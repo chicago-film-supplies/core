@@ -296,7 +296,8 @@ export type DocItemTypeType = typeof DOC_ITEM_TYPES[number];
 /** Zod schema for DocItemTypeType. */
 export const DocItemTypeEnum: z.ZodType<DocItemTypeType> = z.enum(DOC_ITEM_TYPES);
 
-const DOC_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge", "transaction_fee"] as const;
+/** Billable line item types stored in order/invoice documents (excludes destination/group dividers). */
+export const DOC_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge", "transaction_fee"] as const;
 /** Billable line item types stored in order/invoice documents (excludes destination/group dividers). */
 export type DocLineItemTypeType = typeof DOC_LINE_ITEM_TYPES[number];
 /** Zod schema for DocLineItemTypeType. */

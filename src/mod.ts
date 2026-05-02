@@ -203,6 +203,7 @@ export {
   RateTypeEnum,
   DocItemTypeEnum,
   DocLineItemTypeEnum,
+  DOC_LINE_ITEM_TYPES,
   type AddressType,
   type CoordinatesType,
   type DocSourceType,
