@@ -14,8 +14,6 @@ import {
   type DocLineItemTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  ItemTaxProfileEnum,
-  type ItemTaxProfileType,
   PriceFormulaEnum,
   type PriceFormulaType,
   TaxProfileEnum,
@@ -90,8 +88,6 @@ export interface InvoiceDocItemPrice {
   total: number;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   discount_percent?: number;
-  /** @deprecated Legacy CRMS field — not set on new invoices. */
-  tax_profile?: ItemTaxProfileType;
 }
 
 const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject({
@@ -104,7 +100,6 @@ const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject
   taxes: z.array(PriceModifier).default([]),
   total: z.number().default(0),
   discount_percent: z.number().optional(),
-  tax_profile: ItemTaxProfileEnum.optional(),
 });
 
 // ── Line items ───────────────────────────────────────────────────

@@ -297,7 +297,6 @@ export const templateSchemaFields: Record<TemplateSourceCollectionType, SchemaFi
     { path: "items[] (type: rental, replacement, ...).price.taxes[].amount", type: "number" },
     { path: "items[] (type: rental, replacement, ...).price.total", type: "number" },
     { path: "items[] (type: rental, replacement, ...).price.discount_percent", type: "number?" },
-    { path: "items[] (type: rental, replacement, ...).price.tax_profile", type: "tax_none | tax_chicago_rental_tax | tax_chicago_sales_tax | tax_rantoul_sales_tax?" },
     { path: "items[] (type: rental, replacement, ...).path", type: "string[]" },
     { path: "items[] (type: rental, replacement, ...).coa_revenue", type: "union? | null" },
     { path: "items[] (type: rental, replacement, ...).tracking_category", type: "string? | null" },

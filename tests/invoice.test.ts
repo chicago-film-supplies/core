@@ -112,11 +112,24 @@ Deno.test("InvoiceSchema accepts legacy CRMS fields", () => {
       price: {
         ...validInvoice.items[0].price,
         discount_percent: 0,
-        tax_profile: "tax_chicago_rental_tax",
       },
     }],
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
+});
+
+Deno.test("InvoiceSchema rejects removed legacy item-level tax_profile field", () => {
+  const doc = {
+    ...validInvoice,
+    items: [{
+      ...validInvoice.items[0],
+      price: {
+        ...validInvoice.items[0].price,
+        tax_profile: "tax_chicago_rental_tax",
+      },
+    }],
+  };
+  assertEquals(InvoiceSchema.safeParse(doc).success, false);
 });
 
 Deno.test("InvoiceSchema accepts payments", () => {
