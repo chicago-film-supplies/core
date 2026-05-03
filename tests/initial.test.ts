@@ -42,7 +42,7 @@ Deno.test("getInitialValues — produces object for sub-schemas", () => {
 
 Deno.test("getInitialValues — strings default to empty string", () => {
   const result = getInitialValues(ContactSchema);
-  assertEquals(result.name, "");
+  assertEquals(result.first_name, "");
   assertEquals(result.uid, "");
 });
 
@@ -78,7 +78,7 @@ Deno.test("getInitialValues — defaults are used when present", () => {
   const result = getInitialValues(TaxSchema);
   assertEquals(result.active, true);
   assertEquals(result.crms_id, null);
-  assertEquals(result.valid_from, "");
+  assertEquals(result.valid_from, "1970-01-01T00:00:00Z");
 });
 
 Deno.test("getInitialValues — custom types (FirestoreTimestamp) are omitted", () => {

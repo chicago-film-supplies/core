@@ -2,6 +2,7 @@
  * Booking document schema — Firestore collection: bookings
  */
 import { z } from "zod";
+import { chicagoInstant } from "./_datetime.ts";
 import {
   Address,
   type AddressType,
@@ -9,8 +10,6 @@ import {
   type ComponentTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  NoteEntry,
-  type NoteEntryType,
 } from "./common.ts";
 
 const BOOKING_STATUSES = [
@@ -25,13 +24,34 @@ export interface BookingDestinationRef {
   address: AddressType | null;
 }
 
+/** Per-status quantity breakdown for a booking — also embedded in stock-summary entries. */
+export interface BookingBreakdown {
+  damaged: number;
+  lost: number;
+  out: number;
+  prepped: number;
+  quoted: number;
+  reserved: number;
+  returned: number;
+}
+
+/** Zod schema for BookingBreakdown. */
+export const BookingBreakdownSchema: z.ZodType<BookingBreakdown> = z.strictObject({
+  damaged: z.number(),
+  lost: z.number(),
+  out: z.number(),
+  prepped: z.number(),
+  quoted: z.number(),
+  reserved: z.number(),
+  returned: z.number(),
+});
+
 /** A specific location within a store allocated for a booking. */
 export interface BookingStoreLocation {
   uid_location: string;
   name: string;
   quantity: number;
   default: boolean;
-  notes: NoteEntryType[];
 }
 
 /** A store and its locations assigned to a booking. */
@@ -59,22 +79,14 @@ export interface Booking {
   total_price: number;
   crms_id?: number | null;
   crms_product_id?: number | null;
-  breakdown: {
-    damaged: number;
-    lost: number;
-    out: number;
-    prepped: number;
-    quoted: number;
-    reserved: number;
-    returned: number;
-  };
+  breakdown: BookingBreakdown;
   dates: {
-    start: string;
-    start_fs: FirestoreTimestampType;
+    start: string | null;
+    start_fs: FirestoreTimestampType | null;
     end: string | null;
     end_fs: FirestoreTimestampType | null;
-    charge_start: string;
-    charge_start_fs: FirestoreTimestampType;
+    charge_start: string | null;
+    charge_start_fs: FirestoreTimestampType | null;
     charge_end: string | null;
     charge_end_fs: FirestoreTimestampType | null;
   };
@@ -107,7 +119,6 @@ const BookingStoreLocationSchema: z.ZodType<BookingStoreLocation> = z.strictObje
   name: z.string(),
   quantity: z.number(),
   default: z.boolean(),
-  notes: z.array(NoteEntry).default([]),
 });
 
 const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
@@ -118,16 +129,48 @@ const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
   locations: z.array(BookingStoreLocationSchema).default([]),
 });
 
+// ── Update input ──────────────────────────────────────────────
+
+/**
+ * Input for updating a single booking via `PUT /bookings/{uid}`.
+ *
+ * Status and breakdown are independently optional — most warehouse PUTs only
+ * change the breakdown. When `breakdown` is supplied it must be the complete
+ * next state (all 7 keys); the service requires `sum(breakdown) === quantity`
+ * and treats the value as an absolute write, not a partial patch. Version is
+ * required for optimistic concurrency.
+ */
+export interface UpdateBookingInputType {
+  status?: BookingStatusType;
+  breakdown?: Booking["breakdown"];
+  version: number;
+}
+
+/** Zod schema for UpdateBookingInput. */
+export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
+  status: BookingStatus.optional(),
+  breakdown: z.object({
+    damaged: z.number().min(0),
+    lost: z.number().min(0),
+    out: z.number().min(0),
+    prepped: z.number().min(0),
+    quoted: z.number().min(0),
+    reserved: z.number().min(0),
+    returned: z.number().min(0),
+  }).optional(),
+  version: z.int().min(0),
+});
+
 /** Zod schema for Booking. */
 export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid: z.string(),
   uid_order: z.string(),
   uid_product: z.string(),
   name: z.string(),
-  number: z.number(),
+  number: z.int().meta({ label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
   type: ComponentTypeEnum,
   status: BookingStatus,
-  quantity: z.number(),
+  quantity: z.number().meta({ serverSortVia: "quantity" }),
   shortage: z.number(),
   subject: z.string(),
   unit_price: z.number(),
@@ -135,23 +178,15 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   // crms_id and crms_product_id are written back post-transaction by CRMS sync
   crms_id: z.number().nullable().optional(),
   crms_product_id: z.number().nullable().optional(),
-  breakdown: z.strictObject({
-    damaged: z.number(),
-    lost: z.number(),
-    out: z.number(),
-    prepped: z.number(),
-    quoted: z.number(),
-    reserved: z.number(),
-    returned: z.number(),
-  }),
+  breakdown: BookingBreakdownSchema,
   dates: z.strictObject({
-    start: z.string(),
-    start_fs: FirestoreTimestamp,
-    end: z.string().nullable(),
+    start: chicagoInstant().meta({ serverSortVia: "dates.start_fs" }).nullable(),
+    start_fs: FirestoreTimestamp.nullable(),
+    end: chicagoInstant().meta({ serverSortVia: "dates.end_fs" }).nullable(),
     end_fs: FirestoreTimestamp.nullable(),
-    charge_start: z.string(),
-    charge_start_fs: FirestoreTimestamp,
-    charge_end: z.string().nullable(),
+    charge_start: chicagoInstant().nullable(),
+    charge_start_fs: FirestoreTimestamp.nullable(),
+    charge_end: chicagoInstant().nullable(),
     charge_end_fs: FirestoreTimestamp.nullable(),
   }),
   destinations: z.strictObject({
@@ -175,8 +210,12 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   title: "Booking",
   collection: "bookings",
   displayDefaults: {
-    columns: ["order_number", "status", "organization", "quantity", "date_start", "date_end"],
+    columns: ["number", "status", "organization.name", "quantity", "dates.start", "dates.end"],
     filters: {},
-    sort: { column: "order_number", direction: "desc" },
+    sort: { column: "number", direction: "desc" },
+    groupBy: [
+      { field: null, label: "None" },
+      { field: "status", label: "Status", kind: "enum" },
+    ],
   },
 });

@@ -7,8 +7,8 @@ export const aggregates: AggregateDefinition[] = [
   {
     id: "order",
     root: "orders",
-    members: ["bookings", "stock-summaries", "public-stock-summaries", "quotes", "order-events"],
-    description: "Rental/sale order lifecycle — from quote through active rental to completion",
+    members: ["bookings", "stock-summaries", "public-stock-summaries", "quotes", "order-fulfillments", "out-of-service"],
+    description: "Rental/sale order lifecycle — from quote through active rental to completion. Event cards (deliver/pick-up/in-store) live in the cards aggregate but are cowritten by create-order / update-order to project the schedule onto the Dashboard. OOS records born from update-booking carry both bookings: and orders: entries in their sources[] so they surface on both detail pages.",
   },
   {
     id: "product",
@@ -51,6 +51,18 @@ export const aggregates: AggregateDefinition[] = [
     root: "",
     members: ["tags", "tracking-categories", "chart-of-accounts", "destinations", "templates", "holiday-dates"],
     description: "Shared lookup data referenced by other aggregates — low velocity, high fan-out on change",
+  },
+  {
+    id: "threads",
+    root: "threads",
+    members: ["comments"],
+    description: "Conversation primitive — every order, invoice, contact, organization, card, product, transaction, and role carries a default thread cowritten on creation. Comments (Tiptap JSON + plain-text mirror) belong to a thread; threads carry 1..N polymorphic source refs so one conversation can surface on multiple detail pages (e.g. an event card's thread surfaces on both the card and its parent order).",
+  },
+  {
+    id: "cards",
+    root: "cards",
+    members: ["lists"],
+    description: "Generalized work-item surface — event cards (deliver/pick-up/in-store) cowritten from orders, plus to-dos, shopping items, and calendar entries. Lists are routable buckets (Field service, In-store, To do, Purchases). Cards drive the Dashboard's list/agenda/kanban/calendar/map views.",
   },
   {
     id: "infrastructure",

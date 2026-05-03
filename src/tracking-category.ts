@@ -2,7 +2,7 @@
  * TrackingCategory document schema — Firestore collection: tracking-categories
  */
 import { z } from "zod";
-import { type FirestoreFieldValue, type FirestoreTimestampType, TimestampFields, UidNameRef, type UidNameRefType } from "./common.ts";
+import { ActorRef, type ActorRefType, type FirestoreFieldValue, type FirestoreTimestampType, TimestampFields, UidNameRef, type UidNameRefType } from "./common.ts";
 
 /** A tracking category document in Firestore. */
 export interface TrackingCategory {
@@ -15,7 +15,8 @@ export interface TrackingCategory {
   products: Record<string, UidNameRefType>;
   xero_tracking_option_id: string | null;
   version: number;
-  updated_by: string;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
@@ -31,13 +32,14 @@ export const TrackingCategorySchema: z.ZodType<TrackingCategory> = z.strictObjec
   products: z.record(z.string(), UidNameRef),
   xero_tracking_option_id: z.string().nullable(),
   version: z.int().min(0).default(0),
-  updated_by: z.string(),
+  created_by: ActorRef,
+  updated_by: ActorRef,
   ...TimestampFields,
 }).meta({
   title: "Tracking Category",
   collection: "tracking-categories",
   displayDefaults: {
-    columns: ["name", "count"],
+    columns: ["name", "count", "products"],
     filters: {},
     sort: { column: "name", direction: "asc" },
   },

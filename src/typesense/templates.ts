@@ -26,9 +26,9 @@ export const templates: TypesenseCollectionConfig = {
   },
   synonyms: [],
   displayDefaults: {
-    columns: ["name", "version"],
+    columns: ["name", "collection_source", "collection_target", "scope"],
     filters: {},
-    sort: { column: null, direction: "desc" },
+    sort: { column: "name", direction: "asc" },
     group: null,
     facet: [],
   },

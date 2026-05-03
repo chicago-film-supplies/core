@@ -2,7 +2,7 @@
  * ChartOfAccounts document schema — Firestore collection: chart-of-accounts
  */
 import { z } from "zod";
-import { type FirestoreTimestampType, TimestampFields } from "./common.ts";
+import { ActorRef, type ActorRefType, type FirestoreTimestampType, TimestampFields } from "./common.ts";
 
 const COA_CODES = [
   2210, 2800,
@@ -39,7 +39,8 @@ export interface ChartOfAccounts {
   description?: string;
   default_tax_profile: string;
   version: number;
-  updated_by: string;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
@@ -53,7 +54,8 @@ export const ChartOfAccountsSchema: z.ZodType<ChartOfAccounts> = z.strictObject(
   description: z.string().optional(),
   default_tax_profile: z.string(),
   version: z.int().min(0).default(0),
-  updated_by: z.string(),
+  created_by: ActorRef,
+  updated_by: ActorRef,
   ...TimestampFields,
 }).meta({
   title: "Chart of Accounts",

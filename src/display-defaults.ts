@@ -8,12 +8,15 @@
  * this problem — they read from ./typesense/mod.ts which has no cycle with mod.ts.
  */
 import { typesenseSchemas, type TypesenseAlias, type TypesenseDisplayDefaults } from "./typesense/mod.ts";
+import type { GroupByAxis } from "./typesense/types.ts";
 
 /** Display defaults for a Firestore collection in the UI. */
 export interface FirestoreDisplayDefaults {
   columns: string[];
   filters: Record<string, (string | boolean)[]>;
   sort: { column: string | null; direction: "asc" | "desc" };
+  /** Available groupBy axes the UI can offer for this collection. */
+  groupBy?: GroupByAxis[];
 }
 
 /** Display defaults for every Typesense collection, derived from collection config. */

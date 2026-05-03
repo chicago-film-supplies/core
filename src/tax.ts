@@ -5,7 +5,10 @@
  * Tax data is denormalized onto order items at order time.
  */
 import { z } from "zod";
+import { chicagoInstant } from "./_datetime.ts";
 import {
+  ActorRef,
+  type ActorRefType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
   RateTypeEnum,
@@ -25,8 +28,8 @@ export interface Tax {
   valid_to: string | null;
   valid_to_fs: FirestoreTimestampType | null;
   version: number;
-  created_by: string;
-  updated_by: string;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -39,13 +42,13 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   type: RateTypeEnum,
   active: z.boolean().default(true),
   crms_id: z.int().nullable().default(null),
-  valid_from: z.string().default(""),
+  valid_from: chicagoInstant(),
   valid_from_fs: FirestoreTimestamp,
-  valid_to: z.string().nullable().default(null),
+  valid_to: chicagoInstant().nullable().default(null),
   valid_to_fs: FirestoreTimestamp.nullable().default(null),
   version: z.int().min(0).default(0),
-  created_by: z.string(),
-  updated_by: z.string(),
+  created_by: ActorRef,
+  updated_by: ActorRef,
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
 }).meta({
@@ -74,8 +77,8 @@ export const CreateTaxInput: z.ZodType<CreateTaxInputType> = z.object({
   rate: z.number(),
   type: RateTypeEnum,
   active: z.boolean().optional(),
-  valid_from: z.string(),
-  valid_to: z.string().nullable().optional(),
+  valid_from: chicagoInstant(),
+  valid_to: chicagoInstant().nullable().optional(),
 });
 
 /** Input for updating an existing tax definition. */
@@ -97,7 +100,7 @@ export const UpdateTaxInput: z.ZodType<UpdateTaxInputType> = z.object({
   rate: z.number().optional(),
   type: RateTypeEnum.optional(),
   active: z.boolean().optional(),
-  valid_from: z.string().optional(),
-  valid_to: z.string().nullable().optional(),
+  valid_from: chicagoInstant().optional(),
+  valid_to: chicagoInstant().nullable().optional(),
   version: z.int().min(0),
 });

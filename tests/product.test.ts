@@ -3,15 +3,18 @@ import { CreateProductInput, ProductSchema } from "../src/product.ts";
 import { getInitialValues } from "../src/initial.ts";
 
 const base = getInitialValues(ProductSchema);
+const actor = { uid: "test-user-1", name: "Test User" };
 const validProduct = {
   ...base,
   uid: "test-product-1",
   name: "Canon C300",
   active: true,
   crms_id: 100,
-  price: { ...(base.price as Record<string, unknown>), base: 500, taxes: [{ uid: "test-chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
+  price: { ...(base.price as Record<string, unknown>), base: 500, replacement: 5000, taxes: [{ uid: "test-chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
   tags: [{ uid: "test-t1", name: "Camera" }],
   webshop: { available: true },
+  created_by: actor,
+  updated_by: actor,
 };
 
 Deno.test("ProductSchema validates a complete document", () => {
@@ -47,10 +50,66 @@ Deno.test("ProductSchema validates with components", () => {
         quantity: 2,
         price: {
           base: 0,
+          replacement: 100,
           taxes: [{ uid: "test-tax-none", name: "No Tax", rate: 0, type: "percent" }],
           formula: "fixed",
           discountable: false,
         },
+      },
+    ],
+  };
+  assertEquals(ProductSchema.safeParse(doc).success, true);
+});
+
+Deno.test("ProductSchema rejects rental without price.replacement", () => {
+  const doc = {
+    ...validProduct,
+    price: { ...(validProduct.price as Record<string, unknown>), replacement: undefined },
+  };
+  assertEquals(ProductSchema.safeParse(doc).success, false);
+});
+
+Deno.test("ProductSchema accepts rental with stock_method none and no price.replacement", () => {
+  const doc = {
+    ...validProduct,
+    stock_method: "none",
+    price: { ...(validProduct.price as Record<string, unknown>), replacement: undefined },
+  };
+  assertEquals(ProductSchema.safeParse(doc).success, true);
+});
+
+Deno.test("ProductSchema rejects rental component without price.replacement", () => {
+  const doc = {
+    ...validProduct,
+    components: [
+      {
+        uid: "test-comp-1",
+        path: ["test-product-1"],
+        name: "Battery",
+        type: "rental",
+        stock_method: "bulk",
+        crms_id: 200,
+        quantity: 2,
+        price: { base: 0, taxes: [], formula: "fixed", discountable: false },
+      },
+    ],
+  };
+  assertEquals(ProductSchema.safeParse(doc).success, false);
+});
+
+Deno.test("ProductSchema accepts rental component with stock_method none and no price.replacement", () => {
+  const doc = {
+    ...validProduct,
+    components: [
+      {
+        uid: "test-comp-1",
+        path: ["test-product-1"],
+        name: "Service Fee",
+        type: "rental",
+        stock_method: "none",
+        crms_id: 200,
+        quantity: 1,
+        price: { base: 0, taxes: [], formula: "fixed", discountable: false },
       },
     ],
   };
@@ -103,6 +162,7 @@ Deno.test("CreateProductInput requires price.replacement for rental products", (
   assertEquals(CreateProductInput.safeParse(input).success, false);
   assertEquals(CreateProductInput.safeParse(validCreateInput).success, true);
   assertEquals(CreateProductInput.safeParse({ ...input, type: "sale" }).success, true);
+  assertEquals(CreateProductInput.safeParse({ ...input, stock_method: "none" }).success, true);
 });
 
 Deno.test("CreateProductInput requires price.replacement for rental components", () => {
@@ -136,5 +196,12 @@ Deno.test("CreateProductInput requires price.replacement for rental components",
   assertEquals(
     CreateProductInput.safeParse({ ...validCreateInput, component_of: [rentalComponent] }).success,
     false,
+  );
+  assertEquals(
+    CreateProductInput.safeParse({
+      ...validCreateInput,
+      components: [{ ...rentalComponent, stock_method: "none" }],
+    }).success,
+    true,
   );
 });

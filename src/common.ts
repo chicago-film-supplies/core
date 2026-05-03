@@ -56,6 +56,89 @@ export const Phone: z.ZodType<string> = z
   .meta({ pii: "mask" });
 
 /**
+ * Split name fields shared across Contact, User, Invite, and any schema
+ * embedding a contact reference. `first_name` is required; the rest are optional.
+ *
+ * Stored documents also carry a denormalized `name: string` (use `NameField`
+ * + `deriveName()` below). Inputs do not — clients send parts; the server
+ * derives `name` at write time. See `deriveName` for the canonical join rule.
+ */
+export interface NameParts {
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+}
+
+/**
+ * All-optional variant of `NameParts` — use for partial update input types
+ * (PUT endpoints) where callers may omit `first_name`.
+ */
+export interface PartialNameParts {
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+}
+
+/**
+ * Fields object — spread into a parent `z.strictObject()` (documents) or
+ * `z.object()` (inputs) to attach the standard split-name fields.
+ */
+export const NamePartsFields: {
+  first_name: z.ZodType<string>;
+  middle_name: z.ZodType<string | undefined>;
+  last_name: z.ZodType<string | undefined>;
+  pronunciation: z.ZodType<string | undefined>;
+} = {
+  first_name: z.string().min(1, "First name is required").max(50).meta({ pii: "mask" }),
+  middle_name: z.string().min(1).max(50).meta({ pii: "mask" }).optional(),
+  last_name: z.string().min(1).max(50).meta({ pii: "mask" }).optional(),
+  pronunciation: z.string().min(1).max(100).meta({ pii: "mask" }).optional(),
+};
+
+/**
+ * Variant of `NamePartsFields` where every field is optional — use for partial
+ * update input schemas (PUT endpoints) where callers may omit `first_name`.
+ */
+export const NamePartsFieldsPartial: {
+  first_name: z.ZodType<string | undefined>;
+  middle_name: z.ZodType<string | undefined>;
+  last_name: z.ZodType<string | undefined>;
+  pronunciation: z.ZodType<string | undefined>;
+} = {
+  first_name: z.string().min(1, "First name is required").max(50).meta({ pii: "mask" }).optional(),
+  middle_name: z.string().min(1).max(50).meta({ pii: "mask" }).optional(),
+  last_name: z.string().min(1).max(50).meta({ pii: "mask" }).optional(),
+  pronunciation: z.string().min(1).max(100).meta({ pii: "mask" }).optional(),
+};
+
+/**
+ * Canonical join rule for deriving a single display string from name parts.
+ * Joins `[first_name, middle_name, last_name]` with single spaces (missing
+ * parts are dropped, never produce empty padding) and appends ` (pronunciation)`
+ * when set. This is the single source of truth — every `name` field on a
+ * stored document and `ActorRef.name` is computed by passing through here.
+ */
+export function deriveName(parts: PartialNameParts): string {
+  const base = [parts.first_name, parts.middle_name, parts.last_name].filter(Boolean).join(" ");
+  return parts.pronunciation ? `${base} (${parts.pronunciation})` : base;
+}
+
+/**
+ * Zod field for the denormalized `name` on stored documents (Contact, User,
+ * Invite, embedded contact refs in destinations, ActorRef-shaped objects).
+ *
+ * The 255 max is the exact upper bound of `deriveName(parts)` given the
+ * existing per-part maxes:
+ *   50 (first) + 1 (sp) + 50 (middle) + 1 (sp) + 50 (last) + 1 (sp)
+ *   + 1 ("(") + 100 (pronunciation) + 1 (")") = 255
+ * If any part's `.max(...)` changes, this ceiling must move with it or
+ * worst-case writes will fail validation.
+ */
+export const NameField: z.ZodType<string> = z.string().min(1).max(255).meta({ pii: "mask" });
+
+/**
  * Coordinates object (latitude/longitude).
  */
 export interface CoordinatesType {
@@ -87,6 +170,27 @@ export interface AddressType {
 }
 
 /**
+ * A `{collection, uid}` pointer to any Firestore document. Used polymorphically
+ * by Thread, Comment, and Card to reference the source docs they belong to.
+ *
+ * Lives here (not in thread.ts where it originated) because it's a shared
+ * primitive — the "thread" prefix misled readers into thinking it was
+ * thread-specific.
+ */
+export interface DocSourceType {
+  collection: string;
+  uid: string;
+  label?: string | null;
+}
+
+/** Zod schema for a polymorphic doc reference. */
+export const DocSource: z.ZodType<DocSourceType> = z.strictObject({
+  collection: z.string().min(1),
+  uid: z.string().min(1),
+  label: z.string().max(200).nullable().optional(),
+});
+
+/**
  * Generic uid + name reference used across many collections.
  */
 export interface UidNameRefType {
@@ -101,19 +205,23 @@ export const UidNameRef: z.ZodType<UidNameRefType> = z.strictObject({
 });
 
 /**
- * Note entry used in store/location breakdowns.
+ * Actor reference — embedded `{uid, name}` for `created_by` / `updated_by` /
+ * `deleted_by` fields across document schemas. The `name` is denormalized at
+ * write time by the server via `deriveName(parts)` (with `uid` as a fallback
+ * when all parts are empty — see `buildActorRef` in api-cloudrun). Non-human
+ * actors (e.g. integrations, scheduled jobs) use a synthetic uid such as
+ * `"manager-bot"` with a matching display name. Name changes on the source
+ * user fan out via the `update-user:name-to-actor-refs` propagation rule.
  */
-export interface NoteEntryType {
-  note: string;
-  updated_at?: FirestoreTimestampType;
-  updated_by?: string;
+export interface ActorRefType {
+  uid: string;
+  name: string;
 }
 
-/** Zod schema for a note entry. */
-export const NoteEntry: z.ZodType<NoteEntryType> = z.strictObject({
-  note: z.string(),
-  updated_at: FirestoreTimestamp.optional(),
-  updated_by: z.string().optional(),
+/** Zod schema for an actor reference. */
+export const ActorRef: z.ZodType<ActorRefType> = z.strictObject({
+  uid: z.string().min(1),
+  name: NameField,
 });
 
 // ── Shared enums ────────────────────────────────────────────────────
@@ -188,7 +296,8 @@ export type DocItemTypeType = typeof DOC_ITEM_TYPES[number];
 /** Zod schema for DocItemTypeType. */
 export const DocItemTypeEnum: z.ZodType<DocItemTypeType> = z.enum(DOC_ITEM_TYPES);
 
-const DOC_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge", "transaction_fee"] as const;
+/** Billable line item types stored in order/invoice documents (excludes destination/group dividers). */
+export const DOC_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge", "transaction_fee"] as const;
 /** Billable line item types stored in order/invoice documents (excludes destination/group dividers). */
 export type DocLineItemTypeType = typeof DOC_LINE_ITEM_TYPES[number];
 /** Zod schema for DocLineItemTypeType. */
@@ -215,7 +324,6 @@ export interface StoreBreakdownLocation {
   quantity: number;
   default: boolean;
   max: number | null;
-  notes: NoteEntryType[];
 }
 
 /** A single store entry in a stock breakdown, containing its locations. */
@@ -235,7 +343,6 @@ export const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation> = z
   quantity: z.number(),
   default: z.boolean(),
   max: z.number().nullable(),
-  notes: z.array(NoteEntry).default([]),
 });
 
 /** Zod schema for StoreBreakdownEntry. */

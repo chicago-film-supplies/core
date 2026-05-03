@@ -2,6 +2,7 @@
  * Order schemas — Firestore collection: orders
  */
 import { z } from "zod";
+import { chicagoInstant } from "./_datetime.ts";
 import {
   Address,
   type AddressType,
@@ -13,6 +14,8 @@ import {
   type FirestoreTimestampType,
   InclusionTypeEnum,
   type InclusionTypeType,
+  type NameParts,
+  NamePartsFields,
   Phone,
   PriceFormulaEnum,
   type PriceFormulaType,
@@ -24,14 +27,57 @@ import {
   type InvoiceStatusType,
   InvoiceStatusEnum,
   type TaxProfileType,
+  NameField,
   TimestampFields,
 } from "./common.ts";
 
-const ORDER_STATUSES = [
+export const ORDER_STATUSES = [
   "draft", "quoted", "reserved", "active", "complete", "canceled",
 ] as const;
-type OrderStatusType = typeof ORDER_STATUSES[number];
+export type OrderStatusType = typeof ORDER_STATUSES[number];
 const OrderStatus: z.ZodType<OrderStatusType> = z.enum(ORDER_STATUSES);
+
+/**
+ * Statuses an operator may set directly via UpdateOrderInput.status.
+ * `active` and `complete` are computed by the booking workflow and are
+ * never accepted from a manual write.
+ */
+export const ORDER_USER_STATUSES = ["draft", "quoted", "reserved", "canceled"] as const;
+export type OrderUserStatusType = typeof ORDER_USER_STATUSES[number];
+
+/**
+ * Statuses derived from booking state — set only by the API's booking write
+ * path (reserved → active when a booking moves quantity into out;
+ * active → complete when every quantity has reached a terminal state).
+ */
+export const ORDER_COMPUTED_STATUSES = ["active", "complete"] as const;
+export type OrderComputedStatusType = typeof ORDER_COMPUTED_STATUSES[number];
+
+/**
+ * The statuses an operator can move to from the given current status.
+ * Returns an empty list for computed statuses (`active`, `complete`) and
+ * filters the current status out of the user-settable set.
+ */
+export function getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[] {
+  if ((ORDER_COMPUTED_STATUSES as readonly string[]).includes(current)) return [];
+  return ORDER_USER_STATUSES.filter((s) => s !== current);
+}
+
+/**
+ * Server-side gate for an order status write. `source: "manual"` rejects
+ * writes that move into a computed status or out of a computed status into
+ * anything other than the same value (no-op). `source: "propagation"`
+ * trusts the booking write path that sets `active` or `complete`.
+ */
+export function isValidOrderStatusTransition(
+  prev: OrderStatusType,
+  next: OrderStatusType,
+  source: "manual" | "propagation",
+): boolean {
+  if (prev === next) return true;
+  if (source === "propagation") return true;
+  return (getOrderStatusTransitions(prev) as readonly string[]).includes(next);
+}
 
 // Item type constants imported from common.ts:
 // DocItemTypeType / DocItemTypeEnum — all types including structural dividers (input schemas)
@@ -40,32 +86,35 @@ const OrderStatus: z.ZodType<OrderStatusType> = z.enum(ORDER_STATUSES);
 const INCLUSION_TYPES_NULLABLE = ["default", "mandatory", "optional"] as const;
 
 /**
- * Order dates — all six date boundaries as ISO strings.
+ * Order dates — all six date boundaries as ISO datetime strings with offset,
+ * or null when the boundary is unset.
  */
 export interface OrderDatesType {
-  delivery_start: string;
-  delivery_end: string;
-  collection_start: string;
-  collection_end: string;
-  charge_start: string;
-  charge_end: string;
+  delivery_start: string | null;
+  delivery_end: string | null;
+  collection_start: string | null;
+  collection_end: string | null;
+  charge_start: string | null;
+  charge_end: string | null;
 }
 
 /** Zod schema for order dates. */
 export const OrderDates: z.ZodType<OrderDatesType> = z.object({
-  delivery_start: z.string(),
-  delivery_end: z.string(),
-  collection_start: z.string(),
-  collection_end: z.string(),
-  charge_start: z.string(),
-  charge_end: z.string(),
+  delivery_start: chicagoInstant().nullable(),
+  delivery_end: chicagoInstant().nullable(),
+  collection_start: chicagoInstant().nullable(),
+  collection_end: chicagoInstant().nullable(),
+  charge_start: chicagoInstant().nullable(),
+  charge_end: chicagoInstant().nullable(),
 });
 
 /**
  * Contact reference embedded in a destination endpoint.
- * When present (not null), uid and name are required.
+ * When present (not null), uid and first_name are required. `name` is the
+ * server-derived display string (see `deriveName` in common.ts) — populated
+ * by api-cloudrun on every write so consumers don't re-derive client-side.
  */
-export interface DestinationContactType {
+export interface DestinationContactType extends NameParts {
   uid: string;
   name: string;
   phones?: string[];
@@ -74,14 +123,15 @@ export interface DestinationContactType {
 /** Zod schema for destination contact reference. */
 export const DestinationContact: z.ZodType<DestinationContactType> = z.object({
   uid: z.string(),
-  name: z.string().min(1).max(100).meta({ pii: "mask" }),
+  ...NamePartsFields,
+  name: NameField,
   phones: z.array(Phone).optional(),
 });
 
 /**
- * Contact reference in a destination endpoint (document schema — uid & name required).
+ * Contact reference in a destination endpoint (document schema — uid & first_name required).
  */
-export interface DocDestinationContactType {
+export interface DocDestinationContactType extends NameParts {
   uid: string;
   name: string;
   phones?: string[];
@@ -90,7 +140,8 @@ export interface DocDestinationContactType {
 /** Zod schema for destination contact reference (document version). */
 export const DocDestinationContact: z.ZodType<DocDestinationContactType> = z.strictObject({
   uid: z.string(),
-  name: z.string().min(1).max(100).meta({ pii: "mask" }),
+  ...NamePartsFields,
+  name: NameField,
   phones: z.array(Phone).default([]),
 });
 
@@ -132,30 +183,43 @@ export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.s
 
 /**
  * A destination pair — delivery and collection endpoints.
+ *
+ * `customer_collecting` is true when the customer picks up the items at our
+ * warehouse for the delivery side of this pair. `customer_returning` is true
+ * when the customer drops the items off at our warehouse for the collection
+ * side. Both default to false (we deliver / we collect).
  */
 export interface DestinationType {
   delivery: DestinationEndpointType;
   collection: DestinationEndpointType;
+  customer_collecting?: boolean;
+  customer_returning?: boolean;
 }
 
 /** Zod schema for a destination pair. */
 export const Destination: z.ZodType<DestinationType> = z.object({
   delivery: DestinationEndpoint,
   collection: DestinationEndpoint,
+  customer_collecting: z.boolean().optional(),
+  customer_returning: z.boolean().optional(),
 });
 
 /**
- * Document-level destination pair.
+ * Document-level destination pair. See `DestinationType` for flag semantics.
  */
 export interface DocDestinationType {
   delivery: DocDestinationEndpointType;
   collection: DocDestinationEndpointType;
+  customer_collecting: boolean;
+  customer_returning: boolean;
 }
 
 /** Zod schema for a document-level destination pair. */
 export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
   delivery: DocDestinationEndpoint,
   collection: DocDestinationEndpoint,
+  customer_collecting: z.boolean().default(false),
+  customer_returning: z.boolean().default(false),
 });
 
 // ── Shared modifier types ─────────────────────────────────────────
@@ -308,9 +372,6 @@ export interface CreateOrderInputType {
   items?: OrderItemType[];
   subject?: string;
   reference?: string | null;
-  notes?: string;
-  customer_collecting?: boolean;
-  customer_returning?: boolean;
 }
 
 /** Input schema for creating an order. */
@@ -329,9 +390,6 @@ export const CreateOrderInput: z.ZodType<CreateOrderInputType> = z.object({
     .optional(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
-  notes: z.string().meta({ pii: "mask" }).optional(),
-  customer_collecting: z.boolean().optional(),
-  customer_returning: z.boolean().optional(),
 });
 
 /**
@@ -347,9 +405,6 @@ export interface UpdateOrderInputType {
   items?: OrderItemType[];
   subject?: string;
   reference?: string | null;
-  notes?: string;
-  customer_collecting?: boolean;
-  customer_returning?: boolean;
   version: number;
 }
 
@@ -369,9 +424,6 @@ export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
     .optional(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
-  notes: z.string().meta({ pii: "mask" }).optional(),
-  customer_collecting: z.boolean().optional(),
-  customer_returning: z.boolean().optional(),
   version: z.int().min(0),
 });
 
@@ -443,7 +495,7 @@ export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject(
   uid_delivery: z.string().nullable().optional(),
   uid_collection: z.string().nullable().optional(),
 }).refine(
-  (item) => item.type !== "rental" || item.price?.replacement != null,
+  (item) => item.type !== "rental" || item.stock_method === "none" || item.price?.replacement != null,
   { message: "price.replacement is required for rental items", path: ["price", "replacement"] },
 );
 
@@ -522,17 +574,17 @@ export const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationI
 
 /** Order dates with Firestore timestamp companions. */
 export interface OrderDocDatesType {
-  delivery_start: string;
+  delivery_start: string | null;
   delivery_start_fs: FirestoreTimestampType;
-  delivery_end: string;
+  delivery_end: string | null;
   delivery_end_fs: FirestoreTimestampType;
-  collection_start: string;
+  collection_start: string | null;
   collection_start_fs: FirestoreTimestampType;
-  collection_end: string;
+  collection_end: string | null;
   collection_end_fs: FirestoreTimestampType;
-  charge_start: string;
+  charge_start: string | null;
   charge_start_fs: FirestoreTimestampType;
-  charge_end: string;
+  charge_end: string | null;
   charge_end_fs: FirestoreTimestampType;
   days_active: number | null;
   days_charged: number | null;
@@ -540,17 +592,17 @@ export interface OrderDocDatesType {
 
 /** Zod schema for order dates with Firestore timestamp companions. */
 export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
-  delivery_start: z.string().default(""),
+  delivery_start: chicagoInstant().nullable().default(null),
   delivery_start_fs: FirestoreTimestamp,
-  delivery_end: z.string().default(""),
+  delivery_end: chicagoInstant().nullable().default(null),
   delivery_end_fs: FirestoreTimestamp,
-  collection_start: z.string().default(""),
+  collection_start: chicagoInstant().nullable().default(null),
   collection_start_fs: FirestoreTimestamp,
-  collection_end: z.string().default(""),
+  collection_end: chicagoInstant().nullable().default(null),
   collection_end_fs: FirestoreTimestamp,
-  charge_start: z.string().default(""),
+  charge_start: chicagoInstant().nullable().default(null),
   charge_start_fs: FirestoreTimestamp,
-  charge_end: z.string().default(""),
+  charge_end: chicagoInstant().nullable().default(null),
   charge_end_fs: FirestoreTimestamp,
   days_active: z.int().nullable().default(null),
   days_charged: z.int().nullable().default(null),
@@ -581,6 +633,7 @@ export interface OrderDocTotalsType {
   taxes: PriceModifierType[];
   transaction_fees: PriceModifierType[];
   total: number;
+  replacement_total: number;
 }
 
 const OrderDocTotals: z.ZodType<OrderDocTotalsType> = z.strictObject({
@@ -590,6 +643,7 @@ const OrderDocTotals: z.ZodType<OrderDocTotalsType> = z.strictObject({
   taxes: z.array(PriceModifier).default([]),
   transaction_fees: z.array(PriceModifier).default([]),
   total: z.number().default(0),
+  replacement_total: z.number().default(0),
 });
 
 /**
@@ -616,13 +670,31 @@ export interface Order {
   query_by_invoices: string[];
   query_by_items: string[];
   query_by_contacts: string[];
+  /**
+   * Roll-up of breakdown across all bookings on this order. Mirrors the keys
+   * of `stock-summaries.bookings_breakdown` and `booking.breakdown` but
+   * aggregated along the order axis. Maintained incrementally by booking
+   * writes (createOrder seeds it; updateBooking applies a delta).
+   *
+   * Invariant: sum of all values === sum of `booking.quantity` across the
+   * order's bookings. The order is considered complete when
+   * `quoted + reserved + prepped + out === 0` (every quantity has reached
+   * a terminal state: returned, lost, or damaged).
+   */
+  bookings_breakdown: {
+    quoted: number;
+    reserved: number;
+    prepped: number;
+    out: number;
+    returned: number;
+    lost: number;
+    damaged: number;
+  };
   crms_id?: number | null;
   crms_status?: string;
   subject?: string;
   reference?: string | null;
-  notes?: string;
-  customer_collecting?: boolean;
-  customer_returning?: boolean;
+  defaultThreadId?: string;
   version: number;
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
@@ -643,20 +715,27 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   query_by_invoices: z.array(z.string()).default([]),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
+  bookings_breakdown: z.strictObject({
+    quoted: z.number().default(0),
+    reserved: z.number().default(0),
+    prepped: z.number().default(0),
+    out: z.number().default(0),
+    returned: z.number().default(0),
+    lost: z.number().default(0),
+    damaged: z.number().default(0),
+  }).default({ quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0 }),
   crms_id: z.number().nullable().optional(),
   crms_status: z.string().optional(),
   subject: z.string().default(""),
   reference: z.string().max(255).nullable().default(null),
-  notes: z.string().meta({ pii: "mask" }).default(""),
-  customer_collecting: z.boolean().default(false),
-  customer_returning: z.boolean().default(false),
+  defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
   ...TimestampFields,
 }).meta({
   title: "Order",
   collection: "orders",
   displayDefaults: {
-    columns: ["number", "organization.name", "subject", "status"],
+    columns: ["number", "organization.name", "subject", "dates.delivery_start", "dates.collection_start", "status"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },

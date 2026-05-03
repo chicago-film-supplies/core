@@ -9,7 +9,8 @@ Deno.test("ChartOfAccountsSchema validates a complete document", () => {
     type: "Revenue",
     description: "General sales revenue",
     default_tax_profile: "tax_chicago_sales_tax",
-    updated_by: "test-user-1",
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   assertEquals(ChartOfAccountsSchema.safeParse(doc).success, true);
 });
@@ -21,7 +22,8 @@ Deno.test("ChartOfAccountsSchema rejects invalid code", () => {
     name: "Invalid",
     type: "Revenue",
     default_tax_profile: "tax_none",
-    updated_by: "test-user-1",
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   assertEquals(ChartOfAccountsSchema.safeParse(doc).success, false);
 });
@@ -33,7 +35,8 @@ Deno.test("ChartOfAccountsSchema rejects invalid type", () => {
     name: "Sales",
     type: "Fake Type",
     default_tax_profile: "tax_none",
-    updated_by: "test-user-1",
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   assertEquals(ChartOfAccountsSchema.safeParse(doc).success, false);
 });
@@ -45,7 +48,8 @@ Deno.test("ChartOfAccountsSchema rejects additional properties", () => {
     name: "Sales",
     type: "Revenue",
     default_tax_profile: "tax_none",
-    updated_by: "test-user-1",
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
     bogus: true,
   };
   assertEquals(ChartOfAccountsSchema.safeParse(doc).success, false);

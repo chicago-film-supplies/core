@@ -1,6 +1,6 @@
 {
   "name": "@cfs/schemas",
-  "version": "1.14.0-beta.23",
+  "version": "0.0.0",
   "license": "MIT",
   "description": "Shared Zod 4 schemas for CFS Firestore collections, Typesense collections, propagation rules, and domain events.",
   "exports": {
@@ -8,13 +8,16 @@
     "./common": "./src/common.ts",
     "./booking": "./src/booking.ts",
     "./cache-geocodes": "./src/cache-geocodes.ts",
+    "./card": "./src/card.ts",
     "./chart-of-accounts": "./src/chart-of-accounts.ts",
     "./contact": "./src/contact.ts",
     "./destination": "./src/destination.ts",
     "./email-verification": "./src/email-verification.ts",
     "./holiday-dates": "./src/holiday-dates.ts",
     "./inventory-ledger": "./src/inventory-ledger.ts",
+    "./invite": "./src/invite.ts",
     "./invoice": "./src/invoice.ts",
+    "./list": "./src/list.ts",
     "./location": "./src/location.ts",
     "./location-type": "./src/location-type.ts",
     "./order": "./src/order.ts",
@@ -23,6 +26,7 @@
     "./password-reset": "./src/password-reset.ts",
     "./product": "./src/product.ts",
     "./public-stock-summary": "./src/public-stock-summary.ts",
+    "./recurrence": "./src/recurrence.ts",
     "./session": "./src/session.ts",
     "./stock-summary": "./src/stock-summary.ts",
     "./store": "./src/store.ts",
@@ -32,10 +36,15 @@
     "./user": "./src/user.ts",
     "./webshop-product": "./src/webshop-product.ts",
     "./typesense": "./src/typesense/mod.ts",
+    "./typesense/cards": "./src/typesense/cards.ts",
     "./quote": "./src/quote.ts",
     "./template": "./src/template.ts",
     "./webhook-event": "./src/webhook-event.ts",
-    "./log": "./src/log.ts"
+    "./log": "./src/log.ts",
+    "./role": "./src/role.ts",
+    "./permissions": "./src/permissions.ts",
+    "./thread": "./src/thread.ts",
+    "./comment": "./src/comment.ts"
   },
   "tasks": {
     "test": "deno test --allow-read --allow-run --allow-write tests/",
@@ -47,6 +56,8 @@
   },
   "imports": {
     "zod": "npm:zod@^4.3.6",
+    "date-fns": "npm:date-fns@^4.1.0",
+    "@date-fns/tz": "npm:@date-fns/tz@^1.4.1",
     "@std/assert": "jsr:@std/assert@^1.0.19"
   },
   "compilerOptions": {

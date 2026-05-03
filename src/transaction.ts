@@ -2,7 +2,8 @@
  * Transaction document schema — Firestore collection: transactions
  */
 import { z } from "zod";
-import { FirestoreTimestamp, type FirestoreTimestampType, NoteEntry, type NoteEntryType } from "./common.ts";
+import { chicagoInstant } from "./_datetime.ts";
+import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 
 /** All possible transaction type identifiers. */
 export const TRANSACTION_TYPES = [
@@ -74,7 +75,6 @@ export interface TransactionStoreLocation {
   quantity: number;
   transactionQuantity: number;
   default: boolean;
-  notes: string[];
   max: number | null;
 }
 
@@ -109,7 +109,6 @@ export interface Transaction {
   source: TransactionSource;
   stores: TransactionStore[];
   query_by_uid_store: string[];
-  notes: NoteEntryType[];
   serialized_details: {
     asset_tags: string[];
     serial_numbers: string[];
@@ -118,6 +117,7 @@ export interface Transaction {
     stock_level_id: number | null;
     transaction_id: number | null;
   }>;
+  defaultThreadId?: string;
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -130,7 +130,6 @@ export const TransactionStoreLocationSchema: z.ZodType<TransactionStoreLocation>
   quantity: z.number(),
   transactionQuantity: z.number(),
   default: z.boolean(),
-  notes: z.array(z.string()).default([]),
   max: z.number().nullable(),
 });
 
@@ -154,17 +153,16 @@ export const TransactionSchema: z.ZodType<Transaction> = z.strictObject({
   uid: z.string(),
   uid_product: z.string(),
   type: TransactionType,
-  quantity: z.number(),
+  quantity: z.number().meta({ serverSortVia: "quantity" }),
   total_cost: z.number(),
   unit_cost: z.number(),
   unit_costs: z.array(z.number()).default([]),
-  date: z.string(),
+  date: chicagoInstant().meta({ serverSortVia: "date_fs" }),
   date_fs: FirestoreTimestamp,
   reference: z.string(),
   source: SourceSchema,
   stores: z.array(TransactionStoreSchema).default([]),
   query_by_uid_store: z.array(z.string()).default([]),
-  notes: z.array(NoteEntry).default([]),
   serialized_details: z.strictObject({
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
@@ -173,6 +171,7 @@ export const TransactionSchema: z.ZodType<Transaction> = z.strictObject({
     stock_level_id: z.number().nullable(),
     transaction_id: z.number().nullable(),
   })).default({}),
+  defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
@@ -180,9 +179,13 @@ export const TransactionSchema: z.ZodType<Transaction> = z.strictObject({
   title: "Transaction",
   collection: "transactions",
   displayDefaults: {
-    columns: ["date", "quantity", "source.type", "type", "reference"],
+    columns: ["date", "quantity", "total_cost", "source.type", "type", "reference"],
     filters: {},
     sort: { column: "date", direction: "desc" },
+    groupBy: [
+      { field: null, label: "None" },
+      { field: "type", label: "Type", kind: "enum" },
+    ],
   },
 });
 
@@ -199,7 +202,6 @@ interface InputTransactionStoreLocation {
   transactionQuantity: number;
   default: boolean;
   max: number | null;
-  notes: string[];
 }
 
 const InputTransactionStoreLocationSchema: z.ZodType<InputTransactionStoreLocation> = z.object({
@@ -208,7 +210,6 @@ const InputTransactionStoreLocationSchema: z.ZodType<InputTransactionStoreLocati
   transactionQuantity: z.number().int(),
   default: z.boolean(),
   max: z.number().nullable(),
-  notes: z.array(z.string()).default([]),
 });
 
 interface InputTransactionStore {
@@ -237,7 +238,6 @@ export interface CreateTransactionInputType {
   date: string;
   reference: string;
   stores: InputTransactionStore[];
-  note?: string;
   serialized_details?: {
     asset_tags: string[];
     serial_numbers: string[];
@@ -251,10 +251,9 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
   type: z.enum(MANUAL_TRANSACTION_TYPES),
   quantity: z.number().int().positive(),
   total_cost: z.number().min(0),
-  date: z.string().min(1),
+  date: chicagoInstant(),
   reference: z.string(),
   stores: z.array(InputTransactionStoreSchema).min(1),
-  note: z.string().optional(),
   serialized_details: z.object({
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
@@ -271,7 +270,6 @@ export interface UpdateTransactionInputType {
   date: string;
   reference: string;
   stores: InputTransactionStore[];
-  note?: string;
   serialized_details?: {
     asset_tags: string[];
     serial_numbers: string[];
@@ -286,10 +284,9 @@ export const UpdateTransactionInput: z.ZodType<UpdateTransactionInputType> = z.o
   type: z.enum(MANUAL_TRANSACTION_TYPES),
   quantity: z.number().int().positive(),
   total_cost: z.number().min(0),
-  date: z.string().min(1),
+  date: chicagoInstant(),
   reference: z.string(),
   stores: z.array(InputTransactionStoreSchema).min(1),
-  note: z.string().optional(),
   serialized_details: z.object({
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
@@ -316,7 +313,7 @@ export interface CreateStoreTransferInputType {
 export const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType> = z.object({
   uid_product: z.string().min(1),
   quantity: z.number().int().positive(),
-  date: z.string().min(1),
+  date: chicagoInstant(),
   reference: z.string(),
   stores_from: z.array(InputTransactionStoreSchema).min(1),
   stores_to: z.array(InputTransactionStoreSchema).min(1),
@@ -349,7 +346,7 @@ export const UpdateStoreTransferInput: z.ZodType<UpdateStoreTransferInputType> =
   uid_product: z.string().min(1),
   transfer_number: z.number().int(),
   quantity: z.number().int().positive(),
-  date: z.string().min(1),
+  date: chicagoInstant(),
   reference: z.string(),
   stores_from: z.array(InputTransactionStoreSchema).min(1),
   stores_to: z.array(InputTransactionStoreSchema).min(1),

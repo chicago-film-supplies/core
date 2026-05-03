@@ -15,6 +15,8 @@ const validAddress = {
   street: "123 Main St",
 };
 
+const actor = { uid: "test-user-1", name: "Test User" };
+
 Deno.test("OrganizationSchema validates a complete document", () => {
   const doc = {
     uid: "test-org-1",
@@ -25,8 +27,10 @@ Deno.test("OrganizationSchema validates a complete document", () => {
     emails: ["info@acme.com"],
     phones: ["1234567890"],
     billing_address: validAddress,
-    contacts: [{ uid: "test-c1", name: "John", roles: ["admin"] }],
+    contacts: [{ uid: "test-c1", first_name: "John", name: "John", roles: ["admin"] }],
     query_by_contacts: ["test-c1"],
+    created_by: actor,
+    updated_by: actor,
   };
   assertEquals(OrganizationSchema.safeParse(doc).success, true);
 });
@@ -42,6 +46,8 @@ Deno.test("OrganizationSchema accepts null billing_address", () => {
     crms_id: 1,
     xero_id: null,
     billing_address: null,
+    created_by: actor,
+    updated_by: actor,
   };
   assertEquals(OrganizationSchema.safeParse(doc).success, true);
 });
@@ -54,6 +60,8 @@ Deno.test("OrganizationSchema rejects invalid tax_profile", () => {
     xero_id: null,
     tax_profile: "invalid",
     billing_address: null,
+    created_by: actor,
+    updated_by: actor,
   };
   assertEquals(OrganizationSchema.safeParse(doc).success, false);
 });
@@ -65,6 +73,8 @@ Deno.test("OrganizationSchema rejects additional properties", () => {
     crms_id: 1,
     xero_id: null,
     billing_address: null,
+    created_by: actor,
+    updated_by: actor,
     bogus: true,
   };
   assertEquals(OrganizationSchema.safeParse(doc).success, false);

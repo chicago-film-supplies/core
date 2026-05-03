@@ -42,7 +42,7 @@ export const TypesenseConfigSchema: z.ZodType<TypesenseConfig> = z.strictObject(
   title: "TypesenseConfig",
   collection: "typesense",
   displayDefaults: {
-    columns: ["uid", "current_collection"],
+    columns: ["current_collection", "last_reindex", "updates"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

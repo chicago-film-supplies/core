@@ -21,6 +21,8 @@ type ZodDef = {
   entries?: Record<string, string>;
   values?: string[];
   options?: z.ZodType[];
+  in?: z.ZodType;
+  out?: z.ZodType;
 };
 
 function getDef(schema: z.ZodType): ZodDef {
@@ -34,6 +36,12 @@ function unwrap(schema: z.ZodType): z.ZodType {
     def.innerType
   ) {
     return unwrap(def.innerType);
+  }
+  if (def.type === "pipe" && def.in) {
+    // Produced by `.transform()` factories (chicagoInstant, chicagoStartOfDay).
+    // Unwrap to the input side so datetime/offset fields label as "string"
+    // instead of "pipe".
+    return unwrap(def.in);
   }
   return schema;
 }

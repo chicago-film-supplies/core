@@ -21,7 +21,7 @@ export const RateLimitSchema: z.ZodType<RateLimit> = z.strictObject({
   title: "RateLimit",
   collection: "rate-limits",
   displayDefaults: {
-    columns: ["key", "count"],
+    columns: ["attempt_count", "expiresAt"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

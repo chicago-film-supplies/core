@@ -54,7 +54,7 @@ export const LocationTypeSchema: z.ZodType<LocationType> = z.strictObject({
   title: "Location Type",
   collection: "location-types",
   displayDefaults: {
-    columns: ["name"],
+    columns: ["name", "product_capacities", "dimensions"],
     filters: {},
     sort: { column: "name", direction: "asc" },
   },

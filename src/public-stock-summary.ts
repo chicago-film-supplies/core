@@ -58,7 +58,7 @@ export const PublicStockSummarySchema: z.ZodType<PublicStockSummary> = z.strictO
   title: "Public Stock Summary",
   collection: "public-stock-summaries",
   displayDefaults: {
-    columns: ["uid_product", "stores"],
+    columns: ["type", "summary_type", "quantity_available", "store_breakdown"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

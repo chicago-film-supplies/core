@@ -1,11 +1,17 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/initial.ts";
-import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceSchema, UpdateInvoiceInput } from "../src/invoice.ts";
+import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceSchema, UpdateInvoiceInput, UpdatePaymentInput } from "../src/invoice.ts";
 
 const invoiceBase = getInitialValues(InvoiceSchema) as Record<string, unknown>;
 const totalsBase = invoiceBase.totals as Record<string, unknown>;
 const lineItemBase = getInitialValues(InvoiceDocLineItemSchema) as Record<string, unknown>;
 const priceBase = (lineItemBase as { price: Record<string, unknown> }).price;
+
+const validDestination = {
+  uid_order: "test-order-1",
+  delivery: { uid: null, address: null, instructions: null, contact: null },
+  collection: { uid: null, address: null, instructions: null, contact: null },
+};
 
 const validInvoice = {
   ...invoiceBase,
@@ -15,7 +21,7 @@ const validInvoice = {
   query_by_orders: ["test-order-1"],
   number_orders: [1000],
   tax_profile: "tax_applied",
-  date: "2026-03-01",
+  date: "2026-03-01T00:00:00.000-06:00",
   organization: {
     uid: "test-org-1",
     name: "Acme Corp",
@@ -23,6 +29,7 @@ const validInvoice = {
     xero_id: null,
     billing_address: null,
   },
+  destinations: [validDestination],
   items: [{
     ...lineItemBase,
     uid: "item-1",
@@ -45,11 +52,26 @@ const validInvoice = {
     total: 500,
     amount_due: 500,
   },
-  updated_by: "test-user-1",
+  created_by: { uid: "test-user-1", name: "Test User" },
+  updated_by: { uid: "test-user-1", name: "Test User" },
 };
 
 Deno.test("InvoiceSchema validates a complete document", () => {
   assertEquals(InvoiceSchema.safeParse(validInvoice).success, true);
+});
+
+Deno.test("InvoiceSchema allows empty destinations when query_by_orders is empty (standalone invoice)", () => {
+  const doc = { ...validInvoice, query_by_orders: [], number_orders: [], destinations: [] };
+  assertEquals(InvoiceSchema.safeParse(doc).success, true);
+});
+
+Deno.test("InvoiceSchema rejects empty destinations when query_by_orders is non-empty", () => {
+  const doc = { ...validInvoice, destinations: [] };
+  const result = InvoiceSchema.safeParse(doc);
+  assertEquals(result.success, false);
+  if (!result.success) {
+    assertEquals(result.error.issues[0].path.join("."), "destinations");
+  }
 });
 
 Deno.test("InvoiceSchema rejects invalid status", () => {
@@ -69,7 +91,7 @@ Deno.test("InvoiceSchema accepts optional fields", () => {
     reference: "PO-123",
     external_notes: "Thanks!",
     internal_notes: null,
-    due_date: "2026-04-01",
+    due_date: "2026-04-01T00:00:00.000-05:00",
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
 });
@@ -90,11 +112,24 @@ Deno.test("InvoiceSchema accepts legacy CRMS fields", () => {
       price: {
         ...validInvoice.items[0].price,
         discount_percent: 0,
-        tax_profile: "tax_chicago_rental_tax",
       },
     }],
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
+});
+
+Deno.test("InvoiceSchema rejects removed legacy item-level tax_profile field", () => {
+  const doc = {
+    ...validInvoice,
+    items: [{
+      ...validInvoice.items[0],
+      price: {
+        ...validInvoice.items[0].price,
+        tax_profile: "tax_chicago_rental_tax",
+      },
+    }],
+  };
+  assertEquals(InvoiceSchema.safeParse(doc).success, false);
 });
 
 Deno.test("InvoiceSchema accepts payments", () => {
@@ -104,7 +139,7 @@ Deno.test("InvoiceSchema accepts payments", () => {
     payments: [{
       uid: "pay-1",
       xero_payment_id: "xero-pay-1",
-      date: "2026-03-15",
+      date: "2026-03-15T00:00:00Z",
       amount: 250,
       reference: "CHK-001",
       status: "active",
@@ -340,4 +375,61 @@ Deno.test("UpdateInvoiceInput requires version", () => {
   const input = { status: "issued" };
   assertEquals(UpdateInvoiceInput.safeParse(input).success, false);
   assertEquals(UpdateInvoiceInput.safeParse({ ...input, version: 1 }).success, true);
+});
+
+Deno.test("UpdatePaymentInput requires version", () => {
+  assertEquals(UpdatePaymentInput.safeParse({ reference: "CHK #42" }).success, false);
+  assertEquals(
+    UpdatePaymentInput.safeParse({ reference: "CHK #42", version: 1 }).success,
+    true,
+  );
+});
+
+Deno.test("UpdatePaymentInput accepts all whitelisted fields", () => {
+  const input = {
+    date: "2026-04-23T00:00:00.000-05:00",
+    amount: 150.25,
+    reference: "wire",
+    status: "active" as const,
+    version: 3,
+  };
+  assertEquals(UpdatePaymentInput.safeParse(input).success, true);
+});
+
+Deno.test("UpdatePaymentInput rejects zero and negative amounts", () => {
+  assertEquals(UpdatePaymentInput.safeParse({ amount: 0, version: 0 }).success, false);
+  assertEquals(UpdatePaymentInput.safeParse({ amount: -5, version: 0 }).success, false);
+});
+
+Deno.test("UpdatePaymentInput normalizes date to Chicago offset form", () => {
+  const parsed = UpdatePaymentInput.safeParse({
+    date: "2026-04-23T12:00:00.000Z",
+    version: 0,
+  });
+  assertEquals(parsed.success, true);
+  if (parsed.success) {
+    assertEquals(parsed.data.date, "2026-04-23T00:00:00.000-05:00");
+  }
+});
+
+Deno.test("UpdatePaymentInput strips unknown fields (xero_payment_id/uid/synced_at)", () => {
+  const parsed = UpdatePaymentInput.safeParse({
+    reference: "ok",
+    xero_payment_id: "forged",
+    uid: "forged",
+    synced_at: "forged",
+    version: 0,
+  });
+  assertEquals(parsed.success, true);
+  if (parsed.success) {
+    assertEquals("xero_payment_id" in parsed.data, false);
+    assertEquals("uid" in parsed.data, false);
+    assertEquals("synced_at" in parsed.data, false);
+  }
+});
+
+Deno.test("UpdatePaymentInput restricts status to active/deleted", () => {
+  assertEquals(UpdatePaymentInput.safeParse({ status: "active", version: 0 }).success, true);
+  assertEquals(UpdatePaymentInput.safeParse({ status: "deleted", version: 0 }).success, true);
+  assertEquals(UpdatePaymentInput.safeParse({ status: "pending", version: 0 }).success, false);
 });

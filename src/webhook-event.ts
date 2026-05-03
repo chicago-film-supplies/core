@@ -21,7 +21,7 @@ export const WebhookEventSchema: z.ZodType<WebhookEvent> = z.strictObject({
   title: "WebhookEvent",
   collection: "webhooks/{service}/events",
   displayDefaults: {
-    columns: ["type", "status"],
+    columns: ["event", "received"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

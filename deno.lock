@@ -5,6 +5,8 @@
     "jsr:@std/expect@*": "1.0.18",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/path@^1.1.4": "1.1.4",
+    "npm:@date-fns/tz@^1.4.1": "1.4.1",
+    "npm:date-fns@^4.1.0": "4.1.0",
     "npm:zod@^4.3.6": "4.3.6"
   },
   "jsr": {
@@ -33,6 +35,12 @@
     }
   },
   "npm": {
+    "@date-fns/tz@1.4.1": {
+      "integrity": "sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA=="
+    },
+    "date-fns@4.1.0": {
+      "integrity": "sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg=="
+    },
     "zod@4.3.6": {
       "integrity": "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="
     }
@@ -40,6 +48,8 @@
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@^1.0.19",
+      "npm:@date-fns/tz@^1.4.1",
+      "npm:date-fns@^4.1.0",
       "npm:zod@^4.3.6"
     ]
   }

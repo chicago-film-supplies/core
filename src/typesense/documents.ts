@@ -7,6 +7,12 @@
 
 // ── Shared ─────────────────────────────────────────────────────────
 
+/** Shared actor reference (uid + denormalized display name) across Typesense document types. */
+export interface TypesenseActorRef {
+  uid?: string;
+  name?: string;
+}
+
 /**
  * Shared address fields used across Typesense document types.
  *
@@ -103,8 +109,29 @@ export interface ChartOfAccountsDocument {
   type: string;
   default_tax_profile: string;
   description?: string;
-  updated_by?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
   updated_at: number;
+}
+
+// ── Comments ────────────────────────────────────────────────────────
+
+/** Typesense document type for comments. */
+export interface CommentDocument {
+  id: string;
+  uid: string;
+  uid_thread: string;
+  sources: Array<{
+    collection?: string;
+    uid?: string;
+  }>;
+  body_text: string;
+  created_by: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  deleted_by?: TypesenseActorRef;
+  deleted_at?: number;
+  created_at: number;
+  updated_at?: number;
 }
 
 // ── Contacts ────────────────────────────────────────────────────────
@@ -114,6 +141,10 @@ export interface ContactDocument {
   id: string;
   uid: string;
   name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
   crms_id?: number;
   crms_id_str?: string;
   emails: string[];
@@ -122,7 +153,8 @@ export interface ContactDocument {
     uid?: string;
     name?: string;
   }>;
-  updated_by?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
   created_at?: number;
   updated_at: number;
 }
@@ -146,6 +178,10 @@ export interface DestinationDocument {
   contacts?: Array<{
     uid?: string;
     name?: string;
+    first_name?: string;
+    middle_name?: string;
+    last_name?: string;
+    pronunciation?: string;
   }>;
   created_at?: number;
   updated_at: number;
@@ -194,7 +230,8 @@ export interface InvoiceDocument {
   };
   crms_opportunity_ids?: number[];
   xero_id?: string;
-  updated_by?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
   date_fs: number;
   due_date_fs?: number;
   created_at?: number;
@@ -239,11 +276,10 @@ export interface OrderDocument {
   crms_id_str?: string;
   status: string;
   tax_profile: string;
-  customer_collecting?: boolean;
-  customer_returning?: boolean;
+  deliveries?: boolean;
+  pickups?: boolean;
   subject?: string;
   reference?: string;
-  notes?: string;
   crms_status?: string;
   invoices?: Array<{
     uid?: string;
@@ -276,6 +312,10 @@ export interface OrderDocument {
       contact?: {
         uid?: string;
         name?: string;
+        first_name?: string;
+        middle_name?: string;
+        last_name?: string;
+        pronunciation?: string;
       };
     };
     collection?: {
@@ -285,6 +325,10 @@ export interface OrderDocument {
       contact?: {
         uid?: string;
         name?: string;
+        first_name?: string;
+        middle_name?: string;
+        last_name?: string;
+        pronunciation?: string;
       };
     };
   }>;
@@ -328,6 +372,81 @@ export interface OrderDocument {
   updated_at: number;
 }
 
+// ── Order Fulfillments ──────────────────────────────────────────────
+
+/**
+ * Typesense document type for the sanitized fulfillment order view.
+ *
+ * Mirrors `OrderDocument` but strips pricing, totals, tax profile,
+ * invoice refs, CRM/Xero ids, and financial line-item fields.
+ */
+export interface OrderFulfillmentDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  status: string;
+  deliveries?: boolean;
+  pickups?: boolean;
+  subject?: string;
+  reference?: string;
+  organization: {
+    uid?: string;
+    name: string;
+  };
+  dates: {
+    delivery_start_fs?: number;
+    delivery_end_fs?: number;
+    collection_start_fs?: number;
+    collection_end_fs?: number;
+    charge_start_fs?: number;
+    charge_end_fs?: number;
+  };
+  destinations: Array<{
+    delivery?: {
+      uid?: string;
+      address?: TypesenseAddressFields;
+      instructions?: string;
+      contact?: {
+        uid?: string;
+        name?: string;
+        first_name?: string;
+        middle_name?: string;
+        last_name?: string;
+        pronunciation?: string;
+      };
+    };
+    collection?: {
+      uid?: string;
+      address?: TypesenseAddressFields;
+      instructions?: string;
+      contact?: {
+        uid?: string;
+        name?: string;
+        first_name?: string;
+        middle_name?: string;
+        last_name?: string;
+        pronunciation?: string;
+      };
+    };
+  }>;
+  items?: Array<{
+    uid?: string;
+    name?: string;
+    quantity?: number;
+    type?: string;
+    description?: string;
+    stock_method?: string;
+    path?: string[];
+    uid_delivery?: string;
+    uid_collection?: string;
+    order_number?: number;
+    uid_order?: string;
+  }>;
+  created_at?: number;
+  updated_at: number;
+}
+
 // ── Organizations ───────────────────────────────────────────────────
 
 /** Typesense document type for organizations. */
@@ -345,10 +464,14 @@ export interface OrganizationDocument {
   billing_address: TypesenseAddressFields;
   contacts: Array<{
     uid?: string;
-    name?: string;
+    first_name?: string;
+    middle_name?: string;
+    last_name?: string;
+    pronunciation?: string;
     roles?: string[];
   }>;
-  updated_by?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
   last_order?: number;
   created_at?: number;
   updated_at: number;
@@ -373,7 +496,7 @@ export interface ProductDocumentComponent {
   price?: {
     base?: number;
     replacement?: number;
-    coa_revenue?: string;
+    coa_revenue?: number;
     taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string }>;
     formula?: string;
     discountable?: boolean;
@@ -398,7 +521,7 @@ export interface ProductDocument {
   price?: {
     base?: number;
     replacement?: number;
-    coa_revenue?: string;
+    coa_revenue?: number;
     taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string }>;
     formula?: string;
     discountable?: boolean;
@@ -440,7 +563,8 @@ export interface ProductDocument {
   query_by_component_of?: string[];
   crms_stock_level_ids?: number[];
   images?: string[];
-  updated_by?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
   updated_at: number;
   created_at?: number;
 }
@@ -476,8 +600,9 @@ export interface TagDocument {
     uid?: string;
     name?: string;
   }>;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
   updated_at: number;
-  updated_by?: string;
 }
 
 // ── Templates ───────────────────────────────────────────────────────
@@ -516,7 +641,8 @@ export interface TrackingCategoryDocument {
     uid?: string;
     name?: string;
   }>;
-  updated_by?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
   updated_at: number;
 }
 
@@ -590,39 +716,64 @@ export interface WebshopProductDocument {
   created_at?: number;
 }
 
+// ── Users ───────────────────────────────────────────────────────────
+
+/** Typesense document type for users. */
+export interface UserDocument {
+  id: string;
+  uid: string;
+  email: string;
+  name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+  roles?: string[];
+  email_verified: boolean;
+  uid_contact?: string;
+  created_at?: number;
+  updated_at: number;
+}
+
 // ── Union and map ───────────────────────────────────────────────────
 
 /** Union of all Typesense document types. */
 export type TypesenseDocument =
   | BookingDocument
   | ChartOfAccountsDocument
+  | CommentDocument
   | ContactDocument
   | DestinationDocument
   | InvoiceDocument
   | LocationDocument
   | OrderDocument
+  | OrderFulfillmentDocument
   | OrganizationDocument
   | ProductDocument
   | StoreDocument
   | TagDocument
   | TemplateDocument
   | TrackingCategoryDocument
+  | UserDocument
   | WebshopProductDocument;
 
 /** Map from collection alias to its document type. */
 export interface TypesenseDocumentMap {
   bookings: BookingDocument;
   "chart-of-accounts": ChartOfAccountsDocument;
+  comments: CommentDocument;
   contacts: ContactDocument;
   destinations: DestinationDocument;
   invoices: InvoiceDocument;
   locations: LocationDocument;
   orders: OrderDocument;
+  "order-fulfillments": OrderFulfillmentDocument;
   organizations: OrganizationDocument;
   products: ProductDocument;
   stores: StoreDocument;
   tags: TagDocument;
   templates: TemplateDocument;
   "tracking-categories": TrackingCategoryDocument;
+  users: UserDocument;
   "webshop-products": WebshopProductDocument;
 }

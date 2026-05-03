@@ -2,7 +2,10 @@
  * Invoice document schema — Firestore collection: invoices
  */
 import { z } from "zod";
+import { chicagoStartOfDay } from "./_datetime.ts";
 import {
+  ActorRef,
+  type ActorRefType,
   Address,
   type AddressType,
   COARevenueEnum,
@@ -11,8 +14,6 @@ import {
   type DocLineItemTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  ItemTaxProfileEnum,
-  type ItemTaxProfileType,
   PriceFormulaEnum,
   type PriceFormulaType,
   TaxProfileEnum,
@@ -26,6 +27,8 @@ import {
   DiscountInput,
   type DiscountInputType,
   type DiscountType,
+  DocDestinationEndpoint,
+  type DocDestinationType,
   OrderDocDestinationItem,
   type OrderDocDestinationItemType,
   OrderDocGroupItem,
@@ -64,7 +67,7 @@ export interface InvoicePayment {
 const InvoicePaymentSchema: z.ZodType<InvoicePayment> = z.strictObject({
   uid: z.string(),
   xero_payment_id: z.string(),
-  date: z.string(),
+  date: chicagoStartOfDay(),
   amount: z.number(),
   reference: z.string().nullable(),
   status: z.enum(PAYMENT_STATUSES),
@@ -85,8 +88,6 @@ export interface InvoiceDocItemPrice {
   total: number;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   discount_percent?: number;
-  /** @deprecated Legacy CRMS field — not set on new invoices. */
-  tax_profile?: ItemTaxProfileType;
 }
 
 const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject({
@@ -99,7 +100,6 @@ const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject
   taxes: z.array(PriceModifier).default([]),
   total: z.number().default(0),
   discount_percent: z.number().optional(),
-  tax_profile: ItemTaxProfileEnum.optional(),
 });
 
 // ── Line items ───────────────────────────────────────────────────
@@ -204,6 +204,25 @@ const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
   amount_due: z.number().default(0),
 });
 
+// ── Destinations ────────────────────────────────────────────────
+
+/**
+ * Destination pair on an invoice — mirrors the order's `DocDestinationType`
+ * with a `uid_order` scope field so multi-order invoices can carry pairs
+ * from several orders and have them selectively synced per source order.
+ */
+export interface InvoiceDocDestinationType extends DocDestinationType {
+  uid_order: string;
+}
+
+export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z.strictObject({
+  uid_order: z.string(),
+  delivery: DocDestinationEndpoint,
+  collection: DocDestinationEndpoint,
+  customer_collecting: z.boolean().default(false),
+  customer_returning: z.boolean().default(false),
+});
+
 // ── Document schema ──────────────────────────────────────────────
 
 /** An invoice document in the invoices Firestore collection. */
@@ -230,6 +249,7 @@ export interface Invoice {
     xero_id: string | null;
     billing_address: AddressType | null;
   };
+  destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
   payments: InvoicePayment[];
@@ -240,15 +260,17 @@ export interface Invoice {
     version: number;
     uploadcare_uuid: string;
     created_at: FirestoreTimestampType;
-    created_by: string;
+    created_by: ActorRefType;
     deleted_at: FirestoreTimestampType | null;
   }>;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   crms_id?: number | null;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   crms_opportunity_ids?: number[];
+  defaultThreadId?: string;
   version: number;
-  updated_by: string;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
@@ -261,9 +283,9 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   query_by_orders: z.array(z.string()).default([]),
   number_orders: z.array(z.number()).default([]),
   tax_profile: TaxProfileEnum,
-  date: z.string(),
+  date: chicagoStartOfDay(),
   date_fs: FirestoreTimestamp,
-  due_date: z.string().optional(),
+  due_date: chicagoStartOfDay().optional(),
   due_date_fs: FirestoreTimestamp,
   subject: z.string().nullable().optional(),
   reference: z.string().nullable().optional(),
@@ -277,6 +299,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     xero_id: z.string().nullable(),
     billing_address: Address,
   }),
+  destinations: z.array(InvoiceDocDestination).default([]),
   items: z.array(InvoiceDocItem).default([]),
   totals: InvoiceDocTotalsSchema,
   payments: z.array(InvoicePaymentSchema).default([]),
@@ -287,19 +310,24 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     version: z.number(),
     uploadcare_uuid: z.string(),
     created_at: FirestoreTimestamp,
-    created_by: z.string(),
+    created_by: ActorRef,
     deleted_at: FirestoreTimestamp.nullable(),
   })).default([]),
   crms_id: z.number().nullable().optional(),
   crms_opportunity_ids: z.array(z.number()).optional(),
+  defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
-  updated_by: z.string(),
+  created_by: ActorRef,
+  updated_by: ActorRef,
   ...TimestampFields,
-}).meta({
+}).refine(
+  (inv) => inv.query_by_orders.length === 0 || inv.destinations.length >= 1,
+  { message: "destinations must be provided when the invoice is linked to at least one source order", path: ["destinations"] },
+).meta({
   title: "Invoice",
   collection: "invoices",
   displayDefaults: {
-    columns: ["number", "organization.name", "status", "subject"],
+    columns: ["number", "organization.name", "reference", "subject", "status"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },
@@ -362,6 +390,7 @@ export interface CreateInvoiceInputType {
   organization: { uid: string };
   tax_profile: TaxProfileType;
   items?: InvoiceItemInputType[];
+  destinations?: InvoiceDocDestinationType[];
   date?: string;
   due_date?: string;
   subject?: string;
@@ -377,8 +406,9 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   organization: z.object({ uid: z.string() }),
   tax_profile: TaxProfileEnum,
   items: z.array(InvoiceItemInputSchema).optional(),
-  date: z.string().optional(),
-  due_date: z.string().optional(),
+  destinations: z.array(InvoiceDocDestination).optional(),
+  date: chicagoStartOfDay().optional(),
+  due_date: chicagoStartOfDay().optional(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
   external_notes: z.string().meta({ pii: "mask" }).optional(),
@@ -389,6 +419,7 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
 export interface UpdateInvoiceInputType {
   status?: InvoiceStatusType;
   items?: InvoiceItemInputType[];
+  destinations?: InvoiceDocDestinationType[];
   date?: string;
   due_date?: string;
   subject?: string;
@@ -402,11 +433,30 @@ export interface UpdateInvoiceInputType {
 export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   status: InvoiceStatus.optional(),
   items: z.array(InvoiceItemInputSchema).optional(),
-  date: z.string().optional(),
-  due_date: z.string().optional(),
+  destinations: z.array(InvoiceDocDestination).optional(),
+  date: chicagoStartOfDay().optional(),
+  due_date: chicagoStartOfDay().optional(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
   external_notes: z.string().meta({ pii: "mask" }).optional(),
   internal_notes: z.string().meta({ pii: "mask" }).optional(),
+  version: z.int().min(0),
+});
+
+/** Input schema for PATCH /invoices/{uid}/payments/{payment_uid} — partial update of a single payment. */
+export interface UpdatePaymentInputType {
+  date?: string;
+  amount?: number;
+  reference?: string | null;
+  status?: typeof PAYMENT_STATUSES[number];
+  version: number;
+}
+
+/** Input schema for updating a single payment on an invoice. */
+export const UpdatePaymentInput: z.ZodType<UpdatePaymentInputType> = z.object({
+  date: chicagoStartOfDay().optional(),
+  amount: z.number().positive().optional(),
+  reference: z.string().nullable().optional(),
+  status: z.enum(PAYMENT_STATUSES).optional(),
   version: z.int().min(0),
 });

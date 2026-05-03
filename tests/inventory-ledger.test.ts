@@ -29,7 +29,6 @@ const validLedger = {
       quantity: 20,
       default: true,
       max: null,
-      notes: [],
     }],
   }],
   query_by_uid_store: ["test-store-1"],

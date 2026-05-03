@@ -114,6 +114,64 @@ export const PropagationLogRecordSchema: z.ZodType<PropagationLogRecord> = z.obj
   span_id: z.string().optional(),
 }).passthrough().meta({ title: "PropagationLogRecord" });
 
+// ── Transaction commit log record ────────────────────────────────────
+
+const TRANSACTION_STATUSES = ["completed", "failed"] as const;
+
+/** Status outcome of a Firestore transaction commit. */
+export type TransactionStatusType = typeof TRANSACTION_STATUSES[number];
+
+/** Structured log entry for a single Firestore transaction commit (success or failure). */
+export interface TransactionLogRecord {
+  level: LogLevelType;
+  msg: "transaction";
+  ts: string;
+  tx_name: string;
+  status: TransactionStatusType;
+  duration_ms: number;
+  write_count: number;
+  target_counts: Record<string, number>;
+  estimated_json_bytes: number;
+  sample_doc_paths: string[];
+  error_name?: string;
+  error_message?: string;
+  error_stack?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  dry_run?: boolean;
+  [key: string]: unknown;
+}
+
+/** Zod schema for TransactionLogRecord. */
+export const TransactionLogRecordSchema: z.ZodType<TransactionLogRecord> = z.object({
+  level: z.enum(LOG_LEVELS),
+  msg: z.literal("transaction"),
+  ts: z.string(),
+  tx_name: z.string(),
+  status: z.enum(TRANSACTION_STATUSES),
+  duration_ms: z.number(),
+  write_count: z.number(),
+  target_counts: z.record(z.string(), z.number()),
+  estimated_json_bytes: z.number(),
+  sample_doc_paths: z.array(z.string()).max(10),
+  error_name: z.string().optional(),
+  error_message: z.string().optional(),
+  error_stack: z.string().optional(),
+  request_id: z.string().optional(),
+  method: z.string().optional(),
+  path: z.string().optional(),
+  route: z.string().optional(),
+  user_id: z.string().meta({ pii: "hash" }).optional(),
+  trace_id: z.string().optional(),
+  span_id: z.string().optional(),
+  dry_run: z.boolean().optional(),
+}).passthrough().meta({ title: "TransactionLogRecord" });
+
 // ── Client log record ────────────────────────────────────────────────
 
 const CLIENT_APPS = ["manager"] as const;
@@ -135,7 +193,7 @@ export interface ClientLogEntry {
 export const ClientLogEntrySchema: z.ZodType<ClientLogEntry> = z.object({
   level: z.enum(LOG_LEVELS),
   msg: z.string().max(100),
-  ts: z.string().datetime(),
+  ts: z.iso.datetime(),
   app: z.enum(CLIENT_APPS),
   page: z.string().max(500).optional(),
   request_id: z.string().max(100).optional(),

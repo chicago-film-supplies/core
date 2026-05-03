@@ -2,8 +2,11 @@
  * Product document schema — Firestore collection: products
  */
 import { z } from "zod";
+import { chicagoInstant } from "./_datetime.ts";
 import { type TransactionStore, TransactionStoreSchema } from "./transaction.ts";
 import {
+  ActorRef,
+  type ActorRefType,
   COARevenueEnum,
   type COARevenueType,
   ComponentTypeEnum,
@@ -116,8 +119,10 @@ export interface Product {
   images?: string[];
   xero_id?: string | null;
   xero_tracking_option_id?: string;
+  defaultThreadId?: string;
   version: number;
-  updated_by?: string;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
@@ -143,7 +148,10 @@ export const ComponentSchema: z.ZodType<ProductComponent> = z.strictObject({
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }),
-});
+}).refine(
+  (c) => c.type !== "rental" || c.stock_method === "none" || c.price.replacement != null,
+  { message: "price.replacement is required for rental components", path: ["price", "replacement"] },
+);
 
 /** Zod schema for a Product document. */
 export const ProductSchema: z.ZodType<Product> = z.strictObject({
@@ -199,14 +207,19 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   images: z.array(z.string()).optional(),
   xero_id: z.string().nullable().optional(),
   xero_tracking_option_id: z.string().optional(),
+  defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
-  updated_by: z.string().optional(),
+  created_by: ActorRef,
+  updated_by: ActorRef,
   ...TimestampFields,
-}).meta({
+}).refine(
+  (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement != null,
+  { message: "price.replacement is required for rental products", path: ["price", "replacement"] },
+).meta({
   title: "Product",
   collection: "products",
   displayDefaults: {
-    columns: ["type", "name", "active"],
+    columns: ["name", "type", "tracking_category_name", "tags.name", "components.name", "component_of.name", "alternates.name"],
     filters: { type: ["rental", "sale", "service"], active: [true] },
     sort: { column: "name", direction: "asc" },
   },
@@ -262,13 +275,7 @@ export interface CreateProductInputType {
     reference: string;
     stores: TransactionStore[];
   };
-  updated_by?: string;
 }
-
-const RentalReplacementRequiredComponent = ComponentSchema.refine(
-  (c) => c.type !== "rental" || c.price.replacement != null,
-  { message: "price.replacement is required for rental components", path: ["price", "replacement"] },
-);
 
 /** Input schema for creating a product. */
 export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
@@ -300,8 +307,8 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     air_un: z.number().nullable(),
   }).optional(),
   alternates: z.array(UidNameRef).default([]),
-  components: z.array(RentalReplacementRequiredComponent).default([]),
-  component_of: z.array(RentalReplacementRequiredComponent).default([]),
+  components: z.array(ComponentSchema).default([]),
+  component_of: z.array(ComponentSchema).default([]),
   tags: z.array(UidNameRef).default([]),
   tracking_category_name: z.string().optional(),
   uid_tracking_category: z.string().nullable().optional(),
@@ -316,13 +323,12 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     type: z.enum(["purchase", "make", "find"]),
     quantity: z.number(),
     total_cost: z.number(),
-    date: z.string(),
+    date: chicagoInstant(),
     reference: z.string(),
     stores: z.array(TransactionStoreSchema),
   }).optional(),
-  updated_by: z.string().optional(),
 }).refine(
-  (p) => p.type !== "rental" || p.price.replacement != null,
+  (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement != null,
   { message: "price.replacement is required for rental products", path: ["price", "replacement"] },
 );
 /** Input type for updating a product. */
@@ -366,7 +372,6 @@ export interface UpdateProductInputType {
     description?: string | null;
   };
   version: number;
-  updated_by?: string;
 }
 
 /** Input schema for updating a product. */
@@ -410,5 +415,4 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
     description: z.string().nullable().optional(),
   }).optional(),
   version: z.int().min(0),
-  updated_by: z.string().optional(),
 });

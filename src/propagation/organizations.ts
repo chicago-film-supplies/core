@@ -25,9 +25,11 @@ export const createOrganizationRules: CollectionRule[] = [
 
 export const createOrganizationTransaction: TransactionDefinition = {
   id: "create-organization",
-  description: "Creates an organization with bidirectional contact cross-references. CRMS + Xero sync runs pre/post-transaction.",
+  description: "Creates an organization with bidirectional contact cross-references and a cowritten default thread. CRMS + Xero sync runs pre/post-transaction.",
   steps: [
     "create-org:org-to-contacts",
+    "cowrite-thread:organizations-to-thread",
+    "cowrite-thread:thread-to-organizations",
   ],
 };
 

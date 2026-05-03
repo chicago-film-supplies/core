@@ -32,7 +32,7 @@ export const StoreSchema: z.ZodType<Store> = z.strictObject({
   collection: "stores",
   displayDefaults: {
     columns: ["name", "active", "default"],
-    filters: {},
+    filters: { active: [true] },
     sort: { column: "name", direction: "asc" },
   },
 });

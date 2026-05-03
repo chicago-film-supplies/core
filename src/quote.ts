@@ -37,9 +37,9 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   title: "Quote",
   collection: "quotes",
   displayDefaults: {
-    columns: ["uid_order", "version"],
+    columns: ["order_number", "updated_at"],
     filters: {},
-    sort: { column: "version", direction: "desc" },
+    sort: { column: "order_number", direction: "desc" },
   },
 });
 

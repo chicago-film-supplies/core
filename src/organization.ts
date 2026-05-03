@@ -3,11 +3,16 @@
  */
 import { z } from "zod";
 import {
+  ActorRef,
+  type ActorRefType,
   Address,
   type AddressType,
   Email,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  NameField,
+  type NameParts,
+  NamePartsFields,
   Phone,
   TaxProfileEnum,
   type TaxProfileType,
@@ -16,8 +21,9 @@ import {
 
 /**
  * Contact reference embedded in an organization document.
+ * `name` is the server-derived display string (see `deriveName` in common.ts).
  */
-export interface OrganizationContactType {
+export interface OrganizationContactType extends NameParts {
   uid: string;
   name: string;
   roles: string[];
@@ -26,7 +32,8 @@ export interface OrganizationContactType {
 /** Zod schema for a contact reference embedded in an organization. */
 export const OrganizationContact: z.ZodType<OrganizationContactType> = z.strictObject({
   uid: z.string(),
-  name: z.string().min(1, "Contact name is required").max(100).meta({ pii: "mask" }),
+  ...NamePartsFields,
+  name: NameField,
   roles: z.array(z.string()).default([]),
 });
 
@@ -46,8 +53,10 @@ export interface Organization {
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
   last_order?: FirestoreTimestampType | null;
+  defaultThreadId?: string;
   version: number;
-  updated_by?: string;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
@@ -66,14 +75,16 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   contacts: z.array(OrganizationContact).default([]),
   query_by_contacts: z.array(z.string()).default([]),
   last_order: FirestoreTimestamp.nullable().optional(),
+  defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
-  updated_by: z.string().optional(),
+  created_by: ActorRef,
+  updated_by: ActorRef,
   ...TimestampFields,
 }).meta({
   title: "Organization",
   collection: "organizations",
   displayDefaults: {
-    columns: ["name", "emails", "phones"],
+    columns: ["name", "contacts", "emails", "phones"],
     filters: {},
     sort: { column: "name", direction: "asc" },
   },
@@ -82,9 +93,8 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
 /**
  * New contact data submitted inline when creating/updating an organization.
  */
-export interface NewContactInputType {
+export interface NewContactInputType extends NameParts {
   uid: string;
-  name: string;
   emails?: string[];
   phones?: string[];
 }
@@ -92,7 +102,7 @@ export interface NewContactInputType {
 /** Zod schema for new contact data submitted inline with an organization. */
 export const NewContactInput: z.ZodType<NewContactInputType> = z.object({
   uid: z.string(),
-  name: z.string().min(1, "Contact name is required").max(100).meta({ pii: "mask" }),
+  ...NamePartsFields,
   emails: z.array(Email).optional(),
   phones: z.array(Phone).optional(),
 });

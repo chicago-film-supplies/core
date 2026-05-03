@@ -9,12 +9,12 @@ const destBase = getInitialValues(DocDestination) as Record<string, unknown>;
 const priceBase = getInitialValues(OrderDocItemPrice) as Record<string, unknown>;
 
 const validDates = {
-  delivery_start: "2026-03-01",
-  delivery_end: "2026-03-01",
-  collection_start: "2026-03-10",
-  collection_end: "2026-03-10",
-  charge_start: "2026-03-01",
-  charge_end: "2026-03-10",
+  delivery_start: "2026-03-01T00:00:00Z",
+  delivery_end: "2026-03-01T00:00:00Z",
+  collection_start: "2026-03-10T00:00:00Z",
+  collection_end: "2026-03-10T00:00:00Z",
+  charge_start: "2026-03-01T00:00:00Z",
+  charge_end: "2026-03-10T00:00:00Z",
 };
 
 const validDestination = {
@@ -135,14 +135,14 @@ Deno.test("CreateOrderInput accepts destination with complete contact", () => {
     dates: validDates,
     tax_profile: "tax_applied",
     destinations: [{
-      delivery: { uid: "test-dest-1", contact: { uid: "test-contact-1", name: "Jane", phones: ["312-555-0100"] } },
+      delivery: { uid: "test-dest-1", contact: { uid: "test-contact-1", first_name: "Jane", last_name: "Doe", name: "Jane Doe", phones: ["312-555-0100"] } },
       collection: { uid: "test-dest-2" },
     }],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, true);
 });
 
-Deno.test("CreateOrderInput rejects destination contact missing name", () => {
+Deno.test("CreateOrderInput rejects destination contact missing first_name", () => {
   const input = {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
@@ -170,6 +170,33 @@ Deno.test("CreateOrderInput rejects destination contact missing uid", () => {
     }],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, false);
+});
+
+Deno.test("CreateOrderInput accepts per-pair customer_collecting/returning", () => {
+  const input = {
+    uid: "test-order-1",
+    organization: { uid: "test-org-1" },
+    status: "draft",
+    dates: validDates,
+    tax_profile: "tax_applied",
+    destinations: [
+      { ...validDestination, customer_collecting: true, customer_returning: false },
+      { ...validDestination, customer_collecting: false, customer_returning: true },
+    ],
+  };
+  assertEquals(CreateOrderInput.safeParse(input).success, true);
+});
+
+Deno.test("DocDestination defaults customer_collecting/returning to false", () => {
+  const result = DocDestination.safeParse({
+    delivery: { uid: null, address: null, instructions: null, contact: null },
+    collection: { uid: null, address: null, instructions: null, contact: null },
+  });
+  assertEquals(result.success, true);
+  if (result.success) {
+    assertEquals(result.data.customer_collecting, false);
+    assertEquals(result.data.customer_returning, false);
+  }
 });
 
 Deno.test("CreateOrderInput rejects invalid item inclusion_type", () => {
@@ -364,12 +391,12 @@ const validDocDestination = {
 
 const validDocDates = {
   ...datesBase,
-  delivery_start: "2026-03-01",
-  delivery_end: "2026-03-01",
-  collection_start: "2026-03-10",
-  collection_end: "2026-03-10",
-  charge_start: "2026-03-01",
-  charge_end: "2026-03-10",
+  delivery_start: "2026-03-01T00:00:00Z",
+  delivery_end: "2026-03-01T00:00:00Z",
+  collection_start: "2026-03-10T00:00:00Z",
+  collection_end: "2026-03-10T00:00:00Z",
+  charge_start: "2026-03-01T00:00:00Z",
+  charge_end: "2026-03-10T00:00:00Z",
 };
 
 const minimalDoc = {
@@ -445,9 +472,6 @@ Deno.test("OrderSchema validates a complete document", () => {
     crms_status: "active",
     subject: "Film shoot",
     reference: "PO-123",
-    notes: "Handle with care",
-    customer_collecting: true,
-    customer_returning: false,
   };
   assertEquals(OrderSchema.safeParse(doc).success, true);
 });
@@ -566,6 +590,19 @@ Deno.test("OrderSchema rejects rental with null price.replacement", () => {
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
+Deno.test("OrderSchema accepts rental with stock_method none and no price.replacement", () => {
+  const doc = {
+    ...minimalDoc,
+    items: [{
+      uid: "test-prod-1",
+      type: "rental",
+      name: "Service Fee",
+      stock_method: "none",
+    }],
+  };
+  assertEquals(OrderSchema.safeParse(doc).success, true);
+});
+
 Deno.test("OrderSchema rejects custom line item type", () => {
   const doc = {
     ...minimalDoc,
@@ -653,6 +690,8 @@ Deno.test("OrderSchema validates destination with contact", () => {
         instructions: "Ring bell",
         contact: {
           uid: "test-contact-1",
+          first_name: "John",
+          last_name: "Doe",
           name: "John Doe",
           phones: ["1234567890"],
         },
@@ -775,4 +814,56 @@ Deno.test("OrderSchema accepts valid inclusion_type values", () => {
     };
     assertEquals(OrderSchema.safeParse(doc).success, true, `inclusion_type "${val}" should be valid`);
   }
+});
+
+// ── Status transition helpers ────────────────────────────────────
+
+import {
+  getOrderStatusTransitions,
+  isValidOrderStatusTransition,
+  ORDER_USER_STATUSES,
+  ORDER_COMPUTED_STATUSES,
+} from "../src/order.ts";
+
+Deno.test("getOrderStatusTransitions returns the other user statuses for a user status", () => {
+  assertEquals(getOrderStatusTransitions("draft"), ["quoted", "reserved", "canceled"]);
+  assertEquals(getOrderStatusTransitions("quoted"), ["draft", "reserved", "canceled"]);
+  assertEquals(getOrderStatusTransitions("reserved"), ["draft", "quoted", "canceled"]);
+  assertEquals(getOrderStatusTransitions("canceled"), ["draft", "quoted", "reserved"]);
+});
+
+Deno.test("getOrderStatusTransitions returns [] for computed statuses", () => {
+  for (const s of ORDER_COMPUTED_STATUSES) {
+    assertEquals(getOrderStatusTransitions(s), [], `expected no manual transitions out of "${s}"`);
+  }
+});
+
+Deno.test("isValidOrderStatusTransition accepts no-op writes", () => {
+  for (const s of [...ORDER_USER_STATUSES, ...ORDER_COMPUTED_STATUSES]) {
+    assertEquals(isValidOrderStatusTransition(s, s, "manual"), true, `same-status no-op for "${s}"`);
+  }
+});
+
+Deno.test("isValidOrderStatusTransition rejects manual writes into computed statuses", () => {
+  assertEquals(isValidOrderStatusTransition("reserved", "active", "manual"), false);
+  assertEquals(isValidOrderStatusTransition("draft", "active", "manual"), false);
+  assertEquals(isValidOrderStatusTransition("quoted", "complete", "manual"), false);
+});
+
+Deno.test("isValidOrderStatusTransition rejects manual writes out of computed statuses", () => {
+  assertEquals(isValidOrderStatusTransition("active", "reserved", "manual"), false);
+  assertEquals(isValidOrderStatusTransition("complete", "draft", "manual"), false);
+  assertEquals(isValidOrderStatusTransition("complete", "canceled", "manual"), false);
+});
+
+Deno.test("isValidOrderStatusTransition allows propagation writes into computed statuses", () => {
+  assertEquals(isValidOrderStatusTransition("reserved", "active", "propagation"), true);
+  assertEquals(isValidOrderStatusTransition("active", "complete", "propagation"), true);
+  assertEquals(isValidOrderStatusTransition("reserved", "complete", "propagation"), true);
+});
+
+Deno.test("isValidOrderStatusTransition allows manual transitions between user statuses", () => {
+  assertEquals(isValidOrderStatusTransition("draft", "quoted", "manual"), true);
+  assertEquals(isValidOrderStatusTransition("quoted", "reserved", "manual"), true);
+  assertEquals(isValidOrderStatusTransition("reserved", "canceled", "manual"), true);
 });

@@ -16,14 +16,14 @@ export interface EmailVerification {
 /** Zod schema for EmailVerification. */
 export const EmailVerificationSchema: z.ZodType<EmailVerification> = z.strictObject({
   user_id: z.string().min(1),
-  email: z.string().email(),
+  email: z.email(),
   expiresAt: FirestoreTimestamp,
   created_at: z.number(),
 }).meta({
   title: "Email Verification",
   collection: "email-verifications",
   displayDefaults: {
-    columns: ["email", "code"],
+    columns: ["email", "expiresAt"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

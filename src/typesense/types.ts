@@ -95,6 +95,38 @@ export const TypesenseSynonymSchema: z.ZodType<TypesenseSynonym> = z.union([
   TypesenseMultiWaySynonymSchema,
 ]);
 
+/**
+ * Describes how a client should enumerate the keys a groupBy axis produces.
+ *
+ * - `enum` — keys come from the Zod enum at `field` (e.g. card status).
+ * - `collectionFeed` — keys come from a live Firestore collection (e.g. one
+ *   section per list); `collection` names the source.
+ * - `dateBucket` — keys are computed client-side from the row's date value;
+ *   no separate per-key query.
+ *
+ * A single "None" / ungrouped axis is represented with `field: null` and no
+ * `kind` — the axis lists which *groupings are available*, and "no grouping"
+ * is always one of them.
+ */
+export interface GroupByAxis {
+  /** Firestore field the per-key query filters on. `null` for the ungrouped axis. */
+  field: string | null;
+  /** User-facing label for the picker. */
+  label: string;
+  /** How the client should enumerate keys. Omitted for the ungrouped axis. */
+  kind?: "enum" | "collectionFeed" | "dateBucket";
+  /** Source Firestore collection when `kind === "collectionFeed"`. */
+  collection?: string;
+}
+
+/** Zod schema for GroupByAxis. */
+export const GroupByAxisSchema: z.ZodType<GroupByAxis> = z.strictObject({
+  field: z.string().nullable(),
+  label: z.string(),
+  kind: z.enum(["enum", "collectionFeed", "dateBucket"]).optional(),
+  collection: z.string().optional(),
+});
+
 /** Display defaults for a Typesense collection in the UI. */
 export interface TypesenseDisplayDefaults {
   columns: string[];
@@ -102,6 +134,8 @@ export interface TypesenseDisplayDefaults {
   sort: { column: string | null; direction: "asc" | "desc" };
   group: string | null;
   facet: string[];
+  /** Available groupBy axes the UI can offer for this collection. */
+  groupBy?: GroupByAxis[];
 }
 
 /** Zod schema for TypesenseDisplayDefaults. */
@@ -114,6 +148,7 @@ export const TypesenseDisplayDefaultsSchema: z.ZodType<TypesenseDisplayDefaults>
   }),
   group: z.string().nullable(),
   facet: z.array(z.string()),
+  groupBy: z.array(GroupByAxisSchema).optional(),
 });
 
 /** Full collection config with alias, version, and Firestore mapping. */

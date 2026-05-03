@@ -8,7 +8,8 @@ Deno.test("TagSchema validates a complete document", () => {
     count: 5,
     products: [{ uid: "test-p1", name: "LED Panel" }],
     query_by_products: ["test-p1"],
-    updated_by: "test-user-1",
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   assertEquals(TagSchema.safeParse(doc).success, true);
 });
@@ -18,6 +19,8 @@ Deno.test("TagSchema accepts count as record", () => {
     uid: "test-tag-1",
     name: "Audio",
     count: { total: 3 },
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   assertEquals(TagSchema.safeParse(doc).success, true);
 });
@@ -27,6 +30,12 @@ Deno.test("TagSchema rejects missing name", () => {
 });
 
 Deno.test("TagSchema rejects additional properties", () => {
-  const doc = { uid: "test-tag-1", name: "Audio", bogus: true };
+  const doc = {
+    uid: "test-tag-1",
+    name: "Audio",
+    bogus: true,
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
+  };
   assertEquals(TagSchema.safeParse(doc).success, false);
 });

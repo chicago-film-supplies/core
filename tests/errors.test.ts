@@ -33,28 +33,30 @@ Deno.test("Phone shows custom error for too-long value", () => {
   }
 });
 
-Deno.test("ContactSchema shows custom error for empty name", () => {
+Deno.test("ContactSchema shows custom error for empty first_name", () => {
   const doc = {
     uid: "test-abc-123",
-    name: "",
+    first_name: "",
     emails: [],
     phones: [],
     organizations: [],
     query_by_organizations: [],
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   const result = ContactSchema.safeParse(doc);
   assertEquals(result.success, false);
   if (!result.success) {
-    assertEquals(getMessages(result).includes("Contact name is required"), true);
+    assertEquals(getMessages(result).includes("First name is required"), true);
   }
 });
 
-Deno.test("CreateContactInput shows custom error for empty name", () => {
-  const input = { uid: "test-abc-123", name: "" };
+Deno.test("CreateContactInput shows custom error for empty first_name", () => {
+  const input = { uid: "test-abc-123", first_name: "" };
   const result = CreateContactInput.safeParse(input);
   assertEquals(result.success, false);
   if (!result.success) {
-    assertEquals(getMessages(result).includes("Contact name is required"), true);
+    assertEquals(getMessages(result).includes("First name is required"), true);
   }
 });
 
@@ -70,6 +72,8 @@ Deno.test("OrganizationSchema shows custom error for empty name", () => {
     billing_address: null,
     contacts: [],
     query_by_contacts: [],
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   const result = OrganizationSchema.safeParse(doc);
   assertEquals(result.success, false);

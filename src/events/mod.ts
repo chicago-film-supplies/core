@@ -76,6 +76,37 @@ export type {
   OutOfServiceRecordUpdated,
 } from "./transactions.ts";
 
+// ── Threads aggregate ───────────────────────────────────────────────
+
+export type {
+  ThreadCreated,
+  ThreadUpdated,
+  CommentCreated,
+  CommentUpdated,
+  CommentDeleted,
+} from "./threads.ts";
+
+// ── Cards aggregate ─────────────────────────────────────────────────
+
+export type {
+  CardCreated,
+  CardUpdated,
+  CardDeleted,
+  ListCreated,
+  ListUpdated,
+  ListDeleted,
+} from "./cards.ts";
+
+// ── Recurrences aggregate ───────────────────────────────────────────
+
+export type {
+  RecurrenceCreated,
+  RecurrenceUpdated,
+  RecurrenceDeleted,
+  HorizonMaterialized,
+  HorizonMaterializedData,
+} from "./recurrences.ts";
+
 // ── Reference data ──────────────────────────────────────────────────
 
 export type {

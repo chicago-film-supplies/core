@@ -30,13 +30,24 @@ export {
 
 export {
   UserSchema,
+  CreateUserInput,
   UpdateUserInput,
   type User,
   type DisplaySort,
   type FirestoreDisplayPrefs,
   type TypesenseDisplayPrefs,
+  type CreateUserInputType,
   type UpdateUserInputType,
 } from "./user.ts";
+
+export {
+  InviteSchema,
+  CreateInviteInput,
+  AcceptInviteInput,
+  type Invite,
+  type CreateInviteInputType,
+  type AcceptInviteInputType,
+} from "./invite.ts";
 
 export {
   typesenseDisplayDefaults,
@@ -44,7 +55,21 @@ export {
   type FirestoreDisplayDefaults,
 } from "./display-defaults.ts";
 
+export type { GroupByAxis } from "./typesense/types.ts";
+
 export { getInitialValues } from "./initial.ts";
+
+export {
+  unwrapZod,
+  unwrapNonArray,
+  resolveZodField,
+  getNodeMeta,
+  resolveFieldMeta,
+  isDateField,
+  isDateLikeNode,
+  enumValues,
+  getServerSortableColumns,
+} from "./zod-walk.ts";
 
 export {
   SessionSchema,
@@ -117,18 +142,28 @@ export {
   isLineItem,
   type ConsolidatedItemType,
   type GroupPathType,
+  ORDER_STATUSES,
+  type OrderStatusType,
+  ORDER_USER_STATUSES,
+  type OrderUserStatusType,
+  ORDER_COMPUTED_STATUSES,
+  type OrderComputedStatusType,
+  getOrderStatusTransitions,
+  isValidOrderStatusTransition,
 } from "./order.ts";
 
 export {
-  OrderEventSchema,
-  OrderEventResponseSchema,
-  OrderEventsQueryInput,
-  type OrderEvent,
-  type OrderEventResponse,
-  type OrderEventsQueryInputType,
-  type EventTypeType,
-  type EventPositionType,
-} from "./order-event.ts";
+  OrderFulfillmentSchema,
+  OrderFulfillmentItem,
+  OrderFulfillmentLineItem,
+  OrderFulfillmentDestinationItem,
+  OrderFulfillmentGroupItem,
+  type OrderFulfillment,
+  type OrderFulfillmentItemType,
+  type OrderFulfillmentLineItemType,
+  type OrderFulfillmentDestinationItemType,
+  type OrderFulfillmentGroupItemType,
+} from "./order-fulfillment.ts";
 
 export {
   LoginInput,
@@ -144,12 +179,17 @@ export {
 export {
   Address,
   Coordinates,
+  DocSource,
   Email,
   Phone,
   FirestoreTimestamp,
   TimestampFields,
   UidNameRef,
-  NoteEntry,
+  ActorRef,
+  NamePartsFields,
+  NamePartsFieldsPartial,
+  NameField,
+  deriveName,
   ProductTypeEnum,
   StockMethodEnum,
   TaxProfileEnum,
@@ -163,13 +203,17 @@ export {
   RateTypeEnum,
   DocItemTypeEnum,
   DocLineItemTypeEnum,
+  DOC_LINE_ITEM_TYPES,
   type AddressType,
   type CoordinatesType,
+  type DocSourceType,
   type FirestoreTimestampType,
   type FirestoreTimestampValue,
   type FirestoreFieldValue,
   type UidNameRefType,
-  type NoteEntryType,
+  type ActorRefType,
+  type NameParts,
+  type PartialNameParts,
   type ProductTypeType,
   type StockMethodType,
   type TaxProfileType,
@@ -191,6 +235,7 @@ export {
 export {
   LogRecordSchema,
   PropagationLogRecordSchema,
+  TransactionLogRecordSchema,
   ClientLogEntrySchema,
   ClientLogBatchSchema,
   type LogRecord,
@@ -199,6 +244,8 @@ export {
   type PropagationLogRecord,
   type PropagationModeType,
   type PropagationStatusType,
+  type TransactionLogRecord,
+  type TransactionStatusType,
   type ClientLogEntry,
   type ClientLogBatch,
   type ClientAppType,
@@ -225,6 +272,87 @@ export {
 } from "./tag.ts";
 
 export {
+  RoleSchema,
+  type Role,
+} from "./role.ts";
+
+export {
+  ThreadSchema,
+  UpdateThreadInput,
+  type Thread,
+  type UpdateThreadInputType,
+} from "./thread.ts";
+
+export {
+  CommentSchema,
+  CommentBody,
+  CreateCommentInput,
+  UpdateCommentInput,
+  CommentReactionInput,
+  type Comment,
+  type CommentBodyJson,
+  type CreateCommentInputType,
+  type UpdateCommentInputType,
+  type CommentReactionInputType,
+  type ReactionActionType,
+} from "./comment.ts";
+
+export {
+  ListSchema,
+  ListLockKeyEnum,
+  CreateListInput,
+  UpdateListInput,
+  type List,
+  type ListLockKey,
+  type CreateListInputType,
+  type UpdateListInputType,
+} from "./list.ts";
+
+export {
+  CardSchema,
+  CardAttachment,
+  CardDates,
+  CardLockKeyEnum,
+  CardStatusEnum,
+  CreateCardInput,
+  UpdateCardInput,
+  type Card,
+  type CardAttachmentType,
+  type CardDatesType,
+  type CardLockKey,
+  type CardStatus,
+  type CreateCardInputType,
+  type UpdateCardInputType,
+} from "./card.ts";
+
+export {
+  RecurrenceSchema,
+  RecurrencePrototype,
+  RecurrenceRule,
+  RecurrenceFreqEnum,
+  RecurrenceStatusEnum,
+  RecurrenceWeekdayEnum,
+  CreateRecurrenceInput,
+  UpdateRecurrenceInput,
+  type Recurrence,
+  type RecurrencePrototypeType,
+  type RecurrenceRuleType,
+  type RecurrenceFreq,
+  type RecurrenceStatus,
+  type RecurrenceWeekday,
+  type CreateRecurrenceInputType,
+  type UpdateRecurrenceInputType,
+} from "./recurrence.ts";
+
+export {
+  PERMISSIONS,
+  type Permission,
+  type RouteMethod,
+  type RouteManifest,
+  type RouteManifestEntry,
+} from "./permissions.ts";
+
+export {
   HolidayDatesSchema,
   type HolidayDates,
 } from "./holiday-dates.ts";
@@ -237,7 +365,9 @@ export {
 
 export {
   DestinationSchema,
+  DestinationContactRef,
   type Destination as DestinationDoc,
+  type DestinationContactRefType,
 } from "./destination.ts";
 
 export {
@@ -304,22 +434,29 @@ export {
 
 export {
   BookingSchema,
+  BookingBreakdownSchema,
   type Booking,
+  type BookingBreakdown,
   type BookingDestinationRef,
   type BookingStore,
   type BookingStoreLocation,
+  UpdateBookingInput,
+  type UpdateBookingInputType,
 } from "./booking.ts";
 
 export {
   CreateInvoiceInput,
+  InvoiceDocDestination,
   InvoiceDocItem,
   InvoiceDocLineItemSchema,
   InvoiceDocOrderItem,
   InvoiceSchema,
   isInvoiceLineItem,
   UpdateInvoiceInput,
+  UpdatePaymentInput,
   type CreateInvoiceInputType,
   type Invoice,
+  type InvoiceDocDestinationType,
   type InvoiceDocItemPrice,
   type InvoiceDocItemType,
   type InvoiceDocLineItem,
@@ -330,6 +467,7 @@ export {
   type InvoicePayment,
   type InvoiceStatusType,
   type UpdateInvoiceInputType,
+  type UpdatePaymentInputType,
 } from "./invoice.ts";
 
 export {
@@ -380,12 +518,17 @@ export {
   type OOSStore,
   type OOSStoreLocation,
   type OOSTransaction,
-  type OOSSource,
+  type OOSDates,
+  CreateOutOfServiceRecordInput,
+  type CreateOutOfServiceRecordInputType,
+  UpdateOutOfServiceRecordInput,
+  type UpdateOutOfServiceRecordInputType,
 } from "./out-of-service-record.ts";
 
 export {
   StockSummarySchema,
   type StockSummary,
+  type StockSummaryBookingEntry,
 } from "./stock-summary.ts";
 
 export {
@@ -466,6 +609,12 @@ export {
   createContactTransaction,
   updateContactRules,
   updateContactTransaction,
+  createUserRules,
+  createUserTransaction,
+  updateUserRules,
+  updateUserTransaction,
+  deleteUserRules,
+  deleteUserTransaction,
   createInvoiceRules,
   createInvoiceTransaction,
   updateInvoiceOrderRules,
@@ -479,6 +628,41 @@ export {
   createLocationTransaction,
   updateLocationTransactionalRules,
   updateLocationTransaction,
+  threadCowriteRules,
+  threadOrderRules,
+  threadInvoiceRules,
+  threadContactRules,
+  threadOrganizationRules,
+  threadProductRules,
+  threadTransactionRules,
+  threadRoleRules,
+  createRoleTransaction,
+  createCommentRules,
+  createCommentTransaction,
+  cardRules,
+  createCardRules,
+  createCardTransaction,
+  deleteCardRules,
+  deleteCardTransaction,
+  recurrenceRules,
+  createRecurrenceRules,
+  createRecurrenceTransaction,
+  materializeHorizonRules,
+  materializeHorizonTransaction,
+  updateRecurrenceRules,
+  updateRecurrenceTransaction,
+  deleteRecurrenceRules,
+  deleteRecurrenceTransaction,
+  updateCardScopeFollowingRules,
+  updateCardScopeFollowingTransaction,
+  updateCardScopeAllRules,
+  updateCardScopeAllTransaction,
+  deleteCardScopeThisRules,
+  deleteCardScopeThisTransaction,
+  deleteCardScopeFollowingRules,
+  deleteCardScopeFollowingTransaction,
+  deleteCardScopeAllRules,
+  deleteCardScopeAllTransaction,
 } from "./propagation/mod.ts";
 
 // ── Domain events ───────────────────────────────────────────────────
@@ -527,6 +711,25 @@ export type {
   TransactionUpdated,
   OutOfServiceRecordCreated,
   OutOfServiceRecordUpdated,
+  // Threads aggregate
+  ThreadCreated,
+  ThreadUpdated,
+  CommentCreated,
+  CommentUpdated,
+  CommentDeleted,
+  // Cards aggregate
+  CardCreated,
+  CardUpdated,
+  CardDeleted,
+  ListCreated,
+  ListUpdated,
+  ListDeleted,
+  // Recurrences aggregate
+  RecurrenceCreated,
+  RecurrenceUpdated,
+  RecurrenceDeleted,
+  HorizonMaterialized,
+  HorizonMaterializedData,
   // Reference data
   TagCreated,
   TagUpdated,
@@ -542,16 +745,21 @@ export type {
 
 // ── Union of all Firestore document types ───────────────────────────
 
+import type { Card } from "./card.ts";
+import type { Comment } from "./comment.ts";
 import type { Counter } from "./counter.ts";
 import type { Booking } from "./booking.ts";
+import type { List } from "./list.ts";
+import type { Recurrence } from "./recurrence.ts";
 import type { CacheGeocodes } from "./cache-geocodes.ts";
 import type { ChartOfAccounts } from "./chart-of-accounts.ts";
 import type { Contact } from "./contact.ts";
 import type { Destination as DestinationDocType } from "./destination.ts";
 import type { EmailVerification } from "./email-verification.ts";
-import type { OrderEvent } from "./order-event.ts";
+import type { OrderFulfillment } from "./order-fulfillment.ts";
 import type { HolidayDates } from "./holiday-dates.ts";
 import type { InventoryLedger } from "./inventory-ledger.ts";
+import type { Invite } from "./invite.ts";
 import type { Invoice } from "./invoice.ts";
 import type { Location } from "./location.ts";
 import type { LocationType } from "./location-type.ts";
@@ -567,6 +775,8 @@ import type { RateLimit } from "./rate-limit.ts";
 import type { Session } from "./session.ts";
 import type { StockSummary } from "./stock-summary.ts";
 import type { Store } from "./store.ts";
+import type { Role } from "./role.ts";
+import type { Thread } from "./thread.ts";
 import type { Tag } from "./tag.ts";
 import type { Tax } from "./tax.ts";
 import type { TrackingCategory } from "./tracking-category.ts";
@@ -578,11 +788,11 @@ import type { WebshopProduct } from "./webshop-product.ts";
 
 /** Union of all Firestore document types. Use with validateBeforeWrite. */
 export type SchemaDocType =
-  | Booking | CacheGeocodes | ChartOfAccounts | Contact | Counter | DestinationDocType
-  | EmailVerification | OrderEvent | HolidayDates | InventoryLedger | Invoice | Location
+  | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
+  | EmailVerification | HolidayDates | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | Organization | OutOfServiceRecord | PasswordReset
-  | Product | PublicStockSummary | Quote | RateLimit | Session | StockSummary | Tax | Template
-  | Store | Tag | TrackingCategory | Transaction | TypesenseConfig | User
+  | OrderFulfillment | Product | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
+  | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User
   | WebhookEvent | WebshopProduct;
 
 // ── Schema record keyed by collection name ─────────────────────────
@@ -590,15 +800,19 @@ export type SchemaDocType =
 import { z } from "zod";
 
 import { BookingSchema } from "./booking.ts";
+import { CardSchema } from "./card.ts";
+import { CommentSchema } from "./comment.ts";
+import { ListSchema } from "./list.ts";
 import { CounterSchema as CounterSchema_ } from "./counter.ts";
 import { CacheGeocodesSchema } from "./cache-geocodes.ts";
 import { ChartOfAccountsSchema } from "./chart-of-accounts.ts";
 import { ContactSchema } from "./contact.ts";
 import { DestinationSchema } from "./destination.ts";
 import { EmailVerificationSchema } from "./email-verification.ts";
-import { OrderEventSchema as OrderEventSchema_ } from "./order-event.ts";
+import { OrderFulfillmentSchema } from "./order-fulfillment.ts";
 import { HolidayDatesSchema } from "./holiday-dates.ts";
 import { InventoryLedgerSchema } from "./inventory-ledger.ts";
+import { InviteSchema } from "./invite.ts";
 import { InvoiceSchema } from "./invoice.ts";
 import { LocationSchema } from "./location.ts";
 import { LocationTypeSchema } from "./location-type.ts";
@@ -610,12 +824,15 @@ import { ProductSchema } from "./product.ts";
 import { QuoteSchema as QuoteSchema_ } from "./quote.ts";
 import { TemplateSchema as TemplateSchema_ } from "./template.ts";
 import { RateLimitSchema } from "./rate-limit.ts";
+import { RecurrenceSchema } from "./recurrence.ts";
+import { RoleSchema } from "./role.ts";
 import { PublicStockSummarySchema } from "./public-stock-summary.ts";
 import { SessionSchema } from "./session.ts";
 import { StockSummarySchema } from "./stock-summary.ts";
 import { StoreSchema } from "./store.ts";
 import { TagSchema } from "./tag.ts";
 import { TaxSchema as TaxSchema_ } from "./tax.ts";
+import { ThreadSchema } from "./thread.ts";
 import { TrackingCategorySchema } from "./tracking-category.ts";
 import { TransactionSchema } from "./transaction.ts";
 import { UserSchema } from "./user.ts";
@@ -626,19 +843,23 @@ import { WebshopProductSchema } from "./webshop-product.ts";
 /** All document schemas keyed by singular and plural collection names. */
 export const schemas: Record<string, z.ZodType> = {
   "booking": BookingSchema, "bookings": BookingSchema,
+  "card": CardSchema, "cards": CardSchema,
   "counter": CounterSchema_, "counters": CounterSchema_,
   "cache-geocodes": CacheGeocodesSchema,
   "chart-of-accounts": ChartOfAccountsSchema,
+  "comment": CommentSchema, "comments": CommentSchema,
   "contact": ContactSchema, "contacts": ContactSchema,
   "destination": DestinationSchema, "destinations": DestinationSchema,
   "email-verification": EmailVerificationSchema, "email-verifications": EmailVerificationSchema,
   "holiday-dates": HolidayDatesSchema,
   "inventory-ledger": InventoryLedgerSchema, "inventory-ledgers": InventoryLedgerSchema,
+  "invite": InviteSchema, "invites": InviteSchema,
   "invoice": InvoiceSchema, "invoices": InvoiceSchema,
+  "list": ListSchema, "lists": ListSchema,
   "location": LocationSchema, "locations": LocationSchema,
   "location-type": LocationTypeSchema, "location-types": LocationTypeSchema,
   "order": OrderSchema, "orders": OrderSchema,
-  "order-event": OrderEventSchema_, "order-events": OrderEventSchema_,
+  "order-fulfillment": OrderFulfillmentSchema, "order-fulfillments": OrderFulfillmentSchema,
   "organization": OrganizationSchema, "organizations": OrganizationSchema,
   "out-of-service-record": OutOfServiceRecordSchema, "out-of-service": OutOfServiceRecordSchema,
   "password-reset": PasswordResetSchema, "password-resets": PasswordResetSchema,
@@ -646,12 +867,15 @@ export const schemas: Record<string, z.ZodType> = {
   "quote": QuoteSchema_, "quotes": QuoteSchema_,
   "template": TemplateSchema_, "templates": TemplateSchema_,
   "rate-limit": RateLimitSchema, "rate-limits": RateLimitSchema,
+  "recurrence": RecurrenceSchema, "recurrences": RecurrenceSchema,
+  "role": RoleSchema, "roles": RoleSchema,
   "public-stock-summary": PublicStockSummarySchema, "public-stock-summaries": PublicStockSummarySchema,
   "session": SessionSchema, "sessions": SessionSchema,
   "stock-summary": StockSummarySchema, "stock-summaries": StockSummarySchema,
   "store": StoreSchema, "stores": StoreSchema,
   "tag": TagSchema, "tags": TagSchema,
   "tax": TaxSchema_, "taxes": TaxSchema_,
+  "thread": ThreadSchema, "threads": ThreadSchema,
   "tracking-category": TrackingCategorySchema, "tracking-categories": TrackingCategorySchema,
   "transaction": TransactionSchema, "transactions": TransactionSchema,
   "user": UserSchema, "users": UserSchema,

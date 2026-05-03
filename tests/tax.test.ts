@@ -12,8 +12,8 @@ const validTax = {
   type: "percent",
   valid_from: "2026-01-01T00:00:00.000Z",
   valid_from_fs: null,
-  created_by: "test-user-1",
-  updated_by: "test-user-1",
+  created_by: { uid: "test-user-1", name: "Test User" },
+  updated_by: { uid: "test-user-1", name: "Test User" },
   created_at: null,
   updated_at: null,
 };

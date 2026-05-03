@@ -2,7 +2,7 @@
  * Tag document schema — Firestore collection: tags
  */
 import { z } from "zod";
-import { type FirestoreFieldValue, type FirestoreTimestampType, TimestampFields, type UidNameRefType, UidNameRef } from "./common.ts";
+import { ActorRef, type ActorRefType, type FirestoreFieldValue, type FirestoreTimestampType, TimestampFields, type UidNameRefType, UidNameRef } from "./common.ts";
 
 /** A tag document in Firestore. */
 export interface Tag {
@@ -12,7 +12,8 @@ export interface Tag {
   products?: UidNameRefType[];
   query_by_products?: string[];
   version: number;
-  updated_by?: string;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
@@ -25,15 +26,16 @@ export const TagSchema: z.ZodType<Tag> = z.strictObject({
   products: z.array(UidNameRef).default([]).optional(),
   query_by_products: z.array(z.string()).default([]).optional(),
   version: z.int().min(0).default(0),
-  updated_by: z.string().optional(),
+  created_by: ActorRef,
+  updated_by: ActorRef,
   ...TimestampFields,
 }).meta({
   title: "Tag",
   collection: "tags",
   displayDefaults: {
-    columns: ["name", "count"],
+    columns: ["name", "count", "products.name"],
     filters: {},
-    sort: { column: "count", direction: "desc" },
+    sort: { column: "name", direction: "asc" },
   },
 });
 

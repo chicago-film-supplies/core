@@ -89,13 +89,15 @@ export const createProductRules: CollectionRule[] = [
 
 export const createProductTransaction: TransactionDefinition = {
   id: "create-product",
-  description: "Creates a product with tag/category cross-refs, optional inventory ledger, and webshop fan-out. CRMS + Xero sync runs post-transaction.",
+  description: "Creates a product with tag/category cross-refs, optional inventory ledger, webshop fan-out, and a cowritten default thread. CRMS + Xero sync runs post-transaction.",
   steps: [
     "create-product:product-to-tags",
     "create-product:product-to-tracking-categories",
     "create-product:product-to-components",
     "create-product:product-to-ledger",
     "create-product:product-to-webshop",
+    "cowrite-thread:products-to-thread",
+    "cowrite-thread:thread-to-products",
   ],
 };
 

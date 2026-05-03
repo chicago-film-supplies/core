@@ -8,6 +8,7 @@ export const chartOfAccounts: TypesenseCollectionConfig = {
   collectionName: "chart-of-accounts_v4",
   schema: {
     name: "chart-of-accounts_v4",
+    enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
       { name: "name", type: "string", sort: true, stem: true, facet: false },
@@ -16,7 +17,12 @@ export const chartOfAccounts: TypesenseCollectionConfig = {
       { name: "type", type: "string", facet: true },
       { name: "default_tax_profile", type: "string", facet: false },
       { name: "description", type: "string", stem: true, optional: true },
-      { name: "updated_by", type: "string", facet: false, optional: true },
+      { name: "created_by", type: "object", optional: true },
+      { name: "created_by.uid", type: "string", facet: true, optional: true },
+      { name: "created_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },
+      { name: "updated_by", type: "object", optional: true },
+      { name: "updated_by.uid", type: "string", facet: true, optional: true },
+      { name: "updated_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },
       { name: "updated_at", type: "int64", sort: true, index: true, facet: false },
     ],
     default_sorting_field: "code",

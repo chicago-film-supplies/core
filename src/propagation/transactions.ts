@@ -66,12 +66,14 @@ export const createTransactionRules: CollectionRule[] = [
 
 export const createTransactionTransaction: TransactionDefinition = {
   id: "create-transaction",
-  description: "Creates an inventory transaction, updates ledger quantities, location product tracking, and recalculates all stock summaries for the product.",
+  description: "Creates an inventory transaction, updates ledger quantities, location product tracking, recalculates all stock summaries for the product, and cowrites a default thread.",
   steps: [
     "create-transaction:transaction-to-ledger",
     "create-transaction:transaction-to-locations",
     "create-transaction:ledger-to-stock-summaries",
     "create-transaction:stock-to-public-stock",
+    "cowrite-thread:transactions-to-thread",
+    "cowrite-thread:thread-to-transactions",
   ],
 };
 

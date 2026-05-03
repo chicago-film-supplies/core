@@ -65,7 +65,7 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
   title: "Inventory Ledger",
   collection: "inventory-ledgers",
   displayDefaults: {
-    columns: ["uid_product", "stores"],
+    columns: ["type", "stock_method", "quantity_held", "store_breakdown"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

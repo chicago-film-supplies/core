@@ -27,7 +27,7 @@ export const stores: TypesenseCollectionConfig = {
   synonyms: [],
   displayDefaults: {
     columns: ["name", "active", "default"],
-    filters: {},
+    filters: { active: [true] },
     sort: { column: "name", direction: "asc" },
     group: null,
     facet: [],

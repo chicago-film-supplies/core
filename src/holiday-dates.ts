@@ -20,7 +20,7 @@ export interface HolidayDates {
 export const HolidayDatesSchema: z.ZodType<HolidayDates> = z.strictObject({
   uid: z.string(),
   uid_holiday: z.string(),
-  date: z.string(),
+  date: z.iso.date(),
   date_fs: FirestoreTimestamp,
   name: z.string().min(1).max(100),
   type: z.enum(["fixed", "variable"]),

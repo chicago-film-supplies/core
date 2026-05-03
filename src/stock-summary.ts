@@ -10,11 +10,17 @@ import {
   ProductTypeEnum,
   type ProductTypeType,
 } from "./common.ts";
-import { type Booking, BookingSchema } from "./booking.ts";
+import { type BookingBreakdown, BookingBreakdownSchema } from "./booking.ts";
 
 const SUMMARY_TYPES = ["sale", "rental"] as const;
 type SummaryTypeType = typeof SUMMARY_TYPES[number];
 
+/** Slim audit-trail entry: which booking + its breakdown, no full Booking embed. */
+export interface StockSummaryBookingEntry {
+  uid: string;
+  number: number;
+  breakdown: BookingBreakdown;
+}
 
 /** A stock summary document aggregating availability and bookings for a product over a date range. */
 export interface StockSummary {
@@ -28,7 +34,7 @@ export interface StockSummary {
     end: string | null;
     end_fs: FirestoreTimestampType | null;
   };
-  bookings: Booking[];
+  bookings: StockSummaryBookingEntry[];
   bookings_breakdown: {
     quoted: number;
     reserved: number;
@@ -69,7 +75,11 @@ export const StockSummarySchema: z.ZodType<StockSummary> = z.strictObject({
     end: z.string().nullable(),
     end_fs: FirestoreTimestamp.nullable(),
   }),
-  bookings: z.array(BookingSchema),
+  bookings: z.array(z.strictObject({
+    uid: z.string(),
+    number: z.number(),
+    breakdown: BookingBreakdownSchema,
+  })),
   bookings_breakdown: z.strictObject({
     quoted: z.number(),
     reserved: z.number(),
@@ -100,7 +110,7 @@ export const StockSummarySchema: z.ZodType<StockSummary> = z.strictObject({
   title: "Stock Summary",
   collection: "stock-summaries",
   displayDefaults: {
-    columns: ["uid_product", "stores"],
+    columns: ["type", "summary_type", "quantity_available", "quantity_booked", "store_breakdown"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

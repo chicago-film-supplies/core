@@ -52,6 +52,7 @@ export const createOrderRules: CollectionRule[] = [
       { source: ["destinations"], target: ["query_by_contacts"], transform: "flatten all contact uids from delivery/collection endpoints" },
       { source: [], target: ["number"], transform: "atomic increment of counters/orders.count" },
       { source: ["dates"], target: ["dates"], transform: "Timestamp.fromDate() — each ISO string gets a Firestore timestamp companion (*_fs)" },
+      { source: [], target: ["bookings_breakdown"], transform: "sum of breakdowns across all freshly-built bookings — initial roll-up, maintained incrementally by update-booking thereafter. Sum of all values === sum of booking.quantity (invariant)." },
     ],
   },
   {
@@ -148,32 +149,53 @@ export const createOrderRules: CollectionRule[] = [
     ],
   },
   {
-    id: "create-order:order-to-order-events",
+    id: "create-order:order-to-cards",
     source: "orders",
-    target: "order-events",
+    target: "cards",
     mode: "co-write",
-    invariant: "Lightweight schedule projection — one event per destination per position for dashboard calendar/card views",
+    invariant: "Schedule projection — one event card per destination per position (start/end) drives the Dashboard's list/kanban/calendar/map views",
     transaction: "create-order",
     fields: [
-      { source: ["uid"], target: ["uid_order"] },
-      { source: ["number"], target: ["order_number"] },
-      { source: ["status"], target: ["status"] },
+      { source: ["uid"], target: ["sources"], transform: "[{collection:'orders', uid}] — event card links back to its parent order" },
+      { source: ["status"], target: ["status"], transform: "mapped: reserved/quoted→planned, active→active, complete→complete, canceled→canceled, draft→draft" },
       { source: ["subject"], target: ["subject"] },
-      { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "name"], target: ["organization", "name"] },
       { source: ["destinations", "delivery"], target: ["destination"], transform: "full DocDestinationEndpointType for start events" },
       { source: ["destinations", "collection"], target: ["destination"], transform: "full DocDestinationEndpointType for end events" },
-      { source: ["dates", "delivery_start"], target: ["date"], transform: "start event date" },
-      { source: ["dates", "collection_start"], target: ["date"], transform: "end event date (rental items only)" },
-      { source: ["items"], target: ["item_uids"], transform: "product UIDs filtered by destination — delivery types for start, collection types for end" },
-      { source: ["customer_collecting", "customer_returning"], target: ["event_type"], transform: "getEventType(customerCollecting, customerReturning, position)" },
+      { source: ["dates", "delivery_start"], target: ["dates", "start"], transform: "start event start instant" },
+      { source: ["dates", "delivery_end"], target: ["dates", "end"], transform: "start event end instant" },
+      { source: ["dates", "collection_start"], target: ["dates", "start"], transform: "end event start instant (rental items only)" },
+      { source: ["dates", "collection_end"], target: ["dates", "end"], transform: "end event end instant (rental items only)" },
+      { source: ["destinations", "customer_collecting", "customer_returning"], target: ["uid_list"], transform: "per-pair flag drives card list — field-service for deliver/pick_up, in-store for in_store_pickup/in_store_return" },
+      { source: [], target: ["locked"], transform: "['card','subject','sources'] — order-derived cards cannot be deleted or have their label/link edited" },
+    ],
+  },
+  {
+    id: "create-order:order-to-order-fulfillment",
+    source: "orders",
+    target: "order-fulfillments",
+    mode: "co-write",
+    invariant: "Fulfillment clients see a sanitized order view — pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items are stripped",
+    transaction: "create-order",
+    fields: [
+      { source: ["uid"], target: ["uid"] },
+      { source: ["number"], target: ["number"] },
+      { source: ["status"], target: ["status"] },
+      { source: ["organization", "uid"], target: ["organization", "uid"] },
+      { source: ["organization", "name"], target: ["organization", "name"] },
+      { source: ["dates"], target: ["dates"] },
+      { source: ["destinations"], target: ["destinations"], transform: "full DocDestination with contacts retained" },
+      { source: ["items"], target: ["items"], transform: "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely" },
+      { source: ["subject"], target: ["subject"] },
+      { source: ["reference"], target: ["reference"] },
+      { source: ["query_by_items"], target: ["query_by_items"] },
+      { source: ["query_by_contacts"], target: ["query_by_contacts"] },
     ],
   },
 ];
 
 export const createOrderTransaction: TransactionDefinition = {
   id: "create-order",
-  description: "Creates an order with bookings, stock summaries, and order events in a single Firestore transaction. Skips bookings/events for draft/canceled status.",
+  description: "Creates an order with bookings, stock summaries, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view).",
   steps: [
     "create-order:org-to-order",
     "create-order:products-to-order-items",
@@ -183,7 +205,12 @@ export const createOrderTransaction: TransactionDefinition = {
     "create-order:bookings-to-stock-summaries",
     "create-order:ledger-to-stock-summaries",
     "create-order:stock-to-public-stock",
-    "create-order:order-to-order-events",
+    "create-order:order-to-cards",
+    "create-order:order-to-order-fulfillment",
+    "cowrite-thread:orders-to-thread",
+    "cowrite-thread:thread-to-orders",
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
   ],
 };
 
@@ -224,7 +251,7 @@ export const updateOrderRules: CollectionRule[] = [
     source: "orders",
     target: "bookings",
     mode: "co-write",
-    invariant: "Bookings are diffed — created, updated, or deleted based on item/status/date changes",
+    invariant: "Bookings are diffed — created, updated, or deleted based on item/status/date/destination changes. Orphan bookings (bookings whose {order,product,destination} composite id no longer appears in the order) are deleted and their stock summaries zeroed.",
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["uid_order"] },
@@ -280,32 +307,51 @@ export const updateOrderRules: CollectionRule[] = [
     ],
   },
   {
-    id: "update-order:order-to-order-events",
+    id: "update-order:order-to-cards",
     source: "orders",
-    target: "order-events",
+    target: "cards",
     mode: "co-write",
-    invariant: "Order events rebuilt on every update — old events for removed destinations are deleted",
+    invariant: "Event cards are rebuilt on every update — cards for removed destinations are deleted (and their threads cascade), cards for existing destinations are upserted in place. Preserves each card's user-editable fields (body, attachments, assignees, status overrides) where compatible.",
     transaction: "update-order",
     fields: [
-      { source: ["uid"], target: ["uid_order"] },
-      { source: ["number"], target: ["order_number"] },
-      { source: ["status"], target: ["status"] },
+      { source: ["uid"], target: ["sources"], transform: "[{collection:'orders', uid}] — regenerated event cards link back to the parent order" },
+      { source: ["status"], target: ["status"], transform: "mapped: reserved/quoted→planned, active→active, complete→complete, canceled→canceled, draft→draft" },
       { source: ["subject"], target: ["subject"] },
-      { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "name"], target: ["organization", "name"] },
       { source: ["destinations", "delivery"], target: ["destination"], transform: "full DocDestinationEndpointType for start events" },
       { source: ["destinations", "collection"], target: ["destination"], transform: "full DocDestinationEndpointType for end events" },
-      { source: ["dates", "delivery_start"], target: ["date"], transform: "start event date" },
-      { source: ["dates", "collection_start"], target: ["date"], transform: "end event date (rental items only)" },
-      { source: ["items"], target: ["item_uids"], transform: "product UIDs filtered by destination — delivery types for start, collection types for end" },
-      { source: ["customer_collecting", "customer_returning"], target: ["event_type"], transform: "getEventType(customerCollecting, customerReturning, position)" },
+      { source: ["dates", "delivery_start"], target: ["dates", "start"] },
+      { source: ["dates", "delivery_end"], target: ["dates", "end"] },
+      { source: ["dates", "collection_start"], target: ["dates", "start"] },
+      { source: ["dates", "collection_end"], target: ["dates", "end"] },
+    ],
+  },
+  {
+    id: "update-order:order-to-order-fulfillment",
+    source: "orders",
+    target: "order-fulfillments",
+    mode: "co-write",
+    invariant: "Fulfillment view mirrors the order on every update — stripped of pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items",
+    transaction: "update-order",
+    fields: [
+      { source: ["uid"], target: ["uid"] },
+      { source: ["number"], target: ["number"] },
+      { source: ["status"], target: ["status"] },
+      { source: ["organization", "uid"], target: ["organization", "uid"] },
+      { source: ["organization", "name"], target: ["organization", "name"] },
+      { source: ["dates"], target: ["dates"] },
+      { source: ["destinations"], target: ["destinations"], transform: "full DocDestination with contacts retained" },
+      { source: ["items"], target: ["items"], transform: "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely" },
+      { source: ["subject"], target: ["subject"] },
+      { source: ["reference"], target: ["reference"] },
+      { source: ["query_by_items"], target: ["query_by_items"] },
+      { source: ["query_by_contacts"], target: ["query_by_contacts"] },
     ],
   },
 ];
 
 export const updateOrderTransaction: TransactionDefinition = {
   id: "update-order",
-  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, recalculate stock summaries, and rebuild order events.",
+  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, recalculate stock summaries, rebuild event cards, and refresh the fulfillment view.",
   steps: [
     "update-order:org-to-order",
     "update-order:order-self-derive",
@@ -313,8 +359,122 @@ export const updateOrderTransaction: TransactionDefinition = {
     "update-order:ledger-to-bookings",
     "update-order:bookings-to-stock-summaries",
     "update-order:stock-to-public-stock",
-    "update-order:order-to-order-events",
+    "update-order:order-to-cards",
+    "update-order:order-to-order-fulfillment",
     "update-order:items-to-invoices",
     "update-order:status-to-invoices",
+  ],
+};
+
+// ── update-booking ────────────────────────────────────────────────
+//
+// Single-booking PUT used by the fulfillment view to check items in/out and
+// to record returned/lost/damaged quantities. Co-located here (not in its
+// own file) because it lives entirely under the `order` aggregate root.
+
+export const updateBookingRules: CollectionRule[] = [
+  {
+    id: "update-booking:booking-to-self",
+    source: "bookings",
+    target: "bookings",
+    mode: "co-write",
+    invariant: "Status and breakdown rewritten with optimistic version bump. When status flips to 'complete', the API enforces breakdown.returned + breakdown.lost + breakdown.damaged === booking.quantity.",
+    transaction: "update-booking",
+    fields: [
+      { source: [], target: ["status"], transform: "from input.status (defaults to current)" },
+      { source: [], target: ["breakdown"], transform: "merge of input.breakdown over current; deltas must be ≥ 0 for lost/damaged" },
+      { source: [], target: ["version"], transform: "version + 1 (optimistic concurrency)" },
+    ],
+  },
+  {
+    id: "update-booking:booking-to-stock-summaries",
+    source: "bookings",
+    target: "stock-summaries",
+    mode: "co-write",
+    invariant: "Every booking breakdown change recomputes stock-summaries.bookings_breakdown and quantity_booked for the product (recalculateAllStockSummaries, source: 'booking').",
+    transaction: "update-booking",
+    fields: [
+      { source: ["breakdown"], target: ["bookings_breakdown"] },
+      { source: ["breakdown"], target: ["quantity_booked"], transform: "reserved + prepped + out across all bookings" },
+      { source: [], target: ["quantity_available"], transform: "quantity_held - quantity_booked - quantity_out_of_service" },
+    ],
+  },
+  {
+    id: "update-booking:booking-to-out-of-service",
+    source: "bookings",
+    target: "out-of-service",
+    mode: "co-write",
+    invariant: "Non-zero increase in breakdown.lost or breakdown.damaged writes one OOS record per (booking, reason). If a non-complete OOS already exists for that pair (located via where('query_by_sources', 'array-contains', 'bookings:' + booking.uid) filtered by reason), its quantity is grown by the delta and a row appended to transactions[]. Otherwise a new OOS doc is cowritten with sources=[bookings, orders] and its default thread.",
+    transaction: "update-booking",
+    fields: [
+      { source: [], target: ["sources"], transform: "[{collection:'bookings', uid: booking.uid, label: 'Booking #' + booking.number}, {collection:'orders', uid: booking.uid_order, label: 'Order #' + order.number}]" },
+      { source: [], target: ["query_by_sources"], transform: "['bookings:' + booking.uid, 'orders:' + booking.uid_order]" },
+      { source: ["uid_product"], target: ["uid_product"] },
+      { source: [], target: ["reason"], transform: "'lost' or 'damaged' depending on which delta fired" },
+      { source: [], target: ["quantity"], transform: "delta (or current quantity + delta when growing an existing record)" },
+      { source: ["stores"], target: ["stores"], transform: "copied from booking.stores" },
+      { source: [], target: ["dates", "start"], transform: "now (chicagoInstant)" },
+    ],
+  },
+  {
+    id: "update-booking:booking-to-order",
+    source: "bookings",
+    target: "orders",
+    mode: "co-write",
+    invariant: "Every booking update applies a delta to order.bookings_breakdown ('+= next.breakdown[k] - prev.breakdown[k]' for each key). Same transaction may also flip order.status: (a) reserved → active when the post-delta bookings_breakdown.out > 0 and order.status === 'reserved' (one-way; out returning to 0 does NOT revert to reserved), (b) active/reserved → complete when bookings_breakdown.quoted + reserved + prepped + out === 0 (every quantity has reached a terminal state). Single order read + write per booking PUT — no sibling-bookings query.",
+    transaction: "update-booking",
+    fields: [
+      { source: ["breakdown"], target: ["bookings_breakdown"], transform: "delta-applied roll-up across all bookings on this order" },
+      { source: [], target: ["status"], transform: "complete iff bookings_breakdown.{quoted,reserved,prepped,out} === 0; else active iff bookings_breakdown.out > 0 and prev status === 'reserved'" },
+    ],
+  },
+];
+
+export const updateBookingTransaction: TransactionDefinition = {
+  id: "update-booking",
+  description: "Update a single booking's status or breakdown. Recalculates stock summaries; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of stock summaries and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed.",
+  steps: [
+    "update-booking:booking-to-self",
+    "update-booking:booking-to-stock-summaries",
+    "update-booking:booking-to-out-of-service",
+    "update-booking:booking-to-order",
+    // OOS cowrites pull these in when a new OOS record is created:
+    "create-out-of-service-record:sources-to-record",
+    "create-out-of-service-record:record-to-stock-summaries",
+    "cowrite-thread:out-of-service-to-thread",
+    "cowrite-thread:thread-to-out-of-service",
+  ],
+};
+
+// ── bulk-checkout-order / bulk-return-order ───────────────────────
+//
+// Convenience wrappers over N update-booking calls inside one Firestore
+// transaction. POST /orders/{uid}/checkout flips every reserved/prepped
+// booking to active and moves quantities into breakdown.out. POST
+// /orders/{uid}/return applies caller-supplied returned/lost/damaged
+// deltas per booking.
+
+export const bulkCheckoutOrderTransaction: TransactionDefinition = {
+  id: "bulk-checkout-order",
+  description: "Flip every booking on an order from reserved/prepped to active and move quantities into breakdown.out in one Firestore transaction. Reuses update-booking rules per row.",
+  steps: [
+    "update-booking:booking-to-self",
+    "update-booking:booking-to-stock-summaries",
+    "update-booking:booking-to-order",
+  ],
+};
+
+export const bulkReturnOrderTransaction: TransactionDefinition = {
+  id: "bulk-return-order",
+  description: "Apply per-booking returned/lost/damaged deltas across the order in one Firestore transaction. Reuses update-booking rules per row, including OOS cowrite for any lost/damaged deltas; final state may auto-complete the order.",
+  steps: [
+    "update-booking:booking-to-self",
+    "update-booking:booking-to-stock-summaries",
+    "update-booking:booking-to-out-of-service",
+    "update-booking:booking-to-order",
+    "create-out-of-service-record:sources-to-record",
+    "create-out-of-service-record:record-to-stock-summaries",
+    "cowrite-thread:out-of-service-to-thread",
+    "cowrite-thread:thread-to-out-of-service",
   ],
 };

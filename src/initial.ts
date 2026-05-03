@@ -19,7 +19,13 @@ function resolveField(schema: any): unknown {
     }
     case "nullable":
       return null;
+    case "pipe":
+      // Produced by `.transform()` — resolve against the input side so
+      // factories like chicagoInstant() inherit the ISO-datetime initial.
+      return resolveField(def.in);
     case "string":
+      if (def.format === "datetime") return "1970-01-01T00:00:00Z";
+      if (def.format === "date") return "1970-01-01";
       return "";
     case "number":
       return 0;

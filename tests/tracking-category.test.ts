@@ -10,7 +10,8 @@ Deno.test("TrackingCategorySchema validates a complete document", () => {
     crms_product_group_name: "Camera Group",
     products: { "test-p1": { uid: "test-p1", name: "Canon C300" } },
     xero_tracking_option_id: "test-xero-1",
-    updated_by: "test-user-1",
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   assertEquals(TrackingCategorySchema.safeParse(doc).success, true);
 });
@@ -23,7 +24,8 @@ Deno.test("TrackingCategorySchema accepts count as record", () => {
     crms_product_group_name: "Lens Group",
     products: {},
     xero_tracking_option_id: null,
-    updated_by: "test-user-1",
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
   };
   assertEquals(TrackingCategorySchema.safeParse(doc).success, true);
 });
@@ -40,7 +42,8 @@ Deno.test("TrackingCategorySchema rejects additional properties", () => {
     crms_product_group_name: "Audio",
     products: {},
     xero_tracking_option_id: null,
-    updated_by: "test-user-1",
+    created_by: { uid: "test-user-1", name: "Test User" },
+    updated_by: { uid: "test-user-1", name: "Test User" },
     bogus: true,
   };
   assertEquals(TrackingCategorySchema.safeParse(doc).success, false);

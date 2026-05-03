@@ -5,8 +5,9 @@
  * key patterns always carry a `.meta({ pii })` annotation.
  */
 import { assertEquals } from "@std/assert";
-import { z } from "zod";
+import type { z } from "zod";
 
+import { getNodeMeta, unwrapZod } from "../src/zod-walk.ts";
 import { ContactSchema, CreateContactInput, UpdateContactInput } from "../src/contact.ts";
 import {
   OrganizationSchema,
@@ -47,60 +48,35 @@ const SENSITIVE_NAME_FIELD = "name";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+type WrapperDef = { type: string; innerType?: z.ZodType; element?: z.ZodType };
+
 /**
- * Unwrap wrapper types (optional, default, nullable) to reach the inner
- * schema where `.meta()` was called.
+ * True when the schema (or any wrapper in its chain) carries a `pii` meta
+ * value. `.meta()` registers on the specific instance it's called on, so
+ * `z.email().meta({ pii: "mask" }).nullable()` stores the meta on the email
+ * node — we must check at every wrapper level, not just the leaf.
  */
-function unwrap(schema: z.ZodType): z.ZodType {
-  const def = (schema as unknown as { _zod: { def: { type: string; innerType?: z.ZodType } } })._zod.def;
-  if (
-    (def.type === "optional" || def.type === "default" || def.type === "nullable") &&
-    def.innerType
-  ) {
-    return unwrap(def.innerType);
-  }
-  return schema;
-}
-
-function getMeta(schema: z.ZodType): Record<string, unknown> | undefined {
-  return z.globalRegistry.get(schema) as Record<string, unknown> | undefined;
-}
-
-type ZodDef = { type: string; innerType?: z.ZodType; element?: z.ZodType; shape?: Record<string, z.ZodType> };
-
-function getDef(schema: z.ZodType): ZodDef {
-  return (schema as unknown as { _zod: { def: ZodDef } })._zod.def;
-}
-
 function hasPii(schema: z.ZodType): boolean {
-  // Check meta at this level
-  if (getMeta(schema)?.pii) return true;
-
-  const def = getDef(schema);
-
-  // Unwrap one level and recurse
-  if (
-    (def.type === "optional" || def.type === "default" || def.type === "nullable") &&
-    def.innerType
-  ) {
-    return hasPii(def.innerType);
+  let n: z.ZodType = schema;
+  while (true) {
+    if (getNodeMeta(n)?.pii) return true;
+    const def = (n as unknown as { _zod: { def: WrapperDef } })._zod.def;
+    if (
+      (def.type === "optional" || def.type === "default" || def.type === "nullable") &&
+      def.innerType
+    ) {
+      n = def.innerType;
+      continue;
+    }
+    if (def.type === "array" && def.element) return hasPii(def.element);
+    return false;
   }
-
-  // For arrays, check element type (e.g. z.array(Email) where Email has pii)
-  if (def.type === "array" && def.element) {
-    return hasPii(def.element);
-  }
-
-  return false;
 }
-
-type ShapeDef = { type: string; shape?: Record<string, z.ZodType>; innerType?: z.ZodType };
 
 function getShape(schema: z.ZodType): Record<string, z.ZodType> | null {
-  const def = (schema as unknown as { _zod: { def: ShapeDef } })._zod.def;
-  if (def.shape) return def.shape;
-  if (def.innerType) return getShape(def.innerType);
-  return null;
+  const unwrapped = unwrapZod(schema);
+  const def = (unwrapped as unknown as { _zod: { def: { shape?: Record<string, z.ZodType> } } })._zod.def;
+  return def.shape ?? null;
 }
 
 // ── Collect violations ───────────────────────────────────────────────
@@ -131,7 +107,7 @@ function checkSchema(
     // Recurse into nested objects (denormalized org, destinations, etc.)
     // Don't flag `name` inside nested objects — those are typically labels
     // (e.g. address.name), not person/org names.
-    const innerShape = getShape(unwrap(fieldSchema));
+    const innerShape = getShape(unwrapZod(fieldSchema));
     if (innerShape) {
       for (const [nestedKey, nestedSchema] of Object.entries(innerShape)) {
         if (!SENSITIVE_EXACT.has(nestedKey)) continue;

@@ -20,6 +20,14 @@ export interface Session {
   expiresAt: FirestoreTimestampType;
   created_at: number;
   user_agent: string;
+  /**
+   * Name of the role the caller is currently previewing the app as.
+   * When set, /auth/me resolves permissions, custom-token claims, and
+   * scoped Typesense keys against this role instead of the user's
+   * real role assignments. Subset enforcement (target ⊆ caller real)
+   * happens in POST /auth/preview-role and is re-validated by /auth/me.
+   */
+  preview_role?: string;
 }
 
 /** Zod schema for Session. */
@@ -30,4 +38,5 @@ export const SessionSchema: z.ZodType<Session> = z.strictObject({
   expiresAt: FirestoreTimestamp,
   created_at: z.number(),
   user_agent: z.string(),
+  preview_role: z.string().regex(/^[a-z][a-z0-9_-]*$/).min(1).max(64).optional(),
 }).meta({ title: "Session", collection: "sessions" });
