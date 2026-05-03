@@ -170,11 +170,11 @@ export const createOrderRules: CollectionRule[] = [
     ],
   },
   {
-    id: "create-order:order-to-order-warehouse",
+    id: "create-order:order-to-order-fulfillment",
     source: "orders",
-    target: "order-warehouses",
+    target: "order-fulfillments",
     mode: "co-write",
-    invariant: "Warehouse clients see a sanitized order view — pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items are stripped",
+    invariant: "Fulfillment clients see a sanitized order view — pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items are stripped",
     transaction: "create-order",
     fields: [
       { source: ["uid"], target: ["uid"] },
@@ -195,7 +195,7 @@ export const createOrderRules: CollectionRule[] = [
 
 export const createOrderTransaction: TransactionDefinition = {
   id: "create-order",
-  description: "Creates an order with bookings, stock summaries, event cards, and the sanitized warehouse view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view).",
+  description: "Creates an order with bookings, stock summaries, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view).",
   steps: [
     "create-order:org-to-order",
     "create-order:products-to-order-items",
@@ -206,7 +206,7 @@ export const createOrderTransaction: TransactionDefinition = {
     "create-order:ledger-to-stock-summaries",
     "create-order:stock-to-public-stock",
     "create-order:order-to-cards",
-    "create-order:order-to-order-warehouse",
+    "create-order:order-to-order-fulfillment",
     "cowrite-thread:orders-to-thread",
     "cowrite-thread:thread-to-orders",
     "cowrite-thread:cards-to-thread",
@@ -326,11 +326,11 @@ export const updateOrderRules: CollectionRule[] = [
     ],
   },
   {
-    id: "update-order:order-to-order-warehouse",
+    id: "update-order:order-to-order-fulfillment",
     source: "orders",
-    target: "order-warehouses",
+    target: "order-fulfillments",
     mode: "co-write",
-    invariant: "Warehouse view mirrors the order on every update — stripped of pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items",
+    invariant: "Fulfillment view mirrors the order on every update — stripped of pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items",
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["uid"] },
@@ -351,7 +351,7 @@ export const updateOrderRules: CollectionRule[] = [
 
 export const updateOrderTransaction: TransactionDefinition = {
   id: "update-order",
-  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, recalculate stock summaries, rebuild event cards, and refresh the warehouse view.",
+  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, recalculate stock summaries, rebuild event cards, and refresh the fulfillment view.",
   steps: [
     "update-order:org-to-order",
     "update-order:order-self-derive",
@@ -360,7 +360,7 @@ export const updateOrderTransaction: TransactionDefinition = {
     "update-order:bookings-to-stock-summaries",
     "update-order:stock-to-public-stock",
     "update-order:order-to-cards",
-    "update-order:order-to-order-warehouse",
+    "update-order:order-to-order-fulfillment",
     "update-order:items-to-invoices",
     "update-order:status-to-invoices",
   ],
@@ -368,9 +368,9 @@ export const updateOrderTransaction: TransactionDefinition = {
 
 // ── update-booking ────────────────────────────────────────────────
 //
-// Single-booking PUT used by the warehouse to check items in/out and to
-// record returned/lost/damaged quantities. Co-located here (not in its own
-// file) because it lives entirely under the `order` aggregate root.
+// Single-booking PUT used by the fulfillment view to check items in/out and
+// to record returned/lost/damaged quantities. Co-located here (not in its
+// own file) because it lives entirely under the `order` aggregate root.
 
 export const updateBookingRules: CollectionRule[] = [
   {

@@ -372,15 +372,15 @@ export interface OrderDocument {
   updated_at: number;
 }
 
-// ── Order Warehouses ────────────────────────────────────────────────
+// ── Order Fulfillments ──────────────────────────────────────────────
 
 /**
- * Typesense document type for the sanitized warehouse order view.
+ * Typesense document type for the sanitized fulfillment order view.
  *
  * Mirrors `OrderDocument` but strips pricing, totals, tax profile,
  * invoice refs, CRM/Xero ids, and financial line-item fields.
  */
-export interface OrderWarehouseDocument {
+export interface OrderFulfillmentDocument {
   id: string;
   uid: string;
   number: number;
@@ -747,7 +747,7 @@ export type TypesenseDocument =
   | InvoiceDocument
   | LocationDocument
   | OrderDocument
-  | OrderWarehouseDocument
+  | OrderFulfillmentDocument
   | OrganizationDocument
   | ProductDocument
   | StoreDocument
@@ -767,7 +767,7 @@ export interface TypesenseDocumentMap {
   invoices: InvoiceDocument;
   locations: LocationDocument;
   orders: OrderDocument;
-  "order-warehouses": OrderWarehouseDocument;
+  "order-fulfillments": OrderFulfillmentDocument;
   organizations: OrganizationDocument;
   products: ProductDocument;
   stores: StoreDocument;

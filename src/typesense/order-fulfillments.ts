@@ -2,21 +2,21 @@ import type { TypesenseCollectionConfig } from "./types.ts";
 import { typesenseAddressFields } from "./types.ts";
 
 /**
- * Typesense collection config for the sanitized warehouse order view.
+ * Typesense collection config for the sanitized fulfillment order view.
  *
  * Mirrors `orders` by uid but strips all pricing, totals, tax profile,
  * invoice refs, CRM/Xero ids, and financial line-item fields. The default
  * sort is `number` (non-optional, always set) because Typesense rejects
- * optional fields as default_sorting_field; the warehouse UI overrides
+ * optional fields as default_sorting_field; the fulfillment UI overrides
  * this at query time via `displayDefaults.sort` to order by delivery date.
  */
-export const orderWarehouses: TypesenseCollectionConfig = {
-  alias: "order-warehouses",
+export const orderFulfillments: TypesenseCollectionConfig = {
+  alias: "order-fulfillments",
   version: 3,
-  firestoreCollection: "order-warehouses",
-  collectionName: "order-warehouses_v3",
+  firestoreCollection: "order-fulfillments",
+  collectionName: "order-fulfillments_v3",
   schema: {
-    name: "order-warehouses_v3",
+    name: "order-fulfillments_v3",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },

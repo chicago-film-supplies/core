@@ -153,17 +153,17 @@ export {
 } from "./order.ts";
 
 export {
-  OrderWarehouseSchema,
-  OrderWarehouseItem,
-  OrderWarehouseLineItem,
-  OrderWarehouseDestinationItem,
-  OrderWarehouseGroupItem,
-  type OrderWarehouse,
-  type OrderWarehouseItemType,
-  type OrderWarehouseLineItemType,
-  type OrderWarehouseDestinationItemType,
-  type OrderWarehouseGroupItemType,
-} from "./order-warehouse.ts";
+  OrderFulfillmentSchema,
+  OrderFulfillmentItem,
+  OrderFulfillmentLineItem,
+  OrderFulfillmentDestinationItem,
+  OrderFulfillmentGroupItem,
+  type OrderFulfillment,
+  type OrderFulfillmentItemType,
+  type OrderFulfillmentLineItemType,
+  type OrderFulfillmentDestinationItemType,
+  type OrderFulfillmentGroupItemType,
+} from "./order-fulfillment.ts";
 
 export {
   LoginInput,
@@ -756,7 +756,7 @@ import type { ChartOfAccounts } from "./chart-of-accounts.ts";
 import type { Contact } from "./contact.ts";
 import type { Destination as DestinationDocType } from "./destination.ts";
 import type { EmailVerification } from "./email-verification.ts";
-import type { OrderWarehouse } from "./order-warehouse.ts";
+import type { OrderFulfillment } from "./order-fulfillment.ts";
 import type { HolidayDates } from "./holiday-dates.ts";
 import type { InventoryLedger } from "./inventory-ledger.ts";
 import type { Invite } from "./invite.ts";
@@ -791,7 +791,7 @@ export type SchemaDocType =
   | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
   | EmailVerification | HolidayDates | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | Organization | OutOfServiceRecord | PasswordReset
-  | OrderWarehouse | Product | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
+  | OrderFulfillment | Product | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
   | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User
   | WebhookEvent | WebshopProduct;
 
@@ -809,7 +809,7 @@ import { ChartOfAccountsSchema } from "./chart-of-accounts.ts";
 import { ContactSchema } from "./contact.ts";
 import { DestinationSchema } from "./destination.ts";
 import { EmailVerificationSchema } from "./email-verification.ts";
-import { OrderWarehouseSchema } from "./order-warehouse.ts";
+import { OrderFulfillmentSchema } from "./order-fulfillment.ts";
 import { HolidayDatesSchema } from "./holiday-dates.ts";
 import { InventoryLedgerSchema } from "./inventory-ledger.ts";
 import { InviteSchema } from "./invite.ts";
@@ -859,7 +859,7 @@ export const schemas: Record<string, z.ZodType> = {
   "location": LocationSchema, "locations": LocationSchema,
   "location-type": LocationTypeSchema, "location-types": LocationTypeSchema,
   "order": OrderSchema, "orders": OrderSchema,
-  "order-warehouse": OrderWarehouseSchema, "order-warehouses": OrderWarehouseSchema,
+  "order-fulfillment": OrderFulfillmentSchema, "order-fulfillments": OrderFulfillmentSchema,
   "organization": OrganizationSchema, "organizations": OrganizationSchema,
   "out-of-service-record": OutOfServiceRecordSchema, "out-of-service": OutOfServiceRecordSchema,
   "password-reset": PasswordResetSchema, "password-resets": PasswordResetSchema,

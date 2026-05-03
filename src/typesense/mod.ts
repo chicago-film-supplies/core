@@ -39,7 +39,7 @@ export type {
   InvoiceDocument,
   LocationDocument,
   OrderDocument,
-  OrderWarehouseDocument,
+  OrderFulfillmentDocument,
   OrganizationDocument,
   ProductDocument,
   ProductDocumentComponent,
@@ -63,7 +63,7 @@ export { destinations } from "./destinations.ts";
 export { invoices } from "./invoices.ts";
 export { locations } from "./locations.ts";
 export { orders } from "./orders.ts";
-export { orderWarehouses } from "./order-warehouses.ts";
+export { orderFulfillments } from "./order-fulfillments.ts";
 export { organizations } from "./organizations.ts";
 export { products } from "./products.ts";
 export { stores } from "./stores.ts";
@@ -85,7 +85,7 @@ import { destinations } from "./destinations.ts";
 import { invoices } from "./invoices.ts";
 import { locations } from "./locations.ts";
 import { orders } from "./orders.ts";
-import { orderWarehouses } from "./order-warehouses.ts";
+import { orderFulfillments } from "./order-fulfillments.ts";
 import { organizations } from "./organizations.ts";
 import { products } from "./products.ts";
 import { stores } from "./stores.ts";
@@ -106,7 +106,7 @@ const allSchemas: TypesenseCollectionConfig[] = [
   invoices,
   locations,
   orders,
-  orderWarehouses,
+  orderFulfillments,
   organizations,
   products,
   stores,
@@ -129,7 +129,7 @@ export type TypesenseAlias =
   | "invoices"
   | "locations"
   | "orders"
-  | "order-warehouses"
+  | "order-fulfillments"
   | "organizations"
   | "products"
   | "stores"
@@ -208,7 +208,7 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "invoices": "invoices.search",
   "locations": "locations.search",
   "orders": "orders.search",
-  "order-warehouses": "orderWarehouses.search",
+  "order-fulfillments": "orderFulfillment.search",
   "organizations": "organizations.search",
   "products": "products.search",
   "stores": "stores.search",

@@ -1,7 +1,7 @@
 /**
- * OrderWarehouse schemas — Firestore collection: order-warehouses
+ * OrderFulfillment schemas — Firestore collection: order-fulfillments
  *
- * Sanitized projection of an Order for the warehouse client view.
+ * Sanitized projection of an Order for the fulfillment client view.
  * Strips pricing, financial totals, invoice refs, tax profile, CRM/Xero
  * ids, version, notes, and transaction_fee line items. Keeps
  * destination contacts, dates, quantities, and item structure.
@@ -20,21 +20,21 @@ import {
   type OrderDocDatesType,
 } from "./order.ts";
 
-const WAREHOUSE_ORDER_STATUSES = [
+const FULFILLMENT_ORDER_STATUSES = [
   "draft", "quoted", "reserved", "active", "complete", "canceled",
 ] as const;
-type WarehouseOrderStatusType = typeof WAREHOUSE_ORDER_STATUSES[number];
-const WarehouseOrderStatus: z.ZodType<WarehouseOrderStatusType> = z.enum(WAREHOUSE_ORDER_STATUSES);
+type FulfillmentOrderStatusType = typeof FULFILLMENT_ORDER_STATUSES[number];
+const FulfillmentOrderStatus: z.ZodType<FulfillmentOrderStatusType> = z.enum(FULFILLMENT_ORDER_STATUSES);
 
-// Warehouse line items exclude transaction_fee — that type is purely financial.
-const WAREHOUSE_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
-type WarehouseLineItemTypeType = typeof WAREHOUSE_LINE_ITEM_TYPES[number];
-const WarehouseLineItemTypeEnum: z.ZodType<WarehouseLineItemTypeType> = z.enum(WAREHOUSE_LINE_ITEM_TYPES);
+// Fulfillment line items exclude transaction_fee — that type is purely financial.
+const FULFILLMENT_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
+type FulfillmentLineItemTypeType = typeof FULFILLMENT_LINE_ITEM_TYPES[number];
+const FulfillmentLineItemTypeEnum: z.ZodType<FulfillmentLineItemTypeType> = z.enum(FULFILLMENT_LINE_ITEM_TYPES);
 
-/** Line item in the warehouse order view — no price, no financial flags. */
-export interface OrderWarehouseLineItemType {
+/** Line item in the fulfillment order view — no price, no financial flags. */
+export interface OrderFulfillmentLineItemType {
   uid: string;
-  type: WarehouseLineItemTypeType;
+  type: FulfillmentLineItemTypeType;
   name: string;
   description: string;
   quantity: number;
@@ -46,9 +46,9 @@ export interface OrderWarehouseLineItemType {
   uid_collection?: string | null;
 }
 
-export const OrderWarehouseLineItem: z.ZodType<OrderWarehouseLineItemType> = z.strictObject({
+export const OrderFulfillmentLineItem: z.ZodType<OrderFulfillmentLineItemType> = z.strictObject({
   uid: z.string(),
-  type: WarehouseLineItemTypeEnum,
+  type: FulfillmentLineItemTypeEnum,
   name: z.string().min(1).max(100),
   description: z.string().default(""),
   quantity: z.number().int().min(0).default(0),
@@ -60,8 +60,8 @@ export const OrderWarehouseLineItem: z.ZodType<OrderWarehouseLineItemType> = z.s
   uid_collection: z.string().nullable().optional(),
 });
 
-/** Destination divider in the warehouse items array. */
-export interface OrderWarehouseDestinationItemType {
+/** Destination divider in the fulfillment items array. */
+export interface OrderFulfillmentDestinationItemType {
   uid: string;
   type: "destination";
   name: string;
@@ -71,7 +71,7 @@ export interface OrderWarehouseDestinationItemType {
   description: string;
 }
 
-export const OrderWarehouseDestinationItem: z.ZodType<OrderWarehouseDestinationItemType> = z.strictObject({
+export const OrderFulfillmentDestinationItem: z.ZodType<OrderFulfillmentDestinationItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("destination"),
   name: z.string().max(200).default(""),
@@ -81,8 +81,8 @@ export const OrderWarehouseDestinationItem: z.ZodType<OrderWarehouseDestinationI
   description: z.string().default(""),
 });
 
-/** Group divider in the warehouse items array. */
-export interface OrderWarehouseGroupItemType {
+/** Group divider in the fulfillment items array. */
+export interface OrderFulfillmentGroupItemType {
   uid: string;
   type: "group";
   name: string;
@@ -90,7 +90,7 @@ export interface OrderWarehouseGroupItemType {
   description: string;
 }
 
-export const OrderWarehouseGroupItem: z.ZodType<OrderWarehouseGroupItemType> = z.strictObject({
+export const OrderFulfillmentGroupItem: z.ZodType<OrderFulfillmentGroupItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("group"),
   name: z.string().min(1).max(100),
@@ -98,39 +98,39 @@ export const OrderWarehouseGroupItem: z.ZodType<OrderWarehouseGroupItemType> = z
   description: z.string().default(""),
 });
 
-/** Union of all item types in the warehouse order view. */
-export type OrderWarehouseItemType =
-  | OrderWarehouseLineItemType
-  | OrderWarehouseDestinationItemType
-  | OrderWarehouseGroupItemType;
+/** Union of all item types in the fulfillment order view. */
+export type OrderFulfillmentItemType =
+  | OrderFulfillmentLineItemType
+  | OrderFulfillmentDestinationItemType
+  | OrderFulfillmentGroupItemType;
 
-export const OrderWarehouseItem: z.ZodType<OrderWarehouseItemType> = z.union([
-  OrderWarehouseLineItem,
-  OrderWarehouseDestinationItem,
-  OrderWarehouseGroupItem,
+export const OrderFulfillmentItem: z.ZodType<OrderFulfillmentItemType> = z.union([
+  OrderFulfillmentLineItem,
+  OrderFulfillmentDestinationItem,
+  OrderFulfillmentGroupItem,
 ]);
 
 /** Sanitized organization snapshot — uid and name only. */
-const OrderWarehouseOrganization = z.strictObject({
+const OrderFulfillmentOrganization = z.strictObject({
   uid: z.string().nullable(),
   name: z.string().min(1).max(100).meta({ pii: "mask" }),
 });
 
 /**
- * Sanitized order document for the warehouse client view.
- * Mirrors the order by uid — one warehouse doc per order.
+ * Sanitized order document for the fulfillment client view.
+ * Mirrors the order by uid — one fulfillment doc per order.
  */
-export interface OrderWarehouse {
+export interface OrderFulfillment {
   uid: string;
   number: number;
-  status: WarehouseOrderStatusType;
+  status: FulfillmentOrderStatusType;
   organization: {
     uid: string | null;
     name: string;
   };
   dates: OrderDocDatesType;
   destinations: DocDestinationType[];
-  items: OrderWarehouseItemType[];
+  items: OrderFulfillmentItemType[];
   subject: string;
   reference: string | null;
   query_by_items: string[];
@@ -139,25 +139,25 @@ export interface OrderWarehouse {
   updated_at?: FirestoreTimestampType;
 }
 
-export const OrderWarehouseSchema: z.ZodType<OrderWarehouse> = z.strictObject({
+export const OrderFulfillmentSchema: z.ZodType<OrderFulfillment> = z.strictObject({
   uid: z.string(),
   number: z.int(),
-  status: WarehouseOrderStatus,
-  organization: OrderWarehouseOrganization,
+  status: FulfillmentOrderStatus,
+  organization: OrderFulfillmentOrganization,
   dates: OrderDocDates,
   destinations: z.array(DocDestination).min(1),
-  items: z.array(OrderWarehouseItem).default([]),
+  items: z.array(OrderFulfillmentItem).default([]),
   subject: z.string().default(""),
   reference: z.string().max(255).nullable().default(null),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
   ...TimestampFields,
 }).meta({
-  title: "Order (Warehouse)",
-  collection: "order-warehouses",
+  title: "Order (Fulfillment)",
+  collection: "order-fulfillments",
   displayDefaults: {
     columns: ["number", "organization.name", "subject", "dates.delivery_start", "dates.collection_start", "status"],
     filters: { status: [] },
     sort: { column: "dates.delivery_start", direction: "desc" },
   },
-}) as z.ZodType<OrderWarehouse>;
+}) as z.ZodType<OrderFulfillment>;
