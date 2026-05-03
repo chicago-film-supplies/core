@@ -167,7 +167,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid_order: z.string(),
   uid_product: z.string(),
   name: z.string(),
-  number: z.int().meta({ label: "#", linkTo: "orderDetail", serverSortVia: "number" }),
+  number: z.int().meta({ label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
   type: ComponentTypeEnum,
   status: BookingStatus,
   quantity: z.number().meta({ serverSortVia: "quantity" }),

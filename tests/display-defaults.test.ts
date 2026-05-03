@@ -151,7 +151,7 @@ Deno.test("booking.number carries label + linkTo meta", () => {
     | { label?: string; linkTo?: string }
     | undefined;
   assertEquals(meta?.label, "#");
-  assertEquals(meta?.linkTo, "orderDetail");
+  assertEquals(meta?.linkTo, "fulfillmentDetail");
 });
 
 Deno.test("booking displayDefaults use real Firestore paths (not aliases)", () => {
