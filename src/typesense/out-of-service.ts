@@ -6,7 +6,7 @@ export const outOfService: TypesenseCollectionConfig = {
   version: 1,
   firestoreCollection: "out-of-service",
   collectionName: "out-of-service_v1",
-  enabled: false,
+  enabled: true,
   schema: {
     name: "out-of-service_v1",
     enable_nested_fields: true,
