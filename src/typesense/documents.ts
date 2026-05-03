@@ -447,6 +447,45 @@ export interface OrderFulfillmentDocument {
   updated_at: number;
 }
 
+// ── Out of Service ──────────────────────────────────────────────────
+
+/** Typesense document type for out-of-service records. */
+export interface OutOfServiceDocument {
+  id: string;
+  uid: string;
+  uid_product: string;
+  number: number;
+  number_str?: string;
+  reason: string;
+  status: string;
+  quantity: number;
+  breakdown: {
+    draft: number;
+    planned: number;
+    active: number;
+    blocked: number;
+    written_off: number;
+    returned_to_service: number;
+  };
+  organization?: {
+    uid?: string;
+    name?: string;
+  };
+  dates: {
+    start_fs?: number;
+    end_fs?: number;
+  };
+  stores?: Array<{
+    uid_store?: string;
+    name?: string;
+    quantity?: number;
+  }>;
+  query_by_sources?: string[];
+  canceled_at?: number;
+  created_at?: number;
+  updated_at: number;
+}
+
 // ── Organizations ───────────────────────────────────────────────────
 
 /** Typesense document type for organizations. */
@@ -749,6 +788,7 @@ export type TypesenseDocument =
   | OrderDocument
   | OrderFulfillmentDocument
   | OrganizationDocument
+  | OutOfServiceDocument
   | ProductDocument
   | StoreDocument
   | TagDocument
@@ -769,6 +809,7 @@ export interface TypesenseDocumentMap {
   orders: OrderDocument;
   "order-fulfillments": OrderFulfillmentDocument;
   organizations: OrganizationDocument;
+  "out-of-service": OutOfServiceDocument;
   products: ProductDocument;
   stores: StoreDocument;
   tags: TagDocument;

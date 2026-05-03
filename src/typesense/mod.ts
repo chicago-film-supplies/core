@@ -41,6 +41,7 @@ export type {
   OrderDocument,
   OrderFulfillmentDocument,
   OrganizationDocument,
+  OutOfServiceDocument,
   ProductDocument,
   ProductDocumentComponent,
   StoreDocument,
@@ -65,6 +66,7 @@ export { locations } from "./locations.ts";
 export { orders } from "./orders.ts";
 export { orderFulfillments } from "./order-fulfillments.ts";
 export { organizations } from "./organizations.ts";
+export { outOfService } from "./out-of-service.ts";
 export { products } from "./products.ts";
 export { stores } from "./stores.ts";
 export { tags } from "./tags.ts";
@@ -87,6 +89,7 @@ import { locations } from "./locations.ts";
 import { orders } from "./orders.ts";
 import { orderFulfillments } from "./order-fulfillments.ts";
 import { organizations } from "./organizations.ts";
+import { outOfService } from "./out-of-service.ts";
 import { products } from "./products.ts";
 import { stores } from "./stores.ts";
 import { tags } from "./tags.ts";
@@ -108,6 +111,7 @@ const allSchemas: TypesenseCollectionConfig[] = [
   orders,
   orderFulfillments,
   organizations,
+  outOfService,
   products,
   stores,
   tags,
@@ -131,6 +135,7 @@ export type TypesenseAlias =
   | "orders"
   | "order-fulfillments"
   | "organizations"
+  | "out-of-service"
   | "products"
   | "stores"
   | "tags"
@@ -210,6 +215,7 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "orders": "orders.search",
   "order-fulfillments": "orderFulfillment.search",
   "organizations": "organizations.search",
+  "out-of-service": "outOfService.search",
   "products": "products.search",
   "stores": "stores.search",
   "tags": "tags.search",

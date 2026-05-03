@@ -116,8 +116,8 @@ export const updateLocationRules: CollectionRule[] = [
     source: "locations",
     target: "out-of-service",
     mode: "fan-out",
-    invariant: "Out-of-service records embed location names in stores — a location rename must cascade to all incomplete OOS records containing that location",
-    trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition, filtered to complete != true",
+    invariant: "Out-of-service records embed location names in stores — a location rename must cascade to every OOS record containing that location, including terminal (complete/canceled) ones, so list views and detail pages stay consistent",
+    trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
     fields: [
       { source: ["name"], target: ["stores", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
     ],

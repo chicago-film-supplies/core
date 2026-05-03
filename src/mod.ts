@@ -513,17 +513,23 @@ export {
 } from "./availability.ts";
 
 export {
-  OutOfServiceRecordSchema,
-  type OutOfServiceRecord,
+  OutOfServiceSchema,
+  type OutOfService,
+  OOSStatusEnum,
+  type OOSStatusType,
+  OOSBreakdownSchema,
+  type OOSBreakdown,
+  OOSTransactionTypeEnum,
+  type OOSTransactionTypeType,
   type OOSStore,
   type OOSStoreLocation,
   type OOSTransaction,
   type OOSDates,
-  CreateOutOfServiceRecordInput,
-  type CreateOutOfServiceRecordInputType,
-  UpdateOutOfServiceRecordInput,
-  type UpdateOutOfServiceRecordInputType,
-} from "./out-of-service-record.ts";
+  CreateOutOfServiceInput,
+  type CreateOutOfServiceInputType,
+  UpdateOutOfServiceInput,
+  type UpdateOutOfServiceInputType,
+} from "./out-of-service.ts";
 
 export {
   StockSummarySchema,
@@ -709,8 +715,8 @@ export type {
   // Transaction aggregate
   TransactionCreated,
   TransactionUpdated,
-  OutOfServiceRecordCreated,
-  OutOfServiceRecordUpdated,
+  OutOfServiceCreated,
+  OutOfServiceUpdated,
   // Threads aggregate
   ThreadCreated,
   ThreadUpdated,
@@ -765,7 +771,7 @@ import type { Location } from "./location.ts";
 import type { LocationType } from "./location-type.ts";
 import type { Order } from "./order.ts";
 import type { Organization } from "./organization.ts";
-import type { OutOfServiceRecord } from "./out-of-service-record.ts";
+import type { OutOfService } from "./out-of-service.ts";
 import type { PasswordReset } from "./password-reset.ts";
 import type { Product } from "./product.ts";
 import type { Quote } from "./quote.ts";
@@ -790,7 +796,7 @@ import type { WebshopProduct } from "./webshop-product.ts";
 export type SchemaDocType =
   | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
   | EmailVerification | HolidayDates | InventoryLedger | Invite | Invoice | List | Location
-  | LocationType | Order | Organization | OutOfServiceRecord | PasswordReset
+  | LocationType | Order | Organization | OutOfService | PasswordReset
   | OrderFulfillment | Product | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
   | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User
   | WebhookEvent | WebshopProduct;
@@ -818,7 +824,7 @@ import { LocationSchema } from "./location.ts";
 import { LocationTypeSchema } from "./location-type.ts";
 import { OrderSchema } from "./order.ts";
 import { OrganizationSchema } from "./organization.ts";
-import { OutOfServiceRecordSchema } from "./out-of-service-record.ts";
+import { OutOfServiceSchema } from "./out-of-service.ts";
 import { PasswordResetSchema } from "./password-reset.ts";
 import { ProductSchema } from "./product.ts";
 import { QuoteSchema as QuoteSchema_ } from "./quote.ts";
@@ -861,7 +867,7 @@ export const schemas: Record<string, z.ZodType> = {
   "order": OrderSchema, "orders": OrderSchema,
   "order-fulfillment": OrderFulfillmentSchema, "order-fulfillments": OrderFulfillmentSchema,
   "organization": OrganizationSchema, "organizations": OrganizationSchema,
-  "out-of-service-record": OutOfServiceRecordSchema, "out-of-service": OutOfServiceRecordSchema,
+  "out-of-service": OutOfServiceSchema,
   "password-reset": PasswordResetSchema, "password-resets": PasswordResetSchema,
   "product": ProductSchema, "products": ProductSchema,
   "quote": QuoteSchema_, "quotes": QuoteSchema_,
