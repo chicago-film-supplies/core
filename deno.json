@@ -22,7 +22,7 @@
     "./location-type": "./src/location-type.ts",
     "./order": "./src/order.ts",
     "./organization": "./src/organization.ts",
-    "./out-of-service-record": "./src/out-of-service-record.ts",
+    "./out-of-service": "./src/out-of-service.ts",
     "./password-reset": "./src/password-reset.ts",
     "./product": "./src/product.ts",
     "./public-stock-summary": "./src/public-stock-summary.ts",

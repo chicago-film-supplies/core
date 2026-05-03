@@ -72,8 +72,8 @@ export type {
 export type {
   TransactionCreated,
   TransactionUpdated,
-  OutOfServiceRecordCreated,
-  OutOfServiceRecordUpdated,
+  OutOfServiceCreated,
+  OutOfServiceUpdated,
 } from "./transactions.ts";
 
 // ── Threads aggregate ───────────────────────────────────────────────
