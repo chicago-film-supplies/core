@@ -7,7 +7,7 @@ export const aggregates: AggregateDefinition[] = [
   {
     id: "order",
     root: "orders",
-    members: ["bookings", "stock-summaries", "public-stock-summaries", "quotes", "order-fulfillments", "out-of-service"],
+    members: ["bookings", "stock-summaries", "public-stock-summaries", "quotes", "fulfillments", "out-of-service"],
     description: "Rental/sale order lifecycle — from quote through active rental to completion. Event cards (deliver/pick-up/in-store) live in the cards aggregate but are cowritten by create-order / update-order to project the schedule onto the Dashboard. OOS records born from update-booking carry both bookings: and orders: entries in their sources[] so they surface on both detail pages.",
   },
   {

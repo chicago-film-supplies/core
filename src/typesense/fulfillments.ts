@@ -10,13 +10,13 @@ import { typesenseAddressFields } from "./types.ts";
  * optional fields as default_sorting_field; the fulfillment UI overrides
  * this at query time via `displayDefaults.sort` to order by delivery date.
  */
-export const orderFulfillments: TypesenseCollectionConfig = {
-  alias: "order-fulfillments",
-  version: 3,
-  firestoreCollection: "order-fulfillments",
-  collectionName: "order-fulfillments_v3",
+export const fulfillments: TypesenseCollectionConfig = {
+  alias: "fulfillments",
+  version: 4,
+  firestoreCollection: "fulfillments",
+  collectionName: "fulfillments_v4",
   schema: {
-    name: "order-fulfillments_v3",
+    name: "fulfillments_v4",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
