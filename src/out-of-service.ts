@@ -275,11 +275,18 @@ export const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType> = z
  * enforces `sum(breakdown) === quantity`. `status` is server-derived; only
  * `"canceled"` is honored from the client and translated into
  * `canceled_at = now()`.
+ *
+ * `dates.start` is honored on update only when the record has no sources
+ * (`sources.length === 0` — manually created / ad-hoc). Source-bound records
+ * (booking PUT or order check-in lineage) reject `dates.start` updates with a
+ * 400 — the start there reflects a real ledger event recorded by the upstream
+ * writer, and operator-side drift would desync the OOS from the source's
+ * audit trail.
  */
 export interface UpdateOutOfServiceInputType {
   status?: OOSStatusType;
   breakdown?: OOSBreakdown;
-  dates?: { end?: string | null };
+  dates?: { start?: string | null; end?: string | null };
   stores?: OOSStore[];
   version: number;
 }
@@ -289,6 +296,7 @@ export const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType> = z
   status: OOSStatusEnum.optional(),
   breakdown: OOSBreakdownSchema.optional(),
   dates: z.object({
+    start: chicagoInstant().nullable().optional(),
     end: chicagoInstant().nullable().optional(),
   }).optional(),
   stores: z.array(OOSStoreSchema).optional(),
