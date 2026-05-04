@@ -36,10 +36,10 @@ export type {
   CommentDocument,
   ContactDocument,
   DestinationDocument,
+  FulfillmentDocument,
   InvoiceDocument,
   LocationDocument,
   OrderDocument,
-  OrderFulfillmentDocument,
   OrganizationDocument,
   OutOfServiceDocument,
   ProductDocument,
@@ -64,7 +64,7 @@ export { destinations } from "./destinations.ts";
 export { invoices } from "./invoices.ts";
 export { locations } from "./locations.ts";
 export { orders } from "./orders.ts";
-export { orderFulfillments } from "./order-fulfillments.ts";
+export { fulfillments } from "./fulfillments.ts";
 export { organizations } from "./organizations.ts";
 export { outOfService } from "./out-of-service.ts";
 export { products } from "./products.ts";
@@ -87,7 +87,7 @@ import { destinations } from "./destinations.ts";
 import { invoices } from "./invoices.ts";
 import { locations } from "./locations.ts";
 import { orders } from "./orders.ts";
-import { orderFulfillments } from "./order-fulfillments.ts";
+import { fulfillments } from "./fulfillments.ts";
 import { organizations } from "./organizations.ts";
 import { outOfService } from "./out-of-service.ts";
 import { products } from "./products.ts";
@@ -109,7 +109,7 @@ const allSchemas: TypesenseCollectionConfig[] = [
   invoices,
   locations,
   orders,
-  orderFulfillments,
+  fulfillments,
   organizations,
   outOfService,
   products,
@@ -133,7 +133,7 @@ export type TypesenseAlias =
   | "invoices"
   | "locations"
   | "orders"
-  | "order-fulfillments"
+  | "fulfillments"
   | "organizations"
   | "out-of-service"
   | "products"
@@ -213,7 +213,7 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "invoices": "invoices.search",
   "locations": "locations.search",
   "orders": "orders.search",
-  "order-fulfillments": "orderFulfillment.search",
+  "fulfillments": "fulfillment.search",
   "organizations": "organizations.search",
   "out-of-service": "outOfService.search",
   "products": "products.search",

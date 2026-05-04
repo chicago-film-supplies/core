@@ -153,17 +153,17 @@ export {
 } from "./order.ts";
 
 export {
-  OrderFulfillmentSchema,
-  OrderFulfillmentItem,
-  OrderFulfillmentLineItem,
-  OrderFulfillmentDestinationItem,
-  OrderFulfillmentGroupItem,
-  type OrderFulfillment,
-  type OrderFulfillmentItemType,
-  type OrderFulfillmentLineItemType,
-  type OrderFulfillmentDestinationItemType,
-  type OrderFulfillmentGroupItemType,
-} from "./order-fulfillment.ts";
+  FulfillmentSchema,
+  FulfillmentItem,
+  FulfillmentLineItem,
+  FulfillmentDestinationItem,
+  FulfillmentGroupItem,
+  type Fulfillment,
+  type FulfillmentItemType,
+  type FulfillmentLineItemType,
+  type FulfillmentDestinationItemType,
+  type FulfillmentGroupItemType,
+} from "./fulfillment.ts";
 
 export {
   LoginInput,
@@ -762,7 +762,7 @@ import type { ChartOfAccounts } from "./chart-of-accounts.ts";
 import type { Contact } from "./contact.ts";
 import type { Destination as DestinationDocType } from "./destination.ts";
 import type { EmailVerification } from "./email-verification.ts";
-import type { OrderFulfillment } from "./order-fulfillment.ts";
+import type { Fulfillment } from "./fulfillment.ts";
 import type { HolidayDates } from "./holiday-dates.ts";
 import type { InventoryLedger } from "./inventory-ledger.ts";
 import type { Invite } from "./invite.ts";
@@ -797,7 +797,7 @@ export type SchemaDocType =
   | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
   | EmailVerification | HolidayDates | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | Organization | OutOfService | PasswordReset
-  | OrderFulfillment | Product | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
+  | Fulfillment | Product | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
   | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User
   | WebhookEvent | WebshopProduct;
 
@@ -815,7 +815,7 @@ import { ChartOfAccountsSchema } from "./chart-of-accounts.ts";
 import { ContactSchema } from "./contact.ts";
 import { DestinationSchema } from "./destination.ts";
 import { EmailVerificationSchema } from "./email-verification.ts";
-import { OrderFulfillmentSchema } from "./order-fulfillment.ts";
+import { FulfillmentSchema } from "./fulfillment.ts";
 import { HolidayDatesSchema } from "./holiday-dates.ts";
 import { InventoryLedgerSchema } from "./inventory-ledger.ts";
 import { InviteSchema } from "./invite.ts";
@@ -865,7 +865,7 @@ export const schemas: Record<string, z.ZodType> = {
   "location": LocationSchema, "locations": LocationSchema,
   "location-type": LocationTypeSchema, "location-types": LocationTypeSchema,
   "order": OrderSchema, "orders": OrderSchema,
-  "order-fulfillment": OrderFulfillmentSchema, "order-fulfillments": OrderFulfillmentSchema,
+  "fulfillment": FulfillmentSchema, "fulfillments": FulfillmentSchema,
   "organization": OrganizationSchema, "organizations": OrganizationSchema,
   "out-of-service": OutOfServiceSchema,
   "password-reset": PasswordResetSchema, "password-resets": PasswordResetSchema,

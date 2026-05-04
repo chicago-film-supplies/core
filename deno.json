@@ -21,6 +21,7 @@
     "./location": "./src/location.ts",
     "./location-type": "./src/location-type.ts",
     "./order": "./src/order.ts",
+    "./fulfillment": "./src/fulfillment.ts",
     "./organization": "./src/organization.ts",
     "./out-of-service": "./src/out-of-service.ts",
     "./password-reset": "./src/password-reset.ts",
