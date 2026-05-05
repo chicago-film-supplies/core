@@ -100,6 +100,13 @@ export {
   updateOrderInvoiceRules,
 } from "./invoices.ts";
 
+// ── Fulfillment rules ───────────────────────────────────────────────
+
+export {
+  updateFulfillmentItemsRules,
+  updateFulfillmentItemsTransaction,
+} from "./fulfillments.ts";
+
 // ── Location rules ──────────────────────────────────────────────────
 
 export {
@@ -201,6 +208,7 @@ import { createContactRules, createContactTransaction, updateContactRules, updat
 import { createUserRules, createUserTransaction, updateUserRules, updateUserTransaction, deleteUserRules, deleteUserTransaction } from "./users.ts";
 import { createLocationRules, createLocationTransaction, updateLocationTransactionalRules, updateLocationTransaction } from "./locations.ts";
 import { createInvoiceRules, createInvoiceTransaction, updateInvoiceOrderRules, updateInvoiceTransaction, updateOrderInvoiceRules } from "./invoices.ts";
+import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
 import { updateTaxRules } from "./taxes.ts";
 import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules } from "./reference-data.ts";
 import {
@@ -250,6 +258,7 @@ export const transactions: TransactionDefinition[] = [
   updateLocationTransaction,
   createInvoiceTransaction,
   updateInvoiceTransaction,
+  updateFulfillmentItemsTransaction,
   createRoleTransaction,
   createCommentTransaction,
   createCardTransaction,
@@ -287,6 +296,7 @@ export const rules: CollectionRule[] = [
   ...createInvoiceRules,
   ...updateInvoiceOrderRules,
   ...updateOrderInvoiceRules,
+  ...updateFulfillmentItemsRules,
   ...updateTaxRules,
   ...updateTagRules,
   ...deleteTagRules,

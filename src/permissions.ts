@@ -125,6 +125,8 @@ export const PERMISSIONS = [
   "ledgers.read",
   "fulfillment.read",
   "fulfillment.search",
+  "fulfillment.update",
+  "fulfillment.reset",
   "outOfService.create",
   "outOfService.read",
   "outOfService.update",
