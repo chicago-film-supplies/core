@@ -12,11 +12,11 @@ import { typesenseAddressFields } from "./types.ts";
  */
 export const fulfillments: TypesenseCollectionConfig = {
   alias: "fulfillments",
-  version: 4,
+  version: 5,
   firestoreCollection: "fulfillments",
-  collectionName: "fulfillments_v4",
+  collectionName: "fulfillments_v5",
   schema: {
-    name: "fulfillments_v4",
+    name: "fulfillments_v5",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -25,6 +25,7 @@ export const fulfillments: TypesenseCollectionConfig = {
       { name: "status", type: "string", facet: true },
       { name: "deliveries", type: "bool", facet: true, optional: true },
       { name: "pickups", type: "bool", facet: true, optional: true },
+      { name: "has_conflicts", type: "bool", facet: true, optional: true },
       { name: "subject", type: "string", sort: true, stem: true, optional: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "organization", type: "object" },

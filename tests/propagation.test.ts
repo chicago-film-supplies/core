@@ -70,6 +70,8 @@ import {
   createOutOfServiceTransaction,
   updateOutOfServiceRules,
   updateOutOfServiceTransaction,
+  updateFulfillmentItemsRules,
+  updateFulfillmentItemsTransaction,
 } from "../src/propagation/mod.ts";
 import { schemas } from "../src/mod.ts";
 
@@ -115,6 +117,7 @@ Deno.test("rules array contains all individual rule sets", () => {
     ...updateBookingRules,
     ...createOutOfServiceRules,
     ...updateOutOfServiceRules,
+    ...updateFulfillmentItemsRules,
   ];
   assertEquals(rules.length, allRuleSets.length);
   for (const rule of allRuleSets) {
@@ -174,6 +177,7 @@ Deno.test("transactions array contains all individual transactions", () => {
     bulkReturnOrderTransaction,
     createOutOfServiceTransaction,
     updateOutOfServiceTransaction,
+    updateFulfillmentItemsTransaction,
   ];
   assertEquals(transactions.length, allTransactions.length);
   for (const txn of allTransactions) {

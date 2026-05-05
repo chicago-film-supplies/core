@@ -3,8 +3,13 @@
  *
  * Sanitized projection of an Order for the fulfillment client view.
  * Strips pricing, financial totals, invoice refs, tax profile, CRM/Xero
- * ids, version, notes, and transaction_fee line items. Keeps
- * destination contacts, dates, quantities, and item structure.
+ * ids, notes, and transaction_fee line items. Keeps destination contacts,
+ * dates, quantities, and item structure.
+ *
+ * Picker-editable: line items may carry `quantity_order` (server-set when
+ * picker quantity diverges from order quantity) and `path_substituted_for`
+ * (picker-set on substitution line items, cleared on graduation). The doc
+ * carries its own `version` for optimistic concurrency on picker writes.
  */
 import { z } from "zod";
 import {
@@ -44,6 +49,19 @@ export interface FulfillmentLineItemType {
   uid_order?: string;
   uid_delivery?: string | null;
   uid_collection?: string | null;
+  /**
+   * Server-set when picker quantity diverges from the order's projected
+   * quantity for the same path. Carries admin's intended quantity. Picker
+   * writes that include this field on any line item are rejected (400) —
+   * it is server-managed.
+   */
+  quantity_order?: number;
+  /**
+   * Picker-set on substitution line items. Carries the path of the
+   * substituted-for item at the moment of substitution. Cleared by the
+   * projection on graduation (admin emits at the same path).
+   */
+  path_substituted_for?: string[];
 }
 
 export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = z.strictObject({
@@ -58,6 +76,8 @@ export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = z.strictO
   uid_order: z.string().optional(),
   uid_delivery: z.string().nullable().optional(),
   uid_collection: z.string().nullable().optional(),
+  quantity_order: z.number().int().min(0).optional(),
+  path_substituted_for: z.array(z.string()).optional(),
 });
 
 /** Destination divider in the fulfillment items array. */
@@ -135,6 +155,13 @@ export interface Fulfillment {
   reference: string | null;
   query_by_items: string[];
   query_by_contacts: string[];
+  /**
+   * Optimistic-concurrency token. Bumped on every write — projection writes
+   * (createOrder, updateOrder, opportunity webhook) and picker writes (PUT
+   * /fulfillments/{uid}/items). Picker PUT body carries this value; server
+   * 409s on mismatch. Mirrors `Order.version`.
+   */
+  version: number;
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
@@ -151,6 +178,7 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   reference: z.string().max(255).nullable().default(null),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
+  version: z.int().min(0).default(0),
   ...TimestampFields,
 }).meta({
   title: "Fulfillment",
