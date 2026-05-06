@@ -442,6 +442,12 @@ export {
   type BookingStoreLocation,
   UpdateBookingInput,
   type UpdateBookingInputType,
+  BookingUpdate,
+  type BookingUpdateType,
+  BulkBookingUpdateInput,
+  type BulkBookingUpdateInputType,
+  BulkBookingUpdateResponse,
+  type BulkBookingUpdateResponseType,
 } from "./booking.ts";
 
 export {

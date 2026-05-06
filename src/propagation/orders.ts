@@ -478,3 +478,25 @@ export const bulkReturnOrderTransaction: TransactionDefinition = {
     "cowrite-thread:thread-to-out-of-service",
   ],
 };
+
+// ── bulk-fulfillment-bookings ────────────────────────────────────
+//
+// PUT /fulfillments/{uid}/bookings — picker UI applies N booking transitions
+// in one Firestore transaction. Reuses update-booking rules per row but with
+// deduped stock-summary recalc per product, single order roll-up delta +
+// auto-complete check, and one OOS counter allocation pass.
+
+export const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
+  id: "bulk-fulfillment-bookings",
+  description: "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock-summary recalc per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, and one OOS counter allocation pass.",
+  steps: [
+    "update-booking:booking-to-self",
+    "update-booking:booking-to-stock-summaries",
+    "update-booking:booking-to-out-of-service",
+    "update-booking:booking-to-order",
+    "create-out-of-service-record:sources-to-record",
+    "create-out-of-service-record:record-to-stock-summaries",
+    "cowrite-thread:out-of-service-to-thread",
+    "cowrite-thread:thread-to-out-of-service",
+  ],
+};

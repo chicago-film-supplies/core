@@ -161,6 +161,71 @@ export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
   version: z.int().min(0),
 });
 
+// ── Bulk update input (PUT /fulfillments/{uid}/bookings) ───────
+
+/**
+ * Per-row entry for the bulk fulfillment-bookings endpoint. Matches
+ * `UpdateBookingInputType` field-for-field, plus the booking `uid` to address
+ * the row (since the URL carries the fulfillment uid, not the booking uid).
+ */
+export interface BookingUpdateType {
+  uid: string;
+  status?: BookingStatusType;
+  breakdown?: Booking["breakdown"];
+  version: number;
+}
+
+export const BookingUpdate: z.ZodType<BookingUpdateType> = z.object({
+  uid: z.string(),
+  status: BookingStatus.optional(),
+  breakdown: BookingBreakdownSchema.optional(),
+  version: z.int().min(0),
+});
+
+/**
+ * Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions
+ * for one order in a single Firestore transaction.
+ *
+ * Top-level `version` is the fulfillment doc version at read time. Currently
+ * advisory: a stale value 409s. Per-row `version` carries each booking's
+ * current version for optimistic concurrency.
+ *
+ * No fixed cap on `updates.length`. Bound only by the real Firestore limits
+ * (270s tx duration, 10 MiB request size). The bulk service rejects empty
+ * arrays with 400.
+ */
+export interface BulkBookingUpdateInputType {
+  version: number;
+  updates: BookingUpdateType[];
+}
+
+export const BulkBookingUpdateInput: z.ZodType<BulkBookingUpdateInputType> = z.object({
+  version: z.int().min(0),
+  updates: z.array(BookingUpdate).min(1),
+});
+
+/**
+ * Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row
+ * `results` carry the post-write booking versions in input order.
+ */
+export interface BulkBookingUpdateResponseType {
+  success: true;
+  order_completed: boolean;
+  oos_records_written: number;
+  results: Array<{ uid: string; version: number }>;
+}
+
+export const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType> =
+  z.object({
+    success: z.literal(true),
+    order_completed: z.boolean(),
+    oos_records_written: z.int().min(0),
+    results: z.array(z.object({
+      uid: z.string(),
+      version: z.int().min(0),
+    })),
+  });
+
 /** Zod schema for Booking. */
 export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid: z.string(),
