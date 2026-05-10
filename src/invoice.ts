@@ -286,7 +286,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   date: chicagoStartOfDay(),
   date_fs: FirestoreTimestamp,
   due_date: chicagoStartOfDay().optional(),
-  due_date_fs: FirestoreTimestamp,
+  due_date_fs: FirestoreTimestamp.optional(),
   subject: z.string().nullable().optional(),
   reference: z.string().nullable().optional(),
   external_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
