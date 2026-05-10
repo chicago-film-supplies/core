@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/initial.ts";
 import { BookingSchema } from "../src/booking.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const bookingBase = getInitialValues(BookingSchema) as Record<string, unknown>;
 const breakdownBase = bookingBase.breakdown as Record<string, unknown>;
@@ -35,8 +36,8 @@ const validBooking = {
   organization: { uid: "test-org-1", name: "Test Acme Corp", crms_id: null },
   uid_destination_delivery: "test-dest-1",
   uid_destination_collection: "test-dest-2",
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("BookingSchema validates a complete document", () => {

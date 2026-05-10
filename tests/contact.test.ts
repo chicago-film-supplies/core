@@ -4,8 +4,10 @@ import {
   CreateContactInput,
   UpdateContactInput,
 } from "../src/contact.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const actor = { uid: "test-user-1", name: "Test User" };
+const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("ContactSchema validates a complete contact document", () => {
   const doc = {
@@ -19,6 +21,7 @@ Deno.test("ContactSchema validates a complete contact document", () => {
     query_by_organizations: ["test-org-1"],
     created_by: actor,
     updated_by: actor,
+    ...ts,
   };
   assertEquals(ContactSchema.safeParse(doc).success, true);
 });
@@ -34,6 +37,7 @@ Deno.test("ContactSchema accepts contact without last_name", () => {
     query_by_organizations: [],
     created_by: actor,
     updated_by: actor,
+    ...ts,
   };
   assertEquals(ContactSchema.safeParse(doc).success, true);
 });
@@ -84,6 +88,7 @@ Deno.test("ContactSchema allows optional crms_id", () => {
     query_by_organizations: [],
     created_by: actor,
     updated_by: actor,
+    ...ts,
   };
   assertEquals(ContactSchema.safeParse(doc).success, true);
 });
@@ -129,6 +134,7 @@ Deno.test("ContactSchema accepts middle_name and pronunciation", () => {
     query_by_organizations: [],
     created_by: actor,
     updated_by: actor,
+    ...ts,
   };
   assertEquals(ContactSchema.safeParse(doc).success, true);
 });

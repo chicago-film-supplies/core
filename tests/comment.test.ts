@@ -5,6 +5,7 @@ import {
   UpdateCommentInput,
   CommentReactionInput,
 } from "../src/comment.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const tiptapBody = {
   type: "doc",
@@ -22,8 +23,8 @@ const validComment = {
   deleted_at: null,
   deleted_by: null,
   updated_by: { uid: "user-1", name: "Alex" },
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("CommentSchema validates a complete comment", () => {

@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { ThreadSchema, UpdateThreadInput } from "../src/thread.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validThread = {
   uid: "thread-1",
@@ -10,8 +11,8 @@ const validThread = {
   comment_count: 0,
   created_by: { uid: "user-1", name: "Alex" },
   updated_by: { uid: "user-1", name: "Alex" },
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("ThreadSchema validates a default thread", () => {

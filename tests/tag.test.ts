@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { TagSchema } from "../src/tag.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("TagSchema validates a complete document", () => {
   const doc = {
@@ -10,6 +13,7 @@ Deno.test("TagSchema validates a complete document", () => {
     query_by_products: ["test-p1"],
     created_by: { uid: "test-user-1", name: "Test User" },
     updated_by: { uid: "test-user-1", name: "Test User" },
+    ...ts,
   };
   assertEquals(TagSchema.safeParse(doc).success, true);
 });
@@ -21,6 +25,7 @@ Deno.test("TagSchema accepts count as record", () => {
     count: { total: 3 },
     created_by: { uid: "test-user-1", name: "Test User" },
     updated_by: { uid: "test-user-1", name: "Test User" },
+    ...ts,
   };
   assertEquals(TagSchema.safeParse(doc).success, true);
 });

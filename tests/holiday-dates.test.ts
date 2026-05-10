@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { HolidayDatesSchema } from "../src/holiday-dates.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+const ts = { date_fs: mockTimestamp, created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("HolidayDatesSchema validates a complete document", () => {
   const doc = {
@@ -8,6 +11,7 @@ Deno.test("HolidayDatesSchema validates a complete document", () => {
     date: "2026-12-25",
     name: "Christmas Day",
     type: "fixed",
+    ...ts,
   };
   assertEquals(HolidayDatesSchema.safeParse(doc).success, true);
 });
@@ -19,6 +23,7 @@ Deno.test("HolidayDatesSchema accepts variable type", () => {
     date: "2026-04-05",
     name: "Easter Sunday",
     type: "variable",
+    ...ts,
   };
   assertEquals(HolidayDatesSchema.safeParse(doc).success, true);
 });

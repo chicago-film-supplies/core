@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { getInitialValues } from "../src/initial.ts";
 import { TransactionSchema, getTransactionMultiplier } from "../src/transaction.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const transactionBase = getInitialValues(TransactionSchema) as Record<string, unknown>;
 
@@ -14,12 +15,12 @@ const validTransaction = {
   unit_cost: 250,
   unit_costs: [250],
   date: "2026-03-01T00:00:00Z",
-  date_fs: null,
+  date_fs: mockTimestamp,
   reference: "PO-001",
   source: { type: "manual", number: null, uid: null },
   serialized_details: null,
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("TransactionSchema validates a complete document", () => {

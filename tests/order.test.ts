@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/initial.ts";
 import { CreateOrderInput, DocDestination, OrderDocDates, OrderDocItemPrice, OrderSchema, UpdateOrderInput } from "../src/order.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const orderBase = getInitialValues(OrderSchema) as Record<string, unknown>;
 const totalsBase = orderBase.totals as Record<string, unknown>;
@@ -392,11 +393,17 @@ const validDocDestination = {
 const validDocDates = {
   ...datesBase,
   delivery_start: "2026-03-01T00:00:00Z",
+  delivery_start_fs: mockTimestamp,
   delivery_end: "2026-03-01T00:00:00Z",
+  delivery_end_fs: mockTimestamp,
   collection_start: "2026-03-10T00:00:00Z",
+  collection_start_fs: mockTimestamp,
   collection_end: "2026-03-10T00:00:00Z",
+  collection_end_fs: mockTimestamp,
   charge_start: "2026-03-01T00:00:00Z",
+  charge_start_fs: mockTimestamp,
   charge_end: "2026-03-10T00:00:00Z",
+  charge_end_fs: mockTimestamp,
 };
 
 const minimalDoc = {
@@ -416,6 +423,8 @@ const minimalDoc = {
     subtotal_discounted: 100,
     total: 100,
   },
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("OrderSchema validates a minimal document", () => {

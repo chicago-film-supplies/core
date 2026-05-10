@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { LocationTypeSchema } from "../src/location-type.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("LocationTypeSchema validates a complete document", () => {
   const doc = {
@@ -8,6 +11,7 @@ Deno.test("LocationTypeSchema validates a complete document", () => {
     product_capacities: [{ uid: "test-p1", max: 10 }],
     active: true,
     dimensions: { width: 100, depth: 50, height: 200, weight_capacity: 500 },
+    ...ts,
   };
   assertEquals(LocationTypeSchema.safeParse(doc).success, true);
 });
@@ -18,6 +22,7 @@ Deno.test("LocationTypeSchema accepts null max in capacities", () => {
     name: "Floor",
     product_capacities: [{ uid: "test-p1", max: null }],
     active: true,
+    ...ts,
   };
   assertEquals(LocationTypeSchema.safeParse(doc).success, true);
 });
@@ -29,6 +34,7 @@ Deno.test("LocationTypeSchema accepts null dimensions", () => {
     product_capacities: [],
     active: false,
     dimensions: null,
+    ...ts,
   };
   assertEquals(LocationTypeSchema.safeParse(doc).success, true);
 });

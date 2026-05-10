@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { TrackingCategorySchema } from "../src/tracking-category.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("TrackingCategorySchema validates a complete document", () => {
   const doc = {
@@ -12,6 +15,7 @@ Deno.test("TrackingCategorySchema validates a complete document", () => {
     xero_tracking_option_id: "test-xero-1",
     created_by: { uid: "test-user-1", name: "Test User" },
     updated_by: { uid: "test-user-1", name: "Test User" },
+    ...ts,
   };
   assertEquals(TrackingCategorySchema.safeParse(doc).success, true);
 });
@@ -26,6 +30,7 @@ Deno.test("TrackingCategorySchema accepts count as record", () => {
     xero_tracking_option_id: null,
     created_by: { uid: "test-user-1", name: "Test User" },
     updated_by: { uid: "test-user-1", name: "Test User" },
+    ...ts,
   };
   assertEquals(TrackingCategorySchema.safeParse(doc).success, true);
 });

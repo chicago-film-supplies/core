@@ -4,6 +4,7 @@
 import { z } from "zod";
 import {
   Email,
+  FirestoreTimestamp,
   type FirestoreTimestampType,
   NameField,
   type NameParts,
@@ -90,7 +91,7 @@ export const UserSchema: z.ZodType<User> = z.strictObject({
   version: z.int().min(0).default(0),
   prefs_firestore: z.record(z.string(), FirestoreDisplayPrefsSchema),
   prefs_typesense: z.record(z.string(), TypesenseDisplayPrefsSchema),
-  deleted_at: z.custom<FirestoreTimestampType>((v) => v === undefined || v === null || typeof v === "object").nullable().optional(),
+  deleted_at: FirestoreTimestamp.nullable().optional(),
   ...TimestampFields,
 }).meta({
   title: "User",

@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { CacheGeocodesSchema } from "../src/cache-geocodes.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+const ts = { created_at: mockTimestamp, expiresAt: mockTimestamp };
 
 Deno.test("CacheGeocodesSchema validates a complete document", () => {
   const doc = {
@@ -15,6 +18,7 @@ Deno.test("CacheGeocodesSchema validates a complete document", () => {
       full: "123 Main St, Chicago, IL 60601",
       name: "123 Main St",
     },
+    ...ts,
   };
   assertEquals(CacheGeocodesSchema.safeParse(doc).success, true);
 });
@@ -25,6 +29,7 @@ Deno.test("CacheGeocodesSchema accepts null coordinates", () => {
     coordinates: null,
     mapbox_id: "test-mapbox-2",
     address: {},
+    ...ts,
   };
   assertEquals(CacheGeocodesSchema.safeParse(doc).success, true);
 });

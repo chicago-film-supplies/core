@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { InventoryLedgerSchema } from "../src/inventory-ledger.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validLedger = {
   uid: "test-il-1",
@@ -32,8 +33,8 @@ const validLedger = {
     }],
   }],
   query_by_uid_store: ["test-store-1"],
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("InventoryLedgerSchema validates a complete document", () => {

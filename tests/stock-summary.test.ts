@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { StockSummarySchema } from "../src/stock-summary.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validSummary = {
   uid: "test-ss-1",
@@ -8,7 +9,7 @@ const validSummary = {
   type: "rental",
   dates: {
     start: "2026-03-01",
-    start_fs: null,
+    start_fs: mockTimestamp,
     end: null,
     end_fs: null,
   },
@@ -48,9 +49,9 @@ const validSummary = {
     }],
   }],
   query_by_uid_store: ["test-store-1"],
-  created_at: null,
-  updated_at: null,
-  expiresAt: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
+  expiresAt: mockTimestamp,
 };
 
 Deno.test("StockSummarySchema validates a complete document", () => {

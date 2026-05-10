@@ -5,6 +5,7 @@ import {
   RecurrenceSchema,
   UpdateRecurrenceInput,
 } from "../src/recurrence.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validRule = {
   freq: "WEEKLY" as const,
@@ -42,8 +43,8 @@ const validRecurrence = {
   prototype: validPrototype,
   created_by: { uid: "user-1", name: "Alex" },
   updated_by: { uid: "user-1", name: "Alex" },
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("RecurrenceSchema validates a complete document", () => {

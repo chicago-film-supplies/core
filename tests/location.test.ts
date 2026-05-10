@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/initial.ts";
 import { LocationSchema } from "../src/location.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const locationBase = getInitialValues(LocationSchema) as Record<string, unknown>;
 
@@ -15,8 +16,8 @@ const validLocation = {
   query_by_product_capacities: ["test-p1"],
   products: [{ uid: "test-p1", name: "LED Panel", quantity: 10, default: true }],
   query_by_products: ["test-p1"],
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("LocationSchema validates a complete document", () => {

@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/initial.ts";
 import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceSchema, UpdateInvoiceInput, UpdatePaymentInput } from "../src/invoice.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const invoiceBase = getInitialValues(InvoiceSchema) as Record<string, unknown>;
 const totalsBase = invoiceBase.totals as Record<string, unknown>;
@@ -22,6 +23,8 @@ const validInvoice = {
   number_orders: [1000],
   tax_profile: "tax_applied",
   date: "2026-03-01T00:00:00.000-06:00",
+  date_fs: mockTimestamp,
+  due_date_fs: mockTimestamp,
   organization: {
     uid: "test-org-1",
     name: "Acme Corp",
@@ -54,6 +57,8 @@ const validInvoice = {
   },
   created_by: { uid: "test-user-1", name: "Test User" },
   updated_by: { uid: "test-user-1", name: "Test User" },
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("InvoiceSchema validates a complete document", () => {

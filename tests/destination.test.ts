@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { DestinationSchema } from "../src/destination.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("DestinationSchema validates a complete document", () => {
   const doc = {
@@ -16,12 +19,13 @@ Deno.test("DestinationSchema validates a complete document", () => {
     mapbox_ids: ["test-mbx-1"],
     organizations: [{ uid: "test-org-1", name: "Acme" }],
     query_by_organizations: ["test-org-1"],
+    ...ts,
   };
   assertEquals(DestinationSchema.safeParse(doc).success, true);
 });
 
 Deno.test("DestinationSchema accepts null address", () => {
-  const doc = { uid: "test-dest-1", address: null, mapbox_ids: [] };
+  const doc = { uid: "test-dest-1", address: null, mapbox_ids: [], ...ts };
   assertEquals(DestinationSchema.safeParse(doc).success, true);
 });
 

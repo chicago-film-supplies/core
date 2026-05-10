@@ -4,6 +4,7 @@ import {
   CreateInviteInput,
   InviteSchema,
 } from "../src/invite.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("InviteSchema validates a complete invite", () => {
   const doc = {
@@ -15,7 +16,9 @@ Deno.test("InviteSchema validates a complete invite", () => {
     roles: ["admin"],
     invited_by: "user-1",
     used: false,
-    expires_at: { _seconds: 1700000000, _nanoseconds: 0 },
+    expires_at: mockTimestamp,
+    created_at: mockTimestamp,
+    updated_at: mockTimestamp,
   };
   assertEquals(InviteSchema.safeParse(doc).success, true);
 });
@@ -28,7 +31,9 @@ Deno.test("InviteSchema defaults used to false", () => {
     name: "Invited",
     roles: ["admin"],
     invited_by: "user-1",
-    expires_at: { _seconds: 1700000000, _nanoseconds: 0 },
+    expires_at: mockTimestamp,
+    created_at: mockTimestamp,
+    updated_at: mockTimestamp,
   });
   assertEquals(result.success, true);
   if (result.success) {
@@ -43,7 +48,7 @@ Deno.test("InviteSchema rejects additional properties", () => {
     first_name: "A",
     roles: [],
     invited_by: "u",
-    expires_at: { _seconds: 0, _nanoseconds: 0 },
+    expires_at: mockTimestamp,
     bogus: 1,
   });
   assertEquals(result.success, false);
@@ -95,7 +100,9 @@ Deno.test("InviteSchema accepts middle_name and pronunciation", () => {
     name: "Invited Quincy User (in-VITE-ed)",
     roles: ["admin"],
     invited_by: "user-1",
-    expires_at: { _seconds: 1700000000, _nanoseconds: 0 },
+    expires_at: mockTimestamp,
+    created_at: mockTimestamp,
+    updated_at: mockTimestamp,
   });
   assertEquals(result.success, true);
 });

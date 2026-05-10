@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { CreateListInput, ListSchema, UpdateListInput } from "../src/list.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validList = {
   uid: "list-1",
@@ -10,8 +11,8 @@ const validList = {
   position: 1000,
   created_by: { uid: "user-1", name: "Alex" },
   updated_by: { uid: "user-1", name: "Alex" },
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("ListSchema validates a complete document", () => {

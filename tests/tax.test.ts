@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/initial.ts";
 import { TaxSchema, CreateTaxInput, UpdateTaxInput } from "../src/tax.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const taxBase = getInitialValues(TaxSchema) as Record<string, unknown>;
 
@@ -11,11 +12,11 @@ const validTax = {
   rate: 15,
   type: "percent",
   valid_from: "2026-01-01T00:00:00.000Z",
-  valid_from_fs: null,
+  valid_from_fs: mockTimestamp,
   created_by: { uid: "test-user-1", name: "Test User" },
   updated_by: { uid: "test-user-1", name: "Test User" },
-  created_at: null,
-  updated_at: null,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("TaxSchema validates a complete document", () => {

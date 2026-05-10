@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { ChartOfAccountsSchema } from "../src/chart-of-accounts.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("ChartOfAccountsSchema validates a complete document", () => {
   const doc = {
@@ -11,6 +12,8 @@ Deno.test("ChartOfAccountsSchema validates a complete document", () => {
     default_tax_profile: "tax_chicago_sales_tax",
     created_by: { uid: "test-user-1", name: "Test User" },
     updated_by: { uid: "test-user-1", name: "Test User" },
+    created_at: mockTimestamp,
+    updated_at: mockTimestamp,
   };
   assertEquals(ChartOfAccountsSchema.safeParse(doc).success, true);
 });

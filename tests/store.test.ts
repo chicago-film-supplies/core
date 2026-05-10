@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { StoreSchema } from "../src/store.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("StoreSchema validates a complete document", () => {
   const doc = {
@@ -8,6 +11,7 @@ Deno.test("StoreSchema validates a complete document", () => {
     default: true,
     crms_store_id: 100,
     active: true,
+    ...ts,
   };
   assertEquals(StoreSchema.safeParse(doc).success, true);
 });
@@ -29,7 +33,7 @@ Deno.test("StoreSchema rejects additional properties", () => {
 });
 
 Deno.test("StoreSchema defaults boolean fields", () => {
-  const doc = { uid: "test-store-1", name: "Main", crms_store_id: 1 };
+  const doc = { uid: "test-store-1", name: "Main", crms_store_id: 1, ...ts };
   const result = StoreSchema.safeParse(doc);
   assertEquals(result.success, true);
   if (result.success) {

@@ -1,12 +1,13 @@
 import { assertEquals } from "@std/assert";
 import { SessionSchema } from "../src/session.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("SessionSchema validates a complete session document", () => {
   const result = SessionSchema.safeParse({
     id: "a".repeat(40),
     user_id: "test-user-1",
     anonymous: false,
-    expiresAt: { _seconds: 1700000000, _nanoseconds: 0 },
+    expiresAt: mockTimestamp,
     created_at: 1700000000000,
     user_agent: "Mozilla/5.0",
   });
@@ -18,7 +19,7 @@ Deno.test("SessionSchema validates an anonymous session", () => {
     id: "b".repeat(40),
     user_id: "",
     anonymous: true,
-    expiresAt: { _seconds: 1700000000, _nanoseconds: 0 },
+    expiresAt: mockTimestamp,
     created_at: 1700000000000,
     user_agent: "",
   });
@@ -30,7 +31,7 @@ Deno.test("SessionSchema rejects session ID with wrong length", () => {
     id: "tooshort",
     user_id: "test-user-1",
     anonymous: false,
-    expiresAt: { _seconds: 1700000000, _nanoseconds: 0 },
+    expiresAt: mockTimestamp,
     created_at: 1700000000000,
     user_agent: "Mozilla/5.0",
   });
@@ -47,7 +48,7 @@ Deno.test("SessionSchema rejects additional properties", () => {
     id: "a".repeat(40),
     user_id: "test-user-1",
     anonymous: false,
-    expiresAt: { _seconds: 1700000000, _nanoseconds: 0 },
+    expiresAt: mockTimestamp,
     created_at: 1700000000000,
     user_agent: "Mozilla/5.0",
     extraField: "not allowed",
@@ -60,7 +61,7 @@ Deno.test("SessionSchema rejects non-number created_at", () => {
     id: "a".repeat(40),
     user_id: "test-user-1",
     anonymous: false,
-    expiresAt: { _seconds: 1700000000, _nanoseconds: 0 },
+    expiresAt: mockTimestamp,
     created_at: "not a number",
     user_agent: "Mozilla/5.0",
   });

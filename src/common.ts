@@ -23,11 +23,26 @@ export interface FirestoreFieldValue {
 export type FirestoreTimestampType = FirestoreTimestampValue | FirestoreFieldValue;
 
 /**
- * Firestore server timestamp — passthrough since it's a Firestore
- * FieldValue at write time and a Firestore Timestamp at read time.
+ * Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.
+ *
+ * Tight on purpose: rejects `undefined`, `null`, plain objects, and
+ * `FieldValue` write-time sentinels (which only carry `isEqual`). Writers
+ * must stamp a real `Timestamp` (e.g. `Timestamp.now()` from
+ * `firebase-admin/firestore`) — `validateBeforeWrite` strips `FieldValue`
+ * sentinels before validation, so a sentinel-stamped timestamp would
+ * surface here as `undefined` and fail loudly.
+ *
+ * The accepted union still includes `FirestoreFieldValue` for back-compat
+ * with consumers that type fields against the union (e.g. user-facing
+ * `cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces
+ * the real-Timestamp contract.
  */
 export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<FirestoreTimestampType>(
-  (val) => val === undefined || val === null || typeof val === "object",
+  (val) =>
+    val !== null &&
+    typeof val === "object" &&
+    typeof (val as FirestoreTimestampValue).seconds === "number" &&
+    typeof (val as FirestoreTimestampValue).nanoseconds === "number",
 );
 
 /**

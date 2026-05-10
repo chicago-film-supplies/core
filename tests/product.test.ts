@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { CreateProductInput, ProductSchema } from "../src/product.ts";
 import { getInitialValues } from "../src/initial.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const base = getInitialValues(ProductSchema);
 const actor = { uid: "test-user-1", name: "Test User" };
@@ -15,6 +16,8 @@ const validProduct = {
   webshop: { available: true },
   created_by: actor,
   updated_by: actor,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("ProductSchema validates a complete document", () => {

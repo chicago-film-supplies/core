@@ -4,8 +4,9 @@ import {
   OutOfServiceSchema,
   UpdateOutOfServiceInput,
 } from "../src/out-of-service.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
-const fs = { seconds: 0, nanoseconds: 0, toMillis: () => 0, toDate: () => new Date(0) };
+const fs = mockTimestamp;
 
 const validOOS = {
   uid: "test-oos-1",
@@ -38,6 +39,8 @@ const validOOS = {
   version: 0,
   created_by: { uid: "test-user-1", name: "Test User" },
   updated_by: { uid: "test-user-1", name: "Test User" },
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("OutOfServiceSchema validates a complete document", () => {

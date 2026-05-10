@@ -4,6 +4,9 @@ import {
   OrganizationSchema,
   UpdateOrganizationInput,
 } from "../src/organization.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 const validAddress = {
   city: "Chicago",
@@ -31,6 +34,7 @@ Deno.test("OrganizationSchema validates a complete document", () => {
     query_by_contacts: ["test-c1"],
     created_by: actor,
     updated_by: actor,
+    ...ts,
   };
   assertEquals(OrganizationSchema.safeParse(doc).success, true);
 });
@@ -48,6 +52,7 @@ Deno.test("OrganizationSchema accepts null billing_address", () => {
     billing_address: null,
     created_by: actor,
     updated_by: actor,
+    ...ts,
   };
   assertEquals(OrganizationSchema.safeParse(doc).success, true);
 });

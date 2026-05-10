@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { CreateUserInput, UpdateUserInput, UserSchema } from "../src/user.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const base = {
   uid: "test-user-1",
@@ -10,6 +11,8 @@ const base = {
   email_verified: false,
   prefs_firestore: {},
   prefs_typesense: {},
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
 };
 
 Deno.test("UserSchema validates a complete user document", () => {
@@ -17,8 +20,6 @@ Deno.test("UserSchema validates a complete user document", () => {
     ...base,
     last_name: "Hughes",
     uid_contact: "test-contact-1",
-    created_at: { _seconds: 1700000000, _nanoseconds: 0 },
-    updated_at: { _seconds: 1700000000, _nanoseconds: 0 },
   });
   assertEquals(result.success, true);
 });
