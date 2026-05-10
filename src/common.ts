@@ -38,11 +38,20 @@ export type FirestoreTimestampType = FirestoreTimestampValue | FirestoreFieldVal
  * the real-Timestamp contract.
  */
 export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<FirestoreTimestampType>(
-  (val) =>
-    val !== null &&
-    typeof val === "object" &&
-    typeof (val as FirestoreTimestampValue).seconds === "number" &&
-    typeof (val as FirestoreTimestampValue).nanoseconds === "number",
+  (val) => {
+    if (val === null || typeof val !== "object") return false;
+    // Accept either the public Timestamp accessor shape (`seconds`/
+    // `nanoseconds`, exposed via getters on a `Timestamp` instance) OR the
+    // private underscored shape (`_seconds`/`_nanoseconds`, what survives
+    // `structuredClone` / `lodash.cloneDeep`). Firestore writes accept both.
+    const v = val as Partial<FirestoreTimestampValue> & {
+      _seconds?: number;
+      _nanoseconds?: number;
+    };
+    if (typeof v.seconds === "number" && typeof v.nanoseconds === "number") return true;
+    if (typeof v._seconds === "number" && typeof v._nanoseconds === "number") return true;
+    return false;
+  },
 );
 
 /**
