@@ -32,6 +32,8 @@ export {
   bulkCheckoutOrderTransaction,
   bulkReturnOrderTransaction,
   bulkFulfillmentBookingsTransaction,
+  processOrderDocsRules,
+  processOrderDocsTransaction,
 } from "./orders.ts";
 
 // ── Out-of-service rules ─────────────────────────────────────────────
@@ -196,6 +198,8 @@ import {
   bulkCheckoutOrderTransaction,
   bulkReturnOrderTransaction,
   bulkFulfillmentBookingsTransaction,
+  processOrderDocsRules,
+  processOrderDocsTransaction,
 } from "./orders.ts";
 import {
   createOutOfServiceRules,
@@ -244,6 +248,7 @@ export const transactions: TransactionDefinition[] = [
   bulkCheckoutOrderTransaction,
   bulkReturnOrderTransaction,
   bulkFulfillmentBookingsTransaction,
+  processOrderDocsTransaction,
   createOutOfServiceTransaction,
   updateOutOfServiceTransaction,
   createTransactionTransaction,
@@ -282,6 +287,7 @@ export const rules: CollectionRule[] = [
   ...createOrderRules,
   ...updateOrderRules,
   ...updateBookingRules,
+  ...processOrderDocsRules,
   ...createOutOfServiceRules,
   ...updateOutOfServiceRules,
   ...createTransactionRules,

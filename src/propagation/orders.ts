@@ -158,7 +158,10 @@ export const createOrderRules: CollectionRule[] = [
     fields: [
       { source: ["uid"], target: ["sources"], transform: "[{collection:'orders', uid}] — event card links back to its parent order" },
       { source: ["status"], target: ["status"], transform: "mapped: reserved/quoted→planned, active→active, complete→complete, canceled→canceled, draft→draft" },
+      { source: ["number"], target: ["subject"], transform: "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'; action in {Deliver, Pickup, Return, Canceled} per (position, customer_collecting/returning, status)" },
       { source: ["subject"], target: ["subject"] },
+      { source: ["organization", "uid"], target: ["organization", "uid"] },
+      { source: ["organization", "name"], target: ["organization", "name"] },
       { source: ["destinations", "delivery"], target: ["destination"], transform: "full DocDestinationEndpointType for start events" },
       { source: ["destinations", "collection"], target: ["destination"], transform: "full DocDestinationEndpointType for end events" },
       { source: ["dates", "delivery_start"], target: ["dates", "start"], transform: "start event start instant" },
@@ -166,7 +169,7 @@ export const createOrderRules: CollectionRule[] = [
       { source: ["dates", "collection_start"], target: ["dates", "start"], transform: "end event start instant (rental items only)" },
       { source: ["dates", "collection_end"], target: ["dates", "end"], transform: "end event end instant (rental items only)" },
       { source: ["destinations", "customer_collecting", "customer_returning"], target: ["uid_list"], transform: "per-pair flag drives card list — field-service for deliver/pick_up, in-store for in_store_pickup/in_store_return" },
-      { source: [], target: ["locked"], transform: "['card','subject','sources'] — order-derived cards cannot be deleted or have their label/link edited" },
+      { source: [], target: ["locked"], transform: "['card','subject','sources','destination','organization','attachments','status_auto'] — order-derived cards cannot be deleted, status follows pick progress, label/sources/destination/org/attachments cannot be edited via PATCH" },
     ],
   },
   {
@@ -311,12 +314,15 @@ export const updateOrderRules: CollectionRule[] = [
     source: "orders",
     target: "cards",
     mode: "co-write",
-    invariant: "Event cards are rebuilt on every update — cards for removed destinations are deleted (and their threads cascade), cards for existing destinations are upserted in place. Preserves each card's user-editable fields (body, attachments, assignees, status overrides) where compatible.",
+    invariant: "Event cards are rebuilt on every update — cards for removed destinations are deleted (and their threads cascade), cards for existing destinations are upserted in place. Preserves each card's user-editable fields (body, attachments, assignees) AND any progress-derived status (planned/active/complete/blocked) — order.status is only forced onto the card when the order transitions to draft or canceled (terminal). Active/reserved/quoted/complete order statuses don't clobber the card's per-pick auto-computed status (see update-booking:booking-to-cards).",
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["sources"], transform: "[{collection:'orders', uid}] — regenerated event cards link back to the parent order" },
-      { source: ["status"], target: ["status"], transform: "mapped: reserved/quoted→planned, active→active, complete→complete, canceled→canceled, draft→draft" },
+      { source: ["status"], target: ["status"], transform: "draft→draft, canceled→canceled (force-override); other statuses preserve the card's existing progress-derived status" },
+      { source: ["number"], target: ["subject"], transform: "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'" },
       { source: ["subject"], target: ["subject"] },
+      { source: ["organization", "uid"], target: ["organization", "uid"] },
+      { source: ["organization", "name"], target: ["organization", "name"] },
       { source: ["destinations", "delivery"], target: ["destination"], transform: "full DocDestinationEndpointType for start events" },
       { source: ["destinations", "collection"], target: ["destination"], transform: "full DocDestinationEndpointType for end events" },
       { source: ["dates", "delivery_start"], target: ["dates", "start"] },
@@ -428,16 +434,29 @@ export const updateBookingRules: CollectionRule[] = [
       { source: [], target: ["status"], transform: "complete iff bookings_breakdown.{quoted,reserved,prepped,out} === 0; else active iff bookings_breakdown.out > 0 and prev status === 'reserved'" },
     ],
   },
+  {
+    id: "update-booking:booking-to-cards",
+    source: "bookings",
+    target: "cards",
+    mode: "co-write",
+    invariant: "Per-destination event card status follows pick progress. For each destination touched by a booking write, query sibling bookings for that destination per side (delivery for `:start` cards, collection for `:end` cards) and recompute status: start: pre_delivery=Σ(quoted+reserved+prepped); pre_delivery===0 → complete; out>0 → active; else planned. end: terminal=Σ(returned+lost+damaged); terminal===Σquantity → complete; (terminal>0 || still_out>0) → active; else planned. Manual `blocked` status is preserved (pick-progress writes never overwrite blocked unless the parent order itself transitions to canceled, which lives on update-order). `canceled` status is sourced exclusively from order.status. Sale-only destinations exclude their bookings from the end-side roll-up so the end card stays planned↔complete based on rental siblings only. Card writes bump version and validate via CardSchema; the lock value `status_auto` permits this server-internal write while still rejecting external PATCH attempts to change `status` to anything other than `blocked`.",
+    transaction: "update-booking",
+    fields: [
+      { source: ["breakdown"], target: ["status"], transform: "computeCardStatusFromBookings(side, siblings, current) — see invariant" },
+      { source: [], target: ["version"], transform: "incremented" },
+    ],
+  },
 ];
 
 export const updateBookingTransaction: TransactionDefinition = {
   id: "update-booking",
-  description: "Update a single booking's status or breakdown. Recalculates stock summaries; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of stock summaries and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed.",
+  description: "Update a single booking's status or breakdown. Recalculates stock summaries; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of stock summaries and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings.",
   steps: [
     "update-booking:booking-to-self",
     "update-booking:booking-to-stock-summaries",
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-order",
+    "update-booking:booking-to-cards",
     // OOS cowrites pull these in when a new OOS record is created:
     "create-out-of-service-record:sources-to-record",
     "create-out-of-service-record:record-to-stock-summaries",
@@ -456,22 +475,24 @@ export const updateBookingTransaction: TransactionDefinition = {
 
 export const bulkCheckoutOrderTransaction: TransactionDefinition = {
   id: "bulk-checkout-order",
-  description: "Flip every booking on an order from reserved/prepped to active and move quantities into breakdown.out in one Firestore transaction. Reuses update-booking rules per row.",
+  description: "Flip every booking on an order from reserved/prepped to active and move quantities into breakdown.out in one Firestore transaction. Reuses update-booking rules per row, including the per-destination card status recompute.",
   steps: [
     "update-booking:booking-to-self",
     "update-booking:booking-to-stock-summaries",
     "update-booking:booking-to-order",
+    "update-booking:booking-to-cards",
   ],
 };
 
 export const bulkReturnOrderTransaction: TransactionDefinition = {
   id: "bulk-return-order",
-  description: "Apply per-booking returned/lost/damaged deltas across the order in one Firestore transaction. Reuses update-booking rules per row, including OOS cowrite for any lost/damaged deltas; final state may auto-complete the order.",
+  description: "Apply per-booking returned/lost/damaged deltas across the order in one Firestore transaction. Reuses update-booking rules per row, including OOS cowrite for any lost/damaged deltas and the per-destination card status recompute; final state may auto-complete the order.",
   steps: [
     "update-booking:booking-to-self",
     "update-booking:booking-to-stock-summaries",
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-order",
+    "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
     "create-out-of-service-record:record-to-stock-summaries",
     "cowrite-thread:out-of-service-to-thread",
@@ -488,15 +509,53 @@ export const bulkReturnOrderTransaction: TransactionDefinition = {
 
 export const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
   id: "bulk-fulfillment-bookings",
-  description: "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock-summary recalc per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, and one OOS counter allocation pass.",
+  description: "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock-summary recalc per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
   steps: [
     "update-booking:booking-to-self",
     "update-booking:booking-to-stock-summaries",
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-order",
+    "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
     "create-out-of-service-record:record-to-stock-summaries",
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
+  ],
+};
+
+// ── process-order-docs ─────────────────────────────────────────────
+//
+// Async fanout: after `processOrderDocs` uploads a fresh packing-list PDF to
+// Uploadcare and writes orders/{uid}/documents/{docUid}, the Cloud Run task
+// finds every order-derived event card (cards.where(sources array-contains
+// {collection:'orders', uid: order.uid})) and writes/replaces the attachment
+// whose `type === "packing"` with the new uuid + filename. Replaces in place
+// on each regeneration; the previous uuid is already cleaned by the
+// processOrderDocs orphan-uuid sweep, so the card never references a deleted
+// file. Server-internal write — bypasses CARD_LOCK on `attachments`.
+
+export const processOrderDocsRules: CollectionRule[] = [
+  {
+    id: "process-order-docs:doc-to-cards",
+    source: "orders/documents",
+    target: "cards",
+    mode: "fan-out",
+    invariant: "After the packing-list PDF is uploaded to Uploadcare, the resulting uuid is written into the `attachments[]` of every order-derived card (sources contains {collection:'orders', uid: order.uid}). One attachment per card, identified by `type === 'packing'`. Replaces in place on each regeneration; locked from picker writes (server-internal write bypasses the `attachments` lock).",
+    transaction: "process-order-docs",
+    fields: [
+      { source: ["uuid"], target: ["attachments", "uid"] },
+      { source: ["mime"], target: ["attachments", "mime_type"] },
+      { source: [], target: ["attachments", "type"], transform: "'packing' (constant)" },
+      { source: [], target: ["attachments", "filename"], transform: "`Packing List #${order.number}.pdf`" },
+      { source: [], target: ["attachments", "locked"], transform: "true (server-managed)" },
+    ],
+  },
+];
+
+export const processOrderDocsTransaction: TransactionDefinition = {
+  id: "process-order-docs",
+  description: "Async Cloud Task path: CRMS prepares the packing-list PDF, the API uploads it to Uploadcare, writes the order's documents subcollection, then fans the resulting Uploadcare uuid out to every order-derived event card so the picker UI can deep-link to the live PDF.",
+  steps: [
+    "process-order-docs:doc-to-cards",
   ],
 };

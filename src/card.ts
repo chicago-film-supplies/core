@@ -62,11 +62,13 @@ const CARD_LOCK_KEYS = [
   "card",
   "uid_list",
   "status",
+  "status_auto",
   "subject",
   "body",
   "body_text",
   "dates",
   "destination",
+  "organization",
   "sources",
   "attachments",
   "uid_assignees",
@@ -75,6 +77,10 @@ const CARD_LOCK_KEYS = [
  * Enum of lockable card surfaces.
  *
  * - `"card"` — presence blocks DELETE (all other keys are field locks)
+ * - `"status_auto"` — narrow override slot: server auto-computes `status`,
+ *   but PATCH still accepts `status: "blocked"` (manual block) or a no-op of
+ *   the current auto value. Distinct from `"status"`, which fully locks the
+ *   field.
  * - Any other value — presence rejects PATCH of that specific field
  *
  * Narrower than `(keyof Card)[]` because (a) most Card fields are
@@ -88,9 +94,28 @@ export const CardLockKeyEnum: z.ZodType<CardLockKey> = z.enum(CARD_LOCK_KEYS);
 
 // ── Attachments ─────────────────────────────────────────────────────
 
+const CARD_ATTACHMENT_TYPES = [
+  "image",
+  "file",
+  "packing",
+  "quote",
+  "invoice",
+] as const;
+/**
+ * Semantic discriminator for a card attachment. Server-derived attachments
+ * (packing/quote/invoice) carry their domain meaning so the UI can render
+ * them as labelled chips without sniffing MIME or filename. User uploads
+ * default to `image` (when MIME starts with `image/`) or `file` otherwise.
+ */
+export type CardAttachmentTypeEnum = typeof CARD_ATTACHMENT_TYPES[number];
+/** Zod schema for CardAttachmentTypeEnum. */
+export const CardAttachmentTypeEnumSchema: z.ZodType<CardAttachmentTypeEnum> =
+  z.enum(CARD_ATTACHMENT_TYPES);
+
 /** A single attachment on a card (Uploadcare UUID + display metadata). */
 export interface CardAttachmentType {
   uid: string;
+  type: CardAttachmentTypeEnum;
   filename: string;
   mime_type: string;
   size_bytes: number;
@@ -100,10 +125,31 @@ export interface CardAttachmentType {
 /** Zod schema for a card attachment. */
 export const CardAttachment: z.ZodType<CardAttachmentType> = z.strictObject({
   uid: z.string().min(1),
+  type: CardAttachmentTypeEnumSchema,
   filename: z.string().min(1).max(260).meta({ pii: "mask" }),
   mime_type: z.string().min(1).max(120),
   size_bytes: z.int().min(0),
   locked: z.boolean().default(false),
+});
+
+// ── Organization (denormalized) ─────────────────────────────────────
+
+/**
+ * Denormalized organization snapshot on order-derived event cards. Surfaces
+ * "who is this card for?" on every card-rendering surface (list, kanban,
+ * calendar, dashboard) without joining back to the order. `uid` is nullable
+ * because some organizations exist without a CFS-side uid (legacy CRMS-only
+ * customers).
+ */
+export interface CardOrganizationType {
+  uid: string | null;
+  name: string;
+}
+
+/** Zod schema for CardOrganizationType. */
+export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject({
+  uid: z.string().nullable(),
+  name: z.string().min(1).max(100).meta({ pii: "mask" }),
 });
 
 // ── Firestore document ──────────────────────────────────────────────
@@ -134,6 +180,7 @@ export interface Card {
   all_day: boolean;
   date_fs: FirestoreTimestampType | null;
   destination: DocDestinationEndpointType | null;
+  organization: CardOrganizationType | null;
   sources: DocSourceType[];
   attachments: CardAttachmentType[];
   uid_assignees: string[];
@@ -168,6 +215,7 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   all_day: z.boolean().default(false),
   date_fs: FirestoreTimestamp.nullable(),
   destination: DocDestinationEndpoint.nullable(),
+  organization: CardOrganization.nullable().default(null),
   sources: z.array(DocSource).default([]),
   attachments: z.array(CardAttachment).default([]),
   uid_assignees: z.array(z.string()).default([]),
@@ -208,6 +256,7 @@ export interface CreateCardInputType {
   dates?: CardDatesType;
   all_day?: boolean;
   destination?: DocDestinationEndpointType | null;
+  organization?: CardOrganizationType | null;
   sources?: DocSourceType[];
   attachments?: CardAttachmentType[];
   uid_assignees?: string[];
@@ -225,6 +274,7 @@ export const CreateCardInput: z.ZodType<CreateCardInputType> = z.object({
   dates: CardDates.optional(),
   all_day: z.boolean().optional(),
   destination: DocDestinationEndpoint.nullable().optional(),
+  organization: CardOrganization.nullable().optional(),
   sources: z.array(DocSource).optional(),
   attachments: z.array(CardAttachment).optional(),
   uid_assignees: z.array(z.string()).optional(),
@@ -242,6 +292,7 @@ export interface UpdateCardInputType {
   dates?: CardDatesType;
   all_day?: boolean;
   destination?: DocDestinationEndpointType | null;
+  organization?: CardOrganizationType | null;
   sources?: DocSourceType[];
   attachments?: CardAttachmentType[];
   uid_assignees?: string[];
@@ -263,6 +314,7 @@ export const UpdateCardInput: z.ZodType<UpdateCardInputType> = z.object({
   dates: CardDates.optional(),
   all_day: z.boolean().optional(),
   destination: DocDestinationEndpoint.nullable().optional(),
+  organization: CardOrganization.nullable().optional(),
   sources: z.array(DocSource).optional(),
   attachments: z.array(CardAttachment).optional(),
   uid_assignees: z.array(z.string()).optional(),
