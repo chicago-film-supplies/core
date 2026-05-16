@@ -12,7 +12,7 @@ Deno.test("TrackingCategorySchema validates a complete document", () => {
     crms_product_group_id: 10,
     crms_product_group_name: "Camera Group",
     products: { "test-p1": { uid: "test-p1", name: "Canon C300" } },
-    xero_tracking_option_id: "test-xero-1",
+    xero_tracking_option_id: "00000000-0000-4000-8000-000000000001",
     created_by: { uid: "test-user-1", name: "Test User" },
     updated_by: { uid: "test-user-1", name: "Test User" },
     ...ts,

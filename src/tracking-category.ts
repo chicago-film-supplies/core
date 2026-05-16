@@ -30,7 +30,7 @@ export const TrackingCategorySchema: z.ZodType<TrackingCategory> = z.strictObjec
   crms_service_group_id: z.number().optional(),
   crms_product_group_name: z.string(),
   products: z.record(z.string(), UidNameRef),
-  xero_tracking_option_id: z.string().nullable(),
+  xero_tracking_option_id: z.uuid().nullable(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,

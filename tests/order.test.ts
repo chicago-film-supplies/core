@@ -414,6 +414,7 @@ const minimalDoc = {
   organization: {
     uid: null,
     name: "Test Acme Corp",
+    xero_id: null,
   },
   dates: validDocDates,
   destinations: [validDocDestination],

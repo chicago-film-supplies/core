@@ -66,7 +66,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   uid: z.string(),
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
   crms_id: z.number(),
-  xero_id: z.string().nullable(),
+  xero_id: z.uuid().nullable(),
   tax_profile: TaxProfileEnum.default("tax_applied"),
   description: z.string().default("").optional(),
   emails: z.array(Email).default([]),

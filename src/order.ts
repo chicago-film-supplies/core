@@ -621,7 +621,7 @@ const OrderDocOrganization = z.strictObject({
   uid: z.string().nullable(),
   name: z.string().min(1).max(100).meta({ pii: "mask" }),
   crms_id: z.number().nullable().optional(),
-  xero_id: z.string().nullable().optional(),
+  xero_id: z.uuid().nullable(),
   billing_address: Address.optional(),
 });
 
@@ -658,7 +658,7 @@ export interface Order {
     uid: string | null;
     name: string;
     crms_id?: number | null;
-    xero_id?: string | null;
+    xero_id: string | null;
     billing_address?: AddressType | null;
   };
   dates: OrderDocDatesType;

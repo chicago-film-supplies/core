@@ -117,8 +117,8 @@ export interface Product {
   uid_tracking_category?: string | null;
   webshop: ProductWebshop;
   images?: string[];
-  xero_id?: string | null;
-  xero_tracking_option_id?: string;
+  xero_id: string | null;
+  xero_tracking_option_id: string | null;
   defaultThreadId?: string;
   version: number;
   created_by: ActorRefType;
@@ -205,8 +205,8 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     description: z.string().nullable().optional(),
   }),
   images: z.array(z.string()).optional(),
-  xero_id: z.string().nullable().optional(),
-  xero_tracking_option_id: z.string().optional(),
+  xero_id: z.uuid().nullable(),
+  xero_tracking_option_id: z.uuid().nullable(),
   defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,

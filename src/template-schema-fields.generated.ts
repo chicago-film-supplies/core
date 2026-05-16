@@ -17,7 +17,7 @@ export const templateSchemaFields: Record<TemplateSourceCollectionType, SchemaFi
     { path: "organization.uid", type: "string | null" },
     { path: "organization.name", type: "string" },
     { path: "organization.crms_id", type: "number? | null" },
-    { path: "organization.xero_id", type: "string? | null" },
+    { path: "organization.xero_id", type: "string | null" },
     { path: "organization.billing_address", type: "object? | null" },
     { path: "organization.billing_address.city", type: "string" },
     { path: "organization.billing_address.country_name", type: "string" },

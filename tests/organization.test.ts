@@ -25,7 +25,7 @@ Deno.test("OrganizationSchema validates a complete document", () => {
     uid: "test-org-1",
     name: "Acme Corp",
     crms_id: 100,
-    xero_id: "test-xero-1",
+    xero_id: "00000000-0000-4000-8000-000000000001",
     tax_profile: "tax_applied",
     emails: ["info@acme.com"],
     phones: ["1234567890"],
