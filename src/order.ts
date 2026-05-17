@@ -694,6 +694,7 @@ export interface Order {
   crms_status?: string;
   subject?: string;
   reference?: string | null;
+  xero_id?: string | null;
   defaultThreadId?: string;
   version: number;
   created_at?: FirestoreTimestampType;
@@ -728,6 +729,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   crms_status: z.string().optional(),
   subject: z.string().default(""),
   reference: z.string().max(255).nullable().default(null),
+  xero_id: z.uuid().nullable().default(null),
   defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
   ...TimestampFields,

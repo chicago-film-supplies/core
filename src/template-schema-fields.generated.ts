@@ -186,6 +186,7 @@ export const templateSchemaFields: Record<TemplateSourceCollectionType, SchemaFi
     { path: "crms_status", type: "string?" },
     { path: "subject", type: "string" },
     { path: "reference", type: "string" },
+    { path: "xero_id", type: "string" },
     { path: "defaultThreadId", type: "string?" },
     { path: "version", type: "number" },
   ],
