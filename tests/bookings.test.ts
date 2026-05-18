@@ -3,7 +3,8 @@ import {
   applyBookingBreakdownDelta,
   calculateBookingBreakdown,
   emptyBookingsBreakdown,
-  isOrderBookingsBreakdownClosed,
+  isBookingClosed,
+  isOrderBookingsClosed,
   mergeBookingBreakdown,
   sumBookingBreakdown,
   sumBookingsBreakdown,
@@ -13,6 +14,14 @@ import type { Booking } from "@cfs/schemas";
 const sample = (overrides: Partial<Booking["breakdown"]> = {}): Booking["breakdown"] => ({
   quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0,
   ...overrides,
+});
+
+const booking = (
+  type: Booking["type"],
+  breakdownOverrides: Partial<Booking["breakdown"]> = {},
+): Pick<Booking, "type" | "breakdown"> => ({
+  type,
+  breakdown: sample(breakdownOverrides),
 });
 
 Deno.test("emptyBookingsBreakdown returns all-zero shape", () => {
@@ -65,26 +74,83 @@ Deno.test("applyBookingBreakdownDelta mutates roll-up by next - prev", () => {
   assertEquals(orderRollup, { quoted: 0, reserved: 0, prepped: 0, out: 2, returned: 2, lost: 1, damaged: 0 });
 });
 
-Deno.test("isOrderBookingsBreakdownClosed: true when all open keys zero and total > 0", () => {
+Deno.test("isBookingClosed: rental requires out === 0", () => {
+  assertEquals(isBookingClosed(booking("rental", { returned: 5 })), true);
+  assertEquals(isBookingClosed(booking("rental", { out: 1, returned: 4 })), false);
+  assertEquals(isBookingClosed(booking("rental", { returned: 3, lost: 1, damaged: 1 })), true);
+});
+
+Deno.test("isBookingClosed: sale treats out as terminal", () => {
+  assertEquals(isBookingClosed(booking("sale", { out: 5 })), true);
+  assertEquals(isBookingClosed(booking("sale", { out: 3, returned: 2 })), true);
+  assertEquals(isBookingClosed(booking("sale", { reserved: 1, out: 4 })), false);
+});
+
+Deno.test("isBookingClosed: service/surcharge treat out as terminal (defensive)", () => {
+  assertEquals(isBookingClosed(booking("service", { out: 5 })), true);
+  assertEquals(isBookingClosed(booking("surcharge", { out: 5 })), true);
+});
+
+Deno.test("isBookingClosed: any quoted/reserved/prepped blocks closure", () => {
+  assertEquals(isBookingClosed(booking("rental", { quoted: 1, returned: 4 })), false);
+  assertEquals(isBookingClosed(booking("rental", { reserved: 1, returned: 4 })), false);
+  assertEquals(isBookingClosed(booking("rental", { prepped: 1, returned: 4 })), false);
+  assertEquals(isBookingClosed(booking("sale", { quoted: 1, out: 4 })), false);
+});
+
+Deno.test("isOrderBookingsClosed: all-sale, all out → closed", () => {
   assertEquals(
-    isOrderBookingsBreakdownClosed({
-      quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 3, lost: 1, damaged: 1,
-    }),
+    isOrderBookingsClosed([
+      booking("sale", { out: 3 }),
+      booking("sale", { out: 1 }),
+    ]),
     true,
   );
 });
 
-Deno.test("isOrderBookingsBreakdownClosed: false when any open key > 0", () => {
+Deno.test("isOrderBookingsClosed: all-rental, all out → not closed", () => {
   assertEquals(
-    isOrderBookingsBreakdownClosed({
-      quoted: 0, reserved: 0, prepped: 0, out: 1, returned: 5, lost: 0, damaged: 0,
-    }),
+    isOrderBookingsClosed([
+      booking("rental", { out: 3 }),
+      booking("rental", { out: 1 }),
+    ]),
     false,
   );
 });
 
-Deno.test("isOrderBookingsBreakdownClosed: false on empty roll-up (no bookings)", () => {
-  assertEquals(isOrderBookingsBreakdownClosed(emptyBookingsBreakdown()), false);
+Deno.test("isOrderBookingsClosed: mixed, sales out + rentals out → not closed", () => {
+  assertEquals(
+    isOrderBookingsClosed([
+      booking("sale", { out: 2 }),
+      booking("rental", { out: 3 }),
+    ]),
+    false,
+  );
+});
+
+Deno.test("isOrderBookingsClosed: mixed, sales out + rentals all returned → closed", () => {
+  assertEquals(
+    isOrderBookingsClosed([
+      booking("sale", { out: 2 }),
+      booking("rental", { returned: 3 }),
+      booking("rental", { returned: 2, lost: 1 }),
+    ]),
+    true,
+  );
+});
+
+Deno.test("isOrderBookingsClosed: all-sale, mix of out + returned + damaged → closed", () => {
+  assertEquals(
+    isOrderBookingsClosed([
+      booking("sale", { out: 2, returned: 1, damaged: 1 }),
+      booking("sale", { out: 3 }),
+    ]),
+    true,
+  );
+});
+
+Deno.test("isOrderBookingsClosed: empty bookings → false", () => {
+  assertEquals(isOrderBookingsClosed([]), false);
 });
 
 Deno.test("calculateBookingBreakdown: draft/canceled → all zeros", () => {

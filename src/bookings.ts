@@ -7,7 +7,7 @@
  * ```ts
  * import {
  *   sumBookingBreakdown,
- *   isOrderBookingsBreakdownClosed,
+ *   isOrderBookingsClosed,
  *   mergeBookingBreakdown,
  * } from "@cfs/utilities/bookings";
  * ```
@@ -198,23 +198,42 @@ export function calculateBookingBreakdown(
 }
 
 /**
+ * Per-booking closure rule.
+ *
+ * `quoted + reserved + prepped` must always be zero. The treatment of `out`
+ * depends on `booking.type`:
+ *
+ * - `rental`: `out` is in-flight — units must be returned (or lost/damaged)
+ *   before the booking is closed.
+ * - any other type (`sale`, defensively `service`/`surcharge`): `out` is
+ *   terminal — checkout is delivery and the units don't come back. The
+ *   booking can sit in `out` indefinitely without blocking completion.
+ *
+ * Sale items still expose Return/Lost/Damaged actions in the picker (a sold
+ * item *can* be returned for credit and lost/damaged-in-transit is real) —
+ * they're available, just not required for closure.
+ */
+export function isBookingClosed(b: Pick<Booking, "type" | "breakdown">): boolean {
+  const { quoted, reserved, prepped, out } = b.breakdown;
+  if (quoted + reserved + prepped !== 0) return false;
+  if (b.type === "rental" && out !== 0) return false;
+  return true;
+}
+
+/**
  * Predicate: is the order fully closed?
  *
- * An order is closed when no quantity is in a non-terminal state
- * (`quoted + reserved + prepped + out === 0`) AND at least one booking has
- * been recorded (`total > 0`). The total guard prevents auto-completing an
- * empty order whose bookings_breakdown is all zeros simply because it has no
- * bookings yet.
+ * An order is closed when every booking is closed (per `isBookingClosed`)
+ * and the order has at least one booking. The non-empty guard prevents
+ * auto-completing an empty order simply because it has nothing in flight.
  *
- * Drives the auto-cascade rule in `update-booking`: when this predicate
- * flips to true after applying a delta, the order's status is set to
+ * Drives the auto-cascade in the booking write path: when this predicate
+ * flips to true after applying booking deltas, the order's status is set to
  * "complete" in the same Firestore transaction.
  */
-export function isOrderBookingsBreakdownClosed(
-  orderBreakdown: Order["bookings_breakdown"],
+export function isOrderBookingsClosed(
+  bookings: ReadonlyArray<Pick<Booking, "type" | "breakdown">>,
 ): boolean {
-  const open = orderBreakdown.quoted + orderBreakdown.reserved
-    + orderBreakdown.prepped + orderBreakdown.out;
-  const total = open + orderBreakdown.returned + orderBreakdown.lost + orderBreakdown.damaged;
-  return total > 0 && open === 0;
+  if (bookings.length === 0) return false;
+  return bookings.every(isBookingClosed);
 }
