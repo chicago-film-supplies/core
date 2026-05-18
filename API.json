@@ -4,7 +4,7 @@
   "entrypoints": [
     {
       "entrypoint": "@cfs/utilities/bookings",
-      "moduleDoc": "Pure helpers over the booking breakdown shape and the order's denormalized\nroll-up. Used both server-side (api-cloudrun) and client-side (manager) so\nthe warehouse picker sees instant optimistic updates and the order detail\npage can compute \"is this order done?\" without a round-trip.\n\n```ts\nimport {\n  sumBookingBreakdown,\n  isOrderBookingsBreakdownClosed,\n  mergeBookingBreakdown,\n} from \"@cfs/utilities/bookings\";\n```",
+      "moduleDoc": "Pure helpers over the booking breakdown shape and the order's denormalized\nroll-up. Used both server-side (api-cloudrun) and client-side (manager) so\nthe warehouse picker sees instant optimistic updates and the order detail\npage can compute \"is this order done?\" without a round-trip.\n\n```ts\nimport {\n  sumBookingBreakdown,\n  isOrderBookingsClosed,\n  mergeBookingBreakdown,\n} from \"@cfs/utilities/bookings\";\n```",
       "symbols": [
         {
           "kind": "variable",
@@ -50,9 +50,17 @@
         },
         {
           "kind": "function",
-          "name": "isOrderBookingsBreakdownClosed",
-          "signature": "isOrderBookingsBreakdownClosed(orderBreakdown: indexedAccess): boolean",
-          "doc": "Predicate: is the order fully closed?\n\nAn order is closed when no quantity is in a non-terminal state\n(`quoted + reserved + prepped + out === 0`) AND at least one booking has\nbeen recorded (`total > 0`). The total guard prevents auto-completing an\nempty order whose bookings_breakdown is all zeros simply because it has no\nbookings yet.\n\nDrives the auto-cascade rule in `update-booking`: when this predicate\nflips to true after applying a delta, the order's status is set to\n\"complete\" in the same Firestore transaction.",
+          "name": "isBookingClosed",
+          "signature": "isBookingClosed(b: Pick<Booking, \"type\" | \"breakdown\">): boolean",
+          "doc": "Per-booking closure rule.\n\n`quoted + reserved + prepped` must always be zero. The treatment of `out`\ndepends on `booking.type`:\n\n- `rental`: `out` is in-flight — units must be returned (or lost/damaged)\n  before the booking is closed.\n- any other type (`sale`, defensively `service`/`surcharge`): `out` is\n  terminal — checkout is delivery and the units don't come back. The\n  booking can sit in `out` indefinitely without blocking completion.\n\nSale items still expose Return/Lost/Damaged actions in the picker (a sold\nitem *can* be returned for credit and lost/damaged-in-transit is real) —\nthey're available, just not required for closure.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isOrderBookingsClosed",
+          "signature": "isOrderBookingsClosed(bookings: ReadonlyArray<Pick<Booking, \"type\" | \"breakdown\">>): boolean",
+          "doc": "Predicate: is the order fully closed?\n\nAn order is closed when every booking is closed (per `isBookingClosed`)\nand the order has at least one booking. The non-empty guard prevents\nauto-completing an empty order simply because it has nothing in flight.\n\nDrives the auto-cascade in the booking write path: when this predicate\nflips to true after applying booking deltas, the order's status is set to\n\"complete\" in the same Firestore transaction.",
           "paramTags": [],
           "returnsTag": null
         },

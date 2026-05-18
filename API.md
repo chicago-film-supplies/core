@@ -12,7 +12,7 @@ page can compute "is this order done?" without a round-trip.
 ```ts
 import {
   sumBookingBreakdown,
-  isOrderBookingsBreakdownClosed,
+  isOrderBookingsClosed,
   mergeBookingBreakdown,
 } from "@cfs/utilities/bookings";
 ```
@@ -82,18 +82,33 @@ Use as the seed for new orders and as the target shape for fresh bookings.
 const order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };
 ```
 
-### `isOrderBookingsBreakdownClosed(orderBreakdown: indexedAccess): boolean`
+### `isBookingClosed(b: Pick<Booking, "type" | "breakdown">): boolean`
+
+Per-booking closure rule.
+
+`quoted + reserved + prepped` must always be zero. The treatment of `out`
+depends on `booking.type`:
+
+- `rental`: `out` is in-flight — units must be returned (or lost/damaged)
+  before the booking is closed.
+- any other type (`sale`, defensively `service`/`surcharge`): `out` is
+  terminal — checkout is delivery and the units don't come back. The
+  booking can sit in `out` indefinitely without blocking completion.
+
+Sale items still expose Return/Lost/Damaged actions in the picker (a sold
+item *can* be returned for credit and lost/damaged-in-transit is real) —
+they're available, just not required for closure.
+
+### `isOrderBookingsClosed(bookings: ReadonlyArray<Pick<Booking, "type" | "breakdown">>): boolean`
 
 Predicate: is the order fully closed?
 
-An order is closed when no quantity is in a non-terminal state
-(`quoted + reserved + prepped + out === 0`) AND at least one booking has
-been recorded (`total > 0`). The total guard prevents auto-completing an
-empty order whose bookings_breakdown is all zeros simply because it has no
-bookings yet.
+An order is closed when every booking is closed (per `isBookingClosed`)
+and the order has at least one booking. The non-empty guard prevents
+auto-completing an empty order simply because it has nothing in flight.
 
-Drives the auto-cascade rule in `update-booking`: when this predicate
-flips to true after applying a delta, the order's status is set to
+Drives the auto-cascade in the booking write path: when this predicate
+flips to true after applying booking deltas, the order's status is set to
 "complete" in the same Firestore transaction.
 
 ### `mergeBookingBreakdown(current: indexedAccess, patch: Partial<indexedAccess> | undefined): indexedAccess`
