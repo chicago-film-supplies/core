@@ -43,10 +43,15 @@ export const cards: TypesenseCollectionConfig = {
       { name: "destination.coordinates", type: "geopoint", optional: true },
 
       // Polymorphic sources — object[] with nested facets for
-      // "all cards touching order X" and "all cards touching any order"
+      // "all cards touching order X" and "all cards touching any order".
+      // The `sources` array is required (always present) but may be empty:
+      // manual to-do cards legitimately carry no source. Typesense can't
+      // flatten the nested facets out of an empty array, so the nested
+      // `sources.*` fields are optional — otherwise a source-less card 400s
+      // on upsert ("Field `sources.uid` ... not found in the document").
       { name: "sources", type: "object[]" },
-      { name: "sources.collection", type: "string[]", facet: true, index: true },
-      { name: "sources.uid", type: "string[]", facet: true, index: true },
+      { name: "sources.collection", type: "string[]", facet: true, index: true, optional: true },
+      { name: "sources.uid", type: "string[]", facet: true, index: true, optional: true },
 
       // People
       { name: "uid_thread", type: "string", facet: false, index: true },
