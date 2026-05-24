@@ -109,6 +109,46 @@ export const OrderDates: z.ZodType<OrderDatesType> = z.object({
 });
 
 /**
+ * Order dates with Firestore timestamp companions — the persisted, per-destination
+ * date set. Each destination on an order/fulfillment/invoice owns one of these;
+ * there is no order-level rollup (derive on demand via deriveOrderDateEnvelope).
+ */
+export interface OrderDocDatesType {
+  delivery_start: string | null;
+  delivery_start_fs: FirestoreTimestampType | null;
+  delivery_end: string | null;
+  delivery_end_fs: FirestoreTimestampType | null;
+  collection_start: string | null;
+  collection_start_fs: FirestoreTimestampType | null;
+  collection_end: string | null;
+  collection_end_fs: FirestoreTimestampType | null;
+  charge_start: string | null;
+  charge_start_fs: FirestoreTimestampType | null;
+  charge_end: string | null;
+  charge_end_fs: FirestoreTimestampType | null;
+  days_active: number | null;
+  days_charged: number | null;
+}
+
+/** Zod schema for order dates with Firestore timestamp companions. */
+export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
+  delivery_start: chicagoInstant().nullable().default(null),
+  delivery_start_fs: FirestoreTimestamp.nullable().default(null),
+  delivery_end: chicagoInstant().nullable().default(null),
+  delivery_end_fs: FirestoreTimestamp.nullable().default(null),
+  collection_start: chicagoInstant().nullable().default(null),
+  collection_start_fs: FirestoreTimestamp.nullable().default(null),
+  collection_end: chicagoInstant().nullable().default(null),
+  collection_end_fs: FirestoreTimestamp.nullable().default(null),
+  charge_start: chicagoInstant().nullable().default(null),
+  charge_start_fs: FirestoreTimestamp.nullable().default(null),
+  charge_end: chicagoInstant().nullable().default(null),
+  charge_end_fs: FirestoreTimestamp.nullable().default(null),
+  days_active: z.int().nullable().default(null),
+  days_charged: z.int().nullable().default(null),
+});
+
+/**
  * Contact reference embedded in a destination endpoint.
  * When present (not null), uid and first_name are required. `name` is the
  * server-derived display string (see `deriveName` in common.ts) — populated
@@ -190,6 +230,7 @@ export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.s
  * side. Both default to false (we deliver / we collect).
  */
 export interface DestinationType {
+  dates: OrderDatesType;
   delivery: DestinationEndpointType;
   collection: DestinationEndpointType;
   customer_collecting?: boolean;
@@ -198,6 +239,7 @@ export interface DestinationType {
 
 /** Zod schema for a destination pair. */
 export const Destination: z.ZodType<DestinationType> = z.object({
+  dates: OrderDates,
   delivery: DestinationEndpoint,
   collection: DestinationEndpoint,
   customer_collecting: z.boolean().optional(),
@@ -208,6 +250,7 @@ export const Destination: z.ZodType<DestinationType> = z.object({
  * Document-level destination pair. See `DestinationType` for flag semantics.
  */
 export interface DocDestinationType {
+  dates: OrderDocDatesType;
   delivery: DocDestinationEndpointType;
   collection: DocDestinationEndpointType;
   customer_collecting: boolean;
@@ -216,6 +259,7 @@ export interface DocDestinationType {
 
 /** Zod schema for a document-level destination pair. */
 export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
+  dates: OrderDocDates,
   delivery: DocDestinationEndpoint,
   collection: DocDestinationEndpoint,
   customer_collecting: z.boolean().default(false),
@@ -366,7 +410,6 @@ export interface CreateOrderInputType {
   uid: string;
   organization: { uid: string };
   status: OrderStatusType;
-  dates: OrderDatesType;
   tax_profile: TaxProfileType;
   destinations: DestinationType[];
   items?: OrderItemType[];
@@ -379,7 +422,6 @@ export const CreateOrderInput: z.ZodType<CreateOrderInputType> = z.object({
   uid: z.string(),
   organization: z.object({ uid: z.string() }),
   status: OrderStatus,
-  dates: OrderDates,
   tax_profile: TaxProfileEnum,
   destinations: z.array(Destination).min(1, "At least one destination is required"),
   items: z.array(OrderItem)
@@ -399,7 +441,6 @@ export interface UpdateOrderInputType {
   uid?: string;
   organization?: { uid: string };
   status?: OrderStatusType;
-  dates?: OrderDatesType;
   tax_profile?: TaxProfileType;
   destinations?: DestinationType[];
   items?: OrderItemType[];
@@ -413,7 +454,6 @@ export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
   uid: z.string().optional(),
   organization: z.object({ uid: z.string() }).optional(),
   status: OrderStatus.optional(),
-  dates: OrderDates.optional(),
   tax_profile: TaxProfileEnum.optional(),
   destinations: z.array(Destination).min(1, "At least one destination is required").optional(),
   items: z.array(OrderItem)
@@ -572,42 +612,6 @@ export const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationI
   OrderDocTransactionFeeItem,
 ]);
 
-/** Order dates with Firestore timestamp companions. */
-export interface OrderDocDatesType {
-  delivery_start: string | null;
-  delivery_start_fs: FirestoreTimestampType;
-  delivery_end: string | null;
-  delivery_end_fs: FirestoreTimestampType;
-  collection_start: string | null;
-  collection_start_fs: FirestoreTimestampType;
-  collection_end: string | null;
-  collection_end_fs: FirestoreTimestampType;
-  charge_start: string | null;
-  charge_start_fs: FirestoreTimestampType;
-  charge_end: string | null;
-  charge_end_fs: FirestoreTimestampType;
-  days_active: number | null;
-  days_charged: number | null;
-}
-
-/** Zod schema for order dates with Firestore timestamp companions. */
-export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
-  delivery_start: chicagoInstant().nullable().default(null),
-  delivery_start_fs: FirestoreTimestamp,
-  delivery_end: chicagoInstant().nullable().default(null),
-  delivery_end_fs: FirestoreTimestamp,
-  collection_start: chicagoInstant().nullable().default(null),
-  collection_start_fs: FirestoreTimestamp,
-  collection_end: chicagoInstant().nullable().default(null),
-  collection_end_fs: FirestoreTimestamp,
-  charge_start: chicagoInstant().nullable().default(null),
-  charge_start_fs: FirestoreTimestamp,
-  charge_end: chicagoInstant().nullable().default(null),
-  charge_end_fs: FirestoreTimestamp,
-  days_active: z.int().nullable().default(null),
-  days_charged: z.int().nullable().default(null),
-});
-
 /** Union of all item types stored in the order document. */
 export type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType;
 
@@ -661,7 +665,6 @@ export interface Order {
     xero_id: string | null;
     billing_address?: AddressType | null;
   };
-  dates: OrderDocDatesType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
   tax_profile: TaxProfileType;
@@ -670,6 +673,7 @@ export interface Order {
   query_by_invoices: string[];
   query_by_items: string[];
   query_by_contacts: string[];
+  query_by_dates: string[];
   /**
    * Roll-up of breakdown across all bookings on this order. Mirrors the keys
    * of `stock-summaries.bookings_breakdown` and `booking.breakdown` but
@@ -707,7 +711,6 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   number: z.int(),
   status: OrderStatus,
   organization: OrderDocOrganization,
-  dates: OrderDocDates,
   destinations: z.array(DocDestination).min(1),
   items: z.array(OrderDocItem).default([]),
   tax_profile: TaxProfileEnum.default("tax_applied"),
@@ -716,6 +719,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   query_by_invoices: z.array(z.string()).default([]),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
+  query_by_dates: z.array(z.string()).default([]),
   bookings_breakdown: z.strictObject({
     quoted: z.number().default(0),
     reserved: z.number().default(0),
@@ -737,7 +741,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   title: "Order",
   collection: "orders",
   displayDefaults: {
-    columns: ["number", "organization.name", "subject", "dates.delivery_start", "dates.collection_start", "status"],
+    columns: ["number", "organization.name", "subject", "status"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },

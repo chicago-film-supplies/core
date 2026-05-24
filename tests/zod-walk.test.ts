@@ -11,7 +11,7 @@ import {
 import { FirestoreTimestamp } from "../src/common.ts";
 import { chicagoInstant, chicagoStartOfDay } from "../src/_datetime.ts";
 import { InvoiceSchema } from "../src/invoice.ts";
-import { OrderSchema } from "../src/order.ts";
+import { DocDestination } from "../src/order.ts";
 import { TransactionSchema } from "../src/transaction.ts";
 
 // ── isDateField on production schemas using the Chicago datetime factories ──
@@ -24,8 +24,8 @@ Deno.test("isDateField detects chicagoStartOfDay on invoice.due_date (optional)"
   assertEquals(isDateField(InvoiceSchema, "due_date"), true);
 });
 
-Deno.test("isDateField detects chicagoInstant on order.dates.delivery_start (nullable)", () => {
-  assertEquals(isDateField(OrderSchema, "dates.delivery_start"), true);
+Deno.test("isDateField detects chicagoInstant on destination dates.delivery_start (nullable)", () => {
+  assertEquals(isDateField(DocDestination, "dates.delivery_start"), true);
 });
 
 Deno.test("isDateField detects chicagoInstant on transaction.date (with pipe-level meta)", () => {

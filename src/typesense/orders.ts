@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for orders. */
 export const orders: TypesenseCollectionConfig = {
   alias: "orders",
-  version: 22,
+  version: 23,
   firestoreCollection: "orders",
-  collectionName: "orders_v22",
+  collectionName: "orders_v23",
   schema: {
-    name: "orders_v22",
+    name: "orders_v23",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -39,6 +39,7 @@ export const orders: TypesenseCollectionConfig = {
       { name: "dates.charge_end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "dates.days_active", type: "int32", sort: true, optional: true },
       { name: "dates.days_charged", type: "int32", sort: true, optional: true },
+      { name: "query_by_dates", type: "string[]", facet: true, optional: true },
       { name: "destinations", type: "object[]" },
       { name: "destinations.delivery", type: "object[]", optional: true },
       ...typesenseAddressFields("destinations.delivery.address", { array: true }),
@@ -58,6 +59,15 @@ export const orders: TypesenseCollectionConfig = {
       { name: "destinations.collection.contact.middle_name", type: "string[]", stem: true, optional: true },
       { name: "destinations.collection.contact.last_name", type: "string[]", stem: true, optional: true },
       { name: "destinations.collection.contact.pronunciation", type: "string[]", stem: true, optional: true },
+      { name: "destinations.dates", type: "object[]", optional: true },
+      { name: "destinations.dates.delivery_start_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.delivery_end_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.collection_start_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.collection_end_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.charge_start_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.charge_end_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.days_active", type: "int32[]", optional: true },
+      { name: "destinations.dates.days_charged", type: "int32[]", optional: true },
       { name: "totals", type: "object" },
       { name: "totals.discount_amount", type: "float", optional: true },
       { name: "totals.subtotal", type: "float", optional: true },

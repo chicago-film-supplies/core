@@ -21,8 +21,6 @@ import {
 import {
   DocDestination,
   type DocDestinationType,
-  OrderDocDates,
-  type OrderDocDatesType,
 } from "./order.ts";
 
 const FULFILLMENT_ORDER_STATUSES = [
@@ -148,13 +146,13 @@ export interface Fulfillment {
     uid: string | null;
     name: string;
   };
-  dates: OrderDocDatesType;
   destinations: DocDestinationType[];
   items: FulfillmentItemType[];
   subject: string;
   reference: string | null;
   query_by_items: string[];
   query_by_contacts: string[];
+  query_by_dates: string[];
   /**
    * Optimistic-concurrency token. Bumped on every write — projection writes
    * (createOrder, updateOrder, opportunity webhook) and picker writes (PUT
@@ -171,21 +169,21 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   number: z.int(),
   status: FulfillmentOrderStatus,
   organization: FulfillmentOrganization,
-  dates: OrderDocDates,
   destinations: z.array(DocDestination).min(1),
   items: z.array(FulfillmentItem).default([]),
   subject: z.string().default(""),
   reference: z.string().max(255).nullable().default(null),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
+  query_by_dates: z.array(z.string()).default([]),
   version: z.int().min(0).default(0),
   ...TimestampFields,
 }).meta({
   title: "Fulfillment",
   collection: "fulfillments",
   displayDefaults: {
-    columns: ["number", "organization.name", "subject", "dates.delivery_start", "dates.collection_start", "status"],
+    columns: ["number", "organization.name", "subject", "status"],
     filters: { status: [] },
-    sort: { column: "dates.delivery_start", direction: "desc" },
+    sort: { column: "number", direction: "desc" },
   },
 }) as z.ZodType<Fulfillment>;

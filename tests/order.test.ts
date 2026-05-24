@@ -18,9 +18,33 @@ const validDates = {
   charge_end: "2026-03-10T00:00:00Z",
 };
 
+const validDocDates = {
+  ...datesBase,
+  delivery_start: "2026-03-01T00:00:00Z",
+  delivery_start_fs: mockTimestamp,
+  delivery_end: "2026-03-01T00:00:00Z",
+  delivery_end_fs: mockTimestamp,
+  collection_start: "2026-03-10T00:00:00Z",
+  collection_start_fs: mockTimestamp,
+  collection_end: "2026-03-10T00:00:00Z",
+  collection_end_fs: mockTimestamp,
+  charge_start: "2026-03-01T00:00:00Z",
+  charge_start_fs: mockTimestamp,
+  charge_end: "2026-03-10T00:00:00Z",
+  charge_end_fs: mockTimestamp,
+};
+
+// Each destination now owns its own full date range (delivery/collection +
+// optional charge override). There is no order-level `dates` anymore.
 const validDestination = {
+  dates: validDates,
   delivery: { uid: "test-dest-1" },
   collection: { uid: "test-dest-2" },
+};
+
+const validDocDestination = {
+  ...destBase,
+  dates: validDocDates,
 };
 
 // ── CreateOrderInput ─────────────────────────────────────────────
@@ -30,7 +54,6 @@ Deno.test("CreateOrderInput validates a complete input", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
@@ -47,7 +70,6 @@ Deno.test("CreateOrderInput rejects empty destinations", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [],
   };
@@ -59,7 +81,6 @@ Deno.test("CreateOrderInput rejects invalid status", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "invalid",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
   };
@@ -71,26 +92,24 @@ Deno.test("CreateOrderInput rejects invalid tax_profile", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "invalid",
     destinations: [validDestination],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, false);
 });
 
-Deno.test("CreateOrderInput strips extra properties on dates", () => {
+Deno.test("CreateOrderInput strips extra properties on destination dates", () => {
   const input = {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: { ...validDates, extra_field: "nope" },
     tax_profile: "tax_applied",
-    destinations: [validDestination],
+    destinations: [{ ...validDestination, dates: { ...validDates, extra_field: "nope" } }],
   };
   const result = CreateOrderInput.safeParse(input);
   assertEquals(result.success, true);
   if (result.success) {
-    assertEquals("extra_field" in result.data.dates, false);
+    assertEquals("extra_field" in result.data.destinations[0].dates, false);
   }
 });
 
@@ -99,9 +118,9 @@ Deno.test("CreateOrderInput strips extra properties on destination endpoint", ()
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [{
+      dates: validDates,
       delivery: { uid: "test-dest-1", bonus: true },
       collection: { uid: "test-dest-2" },
     }],
@@ -118,9 +137,9 @@ Deno.test("CreateOrderInput accepts destination with null contact", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [{
+      dates: validDates,
       delivery: { uid: "test-dest-1", contact: null },
       collection: { uid: "test-dest-2" },
     }],
@@ -133,9 +152,9 @@ Deno.test("CreateOrderInput accepts destination with complete contact", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [{
+      dates: validDates,
       delivery: { uid: "test-dest-1", contact: { uid: "test-contact-1", first_name: "Jane", last_name: "Doe", name: "Jane Doe", phones: ["312-555-0100"] } },
       collection: { uid: "test-dest-2" },
     }],
@@ -148,9 +167,9 @@ Deno.test("CreateOrderInput rejects destination contact missing first_name", () 
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [{
+      dates: validDates,
       delivery: { uid: "test-dest-1", contact: { uid: "test-contact-1" } },
       collection: { uid: "test-dest-2" },
     }],
@@ -163,9 +182,9 @@ Deno.test("CreateOrderInput rejects destination contact missing uid", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [{
+      dates: validDates,
       delivery: { uid: "test-dest-1", contact: { name: "Jane" } },
       collection: { uid: "test-dest-2" },
     }],
@@ -178,7 +197,6 @@ Deno.test("CreateOrderInput accepts per-pair customer_collecting/returning", () 
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [
       { ...validDestination, customer_collecting: true, customer_returning: false },
@@ -190,6 +208,7 @@ Deno.test("CreateOrderInput accepts per-pair customer_collecting/returning", () 
 
 Deno.test("DocDestination defaults customer_collecting/returning to false", () => {
   const result = DocDestination.safeParse({
+    dates: validDocDates,
     delivery: { uid: null, address: null, instructions: null, contact: null },
     collection: { uid: null, address: null, instructions: null, contact: null },
   });
@@ -205,7 +224,6 @@ Deno.test("CreateOrderInput rejects invalid item inclusion_type", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
@@ -221,7 +239,6 @@ Deno.test("CreateOrderInput accepts null inclusion_type", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
@@ -237,7 +254,6 @@ Deno.test("CreateOrderInput rejects invalid item price formula", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
@@ -253,7 +269,6 @@ Deno.test("CreateOrderInput rejects invalid item discount type", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
@@ -269,7 +284,6 @@ Deno.test("CreateOrderInput accepts item with discount and taxes", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
@@ -294,7 +308,6 @@ Deno.test("CreateOrderInput accepts item with null discount", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
@@ -310,7 +323,6 @@ Deno.test("CreateOrderInput rejects float quantity on items", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
@@ -326,7 +338,6 @@ Deno.test("CreateOrderInput rejects items not starting with destination", () => 
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [{ uid: "test-item-1", type: "rental", path: [], name: "Camera" }],
@@ -339,7 +350,6 @@ Deno.test("CreateOrderInput accepts empty items array", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [],
@@ -352,7 +362,6 @@ Deno.test("CreateOrderInput rejects items without type", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [{ uid: "test-item-1", path: [], name: "Camera" }],
@@ -365,7 +374,6 @@ Deno.test("CreateOrderInput rejects items without path", () => {
     uid: "test-order-1",
     organization: { uid: "test-org-1" },
     status: "draft",
-    dates: validDates,
     tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [{ uid: "dest-1", type: "destination", name: "Chicago" }],
@@ -386,26 +394,6 @@ Deno.test("UpdateOrderInput rejects missing version", () => {
 
 // ── OrderSchema (document) ───────────────────────────────────────
 
-const validDocDestination = {
-  ...destBase,
-};
-
-const validDocDates = {
-  ...datesBase,
-  delivery_start: "2026-03-01T00:00:00Z",
-  delivery_start_fs: mockTimestamp,
-  delivery_end: "2026-03-01T00:00:00Z",
-  delivery_end_fs: mockTimestamp,
-  collection_start: "2026-03-10T00:00:00Z",
-  collection_start_fs: mockTimestamp,
-  collection_end: "2026-03-10T00:00:00Z",
-  collection_end_fs: mockTimestamp,
-  charge_start: "2026-03-01T00:00:00Z",
-  charge_start_fs: mockTimestamp,
-  charge_end: "2026-03-10T00:00:00Z",
-  charge_end_fs: mockTimestamp,
-};
-
 const minimalDoc = {
   ...orderBase,
   uid: "test-order-1",
@@ -416,7 +404,6 @@ const minimalDoc = {
     name: "Test Acme Corp",
     xero_id: null,
   },
-  dates: validDocDates,
   destinations: [validDocDestination],
   totals: {
     ...totalsBase,
@@ -512,10 +499,10 @@ Deno.test("OrderSchema rejects additional properties on totals", () => {
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
-Deno.test("OrderSchema rejects additional properties on dates", () => {
+Deno.test("OrderSchema rejects additional properties on destination dates", () => {
   const doc = {
     ...minimalDoc,
-    dates: { ...validDocDates, extra: "nope" },
+    destinations: [{ ...validDocDestination, dates: { ...validDocDates, extra: "nope" } }],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -686,6 +673,7 @@ Deno.test("OrderSchema validates destination with contact", () => {
   const doc = {
     ...minimalDoc,
     destinations: [{
+      dates: validDocDates,
       delivery: {
         uid: "test-dest-1",
         address: {
@@ -721,6 +709,7 @@ Deno.test("OrderSchema rejects doc destination contact missing name", () => {
   const doc = {
     ...minimalDoc,
     destinations: [{
+      dates: validDocDates,
       delivery: {
         uid: "test-dest-1",
         address: null,
@@ -742,6 +731,7 @@ Deno.test("OrderSchema rejects doc destination contact with short phone", () => 
   const doc = {
     ...minimalDoc,
     destinations: [{
+      dates: validDocDates,
       delivery: {
         uid: "test-dest-1",
         address: null,

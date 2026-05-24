@@ -8,8 +8,26 @@ const totalsBase = invoiceBase.totals as Record<string, unknown>;
 const lineItemBase = getInitialValues(InvoiceDocLineItemSchema) as Record<string, unknown>;
 const priceBase = (lineItemBase as { price: Record<string, unknown> }).price;
 
+const validDocDates = {
+  delivery_start: "2026-03-01T00:00:00.000-06:00",
+  delivery_start_fs: mockTimestamp,
+  delivery_end: "2026-03-01T00:00:00.000-06:00",
+  delivery_end_fs: mockTimestamp,
+  collection_start: "2026-03-10T00:00:00.000-06:00",
+  collection_start_fs: mockTimestamp,
+  collection_end: "2026-03-10T00:00:00.000-06:00",
+  collection_end_fs: mockTimestamp,
+  charge_start: "2026-03-01T00:00:00.000-06:00",
+  charge_start_fs: mockTimestamp,
+  charge_end: "2026-03-10T00:00:00.000-06:00",
+  charge_end_fs: mockTimestamp,
+  days_active: null,
+  days_charged: null,
+};
+
 const validDestination = {
   uid_order: "test-order-1",
+  dates: validDocDates,
   delivery: { uid: null, address: null, instructions: null, contact: null },
   collection: { uid: null, address: null, instructions: null, contact: null },
 };

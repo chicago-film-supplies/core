@@ -29,6 +29,7 @@ import {
   type DiscountType,
   DocDestinationEndpoint,
   type DocDestinationType,
+  OrderDocDates,
   OrderDocDestinationItem,
   type OrderDocDestinationItemType,
   OrderDocGroupItem,
@@ -210,6 +211,7 @@ const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
  * Destination pair on an invoice — mirrors the order's `DocDestinationType`
  * with a `uid_order` scope field so multi-order invoices can carry pairs
  * from several orders and have them selectively synced per source order.
+ * Carries `dates` (rendered on the invoice) snapshotted from the source order.
  */
 export interface InvoiceDocDestinationType extends DocDestinationType {
   uid_order: string;
@@ -217,6 +219,7 @@ export interface InvoiceDocDestinationType extends DocDestinationType {
 
 export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z.strictObject({
   uid_order: z.string(),
+  dates: OrderDocDates,
   delivery: DocDestinationEndpoint,
   collection: DocDestinationEndpoint,
   customer_collecting: z.boolean().default(false),
