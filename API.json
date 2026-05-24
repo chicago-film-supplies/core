@@ -850,6 +850,12 @@
           "doc": "A single line item in an order (product, destination, group, surcharge, or fee).\nLoose interface compatible with all OrderDocItemType members — utility functions\nuse type guards (isPriceableItem, isTransactionFeeItem) before accessing\nmember-specific fields."
         },
         {
+          "kind": "interface",
+          "name": "OrderDateEnvelope",
+          "declaration": "interface OrderDateEnvelope {\n  delivery_start: string | null;\n  delivery_start_fs: FirestoreTimestampType | null;\n  delivery_end: string | null;\n  delivery_end_fs: FirestoreTimestampType | null;\n  collection_start: string | null;\n  collection_start_fs: FirestoreTimestampType | null;\n  collection_end: string | null;\n  collection_end_fs: FirestoreTimestampType | null;\n  charge_start: string | null;\n  charge_start_fs: FirestoreTimestampType | null;\n  charge_end: string | null;\n  charge_end_fs: FirestoreTimestampType | null;\n  days_active: number | null;\n  days_charged: number | null;\n}",
+          "doc": "Order-level date envelope derived on demand from per-destination dates.\n\nMirrors the field set of the old top-level `order.dates`, except the `_fs`\ncompanions are nullable: utilities can't mint a Firestore Timestamp, so each\nboundary copies the `_fs` from whichever destination owns the extreme value\n(and is null when no destination sets that boundary)."
+        },
+        {
           "kind": "typeAlias",
           "name": "OrderTotals",
           "declaration": "type OrderTotals = OrderDocTotalsType;",
@@ -908,6 +914,14 @@
           "name": "buildPackingList",
           "signature": "buildPackingList(items: LineItem[], consolidated?: boolean, destinationUid?: string): PackingListItem[] | ConsolidatedItem[]",
           "doc": "Build a packing list from order line items.\n\nWhen `consolidated` is true, deduplicates by product UID and sums quantities\n(delegates to {@link consolidateItems}). When false (default), returns\nexpanded entries with `group_name` preserved.\n\nPass `destinationUid` to scope to a single destination; omit for the full order.\n\nExcludes structural rows, surcharges, transaction fees, and services.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "buildQueryByDates",
+          "signature": "buildQueryByDates(destinations: ReadonlyArray<QueryByDatesDestination>): string[]",
+          "doc": "Deduped, ascending list of Chicago `YYYY-MM-DD` boundary days across every\ndestination's delivery + collection windows. Server-maintained on the order\n(and fulfillment) doc as `query_by_dates`, reserved for exact-day Firestore\n`array-contains` lookups. Charge dates are billing-only and excluded.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -980,6 +994,14 @@
           "name": "consolidateItems",
           "signature": "consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]",
           "doc": "Deduplicate line items by product UID and sum quantities.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveOrderDateEnvelope",
+          "signature": "deriveOrderDateEnvelope(destinations: ReadonlyArray<Pick<DocDestinationType, \"dates\">>): OrderDateEnvelope",
+          "doc": "Collapse per-destination dates into one order-level envelope.\n\nThere is no persisted order-level `dates` anymore — every destination owns\nits own range. This derives a bounding envelope on demand for the consumers\nthat still want one order-level range: the Typesense projection's sort key\nand the quote / Xero / Calendar / Trello exporters.\n\n`*_start` boundaries take the earliest value across destinations, `*_end`\nboundaries take the latest; `days_active` / `days_charged` take the largest\nnon-null value. For a single-destination order the envelope equals that\ndestination's dates exactly.",
           "paramTags": [],
           "returnsTag": null
         },

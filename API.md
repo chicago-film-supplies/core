@@ -1089,6 +1089,34 @@ interface LineItem {
 }
 ```
 
+### `OrderDateEnvelope`
+
+Order-level date envelope derived on demand from per-destination dates.
+
+Mirrors the field set of the old top-level `order.dates`, except the `_fs`
+companions are nullable: utilities can't mint a Firestore Timestamp, so each
+boundary copies the `_fs` from whichever destination owns the extreme value
+(and is null when no destination sets that boundary).
+
+```ts
+interface OrderDateEnvelope {
+  delivery_start: string | null;
+  delivery_start_fs: FirestoreTimestampType | null;
+  delivery_end: string | null;
+  delivery_end_fs: FirestoreTimestampType | null;
+  collection_start: string | null;
+  collection_start_fs: FirestoreTimestampType | null;
+  collection_end: string | null;
+  collection_end_fs: FirestoreTimestampType | null;
+  charge_start: string | null;
+  charge_start_fs: FirestoreTimestampType | null;
+  charge_end: string | null;
+  charge_end_fs: FirestoreTimestampType | null;
+  days_active: number | null;
+  days_charged: number | null;
+}
+```
+
 ### `OrderTotals`
 
 ```ts
@@ -1186,6 +1214,13 @@ Pass `destinationUid` to scope to a single destination; omit for the full order.
 
 Excludes structural rows, surcharges, transaction fees, and services.
 
+### `buildQueryByDates(destinations: ReadonlyArray<QueryByDatesDestination>): string[]`
+
+Deduped, ascending list of Chicago `YYYY-MM-DD` boundary days across every
+destination's delivery + collection windows. Server-maintained on the order
+(and fulfillment) doc as `query_by_dates`, reserved for exact-day Firestore
+`array-contains` lookups. Charge dates are billing-only and excluded.
+
 ### `calculateItemDiscount(item: LineItem): number`
 
 Calculate the discount dollar amount for a single line item.
@@ -1259,6 +1294,20 @@ and `getGroupItems` can rely on path-prefix matching alone.
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
 Deduplicate line items by product UID and sum quantities.
+
+### `deriveOrderDateEnvelope(destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>): OrderDateEnvelope`
+
+Collapse per-destination dates into one order-level envelope.
+
+There is no persisted order-level `dates` anymore — every destination owns
+its own range. This derives a bounding envelope on demand for the consumers
+that still want one order-level range: the Typesense projection's sort key
+and the quote / Xero / Calendar / Trello exporters.
+
+`*_start` boundaries take the earliest value across destinations, `*_end`
+boundaries take the latest; `days_active` / `days_charged` take the largest
+non-null value. For a single-destination order the envelope equals that
+destination's dates exactly.
 
 ### `getDefaultChargeDays(dates: OrderDatesType, holidays: string[]): number | null`
 
