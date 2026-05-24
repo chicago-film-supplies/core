@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for invoices. */
 export const invoices: TypesenseCollectionConfig = {
   alias: "invoices",
-  version: 7,
+  version: 8,
   firestoreCollection: "invoices",
-  collectionName: "invoices_v7",
+  collectionName: "invoices_v8",
   schema: {
-    name: "invoices_v7",
+    name: "invoices_v8",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -30,6 +30,19 @@ export const invoices: TypesenseCollectionConfig = {
       { name: "organization.tax_profile", type: "string", facet: true, optional: true },
       { name: "organization.xero_id", type: "string", optional: true },
       ...typesenseAddressFields("organization.billing_address"),
+      // Per-destination dates, snapshotted from each source order onto the
+      // invoice's destination pairs (same `OrderDocDates` shape as orders, so
+      // the `_fs` Timestamp companions already exist in Firestore). Only the
+      // filterable epoch-ms arrays are projected — they back the date-range
+      // filter on /invoices ("any destination delivering in the window").
+      { name: "destinations", type: "object[]", optional: true },
+      { name: "destinations.dates", type: "object[]", optional: true },
+      { name: "destinations.dates.delivery_start_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.delivery_end_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.collection_start_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.collection_end_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.charge_start_fs", type: "int64[]", index: true, facet: false, optional: true },
+      { name: "destinations.dates.charge_end_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.uid", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },
