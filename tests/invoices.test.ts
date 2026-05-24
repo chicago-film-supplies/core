@@ -24,6 +24,20 @@ import {
   validateInvoiceItemPaths,
   validateInvoiceItemUniqueness,
 } from "../src/invoices.ts";
+import type { FirestoreTimestampType, OrderDocDatesType } from "@cfs/schemas";
+
+// Invoice destination pairs require per-destination dates; these sync helpers
+// don't read them, so a zeroed doc-dates object satisfies the type.
+const TS0 = { seconds: 0, nanoseconds: 0 } as FirestoreTimestampType;
+const NO_DOC_DATES: OrderDocDatesType = {
+  delivery_start: null, delivery_start_fs: TS0,
+  delivery_end: null, delivery_end_fs: TS0,
+  collection_start: null, collection_start_fs: TS0,
+  collection_end: null, collection_end_fs: TS0,
+  charge_start: null, charge_start_fs: TS0,
+  charge_end: null, charge_end_fs: TS0,
+  days_active: null, days_charged: null,
+};
 
 // ── Schema bases ────────────────────────────────────────────────
 
@@ -717,6 +731,7 @@ function makePair(
   } = {},
 ) {
   return {
+    dates: NO_DOC_DATES,
     delivery: { uid: deliveryUid, address: null, instructions: overrides.delivery?.instructions ?? null, contact: null },
     collection: { uid: collectionUid, address: null, instructions: overrides.collection?.instructions ?? null, contact: null },
     customer_collecting: overrides.customer_collecting ?? false,

@@ -9,6 +9,8 @@ import {
   calculateOrderTotals,
   calculateReplacementTotals,
   buildPackingList,
+  buildQueryByDates,
+  deriveOrderDateEnvelope,
   computeItemPaths,
   consolidateItems,
   validateItemPaths,
@@ -40,7 +42,7 @@ import {
   orderHasRentals,
   orderHasTax,
 } from "../src/orders.ts";
-import type { OrderDatesType, DestinationType } from "@cfs/schemas";
+import type { OrderDatesType, DestinationType, OrderDocDatesType, FirestoreTimestampType } from "@cfs/schemas";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 const priceBase = lineItemBase.price as Record<string, unknown>;
@@ -900,8 +902,17 @@ const baseEndpoint = {
   contact: { uid: "c1", first_name: "John", name: "John" },
 };
 
+// Destination-display helpers (isSameAsDeliveryDestination, getDestinationPairItemName,
+// getDestinationsLegend) don't read dates; this satisfies the now-required field.
+const NO_DATES: OrderDatesType = {
+  delivery_start: null, delivery_end: null,
+  collection_start: null, collection_end: null,
+  charge_start: null, charge_end: null,
+};
+
 Deno.test("isSameAsDeliveryDestination returns true when endpoints match", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint },
   };
@@ -910,6 +921,7 @@ Deno.test("isSameAsDeliveryDestination returns true when endpoints match", () =>
 
 Deno.test("isSameAsDeliveryDestination returns false when addresses differ", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint, address: { ...baseEndpoint.address, city: "Houston" } },
   };
@@ -918,6 +930,7 @@ Deno.test("isSameAsDeliveryDestination returns false when addresses differ", () 
 
 Deno.test("isSameAsDeliveryDestination returns false when contacts differ", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint, contact: { uid: "c2", first_name: "Jane", name: "Jane" } },
   };
@@ -926,6 +939,7 @@ Deno.test("isSameAsDeliveryDestination returns false when contacts differ", () =
 
 Deno.test("isSameAsDeliveryDestination returns false when instructions differ", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint, instructions: "Front door" },
   };
@@ -941,6 +955,7 @@ Deno.test("isSameAsDeliveryDestination returns true when both null endpoints", (
 
 Deno.test("getDestinationPairItemName uses delivery and collection names", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: { address: { name: "Warehouse A", street: "1 Main", city: "", country_name: "", full: "", postcode: "", region: "" } },
     collection: { address: { name: "Venue B", street: "2 Oak", city: "", country_name: "", full: "", postcode: "", region: "" } },
   };
@@ -950,6 +965,7 @@ Deno.test("getDestinationPairItemName uses delivery and collection names", () =>
 Deno.test("getDestinationPairItemName uses delivery only when same", () => {
   const addr = { name: "Warehouse A", street: "1 Main", city: "", country_name: "", full: "", postcode: "", region: "" };
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: { address: addr },
     collection: { address: addr },
   };
@@ -958,6 +974,7 @@ Deno.test("getDestinationPairItemName uses delivery only when same", () => {
 
 Deno.test("getDestinationPairItemName falls back to street", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: { address: { name: "", street: "1 Main St", city: "", country_name: "", full: "", postcode: "", region: "" } },
     collection: { address: { name: "", street: "2 Oak Ave", city: "", country_name: "", full: "", postcode: "", region: "" } },
   };
@@ -965,13 +982,14 @@ Deno.test("getDestinationPairItemName falls back to street", () => {
 });
 
 Deno.test("getDestinationPairItemName falls back to index", () => {
-  const dest: DestinationType = { delivery: {}, collection: {} };
+  const dest: DestinationType = { dates: NO_DATES, delivery: {}, collection: {} };
   assertEquals(getDestinationPairItemName(dest, 0), "Destination 1");
   assertEquals(getDestinationPairItemName(dest, 2), "Destination 3");
 });
 
 Deno.test("getDestinationPairItemName uses delivery when collection has no address", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: { address: { name: "Warehouse", street: "", city: "", country_name: "", full: "", postcode: "", region: "" } },
     collection: {},
   };
@@ -987,12 +1005,13 @@ Deno.test("getDestinationsLegend returns empty strings when no destinations", ()
 });
 
 Deno.test("getDestinationsLegend default flags render Delivery / Pickup", () => {
-  const dest: DestinationType = { delivery: {}, collection: {} };
+  const dest: DestinationType = { dates: NO_DATES, delivery: {}, collection: {} };
   assertEquals(getDestinationsLegend([dest]), { start: "Delivery", end: "Pickup" });
 });
 
 Deno.test("getDestinationsLegend customer-collecting renders Pickup / Pickup", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: {},
     collection: {},
     customer_collecting: true,
@@ -1003,6 +1022,7 @@ Deno.test("getDestinationsLegend customer-collecting renders Pickup / Pickup", (
 
 Deno.test("getDestinationsLegend customer-returning renders Delivery / Return", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: {},
     collection: {},
     customer_collecting: false,
@@ -1013,6 +1033,7 @@ Deno.test("getDestinationsLegend customer-returning renders Delivery / Return", 
 
 Deno.test("getDestinationsLegend dedupes identical pairs", () => {
   const dest: DestinationType = {
+    dates: NO_DATES,
     delivery: {},
     collection: {},
     customer_collecting: true,
@@ -1023,12 +1044,14 @@ Deno.test("getDestinationsLegend dedupes identical pairs", () => {
 
 Deno.test("getDestinationsLegend joins mixed pairs with ' / '", () => {
   const a: DestinationType = {
+    dates: NO_DATES,
     delivery: {},
     collection: {},
     customer_collecting: false,
     customer_returning: false,
   };
   const b: DestinationType = {
+    dates: NO_DATES,
     delivery: {},
     collection: {},
     customer_collecting: true,
@@ -1677,4 +1700,113 @@ Deno.test("getItemSubtreeRange handles invoice-style paths prefixed with order u
   assertEquals(getItemSubtreeRange(items, 1), { startIndex: 1, endIndex: 4 });
   // Top-level product within the destination, includes its component
   assertEquals(getItemSubtreeRange(items, 2), { startIndex: 2, endIndex: 3 });
+});
+
+// ── deriveOrderDateEnvelope / buildQueryByDates ──────────────────
+
+function fsTs(seconds: number): FirestoreTimestampType {
+  return { seconds, nanoseconds: 0 } as FirestoreTimestampType;
+}
+
+function docDates(over: Partial<OrderDocDatesType> = {}): OrderDocDatesType {
+  return {
+    delivery_start: null, delivery_start_fs: fsTs(0),
+    delivery_end: null, delivery_end_fs: fsTs(0),
+    collection_start: null, collection_start_fs: fsTs(0),
+    collection_end: null, collection_end_fs: fsTs(0),
+    charge_start: null, charge_start_fs: fsTs(0),
+    charge_end: null, charge_end_fs: fsTs(0),
+    days_active: null, days_charged: null,
+    ...over,
+  };
+}
+
+Deno.test("deriveOrderDateEnvelope: single destination returns its own dates", () => {
+  const dates = docDates({
+    delivery_start: "2026-03-01T09:00:00.000-06:00", delivery_start_fs: fsTs(101),
+    delivery_end: "2026-03-01T17:00:00.000-06:00", delivery_end_fs: fsTs(102),
+    collection_start: "2026-03-10T09:00:00.000-06:00", collection_start_fs: fsTs(103),
+    collection_end: "2026-03-10T17:00:00.000-06:00", collection_end_fs: fsTs(104),
+    charge_start: "2026-03-01T09:00:00.000-06:00", charge_start_fs: fsTs(105),
+    charge_end: "2026-03-10T17:00:00.000-06:00", charge_end_fs: fsTs(106),
+    days_active: 8, days_charged: 6,
+  });
+  const env = deriveOrderDateEnvelope([{ dates }]);
+  assertEquals(env.delivery_start, "2026-03-01T09:00:00.000-06:00");
+  assertEquals(env.delivery_start_fs, fsTs(101));
+  assertEquals(env.collection_end, "2026-03-10T17:00:00.000-06:00");
+  assertEquals(env.collection_end_fs, fsTs(104));
+  assertEquals(env.days_active, 8);
+  assertEquals(env.days_charged, 6);
+});
+
+Deno.test("deriveOrderDateEnvelope: starts take min, ends take max across destinations", () => {
+  const a = docDates({
+    delivery_start: "2026-03-05T09:00:00.000-06:00", delivery_start_fs: fsTs(1),
+    collection_end: "2026-03-12T17:00:00.000-06:00", collection_end_fs: fsTs(2),
+    days_active: 5, days_charged: 5,
+  });
+  const b = docDates({
+    delivery_start: "2026-03-02T09:00:00.000-06:00", delivery_start_fs: fsTs(3),
+    collection_end: "2026-03-20T17:00:00.000-06:00", collection_end_fs: fsTs(4),
+    days_active: 9, days_charged: 7,
+  });
+  const env = deriveOrderDateEnvelope([{ dates: a }, { dates: b }]);
+  // earliest delivery_start (b) carries its own _fs companion
+  assertEquals(env.delivery_start, "2026-03-02T09:00:00.000-06:00");
+  assertEquals(env.delivery_start_fs, fsTs(3));
+  // latest collection_end (b)
+  assertEquals(env.collection_end, "2026-03-20T17:00:00.000-06:00");
+  assertEquals(env.collection_end_fs, fsTs(4));
+  // days take the largest non-null value
+  assertEquals(env.days_active, 9);
+  assertEquals(env.days_charged, 7);
+});
+
+Deno.test("deriveOrderDateEnvelope: compares instants across the DST boundary", () => {
+  // CST (-06:00) vs CDT (-05:00) — the earlier instant must win regardless of offset.
+  const winter = docDates({ delivery_start: "2026-03-01T23:00:00.000-06:00", delivery_start_fs: fsTs(1) });
+  const summer = docDates({ delivery_start: "2026-03-09T00:00:00.000-05:00", delivery_start_fs: fsTs(2) });
+  const env = deriveOrderDateEnvelope([{ dates: summer }, { dates: winter }]);
+  assertEquals(env.delivery_start, "2026-03-01T23:00:00.000-06:00");
+  assertEquals(env.delivery_start_fs, fsTs(1));
+});
+
+Deno.test("deriveOrderDateEnvelope: all-null and empty inputs yield a null envelope", () => {
+  const allNull = deriveOrderDateEnvelope([{ dates: docDates() }, { dates: docDates() }]);
+  assertEquals(allNull.delivery_start, null);
+  assertEquals(allNull.delivery_start_fs, null);
+  assertEquals(allNull.collection_end, null);
+  assertEquals(allNull.days_active, null);
+
+  const empty = deriveOrderDateEnvelope([]);
+  assertEquals(empty.delivery_start, null);
+  assertEquals(empty.days_charged, null);
+});
+
+Deno.test("buildQueryByDates: dedupes and sorts Chicago boundary days", () => {
+  const a = docDates({
+    delivery_start: "2026-03-01T09:00:00.000-06:00",
+    delivery_end: "2026-03-01T17:00:00.000-06:00",
+    collection_start: "2026-03-10T09:00:00.000-06:00",
+    collection_end: "2026-03-10T17:00:00.000-06:00",
+  });
+  const b = docDates({
+    delivery_start: "2026-03-05T09:00:00.000-06:00",
+    delivery_end: "2026-03-05T17:00:00.000-06:00",
+    collection_start: "2026-03-10T09:00:00.000-06:00",
+    collection_end: "2026-03-10T17:00:00.000-06:00",
+  });
+  assertEquals(buildQueryByDates([{ dates: a }, { dates: b }]), ["2026-03-01", "2026-03-05", "2026-03-10"]);
+});
+
+Deno.test("buildQueryByDates: skips null boundaries, returns [] when empty", () => {
+  assertEquals(buildQueryByDates([{ dates: docDates() }]), []);
+  assertEquals(buildQueryByDates([]), []);
+});
+
+Deno.test("buildQueryByDates: keys on the Chicago calendar day across the UTC midnight boundary", () => {
+  // 03:00Z on Mar 2 is still Mar 1 in Chicago (-06:00).
+  const d = docDates({ delivery_start: "2026-03-02T03:00:00.000Z" });
+  assertEquals(buildQueryByDates([{ dates: d }]), ["2026-03-01"]);
 });

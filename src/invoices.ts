@@ -823,6 +823,7 @@ export function syncOrderDestinationsSelective(
       // New pair — add tagged with uid_order.
       synced.push({
         uid_order: uidOrder,
+        dates: newPair.dates,
         delivery: newPair.delivery,
         collection: newPair.collection,
         customer_collecting: newPair.customer_collecting,
@@ -832,6 +833,7 @@ export function syncOrderDestinationsSelective(
       // Not overridden — replace with new order pair.
       synced.push({
         uid_order: uidOrder,
+        dates: newPair.dates,
         delivery: newPair.delivery,
         collection: newPair.collection,
         customer_collecting: newPair.customer_collecting,

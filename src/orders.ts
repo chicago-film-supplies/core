@@ -35,12 +35,15 @@ import type {
   OrderDocTotalsType,
   OrderDocItemPriceType,
   OrderDatesType,
+  OrderDocDatesType,
   DestinationType,
+  DocDestinationType,
+  FirestoreTimestampType,
   ConsolidatedItemType,
   GroupPathType,
   Tax as SchemaTax,
 } from "@cfs/schemas";
-import { getDuration } from "./dates.ts";
+import { getDuration, toChicagoYmd } from "./dates.ts";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -222,6 +225,144 @@ export function syncChargeDaysToItems(
     if (days !== previousDefault) continue;
     (item.price as PriceObject).chargeable_days = newDefault;
   }
+}
+
+// ── Per-destination date rollups ─────────────────────────────────
+
+/**
+ * Order-level date envelope derived on demand from per-destination dates.
+ *
+ * Mirrors the field set of the old top-level `order.dates`, except the `_fs`
+ * companions are nullable: utilities can't mint a Firestore Timestamp, so each
+ * boundary copies the `_fs` from whichever destination owns the extreme value
+ * (and is null when no destination sets that boundary).
+ */
+export interface OrderDateEnvelope {
+  delivery_start: string | null;
+  delivery_start_fs: FirestoreTimestampType | null;
+  delivery_end: string | null;
+  delivery_end_fs: FirestoreTimestampType | null;
+  collection_start: string | null;
+  collection_start_fs: FirestoreTimestampType | null;
+  collection_end: string | null;
+  collection_end_fs: FirestoreTimestampType | null;
+  charge_start: string | null;
+  charge_start_fs: FirestoreTimestampType | null;
+  charge_end: string | null;
+  charge_end_fs: FirestoreTimestampType | null;
+  days_active: number | null;
+  days_charged: number | null;
+}
+
+/**
+ * Pick the extreme (earliest for `"min"`, latest for `"max"`) value of one
+ * date boundary across destinations, carrying along the `_fs` companion from
+ * the owning destination. Instants are compared by epoch ms so mixed
+ * CST/CDT offsets compare correctly. Returns nulls when no destination sets
+ * the boundary.
+ */
+function pickEnvelopeBound(
+  destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>,
+  isoKey: keyof OrderDocDatesType,
+  fsKey: keyof OrderDocDatesType,
+  dir: "min" | "max",
+): { iso: string | null; fs: FirestoreTimestampType | null } {
+  let bestT: number | null = null;
+  let iso: string | null = null;
+  let fs: FirestoreTimestampType | null = null;
+  for (const d of destinations) {
+    const value = d.dates?.[isoKey] as string | null | undefined;
+    if (!value) continue;
+    const t = new Date(value).getTime();
+    if (Number.isNaN(t)) continue;
+    if (bestT === null || (dir === "min" ? t < bestT : t > bestT)) {
+      bestT = t;
+      iso = value;
+      fs = (d.dates[fsKey] as FirestoreTimestampType | undefined) ?? null;
+    }
+  }
+  return { iso, fs };
+}
+
+/**
+ * Collapse per-destination dates into one order-level envelope.
+ *
+ * There is no persisted order-level `dates` anymore — every destination owns
+ * its own range. This derives a bounding envelope on demand for the consumers
+ * that still want one order-level range: the Typesense projection's sort key
+ * and the quote / Xero / Calendar / Trello exporters.
+ *
+ * `*_start` boundaries take the earliest value across destinations, `*_end`
+ * boundaries take the latest; `days_active` / `days_charged` take the largest
+ * non-null value. For a single-destination order the envelope equals that
+ * destination's dates exactly.
+ */
+export function deriveOrderDateEnvelope(
+  destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>,
+): OrderDateEnvelope {
+  const ds = pickEnvelopeBound(destinations, "delivery_start", "delivery_start_fs", "min");
+  const de = pickEnvelopeBound(destinations, "delivery_end", "delivery_end_fs", "max");
+  const cs = pickEnvelopeBound(destinations, "collection_start", "collection_start_fs", "min");
+  const ce = pickEnvelopeBound(destinations, "collection_end", "collection_end_fs", "max");
+  const chs = pickEnvelopeBound(destinations, "charge_start", "charge_start_fs", "min");
+  const che = pickEnvelopeBound(destinations, "charge_end", "charge_end_fs", "max");
+
+  let days_active: number | null = null;
+  let days_charged: number | null = null;
+  for (const d of destinations) {
+    if (d.dates?.days_active != null) {
+      days_active = Math.max(days_active ?? 0, d.dates.days_active);
+    }
+    if (d.dates?.days_charged != null) {
+      days_charged = Math.max(days_charged ?? 0, d.dates.days_charged);
+    }
+  }
+
+  return {
+    delivery_start: ds.iso, delivery_start_fs: ds.fs,
+    delivery_end: de.iso, delivery_end_fs: de.fs,
+    collection_start: cs.iso, collection_start_fs: cs.fs,
+    collection_end: ce.iso, collection_end_fs: ce.fs,
+    charge_start: chs.iso, charge_start_fs: chs.fs,
+    charge_end: che.iso, charge_end_fs: che.fs,
+    days_active,
+    days_charged,
+  };
+}
+
+/** Minimal destination shape consumed by {@link buildQueryByDates}. */
+interface QueryByDatesDestination {
+  dates: {
+    delivery_start: string | null;
+    delivery_end: string | null;
+    collection_start: string | null;
+    collection_end: string | null;
+  };
+}
+
+/**
+ * Deduped, ascending list of Chicago `YYYY-MM-DD` boundary days across every
+ * destination's delivery + collection windows. Server-maintained on the order
+ * (and fulfillment) doc as `query_by_dates`, reserved for exact-day Firestore
+ * `array-contains` lookups. Charge dates are billing-only and excluded.
+ */
+export function buildQueryByDates(
+  destinations: ReadonlyArray<QueryByDatesDestination>,
+): string[] {
+  const days = new Set<string>();
+  for (const d of destinations) {
+    for (
+      const iso of [
+        d.dates?.delivery_start,
+        d.dates?.delivery_end,
+        d.dates?.collection_start,
+        d.dates?.collection_end,
+      ]
+    ) {
+      if (iso) days.add(toChicagoYmd(iso));
+    }
+  }
+  return [...days].sort();
 }
 
 // ── Type guards ──────────────────────────────────────────────────
