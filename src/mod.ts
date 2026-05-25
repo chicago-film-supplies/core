@@ -580,17 +580,40 @@ export {
 
 export {
   TEMPLATE_SOURCE_COLLECTIONS,
+  TEMPLATE_TARGET_COLLECTIONS,
+  TEMPLATE_SURFACES,
   TemplateSchema,
   TemplateInputSchema,
-  TemplateUpdateInputSchema,
   type Template,
   type TemplateInputType,
-  type TemplateUpdateInputType,
   type TemplateContext,
+  type TemplateDependsOn,
   type TemplateSourceCollectionType,
   type TemplateTargetCollectionType,
-  type TemplateScopeType,
+  type TemplateSurfaceType,
 } from "./template.ts";
+
+export {
+  TEMPLATE_VERSION_STATUSES,
+  TEMPLATE_PARAM_TYPES,
+  TemplateVersionSchema,
+  TemplateParamSchema,
+  CommitMetaSchema,
+  BlobRefSchema,
+  type TemplateVersion,
+  type TemplateVersionStatusType,
+  type TemplateParam,
+  type TemplateParamType,
+  type CommitMeta,
+  type BlobRef,
+} from "./template-version.ts";
+
+export {
+  TemplateDesignSystemSchema,
+  TemplateDesignSystemInputSchema,
+  type TemplateDesignSystem,
+  type TemplateDesignSystemInputType,
+} from "./template-design-system.ts";
 
 // ── Propagation ─────────────────────────────────────────────────────
 
@@ -660,6 +683,13 @@ export {
   createCardTransaction,
   deleteCardRules,
   deleteCardTransaction,
+  templateRules,
+  createTemplateRules,
+  createTemplateTransaction,
+  manageDraftRules,
+  manageDraftTransaction,
+  publishTemplateRules,
+  publishTemplateTransaction,
   recurrenceRules,
   createRecurrenceRules,
   createRecurrenceTransaction,
@@ -839,6 +869,8 @@ import { PasswordResetSchema } from "./password-reset.ts";
 import { ProductSchema } from "./product.ts";
 import { QuoteSchema as QuoteSchema_ } from "./quote.ts";
 import { TemplateSchema as TemplateSchema_ } from "./template.ts";
+import { TemplateVersionSchema as TemplateVersionSchema_ } from "./template-version.ts";
+import { TemplateDesignSystemSchema as TemplateDesignSystemSchema_ } from "./template-design-system.ts";
 import { RateLimitSchema } from "./rate-limit.ts";
 import { RecurrenceSchema } from "./recurrence.ts";
 import { RoleSchema } from "./role.ts";
@@ -882,6 +914,8 @@ export const schemas: Record<string, z.ZodType> = {
   "product": ProductSchema, "products": ProductSchema,
   "quote": QuoteSchema_, "quotes": QuoteSchema_,
   "template": TemplateSchema_, "templates": TemplateSchema_,
+  "templates-versions": TemplateVersionSchema_,
+  "template-design-system": TemplateDesignSystemSchema_,
   "rate-limit": RateLimitSchema, "rate-limits": RateLimitSchema,
   "recurrence": RecurrenceSchema, "recurrences": RecurrenceSchema,
   "role": RoleSchema, "roles": RoleSchema,

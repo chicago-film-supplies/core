@@ -160,6 +160,18 @@ export {
   deleteCardTransaction,
 } from "./cards.ts";
 
+// ── Template (git-canonical) rules ───────────────────────────────────
+
+export {
+  templateRules,
+  createTemplateRules,
+  createTemplateTransaction,
+  manageDraftRules,
+  manageDraftTransaction,
+  publishTemplateRules,
+  publishTemplateTransaction,
+} from "./templates.ts";
+
 // ── Recurrences rules ────────────────────────────────────────────────
 
 export {
@@ -229,6 +241,12 @@ import {
   deleteCardTransaction,
 } from "./cards.ts";
 import {
+  templateRules,
+  createTemplateTransaction,
+  manageDraftTransaction,
+  publishTemplateTransaction,
+} from "./templates.ts";
+import {
   recurrenceRules,
   createRecurrenceTransaction,
   materializeHorizonTransaction,
@@ -271,6 +289,9 @@ export const transactions: TransactionDefinition[] = [
   createCommentTransaction,
   createCardTransaction,
   deleteCardTransaction,
+  createTemplateTransaction,
+  manageDraftTransaction,
+  publishTemplateTransaction,
   createRecurrenceTransaction,
   materializeHorizonTransaction,
   updateRecurrenceTransaction,
@@ -317,5 +338,6 @@ export const rules: CollectionRule[] = [
   ...threadCowriteRules,
   ...createCommentRules,
   ...cardRules,
+  ...templateRules,
   ...recurrenceRules,
 ];

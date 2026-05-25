@@ -95,9 +95,13 @@ export const PERMISSIONS = [
 
   "templates.create",
   "templates.read",
-  "templates.update",
-  "templates.delete",
   "templates.search",
+  "templates.propose",
+  "templates.release",
+  "templates.merge",
+  "templates.rollback",
+  "templates.blessGolden",
+  "templates.archive",
 
   "lists.create",
   "lists.read",

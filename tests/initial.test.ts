@@ -108,7 +108,6 @@ Deno.test("getInitialValues — template enums use first value", () => {
   const result = getInitialValues(TemplateSchema);
   assertEquals(result.collection_source, "orders");
   assertEquals(result.collection_target, "quotes");
-  assertEquals(result.scope, "single");
 });
 
 Deno.test("getInitialValues — product price has correct structure", () => {
