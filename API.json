@@ -1254,6 +1254,62 @@
           "returnsTag": "New array with the component and its descendants removed"
         }
       ]
+    },
+    {
+      "entrypoint": "@cfs/utilities/templates",
+      "moduleDoc": "Template helpers for the git-canonical template system — pure functions\nshared by api-cloudrun and manager.\n\n- `slugify` derives a `git_path` from a family display name (frozen at create).\n- `deriveBump` maps a conventional-commit type → semver bump level, and\n  `bumpSemver` applies that bump to the family's previous version.\n- `resolveRenderParams` validates caller-provided render params against the\n  version's declared params **strictly** — unknown params throw (the API\n  maps `RenderParamError` → HTTP 422).\n\nNo runtime dependency on `@cfs/schemas`: the declared-param shape is accepted\nstructurally so this module type-checks independent of the schemas publish\ncadence. `@cfs/schemas`' `TemplateParam` is structurally compatible.",
+      "symbols": [
+        {
+          "kind": "typeAlias",
+          "name": "BumpLevel",
+          "declaration": "type BumpLevel = \"major\" | \"minor\" | \"patch\";",
+          "doc": "A semantic-version bump level."
+        },
+        {
+          "kind": "interface",
+          "name": "RenderParamDecl",
+          "declaration": "interface RenderParamDecl {\n  key: string;\n  type: string;\n  label?: string;\n  default?: boolean;\n  required?: boolean;\n}",
+          "doc": "A render-time parameter declaration (structurally `@cfs/schemas`' `TemplateParam`)."
+        },
+        {
+          "kind": "other",
+          "name": "RenderParamError",
+          "declaredKind": "class",
+          "doc": "Thrown when caller-provided render params fail strict validation. The API maps this to HTTP 422."
+        },
+        {
+          "kind": "function",
+          "name": "bumpSemver",
+          "signature": "bumpSemver(current: string | null | undefined, bump: BumpLevel): string",
+          "doc": "Apply a bump level to a `MAJOR.MINOR.PATCH` semver string. A missing/invalid\n`current` is treated as `0.0.0` (so the first publish off `deriveBump` yields\n`1.0.0` for a major, `0.1.0` for a minor, `0.0.1` for a patch).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveBump",
+          "signature": "deriveBump(type: string, breaking: boolean): BumpLevel",
+          "doc": "Map a conventional-commit type + breaking flag to a semver bump level.\nBreaking always wins (`major`). `feat` → `minor`. Everything else\n(`fix`, `refactor`, `chore`, `docs`, …) → `patch`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "resolveRenderParams",
+          "signature": "resolveRenderParams(declared: typeOperator, provided: Record<string, unknown> | undefined): Record<string, boolean>",
+          "doc": "Resolve caller-provided render params against a version's declared params,\n**strictly**:\n- any provided key not declared → throw `RenderParamError`;\n- a provided value of the wrong type → throw;\n- a declared param absent from input → its `default` (or `false` for a\n  boolean with no default), unless `required` with no default → throw.\n\nReturns a fully-resolved param map safe to hand to the render context.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "slugify",
+          "signature": "slugify(name: string): string",
+          "doc": "Derive a URL/git-safe slug from a display name. Lowercases, replaces every\nrun of non-alphanumeric characters with a single hyphen, and trims leading/\ntrailing hyphens. Two distinct display names can collapse to the same slug\n(e.g. \"Quote!\" and \"quote\") — callers enforce slug uniqueness at create.\n\n```ts\nslugify(\"Packing List (v2)\"); // \"packing-list-v2\"\n```",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
     }
   ]
 }

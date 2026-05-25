@@ -1518,3 +1518,79 @@ this covers the component itself and every entry nested beneath it.
 - `path` — Full path of the component to remove (e.g. `["A", "B"]`)
 
 **Returns** — New array with the component and its descendants removed
+
+## `@cfs/utilities/templates`
+
+Template helpers for the git-canonical template system — pure functions
+shared by api-cloudrun and manager.
+
+- `slugify` derives a `git_path` from a family display name (frozen at create).
+- `deriveBump` maps a conventional-commit type → semver bump level, and
+  `bumpSemver` applies that bump to the family's previous version.
+- `resolveRenderParams` validates caller-provided render params against the
+  version's declared params **strictly** — unknown params throw (the API
+  maps `RenderParamError` → HTTP 422).
+
+No runtime dependency on `@cfs/schemas`: the declared-param shape is accepted
+structurally so this module type-checks independent of the schemas publish
+cadence. `@cfs/schemas`' `TemplateParam` is structurally compatible.
+
+### `BumpLevel`
+
+A semantic-version bump level.
+
+```ts
+type BumpLevel = "major" | "minor" | "patch";
+```
+
+### `RenderParamDecl`
+
+A render-time parameter declaration (structurally `@cfs/schemas`' `TemplateParam`).
+
+```ts
+interface RenderParamDecl {
+  key: string;
+  type: string;
+  label?: string;
+  default?: boolean;
+  required?: boolean;
+}
+```
+
+### `RenderParamError`
+
+_(class — see source)_
+
+### `bumpSemver(current: string | null | undefined, bump: BumpLevel): string`
+
+Apply a bump level to a `MAJOR.MINOR.PATCH` semver string. A missing/invalid
+`current` is treated as `0.0.0` (so the first publish off `deriveBump` yields
+`1.0.0` for a major, `0.1.0` for a minor, `0.0.1` for a patch).
+
+### `deriveBump(type: string, breaking: boolean): BumpLevel`
+
+Map a conventional-commit type + breaking flag to a semver bump level.
+Breaking always wins (`major`). `feat` → `minor`. Everything else
+(`fix`, `refactor`, `chore`, `docs`, …) → `patch`.
+
+### `resolveRenderParams(declared: typeOperator, provided: Record<string, unknown> | undefined): Record<string, boolean>`
+
+Resolve caller-provided render params against a version's declared params,
+**strictly**:
+- any provided key not declared → throw `RenderParamError`;
+- a provided value of the wrong type → throw;
+- a declared param absent from input → its `default` (or `false` for a
+  boolean with no default), unless `required` with no default → throw.
+
+Returns a fully-resolved param map safe to hand to the render context.
+
+### `slugify(name: string): string`
+
+Derive a URL/git-safe slug from a display name. Lowercases, replaces every
+run of non-alphanumeric characters with a single hyphen, and trims leading/
+trailing hyphens. Two distinct display names can collapse to the same slug
+(e.g. "Quote!" and "quote") — callers enforce slug uniqueness at create.
+
+```ts
+slugify("Packing List (v2)"); // "packing-list-v2"
+```

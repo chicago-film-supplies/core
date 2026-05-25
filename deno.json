@@ -10,13 +10,14 @@
     "./dates": "./src/dates.ts",
     "./invoices": "./src/invoices.ts",
     "./orders": "./src/orders.ts",
-    "./products": "./src/products.ts"
+    "./products": "./src/products.ts",
+    "./templates": "./src/templates.ts"
   },
   "tasks": {
     "setup": "deno install && git config core.hooksPath .githooks",
     "test": "deno test tests/",
     "lint": "deno lint",
-    "check": "deno check src/bookings.ts src/cards.ts src/contact-name.ts src/dates.ts src/invoices.ts src/orders.ts src/products.ts",
+    "check": "deno check src/bookings.ts src/cards.ts src/contact-name.ts src/dates.ts src/invoices.ts src/orders.ts src/products.ts src/templates.ts",
     "docs": "deno run --allow-run --allow-read --allow-write scripts/generate-api-docs.ts",
     "docs:check": "deno task docs && git diff --exit-code -- API.md API.json"
   },
