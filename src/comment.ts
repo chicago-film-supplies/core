@@ -33,6 +33,31 @@ export type CommentBodyJson = Record<string, unknown>;
 /** Zod schema for the Tiptap JSON body. */
 export const CommentBody: z.ZodType<CommentBodyJson> = z.record(z.string(), z.unknown());
 
+// ── GitHub PR-comment mirror ────────────────────────────────────────
+
+/**
+ * GitHub PR-comment mirror metadata. Set only on template branch-thread
+ * comments by the comment-sync Cloud Task after the external POST: `comment_id`
+ * is the GitHub issue-comment id (the idempotency key for later update/tombstone
+ * PATCHes). `synced_at` is an internal machine timestamp marking the last
+ * successful mirror — it is NEVER transmitted to GitHub (GitHub server-stamps
+ * its own comment times).
+ */
+export interface CommentGitMirror {
+  comment_id: number;
+  node_id?: string;
+  html_url?: string;
+  synced_at: FirestoreTimestampType;
+}
+
+/** Zod schema for a comment's GitHub-mirror metadata. */
+export const CommentGitMirrorSchema: z.ZodType<CommentGitMirror> = z.strictObject({
+  comment_id: z.int(),
+  node_id: z.string().optional(),
+  html_url: z.url().optional(),
+  synced_at: FirestoreTimestamp,
+});
+
 // ── Firestore document ──────────────────────────────────────────────
 
 /** Comment Firestore document shape. */
@@ -43,6 +68,8 @@ export interface Comment {
   body: CommentBodyJson;
   body_text: string;
   reactions: Record<string, Record<string, ActorRefType>>;
+  /** GitHub PR-comment mirror — present only on template-sourced comments. */
+  git?: CommentGitMirror;
   version: number;
   created_by: ActorRefType;
   deleted_at: FirestoreTimestampType | null;
@@ -60,12 +87,27 @@ export const CommentSchema: z.ZodType<Comment> = z.strictObject({
   body: CommentBody,
   body_text: z.string().meta({ pii: "mask" }).default(""),
   reactions: z.record(z.string(), z.record(z.string(), ActorRef)).default({}),
+  git: CommentGitMirrorSchema.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   deleted_at: FirestoreTimestamp.nullable(),
   deleted_by: ActorRef.nullable(),
   updated_by: ActorRef,
   ...TimestampFields,
+}).superRefine((doc, ctx) => {
+  // GitHub-mirror metadata is only meaningful on template branch/family
+  // comments — keep it from leaking onto order/contact/etc. comments.
+  if (doc.git) {
+    const TEMPLATE_SOURCES = ["templates", "templates-versions", "template-components"];
+    const hasTemplateSource = doc.sources.some((s) => TEMPLATE_SOURCES.includes(s.collection));
+    if (!hasTemplateSource) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["git"],
+        message: "git mirror metadata is only valid on template-sourced comments",
+      });
+    }
+  }
 }).meta({
   title: "Comment",
   collection: "comments",

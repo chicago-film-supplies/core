@@ -63,6 +63,46 @@ Deno.test("CommentSchema accepts soft-deleted comment", () => {
   assertEquals(CommentSchema.safeParse(doc).success, true);
 });
 
+const gitMirror = {
+  comment_id: 123456,
+  node_id: "IC_node",
+  html_url: "https://github.com/chicago-film-supplies/templates/issues/1#issuecomment-123456",
+  synced_at: mockTimestamp,
+};
+
+Deno.test("CommentSchema accepts git mirror on a templates-versions comment", () => {
+  const doc = {
+    ...validComment,
+    sources: [{ collection: "templates-versions", uid: "version-1" }],
+    git: gitMirror,
+  };
+  assertEquals(CommentSchema.safeParse(doc).success, true);
+});
+
+Deno.test("CommentSchema accepts git mirror on a template-components comment", () => {
+  const doc = {
+    ...validComment,
+    sources: [{ collection: "template-components", uid: "component-1" }],
+    git: gitMirror,
+  };
+  assertEquals(CommentSchema.safeParse(doc).success, true);
+});
+
+Deno.test("CommentSchema rejects git mirror on a non-template comment", () => {
+  const doc = { ...validComment, git: gitMirror }; // sources: orders
+  assertEquals(CommentSchema.safeParse(doc).success, false);
+});
+
+Deno.test("CommentSchema rejects a git mirror missing comment_id", () => {
+  const { comment_id: _omit, ...partial } = gitMirror;
+  const doc = {
+    ...validComment,
+    sources: [{ collection: "templates", uid: "family-1" }],
+    git: partial,
+  };
+  assertEquals(CommentSchema.safeParse(doc).success, false);
+});
+
 Deno.test("CreateCommentInput requires body_text", () => {
   assertEquals(
     CreateCommentInput.safeParse({
