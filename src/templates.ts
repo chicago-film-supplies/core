@@ -137,3 +137,93 @@ export function resolveRenderParams(
   }
   return resolved;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fork field-mapping helpers (Part 5: start-from-existing). Pure + advisory: the
+// fork preview/rewrite are a head-start for switching a template's source doc
+// (e.g. order → invoice), NOT a guarantee. The operator finishes in the editor.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A path segment: a word, optionally followed by one or more `[]` array marks. */
+const SEGMENT_RE = /^([A-Za-z_$][\w$]*)((?:\[\])*)$/;
+
+/**
+ * Distinct `it.doc.<path>` references across a content map, with array indices
+ * normalized (`it.doc.items[0].name` → `items[].name`) so paths match the
+ * `templateSchemaFields` catalog. Sorted, deduped.
+ *
+ * BEST-EFFORT — does NOT catch loop-aliased refs (`it.doc.items.forEach(i =>
+ * i.name)`) or optional chaining. Most line-item fields are loop-aliased, which
+ * is exactly where order/invoice schemas diverge, so treat the result as a
+ * head-start, never a complete list.
+ */
+export function scanDocFieldRefs(content: Record<string, string>): string[] {
+  const re = /it\.doc((?:\.[A-Za-z_$][\w$]*|\[\d+\])+)/g;
+  const found = new Set<string>();
+  for (const src of Object.values(content)) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) {
+      let raw = m[1];
+      // A trailing segment immediately followed by "(" is a method call
+      // (`.forEach`, `.map`, …), not a field — drop it.
+      if (src[re.lastIndex] === "(") raw = raw.replace(/\.[A-Za-z_$][\w$]*$/, "");
+      const path = raw.replace(/^\./, "").replace(/\[\d+\]/g, "[]");
+      if (path) found.add(path);
+    }
+  }
+  return [...found].sort();
+}
+
+/** Build a regex matching `it.doc.<from>`, capturing each concrete array index. */
+function fromPathToRegex(from: string): RegExp {
+  let pat = "it\\.doc";
+  for (const part of from.split(".")) {
+    const m = part.match(SEGMENT_RE);
+    const word = m ? m[1] : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    pat += "\\." + word;
+    const brackets = m ? m[2].length / 2 : 0;
+    for (let b = 0; b < brackets; b++) pat += "(\\[\\d+\\])";
+  }
+  return new RegExp(pat, "g");
+}
+
+/** Build the `it.doc.<to>` replacement, reusing captured indices ($1, $2, …)
+ * positionally; surplus `to` array marks (beyond what `from` captured) → `[0]`. */
+function toPathToReplacement(to: string, fromBracketCount: number): string {
+  let rep = "it.doc";
+  let group = 1;
+  for (const part of to.split(".")) {
+    const m = part.match(SEGMENT_RE);
+    rep += "." + (m ? m[1] : part);
+    const brackets = m ? m[2].length / 2 : 0;
+    for (let b = 0; b < brackets; b++) rep += group <= fromBracketCount ? `$${group++}` : "[0]";
+  }
+  return rep;
+}
+
+const bracketCount = (path: string): number => (path.match(/\[\]/g) ?? []).length;
+
+/**
+ * Rewrite `it.doc.<from>` → `it.doc.<to>` across a content map per `fieldMap`
+ * (normalized paths from `scanDocFieldRefs`). Entries mapped to `null` (or to
+ * themselves) are left untouched — the operator resolves those by hand. Array
+ * indices are preserved (`items[0].name` with map `items[].name`→`lines[].name`
+ * becomes `lines[0].name`). Longest `from` rewritten first so a nested path is
+ * handled before its prefix.
+ */
+export function rewriteDocFieldRefs(
+  content: Record<string, string>,
+  fieldMap: Record<string, string | null>,
+): Record<string, string> {
+  const rules = Object.entries(fieldMap)
+    .filter((e): e is [string, string] => e[1] != null && e[1] !== e[0])
+    .sort((a, b) => b[0].length - a[0].length)
+    .map(([from, to]) => ({ re: fromPathToRegex(from), replacement: toPathToReplacement(to, bracketCount(from)) }));
+  const out: Record<string, string> = {};
+  for (const [key, src] of Object.entries(content)) {
+    let next = src;
+    for (const { re, replacement } of rules) next = next.replace(re, replacement);
+    out[key] = next;
+  }
+  return out;
+}

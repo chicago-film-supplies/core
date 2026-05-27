@@ -5,6 +5,8 @@ import {
   RenderParamError,
   type RenderParamDecl,
   resolveRenderParams,
+  rewriteDocFieldRefs,
+  scanDocFieldRefs,
   slugify,
 } from "../src/templates.ts";
 
@@ -96,4 +98,55 @@ Deno.test("resolveRenderParams: missing required (no default) throws", () => {
 Deno.test("resolveRenderParams: undefined provided treated as empty", () => {
   assertThrows(() => resolveRenderParams(decls, undefined), RenderParamError);
   assertEquals(resolveRenderParams([], undefined), {});
+});
+
+// ── scanDocFieldRefs / rewriteDocFieldRefs (fork field-mapping) ──────
+
+Deno.test("scanDocFieldRefs: distinct dotted paths, normalized + sorted", () => {
+  const content = {
+    "templates/quote.eta": `<h1><%= it.doc.number %></h1><p><%= it.doc.organization.name %></p><%= it.doc.organization.name %>`,
+    "styles/quote.css": `h1{}`,
+  };
+  assertEquals(scanDocFieldRefs(content), ["number", "organization.name"]);
+});
+
+Deno.test("scanDocFieldRefs: normalizes array indices to []", () => {
+  const content = { "t.eta": `<%= it.doc.items[0].name %> <%= it.doc.items[2].price %>` };
+  assertEquals(scanDocFieldRefs(content), ["items[].name", "items[].price"]);
+});
+
+Deno.test("scanDocFieldRefs: known limitation — loop-aliased refs are NOT caught", () => {
+  // it.doc.items IS caught, but the aliased `item.name` inside the loop is not.
+  const content = { "t.eta": `<% it.doc.items.forEach((item) => { %><%= item.name %><% }) %>` };
+  assertEquals(scanDocFieldRefs(content), ["items"]);
+});
+
+Deno.test("rewriteDocFieldRefs: swaps mapped paths, leaves null + identity untouched", () => {
+  const content = {
+    "t.eta": `<%= it.doc.organization.name %> / <%= it.doc.number %> / <%= it.doc.total %>`,
+  };
+  const out = rewriteDocFieldRefs(content, {
+    "organization.name": "contact.name", // remap
+    "number": null, // leave for manual fixup
+    "total": "total", // identity → untouched
+  });
+  assertEquals(
+    out["t.eta"],
+    `<%= it.doc.contact.name %> / <%= it.doc.number %> / <%= it.doc.total %>`,
+  );
+});
+
+Deno.test("rewriteDocFieldRefs: preserves array indices across a remap", () => {
+  const content = { "t.eta": `<%= it.doc.items[0].name %> <%= it.doc.items[3].name %>` };
+  const out = rewriteDocFieldRefs(content, { "items[].name": "lines[].name" });
+  assertEquals(out["t.eta"], `<%= it.doc.lines[0].name %> <%= it.doc.lines[3].name %>`);
+});
+
+Deno.test("rewriteDocFieldRefs: nested path rewritten before its prefix (longest-first)", () => {
+  const content = { "t.eta": `<%= it.doc.organization.name %> <%= it.doc.organization %>` };
+  const out = rewriteDocFieldRefs(content, {
+    "organization.name": "org.name",
+    "organization": "org",
+  });
+  assertEquals(out["t.eta"], `<%= it.doc.org.name %> <%= it.doc.org %>`);
 });
