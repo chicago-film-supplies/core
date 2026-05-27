@@ -136,6 +136,11 @@ export interface TemplateVersion {
   display_name?: string;
   /** uid of this version's per-branch comment thread (cowritten on draft create). */
   uid_thread?: string;
+  /** Server timestamp of the last commit of this draft's content to its branch
+   * (commit and release both imply a commit). The manager compares it against
+   * `updated_at` to detect saved-but-uncommitted edits ("dirty since commit")
+   * and prompt at approve-to-merge. Machine timestamp; draft-only. */
+  committed_at?: FirestoreTimestampType;
 
   // ── published fields ──
   sha?: string;
@@ -171,6 +176,7 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   base_seq: z.int().min(0).optional(),
   display_name: z.string().min(1).max(200).optional(),
   uid_thread: z.string().min(1).optional(),
+  committed_at: FirestoreTimestamp.optional(),
 
   sha: z.string().min(1).optional(),
   semver: z.string().min(1).optional(),
