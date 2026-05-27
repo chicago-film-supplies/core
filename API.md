@@ -1584,6 +1584,26 @@ Resolve caller-provided render params against a version's declared params,
 
 Returns a fully-resolved param map safe to hand to the render context.
 
+### `rewriteDocFieldRefs(content: Record<string, string>, fieldMap: Record<string, string | null>): Record<string, string>`
+
+Rewrite `it.doc.<from>` → `it.doc.<to>` across a content map per `fieldMap`
+(normalized paths from `scanDocFieldRefs`). Entries mapped to `null` (or to
+themselves) are left untouched — the operator resolves those by hand. Array
+indices are preserved (`items[0].name` with map `items[].name`→`lines[].name`
+becomes `lines[0].name`). Longest `from` rewritten first so a nested path is
+handled before its prefix.
+
+### `scanDocFieldRefs(content: Record<string, string>): string[]`
+
+Distinct `it.doc.<path>` references across a content map, with array indices
+normalized (`it.doc.items[0].name` → `items[].name`) so paths match the
+`templateSchemaFields` catalog. Sorted, deduped.
+
+BEST-EFFORT — does NOT catch loop-aliased refs (`it.doc.items.forEach(i =>
+i.name)`) or optional chaining. Most line-item fields are loop-aliased, which
+is exactly where order/invoice schemas diverge, so treat the result as a
+head-start, never a complete list.
+
 ### `slugify(name: string): string`
 
 Derive a URL/git-safe slug from a display name. Lowercases, replaces every
