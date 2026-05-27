@@ -1573,6 +1573,23 @@ Map a conventional-commit type + breaking flag to a semver bump level.
 Breaking always wins (`major`). `feat` → `minor`. Everything else
 (`fix`, `refactor`, `chore`, `docs`, …) → `patch`.
 
+### `hashTemplateContent(content: Record<string, string>): string`
+
+Order-independent fingerprint of a template/component content map
+(path → file text). The API stamps a version's `committed_content_hash` with
+this when it pushes content to git (commit / release); the manager hashes the
+live draft content the same way to detect "dirty since last commit" and warn
+at approve-to-merge.
+
+Pure, synchronous, and runtime-agnostic (Deno + browser) so both sides agree
+byte-for-byte. A non-cryptographic 64-bit FNV-1a digest (two seeded streams):
+collision resistance is irrelevant here — it only answers "did the content
+change since the last push?".
+
+```ts
+hashTemplateContent({ "a.eta": "x" }) === hashTemplateContent({ "a.eta": "x" }); // true
+```
+
 ### `resolveRenderParams(declared: typeOperator, provided: Record<string, unknown> | undefined): Record<string, boolean>`
 
 Resolve caller-provided render params against a version's declared params,

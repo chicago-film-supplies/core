@@ -1,7 +1,8 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import {
   bumpSemver,
   deriveBump,
+  hashTemplateContent,
   RenderParamError,
   type RenderParamDecl,
   resolveRenderParams,
@@ -149,4 +150,41 @@ Deno.test("rewriteDocFieldRefs: nested path rewritten before its prefix (longest
     "organization": "org",
   });
   assertEquals(out["t.eta"], `<%= it.doc.org.name %> <%= it.doc.org %>`);
+});
+
+// ── hashTemplateContent ─────────────────────────────────────────────
+
+Deno.test("hashTemplateContent is stable and order-independent", () => {
+  const a = { "layouts/base.eta": "<p>hi</p>", "styles/base.css": "p{}" };
+  const b = { "styles/base.css": "p{}", "layouts/base.eta": "<p>hi</p>" };
+  assertEquals(hashTemplateContent(a), hashTemplateContent(b));
+  assertEquals(hashTemplateContent(a), hashTemplateContent({ ...a }));
+});
+
+Deno.test("hashTemplateContent changes when any content changes", () => {
+  const base = { "a.eta": "x", "b.css": "y" };
+  assertNotEquals(hashTemplateContent(base), hashTemplateContent({ ...base, "b.css": "z" }));
+});
+
+Deno.test("hashTemplateContent distinguishes key/value boundary shifts (injective prefix)", () => {
+  assertNotEquals(
+    hashTemplateContent({ "ab": "c" }),
+    hashTemplateContent({ "a": "bc" }),
+  );
+  assertNotEquals(
+    hashTemplateContent({ "a": "b", "c": "d" }),
+    hashTemplateContent({ "a": "bcd" }),
+  );
+});
+
+Deno.test("hashTemplateContent distinguishes add/remove of an empty file", () => {
+  assertNotEquals(
+    hashTemplateContent({ "a.eta": "x" }),
+    hashTemplateContent({ "a.eta": "x", "b.css": "" }),
+  );
+});
+
+Deno.test("hashTemplateContent returns a 16-char hex digest", () => {
+  const h = hashTemplateContent({ "a.eta": "hello" });
+  assertEquals(/^[0-9a-f]{16}$/.test(h), true);
 });

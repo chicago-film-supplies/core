@@ -74,6 +74,44 @@ export function bumpSemver(current: string | null | undefined, bump: BumpLevel):
   }
 }
 
+// ── content fingerprint (dirty-since-commit guard) ──────────────────
+
+/**
+ * Order-independent fingerprint of a template/component content map
+ * (path → file text). The API stamps a version's `committed_content_hash` with
+ * this when it pushes content to git (commit / release); the manager hashes the
+ * live draft content the same way to detect "dirty since last commit" and warn
+ * at approve-to-merge.
+ *
+ * Pure, synchronous, and runtime-agnostic (Deno + browser) so both sides agree
+ * byte-for-byte. A non-cryptographic 64-bit FNV-1a digest (two seeded streams):
+ * collision resistance is irrelevant here — it only answers "did the content
+ * change since the last push?".
+ *
+ * ```ts
+ * hashTemplateContent({ "a.eta": "x" }) === hashTemplateContent({ "a.eta": "x" }); // true
+ * ```
+ */
+export function hashTemplateContent(content: Record<string, string>): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0xc59d1c81;
+  const mix = (s: string): void => {
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 0x01000193);
+      h2 = Math.imul(h2 ^ c, 0x01000193);
+    }
+  };
+  // Sort keys so the digest ignores insertion order. Length-prefix each token
+  // so the stream is injective without in-band delimiter bytes: {"ab":"c"}
+  // ("2:ab1:c") differs from {"a":"bc"} ("1:a2:bc").
+  for (const key of Object.keys(content).sort()) {
+    mix(`${key.length}:${key}${content[key].length}:${content[key]}`);
+  }
+  const hex = (n: number): string => (n >>> 0).toString(16).padStart(8, "0");
+  return hex(h1) + hex(h2);
+}
+
 // ── render params ───────────────────────────────────────────────────
 
 /** A render-time parameter declaration (structurally `@cfs/schemas`' `TemplateParam`). */

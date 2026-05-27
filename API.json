@@ -1295,6 +1295,14 @@
         },
         {
           "kind": "function",
+          "name": "hashTemplateContent",
+          "signature": "hashTemplateContent(content: Record<string, string>): string",
+          "doc": "Order-independent fingerprint of a template/component content map\n(path → file text). The API stamps a version's `committed_content_hash` with\nthis when it pushes content to git (commit / release); the manager hashes the\nlive draft content the same way to detect \"dirty since last commit\" and warn\nat approve-to-merge.\n\nPure, synchronous, and runtime-agnostic (Deno + browser) so both sides agree\nbyte-for-byte. A non-cryptographic 64-bit FNV-1a digest (two seeded streams):\ncollision resistance is irrelevant here — it only answers \"did the content\nchange since the last push?\".\n\n```ts\nhashTemplateContent({ \"a.eta\": \"x\" }) === hashTemplateContent({ \"a.eta\": \"x\" }); // true\n```",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "resolveRenderParams",
           "signature": "resolveRenderParams(declared: typeOperator, provided: Record<string, unknown> | undefined): Record<string, boolean>",
           "doc": "Resolve caller-provided render params against a version's declared params,\n**strictly**:\n- any provided key not declared → throw `RenderParamError`;\n- a provided value of the wrong type → throw;\n- a declared param absent from input → its `default` (or `false` for a\n  boolean with no default), unless `required` with no default → throw.\n\nReturns a fully-resolved param map safe to hand to the render context.",
