@@ -55,9 +55,9 @@ export const aggregates: AggregateDefinition[] = [
   {
     id: "templates",
     root: "templates",
-    members: ["templates-versions", "template-design-system"],
+    members: ["templates-versions", "template-components"],
     description:
-      "Git-canonical document templates. `templates` is a thin family (identity + rollups); `templates-versions` holds status-discriminated content projections (draft|published|archived) shared with design-system component families; `template-design-system` is per-component families. Git is the source of truth for content — Firestore is a rebuildable projection. Each family carries a default thread (cards-style cowrite) for per-family chat, excluded from git rebuilds.",
+      "Git-canonical document templates. `templates` is a thin family (identity + rollups); `templates-versions` holds status-discriminated content projections (draft|published|archived) shared with template-component families; `template-components` is per-component families. Git is the source of truth for content — Firestore is a rebuildable projection. Each family carries a default thread (cards-style cowrite) for per-family chat, excluded from git rebuilds.",
   },
   {
     id: "threads",

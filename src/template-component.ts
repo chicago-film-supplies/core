@@ -1,7 +1,7 @@
 /**
- * Design-system component family schema — Firestore collection: template-design-system
+ * Template component family schema — Firestore collection: template-components
  *
- * A design-system doc is a *thin component family* (same shape philosophy as a
+ * A component doc is a *thin component family* (same shape philosophy as a
  * `templates` family: identity + rollups, no content/status). Each component
  * (e.g. a shared `base` layout, a `quote` stylesheet) is its own family. Its
  * versions live in the SHARED `templates-versions` collection (status-
@@ -23,8 +23,8 @@ import {
   TimestampFields,
 } from "./common.ts";
 
-/** A thin design-system component *family* document. */
-export interface TemplateDesignSystem {
+/** A thin template-component *family* document. */
+export interface TemplateComponent {
   uid: string;
   /** Immutable slug `slugify(name)`, frozen at create — the family's git identity. */
   git_path: string;
@@ -46,8 +46,8 @@ export interface TemplateDesignSystem {
   updated_at?: FirestoreTimestampType;
 }
 
-/** Zod schema for a TemplateDesignSystem family document. */
-export const TemplateDesignSystemSchema: z.ZodType<TemplateDesignSystem> = z.strictObject({
+/** Zod schema for a TemplateComponent family document. */
+export const TemplateComponentSchema: z.ZodType<TemplateComponent> = z.strictObject({
   uid: z.string(),
   git_path: z.string().min(1).max(200),
   name: z.string().min(1).max(200),
@@ -60,8 +60,8 @@ export const TemplateDesignSystemSchema: z.ZodType<TemplateDesignSystem> = z.str
   updated_by: ActorRef,
   ...TimestampFields,
 }).meta({
-  title: "Design System Component",
-  collection: "template-design-system",
+  title: "Template Component",
+  collection: "template-components",
   displayDefaults: {
     columns: ["name", "version_count"],
     filters: {},
@@ -69,12 +69,12 @@ export const TemplateDesignSystemSchema: z.ZodType<TemplateDesignSystem> = z.str
   },
 });
 
-/** Input for registering a new design-system component family. */
-export interface TemplateDesignSystemInputType {
+/** Input for registering a new template-component family. */
+export interface TemplateComponentInputType {
   name: string;
 }
 
-/** Zod schema for TemplateDesignSystemInput. */
-export const TemplateDesignSystemInputSchema: z.ZodType<TemplateDesignSystemInputType> = z.object({
+/** Zod schema for TemplateComponentInput. */
+export const TemplateComponentInputSchema: z.ZodType<TemplateComponentInputType> = z.object({
   name: z.string().min(1).max(200),
 });

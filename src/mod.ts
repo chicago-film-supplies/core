@@ -609,11 +609,11 @@ export {
 } from "./template-version.ts";
 
 export {
-  TemplateDesignSystemSchema,
-  TemplateDesignSystemInputSchema,
-  type TemplateDesignSystem,
-  type TemplateDesignSystemInputType,
-} from "./template-design-system.ts";
+  TemplateComponentSchema,
+  TemplateComponentInputSchema,
+  type TemplateComponent,
+  type TemplateComponentInputType,
+} from "./template-component.ts";
 
 // ── Propagation ─────────────────────────────────────────────────────
 
@@ -870,7 +870,7 @@ import { ProductSchema } from "./product.ts";
 import { QuoteSchema as QuoteSchema_ } from "./quote.ts";
 import { TemplateSchema as TemplateSchema_ } from "./template.ts";
 import { TemplateVersionSchema as TemplateVersionSchema_ } from "./template-version.ts";
-import { TemplateDesignSystemSchema as TemplateDesignSystemSchema_ } from "./template-design-system.ts";
+import { TemplateComponentSchema as TemplateComponentSchema_ } from "./template-component.ts";
 import { RateLimitSchema } from "./rate-limit.ts";
 import { RecurrenceSchema } from "./recurrence.ts";
 import { RoleSchema } from "./role.ts";
@@ -915,7 +915,7 @@ export const schemas: Record<string, z.ZodType> = {
   "quote": QuoteSchema_, "quotes": QuoteSchema_,
   "template": TemplateSchema_, "templates": TemplateSchema_,
   "templates-versions": TemplateVersionSchema_,
-  "template-design-system": TemplateDesignSystemSchema_,
+  "template-components": TemplateComponentSchema_,
   "rate-limit": RateLimitSchema, "rate-limits": RateLimitSchema,
   "recurrence": RecurrenceSchema, "recurrences": RecurrenceSchema,
   "role": RoleSchema, "roles": RoleSchema,

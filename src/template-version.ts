@@ -5,7 +5,7 @@
  * of template *content* at a point in the git lifecycle. Drafts live here too
  * (status `draft`); a merge flips the SAME doc to `published` in place; an
  * abandoned draft becomes `archived` (recoverable). Versions are shared by both
- * `templates` families and `template-design-system` component families — the
+ * `templates` families and `template-components` component families — the
  * `uid_template` points at whichever family owns the version.
  *
  * Status invariants (enforced by `.superRefine` below):
@@ -88,7 +88,7 @@ export const BlobRefSchema: z.ZodType<BlobRef> = z.strictObject({
 /** A status-discriminated template version (draft | published | archived). */
 export interface TemplateVersion {
   uid: string;
-  /** Family doc uid (templates OR template-design-system) that owns this version. */
+  /** Family doc uid (templates OR template-components) that owns this version. */
   uid_template: string;
   status: TemplateVersionStatusType;
   /** Path → file content overlay (e.g. `templates/quote.eta`, `styles/quote.css`). */

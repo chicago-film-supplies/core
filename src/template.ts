@@ -46,10 +46,10 @@ export const TEMPLATE_SURFACES = ["order", "fulfillment", "invoice"] as const;
 /** A single client-agnostic surface a template is offered on. */
 export type TemplateSurfaceType = typeof TEMPLATE_SURFACES[number];
 
-/** Design-system dependencies a template family overlays at render time. */
+/** Component dependencies a template family overlays at render time. */
 export interface TemplateDependsOn {
-  /** Component family uids (template-design-system) whose active versions overlay this template. */
-  design_system: string[];
+  /** Component family uids (template-components) whose active versions overlay this template. */
+  components: string[];
 }
 
 /** A thin template *family* document — identity + rollups, no content/status. */
@@ -91,7 +91,7 @@ export const TemplateSchema: z.ZodType<Template> = z.strictObject({
   surfaces: z.array(z.enum(TEMPLATE_SURFACES)).min(1),
   uid_active: z.string().nullable(),
   depends_on: z.strictObject({
-    design_system: z.array(z.string()).default([]),
+    components: z.array(z.string()).default([]),
   }),
   draft_uids: z.array(z.string()).default([]),
   version_count: z.int().min(0).default(0),
@@ -131,7 +131,7 @@ export const TemplateInputSchema: z.ZodType<TemplateInputType> = z.object({
   collection_target: z.enum(TEMPLATE_TARGET_COLLECTIONS),
   surfaces: z.array(z.enum(TEMPLATE_SURFACES)).min(1),
   depends_on: z.object({
-    design_system: z.array(z.string()).optional(),
+    components: z.array(z.string()).optional(),
   }).optional(),
 });
 
