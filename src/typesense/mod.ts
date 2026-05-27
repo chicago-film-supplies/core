@@ -46,6 +46,7 @@ export type {
   ProductDocumentComponent,
   StoreDocument,
   TagDocument,
+  TemplateComponentDocument,
   TemplateDocument,
   TrackingCategoryDocument,
   UserDocument,
@@ -72,6 +73,7 @@ export { stores } from "./stores.ts";
 export { tags } from "./tags.ts";
 export { trackingCategories } from "./tracking-categories.ts";
 export { templates } from "./templates.ts";
+export { templateComponents } from "./template-components.ts";
 export { threads } from "./threads.ts";
 export { users } from "./users.ts";
 export { webshopProducts } from "./webshop-products.ts";
@@ -95,6 +97,7 @@ import { stores } from "./stores.ts";
 import { tags } from "./tags.ts";
 import { trackingCategories } from "./tracking-categories.ts";
 import { templates } from "./templates.ts";
+import { templateComponents } from "./template-components.ts";
 import { threads } from "./threads.ts";
 import { users } from "./users.ts";
 import { webshopProducts } from "./webshop-products.ts";
@@ -116,6 +119,7 @@ const allSchemas: TypesenseCollectionConfig[] = [
   stores,
   tags,
   templates,
+  templateComponents,
   threads,
   trackingCategories,
   users,
@@ -140,6 +144,7 @@ export type TypesenseAlias =
   | "stores"
   | "tags"
   | "templates"
+  | "template-components"
   | "threads"
   | "tracking-categories"
   | "users"
@@ -220,6 +225,9 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "stores": "stores.search",
   "tags": "tags.search",
   "templates": "templates.search",
+  // Components route through the template system — reuse templates.search rather
+  // than minting a new RBAC verb (components are not a separate permission scope).
+  "template-components": "templates.search",
   "threads": "threads.search",
   "tracking-categories": "trackingCategories.search",
   "users": "users.search",

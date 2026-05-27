@@ -662,6 +662,21 @@ export interface TemplateDocument {
   updated_at: number;
 }
 
+// ── Template Components ─────────────────────────────────────────────
+
+/** Typesense document type for template-component families. */
+export interface TemplateComponentDocument {
+  id: string;
+  uid: string;
+  git_path: string;
+  name: string;
+  uid_active?: string;
+  version_count: number;
+  version: number;
+  created_at: number;
+  updated_at: number;
+}
+
 // ── Tracking Categories ─────────────────────────────────────────────
 
 /** Typesense document type for tracking categories. */
@@ -793,6 +808,7 @@ export type TypesenseDocument =
   | StoreDocument
   | TagDocument
   | TemplateDocument
+  | TemplateComponentDocument
   | TrackingCategoryDocument
   | UserDocument
   | WebshopProductDocument;
@@ -814,6 +830,7 @@ export interface TypesenseDocumentMap {
   stores: StoreDocument;
   tags: TagDocument;
   templates: TemplateDocument;
+  "template-components": TemplateComponentDocument;
   "tracking-categories": TrackingCategoryDocument;
   users: UserDocument;
   "webshop-products": WebshopProductDocument;
