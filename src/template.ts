@@ -64,6 +64,9 @@ export interface Template {
   surfaces: TemplateSurfaceType[];
   /** uid of the current published version, or null until the first merge. */
   uid_active: string | null;
+  /** Rollup: semver of the active published version, or null until first publish.
+   * Lets consumers show current→predicted without fetching the active version. */
+  active_semver?: string | null;
   depends_on: TemplateDependsOn;
   /** Rollup: uids of versions currently in `draft` status. */
   draft_uids: string[];
@@ -90,6 +93,7 @@ export const TemplateSchema: z.ZodType<Template> = z.strictObject({
   collection_target: z.enum(TEMPLATE_TARGET_COLLECTIONS),
   surfaces: z.array(z.enum(TEMPLATE_SURFACES)).min(1),
   uid_active: z.string().nullable(),
+  active_semver: z.string().nullable().default(null),
   depends_on: z.strictObject({
     components: z.array(z.string()).default([]),
   }),

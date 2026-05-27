@@ -101,6 +101,10 @@ export interface TemplateVersion {
   git_branch?: string;
   base_sha?: string;
   base_seq?: number;
+  /** Operator-editable label for a draft branch (we never rename git branches). */
+  display_name?: string;
+  /** uid of this version's per-branch comment thread (cowritten on draft create). */
+  uid_thread?: string;
 
   // ── published fields ──
   sha?: string;
@@ -131,6 +135,8 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   git_branch: z.string().min(1).optional(),
   base_sha: z.string().min(1).optional(),
   base_seq: z.int().min(0).optional(),
+  display_name: z.string().min(1).max(200).optional(),
+  uid_thread: z.string().min(1).optional(),
 
   sha: z.string().min(1).optional(),
   semver: z.string().min(1).optional(),
