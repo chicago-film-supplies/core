@@ -596,16 +596,20 @@ export {
 export {
   TEMPLATE_VERSION_STATUSES,
   TEMPLATE_PARAM_TYPES,
+  GOLDEN_DIFF_VERDICTS,
   TemplateVersionSchema,
   TemplateParamSchema,
   CommitMetaSchema,
   BlobRefSchema,
+  GoldenDiffSchema,
   type TemplateVersion,
   type TemplateVersionStatusType,
   type TemplateParam,
   type TemplateParamType,
   type CommitMeta,
   type BlobRef,
+  type GoldenDiff,
+  type GoldenDiffVerdict,
 } from "./template-version.ts";
 
 export {

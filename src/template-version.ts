@@ -21,6 +21,7 @@ import { z } from "zod";
 import {
   ActorRef,
   type ActorRefType,
+  FirestoreTimestamp,
   type FirestoreTimestampType,
   TimestampFields,
 } from "./common.ts";
@@ -85,6 +86,36 @@ export const BlobRefSchema: z.ZodType<BlobRef> = z.strictObject({
   sha: z.string().min(1),
 });
 
+/** Golden visual-diff verdicts (mirrors the golden-diff endpoint). */
+export const GOLDEN_DIFF_VERDICTS = ["match", "diff", "no-golden", "renderer-unavailable"] as const;
+export type GoldenDiffVerdict = typeof GOLDEN_DIFF_VERDICTS[number];
+
+/**
+ * Latest golden visual-diff result for a draft branch, persisted by the CI
+ * golden-diff path so the manager can render the approve-to-merge review.
+ * `image_uuids` are Uploadcare UUIDs (served via ucarecdn.com).
+ */
+export interface GoldenDiff {
+  verdict: GoldenDiffVerdict;
+  delta: number;
+  image_uuids: { candidate?: string; diff?: string };
+  /** PR head sha the verdict was computed at. */
+  sha: string;
+  checked_at: FirestoreTimestampType;
+}
+
+/** Zod schema for a GoldenDiff. */
+export const GoldenDiffSchema: z.ZodType<GoldenDiff> = z.strictObject({
+  verdict: z.enum(GOLDEN_DIFF_VERDICTS),
+  delta: z.number(),
+  image_uuids: z.strictObject({
+    candidate: z.string().optional(),
+    diff: z.string().optional(),
+  }),
+  sha: z.string().min(1),
+  checked_at: FirestoreTimestamp,
+});
+
 /** A status-discriminated template version (draft | published | archived). */
 export interface TemplateVersion {
   uid: string;
@@ -114,6 +145,9 @@ export interface TemplateVersion {
   blob_refs?: BlobRef[];
 
   pr_number?: number | null;
+  /** Latest golden visual-diff result for this branch (CI-written), for the
+   * approve-to-merge review. */
+  golden?: GoldenDiff;
   /** Whether the projection has been reconciled against git (rebuild engine). */
   reconciled?: boolean;
   written_by: ActorRefType;
@@ -145,6 +179,7 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   blob_refs: z.array(BlobRefSchema).optional(),
 
   pr_number: z.int().nullable().optional(),
+  golden: GoldenDiffSchema.optional(),
   reconciled: z.boolean().optional(),
   written_by: ActorRef,
   version: z.int().min(0).default(0),
