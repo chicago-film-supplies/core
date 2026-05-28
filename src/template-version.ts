@@ -220,3 +220,25 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
     sort: { column: "seq", direction: "desc" },
   },
 });
+
+// ── Input schemas ───────────────────────────────────────────────────
+
+/** Input for PUT /templates-versions/:uid — partial content/params/rename + OCC token. */
+export interface UpdateTemplateVersionInputType {
+  content?: Record<string, string>;
+  params?: TemplateParam[];
+  display_name?: string;
+  version: number;
+}
+
+/**
+ * Zod schema for updating a template version. NON-strict on purpose: the manager
+ * cache's buildDiff injects `uid`, and validateUpdate runs this against the full
+ * TemplateVersion entity — both rely on unknown-key stripping.
+ */
+export const UpdateTemplateVersionInput: z.ZodType<UpdateTemplateVersionInputType> = z.object({
+  content: z.record(z.string(), z.string()).optional(),
+  params: z.array(TemplateParamSchema).optional(),
+  display_name: z.string().min(1).max(200).optional(),
+  version: z.int().min(0),
+});
