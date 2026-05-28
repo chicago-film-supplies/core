@@ -233,14 +233,26 @@ export {
 } from "./common.ts";
 
 export {
+  // Generic envelope (OpenAPI-only)
   LogRecordSchema,
+  type LogRecord,
+  // Shared envelope primitives
+  LogLevelEnum,
+  type BaseLogFields,
+  type LogLevelType,
+  type PiiClassification,
+  // Typed archetype arms (Phase 0: ~10; more added by big-bang migration)
   PropagationLogRecordSchema,
   TransactionLogRecordSchema,
   ClientLogEntrySchema,
   ClientLogBatchSchema,
-  type LogRecord,
-  type LogLevelType,
-  type PiiClassification,
+  RequestLogRecordSchema,
+  DmarcAggregateLogRecordSchema,
+  SyncErrorLogRecordSchema,
+  ValidationErrorLogRecordSchema,
+  EmailSendFailedLogRecordSchema,
+  EmailSentLogRecordSchema,
+  OAuthRefreshLogRecordSchema,
   type PropagationLogRecord,
   type PropagationModeType,
   type PropagationStatusType,
@@ -249,7 +261,19 @@ export {
   type ClientLogEntry,
   type ClientLogBatch,
   type ClientAppType,
-} from "./log.ts";
+  type RequestLogRecord,
+  type DmarcAggregateLogRecord,
+  type SyncErrorLogRecord,
+  type ValidationErrorLogRecord,
+  type ValidationIssue,
+  type EmailSendFailedLogRecord,
+  type EmailSentLogRecord,
+  type OAuthRefreshLogRecord,
+  // Discriminated union + msg→schema registry — primary surface for the
+  // typed `logTyped` API in api-cloudrun.
+  type TypedLogRecord,
+  MSG_SCHEMA_REGISTRY,
+} from "./log/mod.ts";
 
 export {
   StoreSchema,

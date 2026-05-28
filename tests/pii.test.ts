@@ -24,27 +24,12 @@ import { InvoiceSchema } from "../src/invoice.ts";
 import { BookingSchema } from "../src/booking.ts";
 import { UserSchema } from "../src/user.ts";
 import { LoginInput, RegisterInput, ResetPasswordInput, EmailInput } from "../src/auth.ts";
-import { LogRecordSchema } from "../src/log.ts";
+import { LogRecordSchema } from "../src/log/mod.ts";
+import { SENSITIVE_EXACT, SENSITIVE_NAME_FIELD } from "../src/pii/dictionary.ts";
 
-// ── Sensitive field patterns ─────────────────────────────────────────
-
-/** Fields that MUST have a `pii` meta value when they appear at any depth. */
-const SENSITIVE_EXACT = new Set([
-  "email",
-  "emails",
-  "password",
-  "password_hash",
-  "token",
-  "user_id",
-  "phones",
-  "billing_address",
-  "address",
-  "external_notes",
-  "internal_notes",
-]);
-
-/** Field names that require `pii` when they appear in contact/org/user-adjacent schemas. */
-const SENSITIVE_NAME_FIELD = "name";
+// The sensitive-field dictionary lives in `src/pii/dictionary.ts` (promoted
+// from this file 2026-05-27 so the runtime PII scrubber and this test
+// agree on the canonical set). Test logic is unchanged.
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
