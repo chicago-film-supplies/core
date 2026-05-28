@@ -46,9 +46,11 @@ export {
 export {
   ClientLogBatchSchema,
   ClientLogEntrySchema,
+  ClientLogRecordSchema,
   type ClientAppType,
   type ClientLogBatch,
   type ClientLogEntry,
+  type ClientLogRecord,
 } from "./client.ts";
 
 export {
@@ -161,6 +163,7 @@ export {
 
 // ── Discriminated union over typed arms ─────────────────────────────
 
+import { ClientLogRecordSchema } from "./client.ts";
 import { DmarcAggregateLogRecordSchema } from "./dmarc.ts";
 import { EmailSendFailedLogRecordSchema, EmailSentLogRecordSchema } from "./email.ts";
 import { OAuthRefreshLogRecordSchema } from "./oauth.ts";
@@ -219,6 +222,7 @@ import {
   XeroEventLogRecordSchema,
 } from "./xero-event.ts";
 
+import type { ClientLogRecord } from "./client.ts";
 import type { DmarcAggregateLogRecord } from "./dmarc.ts";
 import type { EmailSendFailedLogRecord, EmailSentLogRecord } from "./email.ts";
 import type { OAuthRefreshLogRecord } from "./oauth.ts";
@@ -259,6 +263,7 @@ import type { XeroEventLogRecord } from "./xero-event.ts";
  * symmetry so it's impossible to add one without the other.
  */
 export type TypedLogRecord =
+  | ClientLogRecord
   | DmarcAggregateLogRecord
   | EmailSendFailedLogRecord
   | EmailSentLogRecord
@@ -296,6 +301,7 @@ export type TypedLogRecord =
  */
 export const MSG_SCHEMA_REGISTRY: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
   // Phase 0 — per-msg schemas (one msg literal, one schema arm)
+  ["client_log", ClientLogRecordSchema as z.ZodType],
   ["dmarc_aggregate_record", DmarcAggregateLogRecordSchema as z.ZodType],
   ["email_send_failed", EmailSendFailedLogRecordSchema as z.ZodType],
   ["email_sent", EmailSentLogRecordSchema as z.ZodType],
