@@ -47,6 +47,11 @@ export const DOMAIN_EVENT_MSGS = [
   "stock_recalc_items",
   "stock_recalc_status_changed",
   "stock_summaries_pruned",
+  // Fulfillment picker accepted a quantity edit on a `custom-*` line
+  // item. Custom uids regenerate on the next CRMS opportunity sync, so
+  // the override is lossy — this is the explicit warning trail. Emitted
+  // from `src/services/fulfillmentEdits.ts` in api-cloudrun.
+  "fulfillment_custom_item_qty_override",
 ] as const;
 
 /** Discriminated msg union for Domain-archetype log records. */

@@ -13,6 +13,7 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 
 /** Msg literals this archetype absorbs. */
 export const SYSTEM_EVENT_MSGS = [
+  "dev_guard_skip",
   "dry_run_skip",
   "retry_attempt",
   "startup_error",

@@ -37,7 +37,15 @@ export interface DmarcAggregateLogRecord {
   domain: string;
   date_range_begin: number;
   date_range_end: number;
-  dmarc_pass: boolean;
+  /**
+   * Stringified boolean (`"true"` / `"false"`). The vmalert
+   * `DmarcSpoofingAttempt` rule in api-cloudrun's
+   * `infra/observability/vmalert/rules-vlogs.yml` filters
+   * `dmarc_pass:"false"` — LogsQL distinguishes string `"false"` from
+   * the boolean literal. Emitting as string keeps that filter robust
+   * regardless of how downstream serializers represent bools.
+   */
+  dmarc_pass: "true" | "false";
   request_id?: string;
   method?: string;
   path?: string;
@@ -70,5 +78,7 @@ export const DmarcAggregateLogRecordSchema: z.ZodType<DmarcAggregateLogRecord> =
   domain: z.string(),
   date_range_begin: z.number(),
   date_range_end: z.number(),
-  dmarc_pass: z.boolean(),
+  // Stringified — see the field doc in DmarcAggregateLogRecord above for
+  // why this isn't a `z.boolean()` (vmalert filter contract).
+  dmarc_pass: z.enum(["true", "false"]),
 }).passthrough().meta({ title: "DmarcAggregateLogRecord" });
