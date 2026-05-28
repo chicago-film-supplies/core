@@ -84,6 +84,81 @@ export {
   type OAuthRefreshLogRecord,
 } from "./oauth.ts";
 
+// ── Phase 3 archetypes (one schema per family; many msgs each) ──────
+
+export {
+  ACCESS_CONTROL_EVENT_MSGS,
+  AccessControlEventLogRecordSchema,
+  type AccessControlEventLogRecord,
+  type AccessControlEventMsg,
+} from "./access-control-event.ts";
+export {
+  CALENDAR_EVENT_MSGS,
+  CalendarEventLogRecordSchema,
+  type CalendarEventLogRecord,
+  type CalendarEventMsg,
+} from "./calendar-event.ts";
+export {
+  CLOUD_TASK_EVENT_MSGS,
+  CloudTaskEventLogRecordSchema,
+  type CloudTaskEventLogRecord,
+  type CloudTaskEventMsg,
+} from "./cloud-task-event.ts";
+export {
+  DOMAIN_EVENT_MSGS,
+  DomainEventLogRecordSchema,
+  type DomainEventLogRecord,
+  type DomainEventMsg,
+} from "./domain-event.ts";
+export {
+  INTEGRATION_EVENT_MSGS,
+  IntegrationEventLogRecordSchema,
+  type IntegrationEventLogRecord,
+  type IntegrationEventMsg,
+} from "./integration-event.ts";
+export {
+  MCP_EVENT_MSGS,
+  McpEventLogRecordSchema,
+  type McpEventLogRecord,
+  type McpEventMsg,
+} from "./mcp-event.ts";
+export {
+  OAUTH_EVENT_MSGS,
+  OAuthEventLogRecordSchema,
+  type OAuthEventLogRecord,
+  type OAuthEventMsg,
+} from "./oauth-event.ts";
+export {
+  SYSTEM_EVENT_MSGS,
+  SystemEventLogRecordSchema,
+  type SystemEventLogRecord,
+  type SystemEventMsg,
+} from "./system-event.ts";
+export {
+  TEMPLATE_EVENT_MSGS,
+  TemplateEventLogRecordSchema,
+  type TemplateEventLogRecord,
+  type TemplateEventMsg,
+} from "./template-event.ts";
+export {
+  TYPESENSE_EVENT_MSGS,
+  TypesenseEventLogRecordSchema,
+  type TypesenseEventLogRecord,
+  type TypesenseEventMsg,
+} from "./typesense-event.ts";
+export {
+  USER_SESSION_EVENT_MSGS,
+  UserSessionEventLogRecordSchema,
+  type UserSessionEventLogRecord,
+  type UserSessionEventMsg,
+} from "./user-session-event.ts";
+export {
+  XERO_EVENT_MSGS,
+  XeroEventLogRecordSchema,
+  type XeroEventLogRecord,
+  type XeroEventMsg,
+} from "./xero-event.ts";
+
 // ── Discriminated union over typed arms ─────────────────────────────
 
 import { DmarcAggregateLogRecordSchema } from "./dmarc.ts";
@@ -95,6 +170,55 @@ import { SyncErrorLogRecordSchema } from "./sync.ts";
 import { TransactionLogRecordSchema } from "./transaction.ts";
 import { ValidationErrorLogRecordSchema } from "./validation.ts";
 
+import {
+  ACCESS_CONTROL_EVENT_MSGS as ACCESS_MSGS,
+  AccessControlEventLogRecordSchema,
+} from "./access-control-event.ts";
+import {
+  CALENDAR_EVENT_MSGS as CALENDAR_MSGS,
+  CalendarEventLogRecordSchema,
+} from "./calendar-event.ts";
+import {
+  CLOUD_TASK_EVENT_MSGS as CLOUD_MSGS,
+  CloudTaskEventLogRecordSchema,
+} from "./cloud-task-event.ts";
+import {
+  DOMAIN_EVENT_MSGS as DOMAIN_MSGS,
+  DomainEventLogRecordSchema,
+} from "./domain-event.ts";
+import {
+  INTEGRATION_EVENT_MSGS as INTEGRATION_MSGS,
+  IntegrationEventLogRecordSchema,
+} from "./integration-event.ts";
+import {
+  MCP_EVENT_MSGS as MCP_MSGS,
+  McpEventLogRecordSchema,
+} from "./mcp-event.ts";
+import {
+  OAUTH_EVENT_MSGS as OAUTH_MSGS,
+  OAuthEventLogRecordSchema,
+} from "./oauth-event.ts";
+import {
+  SYSTEM_EVENT_MSGS as SYSTEM_MSGS,
+  SystemEventLogRecordSchema,
+} from "./system-event.ts";
+import {
+  TEMPLATE_EVENT_MSGS as TEMPLATE_MSGS,
+  TemplateEventLogRecordSchema,
+} from "./template-event.ts";
+import {
+  TYPESENSE_EVENT_MSGS as TYPESENSE_MSGS,
+  TypesenseEventLogRecordSchema,
+} from "./typesense-event.ts";
+import {
+  USER_SESSION_EVENT_MSGS as USER_SESSION_MSGS,
+  UserSessionEventLogRecordSchema,
+} from "./user-session-event.ts";
+import {
+  XERO_EVENT_MSGS as XERO_MSGS,
+  XeroEventLogRecordSchema,
+} from "./xero-event.ts";
+
 import type { DmarcAggregateLogRecord } from "./dmarc.ts";
 import type { EmailSendFailedLogRecord, EmailSentLogRecord } from "./email.ts";
 import type { OAuthRefreshLogRecord } from "./oauth.ts";
@@ -103,6 +227,19 @@ import type { RequestLogRecord } from "./request.ts";
 import type { SyncErrorLogRecord } from "./sync.ts";
 import type { TransactionLogRecord } from "./transaction.ts";
 import type { ValidationErrorLogRecord } from "./validation.ts";
+
+import type { AccessControlEventLogRecord } from "./access-control-event.ts";
+import type { CalendarEventLogRecord } from "./calendar-event.ts";
+import type { CloudTaskEventLogRecord } from "./cloud-task-event.ts";
+import type { DomainEventLogRecord } from "./domain-event.ts";
+import type { IntegrationEventLogRecord } from "./integration-event.ts";
+import type { McpEventLogRecord } from "./mcp-event.ts";
+import type { OAuthEventLogRecord } from "./oauth-event.ts";
+import type { SystemEventLogRecord } from "./system-event.ts";
+import type { TemplateEventLogRecord } from "./template-event.ts";
+import type { TypesenseEventLogRecord } from "./typesense-event.ts";
+import type { UserSessionEventLogRecord } from "./user-session-event.ts";
+import type { XeroEventLogRecord } from "./xero-event.ts";
 
 /**
  * Discriminated union of every typed log record, keyed by the `msg`
@@ -130,7 +267,21 @@ export type TypedLogRecord =
   | RequestLogRecord
   | SyncErrorLogRecord
   | TransactionLogRecord
-  | ValidationErrorLogRecord;
+  | ValidationErrorLogRecord
+  // Phase 3 archetypes (one type per family; each arm's `msg` is a
+  // union of the family's literals — TS narrows to family shape).
+  | AccessControlEventLogRecord
+  | CalendarEventLogRecord
+  | CloudTaskEventLogRecord
+  | DomainEventLogRecord
+  | IntegrationEventLogRecord
+  | McpEventLogRecord
+  | OAuthEventLogRecord
+  | SystemEventLogRecord
+  | TemplateEventLogRecord
+  | TypesenseEventLogRecord
+  | UserSessionEventLogRecord
+  | XeroEventLogRecord;
 
 /**
  * Runtime msg → schema lookup. The structured logger's `emit()` reads
@@ -144,6 +295,7 @@ export type TypedLogRecord =
  * tree emits.
  */
 export const MSG_SCHEMA_REGISTRY: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
+  // Phase 0 — per-msg schemas (one msg literal, one schema arm)
   ["dmarc_aggregate_record", DmarcAggregateLogRecordSchema as z.ZodType],
   ["email_send_failed", EmailSendFailedLogRecordSchema as z.ZodType],
   ["email_sent", EmailSentLogRecordSchema as z.ZodType],
@@ -153,4 +305,17 @@ export const MSG_SCHEMA_REGISTRY: ReadonlyMap<string, z.ZodType> = new Map<strin
   ["sync_error", SyncErrorLogRecordSchema as z.ZodType],
   ["transaction", TransactionLogRecordSchema as z.ZodType],
   ["validation_error", ValidationErrorLogRecordSchema as z.ZodType],
+  // Phase 3 — archetype schemas (many msg literals share one schema arm)
+  ...ACCESS_MSGS.map((m) => [m, AccessControlEventLogRecordSchema as z.ZodType] as const),
+  ...CALENDAR_MSGS.map((m) => [m, CalendarEventLogRecordSchema as z.ZodType] as const),
+  ...CLOUD_MSGS.map((m) => [m, CloudTaskEventLogRecordSchema as z.ZodType] as const),
+  ...DOMAIN_MSGS.map((m) => [m, DomainEventLogRecordSchema as z.ZodType] as const),
+  ...INTEGRATION_MSGS.map((m) => [m, IntegrationEventLogRecordSchema as z.ZodType] as const),
+  ...MCP_MSGS.map((m) => [m, McpEventLogRecordSchema as z.ZodType] as const),
+  ...OAUTH_MSGS.map((m) => [m, OAuthEventLogRecordSchema as z.ZodType] as const),
+  ...SYSTEM_MSGS.map((m) => [m, SystemEventLogRecordSchema as z.ZodType] as const),
+  ...TEMPLATE_MSGS.map((m) => [m, TemplateEventLogRecordSchema as z.ZodType] as const),
+  ...TYPESENSE_MSGS.map((m) => [m, TypesenseEventLogRecordSchema as z.ZodType] as const),
+  ...USER_SESSION_MSGS.map((m) => [m, UserSessionEventLogRecordSchema as z.ZodType] as const),
+  ...XERO_MSGS.map((m) => [m, XeroEventLogRecordSchema as z.ZodType] as const),
 ]);

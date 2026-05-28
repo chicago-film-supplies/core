@@ -21,6 +21,8 @@ interface ZodInternalDef {
   shape?: Record<string, z.ZodType>;
   /** Zod 4 stores literal values as an array (single-arg literals are a 1-element array). */
   values?: readonly unknown[];
+  /** Zod 4 stores enum values as `entries: Record<string, string>`. */
+  entries?: Record<string, string>;
 }
 
 function getDef(node: z.ZodType): ZodInternalDef {
@@ -40,30 +42,52 @@ function unwrap(node: z.ZodType): z.ZodType {
   }
 }
 
-/** Extract the literal value of a record's `msg` field. */
-function extractMsgLiteral(schema: z.ZodType): string | null {
+/**
+ * Extract the set of `msg` values a record's schema accepts.
+ *
+ * - Phase 0 per-msg arms use `z.literal("...")` — returns a 1-element set.
+ * - Phase 3 archetype arms use `z.enum([...])` — returns the enum's
+ *   accepted values.
+ *
+ * Returns null if the schema's `msg` field is shaped unexpectedly (would
+ * indicate a malformed arm).
+ */
+function extractMsgAccepted(schema: z.ZodType): Set<string> | null {
   const obj = unwrap(schema);
   const shape = getDef(obj).shape;
   if (!shape || !shape.msg) return null;
   const msgDef = getDef(unwrap(shape.msg));
-  if (msgDef.type !== "literal" || !msgDef.values || msgDef.values.length !== 1) return null;
-  const v = msgDef.values[0];
-  return typeof v === "string" ? v : null;
+  if (msgDef.type === "literal") {
+    if (!msgDef.values || msgDef.values.length !== 1) return null;
+    const v = msgDef.values[0];
+    return typeof v === "string" ? new Set([v]) : null;
+  }
+  if (msgDef.type === "enum") {
+    if (!msgDef.entries) return null;
+    return new Set(Object.values(msgDef.entries));
+  }
+  return null;
 }
 
-Deno.test("MSG_SCHEMA_REGISTRY: each entry's schema has a matching msg literal", () => {
+Deno.test("MSG_SCHEMA_REGISTRY: each entry's key is accepted by its schema's msg", () => {
   for (const [key, schema] of MSG_SCHEMA_REGISTRY.entries()) {
-    const literal = extractMsgLiteral(schema);
-    assertEquals(
-      literal,
-      key,
-      `Registry key "${key}" does not match its schema's msg literal (${literal}).`,
-    );
+    const accepted = extractMsgAccepted(schema);
+    if (!accepted) {
+      throw new Error(
+        `Registry key "${key}" — schema's msg field is not a literal or enum.`,
+      );
+    }
+    if (!accepted.has(key)) {
+      throw new Error(
+        `Registry key "${key}" is not in its schema's accepted msg set ` +
+          `[${[...accepted].join(", ")}].`,
+      );
+    }
   }
 });
 
-Deno.test("MSG_SCHEMA_REGISTRY: contains expected Phase 0 archetypes", () => {
-  const expected = new Set([
+Deno.test("MSG_SCHEMA_REGISTRY: contains every Phase 0 archetype", () => {
+  const phase0 = [
     "dmarc_aggregate_record",
     "email_send_failed",
     "email_sent",
@@ -73,7 +97,9 @@ Deno.test("MSG_SCHEMA_REGISTRY: contains expected Phase 0 archetypes", () => {
     "sync_error",
     "transaction",
     "validation_error",
-  ]);
+  ];
   const actual = new Set(MSG_SCHEMA_REGISTRY.keys());
-  assertEquals(actual, expected);
+  for (const key of phase0) {
+    assertEquals(actual.has(key), true, `Missing Phase 0 archetype "${key}"`);
+  }
 });
