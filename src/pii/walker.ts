@@ -95,6 +95,13 @@ interface ZodInternalDef {
   innerType?: z.ZodType;
   element?: z.ZodType;
   shape?: Record<string, z.ZodType>;
+  options?: z.ZodType[];
+  /** `literal` def values (Zod 4 stores the literal set as an array). */
+  values?: unknown[];
+  /** Older / non-Zod-4 literal def shape. */
+  value?: unknown;
+  /** `enum` def — Zod 4 stores entries as a record `{member: member, ...}`. */
+  entries?: Record<string, unknown>;
 }
 
 function getDef(node: z.ZodType): ZodInternalDef {
@@ -103,6 +110,57 @@ function getDef(node: z.ZodType): ZodInternalDef {
 
 function getShape(node: z.ZodType): Record<string, z.ZodType> | null {
   return getDef(unwrapZod(node)).shape ?? null;
+}
+
+/**
+ * Resolve a union schema down to the single member that matches `record`'s
+ * shape, using `literal` and `enum` fields as discriminators (e.g.
+ * `type: "rental"` against an `OrderItemType` enum in one member and
+ * `type: "destination"` against a `z.literal("destination")` in another).
+ * Returns the matched member, or `null` if `node` isn't a union or no member
+ * discriminates. Members without any discriminator field are skipped — we
+ * never guess.
+ */
+function resolveUnionMember(
+  node: z.ZodType,
+  record: Record<string, unknown>,
+): z.ZodType | null {
+  const def = getDef(unwrapZod(node));
+  if (def.type !== "union" || !def.options) return null;
+  // Pass 1 — prefer a member whose literal discriminator(s) match exactly.
+  // Pass 2 — fall back to a member whose enum discriminator includes the value.
+  for (const passRequiresLiteral of [true, false]) {
+    for (const member of def.options) {
+      const memberShape = getShape(member);
+      if (!memberShape) continue;
+      let hasDiscriminator = false;
+      let allMatched = true;
+      for (const [key, fieldSchema] of Object.entries(memberShape)) {
+        const fieldDef = getDef(unwrapZod(fieldSchema));
+        let expected: unknown[] | null = null;
+        if (fieldDef.type === "literal") {
+          // Zod 4 literals carry a `values` array; older builds use `value`.
+          expected = fieldDef.values ?? (fieldDef.value !== undefined ? [fieldDef.value] : []);
+        } else if (!passRequiresLiteral && fieldDef.type === "enum" && fieldDef.entries) {
+          expected = Object.values(fieldDef.entries);
+        }
+        if (!expected) continue;
+        // Skip optional/nullable discriminators the record doesn't carry —
+        // an absent value is "match by absence", not a mismatch. Without this
+        // an optional enum (e.g. an order line item's `inclusion_type`) would
+        // wrongly disqualify every member.
+        const recValue = record[key];
+        if (recValue === undefined || recValue === null) continue;
+        hasDiscriminator = true;
+        if (!expected.includes(recValue)) {
+          allMatched = false;
+          break;
+        }
+      }
+      if (hasDiscriminator && allMatched) return member;
+    }
+  }
+  return null;
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -129,7 +187,12 @@ function walkObject(
   strategy: PiiStrategy,
   prefix: string,
 ): Record<string, unknown> {
-  const shape = getShape(schema);
+  // If the schema is a union (e.g. an items-array element), narrow to the
+  // member that matches `record`'s literal-discriminated shape, then walk.
+  // Without this an order's items[] union would skip every member's tagged
+  // fields (regression: the 2026-05-28 fixture-sanitizer audit).
+  const narrowed = resolveUnionMember(schema, record) ?? schema;
+  const shape = getShape(narrowed);
   if (!shape) return record;
   const out: Record<string, unknown> = { ...record };
   for (const [key, fieldSchema] of Object.entries(shape)) {
@@ -173,7 +236,12 @@ function transformField(
       return value.map((v) => strategy.apply(v, elemPii, path));
     }
     const elemDef = getDef(elemUnwrapped);
-    if (elemDef.type === "object" && elemDef.shape) {
+    if (
+      (elemDef.type === "object" && elemDef.shape) ||
+      elemDef.type === "union"
+    ) {
+      // `walkObject` handles both: a plain object element walks the element's
+      // shape, a union element is narrowed by `resolveUnionMember` first.
       return value.map((v) =>
         v !== null && typeof v === "object" && !Array.isArray(v)
           ? walkObject(v as Record<string, unknown>, elem, strategy, path)

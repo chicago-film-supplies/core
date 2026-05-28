@@ -199,7 +199,9 @@ export interface DestinationEndpointType {
 export const DestinationEndpoint: z.ZodType<DestinationEndpointType> = z.object({
   uid: z.string().nullable().optional(),
   address: Address.optional(),
-  instructions: z.string().nullable().optional(),
+  // Free-text operator notes ("key under the mat", "ask for John") routinely
+  // carry PII — tagged so the fixture sanitizer + logger masks them.
+  instructions: z.string().meta({ pii: "mask" }).nullable().optional(),
   contact: DestinationContact.nullable().optional(),
 });
 
@@ -217,7 +219,7 @@ export interface DocDestinationEndpointType {
 export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.strictObject({
   uid: z.string().nullable(),
   address: Address,
-  instructions: z.string().nullable(),
+  instructions: z.string().meta({ pii: "mask" }).nullable(),
   contact: DocDestinationContact.nullable(),
 });
 
@@ -390,7 +392,9 @@ export const OrderItem: z.ZodType<OrderItemType> = z.object({
   uid: z.string(),
   type: DocItemTypeEnum,
   name: z.string().optional(),
-  description: z.string().optional(),
+  // Custom/divider items hold free-text description that often references the
+  // customer ("for John's birthday shoot") — mask in fixtures + logs.
+  description: z.string().meta({ pii: "mask" }).optional(),
   quantity: z.int().optional(),
   price: ItemPrice.optional(),
   stock_method: StockMethodEnum.optional(),
@@ -522,7 +526,9 @@ export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject(
   uid: z.string(),
   type: DocLineItemTypeEnum,
   name: z.string().min(1).max(100),
-  description: z.string().default(""),
+  // Free-text — for custom items the operator routinely paraphrases the
+  // customer's request; mask in fixtures + logs.
+  description: z.string().meta({ pii: "mask" }).default(""),
   quantity: z.number().int().min(0).default(0),
   price: OrderDocItemPrice.optional(),
   stock_method: StockMethodEnum.optional(),
@@ -554,11 +560,13 @@ export interface OrderDocDestinationItemType {
 export const OrderDocDestinationItem: z.ZodType<OrderDocDestinationItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("destination"),
-  name: z.string().max(200).default(""),
+  // Operator-typed divider label — often the contact's name or address;
+  // mask in fixtures + logs.
+  name: z.string().max(200).meta({ pii: "mask" }).default(""),
   path: z.array(z.string()).default([]),
   uid_delivery: z.string().nullable().default(null),
   uid_collection: z.string().nullable().default(null),
-  description: z.string().default(""),
+  description: z.string().meta({ pii: "mask" }).default(""),
 });
 
 /** Group divider in items array. */
@@ -573,9 +581,10 @@ export interface OrderDocGroupItemType {
 export const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("group"),
-  name: z.string().min(1).max(100),
+  // Operator-typed divider label — often a customer/project name; mask.
+  name: z.string().min(1).max(100).meta({ pii: "mask" }),
   path: z.array(z.string()).default([]),
-  description: z.string().default(""),
+  description: z.string().meta({ pii: "mask" }).default(""),
 });
 
 /** Transaction fee line item in the full order document. */

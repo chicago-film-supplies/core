@@ -128,7 +128,9 @@ export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = z.strictO
   uid: z.string(),
   type: DocLineItemTypeEnum,
   name: z.string(),
-  description: z.string().default(""),
+  // Free-text — custom items routinely paraphrase the customer's request;
+  // mask in fixtures + logs.
+  description: z.string().meta({ pii: "mask" }).default(""),
   quantity: z.number().default(0),
   price: InvoiceDocItemPriceSchema,
   path: z.array(z.string()).default([]),
@@ -156,10 +158,11 @@ export interface InvoiceDocOrderItemType {
 export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("order"),
-  name: z.string().max(200).default(""),
+  // Operator-typed divider label — often references the source order/customer.
+  name: z.string().max(200).meta({ pii: "mask" }).default(""),
   path: z.array(z.string()).default([]),
   uid_order: z.string(),
-  description: z.string().default(""),
+  description: z.string().meta({ pii: "mask" }).default(""),
 });
 
 // ── Item union ──────────────────────────────────────────────────

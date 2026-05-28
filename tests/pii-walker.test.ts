@@ -253,3 +253,104 @@ Deno.test("walker: applies per-element transform on array of pii-tagged primitiv
   );
   assertEquals(out.emails, ["a****@x.com", "b**@y.com"]);
 });
+
+// ── Order/Invoice free-text fixture-audit coverage ──────────────────
+//
+// These exercise the newly-tagged `instructions` / `description` / divider
+// `name` fields on OrderSchema + InvoiceSchema so the fixture sanitizer
+// (and the logger) won't leak them. Regressions here mean a future schema
+// edit removed a `pii` tag without anyone noticing.
+
+Deno.test("walker: masks destination instructions on OrderSchema", async () => {
+  const { OrderSchema } = await import("../src/order.ts");
+  const strategy = createLoggerStrategy(undefined);
+  const doc = {
+    uid: "o-1",
+    number: 1,
+    status: "draft",
+    organization: { uid: "org-1", name: "Acme Inc", xero_id: null },
+    destinations: [
+      {
+        dates: {
+          delivery_start: "2026-01-15T12:00:00.000-06:00",
+          delivery_end: "2026-01-16T12:00:00.000-06:00",
+          collection_start: "2026-01-16T12:00:00.000-06:00",
+          collection_end: "2026-01-17T12:00:00.000-06:00",
+          charge_start: "2026-01-15T00:00:00.000-06:00",
+          charge_end: "2026-01-17T00:00:00.000-06:00",
+          days_active: 2,
+          days_charged: 2,
+        },
+        delivery: {
+          uid: null,
+          address: null,
+          instructions: "key under mat, ask for John",
+          contact: null,
+        },
+        collection: {
+          uid: null,
+          address: null,
+          instructions: "ring bell at studio 4B",
+          contact: null,
+        },
+        customer_collecting: false,
+        customer_returning: false,
+      },
+    ],
+    items: [],
+  };
+  // deno-lint-ignore no-explicit-any
+  const out = applyPii(doc as any, OrderSchema as any, strategy) as any;
+  assertNotEquals(out.destinations[0].delivery.instructions, "key under mat, ask for John");
+  assertNotEquals(out.destinations[0].collection.instructions, "ring bell at studio 4B");
+  // Organization name is also mask-tagged.
+  assertNotEquals(out.organization.name, "Acme Inc");
+});
+
+Deno.test("walker: masks line-item + divider description/name on OrderSchema", async () => {
+  const { OrderSchema } = await import("../src/order.ts");
+  const strategy = createLoggerStrategy(undefined);
+  const doc = {
+    uid: "o-2",
+    number: 2,
+    status: "draft",
+    organization: { uid: "org-1", name: "Acme", xero_id: null },
+    destinations: [],
+    items: [
+      {
+        uid: "00000000-0000-0000-0000-000000000001",
+        type: "destination",
+        name: "John Smith — primary studio",
+        description: "deliver before 8am",
+        path: [],
+        uid_delivery: null,
+        uid_collection: null,
+      },
+      {
+        uid: "00000000-0000-0000-0000-000000000002",
+        type: "group",
+        name: "Smith family shoot",
+        description: "no-flash gear only",
+        path: [],
+      },
+      {
+        uid: "li-1",
+        type: "rental",
+        name: "Custom item",
+        description: "for John's birthday wedding video",
+        quantity: 1,
+        stock_method: "none",
+        path: [],
+      },
+    ],
+  };
+  // deno-lint-ignore no-explicit-any
+  const out = applyPii(doc as any, OrderSchema as any, strategy) as any;
+  // Divider name + description masked.
+  assertNotEquals(out.items[0].name, "John Smith — primary studio");
+  assertNotEquals(out.items[0].description, "deliver before 8am");
+  assertNotEquals(out.items[1].name, "Smith family shoot");
+  assertNotEquals(out.items[1].description, "no-flash gear only");
+  // Custom line item description masked.
+  assertNotEquals(out.items[2].description, "for John's birthday wedding video");
+});

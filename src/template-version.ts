@@ -86,16 +86,34 @@ export const BlobRefSchema: z.ZodType<BlobRef> = z.strictObject({
   sha: z.string().min(1),
 });
 
-/** Golden visual-diff verdicts (mirrors the golden-diff endpoint). */
-export const GOLDEN_DIFF_VERDICTS = ["match", "diff", "no-golden", "renderer-unavailable"] as const;
+/** Golden visual-diff verdicts (mirrors the golden-diff endpoint).
+ *
+ * `no-fixtures` is an informational result emitted when a template family has
+ * zero fixtures in git — there is nothing to render, so CI treats it as a pass
+ * and the manager renders it as a "capture a source doc to enable golden
+ * review" hint. It's never aggregated with other verdicts (the family-level
+ * aggregate uses the per-fixture entries directly). */
+export const GOLDEN_DIFF_VERDICTS = [
+  "match",
+  "diff",
+  "no-golden",
+  "renderer-unavailable",
+  "no-fixtures",
+] as const;
 export type GoldenDiffVerdict = typeof GOLDEN_DIFF_VERDICTS[number];
 
 /**
- * Latest golden visual-diff result for a draft branch, persisted by the CI
- * golden-diff path so the manager can render the approve-to-merge review.
- * `image_uuids` are Uploadcare UUIDs (served via ucarecdn.com).
+ * Per-fixture golden visual-diff result for a draft branch. The CI golden-diff
+ * path fans out over the family's git-canonical fixtures (`fixtures/<gp>/*.json`)
+ * and persists one entry per fixture so the manager can render the
+ * approve-to-merge review row-by-row. `image_uuids` are Uploadcare UUIDs
+ * (served via ucarecdn.com); `fixture` is the slug join key
+ * (`fixtures/<gp>/<slug>.json`).
  */
 export interface GoldenDiff {
+  /** Fixture slug — the join key to the family's `fixtures[]` manifest entry
+   * and the file at `fixtures/<git_path>/<slug>.json`. */
+  fixture: string;
   verdict: GoldenDiffVerdict;
   delta: number;
   image_uuids: { candidate?: string; diff?: string };
@@ -106,6 +124,7 @@ export interface GoldenDiff {
 
 /** Zod schema for a GoldenDiff. */
 export const GoldenDiffSchema: z.ZodType<GoldenDiff> = z.strictObject({
+  fixture: z.string().min(1).max(200),
   verdict: z.enum(GOLDEN_DIFF_VERDICTS),
   delta: z.number(),
   image_uuids: z.strictObject({
@@ -153,9 +172,11 @@ export interface TemplateVersion {
   blob_refs?: BlobRef[];
 
   pr_number?: number | null;
-  /** Latest golden visual-diff result for this branch (CI-written), for the
-   * approve-to-merge review. */
-  golden?: GoldenDiff;
+  /** Per-fixture golden visual-diff results for this branch (CI-written), one
+   * entry per fixture rendered, for the approve-to-merge review. CI replaces
+   * the whole array each run so stale entries for deleted fixtures evict
+   * naturally. Empty / undefined until the first golden-diff run on the branch. */
+  golden_results?: GoldenDiff[];
   /** Whether the projection has been reconciled against git (rebuild engine). */
   reconciled?: boolean;
   written_by: ActorRefType;
@@ -188,7 +209,7 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   blob_refs: z.array(BlobRefSchema).optional(),
 
   pr_number: z.int().nullable().optional(),
-  golden: GoldenDiffSchema.optional(),
+  golden_results: z.array(GoldenDiffSchema).optional(),
   reconciled: z.boolean().optional(),
   written_by: ActorRef,
   version: z.int().min(0).default(0),

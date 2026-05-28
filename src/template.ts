@@ -52,6 +52,29 @@ export interface TemplateDependsOn {
   components: string[];
 }
 
+/**
+ * A fixture manifest entry — the operator-facing label/description for one
+ * git-canonical fixture (`fixtures/<git_path>/<slug>.json`). Files are
+ * authoritative: discovery globs the directory; this manifest only enriches
+ * the manager list with labels. An orphaned manifest entry (slug with no
+ * matching file) is ignored at render/golden time — never breaks a render.
+ */
+export interface FixtureMeta {
+  /** Filename slug — the join key to `fixtures/<git_path>/<slug>.json`. */
+  slug: string;
+  /** Operator-facing label shown in the editor's fixture picker. */
+  label: string;
+  /** Optional one-line description (e.g. "Order with three destinations + a tax-exempt subgroup"). */
+  description?: string;
+}
+
+/** Zod schema for a fixture manifest entry. */
+export const FixtureMetaSchema: z.ZodType<FixtureMeta> = z.strictObject({
+  slug: z.string().min(1).max(100),
+  label: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+});
+
 /** A thin template *family* document — identity + rollups, no content/status. */
 export interface Template {
   uid: string;
@@ -68,6 +91,11 @@ export interface Template {
    * Lets consumers show current→predicted without fetching the active version. */
   active_semver?: string | null;
   depends_on: TemplateDependsOn;
+  /** Operator-managed fixture manifest, projected from the sidecar
+   * `fixtures: [{slug, label, description?}]`. Files in `fixtures/<git_path>/`
+   * are authoritative — this list only enriches the manager UI with labels.
+   * Defaults to `[]` for a never-captured family. */
+  fixtures: FixtureMeta[];
   /** Rollup: uids of versions currently in `draft` status. */
   draft_uids: string[];
   /** Rollup: total versions ever published in this family. */
@@ -97,6 +125,7 @@ export const TemplateSchema: z.ZodType<Template> = z.strictObject({
   depends_on: z.strictObject({
     components: z.array(z.string()).default([]),
   }),
+  fixtures: z.array(FixtureMetaSchema).default([]),
   draft_uids: z.array(z.string()).default([]),
   version_count: z.int().min(0).default(0),
   last_published_at: FirestoreTimestamp.nullable(),
