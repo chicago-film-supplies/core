@@ -2,7 +2,11 @@ import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import {
   bumpSemver,
   deriveBump,
+  fixtureDir,
+  fixturePath,
+  goldenPath,
   hashTemplateContent,
+  parseFixturePath,
   RenderParamError,
   type RenderParamDecl,
   resolveRenderParams,
@@ -10,6 +14,48 @@ import {
   scanDocFieldRefs,
   slugify,
 } from "../src/templates.ts";
+
+// ── Path helpers (fixtures + goldens) ───────────────────────────────
+
+Deno.test("fixtureDir returns the family's fixtures dir with a trailing slash", () => {
+  assertEquals(fixtureDir("quote"), "fixtures/quote/");
+});
+
+Deno.test("fixturePath joins git_path and slug", () => {
+  assertEquals(fixturePath("quote", "order-841"), "fixtures/quote/order-841.json");
+});
+
+Deno.test("goldenPath includes branch, git_path, and slug", () => {
+  assertEquals(
+    goldenPath("main", "quote", "order-841"),
+    "goldens/main/quote/order-841.png",
+  );
+  assertEquals(
+    goldenPath("sandbox", "packing-list", "tax-exempt"),
+    "goldens/sandbox/packing-list/tax-exempt.png",
+  );
+});
+
+Deno.test("parseFixturePath recovers git_path + slug from a valid path", () => {
+  assertEquals(
+    parseFixturePath("fixtures/quote/order-841.json"),
+    { gitPath: "quote", slug: "order-841" },
+  );
+});
+
+Deno.test("parseFixturePath rejects flat fixture paths (legacy layout)", () => {
+  assertEquals(parseFixturePath("fixtures/order-841.json"), null);
+});
+
+Deno.test("parseFixturePath rejects nested-slug paths (no `/` allowed in slug)", () => {
+  assertEquals(parseFixturePath("fixtures/quote/sub/order.json"), null);
+});
+
+Deno.test("parseFixturePath rejects non-fixture paths", () => {
+  assertEquals(parseFixturePath("templates/quote.eta"), null);
+  assertEquals(parseFixturePath("goldens/main/quote/order-841.png"), null);
+  assertEquals(parseFixturePath("fixtures/quote/order-841.txt"), null);
+});
 
 // ── slugify ─────────────────────────────────────────────────────────
 

@@ -1573,6 +1573,18 @@ Map a conventional-commit type + breaking flag to a semver bump level.
 Breaking always wins (`major`). `feat` → `minor`. Everything else
 (`fix`, `refactor`, `chore`, `docs`, …) → `patch`.
 
+### `fixtureDir(gitPath: string): string`
+
+Directory holding a template family's fixtures: `fixtures/<git_path>/`.
+
+### `fixturePath(gitPath: string, slug: string): string`
+
+Path to one fixture: `fixtures/<git_path>/<slug>.json`.
+
+### `goldenPath(branch: string, gitPath: string, slug: string): string`
+
+Path to one branch-keyed golden: `goldens/<branch>/<git_path>/<slug>.png`.
+
 ### `hashTemplateContent(content: Record<string, string>): string`
 
 Order-independent fingerprint of a template/component content map
@@ -1589,6 +1601,13 @@ change since the last push?".
 ```ts
 hashTemplateContent({ "a.eta": "x" }) === hashTemplateContent({ "a.eta": "x" }); // true
 ```
+
+### `parseFixturePath(path: string): typeLiteral | null`
+
+Parse a fixture path back to `{ gitPath, slug }`. Returns `null` for any
+path that isn't of the form `fixtures/<gp>/<slug>.json`. The affected-set
+classifier consumes this to route fixture-only PR changes into the
+`goldenOnly` bucket (golden re-run, no version bump).
 
 ### `resolveRenderParams(declared: typeOperator, provided: Record<string, unknown> | undefined): Record<string, boolean>`
 

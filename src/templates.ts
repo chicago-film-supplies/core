@@ -16,6 +16,46 @@
  * @module
  */
 
+// ── Git-canonical paths (fixtures + goldens) ────────────────────────
+//
+// Shared path helpers so the api-cloudrun golden-diff, the affected-set
+// classifier, the rebless script, and the manager all agree on where
+// fixtures and goldens live in the templates repo. No DEFAULT_FIXTURE_PATH
+// — a template with zero fixtures emits a `no-fixtures` golden verdict
+// rather than rendering a wrong-shaped fallback.
+
+/** Directory holding a template family's fixtures: `fixtures/<git_path>/`. */
+export function fixtureDir(gitPath: string): string {
+  return `fixtures/${gitPath}/`;
+}
+
+/** Path to one fixture: `fixtures/<git_path>/<slug>.json`. */
+export function fixturePath(gitPath: string, slug: string): string {
+  return `fixtures/${gitPath}/${slug}.json`;
+}
+
+/** Path to one branch-keyed golden: `goldens/<branch>/<git_path>/<slug>.png`. */
+export function goldenPath(branch: string, gitPath: string, slug: string): string {
+  return `goldens/${branch}/${gitPath}/${slug}.png`;
+}
+
+/**
+ * Parse a fixture path back to `{ gitPath, slug }`. Returns `null` for any
+ * path that isn't of the form `fixtures/<gp>/<slug>.json`. The affected-set
+ * classifier consumes this to route fixture-only PR changes into the
+ * `goldenOnly` bucket (golden re-run, no version bump).
+ */
+export function parseFixturePath(path: string): { gitPath: string; slug: string } | null {
+  if (!path.startsWith("fixtures/") || !path.endsWith(".json")) return null;
+  const inner = path.slice("fixtures/".length, -".json".length);
+  const slashIndex = inner.indexOf("/");
+  if (slashIndex < 0) return null;
+  const gitPath = inner.slice(0, slashIndex);
+  const slug = inner.slice(slashIndex + 1);
+  if (!gitPath || !slug || slug.includes("/")) return null;
+  return { gitPath, slug };
+}
+
 // ── slugify ─────────────────────────────────────────────────────────
 
 /**

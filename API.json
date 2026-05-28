@@ -1295,9 +1295,41 @@
         },
         {
           "kind": "function",
+          "name": "fixtureDir",
+          "signature": "fixtureDir(gitPath: string): string",
+          "doc": "Directory holding a template family's fixtures: `fixtures/<git_path>/`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "fixturePath",
+          "signature": "fixturePath(gitPath: string, slug: string): string",
+          "doc": "Path to one fixture: `fixtures/<git_path>/<slug>.json`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "goldenPath",
+          "signature": "goldenPath(branch: string, gitPath: string, slug: string): string",
+          "doc": "Path to one branch-keyed golden: `goldens/<branch>/<git_path>/<slug>.png`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "hashTemplateContent",
           "signature": "hashTemplateContent(content: Record<string, string>): string",
           "doc": "Order-independent fingerprint of a template/component content map\n(path → file text). The API stamps a version's `committed_content_hash` with\nthis when it pushes content to git (commit / release); the manager hashes the\nlive draft content the same way to detect \"dirty since last commit\" and warn\nat approve-to-merge.\n\nPure, synchronous, and runtime-agnostic (Deno + browser) so both sides agree\nbyte-for-byte. A non-cryptographic 64-bit FNV-1a digest (two seeded streams):\ncollision resistance is irrelevant here — it only answers \"did the content\nchange since the last push?\".\n\n```ts\nhashTemplateContent({ \"a.eta\": \"x\" }) === hashTemplateContent({ \"a.eta\": \"x\" }); // true\n```",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "parseFixturePath",
+          "signature": "parseFixturePath(path: string): typeLiteral | null",
+          "doc": "Parse a fixture path back to `{ gitPath, slug }`. Returns `null` for any\npath that isn't of the form `fixtures/<gp>/<slug>.json`. The affected-set\nclassifier consumes this to route fixture-only PR changes into the\n`goldenOnly` bucket (golden re-run, no version bump).",
           "paramTags": [],
           "returnsTag": null
         },
