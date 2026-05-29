@@ -12,6 +12,8 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 
 /** Msg literals this archetype absorbs. */
 export const TEMPLATE_EVENT_MSGS = [
+  "fixture_saved",
+  "fixture_deleted",
   "template_abandon_close_pr_failed",
   "template_component_file_missing",
   "template_component_no_content",
