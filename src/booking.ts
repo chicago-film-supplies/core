@@ -12,10 +12,10 @@ import {
   type FirestoreTimestampType,
 } from "./common.ts";
 
-const BOOKING_STATUSES = [
+export const BOOKING_STATUSES = [
   "draft", "quoted", "reserved", "part-prepped", "prepped", "active", "complete",
 ] as const;
-type BookingStatusType = typeof BOOKING_STATUSES[number];
+export type BookingStatusType = typeof BOOKING_STATUSES[number];
 const BookingStatus: z.ZodType<BookingStatusType> = z.enum(BOOKING_STATUSES);
 
 /** A reference to a destination with its address, used in booking delivery/collection. */

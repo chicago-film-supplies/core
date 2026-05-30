@@ -462,6 +462,8 @@ export {
 
 export {
   BookingSchema,
+  BOOKING_STATUSES,
+  type BookingStatusType,
   BookingBreakdownSchema,
   type Booking,
   type BookingBreakdown,
