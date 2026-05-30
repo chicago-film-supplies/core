@@ -364,7 +364,7 @@ export interface StoreBreakdownEntry {
 export const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation> = z.strictObject({
   uid_location: z.string(),
   name: z.string(),
-  quantity: z.number(),
+  quantity: z.number().min(0), // physical shelf count — can't go negative
   default: z.boolean(),
   max: z.number().nullable(),
 });
@@ -375,7 +375,7 @@ export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.stric
   name: z.string(),
   default: z.boolean(),
   crms_stock_level_id: z.number().nullable(),
-  quantity: z.number(),
+  quantity: z.number().min(0), // Σ of this store's location quantities — can't go negative
   locations: z.array(StoreBreakdownLocationSchema).default([]),
 });
 

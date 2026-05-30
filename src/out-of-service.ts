@@ -257,7 +257,7 @@ export interface CreateOutOfServiceInputType {
 export const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType> = z.object({
   uid_product: z.string().min(1),
   reason: OOSReasonEnum,
-  quantity: z.number().positive(),
+  quantity: z.number().int().positive(),
   dates: z.object({
     start: chicagoInstant().nullable().optional(),
     end: chicagoInstant().nullable().optional(),

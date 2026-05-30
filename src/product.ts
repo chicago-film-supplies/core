@@ -321,7 +321,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   transaction: z.object({
     uid: z.string(),
     type: z.enum(["purchase", "make", "find"]),
-    quantity: z.number(),
+    quantity: z.number().int().nonnegative(),
     total_cost: z.number(),
     date: chicagoInstant(),
     reference: z.string(),
@@ -330,6 +330,21 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
 }).refine(
   (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement != null,
   { message: "price.replacement is required for rental products", path: ["price", "replacement"] },
+).refine(
+  // Opening-balance scalar quantity must equal Σ per-location transactionQuantity,
+  // or the ledger is born desynced (quantity_held != Σ store_breakdown). Backstop
+  // behind the server-side assertQuantityMatchesLocations guard (#168).
+  (p) =>
+    !p.transaction ||
+    p.transaction.quantity ===
+      p.transaction.stores.reduce(
+        (sum, s) => sum + s.locations.reduce((acc, l) => acc + (l.transactionQuantity || 0), 0),
+        0,
+      ),
+  {
+    message: "transaction.quantity must equal the sum of per-location transactionQuantity",
+    path: ["transaction", "quantity"],
+  },
 );
 /** Input type for updating a product. */
 export interface UpdateProductInputType {
