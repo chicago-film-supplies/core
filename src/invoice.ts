@@ -150,7 +150,6 @@ export interface InvoiceDocOrderItemType {
   type: "order";
   name: string;
   path: string[];
-  uid_order?: string;
   description: string;
 }
 
@@ -163,9 +162,6 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = z.strictO
   // Operator-typed divider label — often references the source order/customer.
   name: z.string().max(200).meta({ pii: "mask" }).default(""),
   path: z.array(z.string()).default([]),
-  // Transitional (Option B): redundant once uid === order.uid; optional during the
-  // backfill window, removed entirely in the cleanup phase. Do not write on new docs.
-  uid_order: z.string().optional(),
   description: z.string().meta({ pii: "mask" }).default(""),
 });
 

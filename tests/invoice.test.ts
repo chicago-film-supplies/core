@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/initial.ts";
-import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceSchema, UpdateInvoiceInput, UpdatePaymentInput } from "../src/invoice.ts";
+import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, UpdateInvoiceInput, UpdatePaymentInput } from "../src/invoice.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const invoiceBase = getInitialValues(InvoiceSchema) as Record<string, unknown>;
@@ -315,7 +315,6 @@ Deno.test("InvoiceSchema accepts order divider item in items array", () => {
         uid: "550e8400-e29b-41d4-a716-446655440002",
         type: "order",
         name: "Order #1001",
-        uid_order: "order-1",
         description: "",
       },
       {
@@ -350,6 +349,25 @@ Deno.test("InvoiceSchema accepts an Option-B order divider: Firestore-id uid, no
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
 });
 
+// Phase D: uid_order is removed from the order-divider doc schema. A divider
+// still carrying it is rejected — strictObject surfaces unrecognized_keys on the
+// bare member (InvoiceSchema.items is a plain union, so its top-level code would
+// be invalid_union instead — assert against the member to pin the real reason).
+Deno.test("InvoiceDocOrderItem rejects a uid_order key (Phase D: field removed)", () => {
+  const result = InvoiceDocOrderItem.safeParse({
+    uid: "order-1",
+    type: "order",
+    name: "Order #1001",
+    path: [],
+    uid_order: "order-1",
+    description: "",
+  });
+  assertEquals(result.success, false);
+  if (!result.success) {
+    assertEquals(result.error.issues[0].code, "unrecognized_keys");
+  }
+});
+
 Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
   const doc = {
     ...validInvoice,
@@ -359,7 +377,6 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         uid: "550e8400-e29b-41d4-a716-446655440010",
         type: "order",
         name: "Order #1001",
-        uid_order: "order-1",
         description: "",
       },
       {
@@ -378,7 +395,6 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         uid: "550e8400-e29b-41d4-a716-446655440020",
         type: "order",
         name: "Order #1002",
-        uid_order: "order-2",
         description: "",
       },
       {

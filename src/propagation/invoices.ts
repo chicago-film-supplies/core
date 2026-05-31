@@ -82,7 +82,7 @@ export const updateOrderInvoiceRules: CollectionRule[] = [
     invariant: "Unpaid invoices stay in sync with their source orders — items and destinations scoped by order are selectively synced (respecting invoice-side overrides); scalar fields (subject, reference, organization) co-write only while the invoice value still matches the prev order value",
     trigger: "items, destinations, subject, reference, or organization change on order — targets invoices where query_by_orders contains order uid AND payments is empty",
     fields: [
-      { source: ["uid"], target: ["items", "uid_order"], transform: "match order divider by uid_order to scope item removal/rebuild" },
+      { source: ["uid"], target: ["items", "uid"], transform: "match order divider by uid (= source order id) to scope item removal/rebuild" },
       { source: ["items"], target: ["items"], transform: "selective sync: compare prev order items to current invoice items by path — update only non-overridden items, add new items, remove deleted non-overridden items. Invoice-only fields (coa_revenue, tracking_category, xero_id, xero_tracking_option_id) are preserved." },
       { source: ["items"], target: ["totals"], transform: "recalculate totals server-side after item sync" },
       { source: ["destinations"], target: ["destinations"], transform: "selective sync within uid_order scope: match pairs by (delivery.uid, collection.uid) — update only non-overridden pairs, add new pairs (tagged with uid_order), remove deleted non-overridden pairs. Leaves pairs from other orders untouched." },
