@@ -1,18 +1,18 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@cfs/schemas@10.0.0-beta.27": "10.0.0-beta.27",
+    "jsr:@cfs/schemas@10.0.0-beta.28": "10.0.0-beta.28",
     "jsr:@std/assert@^1.0.19": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "npm:@date-fns/tz@^1.4.1": "1.5.0",
     "npm:currency.js@^2.0.4": "2.0.4",
-    "npm:date-fns@^4.1.0": "4.3.0",
+    "npm:date-fns@^4.1.0": "4.4.0",
     "npm:firebase-admin@*": "13.8.0",
     "npm:zod@^4.3.6": "4.4.3"
   },
   "jsr": {
-    "@cfs/schemas@10.0.0-beta.27": {
-      "integrity": "ed84b258a25e50398a29302f900df230d465f6db050f85dee1c51f39eb738c8c",
+    "@cfs/schemas@10.0.0-beta.28": {
+      "integrity": "4a9c971a8023fa4067d6f4553384ef03878fc5eeafa475140ba88b1d905489ff",
       "dependencies": [
         "npm:@date-fns/tz",
         "npm:date-fns",
@@ -332,8 +332,8 @@
     "data-uri-to-buffer@4.0.1": {
       "integrity": "sha512-0R9ikRb668HB7QDxT1vkpuUBtqc53YyAwMwGeUFKRojY/NWKvdZ+9UYtRfGmhqNbRkTSVpMbmyhXipFFv2cb/A=="
     },
-    "date-fns@4.3.0": {
-      "integrity": "sha512-OYcL+3N/jyWbYdFGqoMAhytDgxP9pbYPUUiRCOgn4Fewaadk9l/Wam4Avciiyp2BgkpfQyBV9B+ehnVJych+eQ=="
+    "date-fns@4.4.0": {
+      "integrity": "sha512-+1UMbeh68lH1SegH83CGWwpb6OHHbpSgr3+s5Eww5M4CAgswBpoWS0AjTOfEJ33HiYKz1hdj/KTFprzXHmq/6w=="
     },
     "debug@4.4.3": {
       "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
@@ -991,7 +991,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@cfs/schemas@10.0.0-beta.27",
+      "jsr:@cfs/schemas@10.0.0-beta.28",
       "jsr:@std/assert@^1.0.19",
       "npm:@date-fns/tz@^1.4.1",
       "npm:currency.js@^2.0.4",
