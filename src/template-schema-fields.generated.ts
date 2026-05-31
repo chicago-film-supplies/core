@@ -330,7 +330,7 @@ export const templateSchemaFields: Record<TemplateSourceCollectionType, SchemaFi
     { path: "items[] (type: order).type", type: "order" },
     { path: "items[] (type: order).name", type: "string" },
     { path: "items[] (type: order).path", type: "string[]" },
-    { path: "items[] (type: order).uid_order", type: "string" },
+    { path: "items[] (type: order).uid_order", type: "string?" },
     { path: "items[] (type: order).description", type: "string" },
     { path: "totals", type: "object" },
     { path: "totals.subtotal", type: "number" },

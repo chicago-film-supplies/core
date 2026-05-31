@@ -327,6 +327,29 @@ Deno.test("InvoiceSchema accepts order divider item in items array", () => {
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
 });
 
+// Option B (Phase A relaxation): the order divider's uid is the source order's
+// Firestore doc-id (NOT a uuid) and carries no uid_order. This doc would FAIL
+// under the pre-A schema (uid: z.uuid() + uid_order required) and must pass now.
+Deno.test("InvoiceSchema accepts an Option-B order divider: Firestore-id uid, no uid_order", () => {
+  const doc = {
+    ...validInvoice,
+    items: [
+      {
+        uid: "k7Hq2mNpQ4rStUvWxYz0",
+        type: "order",
+        name: "Order #1001",
+        path: [],
+        description: "",
+      },
+      {
+        ...validInvoice.items[0],
+        path: ["k7Hq2mNpQ4rStUvWxYz0"],
+      },
+    ],
+  };
+  assertEquals(InvoiceSchema.safeParse(doc).success, true);
+});
+
 Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
   const doc = {
     ...validInvoice,

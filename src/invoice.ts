@@ -150,18 +150,22 @@ export interface InvoiceDocOrderItemType {
   type: "order";
   name: string;
   path: string[];
-  uid_order: string;
+  uid_order?: string;
   description: string;
 }
 
 /** Zod schema for an order divider item. */
 export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = z.strictObject({
-  uid: z.uuid(),
+  // Option B: the order divider's identity IS the source order's Firestore doc-id
+  // (order.uid), not a synthesized UUID — so this is z.string(), not z.uuid().
+  uid: z.string(),
   type: z.literal("order"),
   // Operator-typed divider label — often references the source order/customer.
   name: z.string().max(200).meta({ pii: "mask" }).default(""),
   path: z.array(z.string()).default([]),
-  uid_order: z.string(),
+  // Transitional (Option B): redundant once uid === order.uid; optional during the
+  // backfill window, removed entirely in the cleanup phase. Do not write on new docs.
+  uid_order: z.string().optional(),
   description: z.string().meta({ pii: "mask" }).default(""),
 });
 

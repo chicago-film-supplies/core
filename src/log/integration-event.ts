@@ -16,6 +16,8 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 
 /** Msg literals this archetype absorbs. */
 export const INTEGRATION_EVENT_MSGS = [
+  "crms_invoice_items_uniqueness_violation",
+  "crms_invoice_multidest_flat",
   "crms_invoice_multiple_orders_found",
   "crms_invoice_order_not_found",
   "crms_mark_paid_failed",
