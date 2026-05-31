@@ -292,20 +292,37 @@ function stripOrderPrefix(path: string[], orderDividerUid: string): string[] {
  * Mirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`
  * (`createInvoice`) so sync output is shape-consistent with create output.
  */
+/**
+ * Build an invoice destination divider from a source order's destination item.
+ * Single source of truth for the divider shape — reused by
+ * `projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice
+ * webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.
+ *
+ * `path` defaults to `[]` so callers that run `computeInvoiceItemPaths`
+ * afterward (the webhook + backfill) get positional path assignment; the
+ * order-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.
+ */
+export function buildInvoiceDestinationDivider(
+  source: { uid: string; name: string; description?: string | null; uid_delivery?: string | null; uid_collection?: string | null },
+  path: string[] = [],
+): InvoiceItem {
+  return {
+    uid: source.uid,
+    type: "destination",
+    name: source.name,
+    description: source.description ?? "",
+    uid_delivery: source.uid_delivery ?? null,
+    uid_collection: source.uid_collection ?? null,
+    path,
+  } as InvoiceItem;
+}
+
 function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceItem {
   const basePath = item.path ?? [];
   const path = [orderDividerUid, ...basePath];
 
   if (item.type === "destination") {
-    return {
-      uid: item.uid,
-      type: "destination",
-      name: item.name,
-      description: item.description ?? "",
-      uid_delivery: item.uid_delivery ?? null,
-      uid_collection: item.uid_collection ?? null,
-      path,
-    } as InvoiceItem;
+    return buildInvoiceDestinationDivider(item, path);
   }
   if (item.type === "group") {
     return {

@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues, InvoiceDocLineItemSchema, InvoiceDocOrderItem, OrderDocDestinationItem, OrderDocGroupItem } from "@cfs/schemas";
 import {
+  buildInvoiceDestinationDivider,
   buildOrderScopedItems,
   calculateInvoiceTotals,
   carryForwardOverrides,
@@ -940,4 +941,35 @@ Deno.test("validateInvoiceItemUniqueness allows same product in two different or
     makeItem({ uid: "P", path: ["order-div-2", "P"] }),
   ];
   assertEquals(validateInvoiceItemUniqueness(items), []);
+});
+
+// ── buildInvoiceDestinationDivider ──────────────────────────────
+
+Deno.test("buildInvoiceDestinationDivider maps fields and defaults path to []", () => {
+  const divider = buildInvoiceDestinationDivider({
+    uid: "dest-9",
+    name: "Warehouse",
+    uid_delivery: "del-9",
+    uid_collection: "col-9",
+  });
+  assertEquals(divider.type, "destination");
+  assertEquals(divider.uid, "dest-9");
+  assertEquals(divider.name, "Warehouse");
+  assertEquals(divider.description, "");
+  assertEquals((divider as { uid_delivery?: string | null }).uid_delivery, "del-9");
+  assertEquals((divider as { uid_collection?: string | null }).uid_collection, "col-9");
+  assertEquals(divider.path, []);
+});
+
+Deno.test("buildInvoiceDestinationDivider nulls missing collection, accepts explicit path, matches schema", () => {
+  // The webhook leaves path [] and lets computeInvoiceItemPaths assign it; the
+  // order-projection caller passes the scoped path directly — both must validate.
+  // A real order destination always carries a delivery uid; uid_collection may be null.
+  // OrderDocDestinationItem validates `uid` as a UUID, so use a real one.
+  const destUid = crypto.randomUUID();
+  const divider = buildInvoiceDestinationDivider({ uid: destUid, name: "Venue", uid_delivery: "del-10" }, ["order-div-1", destUid]);
+  assertEquals((divider as { uid_collection?: string | null }).uid_collection, null); // omitted → defaulted to null
+  assertEquals(divider.path, ["order-div-1", destUid]);
+  const parsed = OrderDocDestinationItem.safeParse(divider);
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
 });
