@@ -2,6 +2,7 @@
  * Contact document schema — Firestore collection: contacts
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -26,7 +27,7 @@ export interface ContactOrganizationType {
 
 /** Zod schema for an organization reference embedded in a contact. */
 export const ContactOrganization: z.ZodType<ContactOrganizationType> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
 });
 
@@ -52,7 +53,7 @@ export interface Contact extends NameParts {
 
 /** Zod schema for a full contact Firestore document. */
 export const ContactSchema: z.ZodType<Contact> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   ...NamePartsFields,
   name: NameField,
   crms_id: z.number().optional(),
@@ -60,7 +61,7 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   phones: z.array(Phone).default([]),
   organizations: z.array(ContactOrganization).default([]),
   query_by_organizations: z.array(z.string()).default([]),
-  uid_user: z.string().optional(),
+  uid_user: FirestoreId.optional(),
   defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
@@ -88,7 +89,7 @@ export interface CreateContactInputType extends NameParts {
 
 /** Input schema for creating a contact. */
 export const CreateContactInput: z.ZodType<CreateContactInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   ...NamePartsFields,
   emails: z.array(Email).optional(),
   phones: z.array(Phone).optional(),
@@ -108,7 +109,7 @@ export interface UpdateContactInputType extends PartialNameParts {
 
 /** Input schema for updating a contact. */
 export const UpdateContactInput: z.ZodType<UpdateContactInputType> = z.object({
-  uid: z.string().optional(),
+  uid: FirestoreId.optional(),
   ...NamePartsFieldsPartial,
   emails: z.array(Email).optional(),
   phones: z.array(Phone).optional(),

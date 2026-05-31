@@ -18,6 +18,7 @@
  * already-`pii`-annotated `ActorRef` (grounding #6).
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -188,8 +189,8 @@ export interface TemplateVersion {
 
 /** Zod schema for a TemplateVersion document. */
 export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject({
-  uid: z.string(),
-  uid_template: z.string().min(1),
+  uid: FirestoreId,
+  uid_template: FirestoreId,
   status: z.enum(TEMPLATE_VERSION_STATUSES),
   content: z.record(z.string(), z.string()),
   params: z.array(TemplateParamSchema).default([]),
@@ -199,7 +200,7 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   base_sha: z.string().min(1).optional(),
   base_seq: z.int().min(0).optional(),
   display_name: z.string().min(1).max(200).optional(),
-  uid_thread: z.string().min(1).optional(),
+  uid_thread: FirestoreId.optional(),
   committed_content_hash: z.string().min(1).optional(),
 
   sha: z.string().min(1).optional(),

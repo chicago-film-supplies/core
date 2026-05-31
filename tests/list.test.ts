@@ -3,14 +3,14 @@ import { CreateListInput, ListSchema, UpdateListInput } from "../src/list.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validList = {
-  uid: "list-1",
+  uid: "list1000000000000000",
   name: "Field service",
   description: "Deliveries and pickups",
   icon: "truck",
   color: "#3b82f6",
   position: 1000,
-  created_by: { uid: "user-1", name: "Alex" },
-  updated_by: { uid: "user-1", name: "Alex" },
+  created_by: { uid: "user1000000000000000", name: "Alex" },
+  updated_by: { uid: "user1000000000000000", name: "Alex" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };

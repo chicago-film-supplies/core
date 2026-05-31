@@ -3,8 +3,8 @@ import { StockSummarySchema } from "../src/stock-summary.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validSummary = {
-  uid: "test-ss-1",
-  uid_product: "test-prod-1",
+  uid: "testprod100000000000:rental:2026-03-01:2036-03-01",
+  uid_product: "testprod100000000000",
   summary_type: "rental",
   type: "rental",
   dates: {
@@ -35,20 +35,20 @@ const validSummary = {
   quantity_in_service: 18,
   quantity_out_of_service: 2,
   store_breakdown: [{
-    uid_store: "test-store-1",
+    uid_store: "teststore10000000000",
     name: "Main",
     default: true,
     crms_stock_level_id: null,
     quantity: 20,
     locations: [{
-      uid_location: "test-loc-1",
+      uid_location: "testloc1000000000000",
       name: "Shelf A",
       quantity: 20,
       default: true,
       max: null,
     }],
   }],
-  query_by_uid_store: ["test-store-1"],
+  query_by_uid_store: ["teststore10000000000"],
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
   expiresAt: mockTimestamp,

@@ -3,8 +3,8 @@ import { PublicStockSummarySchema } from "../src/public-stock-summary.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validSummary = {
-  uid: "test-pss-1",
-  uid_product: "test-prod-1",
+  uid: "testprod100000000000:rental:2026-03-01:2036-03-01",
+  uid_product: "testprod100000000000",
   summary_type: "rental",
   type: "rental",
   dates: {
@@ -14,8 +14,8 @@ const validSummary = {
     end_fs: null,
   },
   quantity_available: 10,
-  store_breakdown: [{ uid_store: "test-store-1", quantity: 10 }],
-  query_by_uid_store: ["test-store-1"],
+  store_breakdown: [{ uid_store: "teststore10000000000", quantity: 10 }],
+  query_by_uid_store: ["teststore10000000000"],
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
   expiresAt: mockTimestamp,

@@ -12,6 +12,7 @@
  * carries its own `version` for optimistic concurrency on picker writes.
  */
 import { z } from "zod";
+import { FirestoreId, ItemUid } from "./_uid.ts";
 import {
   type FirestoreTimestampType,
   StockMethodEnum,
@@ -63,19 +64,19 @@ export interface FulfillmentLineItemType {
 }
 
 export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = z.strictObject({
-  uid: z.string(),
+  uid: ItemUid,
   type: FulfillmentLineItemTypeEnum,
   name: z.string().min(1).max(100),
   description: z.string().default(""),
   quantity: z.number().int().min(0).default(0),
   stock_method: StockMethodEnum.optional(),
-  path: z.array(z.string()).default([]),
+  path: z.array(ItemUid).default([]),
   order_number: z.number().optional(),
-  uid_order: z.string().optional(),
-  uid_delivery: z.string().nullable().optional(),
-  uid_collection: z.string().nullable().optional(),
+  uid_order: FirestoreId.optional(),
+  uid_delivery: FirestoreId.nullable().optional(),
+  uid_collection: FirestoreId.nullable().optional(),
   quantity_order: z.number().int().min(0).optional(),
-  path_substituted_for: z.array(z.string()).optional(),
+  path_substituted_for: z.array(ItemUid).optional(),
 });
 
 /** Destination divider in the fulfillment items array. */
@@ -93,9 +94,9 @@ export const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemTyp
   uid: z.uuid(),
   type: z.literal("destination"),
   name: z.string().max(200).default(""),
-  path: z.array(z.string()).default([]),
-  uid_delivery: z.string().nullable().default(null),
-  uid_collection: z.string().nullable().default(null),
+  path: z.array(ItemUid).default([]),
+  uid_delivery: FirestoreId.nullable().default(null),
+  uid_collection: FirestoreId.nullable().default(null),
   description: z.string().default(""),
 });
 
@@ -112,7 +113,7 @@ export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> = z.stric
   uid: z.uuid(),
   type: z.literal("group"),
   name: z.string().min(1).max(100),
-  path: z.array(z.string()).default([]),
+  path: z.array(ItemUid).default([]),
   description: z.string().default(""),
 });
 
@@ -130,7 +131,7 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.union([
 
 /** Sanitized organization snapshot — uid and name only. */
 const FulfillmentOrganization = z.strictObject({
-  uid: z.string().nullable(),
+  uid: FirestoreId.nullable(),
   name: z.string().min(1).max(100).meta({ pii: "mask" }),
 });
 
@@ -165,7 +166,7 @@ export interface Fulfillment {
 }
 
 export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   number: z.int(),
   status: FulfillmentOrderStatus,
   organization: FulfillmentOrganization,

@@ -2,6 +2,10 @@
  * Shared schema fragments used across multiple collections.
  */
 import { z } from "zod";
+import { AnyUid, FirestoreId } from "./_uid.ts";
+
+// Re-export the id validators so consumers can import them from the package root.
+export { AnyUid, BookingId, CardId, EventCardId, FirestoreId, ItemUid, ListId, StockSummaryId } from "./_uid.ts";
 
 /**
  * Structural interfaces for Firestore Timestamp and FieldValue.
@@ -210,7 +214,9 @@ export interface DocSourceType {
 /** Zod schema for a polymorphic doc reference. */
 export const DocSource: z.ZodType<DocSourceType> = z.strictObject({
   collection: z.string().min(1),
-  uid: z.string().min(1),
+  // Polymorphic — points at any collection, including composite-keyed docs
+  // (bookings, stock-summaries). AnyUid is the union of every known id shape.
+  uid: AnyUid,
   label: z.string().max(200).nullable().optional(),
 });
 
@@ -224,7 +230,8 @@ export interface UidNameRefType {
 
 /** Zod schema for a uid + name reference. */
 export const UidNameRef: z.ZodType<UidNameRefType> = z.strictObject({
-  uid: z.string().min(1),
+  // Generic/polymorphic reference — AnyUid covers every known id shape.
+  uid: AnyUid,
   name: z.string().min(1).max(100).meta({ pii: "none" }),
 });
 
@@ -244,6 +251,10 @@ export interface ActorRefType {
 
 /** Zod schema for an actor reference. */
 export const ActorRef: z.ZodType<ActorRefType> = z.strictObject({
+  // Free-form in historical data: real user ids, bot slugs (manager-bot,
+  // crms-bot, …), ad-hoc migration actors (migrateProducts, migration-bot),
+  // and even legacy email addresses. Not constrainable without a data cleanup
+  // — deferred to a future migration before a strict ActorId can be applied.
   uid: z.string().min(1),
   name: NameField,
 });
@@ -362,7 +373,7 @@ export interface StoreBreakdownEntry {
 
 /** Zod schema for StoreBreakdownLocation. */
 export const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation> = z.strictObject({
-  uid_location: z.string(),
+  uid_location: FirestoreId,
   name: z.string(),
   quantity: z.number().min(0), // physical shelf count — can't go negative
   default: z.boolean(),
@@ -371,7 +382,7 @@ export const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation> = z
 
 /** Zod schema for StoreBreakdownEntry. */
 export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.strictObject({
-  uid_store: z.string(),
+  uid_store: FirestoreId,
   name: z.string(),
   default: z.boolean(),
   crms_stock_level_id: z.number().nullable(),

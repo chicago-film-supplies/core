@@ -2,6 +2,7 @@
  * Booking document schema — Firestore collection: bookings
  */
 import { z } from "zod";
+import { BookingId, FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   Address,
@@ -110,19 +111,19 @@ export interface Booking {
 }
 
 const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   address: Address,
 });
 
 const BookingStoreLocationSchema: z.ZodType<BookingStoreLocation> = z.strictObject({
-  uid_location: z.string(),
+  uid_location: FirestoreId,
   name: z.string(),
   quantity: z.number(),
   default: z.boolean(),
 });
 
 const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
-  uid_store: z.string(),
+  uid_store: FirestoreId,
   name: z.string(),
   default: z.boolean(),
   quantity: z.number(),
@@ -176,7 +177,7 @@ export interface BookingUpdateType {
 }
 
 export const BookingUpdate: z.ZodType<BookingUpdateType> = z.object({
-  uid: z.string(),
+  uid: BookingId,
   status: BookingStatus.optional(),
   breakdown: BookingBreakdownSchema.optional(),
   version: z.int().min(0),
@@ -221,16 +222,16 @@ export const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType>
     order_completed: z.boolean(),
     oos_records_written: z.int().min(0),
     results: z.array(z.object({
-      uid: z.string(),
+      uid: BookingId,
       version: z.int().min(0),
     })),
   });
 
 /** Zod schema for Booking. */
 export const BookingSchema: z.ZodType<Booking> = z.strictObject({
-  uid: z.string(),
-  uid_order: z.string(),
-  uid_product: z.string(),
+  uid: BookingId,
+  uid_order: FirestoreId,
+  uid_product: FirestoreId,
   name: z.string(),
   number: z.int().meta({ label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
   type: ComponentTypeEnum,
@@ -259,15 +260,15 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
     collection: BookingDestinationRefSchema.nullable(),
   }),
   organization: z.strictObject({
-    uid: z.string().nullable(),
+    uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask" }),
     crms_id: z.number().nullable(),
   }),
   stores: z.array(BookingStoreSchema).default([]),
-  query_by_uid_store: z.array(z.string()).default([]),
-  query_by_uid_location: z.array(z.string()).default([]),
-  uid_destination_delivery: z.string(),
-  uid_destination_collection: z.string(),
+  query_by_uid_store: z.array(FirestoreId).default([]),
+  query_by_uid_location: z.array(FirestoreId).default([]),
+  uid_destination_delivery: FirestoreId,
+  uid_destination_collection: FirestoreId,
   version: z.int().min(0).default(0),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,

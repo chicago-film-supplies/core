@@ -3,14 +3,14 @@ import { ThreadSchema, UpdateThreadInput } from "../src/thread.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validThread = {
-  uid: "thread-1",
-  sources: [{ collection: "orders", uid: "order-1" }],
+  uid: "thread10000000000000",
+  sources: [{ collection: "orders", uid: "order100000000000000" }],
   title: null,
   last_message_at: null,
   last_message_preview: "",
   comment_count: 0,
-  created_by: { uid: "user-1", name: "Alex" },
-  updated_by: { uid: "user-1", name: "Alex" },
+  created_by: { uid: "user1000000000000000", name: "Alex" },
+  updated_by: { uid: "user1000000000000000", name: "Alex" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };
@@ -23,8 +23,8 @@ Deno.test("ThreadSchema accepts multi-source threads", () => {
   const doc = {
     ...validThread,
     sources: [
-      { collection: "cards", uid: "card-1" },
-      { collection: "orders", uid: "order-1" },
+      { collection: "cards", uid: "card1000000000000000" },
+      { collection: "orders", uid: "order100000000000000" },
     ],
   };
   assertEquals(ThreadSchema.safeParse(doc).success, true);

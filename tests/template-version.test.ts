@@ -20,7 +20,7 @@ Deno.test("UpdateTemplateVersionInput accepts a display_name-only update", () =>
 });
 
 Deno.test("UpdateTemplateVersionInput strips an injected uid (non-strict)", () => {
-  const res = UpdateTemplateVersionInput.safeParse({ content: { "a.eta": "x" }, uid: "tv-1", version: 1 });
+  const res = UpdateTemplateVersionInput.safeParse({ content: { "a.eta": "x" }, uid: "tv100000000000000000", version: 1 });
   assertEquals(res.success, true);
   if (res.success) assertEquals("uid" in res.data, false);
 });
@@ -78,8 +78,8 @@ Deno.test("GOLDEN_DIFF_VERDICTS includes no-fixtures", () => {
 
 Deno.test("TemplateVersionSchema accepts a draft with golden_results array", () => {
   const res = TemplateVersionSchema.safeParse({
-    uid: "tv-1",
-    uid_template: "t-1",
+    uid: "tv100000000000000000",
+    uid_template: "t1000000000000000000",
     status: "draft",
     content: { "templates/quote.eta": "x" },
     params: [],
@@ -97,7 +97,7 @@ Deno.test("TemplateVersionSchema accepts a draft with golden_results array", () 
         checked_at: mockTimestamp,
       },
     ],
-    written_by: { uid: "u-1", name: "Tester" },
+    written_by: { uid: "u1000000000000000000", name: "Tester" },
     version: 0,
     created_at: mockTimestamp,
     updated_at: mockTimestamp,
@@ -108,8 +108,8 @@ Deno.test("TemplateVersionSchema accepts a draft with golden_results array", () 
 
 Deno.test("TemplateVersionSchema accepts a draft without golden_results (pre-first-run)", () => {
   const res = TemplateVersionSchema.safeParse({
-    uid: "tv-1",
-    uid_template: "t-1",
+    uid: "tv100000000000000000",
+    uid_template: "t1000000000000000000",
     status: "draft",
     content: {},
     params: [],
@@ -117,7 +117,7 @@ Deno.test("TemplateVersionSchema accepts a draft without golden_results (pre-fir
     git_branch: "draft/quote/abc",
     base_sha: "deadbeef",
     base_seq: 0,
-    written_by: { uid: "u-1", name: "Tester" },
+    written_by: { uid: "u1000000000000000000", name: "Tester" },
     version: 0,
     created_at: mockTimestamp,
     updated_at: mockTimestamp,

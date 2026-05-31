@@ -2,6 +2,7 @@
  * StockSummary document schema — Firestore collection: stock-summaries
  */
 import { z } from "zod";
+import { BookingId, FirestoreId, StockSummaryId } from "./_uid.ts";
 import {
   FirestoreTimestamp,
   type FirestoreTimestampType,
@@ -65,8 +66,8 @@ export interface StockSummary {
 
 /** Zod schema for StockSummary. */
 export const StockSummarySchema: z.ZodType<StockSummary> = z.strictObject({
-  uid: z.string(),
-  uid_product: z.string(),
+  uid: StockSummaryId,
+  uid_product: FirestoreId,
   summary_type: z.enum(SUMMARY_TYPES),
   type: ProductTypeEnum,
   dates: z.strictObject({
@@ -76,7 +77,7 @@ export const StockSummarySchema: z.ZodType<StockSummary> = z.strictObject({
     end_fs: FirestoreTimestamp.nullable(),
   }),
   bookings: z.array(z.strictObject({
-    uid: z.string(),
+    uid: BookingId,
     number: z.number(),
     breakdown: BookingBreakdownSchema,
   })),
@@ -101,8 +102,8 @@ export const StockSummarySchema: z.ZodType<StockSummary> = z.strictObject({
   quantity_in_service: z.number(),
   quantity_out_of_service: z.number(),
   store_breakdown: z.array(StoreBreakdownEntrySchema).default([]),
-  query_by_uid_store: z.array(z.string()).default([]),
-  query_by_uid_location: z.array(z.string()).default([]),
+  query_by_uid_store: z.array(FirestoreId).default([]),
+  query_by_uid_location: z.array(FirestoreId).default([]),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
   expiresAt: FirestoreTimestamp,

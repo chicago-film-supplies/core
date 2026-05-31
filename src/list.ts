@@ -10,6 +10,7 @@
  * synced to Typesense — the manager loads them once into a store.
  */
 import { z } from "zod";
+import { ListId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -63,7 +64,7 @@ export interface List {
 
 /** Zod schema for a list Firestore document. */
 export const ListSchema: z.ZodType<List> = z.strictObject({
-  uid: z.string(),
+  uid: ListId,
   name: z.string().min(1).max(80).meta({ pii: "none" }),
   description: z.string().max(500).meta({ pii: "none" }).default(""),
   icon: z.string().max(64).nullable(),

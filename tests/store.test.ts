@@ -6,7 +6,7 @@ const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("StoreSchema validates a complete document", () => {
   const doc = {
-    uid: "test-store-1",
+    uid: "teststore10000000000",
     name: "Main Warehouse",
     default: true,
     crms_store_id: 100,
@@ -17,12 +17,12 @@ Deno.test("StoreSchema validates a complete document", () => {
 });
 
 Deno.test("StoreSchema rejects missing required fields", () => {
-  assertEquals(StoreSchema.safeParse({ uid: "test-store-1" }).success, false);
+  assertEquals(StoreSchema.safeParse({ uid: "teststore10000000000" }).success, false);
 });
 
 Deno.test("StoreSchema rejects additional properties", () => {
   const doc = {
-    uid: "test-store-1",
+    uid: "teststore10000000000",
     name: "Main",
     default: false,
     crms_store_id: 1,
@@ -33,7 +33,7 @@ Deno.test("StoreSchema rejects additional properties", () => {
 });
 
 Deno.test("StoreSchema defaults boolean fields", () => {
-  const doc = { uid: "test-store-1", name: "Main", crms_store_id: 1, ...ts };
+  const doc = { uid: "teststore10000000000", name: "Main", crms_store_id: 1, ...ts };
   const result = StoreSchema.safeParse(doc);
   assertEquals(result.success, true);
   if (result.success) {

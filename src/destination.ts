@@ -2,6 +2,7 @@
  * Destination document schema — Firestore collection: destinations
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   Address,
   type AddressType,
@@ -29,7 +30,7 @@ export interface DestinationContactRefType extends NameParts {
 
 /** Zod schema for a contact reference embedded in a destination. */
 export const DestinationContactRef: z.ZodType<DestinationContactRefType> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   ...NamePartsFields,
   name: NameField,
 });
@@ -52,7 +53,7 @@ export interface Destination {
 
 /** Zod schema for Destination. */
 export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   address: Address,
   mapbox_ids: z.array(z.string()).default([]),
   organizations: z.array(UidNameRef).default([]).optional(),

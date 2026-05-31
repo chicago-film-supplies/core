@@ -5,6 +5,7 @@
  * Tax data is denormalized onto order items at order time.
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -36,7 +37,7 @@ export interface Tax {
 
 /** Zod schema for Tax. */
 export const TaxSchema: z.ZodType<Tax> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100),
   rate: z.number(),
   type: RateTypeEnum,
@@ -95,7 +96,7 @@ export interface UpdateTaxInputType {
 
 /** Zod schema for UpdateTaxInput. */
 export const UpdateTaxInput: z.ZodType<UpdateTaxInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100).optional(),
   rate: z.number().optional(),
   type: RateTypeEnum.optional(),

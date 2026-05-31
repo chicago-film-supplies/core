@@ -11,6 +11,7 @@
  * audit. Reads filter `deleted_at == null`; Typesense filters `deleted_at:=0`.
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -81,8 +82,8 @@ export interface Comment {
 
 /** Zod schema for a comment Firestore document. */
 export const CommentSchema: z.ZodType<Comment> = z.strictObject({
-  uid: z.string(),
-  uid_thread: z.string(),
+  uid: FirestoreId,
+  uid_thread: FirestoreId,
   sources: z.array(DocSource).min(1),
   body: CommentBody,
   body_text: z.string().meta({ pii: "mask" }).default(""),
@@ -129,7 +130,7 @@ export interface CreateCommentInputType {
 
 /** Zod schema for creating a comment. */
 export const CreateCommentInput: z.ZodType<CreateCommentInputType> = z.object({
-  uid_thread: z.string().min(1),
+  uid_thread: FirestoreId,
   body: CommentBody,
   body_text: z.string().min(1).max(10000).meta({ pii: "mask" }),
 });

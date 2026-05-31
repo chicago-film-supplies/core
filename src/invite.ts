@@ -33,6 +33,8 @@ export interface Invite extends NameParts {
 
 /** Zod schema for an Invite document. */
 export const InviteSchema: z.ZodType<Invite> = z.strictObject({
+  // The doc id IS the single-use invite token (64-char hex, `invites/{token}`),
+  // not a Firestore auto-id — so this stays a permissive string, not FirestoreId.
   uid: z.string().min(1),
   email: Email,
   ...NamePartsFields,

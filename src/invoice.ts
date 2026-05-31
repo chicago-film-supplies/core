@@ -2,6 +2,7 @@
  * Invoice document schema — Firestore collection: invoices
  */
 import { z } from "zod";
+import { FirestoreId, ItemUid } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import {
   ActorRef,
@@ -66,7 +67,7 @@ export interface InvoicePayment {
 }
 
 const InvoicePaymentSchema: z.ZodType<InvoicePayment> = z.strictObject({
-  uid: z.string(),
+  uid: z.uuid(),
   xero_payment_id: z.string(),
   date: chicagoStartOfDay(),
   amount: z.number(),
@@ -125,7 +126,7 @@ export interface InvoiceDocLineItem {
 }
 
 export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = z.strictObject({
-  uid: z.string(),
+  uid: ItemUid,
   type: DocLineItemTypeEnum,
   name: z.string(),
   // Free-text — custom items routinely paraphrase the customer's request;
@@ -133,7 +134,7 @@ export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = z.strictO
   description: z.string().meta({ pii: "mask" }).default(""),
   quantity: z.number().default(0),
   price: InvoiceDocItemPriceSchema,
-  path: z.array(z.string()).default([]),
+  path: z.array(ItemUid).default([]),
   coa_revenue: COARevenueEnum.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
   xero_id: z.uuid().nullable().optional(),
@@ -157,11 +158,11 @@ export interface InvoiceDocOrderItemType {
 export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = z.strictObject({
   // Option B: the order divider's identity IS the source order's Firestore doc-id
   // (order.uid), not a synthesized UUID — so this is z.string(), not z.uuid().
-  uid: z.string(),
+  uid: ItemUid,
   type: z.literal("order"),
   // Operator-typed divider label — often references the source order/customer.
   name: z.string().max(200).meta({ pii: "mask" }).default(""),
-  path: z.array(z.string()).default([]),
+  path: z.array(ItemUid).default([]),
   description: z.string().meta({ pii: "mask" }).default(""),
 });
 
@@ -221,7 +222,7 @@ export interface InvoiceDocDestinationType extends DocDestinationType {
 }
 
 export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z.strictObject({
-  uid_order: z.string(),
+  uid_order: FirestoreId,
   dates: OrderDocDates,
   delivery: DocDestinationEndpoint,
   collection: DocDestinationEndpoint,
@@ -283,7 +284,7 @@ export interface Invoice {
 
 /** Zod schema for an Invoice document. */
 export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   number: z.number(),
   status: InvoiceStatus,
   query_by_orders: z.array(z.string()).default([]),
@@ -298,7 +299,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   external_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   internal_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   organization: z.strictObject({
-    uid: z.string().nullable(),
+    uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask" }),
     crms_id: z.number().nullable().optional(),
     tax_profile: TaxProfileEnum,
@@ -355,7 +356,7 @@ const InvoiceItemInputPriceSchema: z.ZodType<InvoiceItemInputPrice> = z.object({
   chargeable_days: z.number().nullable().optional(),
   formula: PriceFormulaEnum.optional(),
   discount: DiscountInput.nullable().optional(),
-  taxes: z.array(z.object({ uid: z.string() })).optional(),
+  taxes: z.array(z.object({ uid: FirestoreId })).optional(),
 });
 
 /** Input version of an invoice item (covers line items, groups, destinations, and order dividers). */
@@ -375,16 +376,16 @@ export interface InvoiceItemInputType {
 }
 
 const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z.object({
-  uid: z.string(),
+  uid: ItemUid,
   type: InvoiceItemTypeEnum.optional(),
   name: z.string().optional(),
   description: z.string().optional(),
   quantity: z.number().optional(),
   price: InvoiceItemInputPriceSchema.optional(),
-  path: z.array(z.string()).optional(),
-  uid_order: z.string().optional(),
-  uid_delivery: z.string().optional(),
-  uid_collection: z.string().optional(),
+  path: z.array(ItemUid).optional(),
+  uid_order: FirestoreId.optional(),
+  uid_delivery: FirestoreId.optional(),
+  uid_collection: FirestoreId.optional(),
   coa_revenue: COARevenueEnum.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
 });
@@ -407,9 +408,9 @@ export interface CreateInvoiceInputType {
 
 /** Input schema for creating an invoice. */
 export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   query_by_orders: z.array(z.string()).min(1, "At least one source order is required"),
-  organization: z.object({ uid: z.string() }),
+  organization: z.object({ uid: FirestoreId }),
   tax_profile: TaxProfileEnum,
   items: z.array(InvoiceItemInputSchema).optional(),
   destinations: z.array(InvoiceDocDestination).optional(),

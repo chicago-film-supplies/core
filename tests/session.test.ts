@@ -5,7 +5,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 Deno.test("SessionSchema validates a complete session document", () => {
   const result = SessionSchema.safeParse({
     id: "a".repeat(40),
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     anonymous: false,
     expiresAt: mockTimestamp,
     created_at: 1700000000000,
@@ -29,7 +29,7 @@ Deno.test("SessionSchema validates an anonymous session", () => {
 Deno.test("SessionSchema rejects session ID with wrong length", () => {
   const result = SessionSchema.safeParse({
     id: "tooshort",
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     anonymous: false,
     expiresAt: mockTimestamp,
     created_at: 1700000000000,
@@ -46,7 +46,7 @@ Deno.test("SessionSchema rejects missing required fields", () => {
 Deno.test("SessionSchema rejects additional properties", () => {
   const result = SessionSchema.safeParse({
     id: "a".repeat(40),
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     anonymous: false,
     expiresAt: mockTimestamp,
     created_at: 1700000000000,
@@ -59,7 +59,7 @@ Deno.test("SessionSchema rejects additional properties", () => {
 Deno.test("SessionSchema rejects non-number created_at", () => {
   const result = SessionSchema.safeParse({
     id: "a".repeat(40),
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     anonymous: false,
     expiresAt: mockTimestamp,
     created_at: "not a number",

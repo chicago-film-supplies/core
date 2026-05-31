@@ -13,16 +13,16 @@ const tiptapBody = {
 };
 
 const validComment = {
-  uid: "comment-1",
-  uid_thread: "thread-1",
-  sources: [{ collection: "orders", uid: "order-1" }],
+  uid: "comment1000000000000",
+  uid_thread: "thread10000000000000",
+  sources: [{ collection: "orders", uid: "order100000000000000" }],
   body: tiptapBody,
   body_text: "Hello",
   reactions: {},
-  created_by: { uid: "user-1", name: "Alex" },
+  created_by: { uid: "user1000000000000000", name: "Alex" },
   deleted_at: null,
   deleted_by: null,
-  updated_by: { uid: "user-1", name: "Alex" },
+  updated_by: { uid: "user1000000000000000", name: "Alex" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };
@@ -36,8 +36,8 @@ Deno.test("CommentSchema accepts reactions map", () => {
     ...validComment,
     reactions: {
       "👍": {
-        "user-1": { uid: "user-1", name: "Alex" },
-        "user-2": { uid: "user-2", name: "Bob" },
+        "user1000000000000000": { uid: "user1000000000000000", name: "Alex" },
+        "user2000000000000000": { uid: "user2000000000000000", name: "Bob" },
       },
     },
   };
@@ -45,7 +45,7 @@ Deno.test("CommentSchema accepts reactions map", () => {
 });
 
 Deno.test("CommentSchema rejects legacy uid-array reactions", () => {
-  const doc = { ...validComment, reactions: { "👍": ["user-1", "user-2"] } };
+  const doc = { ...validComment, reactions: { "👍": ["user1000000000000000", "user2000000000000000"] } };
   assertEquals(CommentSchema.safeParse(doc).success, false);
 });
 
@@ -58,7 +58,7 @@ Deno.test("CommentSchema accepts soft-deleted comment", () => {
   const doc = {
     ...validComment,
     deleted_at: null,
-    deleted_by: { uid: "user-2", name: "Bob" },
+    deleted_by: { uid: "user2000000000000000", name: "Bob" },
   };
   assertEquals(CommentSchema.safeParse(doc).success, true);
 });
@@ -73,7 +73,7 @@ const gitMirror = {
 Deno.test("CommentSchema accepts git mirror on a templates-versions comment", () => {
   const doc = {
     ...validComment,
-    sources: [{ collection: "templates-versions", uid: "version-1" }],
+    sources: [{ collection: "templates-versions", uid: "version1000000000000" }],
     git: gitMirror,
   };
   assertEquals(CommentSchema.safeParse(doc).success, true);
@@ -82,7 +82,7 @@ Deno.test("CommentSchema accepts git mirror on a templates-versions comment", ()
 Deno.test("CommentSchema accepts git mirror on a template-components comment", () => {
   const doc = {
     ...validComment,
-    sources: [{ collection: "template-components", uid: "component-1" }],
+    sources: [{ collection: "template-components", uid: "component10000000000" }],
     git: gitMirror,
   };
   assertEquals(CommentSchema.safeParse(doc).success, true);
@@ -97,7 +97,7 @@ Deno.test("CommentSchema rejects a git mirror missing comment_id", () => {
   const { comment_id: _omit, ...partial } = gitMirror;
   const doc = {
     ...validComment,
-    sources: [{ collection: "templates", uid: "family-1" }],
+    sources: [{ collection: "templates", uid: "family10000000000000" }],
     git: partial,
   };
   assertEquals(CommentSchema.safeParse(doc).success, false);
@@ -106,7 +106,7 @@ Deno.test("CommentSchema rejects a git mirror missing comment_id", () => {
 Deno.test("CreateCommentInput requires body_text", () => {
   assertEquals(
     CreateCommentInput.safeParse({
-      uid_thread: "thread-1",
+      uid_thread: "thread10000000000000",
       body: tiptapBody,
       body_text: "",
     }).success,
@@ -117,7 +117,7 @@ Deno.test("CreateCommentInput requires body_text", () => {
 Deno.test("CreateCommentInput accepts valid input", () => {
   assertEquals(
     CreateCommentInput.safeParse({
-      uid_thread: "thread-1",
+      uid_thread: "thread10000000000000",
       body: tiptapBody,
       body_text: "Hello",
     }).success,

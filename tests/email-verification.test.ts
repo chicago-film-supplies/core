@@ -4,7 +4,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("EmailVerificationSchema validates a complete token document", () => {
   const result = EmailVerificationSchema.safeParse({
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     email: "test@example.com",
     expiresAt: mockTimestamp,
     created_at: 1700000000000,
@@ -33,7 +33,7 @@ Deno.test("EmailVerificationSchema rejects empty user_id", () => {
 
 Deno.test("EmailVerificationSchema rejects invalid email", () => {
   const result = EmailVerificationSchema.safeParse({
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     email: "not-an-email",
     expiresAt: mockTimestamp,
     created_at: 1700000000000,
@@ -43,7 +43,7 @@ Deno.test("EmailVerificationSchema rejects invalid email", () => {
 
 Deno.test("EmailVerificationSchema rejects additional properties", () => {
   const result = EmailVerificationSchema.safeParse({
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     email: "test@example.com",
     expiresAt: mockTimestamp,
     created_at: 1700000000000,

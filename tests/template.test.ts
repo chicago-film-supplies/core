@@ -10,7 +10,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 
 function baseFamily(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    uid: "t-1",
+    uid: "t1000000000000000000",
     git_path: "quote",
     name: "Quote",
     collection_source: "orders",
@@ -21,10 +21,10 @@ function baseFamily(extra: Record<string, unknown> = {}): Record<string, unknown
     draft_uids: [],
     version_count: 0,
     last_published_at: null,
-    uid_thread: "th-1",
+    uid_thread: "th100000000000000000",
     version: 0,
-    created_by: { uid: "u-1", name: "Tester" },
-    updated_by: { uid: "u-1", name: "Tester" },
+    created_by: { uid: "u1000000000000000000", name: "Tester" },
+    updated_by: { uid: "u1000000000000000000", name: "Tester" },
     created_at: mockTimestamp,
     updated_at: mockTimestamp,
     ...extra,

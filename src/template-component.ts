@@ -15,6 +15,7 @@
  * (S5), exactly like a template family.
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -48,11 +49,11 @@ export interface TemplateComponent {
 
 /** Zod schema for a TemplateComponent family document. */
 export const TemplateComponentSchema: z.ZodType<TemplateComponent> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   git_path: z.string().min(1).max(200),
   name: z.string().min(1).max(200),
-  uid_active: z.string().nullable(),
-  draft_uids: z.array(z.string()).default([]),
+  uid_active: FirestoreId.nullable(),
+  draft_uids: z.array(FirestoreId).default([]),
   version_count: z.int().min(0).default(0),
   last_published_at: FirestoreTimestamp.nullable(),
   version: z.int().min(0).default(0),

@@ -230,6 +230,15 @@ export {
   StoreBreakdownLocationSchema,
   type StoreBreakdownEntry,
   type StoreBreakdownLocation,
+  // Identifier validators (defined in _uid.ts, re-exported via common.ts)
+  FirestoreId,
+  ItemUid,
+  BookingId,
+  StockSummaryId,
+  AnyUid,
+  CardId,
+  EventCardId,
+  ListId,
 } from "./common.ts";
 
 export {

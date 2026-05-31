@@ -24,15 +24,15 @@ const validPrototype = {
   body_text: "",
   status: "planned" as const,
   destination: null,
-  sources: [{ collection: "organizations", uid: "org-1" }],
+  sources: [{ collection: "organizations", uid: "org10000000000000000" }],
   attachments: [],
   uid_assignees: [],
   locked: ["card" as const, "subject" as const],
 };
 
 const validRecurrence = {
-  uid: "rec-1",
-  uid_list: "list-1",
+  uid: "rec10000000000000000",
+  uid_list: "list1000000000000000",
   status: "active" as const,
   rule: validRule,
   active_from: "2026-04-21",
@@ -41,8 +41,8 @@ const validRecurrence = {
   horizon_days: null,
   exception_dates: [],
   prototype: validPrototype,
-  created_by: { uid: "user-1", name: "Alex" },
-  updated_by: { uid: "user-1", name: "Alex" },
+  created_by: { uid: "user1000000000000000", name: "Alex" },
+  updated_by: { uid: "user1000000000000000", name: "Alex" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };
@@ -153,7 +153,7 @@ Deno.test("RecurrenceSchema rejects invalid lock key on prototype", () => {
 
 Deno.test("CreateRecurrenceInput accepts a minimal payload", () => {
   const input = {
-    uid_list: "list-1",
+    uid_list: "list1000000000000000",
     rule: validRule,
     active_from: "2026-04-21",
     prototype: { subject: "Weekly shoot" },
@@ -163,7 +163,7 @@ Deno.test("CreateRecurrenceInput accepts a minimal payload", () => {
 
 Deno.test("CreateRecurrenceInput rejects an empty prototype subject", () => {
   const input = {
-    uid_list: "list-1",
+    uid_list: "list1000000000000000",
     rule: validRule,
     active_from: "2026-04-21",
     prototype: { subject: "" },

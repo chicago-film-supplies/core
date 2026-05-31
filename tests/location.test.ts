@@ -7,15 +7,15 @@ const locationBase = getInitialValues(LocationSchema) as Record<string, unknown>
 
 const validLocation = {
   ...locationBase,
-  uid: "test-loc-1",
-  uid_store: "test-store-1",
+  uid: "testloc1000000000000",
+  uid_store: "teststore10000000000",
   name: "Aisle A",
   default: true,
   active: true,
-  product_capacities: [{ uid: "test-p1", max: 50, max_default: 40 }],
-  query_by_product_capacities: ["test-p1"],
-  products: [{ uid: "test-p1", name: "LED Panel", quantity: 10, default: true }],
-  query_by_products: ["test-p1"],
+  product_capacities: [{ uid: "testp100000000000000", max: 50, max_default: 40 }],
+  query_by_product_capacities: ["testp100000000000000"],
+  products: [{ uid: "testp100000000000000", name: "LED Panel", quantity: 10, default: true }],
+  query_by_products: ["testp100000000000000"],
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };
@@ -37,7 +37,7 @@ Deno.test("LocationSchema rejects missing uid_store", () => {
 Deno.test("LocationSchema accepts null max_default", () => {
   const doc = {
     ...validLocation,
-    product_capacities: [{ uid: "test-p1", max: 50, max_default: null }],
+    product_capacities: [{ uid: "testp100000000000000", max: 50, max_default: null }],
   };
   assertEquals(LocationSchema.safeParse(doc).success, true);
 });

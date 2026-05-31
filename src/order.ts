@@ -2,6 +2,7 @@
  * Order schemas — Firestore collection: orders
  */
 import { z } from "zod";
+import { FirestoreId, ItemUid } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   Address,
@@ -162,7 +163,7 @@ export interface DestinationContactType extends NameParts {
 
 /** Zod schema for destination contact reference. */
 export const DestinationContact: z.ZodType<DestinationContactType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   ...NamePartsFields,
   name: NameField,
   phones: z.array(Phone).optional(),
@@ -179,7 +180,7 @@ export interface DocDestinationContactType extends NameParts {
 
 /** Zod schema for destination contact reference (document version). */
 export const DocDestinationContact: z.ZodType<DocDestinationContactType> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   ...NamePartsFields,
   name: NameField,
   phones: z.array(Phone).default([]),
@@ -197,7 +198,7 @@ export interface DestinationEndpointType {
 
 /** Zod schema for a destination endpoint. */
 export const DestinationEndpoint: z.ZodType<DestinationEndpointType> = z.object({
-  uid: z.string().nullable().optional(),
+  uid: FirestoreId.nullable().optional(),
   address: Address.optional(),
   // Free-text operator notes ("key under the mat", "ask for John") routinely
   // carry PII — tagged so the fixture sanitizer + logger masks them.
@@ -217,7 +218,7 @@ export interface DocDestinationEndpointType {
 
 /** Zod schema for a destination endpoint (document version). */
 export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.strictObject({
-  uid: z.string().nullable(),
+  uid: FirestoreId.nullable(),
   address: Address,
   instructions: z.string().meta({ pii: "mask" }).nullable(),
   contact: DocDestinationContact.nullable(),
@@ -284,7 +285,7 @@ export interface PriceModifierType {
 
 /** Zod schema for a rate-based price modifier (tax or transaction fee). */
 export const PriceModifier: z.ZodType<PriceModifierType> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string(),
   rate: z.number(),
   type: RateTypeEnum,
@@ -304,7 +305,7 @@ export interface TaxRefType {
 
 /** Zod schema for a denormalized tax snapshot without computed amount. */
 export const TaxRef: z.ZodType<TaxRefType> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string(),
   rate: z.number(),
   type: RateTypeEnum,
@@ -363,7 +364,7 @@ export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
   formula: PriceFormulaEnum.optional(),
   subtotal: z.number().optional(),
   discount: DiscountInput.nullable().optional(),
-  taxes: z.array(z.object({ uid: z.string() })).optional(),
+  taxes: z.array(z.object({ uid: FirestoreId })).optional(),
   total: z.number().optional(),
 });
 
@@ -389,7 +390,7 @@ export interface OrderItemType {
 
 /** Zod schema for an individual order item (input). */
 export const OrderItem: z.ZodType<OrderItemType> = z.object({
-  uid: z.string(),
+  uid: ItemUid,
   type: DocItemTypeEnum,
   name: z.string().optional(),
   // Custom/divider items hold free-text description that often references the
@@ -398,13 +399,13 @@ export const OrderItem: z.ZodType<OrderItemType> = z.object({
   quantity: z.int().optional(),
   price: ItemPrice.optional(),
   stock_method: StockMethodEnum.optional(),
-  path: z.array(z.string()),
+  path: z.array(ItemUid),
   inclusion_type: InclusionTypeEnum.nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
-  uid_delivery: z.string().optional(),
-  uid_collection: z.string().optional(),
+  uid_delivery: FirestoreId.optional(),
+  uid_collection: FirestoreId.optional(),
   order_number: z.number().optional(),
-  uid_order: z.string().optional(),
+  uid_order: FirestoreId.optional(),
 });
 
 /**
@@ -423,8 +424,8 @@ export interface CreateOrderInputType {
 
 /** Input schema for creating an order. */
 export const CreateOrderInput: z.ZodType<CreateOrderInputType> = z.object({
-  uid: z.string(),
-  organization: z.object({ uid: z.string() }),
+  uid: FirestoreId,
+  organization: z.object({ uid: FirestoreId }),
   status: OrderStatus,
   tax_profile: TaxProfileEnum,
   destinations: z.array(Destination).min(1, "At least one destination is required"),
@@ -455,8 +456,8 @@ export interface UpdateOrderInputType {
 
 /** Input schema for updating an order. */
 export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
-  uid: z.string().optional(),
-  organization: z.object({ uid: z.string() }).optional(),
+  uid: FirestoreId.optional(),
+  organization: z.object({ uid: FirestoreId }).optional(),
   status: OrderStatus.optional(),
   tax_profile: TaxProfileEnum.optional(),
   destinations: z.array(Destination).min(1, "At least one destination is required").optional(),
@@ -523,7 +524,7 @@ export interface OrderDocLineItemType {
 }
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject({
-  uid: z.string(),
+  uid: ItemUid,
   type: DocLineItemTypeEnum,
   name: z.string().min(1).max(100),
   // Free-text — for custom items the operator routinely paraphrases the
@@ -533,13 +534,13 @@ export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject(
   price: OrderDocItemPrice.optional(),
   stock_method: StockMethodEnum.optional(),
   order_number: z.number().optional(),
-  uid_order: z.string().optional(),
-  path: z.array(z.string()).default([]),
+  uid_order: FirestoreId.optional(),
+  path: z.array(ItemUid).default([]),
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
   crms_id: z.number().nullable().optional(),
-  uid_delivery: z.string().nullable().optional(),
-  uid_collection: z.string().nullable().optional(),
+  uid_delivery: FirestoreId.nullable().optional(),
+  uid_collection: FirestoreId.nullable().optional(),
 }).refine(
   (item) => item.type !== "rental" || item.stock_method === "none" || item.price?.replacement != null,
   { message: "price.replacement is required for rental items", path: ["price", "replacement"] },
@@ -563,9 +564,9 @@ export const OrderDocDestinationItem: z.ZodType<OrderDocDestinationItemType> = z
   // Operator-typed divider label — often the contact's name or address;
   // mask in fixtures + logs.
   name: z.string().max(200).meta({ pii: "mask" }).default(""),
-  path: z.array(z.string()).default([]),
-  uid_delivery: z.string().nullable().default(null),
-  uid_collection: z.string().nullable().default(null),
+  path: z.array(ItemUid).default([]),
+  uid_delivery: FirestoreId.nullable().default(null),
+  uid_collection: FirestoreId.nullable().default(null),
   description: z.string().meta({ pii: "mask" }).default(""),
 });
 
@@ -583,7 +584,7 @@ export const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType> = z.strictObjec
   type: z.literal("group"),
   // Operator-typed divider label — often a customer/project name; mask.
   name: z.string().min(1).max(100).meta({ pii: "mask" }),
-  path: z.array(z.string()).default([]),
+  path: z.array(ItemUid).default([]),
   description: z.string().meta({ pii: "mask" }).default(""),
 });
 
@@ -602,15 +603,15 @@ export interface OrderDocTransactionFeeItemType {
 
 /** Zod schema for a transaction fee line item in the order document. */
 export const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType> = z.strictObject({
-  uid: z.string(),
+  uid: ItemUid,
   type: z.literal("transaction_fee"),
   name: z.string().min(1).max(100),
-  path: z.array(z.string()).default([]),
+  path: z.array(ItemUid).default([]),
   description: z.string().default(""),
   quantity: z.number().int().min(0).default(0),
   price: PriceModifier,
   order_number: z.number().optional(),
-  uid_order: z.string().optional(),
+  uid_order: FirestoreId.optional(),
 });
 
 /** Union of all item types in the document. */
@@ -631,7 +632,7 @@ export function isLineItem(item: OrderDocItemType): item is OrderDocLineItemType
 
 /** Denormalized organization snapshot on the order document. */
 const OrderDocOrganization = z.strictObject({
-  uid: z.string().nullable(),
+  uid: FirestoreId.nullable(),
   name: z.string().min(1).max(100).meta({ pii: "mask" }),
   crms_id: z.number().nullable().optional(),
   xero_id: z.uuid().nullable(),
@@ -716,7 +717,7 @@ export interface Order {
 
 /** Zod schema for the full order Firestore document. */
 export const OrderSchema: z.ZodType<Order> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   number: z.int(),
   status: OrderStatus,
   organization: OrderDocOrganization,
@@ -724,7 +725,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   items: z.array(OrderDocItem).default([]),
   tax_profile: TaxProfileEnum.default("tax_applied"),
   totals: OrderDocTotals,
-  invoices: z.array(z.strictObject({ uid: z.string(), number: z.number(), status: InvoiceStatusEnum })).default([]),
+  invoices: z.array(z.strictObject({ uid: FirestoreId, number: z.number(), status: InvoiceStatusEnum })).default([]),
   query_by_invoices: z.array(z.string()).default([]),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),

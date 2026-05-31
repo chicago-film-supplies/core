@@ -6,19 +6,19 @@ import {
 } from "../src/contact.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
-const actor = { uid: "test-user-1", name: "Test User" };
+const actor = { uid: "testuser100000000000", name: "Test User" };
 const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("ContactSchema validates a complete contact document", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     last_name: "Doe",
     name: "John Doe",
     emails: ["john@example.com"],
     phones: ["1234567890"],
-    organizations: [{ uid: "test-org-1", name: "Acme" }],
-    query_by_organizations: ["test-org-1"],
+    organizations: [{ uid: "testorg1000000000000", name: "Acme" }],
+    query_by_organizations: ["testorg1000000000000"],
     created_by: actor,
     updated_by: actor,
     ...ts,
@@ -28,7 +28,7 @@ Deno.test("ContactSchema validates a complete contact document", () => {
 
 Deno.test("ContactSchema accepts contact without last_name", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     name: "John",
     emails: [],
@@ -43,13 +43,13 @@ Deno.test("ContactSchema accepts contact without last_name", () => {
 });
 
 Deno.test("ContactSchema rejects missing required fields", () => {
-  const doc = { uid: "test-abc-123" };
+  const doc = { uid: "testabc1230000000000" };
   assertEquals(ContactSchema.safeParse(doc).success, false);
 });
 
 Deno.test("ContactSchema rejects empty first_name", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "",
     emails: [],
     phones: [],
@@ -63,7 +63,7 @@ Deno.test("ContactSchema rejects empty first_name", () => {
 
 Deno.test("ContactSchema rejects additional properties", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     emails: [],
     phones: [],
@@ -78,7 +78,7 @@ Deno.test("ContactSchema rejects additional properties", () => {
 
 Deno.test("ContactSchema allows optional crms_id", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     name: "John",
     crms_id: 42,
@@ -94,18 +94,18 @@ Deno.test("ContactSchema allows optional crms_id", () => {
 });
 
 Deno.test("CreateContactInput accepts minimal input", () => {
-  const input = { uid: "test-abc-123", first_name: "John" };
+  const input = { uid: "testabc1230000000000", first_name: "John" };
   assertEquals(CreateContactInput.safeParse(input).success, true);
 });
 
 Deno.test("CreateContactInput accepts full input", () => {
   const input = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     last_name: "Doe",
     emails: ["john@example.com"],
     phones: ["1234567890"],
-    organizations: [{ uid: "test-org-1", name: "Acme" }],
+    organizations: [{ uid: "testorg1000000000000", name: "Acme" }],
   };
   assertEquals(CreateContactInput.safeParse(input).success, true);
 });
@@ -122,7 +122,7 @@ Deno.test("UpdateContactInput rejects empty first_name", () => {
 
 Deno.test("ContactSchema accepts middle_name and pronunciation", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     middle_name: "Quincy",
     last_name: "Doe",
@@ -141,7 +141,7 @@ Deno.test("ContactSchema accepts middle_name and pronunciation", () => {
 
 Deno.test("ContactSchema rejects empty middle_name", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     middle_name: "",
     emails: [],
@@ -156,7 +156,7 @@ Deno.test("ContactSchema rejects empty middle_name", () => {
 
 Deno.test("ContactSchema rejects pronunciation longer than 100 chars", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     pronunciation: "x".repeat(101),
     emails: [],
@@ -171,7 +171,7 @@ Deno.test("ContactSchema rejects pronunciation longer than 100 chars", () => {
 
 Deno.test("CreateContactInput accepts middle_name and pronunciation", () => {
   const input = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "John",
     middle_name: "Quincy",
     last_name: "Doe",

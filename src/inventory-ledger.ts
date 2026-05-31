@@ -2,6 +2,7 @@
  * InventoryLedger document schema — Firestore collection: inventory-ledgers
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   FirestoreTimestamp,
   type FirestoreTimestampType,
@@ -41,8 +42,8 @@ export interface InventoryLedger {
 
 /** Zod schema for an InventoryLedger document. */
 export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject({
-  uid: z.string(),
-  uid_product: z.string(),
+  uid: FirestoreId,
+  uid_product: FirestoreId,
   type: ProductTypeEnum,
   stock_method: z.enum(INVENTORY_STOCK_METHODS),
   // Physical / valuation scalars are floored at 0 — fail-closed backstop behind
@@ -62,8 +63,8 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
     lost: z.number(),
   }),
   store_breakdown: z.array(StoreBreakdownEntrySchema).default([]),
-  query_by_uid_store: z.array(z.string()).default([]),
-  query_by_uid_location: z.array(z.string()).default([]),
+  query_by_uid_store: z.array(FirestoreId).default([]),
+  query_by_uid_location: z.array(FirestoreId).default([]),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
 }).meta({

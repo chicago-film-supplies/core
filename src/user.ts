@@ -2,6 +2,7 @@
  * User document schema — Firestore collection: users
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   Email,
   FirestoreTimestamp,
@@ -79,13 +80,13 @@ export interface User extends NameParts {
 
 /** Zod schema for a full user Firestore document. */
 export const UserSchema: z.ZodType<User> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   email: Email,
   ...NamePartsFields,
   name: NameField,
   password_hash: z.string().min(1).meta({ pii: "redact" }),
   email_verified: z.boolean().default(false),
-  uid_contact: z.string().nullable().optional(),
+  uid_contact: FirestoreId.nullable().optional(),
   roles: z.array(z.string()).optional(),
   token_version: z.int().min(0).optional(),
   version: z.int().min(0).default(0),
@@ -119,7 +120,7 @@ export const CreateUserInput: z.ZodType<CreateUserInputType> = z.object({
   ...NamePartsFields,
   password: z.string().min(8).max(128).meta({ pii: "redact" }),
   roles: z.array(z.string()).optional(),
-  uid_contact: z.string().nullable().optional(),
+  uid_contact: FirestoreId.nullable().optional(),
 });
 
 /** Payload for PUT /users/:uid — full-doc replace; server-managed fields excluded. */
@@ -135,7 +136,7 @@ export interface UpdateUserInputType extends PartialNameParts {
 export const UpdateUserInput: z.ZodType<UpdateUserInputType> = z.object({
   email: Email.optional(),
   ...NamePartsFieldsPartial,
-  uid_contact: z.string().nullable().optional(),
+  uid_contact: FirestoreId.nullable().optional(),
   version: z.int().min(0),
   prefs_firestore: z.record(z.string(), FirestoreDisplayPrefsSchema).optional(),
   prefs_typesense: z.record(z.string(), TypesenseDisplayPrefsSchema).optional(),

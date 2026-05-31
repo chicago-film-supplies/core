@@ -2,6 +2,7 @@
  * Organization document schema — Firestore collection: organizations
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -31,7 +32,7 @@ export interface OrganizationContactType extends NameParts {
 
 /** Zod schema for a contact reference embedded in an organization. */
 export const OrganizationContact: z.ZodType<OrganizationContactType> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   ...NamePartsFields,
   name: NameField,
   roles: z.array(z.string()).default([]),
@@ -63,7 +64,7 @@ export interface Organization {
 
 /** Zod schema for a full organization Firestore document. */
 export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
   crms_id: z.number(),
   xero_id: z.uuid().nullable(),
@@ -101,7 +102,7 @@ export interface NewContactInputType extends NameParts {
 
 /** Zod schema for new contact data submitted inline with an organization. */
 export const NewContactInput: z.ZodType<NewContactInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   ...NamePartsFields,
   emails: z.array(Email).optional(),
   phones: z.array(Phone).optional(),
@@ -124,7 +125,7 @@ export interface CreateOrganizationInputType {
 
 /** Input schema for creating an organization. */
 export const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
   tax_profile: TaxProfileEnum,
   billing_address: Address,
@@ -152,7 +153,7 @@ export interface UpdateOrganizationInputType {
 
 /** Input schema for updating an organization. */
 export const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType> = z.object({
-  uid: z.string().optional(),
+  uid: FirestoreId.optional(),
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }).optional(),
   tax_profile: TaxProfileEnum.optional(),
   description: z.string().optional(),

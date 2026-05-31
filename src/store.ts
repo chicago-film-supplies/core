@@ -2,6 +2,7 @@
  * Store document schema — Firestore collection: stores
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import { type FirestoreTimestampType, TimestampFields, UidNameRef, type UidNameRefType } from "./common.ts";
 
 /** A store document in Firestore. */
@@ -19,7 +20,7 @@ export interface Store {
 
 /** Zod schema for Store. */
 export const StoreSchema: z.ZodType<Store> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100),
   default: z.boolean().default(false),
   default_location: UidNameRef.nullable().default(null),
@@ -46,7 +47,7 @@ export interface CreateStoreInputType {
 }
 /** Input schema for creating a store. */
 export const CreateStoreInput: z.ZodType<CreateStoreInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100),
   crms_store_id: z.number(),
   default: z.boolean().optional(),
@@ -63,7 +64,7 @@ export interface UpdateStoreInputType {
 }
 /** Input schema for updating a store. */
 export const UpdateStoreInput: z.ZodType<UpdateStoreInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100).optional(),
   crms_store_id: z.number().optional(),
   default: z.boolean().optional(),

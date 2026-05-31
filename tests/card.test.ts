@@ -3,9 +3,9 @@ import { CardSchema, CreateCardInput, UpdateCardInput } from "../src/card.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validCard = {
-  uid: "card-1",
-  uid_list: "list-1",
-  uid_thread: "thread-1",
+  uid: "card1000000000000000",
+  uid_list: "list1000000000000000",
+  uid_thread: "thread10000000000000",
   status: "planned",
   position: 1000,
   subject: "Deliver to Warehouse A",
@@ -18,15 +18,15 @@ const validCard = {
   all_day: false,
   date_fs: null,
   destination: null,
-  sources: [{ collection: "orders", uid: "order-1" }],
+  sources: [{ collection: "orders", uid: "order100000000000000" }],
   attachments: [],
   uid_assignees: [],
   locked: ["card", "subject", "sources"],
   recurrence_parent_uid: null,
   recurrence_index: null,
   recurrence_overrides: [],
-  created_by: { uid: "user-1", name: "Alex" },
-  updated_by: { uid: "user-1", name: "Alex" },
+  created_by: { uid: "user1000000000000000", name: "Alex" },
+  updated_by: { uid: "user1000000000000000", name: "Alex" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };
@@ -44,8 +44,8 @@ Deno.test("CardSchema accepts multiple polymorphic sources", () => {
   const doc = {
     ...validCard,
     sources: [
-      { collection: "orders", uid: "order-1" },
-      { collection: "organizations", uid: "org-1" },
+      { collection: "orders", uid: "order100000000000000" },
+      { collection: "organizations", uid: "org10000000000000000" },
     ],
   };
   assertEquals(CardSchema.safeParse(doc).success, true);
@@ -128,13 +128,13 @@ Deno.test("CardSchema accepts the 'dates' lock key", () => {
 });
 
 Deno.test("CreateCardInput accepts minimal payload", () => {
-  const input = { uid_list: "list-1", subject: "Buy tape" };
+  const input = { uid_list: "list1000000000000000", subject: "Buy tape" };
   assertEquals(CreateCardInput.safeParse(input).success, true);
 });
 
 Deno.test("CreateCardInput accepts dates + all_day", () => {
   const input = {
-    uid_list: "list-1",
+    uid_list: "list1000000000000000",
     subject: "Site visit",
     dates: {
       start: "2026-04-25T09:00:00.000-05:00",
@@ -146,7 +146,7 @@ Deno.test("CreateCardInput accepts dates + all_day", () => {
 });
 
 Deno.test("CreateCardInput rejects empty subject", () => {
-  const input = { uid_list: "list-1", subject: "" };
+  const input = { uid_list: "list1000000000000000", subject: "" };
   assertEquals(CreateCardInput.safeParse(input).success, false);
 });
 
@@ -185,7 +185,7 @@ Deno.test("CardSchema defaults recurrence_overrides to []", () => {
 Deno.test("CardSchema accepts a recurring-instance card with overrides", () => {
   const doc = {
     ...validCard,
-    recurrence_parent_uid: "rec-1",
+    recurrence_parent_uid: "rec10000000000000000",
     recurrence_index: 3,
     recurrence_overrides: ["dates", "subject"],
   };

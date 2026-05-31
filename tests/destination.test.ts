@@ -6,7 +6,7 @@ const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("DestinationSchema validates a complete document", () => {
   const doc = {
-    uid: "test-dest-1",
+    uid: "testdest100000000000",
     address: {
       city: "Chicago",
       country_name: "US",
@@ -17,15 +17,15 @@ Deno.test("DestinationSchema validates a complete document", () => {
       street: "123 Main St",
     },
     mapbox_ids: ["test-mbx-1"],
-    organizations: [{ uid: "test-org-1", name: "Acme" }],
-    query_by_organizations: ["test-org-1"],
+    organizations: [{ uid: "testorg1000000000000", name: "Acme" }],
+    query_by_organizations: ["testorg1000000000000"],
     ...ts,
   };
   assertEquals(DestinationSchema.safeParse(doc).success, true);
 });
 
 Deno.test("DestinationSchema accepts null address", () => {
-  const doc = { uid: "test-dest-1", address: null, mapbox_ids: [], ...ts };
+  const doc = { uid: "testdest100000000000", address: null, mapbox_ids: [], ...ts };
   assertEquals(DestinationSchema.safeParse(doc).success, true);
 });
 
@@ -34,6 +34,6 @@ Deno.test("DestinationSchema rejects missing uid", () => {
 });
 
 Deno.test("DestinationSchema rejects additional properties", () => {
-  const doc = { uid: "test-dest-1", address: null, mapbox_ids: [], bogus: true };
+  const doc = { uid: "testdest100000000000", address: null, mapbox_ids: [], bogus: true };
   assertEquals(DestinationSchema.safeParse(doc).success, false);
 });

@@ -2,6 +2,7 @@
  * WebshopProduct document schema — Firestore collection: webshop-products
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   ComponentTypeEnum,
   type ComponentTypeType,
@@ -90,7 +91,7 @@ export interface WebshopProduct {
 }
 
 const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   path: z.array(z.string()),
   name: z.string(),
   active: z.boolean().optional(),
@@ -111,7 +112,7 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
 
 /** Zod schema for a WebshopProduct document. */
 export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(200),
   active: z.boolean().default(true),
   type: z.enum(WEBSHOP_PRODUCT_TYPES),

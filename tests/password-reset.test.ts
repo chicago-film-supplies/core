@@ -4,7 +4,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("PasswordResetSchema validates a complete token document", () => {
   const result = PasswordResetSchema.safeParse({
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     email: "test@example.com",
     expiresAt: mockTimestamp,
     created_at: 1700000000000,
@@ -33,7 +33,7 @@ Deno.test("PasswordResetSchema rejects empty user_id", () => {
 
 Deno.test("PasswordResetSchema rejects invalid email", () => {
   const result = PasswordResetSchema.safeParse({
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     email: "not-an-email",
     expiresAt: mockTimestamp,
     created_at: 1700000000000,
@@ -43,7 +43,7 @@ Deno.test("PasswordResetSchema rejects invalid email", () => {
 
 Deno.test("PasswordResetSchema rejects additional properties", () => {
   const result = PasswordResetSchema.safeParse({
-    user_id: "test-user-1",
+    user_id: "testuser100000000000",
     email: "test@example.com",
     expiresAt: mockTimestamp,
     created_at: 1700000000000,

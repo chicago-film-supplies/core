@@ -3,8 +3,8 @@ import { InventoryLedgerSchema } from "../src/inventory-ledger.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validLedger = {
-  uid: "test-il-1",
-  uid_product: "test-prod-1",
+  uid: "testil10000000000000",
+  uid_product: "testprod100000000000",
   type: "rental",
   stock_method: "bulk",
   quantity_held: 20,
@@ -19,20 +19,20 @@ const validLedger = {
     lost: 0,
   },
   store_breakdown: [{
-    uid_store: "test-store-1",
+    uid_store: "teststore10000000000",
     name: "Main",
     default: true,
     crms_stock_level_id: null,
     quantity: 20,
     locations: [{
-      uid_location: "test-loc-1",
+      uid_location: "testloc1000000000000",
       name: "Shelf A",
       quantity: 20,
       default: true,
       max: null,
     }],
   }],
-  query_by_uid_store: ["test-store-1"],
+  query_by_uid_store: ["teststore10000000000"],
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };

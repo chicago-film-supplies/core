@@ -6,10 +6,10 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 const base = getInitialValues(WebshopProductSchema);
 const validWebshopProduct = {
   ...base,
-  uid: "test-wp-1",
+  uid: "testwp10000000000000",
   name: "Canon C300",
   active: true,
-  price: { ...(base.price as Record<string, unknown>), base: 500, taxes: [{ uid: "test-chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
+  price: { ...(base.price as Record<string, unknown>), base: 500, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
   webshop: { available: true, description: "Great camera" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
@@ -27,14 +27,14 @@ Deno.test("WebshopProductSchema rejects replacement type", () => {
 Deno.test("WebshopProductSchema accepts optional tags", () => {
   const doc = {
     ...validWebshopProduct,
-    tags: [{ uid: "test-t1", name: "Camera" }],
-    query_by_tags: ["test-t1"],
+    tags: [{ uid: "testt100000000000000", name: "Camera" }],
+    query_by_tags: ["testt100000000000000"],
   };
   assertEquals(WebshopProductSchema.safeParse(doc).success, true);
 });
 
 Deno.test("WebshopProductSchema rejects missing required fields", () => {
-  assertEquals(WebshopProductSchema.safeParse({ uid: "test-wp-1" }).success, false);
+  assertEquals(WebshopProductSchema.safeParse({ uid: "testwp10000000000000" }).success, false);
 });
 
 Deno.test("WebshopProductSchema rejects additional properties", () => {

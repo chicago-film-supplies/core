@@ -9,9 +9,9 @@ const datesBase = bookingBase.dates as Record<string, unknown>;
 
 const validBooking = {
   ...bookingBase,
-  uid: "test-booking-1",
-  uid_order: "test-order-1",
-  uid_product: "test-prod-1",
+  uid: "testorder10000000000:testprod100000000000:testdest100000000000",
+  uid_order: "testorder10000000000",
+  uid_product: "testprod100000000000",
   name: "LED Panel",
   number: 1,
   type: "rental",
@@ -33,9 +33,9 @@ const validBooking = {
     charge_start_fs: null,
     charge_end: "2026-03-10T00:00:00Z",
   },
-  organization: { uid: "test-org-1", name: "Test Acme Corp", crms_id: null },
-  uid_destination_delivery: "test-dest-1",
-  uid_destination_collection: "test-dest-2",
+  organization: { uid: "testorg1000000000000", name: "Test Acme Corp", crms_id: null },
+  uid_destination_delivery: "testdest100000000000",
+  uid_destination_collection: "testdest200000000000",
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };
@@ -48,18 +48,18 @@ Deno.test("BookingSchema validates with stores", () => {
   const doc = {
     ...validBooking,
     stores: [{
-      uid_store: "test-store-1",
+      uid_store: "teststore10000000000",
       name: "Main",
       default: true,
       quantity: 5,
       locations: [{
-        uid_location: "test-loc-1",
+        uid_location: "testloc1000000000000",
         name: "Shelf A",
         quantity: 5,
         default: true,
       }],
     }],
-    query_by_uid_store: ["test-store-1"],
+    query_by_uid_store: ["teststore10000000000"],
   };
   assertEquals(BookingSchema.safeParse(doc).success, true);
 });
@@ -68,7 +68,7 @@ Deno.test("BookingSchema validates with destination refs", () => {
   const doc = {
     ...validBooking,
     destinations: {
-      delivery: { uid: "test-dest-1", address: null },
+      delivery: { uid: "testdest100000000000", address: null },
       collection: null,
     },
   };

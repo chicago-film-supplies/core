@@ -4,15 +4,15 @@ import { getInitialValues } from "../src/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const base = getInitialValues(ProductSchema);
-const actor = { uid: "test-user-1", name: "Test User" };
+const actor = { uid: "testuser100000000000", name: "Test User" };
 const validProduct = {
   ...base,
-  uid: "test-product-1",
+  uid: "testproduct100000000",
   name: "Canon C300",
   active: true,
   crms_id: 100,
-  price: { ...(base.price as Record<string, unknown>), base: 500, replacement: 5000, taxes: [{ uid: "test-chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
-  tags: [{ uid: "test-t1", name: "Camera" }],
+  price: { ...(base.price as Record<string, unknown>), base: 500, replacement: 5000, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
+  tags: [{ uid: "testt100000000000000", name: "Camera" }],
   webshop: { available: true },
   created_by: actor,
   updated_by: actor,
@@ -44,8 +44,8 @@ Deno.test("ProductSchema validates with components", () => {
     ...validProduct,
     components: [
       {
-        uid: "test-comp-1",
-        path: ["test-product-1"],
+        uid: "testcomp100000000000",
+        path: ["testproduct100000000"],
         name: "Battery",
         type: "rental",
         stock_method: "bulk",
@@ -54,7 +54,7 @@ Deno.test("ProductSchema validates with components", () => {
         price: {
           base: 0,
           replacement: 100,
-          taxes: [{ uid: "test-tax-none", name: "No Tax", rate: 0, type: "percent" }],
+          taxes: [{ uid: "testtaxnone000000000", name: "No Tax", rate: 0, type: "percent" }],
           formula: "fixed",
           discountable: false,
         },
@@ -86,8 +86,8 @@ Deno.test("ProductSchema rejects rental component without price.replacement", ()
     ...validProduct,
     components: [
       {
-        uid: "test-comp-1",
-        path: ["test-product-1"],
+        uid: "testcomp100000000000",
+        path: ["testproduct100000000"],
         name: "Battery",
         type: "rental",
         stock_method: "bulk",
@@ -105,8 +105,8 @@ Deno.test("ProductSchema accepts rental component with stock_method none and no 
     ...validProduct,
     components: [
       {
-        uid: "test-comp-1",
-        path: ["test-product-1"],
+        uid: "testcomp100000000000",
+        path: ["testproduct100000000"],
         name: "Service Fee",
         type: "rental",
         stock_method: "none",
@@ -130,7 +130,7 @@ Deno.test("ProductSchema rejects invalid stock_method", () => {
 });
 
 Deno.test("ProductSchema rejects missing required fields", () => {
-  assertEquals(ProductSchema.safeParse({ uid: "test-product-1", name: "Test" }).success, false);
+  assertEquals(ProductSchema.safeParse({ uid: "testproduct100000000", name: "Test" }).success, false);
 });
 
 Deno.test("ProductSchema rejects additional properties", () => {
@@ -139,7 +139,7 @@ Deno.test("ProductSchema rejects additional properties", () => {
 });
 
 const validCreateInput = {
-  uid: "test-product-1",
+  uid: "testproduct100000000",
   name: "Canon C300",
   active: true,
   type: "rental" as const,
@@ -170,8 +170,8 @@ Deno.test("CreateProductInput requires price.replacement for rental products", (
 
 Deno.test("CreateProductInput requires price.replacement for rental components", () => {
   const rentalComponent = {
-    uid: "test-comp-1",
-    path: ["test-product-1"],
+    uid: "testcomp100000000000",
+    path: ["testproduct100000000"],
     name: "Battery",
     type: "rental" as const,
     stock_method: "bulk" as const,

@@ -7,8 +7,8 @@ const transactionBase = getInitialValues(TransactionSchema) as Record<string, un
 
 const validTransaction = {
   ...transactionBase,
-  uid: "test-txn-1",
-  uid_product: "test-prod-1",
+  uid: "testtxn1000000000000",
+  uid_product: "testprod100000000000",
   type: "purchase",
   quantity: 10,
   total_cost: 2500,
@@ -49,7 +49,7 @@ Deno.test("TransactionSchema rejects invalid type", () => {
 Deno.test("TransactionSchema validates with source", () => {
   const doc = {
     ...validTransaction,
-    source: { type: "order", number: 1001, uid: "test-order-1" },
+    source: { type: "order", number: 1001, uid: "testorder10000000000" },
   };
   assertEquals(TransactionSchema.safeParse(doc).success, true);
 });
@@ -58,12 +58,12 @@ Deno.test("TransactionSchema validates with stores", () => {
   const doc = {
     ...validTransaction,
     stores: [{
-      uid_store: "test-store-1",
+      uid_store: "teststore10000000000",
       name: "Main",
       default: true,
       quantity: 10,
       locations: [{
-        uid_location: "test-loc-1",
+        uid_location: "testloc1000000000000",
         name: "Shelf A",
         quantity: 20,
         transactionQuantity: 10,
@@ -90,7 +90,7 @@ Deno.test("TransactionSchema validates with crms_sync", () => {
   const doc = {
     ...validTransaction,
     crms_sync: {
-      "test-store-1": { stock_level_id: 100, transaction_id: 200 },
+      "teststore10000000000": { stock_level_id: 100, transaction_id: 200 },
     },
   };
   assertEquals(TransactionSchema.safeParse(doc).success, true);

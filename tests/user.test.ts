@@ -3,7 +3,7 @@ import { CreateUserInput, UpdateUserInput, UserSchema } from "../src/user.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const base = {
-  uid: "test-user-1",
+  uid: "testuser100000000000",
   email: "test@example.com",
   first_name: "Alex",
   name: "Alex",
@@ -19,7 +19,7 @@ Deno.test("UserSchema validates a complete user document", () => {
   const result = UserSchema.safeParse({
     ...base,
     last_name: "Hughes",
-    uid_contact: "test-contact-1",
+    uid_contact: "testcontact100000000",
   });
   assertEquals(result.success, true);
 });
@@ -30,7 +30,7 @@ Deno.test("UserSchema accepts user without last_name", () => {
 });
 
 Deno.test("UserSchema rejects missing required fields", () => {
-  const result = UserSchema.safeParse({ uid: "test-user-1" });
+  const result = UserSchema.safeParse({ uid: "testuser100000000000" });
   assertEquals(result.success, false);
 });
 
@@ -72,7 +72,7 @@ Deno.test("UserSchema rejects old preference field names", () => {
 });
 
 Deno.test("UserSchema rejects old uid_customer field", () => {
-  const result = UserSchema.safeParse({ ...base, uid_customer: "test-contact-1" });
+  const result = UserSchema.safeParse({ ...base, uid_customer: "testcontact100000000" });
   assertEquals(result.success, false);
 });
 
@@ -113,7 +113,7 @@ Deno.test("CreateUserInput accepts a full valid payload", () => {
     last_name: "User",
     password: "supersecret",
     roles: ["admin"],
-    uid_contact: "test-contact-1",
+    uid_contact: "testcontact100000000",
   });
   assertEquals(result.success, true);
 });

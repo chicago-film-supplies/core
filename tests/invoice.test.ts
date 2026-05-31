@@ -26,7 +26,7 @@ const validDocDates = {
 };
 
 const validDestination = {
-  uid_order: "test-order-1",
+  uid_order: "testorder10000000000",
   dates: validDocDates,
   delivery: { uid: null, address: null, instructions: null, contact: null },
   collection: { uid: null, address: null, instructions: null, contact: null },
@@ -34,17 +34,17 @@ const validDestination = {
 
 const validInvoice = {
   ...invoiceBase,
-  uid: "test-inv-1",
+  uid: "testinv1000000000000",
   number: 1001,
   status: "draft",
-  query_by_orders: ["test-order-1"],
+  query_by_orders: ["testorder10000000000"],
   number_orders: [1000],
   tax_profile: "tax_applied",
   date: "2026-03-01T00:00:00.000-06:00",
   date_fs: mockTimestamp,
   due_date_fs: mockTimestamp,
   organization: {
-    uid: "test-org-1",
+    uid: "testorg1000000000000",
     name: "Acme Corp",
     tax_profile: "tax_applied",
     xero_id: null,
@@ -53,7 +53,7 @@ const validInvoice = {
   destinations: [validDestination],
   items: [{
     ...lineItemBase,
-    uid: "item-1",
+    uid: "item1000000000000000",
     type: "rental",
     name: "Camera Rental",
     quantity: 1,
@@ -73,8 +73,8 @@ const validInvoice = {
     total: 500,
     amount_due: 500,
   },
-  created_by: { uid: "test-user-1", name: "Test User" },
-  updated_by: { uid: "test-user-1", name: "Test User" },
+  created_by: { uid: "testuser100000000000", name: "Test User" },
+  updated_by: { uid: "testuser100000000000", name: "Test User" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };
@@ -160,7 +160,7 @@ Deno.test("InvoiceSchema accepts payments", () => {
     ...validInvoice,
     status: "part_paid",
     payments: [{
-      uid: "pay-1",
+      uid: "22222222-2222-4222-8222-222222222222",
       xero_payment_id: "xero-pay-1",
       date: "2026-03-15T00:00:00Z",
       amount: 250,
@@ -186,7 +186,7 @@ Deno.test("InvoiceSchema accepts line item with path", () => {
     ...validInvoice,
     items: [{
       ...validInvoice.items[0],
-      path: ["dest-1", "group-1"],
+      path: ["dest1000000000000000", "group100000000000000"],
     }],
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
@@ -216,8 +216,8 @@ Deno.test("InvoiceSchema accepts destination item in items array", () => {
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
         name: "Main Venue",
-        uid_delivery: "del-1",
-        uid_collection: "col-1",
+        uid_delivery: "del10000000000000000",
+        uid_collection: "col10000000000000000",
         description: "",
       },
       ...validInvoice.items,
@@ -234,7 +234,7 @@ Deno.test("InvoiceSchema accepts mixed items (line + group + destination)", () =
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
         name: "Main Venue",
-        uid_delivery: "del-1",
+        uid_delivery: "del10000000000000000",
         uid_collection: null,
         description: "",
       },
@@ -259,7 +259,7 @@ Deno.test("InvoiceSchema accepts transaction_fees in totals", () => {
     totals: {
       ...validInvoice.totals,
       transaction_fees: [{
-        uid: "fee-1",
+        uid: "fee10000000000000000",
         name: "Credit Card Fee",
         rate: 3,
         type: "percent",
@@ -274,9 +274,9 @@ Deno.test("InvoiceSchema accepts transaction_fees in totals", () => {
 
 Deno.test("CreateInvoiceInput accepts valid input", () => {
   const input = {
-    uid: "new-inv-1",
-    query_by_orders: ["order-1"],
-    organization: { uid: "org-1" },
+    uid: "newinv10000000000000",
+    query_by_orders: ["order100000000000000"],
+    organization: { uid: "org10000000000000000" },
     tax_profile: "tax_applied",
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, true);
@@ -284,9 +284,9 @@ Deno.test("CreateInvoiceInput accepts valid input", () => {
 
 Deno.test("CreateInvoiceInput requires at least one order", () => {
   const input = {
-    uid: "new-inv-1",
+    uid: "newinv10000000000000",
     query_by_orders: [],
-    organization: { uid: "org-1" },
+    organization: { uid: "org10000000000000000" },
     tax_profile: "tax_applied",
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, false);
@@ -294,14 +294,14 @@ Deno.test("CreateInvoiceInput requires at least one order", () => {
 
 Deno.test("CreateInvoiceInput accepts items with path and destination fields", () => {
   const input = {
-    uid: "new-inv-1",
-    query_by_orders: ["order-1"],
-    organization: { uid: "org-1" },
+    uid: "newinv10000000000000",
+    query_by_orders: ["order100000000000000"],
+    organization: { uid: "org10000000000000000" },
     tax_profile: "tax_applied",
     items: [
-      { uid: "dest-1", type: "destination", name: "Venue", uid_delivery: "del-1", uid_collection: "col-1" },
-      { uid: "group-1", type: "group", name: "Lighting" },
-      { uid: "item-1", type: "rental", name: "Spot Light", path: ["dest-1", "group-1"] },
+      { uid: "dest1000000000000000", type: "destination", name: "Venue", uid_delivery: "del10000000000000000", uid_collection: "col10000000000000000" },
+      { uid: "group100000000000000", type: "group", name: "Lighting" },
+      { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["dest1000000000000000", "group100000000000000"] },
     ],
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, true);
@@ -355,11 +355,11 @@ Deno.test("InvoiceSchema accepts an Option-B order divider: Firestore-id uid, no
 // be invalid_union instead — assert against the member to pin the real reason).
 Deno.test("InvoiceDocOrderItem rejects a uid_order key (Phase D: field removed)", () => {
   const result = InvoiceDocOrderItem.safeParse({
-    uid: "order-1",
+    uid: "order100000000000000",
     type: "order",
     name: "Order #1001",
     path: [],
-    uid_order: "order-1",
+    uid_order: "order100000000000000",
     description: "",
   });
   assertEquals(result.success, false);
@@ -371,7 +371,7 @@ Deno.test("InvoiceDocOrderItem rejects a uid_order key (Phase D: field removed)"
 Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
   const doc = {
     ...validInvoice,
-    query_by_orders: ["order-1", "order-2"],
+    query_by_orders: ["order100000000000000", "order-2"],
     items: [
       {
         uid: "550e8400-e29b-41d4-a716-446655440010",
@@ -383,7 +383,7 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
         name: "Main Venue",
-        uid_delivery: "del-1",
+        uid_delivery: "del10000000000000000",
         uid_collection: null,
         description: "",
       },
@@ -399,7 +399,7 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
       },
       {
         ...lineItemBase,
-        uid: "item-2",
+        uid: "item2000000000000000",
         type: "sale",
         name: "Tripod Sale",
         quantity: 2,
@@ -420,14 +420,14 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
 
 Deno.test("CreateInvoiceInput accepts order divider items", () => {
   const input = {
-    uid: "new-inv-1",
-    query_by_orders: ["order-1"],
-    organization: { uid: "org-1" },
+    uid: "newinv10000000000000",
+    query_by_orders: ["order100000000000000"],
+    organization: { uid: "org10000000000000000" },
     tax_profile: "tax_applied",
     items: [
-      { uid: "order-div-1", type: "order", name: "Order #1001", uid_order: "order-1" },
-      { uid: "dest-1", type: "destination", name: "Venue", uid_delivery: "del-1", path: ["order-div-1"] },
-      { uid: "item-1", type: "rental", name: "Spot Light", path: ["order-div-1", "dest-1"] },
+      { uid: "orderdiv100000000000", type: "order", name: "Order #1001", uid_order: "order100000000000000" },
+      { uid: "dest1000000000000000", type: "destination", name: "Venue", uid_delivery: "del10000000000000000", path: ["orderdiv100000000000"] },
+      { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["orderdiv100000000000", "dest1000000000000000"] },
     ],
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, true);

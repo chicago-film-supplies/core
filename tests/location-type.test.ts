@@ -6,9 +6,9 @@ const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 
 Deno.test("LocationTypeSchema validates a complete document", () => {
   const doc = {
-    uid: "test-lt-1",
+    uid: "testlt10000000000000",
     name: "Shelf",
-    product_capacities: [{ uid: "test-p1", max: 10 }],
+    product_capacities: [{ uid: "testp100000000000000", max: 10 }],
     active: true,
     dimensions: { width: 100, depth: 50, height: 200, weight_capacity: 500 },
     ...ts,
@@ -18,9 +18,9 @@ Deno.test("LocationTypeSchema validates a complete document", () => {
 
 Deno.test("LocationTypeSchema accepts null max in capacities", () => {
   const doc = {
-    uid: "test-lt-1",
+    uid: "testlt10000000000000",
     name: "Floor",
-    product_capacities: [{ uid: "test-p1", max: null }],
+    product_capacities: [{ uid: "testp100000000000000", max: null }],
     active: true,
     ...ts,
   };
@@ -29,7 +29,7 @@ Deno.test("LocationTypeSchema accepts null max in capacities", () => {
 
 Deno.test("LocationTypeSchema accepts null dimensions", () => {
   const doc = {
-    uid: "test-lt-1",
+    uid: "testlt10000000000000",
     name: "Bin",
     product_capacities: [],
     active: false,
@@ -40,10 +40,10 @@ Deno.test("LocationTypeSchema accepts null dimensions", () => {
 });
 
 Deno.test("LocationTypeSchema rejects missing name", () => {
-  assertEquals(LocationTypeSchema.safeParse({ uid: "test-lt-1", active: true }).success, false);
+  assertEquals(LocationTypeSchema.safeParse({ uid: "testlt10000000000000", active: true }).success, false);
 });
 
 Deno.test("LocationTypeSchema rejects additional properties", () => {
-  const doc = { uid: "test-lt-1", name: "Shelf", active: true, bogus: true };
+  const doc = { uid: "testlt10000000000000", name: "Shelf", active: true, bogus: true };
   assertEquals(LocationTypeSchema.safeParse(doc).success, false);
 });

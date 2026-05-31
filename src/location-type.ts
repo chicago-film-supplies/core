@@ -2,6 +2,7 @@
  * LocationType document schema — Firestore collection: location-types
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 
 /** Product capacity constraint for a location type. */
@@ -33,10 +34,10 @@ export interface LocationType {
 
 /** Zod schema for LocationType. */
 export const LocationTypeSchema: z.ZodType<LocationType> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100),
   product_capacities: z.array(z.strictObject({
-    uid: z.string(),
+    uid: FirestoreId,
     max: z.number().nullable(),
   })).default([]),
   query_by_product_capacities: z.array(z.string()).default([]).optional(),
@@ -89,7 +90,7 @@ export interface UpdateLocationTypeInputType {
 }
 /** Input schema for updating a location type. */
 export const UpdateLocationTypeInput: z.ZodType<UpdateLocationTypeInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100).optional(),
   product_capacities: z.record(z.string(), z.object({ max: z.number().nullable() })).optional(),
   dimensions: z.object({

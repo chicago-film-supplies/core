@@ -35,14 +35,14 @@ Deno.test("Phone shows custom error for too-long value", () => {
 
 Deno.test("ContactSchema shows custom error for empty first_name", () => {
   const doc = {
-    uid: "test-abc-123",
+    uid: "testabc1230000000000",
     first_name: "",
     emails: [],
     phones: [],
     organizations: [],
     query_by_organizations: [],
-    created_by: { uid: "test-user-1", name: "Test User" },
-    updated_by: { uid: "test-user-1", name: "Test User" },
+    created_by: { uid: "testuser100000000000", name: "Test User" },
+    updated_by: { uid: "testuser100000000000", name: "Test User" },
   };
   const result = ContactSchema.safeParse(doc);
   assertEquals(result.success, false);
@@ -52,7 +52,7 @@ Deno.test("ContactSchema shows custom error for empty first_name", () => {
 });
 
 Deno.test("CreateContactInput shows custom error for empty first_name", () => {
-  const input = { uid: "test-abc-123", first_name: "" };
+  const input = { uid: "testabc1230000000000", first_name: "" };
   const result = CreateContactInput.safeParse(input);
   assertEquals(result.success, false);
   if (!result.success) {
@@ -62,7 +62,7 @@ Deno.test("CreateContactInput shows custom error for empty first_name", () => {
 
 Deno.test("OrganizationSchema shows custom error for empty name", () => {
   const doc = {
-    uid: "test-org-1",
+    uid: "testorg1000000000000",
     name: "",
     crms_id: 1,
     xero_id: null,
@@ -72,8 +72,8 @@ Deno.test("OrganizationSchema shows custom error for empty name", () => {
     billing_address: null,
     contacts: [],
     query_by_contacts: [],
-    created_by: { uid: "test-user-1", name: "Test User" },
-    updated_by: { uid: "test-user-1", name: "Test User" },
+    created_by: { uid: "testuser100000000000", name: "Test User" },
+    updated_by: { uid: "testuser100000000000", name: "Test User" },
   };
   const result = OrganizationSchema.safeParse(doc);
   assertEquals(result.success, false);
@@ -84,8 +84,8 @@ Deno.test("OrganizationSchema shows custom error for empty name", () => {
 
 Deno.test("CreateOrderInput shows custom error for empty destinations", () => {
   const input = {
-    uid: "test-order-1",
-    organization: { uid: "test-org-1" },
+    uid: "testorder10000000000",
+    organization: { uid: "testorg1000000000000" },
     status: "draft",
     dates: {
       delivery_start: "2026-01-01",

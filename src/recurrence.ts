@@ -37,6 +37,7 @@
  *   is set.
  */
 import { z } from "zod";
+import { FirestoreId, ListId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -170,7 +171,7 @@ export const RecurrencePrototype: z.ZodType<RecurrencePrototypeType> = z
     destination: DocDestinationEndpoint.nullable(),
     sources: z.array(DocSource).default([]),
     attachments: z.array(CardAttachment).default([]),
-    uid_assignees: z.array(z.string()).default([]),
+    uid_assignees: z.array(FirestoreId).default([]),
     locked: z.array(CardLockKeyEnum).default([]),
   });
 
@@ -215,8 +216,8 @@ export interface Recurrence {
 
 /** Zod schema for a Recurrence Firestore document. */
 export const RecurrenceSchema: z.ZodType<Recurrence> = z.strictObject({
-  uid: z.string(),
-  uid_list: z.string().min(1),
+  uid: FirestoreId,
+  uid_list: ListId,
   status: RecurrenceStatusEnum,
   rule: RecurrenceRule,
   active_from: z.iso.date(),
@@ -265,7 +266,7 @@ export interface CreateRecurrenceInputType {
 /** Zod schema for creating a recurrence. */
 export const CreateRecurrenceInput: z.ZodType<CreateRecurrenceInputType> = z
   .object({
-    uid_list: z.string().min(1),
+    uid_list: ListId,
     status: RecurrenceStatusEnum.optional(),
     rule: RecurrenceRule,
     active_from: z.iso.date(),
@@ -279,7 +280,7 @@ export const CreateRecurrenceInput: z.ZodType<CreateRecurrenceInputType> = z
       destination: DocDestinationEndpoint.nullable().optional(),
       sources: z.array(DocSource).optional(),
       attachments: z.array(CardAttachment).optional(),
-      uid_assignees: z.array(z.string()).optional(),
+      uid_assignees: z.array(FirestoreId).optional(),
       locked: z.array(CardLockKeyEnum).optional(),
     }),
   });
@@ -313,7 +314,7 @@ export interface UpdateRecurrenceInputType {
 /** Zod schema for updating a recurrence. */
 export const UpdateRecurrenceInput: z.ZodType<UpdateRecurrenceInputType> = z
   .object({
-    uid_list: z.string().min(1).optional(),
+    uid_list: ListId.optional(),
     status: RecurrenceStatusEnum.optional(),
     rule: RecurrenceRule.optional(),
     active_from: z.iso.date().optional(),
@@ -327,7 +328,7 @@ export const UpdateRecurrenceInput: z.ZodType<UpdateRecurrenceInputType> = z
       destination: DocDestinationEndpoint.nullable().optional(),
       sources: z.array(DocSource).optional(),
       attachments: z.array(CardAttachment).optional(),
-      uid_assignees: z.array(z.string()).optional(),
+      uid_assignees: z.array(FirestoreId).optional(),
       locked: z.array(CardLockKeyEnum).optional(),
     }).optional(),
     version: z.int().min(0),

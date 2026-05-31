@@ -2,6 +2,7 @@
  * PublicStockSummary document schema — Firestore collection: public-stock-summaries
  */
 import { z } from "zod";
+import { FirestoreId, StockSummaryId } from "./_uid.ts";
 import { FirestoreTimestamp, type FirestoreTimestampType, ProductTypeEnum, type ProductTypeType } from "./common.ts";
 
 const SUMMARY_TYPES = ["sale", "rental"] as const;
@@ -35,8 +36,8 @@ export interface PublicStockSummary {
 
 /** Zod schema for PublicStockSummary. */
 export const PublicStockSummarySchema: z.ZodType<PublicStockSummary> = z.strictObject({
-  uid: z.string(),
-  uid_product: z.string(),
+  uid: StockSummaryId,
+  uid_product: FirestoreId,
   summary_type: z.enum(SUMMARY_TYPES),
   type: ProductTypeEnum,
   dates: z.strictObject({
@@ -47,10 +48,10 @@ export const PublicStockSummarySchema: z.ZodType<PublicStockSummary> = z.strictO
   }),
   quantity_available: z.number(),
   store_breakdown: z.array(z.strictObject({
-    uid_store: z.string(),
+    uid_store: FirestoreId,
     quantity: z.number(),
   })).default([]),
-  query_by_uid_store: z.array(z.string()).default([]),
+  query_by_uid_store: z.array(FirestoreId).default([]),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
   expiresAt: FirestoreTimestamp,

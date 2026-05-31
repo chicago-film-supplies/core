@@ -2,6 +2,7 @@
  * Product document schema — Firestore collection: products
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { type TransactionStore, TransactionStoreSchema } from "./transaction.ts";
 import {
@@ -128,7 +129,7 @@ export interface Product {
 }
 
 export const ComponentSchema: z.ZodType<ProductComponent> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   path: z.array(z.string()),
   name: z.string(),
   active: z.boolean().optional(),
@@ -155,7 +156,7 @@ export const ComponentSchema: z.ZodType<ProductComponent> = z.strictObject({
 
 /** Zod schema for a Product document. */
 export const ProductSchema: z.ZodType<Product> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(200),
   active: z.boolean().default(true),
   type: ProductTypeEnum,
@@ -197,9 +198,9 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   query_by_component_of: z.array(z.string()).default([]).optional(),
   query_by_alternates: z.array(z.string()).default([]).optional(),
   tracking_category_name: z.string().optional(),
-  uid_linked_rental: z.string().nullable().optional(),
-  uid_linked_replacement: z.string().nullable().optional(),
-  uid_tracking_category: z.string().nullable().optional(),
+  uid_linked_rental: FirestoreId.nullable().optional(),
+  uid_linked_replacement: FirestoreId.nullable().optional(),
+  uid_tracking_category: FirestoreId.nullable().optional(),
   webshop: z.strictObject({
     available: z.boolean().default(false),
     description: z.string().nullable().optional(),
@@ -279,7 +280,7 @@ export interface CreateProductInputType {
 
 /** Input schema for creating a product. */
 export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(200),
   active: z.boolean(),
   type: ProductTypeEnum,
@@ -311,15 +312,15 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   component_of: z.array(ComponentSchema).default([]),
   tags: z.array(UidNameRef).default([]),
   tracking_category_name: z.string().optional(),
-  uid_tracking_category: z.string().nullable().optional(),
-  uid_linked_rental: z.string().nullable().optional(),
-  uid_linked_replacement: z.string().nullable().optional(),
+  uid_tracking_category: FirestoreId.nullable().optional(),
+  uid_linked_rental: FirestoreId.nullable().optional(),
+  uid_linked_replacement: FirestoreId.nullable().optional(),
   webshop: z.object({
     available: z.boolean(),
     description: z.string().nullable().optional(),
   }),
   transaction: z.object({
-    uid: z.string(),
+    uid: FirestoreId,
     type: z.enum(["purchase", "make", "find"]),
     quantity: z.number().int().nonnegative(),
     total_cost: z.number(),
@@ -391,7 +392,7 @@ export interface UpdateProductInputType {
 
 /** Input schema for updating a product. */
 export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(200).optional(),
   active: z.boolean().optional(),
   type: ProductTypeEnum.optional(),
@@ -422,9 +423,9 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
   components: z.array(ComponentSchema).optional(),
   component_of: z.array(ComponentSchema).optional(),
   tags: z.array(UidNameRef).optional(),
-  uid_tracking_category: z.string().optional(),
-  uid_linked_rental: z.string().optional(),
-  uid_linked_replacement: z.string().optional(),
+  uid_tracking_category: FirestoreId.optional(),
+  uid_linked_rental: FirestoreId.optional(),
+  uid_linked_replacement: FirestoreId.optional(),
   webshop: z.object({
     available: z.boolean(),
     description: z.string().nullable().optional(),

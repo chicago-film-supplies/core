@@ -15,6 +15,7 @@
  * lives on each entity's delete path, not here).
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -44,7 +45,7 @@ export interface Thread {
 
 /** Zod schema for a thread Firestore document. */
 export const ThreadSchema: z.ZodType<Thread> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   sources: z.array(DocSource).min(1),
   title: z.string().max(200).meta({ pii: "mask" }).nullable(),
   last_message_at: FirestoreTimestamp.nullable(),

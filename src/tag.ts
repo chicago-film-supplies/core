@@ -2,6 +2,7 @@
  * Tag document schema — Firestore collection: tags
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import { ActorRef, type ActorRefType, type FirestoreFieldValue, type FirestoreTimestampType, TimestampFields, type UidNameRefType, UidNameRef } from "./common.ts";
 
 /** A tag document in Firestore. */
@@ -20,7 +21,7 @@ export interface Tag {
 
 /** Zod schema for Tag. */
 export const TagSchema: z.ZodType<Tag> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100),
   count: z.union([z.record(z.string(), z.custom<FirestoreFieldValue>()), z.number()]).optional(),
   products: z.array(UidNameRef).default([]).optional(),
@@ -46,7 +47,7 @@ export interface CreateTagInputType {
 }
 /** Input schema for creating a tag. */
 export const CreateTagInput: z.ZodType<CreateTagInputType> = z.object({
-  uid: z.string().optional(),
+  uid: FirestoreId.optional(),
   name: z.string().min(1).max(100),
 });
 
@@ -58,7 +59,7 @@ export interface UpdateTagInputType {
 }
 /** Input schema for updating a tag. */
 export const UpdateTagInput: z.ZodType<UpdateTagInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100),
   version: z.int().min(0),
 });
@@ -69,5 +70,5 @@ export interface DeleteTagInputType {
 }
 /** Input schema for deleting a tag. */
 export const DeleteTagInput: z.ZodType<DeleteTagInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
 });

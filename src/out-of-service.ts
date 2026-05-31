@@ -16,6 +16,7 @@
  * booking-detail lookups without sub-object equality issues.
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -161,7 +162,7 @@ export interface OutOfService {
 }
 
 const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({
-  uid_location: z.string(),
+  uid_location: FirestoreId,
   name: z.string(),
   quantity: z.number(),
   transactionQuantity: z.number(),
@@ -170,7 +171,7 @@ const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({
 });
 
 const OOSStoreSchema: z.ZodType<OOSStore> = z.strictObject({
-  uid_store: z.string(),
+  uid_store: FirestoreId,
   name: z.string(),
   default: z.boolean(),
   quantity: z.number(),
@@ -198,8 +199,8 @@ const OOSDatesSchema: z.ZodType<OOSDates> = z.strictObject({
 
 /** Zod schema for OutOfService. */
 export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
-  uid: z.string(),
-  uid_product: z.string(),
+  uid: FirestoreId,
+  uid_product: FirestoreId,
   number: z.int().meta({ label: "#", linkTo: "outOfServiceDetail", serverSortVia: "number" }),
   reason: OOSReasonEnum,
   status: OOSStatusEnum,
@@ -207,7 +208,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   breakdown: OOSBreakdownSchema,
   canceled_at: FirestoreTimestamp.nullable(),
   organization: z.strictObject({
-    uid: z.string().nullable(),
+    uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask" }),
     crms_id: z.number().nullable(),
   }).nullable(),
@@ -217,8 +218,8 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   crms_id: z.number().nullable().optional(),
   crms_stock_level_id: z.number().nullable().optional(),
   stores: z.array(OOSStoreSchema).default([]),
-  query_by_uid_store: z.array(z.string()).default([]),
-  query_by_uid_location: z.array(z.string()).default([]),
+  query_by_uid_store: z.array(FirestoreId).default([]),
+  query_by_uid_location: z.array(FirestoreId).default([]),
   transactions: z.array(OOSTransactionSchema).optional(),
   defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
@@ -255,7 +256,7 @@ export interface CreateOutOfServiceInputType {
 
 /** Zod schema for CreateOutOfServiceInput. */
 export const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType> = z.object({
-  uid_product: z.string().min(1),
+  uid_product: FirestoreId,
   reason: OOSReasonEnum,
   quantity: z.number().int().positive(),
   dates: z.object({

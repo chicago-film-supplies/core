@@ -25,6 +25,7 @@
  *   when the parent recurrence's prototype updates fan out to siblings.
  */
 import { z } from "zod";
+import { CardId, FirestoreId, ListId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -124,7 +125,7 @@ export interface CardAttachmentType {
 
 /** Zod schema for a card attachment. */
 export const CardAttachment: z.ZodType<CardAttachmentType> = z.strictObject({
-  uid: z.string().min(1),
+  uid: z.uuid(),
   type: CardAttachmentTypeEnumSchema,
   filename: z.string().min(1).max(260).meta({ pii: "mask" }),
   mime_type: z.string().min(1).max(120),
@@ -148,7 +149,7 @@ export interface CardOrganizationType {
 
 /** Zod schema for CardOrganizationType. */
 export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject({
-  uid: z.string().nullable(),
+  uid: FirestoreId.nullable(),
   name: z.string().min(1).max(100).meta({ pii: "mask" }),
 });
 
@@ -203,9 +204,9 @@ export const CardDates: z.ZodType<CardDatesType> = z.strictObject({
 
 /** Zod schema for a card Firestore document. */
 export const CardSchema: z.ZodType<Card> = z.strictObject({
-  uid: z.string(),
-  uid_list: z.string().min(1),
-  uid_thread: z.string().min(1),
+  uid: CardId,
+  uid_list: ListId,
+  uid_thread: FirestoreId,
   status: CardStatusEnum,
   position: z.number(),
   subject: z.string().max(200).meta({ pii: "mask" }).default(""),
@@ -218,9 +219,9 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   organization: CardOrganization.nullable().default(null),
   sources: z.array(DocSource).default([]),
   attachments: z.array(CardAttachment).default([]),
-  uid_assignees: z.array(z.string()).default([]),
+  uid_assignees: z.array(FirestoreId).default([]),
   locked: z.array(CardLockKeyEnum).default([]),
-  recurrence_parent_uid: z.string().nullable(),
+  recurrence_parent_uid: FirestoreId.nullable(),
   recurrence_index: z.int().nullable(),
   recurrence_overrides: z.array(z.string()).default([]),
   version: z.int().min(0).default(0),
@@ -265,7 +266,7 @@ export interface CreateCardInputType {
 
 /** Zod schema for creating a card. */
 export const CreateCardInput: z.ZodType<CreateCardInputType> = z.object({
-  uid_list: z.string().min(1),
+  uid_list: ListId,
   subject: z.string().min(1).max(200).meta({ pii: "mask" }),
   status: CardStatusEnum.optional(),
   position: z.number().optional(),
@@ -277,7 +278,7 @@ export const CreateCardInput: z.ZodType<CreateCardInputType> = z.object({
   organization: CardOrganization.nullable().optional(),
   sources: z.array(DocSource).optional(),
   attachments: z.array(CardAttachment).optional(),
-  uid_assignees: z.array(z.string()).optional(),
+  uid_assignees: z.array(FirestoreId).optional(),
   locked: z.array(CardLockKeyEnum).optional(),
 });
 
@@ -305,7 +306,7 @@ export interface UpdateCardInputType {
  * with FIELD_LOCKED if the card's `locked[]` contains the field name.
  */
 export const UpdateCardInput: z.ZodType<UpdateCardInputType> = z.object({
-  uid_list: z.string().min(1).optional(),
+  uid_list: ListId.optional(),
   status: CardStatusEnum.optional(),
   position: z.number().optional(),
   subject: z.string().min(1).max(200).meta({ pii: "mask" }).optional(),
@@ -317,6 +318,6 @@ export const UpdateCardInput: z.ZodType<UpdateCardInputType> = z.object({
   organization: CardOrganization.nullable().optional(),
   sources: z.array(DocSource).optional(),
   attachments: z.array(CardAttachment).optional(),
-  uid_assignees: z.array(z.string()).optional(),
+  uid_assignees: z.array(FirestoreId).optional(),
   version: z.int().min(0),
 });

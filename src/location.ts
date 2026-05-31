@@ -2,6 +2,7 @@
  * Location document schema — Firestore collection: locations
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 
 /** Product capacity constraint for a location. */
@@ -38,20 +39,20 @@ export interface Location {
 
 /** Zod schema for Location. */
 export const LocationSchema: z.ZodType<Location> = z.strictObject({
-  uid: z.string(),
-  uid_store: z.string(),
+  uid: FirestoreId,
+  uid_store: FirestoreId,
   name: z.string().min(1).max(100),
   default: z.boolean(),
-  uid_location_type: z.string().nullable(),
+  uid_location_type: FirestoreId.nullable(),
   product_capacities: z.array(z.strictObject({
-    uid: z.string(),
+    uid: FirestoreId,
     max: z.number().nullable(),
     max_default: z.number().nullable(),
   })).default([]),
   query_by_product_capacities: z.array(z.string()).default([]),
   active: z.boolean(),
   products: z.array(z.strictObject({
-    uid: z.string(),
+    uid: FirestoreId,
     name: z.string(),
     quantity: z.number(),
     default: z.boolean(),
@@ -79,10 +80,10 @@ export interface CreateLocationInputType {
 }
 /** Input schema for creating a location. */
 export const CreateLocationInput: z.ZodType<CreateLocationInputType> = z.object({
-  uid: z.string(),
-  uid_store: z.string(),
+  uid: FirestoreId,
+  uid_store: FirestoreId,
   name: z.string().min(1).max(100),
-  uid_location_type: z.string().nullable().optional(),
+  uid_location_type: FirestoreId.nullable().optional(),
 });
 
 /** Input type for updating a location. */
@@ -95,7 +96,7 @@ export interface UpdateLocationInputType {
 }
 /** Input schema for updating a location. */
 export const UpdateLocationInput: z.ZodType<UpdateLocationInputType> = z.object({
-  uid: z.string(),
+  uid: FirestoreId,
   name: z.string().min(1).max(100).optional(),
   default: z.boolean().optional(),
   active: z.boolean().optional(),

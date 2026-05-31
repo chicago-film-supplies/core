@@ -137,12 +137,12 @@ Deno.test("walker: recurses into nested objects", () => {
   });
   const strategy = createLoggerStrategy(undefined);
   const out = applyPii(
-    { user: { email: "alice@example.com", id: "u-1" } },
+    { user: { email: "alice@example.com", id: "u1000000000000000000" } },
     schema,
     strategy,
   );
   assertEquals(out.user.email, "a****@example.com");
-  assertEquals(out.user.id, "u-1");
+  assertEquals(out.user.id, "u1000000000000000000");
 });
 
 Deno.test("walker: recurses into arrays of objects", () => {
@@ -265,10 +265,10 @@ Deno.test("walker: masks destination instructions on OrderSchema", async () => {
   const { OrderSchema } = await import("../src/order.ts");
   const strategy = createLoggerStrategy(undefined);
   const doc = {
-    uid: "o-1",
+    uid: "o1000000000000000000",
     number: 1,
     status: "draft",
-    organization: { uid: "org-1", name: "Acme Inc", xero_id: null },
+    organization: { uid: "org10000000000000000", name: "Acme Inc", xero_id: null },
     destinations: [
       {
         dates: {
@@ -311,10 +311,10 @@ Deno.test("walker: masks line-item + divider description/name on OrderSchema", a
   const { OrderSchema } = await import("../src/order.ts");
   const strategy = createLoggerStrategy(undefined);
   const doc = {
-    uid: "o-2",
+    uid: "o2000000000000000000",
     number: 2,
     status: "draft",
-    organization: { uid: "org-1", name: "Acme", xero_id: null },
+    organization: { uid: "org10000000000000000", name: "Acme", xero_id: null },
     destinations: [],
     items: [
       {
@@ -334,7 +334,7 @@ Deno.test("walker: masks line-item + divider description/name on OrderSchema", a
         path: [],
       },
       {
-        uid: "li-1",
+        uid: "li100000000000000000",
         type: "rental",
         name: "Custom item",
         description: "for John's birthday wedding video",

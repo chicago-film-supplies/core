@@ -2,6 +2,7 @@
  * Transaction document schema — Firestore collection: transactions
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 
@@ -125,7 +126,7 @@ export interface Transaction {
 
 /** Zod schema for TransactionStoreLocation. */
 export const TransactionStoreLocationSchema: z.ZodType<TransactionStoreLocation> = z.strictObject({
-  uid_location: z.string(),
+  uid_location: FirestoreId,
   name: z.string(),
   quantity: z.number(),
   transactionQuantity: z.number(),
@@ -135,7 +136,7 @@ export const TransactionStoreLocationSchema: z.ZodType<TransactionStoreLocation>
 
 /** Zod schema for TransactionStore. */
 export const TransactionStoreSchema: z.ZodType<TransactionStore> = z.strictObject({
-  uid_store: z.string(),
+  uid_store: FirestoreId,
   name: z.string(),
   default: z.boolean(),
   quantity: z.number(),
@@ -145,13 +146,13 @@ export const TransactionStoreSchema: z.ZodType<TransactionStore> = z.strictObjec
 const SourceSchema: z.ZodType<TransactionSource> = z.strictObject({
   type: z.enum(TRANSACTION_SOURCE_TYPES),
   number: z.union([z.string(), z.number()]).nullable(),
-  uid: z.string().nullable(),
+  uid: FirestoreId.nullable(),
 });
 
 /** Zod schema for Transaction. */
 export const TransactionSchema: z.ZodType<Transaction> = z.strictObject({
-  uid: z.string(),
-  uid_product: z.string(),
+  uid: FirestoreId,
+  uid_product: FirestoreId,
   type: TransactionType,
   quantity: z.number().meta({ serverSortVia: "quantity" }),
   total_cost: z.number(),
@@ -162,7 +163,7 @@ export const TransactionSchema: z.ZodType<Transaction> = z.strictObject({
   reference: z.string(),
   source: SourceSchema,
   stores: z.array(TransactionStoreSchema).default([]),
-  query_by_uid_store: z.array(z.string()).default([]),
+  query_by_uid_store: z.array(FirestoreId).default([]),
   serialized_details: z.strictObject({
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
@@ -205,7 +206,7 @@ interface InputTransactionStoreLocation {
 }
 
 const InputTransactionStoreLocationSchema: z.ZodType<InputTransactionStoreLocation> = z.object({
-  uid_location: z.string(),
+  uid_location: FirestoreId,
   name: z.string(),
   transactionQuantity: z.number().int(),
   default: z.boolean(),
@@ -221,7 +222,7 @@ interface InputTransactionStore {
 }
 
 const InputTransactionStoreSchema: z.ZodType<InputTransactionStore> = z.object({
-  uid_store: z.string(),
+  uid_store: FirestoreId,
   name: z.string(),
   default: z.boolean(),
   quantity: z.number(),
@@ -246,8 +247,8 @@ export interface CreateTransactionInputType {
 
 /** Input schema for creating a manual transaction. */
 export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.object({
-  uid: z.string().min(1),
-  uid_product: z.string().min(1),
+  uid: FirestoreId,
+  uid_product: FirestoreId,
   type: z.enum(MANUAL_TRANSACTION_TYPES),
   quantity: z.number().int().positive(),
   total_cost: z.number().min(0),
@@ -279,8 +280,8 @@ export interface UpdateTransactionInputType {
 
 /** Input schema for updating a manual transaction. */
 export const UpdateTransactionInput: z.ZodType<UpdateTransactionInputType> = z.object({
-  uid: z.string().min(1),
-  uid_product: z.string().min(1),
+  uid: FirestoreId,
+  uid_product: FirestoreId,
   type: z.enum(MANUAL_TRANSACTION_TYPES),
   quantity: z.number().int().positive(),
   total_cost: z.number().min(0),
@@ -311,7 +312,7 @@ export interface CreateStoreTransferInputType {
 
 /** Input schema for creating a store-to-store transfer. */
 export const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType> = z.object({
-  uid_product: z.string().min(1),
+  uid_product: FirestoreId,
   quantity: z.number().int().positive(),
   date: chicagoInstant(),
   reference: z.string(),
@@ -343,7 +344,7 @@ export interface UpdateStoreTransferInputType {
 
 /** Input schema for updating a store-to-store transfer. */
 export const UpdateStoreTransferInput: z.ZodType<UpdateStoreTransferInputType> = z.object({
-  uid_product: z.string().min(1),
+  uid_product: FirestoreId,
   transfer_number: z.number().int(),
   quantity: z.number().int().positive(),
   date: chicagoInstant(),

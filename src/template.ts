@@ -18,6 +18,7 @@
  * flips `draft → published` in place; an abandoned draft becomes `archived`.
  */
 import { z } from "zod";
+import { FirestoreId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -114,22 +115,22 @@ export interface Template {
 
 /** Zod schema for a Template family document. */
 export const TemplateSchema: z.ZodType<Template> = z.strictObject({
-  uid: z.string(),
+  uid: FirestoreId,
   git_path: z.string().min(1).max(200),
   name: z.string().min(1).max(200),
   collection_source: z.enum(TEMPLATE_SOURCE_COLLECTIONS),
   collection_target: z.enum(TEMPLATE_TARGET_COLLECTIONS),
   surfaces: z.array(z.enum(TEMPLATE_SURFACES)).min(1),
-  uid_active: z.string().nullable(),
+  uid_active: FirestoreId.nullable(),
   active_semver: z.string().nullable().default(null),
   depends_on: z.strictObject({
     components: z.array(z.string()).default([]),
   }),
   fixtures: z.array(FixtureMetaSchema).default([]),
-  draft_uids: z.array(z.string()).default([]),
+  draft_uids: z.array(FirestoreId).default([]),
   version_count: z.int().min(0).default(0),
   last_published_at: FirestoreTimestamp.nullable(),
-  uid_thread: z.string(),
+  uid_thread: FirestoreId,
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,
