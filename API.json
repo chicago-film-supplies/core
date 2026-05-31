@@ -372,6 +372,14 @@
         },
         {
           "kind": "function",
+          "name": "buildInvoiceDestinationDivider",
+          "signature": "buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): InvoiceItem",
+          "doc": "Build an invoice destination divider from a source order's destination item.\nSingle source of truth for the divider shape — reused by\n`projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice\nwebhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.\n\n`path` defaults to `[]` so callers that run `computeInvoiceItemPaths`\nafterward (the webhook + backfill) get positional path assignment; the\norder-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "buildOrderScopedItems",
           "signature": "buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceItem[]",
           "doc": "Build invoice items from an order's items, scoped under an order divider.\nProjects each order item to its invoice-item shape and prepends the order\ndivider uid to its path.",

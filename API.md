@@ -571,6 +571,17 @@ interface TransactionFeeLineItem {
 }
 ```
 
+### `buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): InvoiceItem`
+
+Build an invoice destination divider from a source order's destination item.
+Single source of truth for the divider shape — reused by
+`projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice
+webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.
+
+`path` defaults to `[]` so callers that run `computeInvoiceItemPaths`
+afterward (the webhook + backfill) get positional path assignment; the
+order-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.
+
 ### `buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceItem[]`
 
 Build invoice items from an order's items, scoped under an order divider.
