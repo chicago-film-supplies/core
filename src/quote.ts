@@ -5,7 +5,7 @@
  * UID scheme: "{orderUid}:draft" for live draft, "{orderUid}:v{N}" for saved versions.
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, QuoteId } from "./_uid.ts";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 
 /** A PDF quote document associated with an order. */
@@ -24,7 +24,7 @@ export interface Quote {
 
 /** Zod schema for Quote. */
 export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
-  uid: FirestoreId,
+  uid: QuoteId,
   uid_order: FirestoreId,
   order_number: z.number(),
   version: z.int().min(0).nullable(),
@@ -59,5 +59,5 @@ export interface RestoreQuoteInputType {
 }
 /** Zod schema for RestoreQuoteInput. */
 export const RestoreQuoteInput: z.ZodType<RestoreQuoteInputType> = z.object({
-  uid: FirestoreId,
+  uid: QuoteId,
 });

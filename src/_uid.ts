@@ -13,6 +13,7 @@
  * | `BookingId`      | `{id}:{itemUid}:{id}`                   | `bookings.uid` = `{uid_order}:{item uid}:{uid_destination}` |
  * | `StockSummaryId` | `{id}:rental:{date}:{date}` / `:sale:`  | `stock-summaries.uid`, `public-stock-summaries.uid` |
  * | `ItemUid`        | `FirestoreId | uuid | custom-{uuid}`    | order/invoice/fulfillment `items[].uid` + `path[]` segments |
+ * | `QuoteId`        | `{id}:v{N}` / `{id}:draft`              | `quotes.uid` (saved versions + working draft) |
  *
  * Carve-outs that intentionally stay looser: `ActorRef.uid` (free-form
  * historical actors — see `common.ts`), `DocSource.uid` / `UidNameRef.uid`
@@ -73,6 +74,16 @@ export const BookingId: z.ZodType<string> = z.templateLiteral([
 export const StockSummaryId: z.ZodType<string> = z.union([
   z.templateLiteral([firestoreId, ":rental:", z.iso.date(), ":", z.iso.date()]),
   z.templateLiteral([firestoreId, ":sale:", z.iso.date()]),
+]);
+
+/**
+ * `quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
+ * `{uid_order}:draft` (the working draft). Built in api-cloudrun
+ * `src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+ */
+export const QuoteId: z.ZodType<string> = z.union([
+  z.templateLiteral([firestoreId, ":v", z.number()]),
+  z.templateLiteral([firestoreId, ":draft"]),
 ]);
 
 /**

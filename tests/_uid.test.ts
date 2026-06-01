@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { BookingId, FirestoreId, ItemUid, StockSummaryId } from "../src/_uid.ts";
+import { BookingId, FirestoreId, ItemUid, QuoteId, StockSummaryId } from "../src/_uid.ts";
 import { bookingId, fid, stockSummaryId } from "./helpers/ids.ts";
 
 const accepts = (s: { safeParse(v: unknown): { success: boolean } }, v: string) =>
@@ -53,6 +53,19 @@ Deno.test("StockSummaryId accepts rental + sale forms", () => {
 Deno.test("StockSummaryId rejects bad type / missing date", () => {
   rejects(StockSummaryId, "0q6NhsjASVnRH5PqKLKP:rental:2026-05-31"); // missing end
   rejects(StockSummaryId, "0q6NhsjASVnRH5PqKLKP:lease:2026-05-31"); // bad type
+});
+
+Deno.test("QuoteId accepts {order}:v{N} and {order}:draft", () => {
+  accepts(QuoteId, "00iNtfho7YCp6FllPi9f:v1");
+  accepts(QuoteId, "00iNtfho7YCp6FllPi9f:v42");
+  accepts(QuoteId, "00iNtfho7YCp6FllPi9f:draft");
+});
+
+Deno.test("QuoteId rejects bad order segment / version / arity", () => {
+  rejects(QuoteId, "test-order:v1"); // bad order id (hyphens)
+  rejects(QuoteId, "00iNtfho7YCp6FllPi9f:v"); // missing version number
+  rejects(QuoteId, "00iNtfho7YCp6FllPi9f:draft:extra"); // extra segment
+  rejects(QuoteId, "00iNtfho7YCp6FllPi9f"); // plain FirestoreId, not a quote uid
 });
 
 Deno.test("fixture id helpers produce validator-compliant ids", () => {

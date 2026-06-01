@@ -239,6 +239,7 @@ export {
   CardId,
   EventCardId,
   ListId,
+  QuoteId,
 } from "./common.ts";
 
 export {

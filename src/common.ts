@@ -5,7 +5,7 @@ import { z } from "zod";
 import { AnyUid, FirestoreId } from "./_uid.ts";
 
 // Re-export the id validators so consumers can import them from the package root.
-export { AnyUid, BookingId, CardId, EventCardId, FirestoreId, ItemUid, ListId, StockSummaryId } from "./_uid.ts";
+export { AnyUid, BookingId, CardId, EventCardId, FirestoreId, ItemUid, ListId, QuoteId, StockSummaryId } from "./_uid.ts";
 
 /**
  * Structural interfaces for Firestore Timestamp and FieldValue.
