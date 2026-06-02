@@ -606,6 +606,27 @@ export {
 } from "./counter.ts";
 
 export {
+  OrderDocumentSchema,
+  type OrderDocument,
+} from "./order-document.ts";
+
+export {
+  PreviewRecordSchema,
+  type PreviewRecord,
+} from "./template-preview.ts";
+
+export {
+  McpOAuthClientSchema,
+  McpOAuthAuthorizeRequestSchema,
+  McpOAuthCodeSchema,
+  McpOAuthTokenSchema,
+  type McpOAuthClient,
+  type McpOAuthAuthorizeRequest,
+  type McpOAuthCode,
+  type McpOAuthToken,
+} from "./mcp-oauth.ts";
+
+export {
   QuoteSchema,
   SaveQuoteVersionInput,
   RestoreQuoteInput,
@@ -875,15 +896,24 @@ import type { TypesenseConfig } from "./typesense-config.ts";
 import type { User } from "./user.ts";
 import type { WebhookEvent } from "./webhook-event.ts";
 import type { WebshopProduct } from "./webshop-product.ts";
+import type { OrderDocument } from "./order-document.ts";
+import type { PreviewRecord } from "./template-preview.ts";
+import type {
+  McpOAuthAuthorizeRequest,
+  McpOAuthClient,
+  McpOAuthCode,
+  McpOAuthToken,
+} from "./mcp-oauth.ts";
 
 /** Union of all Firestore document types. Use with validateBeforeWrite. */
 export type SchemaDocType =
   | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
   | EmailVerification | HolidayDates | InventoryLedger | Invite | Invoice | List | Location
-  | LocationType | Order | Organization | OutOfService | PasswordReset
-  | Fulfillment | Product | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
+  | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
+  | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
   | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User
-  | WebhookEvent | WebshopProduct;
+  | WebhookEvent | WebshopProduct
+  | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 
 // ── Schema record keyed by collection name ─────────────────────────
 
@@ -931,6 +961,14 @@ import { UserSchema } from "./user.ts";
 import { TypesenseConfigSchema } from "./typesense-config.ts";
 import { WebhookEventSchema as WebhookEventSchema_ } from "./webhook-event.ts";
 import { WebshopProductSchema } from "./webshop-product.ts";
+import { OrderDocumentSchema as OrderDocumentSchema_ } from "./order-document.ts";
+import { PreviewRecordSchema as PreviewRecordSchema_ } from "./template-preview.ts";
+import {
+  McpOAuthAuthorizeRequestSchema as McpOAuthAuthorizeRequestSchema_,
+  McpOAuthClientSchema as McpOAuthClientSchema_,
+  McpOAuthCodeSchema as McpOAuthCodeSchema_,
+  McpOAuthTokenSchema as McpOAuthTokenSchema_,
+} from "./mcp-oauth.ts";
 
 /** All document schemas keyed by singular and plural collection names. */
 export const schemas: Record<string, z.ZodType> = {
@@ -944,6 +982,9 @@ export const schemas: Record<string, z.ZodType> = {
   "destination": DestinationSchema, "destinations": DestinationSchema,
   "email-verification": EmailVerificationSchema, "email-verifications": EmailVerificationSchema,
   "holiday-dates": HolidayDatesSchema,
+  // `dates` is the live key — holiday date instances live at config/{id}/dates;
+  // same shape as HolidayDates (the `holiday-dates` key is a display alias).
+  "dates": HolidayDatesSchema,
   "inventory-ledger": InventoryLedgerSchema, "inventory-ledgers": InventoryLedgerSchema,
   "invite": InviteSchema, "invites": InviteSchema,
   "invoice": InvoiceSchema, "invoices": InvoiceSchema,
@@ -974,8 +1015,16 @@ export const schemas: Record<string, z.ZodType> = {
   "transaction": TransactionSchema, "transactions": TransactionSchema,
   "user": UserSchema, "users": UserSchema,
   "webhook-event": WebhookEventSchema_, "webhook-events": WebhookEventSchema_,
+  // `events` is the inbound-webhook idempotency subcollection webhooks/{service}/events.
+  "events": WebhookEventSchema_,
   "webshop-product": WebshopProductSchema, "webshop-products": WebshopProductSchema,
   "typesense-config": TypesenseConfigSchema, "typesense": TypesenseConfigSchema,
+  "documents": OrderDocumentSchema_,
+  "template_previews": PreviewRecordSchema_,
+  "mcp-oauth-clients": McpOAuthClientSchema_,
+  "mcp-oauth-authorize-requests": McpOAuthAuthorizeRequestSchema_,
+  "mcp-oauth-codes": McpOAuthCodeSchema_,
+  "mcp-oauth-tokens": McpOAuthTokenSchema_,
 };
 
 // Defined here (not in display-defaults.ts) to avoid a circular dependency.
