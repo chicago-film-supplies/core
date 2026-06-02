@@ -109,3 +109,46 @@ Deno.test("getNodeMeta on a chicagoInstant().meta(...) node returns the meta", (
   const resolved = resolveZodField(z.object({ x: node }), "x");
   assertEquals(getNodeMeta(resolved!)?.serverSortVia, "foo_fs");
 });
+
+// ── Record (dynamic-key map) traversal ───────────────────────────────
+//
+// `resolveZodField` walks `z.record(keyType, valueType)`: a path segment over a
+// record consumes the dynamic key and resolves to the VALUE schema. This lets
+// dotted field-paths into maps (e.g. Firestore `reactions.<emoji>.<uid>.name`
+// patch keys) resolve to their leaf, so a patch validator can shape-check them.
+
+Deno.test("resolveZodField walks a single z.record to its value schema", () => {
+  const schema = z.object({ counts: z.record(z.string(), z.number()) });
+  const leaf = resolveZodField(schema, "counts.anyKey");
+  assertEquals(leaf?.safeParse(7).success, true);
+  assertEquals(leaf?.safeParse("nope").success, false);
+});
+
+Deno.test("resolveZodField walks nested records to a leaf object field", () => {
+  const Actor = z.strictObject({ uid: z.string(), name: z.string() });
+  const schema = z.object({ reactions: z.record(z.string(), z.record(z.string(), Actor)) });
+  // reactions.<emoji>.<uid> → Actor; .name → string
+  const nameNode = resolveZodField(schema, "reactions.❤️.u1.name");
+  assertEquals(nameNode?.safeParse("Alex").success, true);
+  assertEquals(nameNode?.safeParse(123).success, false);
+  // reactions.<emoji>.<uid> → the Actor object itself
+  const actorNode = resolveZodField(schema, "reactions.❤️.u1");
+  assertEquals(actorNode?.safeParse({ uid: "x", name: "y" }).success, true);
+});
+
+Deno.test("resolveZodField returns null for an unknown key on a record's value object", () => {
+  const Actor = z.strictObject({ uid: z.string(), name: z.string() });
+  const schema = z.object({ reactions: z.record(z.string(), Actor) });
+  assertEquals(resolveZodField(schema, "reactions.❤️.bogus"), null);
+});
+
+Deno.test("resolveZodField { unwrap: false } preserves the leaf's nullable/optional wrappers", () => {
+  const schema = z.object({ deleted_at: FirestoreTimestamp.nullable() });
+  // Default (unwrap: true) strips .nullable() → inner rejects null.
+  assertEquals(resolveZodField(schema, "deleted_at")?.safeParse(null).success, false);
+  // unwrap: false keeps .nullable() → a null write is accepted (field as declared).
+  const asDeclared = resolveZodField(schema, "deleted_at", { unwrap: false });
+  assertEquals(asDeclared?.safeParse(null).success, true);
+  // …but a wrong-typed value is still rejected.
+  assertEquals(asDeclared?.safeParse(123).success, false);
+});

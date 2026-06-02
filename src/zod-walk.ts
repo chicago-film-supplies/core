@@ -22,6 +22,8 @@ interface ZodInternalDef {
   innerType?: z.ZodType;
   element?: z.ZodType;
   shape?: Record<string, z.ZodType>;
+  /** Value schema of a `z.record(keyType, valueType)` — for dynamic-key paths. */
+  valueType?: z.ZodType;
   entries?: Record<string, string>;
   format?: string;
   in?: z.ZodType;
@@ -79,7 +81,8 @@ export function getNodeMeta(node: z.ZodType): Record<string, unknown> | null {
 
 /**
  * Resolve the object shape for a node by unwrapping wrappers. Returns `null`
- * when the node is not an object.
+ * when the node is not an object. (Object-only — does not descend into records;
+ * `getServerSortableColumns` walks fixed object shapes, not dynamic maps.)
  */
 function getShape(node: z.ZodType): Record<string, z.ZodType> | null {
   const unwrapped = unwrapZod(node);
@@ -87,25 +90,46 @@ function getShape(node: z.ZodType): Record<string, z.ZodType> | null {
 }
 
 /**
- * Resolve a dotted field path (e.g. `"dates.end"`) to the leaf schema. Each
- * segment is looked up on the current object's shape after unwrapping.
- * Returns `null` when any segment is missing or when the traversal hits a
- * non-object node before exhausting the path.
+ * Resolve one path segment against the current node (after unwrapping):
+ *  - object → the named field on its shape (`null` if absent);
+ *  - `z.record(keyType, valueType)` → the record's VALUE schema, consuming the
+ *    segment as a dynamic key (so `reactions.<emoji>.<uid>.name` resolves
+ *    through `z.record(z.record(ActorRef))` to the `name` field);
+ *  - anything else (array, scalar, …) → `null`.
+ */
+function descendSegment(node: z.ZodType, seg: string): z.ZodType | null {
+  const def = getDef(unwrapZod(node));
+  if (def.type === "record") return def.valueType ?? null;
+  return def.shape?.[seg] ?? null;
+}
+
+/**
+ * Resolve a dotted field path (e.g. `"dates.end"`, `"reactions.❤️.u1.name"`) to
+ * the leaf schema. Each segment descends through an object shape or a record's
+ * value type after unwrapping. Returns `null` when any segment is missing or
+ * when the traversal hits a non-object/non-record node before exhausting the
+ * path (e.g. an array-index segment — not modelled).
+ *
+ * `opts.unwrap` (default `true`) controls the LEAF only: when `true` the leaf's
+ * Optional/Default/Nullable/etc. wrappers are stripped (callers reading the
+ * inner type / `.meta()`); when `false` the leaf is returned AS DECLARED — use
+ * this to validate a write VALUE against the field, so a `null` write to a
+ * `.nullable()` field (or `undefined` to an `.optional()` one) is accepted.
+ * Intermediate segments are always unwrapped (needed to descend).
  */
 export function resolveZodField(
   schema: z.ZodType,
   fieldPath: string,
+  opts?: { unwrap?: boolean },
 ): z.ZodType | null {
   const segments = fieldPath.split(".");
   let n: z.ZodType = schema;
   for (const seg of segments) {
-    const shape = getShape(n);
-    if (!shape) return null;
-    const next = shape[seg];
+    const next = descendSegment(n, seg);
     if (!next) return null;
     n = next;
   }
-  return unwrapZod(n);
+  return (opts?.unwrap ?? true) ? unwrapZod(n) : n;
 }
 
 /**
