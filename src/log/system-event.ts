@@ -1,9 +1,9 @@
 /**
  * System / lifecycle archetype — process-startup, unhandled errors,
- * health-check failures, retry attempts, dry-run skips, generic
- * validation failures, and the auth-preview-served signal. Catch-all
- * for cross-cutting infrastructure msgs that don't belong to any
- * specific service.
+ * health-check failures, retry attempts, dry-run skips, rate-limit
+ * rejections, generic validation failures, and the auth-preview-served
+ * signal. Catch-all for cross-cutting infrastructure msgs that don't
+ * belong to any specific service.
  *
  * **PII posture**: none. Process-level diagnostics.
  */
@@ -15,6 +15,7 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 export const SYSTEM_EVENT_MSGS = [
   "dev_guard_skip",
   "dry_run_skip",
+  "rate_limit_exceeded",
   "retry_attempt",
   "startup_error",
   "unhandled_error",
