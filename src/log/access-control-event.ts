@@ -22,6 +22,7 @@ export const ACCESS_CONTROL_EVENT_MSGS = [
   "role_update_not_found",
   "role_updated",
   "permission_denied",
+  "service_oidc_observed",
   "preview_role_self_healed",
   "preview_role_started",
   "preview_role_stopped",

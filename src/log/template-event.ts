@@ -33,6 +33,7 @@ export const TEMPLATE_EVENT_MSGS = [
   "template_release_auto_merge_failed",
   "template_render_config_parse_failed",
   "template_render_failed",
+  "draft_git_backfill_failed",
   "template_sandbox_diverged",
   "template_sandbox_fast_forwarded",
   "template_sandbox_force_resynced",
