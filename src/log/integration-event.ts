@@ -48,6 +48,7 @@ export const INTEGRATION_EVENT_MSGS = [
   "mirror_set",
   "mirror_set_failed_terminal",
   "mirror_set_queue_failed",
+  "mirror_skipped_stale",
   "draft_quote_skipped_deleted",
   "draft_quote_skipped_invalid_order",
   "draft_quote_superseded",
