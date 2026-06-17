@@ -1,0 +1,17 @@
+{
+  "branches": [
+    "main",
+    { "name": "beta", "prerelease": "beta" },
+    { "name": "pre-*", "prerelease": "beta", "channel": "beta" },
+    { "name": "beta-*", "prerelease": "beta", "channel": "beta" }
+  ],
+  "plugins": [
+    ["@semantic-release/commit-analyzer", { "preset": "conventionalcommits" }],
+    ["@semantic-release/release-notes-generator", { "preset": "conventionalcommits" }],
+    ["@semantic-release/exec", {
+      "prepareCmd": "deno eval \"const c = JSON.parse(Deno.readTextFileSync('deno.json')); c.version = '${nextRelease.version}'; Deno.writeTextFileSync('deno.json', JSON.stringify(c, null, 2) + '\\n');\"",
+      "publishCmd": "deno publish --allow-dirty"
+    }],
+    "@semantic-release/github"
+  ]
+}
