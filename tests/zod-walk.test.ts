@@ -7,12 +7,12 @@ import {
   isDateLikeNode,
   resolveFieldMeta,
   resolveZodField,
-} from "../src/zod-walk.ts";
-import { FirestoreTimestamp } from "../src/common.ts";
-import { chicagoInstant, chicagoStartOfDay } from "../src/_datetime.ts";
-import { InvoiceSchema } from "../src/invoice.ts";
-import { DocDestination } from "../src/order.ts";
-import { TransactionSchema } from "../src/transaction.ts";
+} from "../src/schemas/zod-walk.ts";
+import { FirestoreTimestamp } from "../src/schemas/common.ts";
+import { chicagoInstant, chicagoStartOfDay } from "../src/schemas/_datetime.ts";
+import { InvoiceSchema } from "../src/schemas/invoice.ts";
+import { DocDestination } from "../src/schemas/order.ts";
+import { TransactionSchema } from "../src/schemas/transaction.ts";
 
 // ── isDateField on production schemas using the Chicago datetime factories ──
 

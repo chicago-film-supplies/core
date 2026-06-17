@@ -6,6 +6,7 @@
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/path@^1.1.4": "1.1.4",
     "npm:@date-fns/tz@^1.4.1": "1.4.1",
+    "npm:currency.js@^2.0.4": "2.0.4",
     "npm:date-fns@^4.1.0": "4.1.0",
     "npm:zod@^4.3.6": "4.3.6"
   },
@@ -38,6 +39,9 @@
     "@date-fns/tz@1.4.1": {
       "integrity": "sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA=="
     },
+    "currency.js@2.0.4": {
+      "integrity": "sha512-6/OplJYgJ0RUlli74d93HJ/OsKVBi8lB1+Z6eJYS1YZzBuIp4qKKHpJ7ad+GvTlWmLR/hLJOWTykN5Nm8NJ7+w=="
+    },
     "date-fns@4.1.0": {
       "integrity": "sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg=="
     },
@@ -49,6 +53,7 @@
     "dependencies": [
       "jsr:@std/assert@^1.0.19",
       "npm:@date-fns/tz@^1.4.1",
+      "npm:currency.js@^2.0.4",
       "npm:date-fns@^4.1.0",
       "npm:zod@^4.3.6"
     ]

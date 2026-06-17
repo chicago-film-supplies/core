@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { getInitialValues } from "../src/initial.ts";
-import { CreateOrderInput, DocDestination, OrderDocDates, OrderDocItemPrice, OrderSchema, UpdateOrderInput } from "../src/order.ts";
+import { getInitialValues } from "../src/schemas/initial.ts";
+import { CreateOrderInput, DocDestination, OrderDocDates, OrderDocItemPrice, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const orderBase = getInitialValues(OrderSchema) as Record<string, unknown>;
@@ -823,7 +823,7 @@ import {
   isValidOrderStatusTransition,
   ORDER_USER_STATUSES,
   ORDER_COMPUTED_STATUSES,
-} from "../src/order.ts";
+} from "../src/schemas/order.ts";
 
 Deno.test("getOrderStatusTransitions returns the other user statuses for a user status", () => {
   assertEquals(getOrderStatusTransitions("draft"), ["quoted", "reserved", "canceled"]);

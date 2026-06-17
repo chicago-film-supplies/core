@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { StockSummarySchema } from "../src/stock-summary.ts";
+import { StockSummarySchema } from "../src/schemas/stock-summary.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validSummary = {

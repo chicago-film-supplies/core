@@ -3,7 +3,7 @@ import {
   AcceptInviteInput,
   CreateInviteInput,
   InviteSchema,
-} from "../src/invite.ts";
+} from "../src/schemas/invite.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("InviteSchema validates a complete invite", () => {

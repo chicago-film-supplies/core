@@ -1,10 +1,10 @@
 import { assertEquals } from "@std/assert";
 import { z } from "zod";
-import { getTypesenseDisplayDefaults } from "../src/display-defaults.ts";
-import { firestoreDisplayDefaults, schemas } from "../src/mod.ts";
-import { BookingSchema } from "../src/booking.ts";
-import { TypesenseConfigSchema } from "../src/typesense-config.ts";
-import { typesenseSchemas } from "../src/typesense/mod.ts";
+import { getTypesenseDisplayDefaults } from "../src/schemas/display-defaults.ts";
+import { firestoreDisplayDefaults, schemas } from "../src/schemas/mod.ts";
+import { BookingSchema } from "../src/schemas/booking.ts";
+import { TypesenseConfigSchema } from "../src/schemas/typesense-config.ts";
+import { typesenseSchemas } from "../src/schemas/typesense/mod.ts";
 
 /**
  * Segments that never make sense as display columns: identifiers, external-system

@@ -16,9 +16,9 @@
 
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
 import { z } from "zod";
-import { applyPii, createLoggerStrategy } from "../src/pii/walker.ts";
-import { mask, redact } from "../src/pii/transforms.ts";
-import { nodeHash } from "../src/pii/hash-node.ts";
+import { applyPii, createLoggerStrategy } from "../src/schemas/pii/walker.ts";
+import { mask, redact } from "../src/schemas/pii/transforms.ts";
+import { nodeHash } from "../src/schemas/pii/hash-node.ts";
 
 // ── Leaf transforms ─────────────────────────────────────────────────
 
@@ -262,7 +262,7 @@ Deno.test("walker: applies per-element transform on array of pii-tagged primitiv
 // edit removed a `pii` tag without anyone noticing.
 
 Deno.test("walker: masks destination instructions on OrderSchema", async () => {
-  const { OrderSchema } = await import("../src/order.ts");
+  const { OrderSchema } = await import("../src/schemas/order.ts");
   const strategy = createLoggerStrategy(undefined);
   const doc = {
     uid: "o1000000000000000000",
@@ -308,7 +308,7 @@ Deno.test("walker: masks destination instructions on OrderSchema", async () => {
 });
 
 Deno.test("walker: masks line-item + divider description/name on OrderSchema", async () => {
-  const { OrderSchema } = await import("../src/order.ts");
+  const { OrderSchema } = await import("../src/schemas/order.ts");
   const strategy = createLoggerStrategy(undefined);
   const doc = {
     uid: "o2000000000000000000",

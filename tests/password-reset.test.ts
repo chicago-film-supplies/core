@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { PasswordResetSchema } from "../src/password-reset.ts";
+import { PasswordResetSchema } from "../src/schemas/password-reset.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("PasswordResetSchema validates a complete token document", () => {

@@ -4,7 +4,7 @@ import {
   RecurrenceRule,
   RecurrenceSchema,
   UpdateRecurrenceInput,
-} from "../src/recurrence.ts";
+} from "../src/schemas/recurrence.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validRule = {

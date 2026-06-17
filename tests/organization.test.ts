@@ -3,7 +3,7 @@ import {
   CreateOrganizationInput,
   OrganizationSchema,
   UpdateOrganizationInput,
-} from "../src/organization.ts";
+} from "../src/schemas/organization.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };

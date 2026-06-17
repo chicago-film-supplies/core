@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { ChartOfAccountsSchema } from "../src/chart-of-accounts.ts";
+import { ChartOfAccountsSchema } from "../src/schemas/chart-of-accounts.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("ChartOfAccountsSchema validates a complete document", () => {

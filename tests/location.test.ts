@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { getInitialValues } from "../src/initial.ts";
-import { LocationSchema } from "../src/location.ts";
+import { getInitialValues } from "../src/schemas/initial.ts";
+import { LocationSchema } from "../src/schemas/location.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const locationBase = getInitialValues(LocationSchema) as Record<string, unknown>;

@@ -4,7 +4,7 @@ import {
   GoldenDiffSchema,
   TemplateVersionSchema,
   UpdateTemplateVersionInput,
-} from "../src/template-version.ts";
+} from "../src/schemas/template-version.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("UpdateTemplateVersionInput accepts a content-only update", () => {

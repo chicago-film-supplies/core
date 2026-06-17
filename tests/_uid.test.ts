@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { BookingId, FirestoreId, ItemUid, QuoteId, StockSummaryId } from "../src/_uid.ts";
+import { BookingId, FirestoreId, ItemUid, QuoteId, StockSummaryId } from "../src/schemas/_uid.ts";
 import { bookingId, fid, stockSummaryId } from "./helpers/ids.ts";
 
 const accepts = (s: { safeParse(v: unknown): { success: boolean } }, v: string) =>

@@ -1,10 +1,10 @@
 import { assertEquals } from "@std/assert";
-import { PERMISSIONS, type Permission } from "../src/permissions.ts";
+import { PERMISSIONS, type Permission } from "../src/schemas/permissions.ts";
 import {
   SEARCH_PERMISSION_BY_ALIAS,
   typesenseSchemas,
   type TypesenseAlias,
-} from "../src/typesense/mod.ts";
+} from "../src/schemas/typesense/mod.ts";
 
 const PERMISSION_SET: ReadonlySet<Permission> = new Set(PERMISSIONS);
 

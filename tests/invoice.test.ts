@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { getInitialValues } from "../src/initial.ts";
-import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, UpdateInvoiceInput, UpdatePaymentInput } from "../src/invoice.ts";
+import { getInitialValues } from "../src/schemas/initial.ts";
+import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, UpdateInvoiceInput, UpdatePaymentInput } from "../src/schemas/invoice.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const invoiceBase = getInitialValues(InvoiceSchema) as Record<string, unknown>;

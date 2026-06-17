@@ -16,7 +16,7 @@ import {
   OrderItem,
   OrderDocDestinationItem,
   getInitialValues,
-} from "../src/mod.ts";
+} from "../src/schemas/mod.ts";
 
 Deno.test("getInitialValues — produces object for every collection schema", () => {
   const schemas = [

@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { ThreadSchema, UpdateThreadInput } from "../src/thread.ts";
+import { ThreadSchema, UpdateThreadInput } from "../src/schemas/thread.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validThread = {

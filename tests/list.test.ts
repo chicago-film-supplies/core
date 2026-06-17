@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { CreateListInput, ListSchema, UpdateListInput } from "../src/list.ts";
+import { CreateListInput, ListSchema, UpdateListInput } from "../src/schemas/list.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validList = {

@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { LocationTypeSchema } from "../src/location-type.ts";
+import { LocationTypeSchema } from "../src/schemas/location-type.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };

@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { CreateUserInput, UpdateUserInput, UserSchema } from "../src/user.ts";
+import { CreateUserInput, UpdateUserInput, UserSchema } from "../src/schemas/user.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const base = {

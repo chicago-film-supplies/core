@@ -1,0 +1,16084 @@
+# `@cfs/core` API Reference
+
+_Generated from source by `scripts/generate-api-docs.ts` — do not edit by hand. A structured companion is emitted alongside as `API.json`. Browsable version on [JSR](https://jsr.io/@cfs/core/doc/all_symbols)._
+
+## `@cfs/core/schemas`
+
+### `AcceptInviteInput`
+
+Input schema for POST /auth/accept-invite.
+
+```ts
+const AcceptInviteInput: z.ZodType<AcceptInviteInputType>;
+```
+
+### `AcceptInviteInputType`
+
+Input to POST /auth/accept-invite. Name fields override the invite's
+captured values — each is optional; omitted means "keep the invite's value".
+
+```ts
+interface AcceptInviteInputType {
+  token: string;
+  password: string;
+}
+```
+
+### `ActorRef`
+
+Zod schema for an actor reference.
+
+```ts
+const ActorRef: z.ZodType<ActorRefType>;
+```
+
+### `ActorRefType`
+
+Actor reference — embedded `{uid, name}` for `created_by` / `updated_by` /
+`deleted_by` fields across document schemas. The `name` is denormalized at
+write time by the server via `deriveName(parts)` (with `uid` as a fallback
+when all parts are empty — see `buildActorRef` in api-cloudrun). Non-human
+actors (e.g. integrations, scheduled jobs) use a synthetic uid such as
+`"manager-bot"` with a matching display name. Name changes on the source
+user fan out via the `update-user:name-to-actor-refs` propagation rule.
+
+```ts
+interface ActorRefType {
+  uid: string;
+  name: string;
+}
+```
+
+### `Address`
+
+Zod schema for Address, nullable.
+
+```ts
+const Address: z.ZodType<AddressType | null>;
+```
+
+### `AddressType`
+
+Address object — shared between organizations and order destinations.
+
+```ts
+interface AddressType {
+  city: string;
+  country_name: string;
+  full: string;
+  name: string;
+  postcode: string;
+  region: string;
+  street: string;
+  street2?: string;
+  mapbox_id?: string;
+  address_coordinates?: CoordinatesType | null;
+  user_coordinates?: CoordinatesType | null;
+}
+```
+
+### `AggregateDefinition`
+
+DDD aggregate boundary — groups collections under one consistency root.
+
+```ts
+interface AggregateDefinition {
+  id: string;
+  root: string;
+  members: string[];
+  description: string;
+}
+```
+
+### `AnyUid`
+
+Any known CFS document-id shape — atomic Firestore id, divider/custom item
+id, a composite (booking / stock-summary / event-card), or a lowercase-kebab
+slug (slug-keyed collections such as `roles` and seeded `lists`). Use for
+polymorphic references (`DocSource`, `UidNameRef`) that may point at any
+collection. `ItemUid` already covers `FirestoreId | uuid | custom-`.
+
+```ts
+const AnyUid: z.ZodType<string>;
+```
+
+### `BOOKING_STATUSES`
+
+```ts
+const BOOKING_STATUSES: "draft" | "quoted" | "reserved" | "part-prepped" | "prepped" | "active" | "complete"[];
+```
+
+### `BaseLogFields`
+
+TypeScript shape of {@link baseLogFields} — for use in archetype
+interfaces that want to declare the envelope explicitly.
+
+```ts
+interface BaseLogFields {
+  level: LogLevelType;
+  ts: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  duration_ms?: number;
+  dry_run?: boolean;
+}
+```
+
+### `BlobRef`
+
+A git blob reference recorded for a published version (path → blob sha).
+
+```ts
+interface BlobRef {
+  path: string;
+  sha: string;
+}
+```
+
+### `BlobRefSchema`
+
+Zod schema for a BlobRef.
+
+```ts
+const BlobRefSchema: z.ZodType<BlobRef>;
+```
+
+### `Booking`
+
+Full Firestore document for a booking (a single product line within an order).
+
+```ts
+interface Booking {
+  uid: string;
+  uid_order: string;
+  uid_product: string;
+  name: string;
+  number: number;
+  type: ComponentTypeType;
+  status: BookingStatusType;
+  quantity: number;
+  shortage: number;
+  subject: string;
+  unit_price: number;
+  total_price: number;
+  crms_id?: number | null;
+  crms_product_id?: number | null;
+  breakdown: BookingBreakdown;
+  dates: typeLiteral;
+  destinations: typeLiteral;
+  organization: typeLiteral;
+  stores: BookingStore[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  uid_destination_delivery: string;
+  uid_destination_collection: string;
+  version: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `BookingBreakdown`
+
+Per-status quantity breakdown for a booking — also embedded in stock-summary entries.
+
+```ts
+interface BookingBreakdown {
+  damaged: number;
+  lost: number;
+  out: number;
+  prepped: number;
+  quoted: number;
+  reserved: number;
+  returned: number;
+}
+```
+
+### `BookingBreakdownSchema`
+
+Zod schema for BookingBreakdown.
+
+```ts
+const BookingBreakdownSchema: z.ZodType<BookingBreakdown>;
+```
+
+### `BookingCreated`
+
+```ts
+type BookingCreated = EventEnvelope<Booking> & typeLiteral;
+```
+
+### `BookingDestinationRef`
+
+A reference to a destination with its address, used in booking delivery/collection.
+
+```ts
+interface BookingDestinationRef {
+  uid: string;
+  address: AddressType | null;
+}
+```
+
+### `BookingId`
+
+`bookings.uid` — deterministic composite
+`{uid_order}:{item uid}:{uid_destination}` (the middle segment is the order
+item's uid, which for a custom product is `custom-{uuid}`).
+
+```ts
+const BookingId: z.ZodType<string>;
+```
+
+### `BookingSchema`
+
+Zod schema for Booking.
+
+```ts
+const BookingSchema: z.ZodType<Booking>;
+```
+
+### `BookingStatusChanged`
+
+```ts
+type BookingStatusChanged = EventEnvelope<Booking> & typeLiteral;
+```
+
+### `BookingStatusType`
+
+```ts
+type BookingStatusType = indexedAccess;
+```
+
+### `BookingStore`
+
+A store and its locations assigned to a booking.
+
+```ts
+interface BookingStore {
+  uid_store: string;
+  name: string;
+  default: boolean;
+  quantity: number;
+  locations: BookingStoreLocation[];
+}
+```
+
+### `BookingStoreLocation`
+
+A specific location within a store allocated for a booking.
+
+```ts
+interface BookingStoreLocation {
+  uid_location: string;
+  name: string;
+  quantity: number;
+  default: boolean;
+}
+```
+
+### `BookingUpdate`
+
+```ts
+const BookingUpdate: z.ZodType<BookingUpdateType>;
+```
+
+### `BookingUpdateType`
+
+Per-row entry for the bulk fulfillment-bookings endpoint. Matches
+`UpdateBookingInputType` field-for-field, plus the booking `uid` to address
+the row (since the URL carries the fulfillment uid, not the booking uid).
+
+```ts
+interface BookingUpdateType {
+  uid: string;
+  status?: BookingStatusType;
+  breakdown?: indexedAccess;
+  version: number;
+}
+```
+
+### `BookingUpdated`
+
+```ts
+type BookingUpdated = EventEnvelope<Booking> & typeLiteral;
+```
+
+### `BulkBookingUpdateInput`
+
+```ts
+const BulkBookingUpdateInput: z.ZodType<BulkBookingUpdateInputType>;
+```
+
+### `BulkBookingUpdateInputType`
+
+Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions
+for one order in a single Firestore transaction.
+
+Top-level `version` is the fulfillment doc version at read time. Currently
+advisory: a stale value 409s. Per-row `version` carries each booking's
+current version for optimistic concurrency.
+
+No fixed cap on `updates.length`. Bound only by the real Firestore limits
+(270s tx duration, 10 MiB request size). The bulk service rejects empty
+arrays with 400.
+
+```ts
+interface BulkBookingUpdateInputType {
+  version: number;
+  updates: BookingUpdateType[];
+}
+```
+
+### `BulkBookingUpdateResponse`
+
+```ts
+const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType>;
+```
+
+### `BulkBookingUpdateResponseType`
+
+Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row
+`results` carry the post-write booking versions in input order.
+
+```ts
+interface BulkBookingUpdateResponseType {
+  success: true;
+  order_completed: boolean;
+  oos_records_written: number;
+  results: Array<typeLiteral>;
+}
+```
+
+### `COACode`
+
+Zod schema for COACode.
+
+```ts
+const COACode: z.ZodType<COACodeType>;
+```
+
+### `COACodeType`
+
+Valid chart of accounts code values.
+
+```ts
+type COACodeType = indexedAccess;
+```
+
+### `COARevenueEnum`
+
+Zod schema for COARevenueType.
+
+```ts
+const COARevenueEnum: z.ZodType<COARevenueType>;
+```
+
+### `COARevenueType`
+
+Allowed values for chart-of-accounts revenue code.
+
+```ts
+type COARevenueType = indexedAccess;
+```
+
+### `COAType`
+
+Zod schema for COAType.
+
+```ts
+const COAType: z.ZodType<COATypeType>;
+```
+
+### `COATypeType`
+
+Valid chart of accounts type values.
+
+```ts
+type COATypeType = indexedAccess;
+```
+
+### `CacheGeocodes`
+
+Full Firestore document for a cached geocode result.
+
+```ts
+interface CacheGeocodes {
+  query: string;
+  coordinates: CoordinatesType | null;
+  mapbox_id: string;
+  address: CacheGeocodesAddress;
+  created_at?: FirestoreTimestampType;
+  expiresAt?: FirestoreTimestampType;
+}
+```
+
+### `CacheGeocodesAddress`
+
+Parsed address fields returned from a geocode lookup.
+
+```ts
+interface CacheGeocodesAddress {
+  street?: string;
+  city?: string;
+  region?: string;
+  postcode?: string;
+  country_name?: string;
+  full?: string;
+  name?: string;
+}
+```
+
+### `CacheGeocodesSchema`
+
+Zod schema for CacheGeocodes.
+
+```ts
+const CacheGeocodesSchema: z.ZodType<CacheGeocodes>;
+```
+
+### `Card`
+
+Card Firestore document shape.
+
+```ts
+interface Card {
+  uid: string;
+  uid_list: string;
+  uid_thread: string;
+  status: CardStatus;
+  position: number;
+  subject: string;
+  body: CommentBodyJson | null;
+  body_text: string;
+  dates: CardDatesType;
+  all_day: boolean;
+  date_fs: FirestoreTimestampType | null;
+  destination: DocDestinationEndpointType | null;
+  organization: CardOrganizationType | null;
+  sources: DocSourceType[];
+  attachments: CardAttachmentType[];
+  uid_assignees: string[];
+  locked: CardLockKey[];
+  recurrence_parent_uid: string | null;
+  recurrence_index: number | null;
+  recurrence_overrides: string[];
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `CardAttachment`
+
+Zod schema for a card attachment.
+
+```ts
+const CardAttachment: z.ZodType<CardAttachmentType>;
+```
+
+### `CardAttachmentType`
+
+A single attachment on a card (Uploadcare UUID + display metadata).
+
+```ts
+interface CardAttachmentType {
+  uid: string;
+  type: CardAttachmentTypeEnum;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  locked: boolean;
+}
+```
+
+### `CardAttachmentTypeEnum`
+
+Semantic discriminator for a card attachment. Server-derived attachments
+(packing/quote/invoice) carry their domain meaning so the UI can render
+them as labelled chips without sniffing MIME or filename. User uploads
+default to `image` (when MIME starts with `image/`) or `file` otherwise.
+
+```ts
+type CardAttachmentTypeEnum = indexedAccess;
+```
+
+### `CardAttachmentTypeEnumSchema`
+
+Zod schema for CardAttachmentTypeEnum.
+
+```ts
+const CardAttachmentTypeEnumSchema: z.ZodType<CardAttachmentTypeEnum>;
+```
+
+### `CardCreated`
+
+```ts
+type CardCreated = EventEnvelope<Card> & typeLiteral;
+```
+
+### `CardDates`
+
+Zod schema for the card dates sub-object.
+
+```ts
+const CardDates: z.ZodType<CardDatesType>;
+```
+
+### `CardDatesType`
+
+Card datetime range. `start` is the canonical occurrence instant — Chicago
+offset form, idempotent through `chicagoInstant()`. `end` carries the
+occurrence's wall-clock close (deliveries with start + end times); `null`
+means single-instant or all-day. `start` is nullable so cards without a
+date (generic to-dos, shopping items) stay valid.
+
+```ts
+interface CardDatesType {
+  start: string | null;
+  end: string | null;
+}
+```
+
+### `CardDeleted`
+
+```ts
+type CardDeleted = EventEnvelope<Card> & typeLiteral;
+```
+
+### `CardId`
+
+`cards.uid` — either a Firestore auto-id (kanban/to-do cards) or an
+`EventCardId` composite (auto-generated order event cards).
+
+```ts
+const CardId: z.ZodType<string>;
+```
+
+### `CardLockKey`
+
+Enum of lockable card surfaces.
+
+- `"card"` — presence blocks DELETE (all other keys are field locks)
+- `"status_auto"` — narrow override slot: server auto-computes `status`,
+  but PATCH still accepts `status: "blocked"` (manual block) or a no-op of
+  the current auto value. Distinct from `"status"`, which fully locks the
+  field.
+- Any other value — presence rejects PATCH of that specific field
+
+Narrower than `(keyof Card)[]` because (a) most Card fields are
+system-managed (uid, timestamps, actor refs) and nonsensical to lock, and
+(b) we need a sentinel for "prevent delete" that doesn't collide with a
+real field name.
+
+```ts
+type CardLockKey = indexedAccess;
+```
+
+### `CardLockKeyEnum`
+
+Zod schema for CardLockKey.
+
+```ts
+const CardLockKeyEnum: z.ZodType<CardLockKey>;
+```
+
+### `CardOrganization`
+
+Zod schema for CardOrganizationType.
+
+```ts
+const CardOrganization: z.ZodType<CardOrganizationType>;
+```
+
+### `CardOrganizationType`
+
+Denormalized organization snapshot on order-derived event cards. Surfaces
+"who is this card for?" on every card-rendering surface (list, kanban,
+calendar, dashboard) without joining back to the order. `uid` is nullable
+because some organizations exist without a CFS-side uid (legacy CRMS-only
+customers).
+
+```ts
+interface CardOrganizationType {
+  uid: string | null;
+  name: string;
+}
+```
+
+### `CardSchema`
+
+Zod schema for a card Firestore document.
+
+```ts
+const CardSchema: z.ZodType<Card>;
+```
+
+### `CardStatus`
+
+Allowed card statuses. Shared across field-service, to-do, shopping, calendar.
+
+```ts
+type CardStatus = indexedAccess;
+```
+
+### `CardStatusEnum`
+
+Zod schema for CardStatus.
+
+```ts
+const CardStatusEnum: z.ZodType<CardStatus>;
+```
+
+### `CardUpdated`
+
+```ts
+type CardUpdated = EventEnvelope<Card> & typeLiteral;
+```
+
+### `ChartOfAccounts`
+
+A chart of accounts document in Firestore.
+
+```ts
+interface ChartOfAccounts {
+  uid: string;
+  code: COACodeType;
+  name: string;
+  type: COATypeType;
+  description?: string;
+  default_tax_profile: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ChartOfAccountsSchema`
+
+Zod schema for ChartOfAccounts.
+
+```ts
+const ChartOfAccountsSchema: z.ZodType<ChartOfAccounts>;
+```
+
+### `ChartOfAccountsUpdated`
+
+```ts
+type ChartOfAccountsUpdated = EventEnvelope<ChartOfAccounts> & typeLiteral;
+```
+
+### `ClientAppType`
+
+Identifier for a client application that emits logs.
+
+```ts
+type ClientAppType = indexedAccess;
+```
+
+### `ClientLogBatch`
+
+A batch of client log entries submitted in a single request.
+
+```ts
+interface ClientLogBatch {
+  logs: ClientLogEntry[];
+}
+```
+
+### `ClientLogBatchSchema`
+
+Zod schema for {@link ClientLogBatch}.
+
+```ts
+const ClientLogBatchSchema: z.ZodType<ClientLogBatch>;
+```
+
+### `ClientLogEntry`
+
+A single log entry sent from a client application.
+
+```ts
+interface ClientLogEntry {
+  level: LogLevelType;
+  msg: string;
+  ts: string;
+  app: ClientAppType;
+  page?: string;
+  request_id?: string;
+  data?: Record<string, unknown>;
+}
+```
+
+### `ClientLogEntrySchema`
+
+Zod schema for {@link ClientLogEntry}.
+
+The `data` field is capped at 20 top-level keys + 4 KB stringified to
+defend against runaway client-side payloads. Manager logs in practice
+carry ≤5 keys and <500 bytes per entry, so this cap is far above the
+legitimate ceiling.
+
+```ts
+const ClientLogEntrySchema: z.ZodType<ClientLogEntry>;
+```
+
+### `CollectionRule`
+
+One edge in the propagation graph — describes data flow between two collections.
+
+```ts
+interface CollectionRule {
+  id: string;
+  source: string;
+  target: string;
+  mode: PropagationMode;
+  invariant?: string;
+  transaction?: string;
+  trigger?: string;
+  fields: FieldMapping[];
+}
+```
+
+### `Comment`
+
+Comment Firestore document shape.
+
+```ts
+interface Comment {
+  uid: string;
+  uid_thread: string;
+  sources: DocSourceType[];
+  body: CommentBodyJson;
+  body_text: string;
+  reactions: Record<string, Record<string, ActorRefType>>;
+  git?: CommentGitMirror;
+  version: number;
+  created_by: ActorRefType;
+  deleted_at: FirestoreTimestampType | null;
+  deleted_by: ActorRefType | null;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `CommentBody`
+
+Zod schema for the Tiptap JSON body.
+
+```ts
+const CommentBody: z.ZodType<CommentBodyJson>;
+```
+
+### `CommentBodyJson`
+
+Tiptap JSON body payload. Stored as a loose record to keep the schema
+forward-compatible with Tiptap's node spec. The composer owns shape
+correctness; the `body_text` mirror is the authoritative plain-text form.
+
+```ts
+type CommentBodyJson = Record<string, unknown>;
+```
+
+### `CommentCreated`
+
+```ts
+type CommentCreated = EventEnvelope<Comment> & typeLiteral;
+```
+
+### `CommentDeleted`
+
+```ts
+type CommentDeleted = EventEnvelope<Comment> & typeLiteral;
+```
+
+### `CommentReactionInput`
+
+Zod schema for a comment reaction add/remove.
+
+```ts
+const CommentReactionInput: z.ZodType<CommentReactionInputType>;
+```
+
+### `CommentReactionInputType`
+
+Input for POST /comments/:uid/reactions.
+
+```ts
+interface CommentReactionInputType {
+  emoji: string;
+  action: ReactionActionType;
+}
+```
+
+### `CommentSchema`
+
+Zod schema for a comment Firestore document.
+
+```ts
+const CommentSchema: z.ZodType<Comment>;
+```
+
+### `CommentUpdated`
+
+```ts
+type CommentUpdated = EventEnvelope<Comment> & typeLiteral;
+```
+
+### `CommitMeta`
+
+Conventional-commit metadata captured at release/publish time.
+
+```ts
+interface CommitMeta {
+  author: ActorRefType;
+  type: string;
+  message: string;
+  breaking: boolean;
+}
+```
+
+### `CommitMetaSchema`
+
+Zod schema for CommitMeta. `author` reuses the pii-annotated ActorRef.
+
+```ts
+const CommitMetaSchema: z.ZodType<CommitMeta>;
+```
+
+### `ComponentSchema`
+
+```ts
+const ComponentSchema: z.ZodType<ProductComponent>;
+```
+
+### `ComponentTypeEnum`
+
+Zod schema for ComponentTypeType.
+
+```ts
+const ComponentTypeEnum: z.ZodType<ComponentTypeType>;
+```
+
+### `ComponentTypeType`
+
+Allowed values for component type.
+
+```ts
+type ComponentTypeType = indexedAccess;
+```
+
+### `ConsolidatedItemType`
+
+A consolidated line item — aggregated quantity and price for display.
+Used by consolidateItems() in utilities and the manager app.
+
+```ts
+interface ConsolidatedItemType {
+  uid: string;
+  name: string;
+  type: string;
+  quantity: number;
+  total_price: number;
+  unit_price: number;
+  stock_method: string;
+}
+```
+
+### `Contact`
+
+Full contact document schema (Firestore document shape).
+
+```ts
+interface Contact {
+  uid: string;
+  name: string;
+  crms_id?: number;
+  emails: string[];
+  phones: string[];
+  organizations: ContactOrganizationType[];
+  query_by_organizations: string[];
+  uid_user?: string;
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ContactCreated`
+
+```ts
+type ContactCreated = EventEnvelope<Contact> & typeLiteral;
+```
+
+### `ContactOrganization`
+
+Zod schema for an organization reference embedded in a contact.
+
+```ts
+const ContactOrganization: z.ZodType<ContactOrganizationType>;
+```
+
+### `ContactOrganizationType`
+
+Organization reference embedded in a contact document.
+
+```ts
+interface ContactOrganizationType {
+  uid: string;
+  name: string;
+}
+```
+
+### `ContactSchema`
+
+Zod schema for a full contact Firestore document.
+
+```ts
+const ContactSchema: z.ZodType<Contact>;
+```
+
+### `ContactUpdated`
+
+```ts
+type ContactUpdated = EventEnvelope<Contact> & typeLiteral;
+```
+
+### `Coordinates`
+
+Zod schema for coordinates (latitude/longitude), nullable.
+
+```ts
+const Coordinates: z.ZodType<CoordinatesType | null>;
+```
+
+### `CoordinatesType`
+
+Coordinates object (latitude/longitude).
+
+```ts
+interface CoordinatesType {
+  latitude: number;
+  longitude: number;
+}
+```
+
+### `Counter`
+
+A counter document in the counters Firestore collection.
+
+```ts
+interface Counter {
+  count: number;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `CounterSchema`
+
+Zod schema for a Counter document.
+
+```ts
+const CounterSchema: z.ZodType<Counter>;
+```
+
+### `CreateCardInput`
+
+Zod schema for creating a card.
+
+```ts
+const CreateCardInput: z.ZodType<CreateCardInputType>;
+```
+
+### `CreateCardInputType`
+
+Input for POST /cards.
+
+```ts
+interface CreateCardInputType {
+  uid_list: string;
+  subject: string;
+  status?: CardStatus;
+  position?: number;
+  body?: CommentBodyJson | null;
+  body_text?: string;
+  dates?: CardDatesType;
+  all_day?: boolean;
+  destination?: DocDestinationEndpointType | null;
+  organization?: CardOrganizationType | null;
+  sources?: DocSourceType[];
+  attachments?: CardAttachmentType[];
+  uid_assignees?: string[];
+  locked?: CardLockKey[];
+}
+```
+
+### `CreateCommentInput`
+
+Zod schema for creating a comment.
+
+```ts
+const CreateCommentInput: z.ZodType<CreateCommentInputType>;
+```
+
+### `CreateCommentInputType`
+
+Input for POST /comments.
+
+```ts
+interface CreateCommentInputType {
+  uid_thread: string;
+  body: CommentBodyJson;
+  body_text: string;
+}
+```
+
+### `CreateContactInput`
+
+Input schema for creating a contact.
+
+```ts
+const CreateContactInput: z.ZodType<CreateContactInputType>;
+```
+
+### `CreateContactInputType`
+
+Input schema for POST /contacts — what the endpoint accepts.
+
+```ts
+interface CreateContactInputType {
+  uid: string;
+  emails?: string[];
+  phones?: string[];
+  organizations?: ContactOrganizationType[];
+}
+```
+
+### `CreateInviteInput`
+
+Input schema for POST /admin/users/invite.
+
+```ts
+const CreateInviteInput: z.ZodType<CreateInviteInputType>;
+```
+
+### `CreateInviteInputType`
+
+Input to POST /admin/users/invite.
+
+```ts
+interface CreateInviteInputType {
+  email: string;
+  roles: string[];
+}
+```
+
+### `CreateInvoiceInput`
+
+Input schema for creating an invoice.
+
+```ts
+const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType>;
+```
+
+### `CreateInvoiceInputType`
+
+Input schema for POST /invoices — create an invoice from orders.
+
+```ts
+interface CreateInvoiceInputType {
+  uid: string;
+  query_by_orders: string[];
+  organization: typeLiteral;
+  tax_profile: TaxProfileType;
+  items?: InvoiceItemInputType[];
+  destinations?: InvoiceDocDestinationType[];
+  date?: string;
+  due_date?: string;
+  subject?: string;
+  reference?: string | null;
+  external_notes?: string;
+  internal_notes?: string;
+}
+```
+
+### `CreateListInput`
+
+Zod schema for creating a list.
+
+```ts
+const CreateListInput: z.ZodType<CreateListInputType>;
+```
+
+### `CreateListInputType`
+
+Input for POST /lists.
+
+```ts
+interface CreateListInputType {
+  name: string;
+  description?: string;
+  icon?: string | null;
+  color?: string | null;
+  position?: number;
+  locked?: ListLockKey[];
+}
+```
+
+### `CreateLocationInput`
+
+Input schema for creating a location.
+
+```ts
+const CreateLocationInput: z.ZodType<CreateLocationInputType>;
+```
+
+### `CreateLocationInputType`
+
+Input type for creating a location.
+
+```ts
+interface CreateLocationInputType {
+  uid: string;
+  uid_store: string;
+  name: string;
+  uid_location_type?: string | null;
+}
+```
+
+### `CreateLocationTypeInput`
+
+Input schema for creating a location type.
+
+```ts
+const CreateLocationTypeInput: z.ZodType<CreateLocationTypeInputType>;
+```
+
+### `CreateLocationTypeInputType`
+
+Input type for creating a location type.
+
+```ts
+interface CreateLocationTypeInputType {
+  name: string;
+  product_capacities?: Record<string, typeLiteral>;
+  dimensions?: typeLiteral | null;
+}
+```
+
+### `CreateOrderInput`
+
+Input schema for creating an order.
+
+```ts
+const CreateOrderInput: z.ZodType<CreateOrderInputType>;
+```
+
+### `CreateOrderInputType`
+
+Input schema for POST /orders — what the endpoint accepts.
+
+```ts
+interface CreateOrderInputType {
+  uid: string;
+  organization: typeLiteral;
+  status: OrderStatusType;
+  tax_profile: TaxProfileType;
+  destinations: DestinationType[];
+  items?: OrderItemType[];
+  subject?: string;
+  reference?: string | null;
+}
+```
+
+### `CreateOrganizationInput`
+
+Input schema for creating an organization.
+
+```ts
+const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType>;
+```
+
+### `CreateOrganizationInputType`
+
+Input schema for POST /organizations.
+crms_id and xero_id are obtained from external APIs — not in input.
+
+```ts
+interface CreateOrganizationInputType {
+  uid: string;
+  name: string;
+  tax_profile: TaxProfileType;
+  billing_address: AddressType | null;
+  contacts?: OrganizationContactType[];
+  newContacts?: NewContactInputType[] | null;
+  emails?: string[];
+  phones?: string[];
+}
+```
+
+### `CreateOutOfServiceInput`
+
+Zod schema for CreateOutOfServiceInput.
+
+```ts
+const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType>;
+```
+
+### `CreateOutOfServiceInputType`
+
+Input for creating an out-of-service record.
+
+```ts
+interface CreateOutOfServiceInputType {
+  uid_product: string;
+  reason: OOSReasonType;
+  quantity: number;
+  dates: typeLiteral;
+  sources?: DocSourceType[];
+  stores?: OOSStore[];
+  crms_id?: number | null;
+  crms_stock_level_id?: number | null;
+}
+```
+
+### `CreateProductInput`
+
+Input schema for creating a product.
+
+```ts
+const CreateProductInput: z.ZodType<CreateProductInputType>;
+```
+
+### `CreateProductInputType`
+
+Input type for creating a product.
+
+```ts
+interface CreateProductInputType {
+  uid: string;
+  name: string;
+  active: boolean;
+  type: ProductTypeType;
+  stock_method: StockMethodType;
+  component_only: boolean;
+  description: string;
+  eligible_delivery: boolean;
+  eligible_in_store_pickup: boolean;
+  eligible_shipping_ground: boolean;
+  eligible_shipping_air: boolean;
+  price: typeLiteral;
+  shipping?: typeLiteral;
+  alternates?: UidNameRefType[];
+  components?: ProductComponent[];
+  component_of?: ProductComponent[];
+  tags?: UidNameRefType[];
+  tracking_category_name?: string;
+  uid_tracking_category?: string | null;
+  uid_linked_rental?: string | null;
+  uid_linked_replacement?: string | null;
+  webshop: typeLiteral;
+  transaction?: typeLiteral;
+}
+```
+
+### `CreateRecurrenceInput`
+
+Zod schema for creating a recurrence.
+
+```ts
+const CreateRecurrenceInput: z.ZodType<CreateRecurrenceInputType>;
+```
+
+### `CreateRecurrenceInputType`
+
+Input for POST /recurrences.
+
+```ts
+interface CreateRecurrenceInputType {
+  uid_list: string;
+  status?: RecurrenceStatus;
+  rule: RecurrenceRuleType;
+  active_from: string;
+  active_until?: string | null;
+  horizon_days?: number | null;
+  prototype: typeLiteral;
+}
+```
+
+### `CreateStoreInput`
+
+Input schema for creating a store.
+
+```ts
+const CreateStoreInput: z.ZodType<CreateStoreInputType>;
+```
+
+### `CreateStoreInputType`
+
+Input type for creating a store.
+
+```ts
+interface CreateStoreInputType {
+  uid: string;
+  name: string;
+  crms_store_id: number;
+  default?: boolean;
+}
+```
+
+### `CreateStoreTransferInput`
+
+Input schema for creating a store-to-store transfer.
+
+```ts
+const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType>;
+```
+
+### `CreateStoreTransferInputType`
+
+Input type for creating a store-to-store transfer.
+
+```ts
+interface CreateStoreTransferInputType {
+  uid_product: string;
+  quantity: number;
+  date: string;
+  reference: string;
+  stores_from: InputTransactionStore[];
+  stores_to: InputTransactionStore[];
+  total_cost?: number;
+  serialized_details?: typeLiteral | null;
+}
+```
+
+### `CreateTagInput`
+
+Input schema for creating a tag.
+
+```ts
+const CreateTagInput: z.ZodType<CreateTagInputType>;
+```
+
+### `CreateTagInputType`
+
+Input type for creating a tag.
+
+```ts
+interface CreateTagInputType {
+  uid?: string;
+  name: string;
+}
+```
+
+### `CreateTaxInput`
+
+Zod schema for CreateTaxInput.
+
+```ts
+const CreateTaxInput: z.ZodType<CreateTaxInputType>;
+```
+
+### `CreateTaxInputType`
+
+Input for creating a new tax definition.
+
+```ts
+interface CreateTaxInputType {
+  name: string;
+  rate: number;
+  type: RateType;
+  active?: boolean;
+  valid_from: string;
+  valid_to?: string | null;
+}
+```
+
+### `CreateTrackingCategoryInput`
+
+Input schema for creating a tracking category.
+
+```ts
+const CreateTrackingCategoryInput: z.ZodType<CreateTrackingCategoryInputType>;
+```
+
+### `CreateTrackingCategoryInputType`
+
+Input type for creating a tracking category.
+
+```ts
+interface CreateTrackingCategoryInputType {
+  uid: string;
+  name: string;
+  crms_product_group_id: number;
+  crms_product_group_name: string;
+}
+```
+
+### `CreateTransactionInput`
+
+Input schema for creating a manual transaction.
+
+```ts
+const CreateTransactionInput: z.ZodType<CreateTransactionInputType>;
+```
+
+### `CreateTransactionInputType`
+
+Input type for creating a manual transaction.
+
+```ts
+interface CreateTransactionInputType {
+  uid: string;
+  uid_product: string;
+  type: indexedAccess;
+  quantity: number;
+  total_cost: number;
+  date: string;
+  reference: string;
+  stores: InputTransactionStore[];
+  serialized_details?: typeLiteral | null;
+}
+```
+
+### `CreateUserInput`
+
+Input schema for creating a user (internal — not exposed as a public route).
+
+```ts
+const CreateUserInput: z.ZodType<CreateUserInputType>;
+```
+
+### `CreateUserInputType`
+
+Payload for creating a user — used internally by the accept-invite flow.
+
+```ts
+interface CreateUserInputType {
+  email: string;
+  password: string;
+  roles?: string[];
+  uid_contact?: string | null;
+}
+```
+
+### `DOC_LINE_ITEM_TYPES`
+
+Billable line item types stored in order/invoice documents (excludes destination/group dividers).
+
+```ts
+const DOC_LINE_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surcharge" | "transaction_fee"[];
+```
+
+### `DeleteTagInput`
+
+Input schema for deleting a tag.
+
+```ts
+const DeleteTagInput: z.ZodType<DeleteTagInputType>;
+```
+
+### `DeleteTagInputType`
+
+Input type for deleting a tag.
+
+```ts
+interface DeleteTagInputType {
+  uid: string;
+}
+```
+
+### `Destination`
+
+Zod schema for a destination pair.
+
+```ts
+const Destination: z.ZodType<DestinationType>;
+```
+
+### `DestinationContact`
+
+Zod schema for destination contact reference.
+
+```ts
+const DestinationContact: z.ZodType<DestinationContactType>;
+```
+
+### `DestinationContactRef`
+
+Zod schema for a contact reference embedded in a destination.
+
+```ts
+const DestinationContactRef: z.ZodType<DestinationContactRefType>;
+```
+
+### `DestinationContactRefType`
+
+Contact reference embedded in a destination document.
+
+Mirrors the split-name shape used in `organizations.contacts[]` so that the
+Typesense `destinations_v5` collection can index the same `first_name /
+middle_name / last_name / pronunciation` fields without an adapter. `name`
+is the server-derived display string (see `deriveName` in common.ts).
+
+```ts
+interface DestinationContactRefType {
+  uid: string;
+  name: string;
+}
+```
+
+### `DestinationContactType`
+
+Contact reference embedded in a destination endpoint.
+When present (not null), uid and first_name are required. `name` is the
+server-derived display string (see `deriveName` in common.ts) — populated
+by api-cloudrun on every write so consumers don't re-derive client-side.
+
+```ts
+interface DestinationContactType {
+  uid: string;
+  name: string;
+  phones?: string[];
+}
+```
+
+### `DestinationDoc`
+
+Full Firestore document for a destination (a physical address used in orders).
+
+```ts
+interface DestinationDoc {
+  uid: string;
+  address: AddressType | null;
+  mapbox_ids: string[];
+  organizations?: UidNameRefType[];
+  query_by_organizations?: string[];
+  products?: UidNameRefType[];
+  query_by_products?: string[];
+  contacts?: DestinationContactRefType[];
+  query_by_contacts?: string[];
+  version: number;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `DestinationEndpoint`
+
+Zod schema for a destination endpoint.
+
+```ts
+const DestinationEndpoint: z.ZodType<DestinationEndpointType>;
+```
+
+### `DestinationEndpointType`
+
+A single destination endpoint (delivery or collection).
+
+```ts
+interface DestinationEndpointType {
+  uid?: string | null;
+  address?: AddressType | null;
+  instructions?: string | null;
+  contact?: DestinationContactType | null;
+}
+```
+
+### `DestinationSchema`
+
+Zod schema for Destination.
+
+```ts
+const DestinationSchema: z.ZodType<Destination>;
+```
+
+### `DestinationType`
+
+A destination pair — delivery and collection endpoints.
+
+`customer_collecting` is true when the customer picks up the items at our
+warehouse for the delivery side of this pair. `customer_returning` is true
+when the customer drops the items off at our warehouse for the collection
+side. Both default to false (we deliver / we collect).
+
+```ts
+interface DestinationType {
+  dates: OrderDatesType;
+  delivery: DestinationEndpointType;
+  collection: DestinationEndpointType;
+  customer_collecting?: boolean;
+  customer_returning?: boolean;
+}
+```
+
+### `Discount`
+
+Zod schema for an item discount.
+
+```ts
+const Discount: z.ZodType<DiscountType>;
+```
+
+### `DiscountInput`
+
+Zod schema for a discount input (without computed amount).
+
+```ts
+const DiscountInput: z.ZodType<DiscountInputType>;
+```
+
+### `DiscountInputType`
+
+Discount input — rate and type only. Amount is computed by calculateItemPrice.
+
+```ts
+interface DiscountInputType {
+  rate: number;
+  type: RateType;
+}
+```
+
+### `DiscountType`
+
+Discount applied to an item price. Nullable — null means no discount.
+rate is per-unit for flat discounts (rate × quantity × days_factor = amount).
+
+```ts
+interface DiscountType {
+  rate: number;
+  type: RateType;
+  amount: number;
+}
+```
+
+### `DisplaySort`
+
+Sort configuration for a display preference (column + direction).
+
+```ts
+interface DisplaySort {
+  column: string | null;
+  direction: "asc" | "desc";
+}
+```
+
+### `DmarcAggregateLogRecord`
+
+Structured log entry for one record from a DMARC aggregate report.
+
+```ts
+interface DmarcAggregateLogRecord {
+  level: LogLevelType;
+  msg: "dmarc_aggregate_record";
+  ts: string;
+  source_ip: string;
+  count: number;
+  disposition: string;
+  dkim_result: string;
+  spf_result: string;
+  dkim_aligned: boolean;
+  spf_aligned: boolean;
+  header_from: string;
+  org_name: string;
+  report_id: string;
+  domain: string;
+  date_range_begin: number;
+  date_range_end: number;
+  dmarc_pass: "true" | "false";
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `DmarcAggregateLogRecordSchema`
+
+Zod schema for {@link DmarcAggregateLogRecord}.
+
+```ts
+const DmarcAggregateLogRecordSchema: z.ZodType<DmarcAggregateLogRecord>;
+```
+
+### `DocDestination`
+
+Zod schema for a document-level destination pair.
+
+```ts
+const DocDestination: z.ZodType<DocDestinationType>;
+```
+
+### `DocDestinationContact`
+
+Zod schema for destination contact reference (document version).
+
+```ts
+const DocDestinationContact: z.ZodType<DocDestinationContactType>;
+```
+
+### `DocDestinationContactType`
+
+Contact reference in a destination endpoint (document schema — uid & first_name required).
+
+```ts
+interface DocDestinationContactType {
+  uid: string;
+  name: string;
+  phones?: string[];
+}
+```
+
+### `DocDestinationEndpoint`
+
+Zod schema for a destination endpoint (document version).
+
+```ts
+const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType>;
+```
+
+### `DocDestinationEndpointType`
+
+Destination endpoint in the full document (uid is nullable, contact uses doc version).
+
+```ts
+interface DocDestinationEndpointType {
+  uid: string | null;
+  address: AddressType | null;
+  instructions: string | null;
+  contact: DocDestinationContactType | null;
+}
+```
+
+### `DocDestinationType`
+
+Document-level destination pair. See `DestinationType` for flag semantics.
+
+```ts
+interface DocDestinationType {
+  dates: OrderDocDatesType;
+  delivery: DocDestinationEndpointType;
+  collection: DocDestinationEndpointType;
+  customer_collecting: boolean;
+  customer_returning: boolean;
+}
+```
+
+### `DocItemTypeEnum`
+
+Zod schema for DocItemTypeType.
+
+```ts
+const DocItemTypeEnum: z.ZodType<DocItemTypeType>;
+```
+
+### `DocItemTypeType`
+
+All item types accepted in order/invoice input schemas (includes structural dividers).
+
+```ts
+type DocItemTypeType = indexedAccess;
+```
+
+### `DocLineItemTypeEnum`
+
+Zod schema for DocLineItemTypeType.
+
+```ts
+const DocLineItemTypeEnum: z.ZodType<DocLineItemTypeType>;
+```
+
+### `DocLineItemTypeType`
+
+Billable line item types stored in order/invoice documents (excludes destination/group dividers).
+
+```ts
+type DocLineItemTypeType = indexedAccess;
+```
+
+### `DocSource`
+
+Zod schema for a polymorphic doc reference.
+
+```ts
+const DocSource: z.ZodType<DocSourceType>;
+```
+
+### `DocSourceType`
+
+A `{collection, uid}` pointer to any Firestore document. Used polymorphically
+by Thread, Comment, and Card to reference the source docs they belong to.
+
+Lives here (not in thread.ts where it originated) because it's a shared
+primitive — the "thread" prefix misled readers into thinking it was
+thread-specific.
+
+```ts
+interface DocSourceType {
+  collection: string;
+  uid: string;
+  label?: string | null;
+}
+```
+
+### `Email`
+
+Email string with format and length constraints.
+
+```ts
+const Email: z.ZodType<string>;
+```
+
+### `EmailInput`
+
+```ts
+const EmailInput: z.ZodType<EmailInputType>;
+```
+
+### `EmailInputType`
+
+Input schema for POST /auth/forgot-password and POST /auth/resend-verification.
+
+```ts
+interface EmailInputType {
+  email: string;
+}
+```
+
+### `EmailSendFailedLogRecord`
+
+Structured log entry for a failed outbound email.
+
+```ts
+interface EmailSendFailedLogRecord {
+  level: LogLevelType;
+  msg: "email_send_failed";
+  ts: string;
+  status: number;
+  body?: string;
+  email_from: string;
+  to?: string;
+  subject?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `EmailSendFailedLogRecordSchema`
+
+Zod schema for {@link EmailSendFailedLogRecord}.
+
+```ts
+const EmailSendFailedLogRecordSchema: z.ZodType<EmailSendFailedLogRecord>;
+```
+
+### `EmailSentLogRecord`
+
+Structured log entry for a successful outbound email.
+
+```ts
+interface EmailSentLogRecord {
+  level: LogLevelType;
+  msg: "email_sent";
+  ts: string;
+  email_from: string;
+  to?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `EmailSentLogRecordSchema`
+
+Zod schema for {@link EmailSentLogRecord}.
+
+```ts
+const EmailSentLogRecordSchema: z.ZodType<EmailSentLogRecord>;
+```
+
+### `EmailVerification`
+
+Full Firestore document for a single-use email verification token.
+
+```ts
+interface EmailVerification {
+  user_id: string;
+  email: string;
+  expiresAt: FirestoreTimestampType;
+  created_at: number;
+}
+```
+
+### `EmailVerificationSchema`
+
+Zod schema for EmailVerification.
+
+```ts
+const EmailVerificationSchema: z.ZodType<EmailVerification>;
+```
+
+### `EventCardId`
+
+`cards` event-card composite id — `{uid_order}:{uid_destination}:start|end`
+(one per order delivery/collection endpoint). See `api-cloudrun
+src/lib/eventCards.ts` (`EventPosition = "start" | "end"`).
+
+```ts
+const EventCardId: z.ZodType<string>;
+```
+
+### `EventEnvelope`
+
+Common envelope wrapping every domain event.
+
+`data` is the full Firestore document after all server sentinels
+(serverTimestamp, increment, etc.) have been resolved by Firestore.
+
+```ts
+interface EventEnvelope {
+  event: string;
+  version: number;
+  timestamp: string;
+  timestamp_fs: FirestoreTimestampType;
+  source_uid: string;
+  correlation_id?: string;
+  data: T;
+}
+```
+
+### `FieldMapping`
+
+Describes how a single field moves from source to target.
+
+```ts
+interface FieldMapping {
+  source: FieldPath;
+  target: FieldPath;
+  transform?: string;
+}
+```
+
+### `FieldPath`
+
+Path segments into a document — e.g. ["organization", "uid"]. Empty = computed/metadata.
+
+```ts
+type FieldPath = string[];
+```
+
+### `FirestoreDisplayDefaults`
+
+Display defaults for a Firestore collection in the UI.
+
+```ts
+interface FirestoreDisplayDefaults {
+  columns: string[];
+  filters: Record<string, parenthesized[]>;
+  sort: typeLiteral;
+  groupBy?: GroupByAxis[];
+}
+```
+
+### `FirestoreDisplayPrefs`
+
+User display preferences for a Firestore-backed collection view.
+
+```ts
+interface FirestoreDisplayPrefs {
+  columns: string[];
+  filters: Record<string, parenthesized[]>;
+  sort: DisplaySort;
+}
+```
+
+### `FirestoreFieldValue`
+
+Structural interface for Firestore FieldValue (write-time sentinel).
+
+```ts
+interface FirestoreFieldValue {
+  isEqual(other: FirestoreFieldValue): boolean;
+}
+```
+
+### `FirestoreId`
+
+Atomic Firestore auto-generated document id (`[A-Za-z0-9]{20}`).
+
+```ts
+const FirestoreId: z.ZodType<string>;
+```
+
+### `FirestoreTimestamp`
+
+Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.
+
+Tight on purpose: rejects `undefined`, `null`, plain objects, and
+`FieldValue` write-time sentinels (which only carry `isEqual`). Writers
+must stamp a real `Timestamp` (e.g. `Timestamp.now()` from
+`firebase-admin/firestore`) — `validateBeforeWrite` strips `FieldValue`
+sentinels before validation, so a sentinel-stamped timestamp would
+surface here as `undefined` and fail loudly.
+
+The accepted union still includes `FirestoreFieldValue` for back-compat
+with consumers that type fields against the union (e.g. user-facing
+`cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces
+the real-Timestamp contract.
+
+```ts
+const FirestoreTimestamp: z.ZodType<FirestoreTimestampType>;
+```
+
+### `FirestoreTimestampType`
+
+Union of Firestore Timestamp (read) and FieldValue (write).
+
+```ts
+type FirestoreTimestampType = FirestoreTimestampValue | FirestoreFieldValue;
+```
+
+### `FirestoreTimestampValue`
+
+Structural interfaces for Firestore Timestamp and FieldValue.
+Expressed structurally so the schemas package has no firebase-admin dependency.
+
+```ts
+interface FirestoreTimestampValue {
+  seconds: number;
+  nanoseconds: number;
+  toMillis(): number;
+  toDate(): Date;
+}
+```
+
+### `FixtureMeta`
+
+A fixture manifest entry — the operator-facing label/description for one
+git-canonical fixture (`fixtures/<git_path>/<slug>.json`). Files are
+authoritative: discovery globs the directory; this manifest only enriches
+the manager list with labels. An orphaned manifest entry (slug with no
+matching file) is ignored at render/golden time — never breaks a render.
+
+```ts
+interface FixtureMeta {
+  slug: string;
+  label: string;
+  description?: string;
+}
+```
+
+### `FixtureMetaSchema`
+
+Zod schema for a fixture manifest entry.
+
+```ts
+const FixtureMetaSchema: z.ZodType<FixtureMeta>;
+```
+
+### `Fulfillment`
+
+Sanitized order document for the fulfillment client view.
+Mirrors the order by uid — one fulfillment doc per order.
+
+```ts
+interface Fulfillment {
+  uid: string;
+  number: number;
+  status: FulfillmentOrderStatusType;
+  organization: typeLiteral;
+  destinations: DocDestinationType[];
+  items: FulfillmentItemType[];
+  subject: string;
+  reference: string | null;
+  query_by_items: string[];
+  query_by_contacts: string[];
+  query_by_dates: string[];
+  version: number;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `FulfillmentDestinationItem`
+
+```ts
+const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemType>;
+```
+
+### `FulfillmentDestinationItemType`
+
+Destination divider in the fulfillment items array.
+
+```ts
+interface FulfillmentDestinationItemType {
+  uid: string;
+  type: "destination";
+  name: string;
+  path: string[];
+  uid_delivery: string | null;
+  uid_collection: string | null;
+  description: string;
+}
+```
+
+### `FulfillmentGroupItem`
+
+```ts
+const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType>;
+```
+
+### `FulfillmentGroupItemType`
+
+Group divider in the fulfillment items array.
+
+```ts
+interface FulfillmentGroupItemType {
+  uid: string;
+  type: "group";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `FulfillmentItem`
+
+```ts
+const FulfillmentItem: z.ZodType<FulfillmentItemType>;
+```
+
+### `FulfillmentItemType`
+
+Union of all item types in the fulfillment order view.
+
+```ts
+type FulfillmentItemType = FulfillmentLineItemType | FulfillmentDestinationItemType | FulfillmentGroupItemType;
+```
+
+### `FulfillmentLineItem`
+
+```ts
+const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType>;
+```
+
+### `FulfillmentLineItemType`
+
+Line item in the fulfillment order view — no price, no financial flags.
+
+```ts
+interface FulfillmentLineItemType {
+  uid: string;
+  type: FulfillmentLineItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  stock_method?: StockMethodType;
+  path: string[];
+  order_number?: number;
+  uid_order?: string;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
+  quantity_order?: number;
+  path_substituted_for?: string[];
+}
+```
+
+### `FulfillmentSchema`
+
+```ts
+const FulfillmentSchema: z.ZodType<Fulfillment>;
+```
+
+### `GOLDEN_DIFF_VERDICTS`
+
+Golden visual-diff verdicts (mirrors the golden-diff endpoint).
+
+`no-fixtures` is an informational result emitted when a template family has
+zero fixtures in git — there is nothing to render, so CI treats it as a pass
+and the manager renders it as a "capture a source doc to enable golden
+review" hint. It's never aggregated with other verdicts (the family-level
+aggregate uses the per-fixture entries directly).
+
+```ts
+const GOLDEN_DIFF_VERDICTS: "match" | "diff" | "no-golden" | "renderer-unavailable" | "no-fixtures"[];
+```
+
+### `GetAvailabilityInput`
+
+```ts
+const GetAvailabilityInput: z.ZodType<GetAvailabilityInputType>;
+```
+
+### `GetAvailabilityInputType`
+
+```ts
+interface GetAvailabilityInputType {
+  productUid: string;
+  type: "rental" | "sale";
+  start?: string;
+  end?: string;
+  date?: string;
+}
+```
+
+### `GoldenDiff`
+
+Per-fixture golden visual-diff result for a draft branch. The CI golden-diff
+path fans out over the family's git-canonical fixtures (`fixtures/<gp>/*.json`)
+and persists one entry per fixture so the manager can render the
+approve-to-merge review row-by-row. `image_uuids` are Uploadcare UUIDs
+(served via ucarecdn.com); `fixture` is the slug join key
+(`fixtures/<gp>/<slug>.json`).
+
+```ts
+interface GoldenDiff {
+  fixture: string;
+  verdict: GoldenDiffVerdict;
+  delta: number;
+  image_uuids: typeLiteral;
+  sha: string;
+  checked_at: FirestoreTimestampType;
+}
+```
+
+### `GoldenDiffSchema`
+
+Zod schema for a GoldenDiff.
+
+```ts
+const GoldenDiffSchema: z.ZodType<GoldenDiff>;
+```
+
+### `GoldenDiffVerdict`
+
+```ts
+type GoldenDiffVerdict = indexedAccess;
+```
+
+### `GroupByAxis`
+
+Describes how a client should enumerate the keys a groupBy axis produces.
+
+- `enum` — keys come from the Zod enum at `field` (e.g. card status).
+- `collectionFeed` — keys come from a live Firestore collection (e.g. one
+  section per list); `collection` names the source.
+- `dateBucket` — keys are computed client-side from the row's date value;
+  no separate per-key query.
+
+A single "None" / ungrouped axis is represented with `field: null` and no
+`kind` — the axis lists which *groupings are available*, and "no grouping"
+is always one of them.
+
+```ts
+interface GroupByAxis {
+  field: string | null;
+  label: string;
+  kind?: "enum" | "collectionFeed" | "dateBucket";
+  collection?: string;
+}
+```
+
+### `GroupPathType`
+
+Path context for an item — which destination and group it belongs to.
+Used by getGroupPath() in utilities and consumed by the manager app.
+
+```ts
+interface GroupPathType {
+  destination: string | null;
+  group: string | null;
+  product: string | null;
+}
+```
+
+### `HolidayDates`
+
+Full Firestore document for a single holiday date entry.
+
+```ts
+interface HolidayDates {
+  uid: string;
+  uid_holiday: string;
+  date: string;
+  date_fs?: FirestoreTimestampType;
+  name: string;
+  type: "fixed" | "variable";
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `HolidayDatesAdded`
+
+```ts
+type HolidayDatesAdded = EventEnvelope<HolidayDates> & typeLiteral;
+```
+
+### `HolidayDatesDeleted`
+
+```ts
+type HolidayDatesDeleted = EventEnvelope<HolidayDates> & typeLiteral;
+```
+
+### `HolidayDatesSchema`
+
+Zod schema for HolidayDates.
+
+```ts
+const HolidayDatesSchema: z.ZodType<HolidayDates>;
+```
+
+### `HorizonMaterialized`
+
+```ts
+type HorizonMaterialized = EventEnvelope<HorizonMaterializedData> & typeLiteral;
+```
+
+### `HorizonMaterializedData`
+
+Payload shape for `horizon.materialized` — compact summary, not a full
+document. Emitted per-recurrence after a materialize-horizon run writes
+(or would have written) new cards.
+
+```ts
+interface HorizonMaterializedData {
+  recurrence_uid: string;
+  horizon_through: string;
+  previous_horizon_through: string | null;
+  cards_created: number;
+  dates_skipped_exceptions: number;
+}
+```
+
+### `InclusionTypeEnum`
+
+Zod schema for InclusionTypeType.
+
+```ts
+const InclusionTypeEnum: z.ZodType<InclusionTypeType>;
+```
+
+### `InclusionTypeType`
+
+Allowed values for component inclusion type.
+
+```ts
+type InclusionTypeType = indexedAccess;
+```
+
+### `InventoryLedger`
+
+An inventory ledger document tracking stock quantities and costs per product.
+
+```ts
+interface InventoryLedger {
+  uid: string;
+  uid_product: string;
+  type: ProductTypeType;
+  stock_method: InventoryStockMethodType;
+  quantity_held: number;
+  quantity_in_service: number;
+  quantity_out_of_service: number;
+  average_unit_cost: number;
+  total_cost_basis: number;
+  out_of_service_breakdown: typeLiteral;
+  store_breakdown: StoreBreakdownEntry[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `InventoryLedgerRecalculated`
+
+```ts
+type InventoryLedgerRecalculated = EventEnvelope<InventoryLedger> & typeLiteral;
+```
+
+### `InventoryLedgerSchema`
+
+Zod schema for an InventoryLedger document.
+
+```ts
+const InventoryLedgerSchema: z.ZodType<InventoryLedger>;
+```
+
+### `Invite`
+
+Full Firestore document for a single-use invite.
+
+```ts
+interface Invite {
+  uid: string;
+  email: string;
+  name: string;
+  roles: string[];
+  invited_by: string;
+  used: boolean;
+  expires_at: FirestoreTimestampType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `InviteSchema`
+
+Zod schema for an Invite document.
+
+```ts
+const InviteSchema: z.ZodType<Invite>;
+```
+
+### `Invoice`
+
+An invoice document in the invoices Firestore collection.
+
+```ts
+interface Invoice {
+  uid: string;
+  number: number;
+  status: InvoiceStatusType;
+  query_by_orders: string[];
+  number_orders: number[];
+  tax_profile: TaxProfileType;
+  date: string;
+  date_fs?: FirestoreTimestampType;
+  due_date?: string;
+  due_date_fs?: FirestoreTimestampType;
+  subject?: string | null;
+  reference?: string | null;
+  external_notes?: string | null;
+  internal_notes?: string | null;
+  organization: typeLiteral;
+  destinations: InvoiceDocDestinationType[];
+  items: InvoiceDocItemType[];
+  totals: InvoiceDocTotals;
+  payments: InvoicePayment[];
+  xero_id: string | null;
+  uploadcare_uuid: string | null;
+  pdf_generated_at: FirestoreTimestampType | null;
+  pdf_versions: Array<typeLiteral>;
+  crms_id?: number | null;
+  crms_opportunity_ids?: number[];
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `InvoiceCreated`
+
+```ts
+type InvoiceCreated = EventEnvelope<Invoice> & typeLiteral;
+```
+
+### `InvoiceDocDestination`
+
+```ts
+const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType>;
+```
+
+### `InvoiceDocDestinationType`
+
+Destination pair on an invoice — mirrors the order's `DocDestinationType`
+with a `uid_order` scope field so multi-order invoices can carry pairs
+from several orders and have them selectively synced per source order.
+Carries `dates` (rendered on the invoice) snapshotted from the source order.
+
+```ts
+interface InvoiceDocDestinationType {
+  uid_order: string;
+}
+```
+
+### `InvoiceDocItem`
+
+Zod schema for any invoice document item (line item, group, destination, or order divider).
+
+```ts
+const InvoiceDocItem: z.ZodType<InvoiceDocItemType>;
+```
+
+### `InvoiceDocItemPrice`
+
+Pricing breakdown for a single invoice line item.
+
+```ts
+interface InvoiceDocItemPrice {
+  base: number;
+  chargeable_days: number | null;
+  formula: PriceFormulaType;
+  subtotal: number;
+  subtotal_discounted: number;
+  discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  total: number;
+  discount_percent?: number;
+}
+```
+
+### `InvoiceDocItemType`
+
+Union of all item types stored in an invoice document.
+
+```ts
+type InvoiceDocItemType = InvoiceDocLineItem | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
+```
+
+### `InvoiceDocLineItem`
+
+A billable line item on an invoice.
+
+```ts
+interface InvoiceDocLineItem {
+  uid: string;
+  type: DocLineItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: InvoiceDocItemPrice;
+  path: string[];
+  coa_revenue?: COARevenueType | null;
+  tracking_category?: string | null;
+  xero_id?: string | null;
+  xero_tracking_option_id?: string | null;
+  crms_opportunity_id?: number | null;
+  crms_id?: number | string | null;
+}
+```
+
+### `InvoiceDocLineItemSchema`
+
+```ts
+const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem>;
+```
+
+### `InvoiceDocOrderItem`
+
+Zod schema for an order divider item.
+
+```ts
+const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType>;
+```
+
+### `InvoiceDocOrderItemType`
+
+Order divider item — scopes invoice items to a source order for multi-order invoices.
+
+```ts
+interface InvoiceDocOrderItemType {
+  uid: string;
+  type: "order";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `InvoiceDocTotals`
+
+Invoice-level totals with payment tracking.
+
+```ts
+interface InvoiceDocTotals {
+  subtotal: number;
+  subtotal_discounted: number;
+  discount_amount: number;
+  taxes: PriceModifierType[];
+  transaction_fees: PriceModifierType[];
+  total: number;
+  amount_paid: number;
+  amount_due: number;
+}
+```
+
+### `InvoiceIssued`
+
+```ts
+type InvoiceIssued = EventEnvelope<Invoice> & typeLiteral;
+```
+
+### `InvoiceItemInputType`
+
+Input version of an invoice item (covers line items, groups, destinations, and order dividers).
+
+```ts
+interface InvoiceItemInputType {
+  uid: string;
+  type?: InvoiceItemTypeType;
+  name?: string;
+  description?: string;
+  quantity?: number;
+  price?: InvoiceItemInputPrice;
+  path?: string[];
+  uid_order?: string;
+  uid_delivery?: string;
+  uid_collection?: string;
+  coa_revenue?: COARevenueType | null;
+  tracking_category?: string | null;
+}
+```
+
+### `InvoiceItemTypeType`
+
+Possible invoice item types (input — includes structural dividers + order divider).
+
+```ts
+type InvoiceItemTypeType = indexedAccess;
+```
+
+### `InvoicePayment`
+
+A payment received against this invoice (synced from Xero).
+
+```ts
+interface InvoicePayment {
+  uid: string;
+  xero_payment_id: string;
+  date: string;
+  amount: number;
+  reference: string | null;
+  status: indexedAccess;
+  synced_at?: FirestoreTimestampType;
+}
+```
+
+### `InvoicePaymentReceived`
+
+```ts
+type InvoicePaymentReceived = EventEnvelope<Invoice> & typeLiteral;
+```
+
+### `InvoiceSchema`
+
+Zod schema for an Invoice document.
+
+```ts
+const InvoiceSchema: z.ZodType<Invoice>;
+```
+
+### `InvoiceStatusEnum`
+
+Zod schema for InvoiceStatusType.
+
+```ts
+const InvoiceStatusEnum: z.ZodType<InvoiceStatusType>;
+```
+
+### `InvoiceStatusType`
+
+Possible invoice statuses.
+
+```ts
+type InvoiceStatusType = indexedAccess;
+```
+
+### `InvoiceUpdated`
+
+```ts
+type InvoiceUpdated = EventEnvelope<Invoice> & typeLiteral;
+```
+
+### `InvoiceVoided`
+
+```ts
+type InvoiceVoided = EventEnvelope<Invoice> & typeLiteral;
+```
+
+### `ItemPrice`
+
+Zod schema for item price breakdown (input).
+
+```ts
+const ItemPrice: z.ZodType<ItemPriceType>;
+```
+
+### `ItemPriceType`
+
+Price breakdown for an order item (input — client sends partial data, server computes the rest).
+
+```ts
+interface ItemPriceType {
+  base?: number;
+  replacement?: number | null;
+  chargeable_days?: number | null;
+  formula?: PriceFormulaType;
+  subtotal?: number;
+  discount?: DiscountInputType | null;
+  taxes?: Array<typeLiteral>;
+  total?: number;
+}
+```
+
+### `ItemTaxProfileEnum`
+
+Zod schema for ItemTaxProfileType.
+
+```ts
+const ItemTaxProfileEnum: z.ZodType<ItemTaxProfileType>;
+```
+
+### `ItemTaxProfileType`
+
+Allowed values for item-level tax profile.
+
+```ts
+type ItemTaxProfileType = indexedAccess;
+```
+
+### `ItemUid`
+
+Polymorphic `items[].uid` + `path[]` segment in order/invoice/fulfillment
+documents: a product's Firestore id, a divider UUID, or a custom-product id.
+
+```ts
+const ItemUid: z.ZodType<string>;
+```
+
+### `List`
+
+List Firestore document shape.
+
+```ts
+interface List {
+  uid: string;
+  name: string;
+  description: string;
+  icon: string | null;
+  color: string | null;
+  position: number;
+  locked: ListLockKey[];
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ListCreated`
+
+```ts
+type ListCreated = EventEnvelope<List> & typeLiteral;
+```
+
+### `ListDeleted`
+
+```ts
+type ListDeleted = EventEnvelope<List> & typeLiteral;
+```
+
+### `ListId`
+
+`lists.uid` (and `uid_list` references) — a Firestore auto-id (user-created
+lists) or a lowercase-kebab slug (seeded/system lists, e.g. `in-store`,
+`field-service`).
+
+```ts
+const ListId: z.ZodType<string>;
+```
+
+### `ListLockKey`
+
+Enum of lockable list surfaces. Mirrors the `CardLockKey` shape: presence in
+`List.locked[]` blocks the corresponding action. Defaults to `[]`.
+
+- `"list"` — sentinel: blocks DELETE of this list doc
+- `"create_card"` — blocks `POST /cards` with `uid_list` = this list
+- `"update_card"` — blocks `PATCH /cards/:uid` for cards on this list
+- `"delete_card"` — blocks `DELETE /cards/:uid` for cards on this list
+
+Used by system-managed lists (e.g. `field-service`, `in-store`) whose cards
+are fanned out from order events and shouldn't be created or deleted by
+users — the API still updates them, and users can still edit non-locked
+fields per `Card.locked[]`.
+
+```ts
+type ListLockKey = indexedAccess;
+```
+
+### `ListLockKeyEnum`
+
+Zod schema for ListLockKey.
+
+```ts
+const ListLockKeyEnum: z.ZodType<ListLockKey>;
+```
+
+### `ListSchema`
+
+Zod schema for a list Firestore document.
+
+```ts
+const ListSchema: z.ZodType<List>;
+```
+
+### `ListUpdated`
+
+```ts
+type ListUpdated = EventEnvelope<List> & typeLiteral;
+```
+
+### `Location`
+
+A location document in Firestore.
+
+```ts
+interface Location {
+  uid: string;
+  uid_store: string;
+  name: string;
+  default: boolean;
+  uid_location_type: string | null;
+  product_capacities: LocationProductCapacity[];
+  query_by_product_capacities: string[];
+  active: boolean;
+  products: LocationProduct[];
+  query_by_products: string[];
+  version: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `LocationCreated`
+
+```ts
+type LocationCreated = EventEnvelope<Location> & typeLiteral;
+```
+
+### `LocationProduct`
+
+A product assigned to a location.
+
+```ts
+interface LocationProduct {
+  uid: string;
+  name: string;
+  quantity: number;
+  default: boolean;
+}
+```
+
+### `LocationProductCapacity`
+
+Product capacity constraint for a location.
+
+```ts
+interface LocationProductCapacity {
+  uid: string;
+  max: number | null;
+  max_default: number | null;
+}
+```
+
+### `LocationSchema`
+
+Zod schema for Location.
+
+```ts
+const LocationSchema: z.ZodType<Location>;
+```
+
+### `LocationType`
+
+A location type document in Firestore.
+
+```ts
+interface LocationType {
+  uid: string;
+  name: string;
+  product_capacities: LocationTypeProductCapacity[];
+  query_by_product_capacities?: string[];
+  dimensions?: LocationTypeDimensions | null;
+  version: number;
+  active: boolean;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `LocationTypeCreated`
+
+```ts
+type LocationTypeCreated = EventEnvelope<LocationType> & typeLiteral;
+```
+
+### `LocationTypeDimensions`
+
+Physical dimensions for a location type.
+
+```ts
+interface LocationTypeDimensions {
+  width?: number;
+  depth?: number;
+  height?: number;
+  weight_capacity?: number;
+}
+```
+
+### `LocationTypeProductCapacity`
+
+Product capacity constraint for a location type.
+
+```ts
+interface LocationTypeProductCapacity {
+  uid: string;
+  max: number | null;
+}
+```
+
+### `LocationTypeSchema`
+
+Zod schema for LocationType.
+
+```ts
+const LocationTypeSchema: z.ZodType<LocationType>;
+```
+
+### `LocationTypeUpdated`
+
+```ts
+type LocationTypeUpdated = EventEnvelope<LocationType> & typeLiteral;
+```
+
+### `LocationUpdated`
+
+```ts
+type LocationUpdated = EventEnvelope<Location> & typeLiteral;
+```
+
+### `LogLevelEnum`
+
+Zod enum for log levels — exported for reuse in arm schemas.
+
+```ts
+const LogLevelEnum: z.ZodType<LogLevelType>;
+```
+
+### `LogLevelType`
+
+Log severity level.
+
+```ts
+type LogLevelType = indexedAccess;
+```
+
+### `LogRecord`
+
+Structured log envelope emitted by the API (OpenAPI shape).
+
+```ts
+interface LogRecord {
+  level: LogLevelType;
+  msg: string;
+  ts: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  duration_ms?: number;
+  dry_run?: boolean;
+}
+```
+
+### `LogRecordSchema`
+
+Zod schema for {@link LogRecord} — generic envelope, OpenAPI-only.
+
+```ts
+const LogRecordSchema: z.ZodType<LogRecord>;
+```
+
+### `LoginInput`
+
+```ts
+const LoginInput: z.ZodType<LoginInputType>;
+```
+
+### `LoginInputType`
+
+Input schema for POST /auth/login.
+
+```ts
+interface LoginInputType {
+  email: string;
+  password: string;
+}
+```
+
+### `MSG_SCHEMA_REGISTRY`
+
+Runtime msg → schema lookup. The structured logger's `emit()` reads
+`record.msg`, looks up the matching schema here, and (if present)
+passes the record through the schema-driven PII walker in
+`@cfs/core/schemas/pii` before stringification.
+
+Records whose `msg` is NOT in this registry fall through to the
+runtime key-name denylist tier (forward defense). The coverage test
+in api-cloudrun keeps the registry exhaustive over what the source
+tree emits.
+
+```ts
+const MSG_SCHEMA_REGISTRY: ReadonlyMap<string, z.ZodType>;
+```
+
+### `McpOAuthAuthorizeRequest`
+
+Short-lived staging state for an in-flight authorization request.
+
+```ts
+interface McpOAuthAuthorizeRequest {
+  id: string;
+  user_uid: string;
+  client_id: string;
+  scope: string;
+  redirect_uri: string;
+  state?: string;
+  code_challenge: string;
+  code_challenge_method: "S256";
+  created_at: number;
+  expiresAt: FirestoreTimestampType;
+}
+```
+
+### `McpOAuthAuthorizeRequestSchema`
+
+Zod schema for McpOAuthAuthorizeRequest.
+
+```ts
+const McpOAuthAuthorizeRequestSchema: z.ZodType<McpOAuthAuthorizeRequest>;
+```
+
+### `McpOAuthClient`
+
+A registered MCP client (dynamic client registration).
+
+```ts
+interface McpOAuthClient {
+  client_id: string;
+  client_name: string;
+  redirect_uris: string[];
+  created_at: number;
+}
+```
+
+### `McpOAuthClientSchema`
+
+Zod schema for McpOAuthClient.
+
+```ts
+const McpOAuthClientSchema: z.ZodType<McpOAuthClient>;
+```
+
+### `McpOAuthCode`
+
+A single-use authorization code (stored under sha256(code)).
+
+```ts
+interface McpOAuthCode {
+  user_uid: string;
+  client_id: string;
+  scope: string;
+  redirect_uri: string;
+  code_challenge: string;
+  code_challenge_method: "S256";
+  created_at: number;
+  expiresAt: FirestoreTimestampType;
+}
+```
+
+### `McpOAuthCodeSchema`
+
+Zod schema for McpOAuthCode.
+
+```ts
+const McpOAuthCodeSchema: z.ZodType<McpOAuthCode>;
+```
+
+### `McpOAuthToken`
+
+An opaque access token (stored under sha256(token)).
+
+```ts
+interface McpOAuthToken {
+  user_uid: string;
+  client_id: string;
+  scope: string;
+  created_at: number;
+  expiresAt: FirestoreTimestampType;
+}
+```
+
+### `McpOAuthTokenSchema`
+
+Zod schema for McpOAuthToken.
+
+```ts
+const McpOAuthTokenSchema: z.ZodType<McpOAuthToken>;
+```
+
+### `NameField`
+
+Zod field for the denormalized `name` on stored documents (Contact, User,
+Invite, embedded contact refs in destinations, ActorRef-shaped objects).
+
+The 255 max is the exact upper bound of `deriveName(parts)` given the
+existing per-part maxes:
+  50 (first) + 1 (sp) + 50 (middle) + 1 (sp) + 50 (last) + 1 (sp)
+  + 1 ("(") + 100 (pronunciation) + 1 (")") = 255
+If any part's `.max(...)` changes, this ceiling must move with it or
+worst-case writes will fail validation.
+
+```ts
+const NameField: z.ZodType<string>;
+```
+
+### `NameParts`
+
+Split name fields shared across Contact, User, Invite, and any schema
+embedding a contact reference. `first_name` is required; the rest are optional.
+
+Stored documents also carry a denormalized `name: string` (use `NameField`
++ `deriveName()` below). Inputs do not — clients send parts; the server
+derives `name` at write time. See `deriveName` for the canonical join rule.
+
+```ts
+interface NameParts {
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+}
+```
+
+### `NamePartsFields`
+
+Fields object — spread into a parent `z.strictObject()` (documents) or
+`z.object()` (inputs) to attach the standard split-name fields.
+
+```ts
+const NamePartsFields: typeLiteral;
+```
+
+### `NamePartsFieldsPartial`
+
+Variant of `NamePartsFields` where every field is optional — use for partial
+update input schemas (PUT endpoints) where callers may omit `first_name`.
+
+```ts
+const NamePartsFieldsPartial: typeLiteral;
+```
+
+### `NewContactInput`
+
+Zod schema for new contact data submitted inline with an organization.
+
+```ts
+const NewContactInput: z.ZodType<NewContactInputType>;
+```
+
+### `NewContactInputType`
+
+New contact data submitted inline when creating/updating an organization.
+
+```ts
+interface NewContactInputType {
+  uid: string;
+  emails?: string[];
+  phones?: string[];
+}
+```
+
+### `OAuthRefreshLogRecord`
+
+Structured log entry for an OAuth token refresh.
+
+```ts
+interface OAuthRefreshLogRecord {
+  level: LogLevelType;
+  msg: "oauth_refresh";
+  ts: string;
+  service: string;
+  grant_type?: string;
+  scope?: string;
+  token_type?: string;
+  expires_in?: number;
+  token_age_hours?: number;
+  refreshed_at_debug?: string;
+  recovered?: boolean;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `OAuthRefreshLogRecordSchema`
+
+Zod schema for {@link OAuthRefreshLogRecord}.
+
+```ts
+const OAuthRefreshLogRecordSchema: z.ZodType<OAuthRefreshLogRecord>;
+```
+
+### `OOSBreakdown`
+
+Per-phase quantity breakdown — sum equals top-level `quantity`.
+
+```ts
+interface OOSBreakdown {
+  draft: number;
+  planned: number;
+  active: number;
+  blocked: number;
+  written_off: number;
+  returned_to_service: number;
+}
+```
+
+### `OOSBreakdownSchema`
+
+Zod schema for OOSBreakdown.
+
+```ts
+const OOSBreakdownSchema: z.ZodType<OOSBreakdown>;
+```
+
+### `OOSDates`
+
+Date object — booking-style start/end with paired Firestore timestamps.
+
+`start` is nullable for `draft` records (operator composing) and `planned`
+records (scheduled maintenance with no pinned start instant). Once the
+record reaches `active`, `start` should be set (writer enforces).
+
+```ts
+interface OOSDates {
+  start: string | null;
+  start_fs: FirestoreTimestampType | null;
+  end: string | null;
+  end_fs: FirestoreTimestampType | null;
+}
+```
+
+### `OOSReasonEnum`
+
+Zod schema for OOSReasonType.
+
+```ts
+const OOSReasonEnum: z.ZodType<OOSReasonType>;
+```
+
+### `OOSReasonType`
+
+Allowed values for out-of-service reason.
+
+```ts
+type OOSReasonType = indexedAccess;
+```
+
+### `OOSStatusEnum`
+
+Zod schema for OOSStatusType.
+
+```ts
+const OOSStatusEnum: z.ZodType<OOSStatusType>;
+```
+
+### `OOSStatusType`
+
+Allowed out-of-service statuses. Server-derived from breakdown + number + canceled_at; only "canceled" is operator-set.
+
+```ts
+type OOSStatusType = indexedAccess;
+```
+
+### `OOSStore`
+
+A store affected by an out-of-service record.
+
+```ts
+interface OOSStore {
+  uid_store: string;
+  name: string;
+  default: boolean;
+  quantity: number;
+  locations: OOSStoreLocation[];
+}
+```
+
+### `OOSStoreLocation`
+
+A location within a store affected by an out-of-service record.
+
+```ts
+interface OOSStoreLocation {
+  uid_location: string;
+  name: string;
+  quantity: number;
+  transactionQuantity: number;
+  default: boolean;
+  max?: number | null;
+}
+```
+
+### `OOSTransaction`
+
+A transaction entry within an out-of-service record.
+
+```ts
+interface OOSTransaction {
+  crms_id?: number | null;
+  crms_quarantine_id?: number | null;
+  crms_stock_level_id?: number | null;
+  crms_stock_level_uid?: string;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  quantity: number;
+  source: DocSourceType;
+  type: OOSTransactionTypeType;
+}
+```
+
+### `OOSTransactionTypeEnum`
+
+Zod schema for OOSTransactionTypeType.
+
+```ts
+const OOSTransactionTypeEnum: z.ZodType<OOSTransactionTypeType>;
+```
+
+### `OOSTransactionTypeType`
+
+Allowed types for an `OOSTransaction`. Terminal types match the breakdown
+keys 1:1 — a transaction with `type === "written_off"` and `quantity === N`
+corresponds to `breakdown.written_off += N`.
+
+```ts
+type OOSTransactionTypeType = indexedAccess;
+```
+
+### `ORDER_COMPUTED_STATUSES`
+
+Statuses derived from booking state — set only by the API's booking write
+path (reserved → active when a booking moves quantity into out;
+active → complete when every quantity has reached a terminal state).
+
+```ts
+const ORDER_COMPUTED_STATUSES: "active" | "complete"[];
+```
+
+### `ORDER_STATUSES`
+
+```ts
+const ORDER_STATUSES: "draft" | "quoted" | "reserved" | "active" | "complete" | "canceled"[];
+```
+
+### `ORDER_USER_STATUSES`
+
+Statuses an operator may set directly via UpdateOrderInput.status.
+`active` and `complete` are computed by the booking workflow and are
+never accepted from a manual write.
+
+```ts
+const ORDER_USER_STATUSES: "draft" | "quoted" | "reserved" | "canceled"[];
+```
+
+### `Order`
+
+Full order document schema (Firestore document shape).
+Used for validation before writing to Firestore.
+
+```ts
+interface Order {
+  uid: string;
+  number: number;
+  status: OrderStatusType;
+  organization: typeLiteral;
+  destinations: DocDestinationType[];
+  items: OrderDocItemType[];
+  tax_profile: TaxProfileType;
+  totals: OrderDocTotalsType;
+  invoices: Array<typeLiteral>;
+  query_by_invoices: string[];
+  query_by_items: string[];
+  query_by_contacts: string[];
+  query_by_dates: string[];
+  bookings_breakdown: typeLiteral;
+  crms_id?: number | null;
+  crms_status?: string;
+  subject?: string;
+  reference?: string | null;
+  xero_id?: string | null;
+  defaultThreadId?: string;
+  version: number;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `OrderCanceled`
+
+```ts
+type OrderCanceled = EventEnvelope<Order> & typeLiteral;
+```
+
+### `OrderComputedStatusType`
+
+```ts
+type OrderComputedStatusType = indexedAccess;
+```
+
+### `OrderCreated`
+
+```ts
+type OrderCreated = EventEnvelope<Order> & typeLiteral;
+```
+
+### `OrderDates`
+
+Zod schema for order dates.
+
+```ts
+const OrderDates: z.ZodType<OrderDatesType>;
+```
+
+### `OrderDatesType`
+
+Order dates — all six date boundaries as ISO datetime strings with offset,
+or null when the boundary is unset.
+
+```ts
+interface OrderDatesType {
+  delivery_start: string | null;
+  delivery_end: string | null;
+  collection_start: string | null;
+  collection_end: string | null;
+  charge_start: string | null;
+  charge_end: string | null;
+}
+```
+
+### `OrderDocDates`
+
+Zod schema for order dates with Firestore timestamp companions.
+
+```ts
+const OrderDocDates: z.ZodType<OrderDocDatesType>;
+```
+
+### `OrderDocDatesType`
+
+Order dates with Firestore timestamp companions — the persisted, per-destination
+date set. Each destination on an order/fulfillment/invoice owns one of these;
+there is no order-level rollup (derive on demand via deriveOrderDateEnvelope).
+
+```ts
+interface OrderDocDatesType {
+  delivery_start: string | null;
+  delivery_start_fs: FirestoreTimestampType | null;
+  delivery_end: string | null;
+  delivery_end_fs: FirestoreTimestampType | null;
+  collection_start: string | null;
+  collection_start_fs: FirestoreTimestampType | null;
+  collection_end: string | null;
+  collection_end_fs: FirestoreTimestampType | null;
+  charge_start: string | null;
+  charge_start_fs: FirestoreTimestampType | null;
+  charge_end: string | null;
+  charge_end_fs: FirestoreTimestampType | null;
+  days_active: number | null;
+  days_charged: number | null;
+}
+```
+
+### `OrderDocDestinationItem`
+
+Destination divider in items array.
+
+```ts
+const OrderDocDestinationItem: z.ZodType<OrderDocDestinationItemType>;
+```
+
+### `OrderDocDestinationItemType`
+
+Destination divider item in the order document items array.
+
+```ts
+interface OrderDocDestinationItemType {
+  uid: string;
+  type: "destination";
+  name: string;
+  path: string[];
+  uid_delivery: string | null;
+  uid_collection: string | null;
+  description: string;
+}
+```
+
+### `OrderDocGroupItem`
+
+```ts
+const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType>;
+```
+
+### `OrderDocGroupItemType`
+
+Group divider in items array.
+
+```ts
+interface OrderDocGroupItemType {
+  uid: string;
+  type: "group";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `OrderDocItem`
+
+Union of all item types in the document.
+
+```ts
+const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType>;
+```
+
+### `OrderDocItemPrice`
+
+```ts
+const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType>;
+```
+
+### `OrderDocItemPriceType`
+
+Line item price in the full order document (all fields required after server compute).
+subtotal = pre-discount (base × qty × days_factor).
+subtotal_discounted = post-discount.
+total = subtotal_discounted + sum(taxes[].amount).
+
+```ts
+interface OrderDocItemPriceType {
+  base: number;
+  replacement?: number | null;
+  chargeable_days: number | null;
+  formula: PriceFormulaType;
+  subtotal: number;
+  subtotal_discounted: number;
+  discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  total: number;
+}
+```
+
+### `OrderDocItemType`
+
+Union of all item types stored in the order document.
+
+```ts
+type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType;
+```
+
+### `OrderDocLineItem`
+
+```ts
+const OrderDocLineItem: z.ZodType<OrderDocLineItemType>;
+```
+
+### `OrderDocLineItemType`
+
+Line item in the full order document.
+
+```ts
+interface OrderDocLineItemType {
+  uid: string;
+  type: DocLineItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  price?: OrderDocItemPriceType;
+  stock_method?: StockMethodType;
+  order_number?: number;
+  uid_order?: string;
+  path: string[];
+  inclusion_type?: "default" | "mandatory" | "optional" | null;
+  zero_priced?: boolean | null;
+  crms_id?: number | null;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
+}
+```
+
+### `OrderDocTotalsType`
+
+Order totals.
+
+```ts
+interface OrderDocTotalsType {
+  discount_amount: number;
+  subtotal: number;
+  subtotal_discounted: number;
+  taxes: PriceModifierType[];
+  transaction_fees: PriceModifierType[];
+  total: number;
+  replacement_total: number;
+}
+```
+
+### `OrderDocTransactionFeeItem`
+
+Zod schema for a transaction fee line item in the order document.
+
+```ts
+const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType>;
+```
+
+### `OrderDocTransactionFeeItemType`
+
+Transaction fee line item in the full order document.
+
+```ts
+interface OrderDocTransactionFeeItemType {
+  uid: string;
+  type: "transaction_fee";
+  name: string;
+  path: string[];
+  description: string;
+  quantity: number;
+  price: PriceModifierType;
+  order_number?: number;
+  uid_order?: string;
+}
+```
+
+### `OrderDocument`
+
+Metadata for a single generated order document (quote / packing list PDF).
+
+```ts
+interface OrderDocument {
+  uuid: string;
+  mime: string;
+  name: string;
+  orderUpdatedAt: FirestoreTimestampType;
+}
+```
+
+### `OrderDocumentSchema`
+
+Zod schema for OrderDocument.
+
+```ts
+const OrderDocumentSchema: z.ZodType<OrderDocument>;
+```
+
+### `OrderItem`
+
+Zod schema for an individual order item (input).
+
+```ts
+const OrderItem: z.ZodType<OrderItemType>;
+```
+
+### `OrderItemType`
+
+An individual order item (rental, replacement, sale, service, surcharge, group header, or destination).
+
+```ts
+interface OrderItemType {
+  uid: string;
+  type: DocItemTypeType;
+  name?: string;
+  description?: string;
+  quantity?: number;
+  price?: ItemPriceType;
+  stock_method?: StockMethodType;
+  path: string[];
+  inclusion_type?: InclusionTypeType | null;
+  zero_priced?: boolean | null;
+  uid_delivery?: string;
+  uid_collection?: string;
+  order_number?: number;
+  uid_order?: string;
+}
+```
+
+### `OrderSchema`
+
+Zod schema for the full order Firestore document.
+
+```ts
+const OrderSchema: z.ZodType<Order>;
+```
+
+### `OrderStatusChanged`
+
+```ts
+type OrderStatusChanged = EventEnvelope<Order> & typeLiteral;
+```
+
+### `OrderStatusType`
+
+```ts
+type OrderStatusType = indexedAccess;
+```
+
+### `OrderUpdated`
+
+```ts
+type OrderUpdated = EventEnvelope<Order> & typeLiteral;
+```
+
+### `OrderUserStatusType`
+
+```ts
+type OrderUserStatusType = indexedAccess;
+```
+
+### `Organization`
+
+Full organization document schema (Firestore document shape).
+
+```ts
+interface Organization {
+  uid: string;
+  name: string;
+  crms_id: number;
+  xero_id: string | null;
+  tax_profile: TaxProfileType;
+  description?: string;
+  emails: string[];
+  phones: string[];
+  billing_address: AddressType | null;
+  contacts: OrganizationContactType[];
+  query_by_contacts: string[];
+  last_order?: FirestoreTimestampType | null;
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `OrganizationContact`
+
+Zod schema for a contact reference embedded in an organization.
+
+```ts
+const OrganizationContact: z.ZodType<OrganizationContactType>;
+```
+
+### `OrganizationContactType`
+
+Contact reference embedded in an organization document.
+`name` is the server-derived display string (see `deriveName` in common.ts).
+
+```ts
+interface OrganizationContactType {
+  uid: string;
+  name: string;
+  roles: string[];
+}
+```
+
+### `OrganizationCreated`
+
+```ts
+type OrganizationCreated = EventEnvelope<Organization> & typeLiteral;
+```
+
+### `OrganizationSchema`
+
+Zod schema for a full organization Firestore document.
+
+```ts
+const OrganizationSchema: z.ZodType<Organization>;
+```
+
+### `OrganizationUpdated`
+
+```ts
+type OrganizationUpdated = EventEnvelope<Organization> & typeLiteral;
+```
+
+### `OutOfService`
+
+An out-of-service record tracking inventory removed from active service.
+
+```ts
+interface OutOfService {
+  uid: string;
+  uid_product: string;
+  number: number;
+  reason: OOSReasonType;
+  status: OOSStatusType;
+  quantity: number;
+  breakdown: OOSBreakdown;
+  canceled_at: FirestoreTimestampType | null;
+  organization: typeLiteral | null;
+  dates: OOSDates;
+  sources: DocSourceType[];
+  query_by_sources: string[];
+  crms_id?: number | null;
+  crms_stock_level_id?: number | null;
+  stores: OOSStore[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  transactions?: OOSTransaction[];
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `OutOfServiceCreated`
+
+```ts
+type OutOfServiceCreated = EventEnvelope<OutOfService> & typeLiteral;
+```
+
+### `OutOfServiceSchema`
+
+Zod schema for OutOfService.
+
+```ts
+const OutOfServiceSchema: z.ZodType<OutOfService>;
+```
+
+### `OutOfServiceUpdated`
+
+```ts
+type OutOfServiceUpdated = EventEnvelope<OutOfService> & typeLiteral;
+```
+
+### `PERMISSIONS`
+
+The full catalog of permissions. Adding a new route? Add its permission here first.
+
+```ts
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+```
+
+### `PartialNameParts`
+
+All-optional variant of `NameParts` — use for partial update input types
+(PUT endpoints) where callers may omit `first_name`.
+
+```ts
+interface PartialNameParts {
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+}
+```
+
+### `PasswordReset`
+
+Full Firestore document for a single-use password reset token.
+
+```ts
+interface PasswordReset {
+  user_id: string;
+  email: string;
+  expiresAt: FirestoreTimestampType;
+  created_at: number;
+}
+```
+
+### `PasswordResetSchema`
+
+Zod schema for PasswordReset.
+
+```ts
+const PasswordResetSchema: z.ZodType<PasswordReset>;
+```
+
+### `Permission`
+
+Union type of every permission string in the catalog.
+
+```ts
+type Permission = indexedAccess;
+```
+
+### `Phone`
+
+Phone string with length constraints.
+
+```ts
+const Phone: z.ZodType<string>;
+```
+
+### `PiiClassification`
+
+PII classification vocabulary.
+
+Applied via `.meta({ pii: "..." })` on any Zod field; the schema-driven
+walker in `./walker.ts` reads these tags and dispatches to the matching
+leaf transform.
+
+- `"none"`   — safe field, no processing
+- `"mask"`   — partial reveal (`alice@x.com` → `a****@x.com`, last-4 for opaque strings)
+- `"hash"`   — deterministic HMAC-SHA256 prefix (server-side only; needs a key)
+- `"redact"` — full removal → `"[REDACTED]"`
+
+```ts
+type PiiClassification = "none" | "mask" | "hash" | "redact";
+```
+
+### `PreviewRecord`
+
+A cached rendered-PDF preview document.
+
+```ts
+interface PreviewRecord {
+  uid: string;
+  user_id: string;
+  pdf_base64: string;
+  filename: string;
+  created_at: FirestoreTimestampType;
+  expires_at: FirestoreTimestampType;
+}
+```
+
+### `PreviewRecordSchema`
+
+Zod schema for PreviewRecord.
+
+```ts
+const PreviewRecordSchema: z.ZodType<PreviewRecord>;
+```
+
+### `PriceFormulaEnum`
+
+Zod schema for PriceFormulaType.
+
+```ts
+const PriceFormulaEnum: z.ZodType<PriceFormulaType>;
+```
+
+### `PriceFormulaType`
+
+Allowed values for pricing formula.
+
+```ts
+type PriceFormulaType = indexedAccess;
+```
+
+### `PriceModifier`
+
+Zod schema for a rate-based price modifier (tax or transaction fee).
+
+```ts
+const PriceModifier: z.ZodType<PriceModifierType>;
+```
+
+### `PriceModifierType`
+
+A rate-based charge applied to an item or order (tax or transaction fee).
+uid references a tax doc (for taxes) or a product doc (for transaction fees).
+
+```ts
+interface PriceModifierType {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  amount: number;
+}
+```
+
+### `Product`
+
+A product document in the products Firestore collection.
+
+```ts
+interface Product {
+  uid: string;
+  name: string;
+  active: boolean;
+  type: ProductTypeType;
+  stock_method: StockMethodType;
+  component_only: boolean;
+  crms_id: number | null;
+  crms_rate_id?: number | null;
+  crms_stock_level_ids?: Record<string, number>;
+  crms_linked_rental_id?: number | null;
+  crms_linked_replacement_id?: number | null;
+  crms_linked_replacement_rate_id?: number | null;
+  description?: string;
+  eligible_delivery: boolean;
+  eligible_in_store_pickup: boolean;
+  eligible_shipping_ground: boolean;
+  eligible_shipping_air: boolean;
+  price: ProductPrice;
+  shipping?: ProductShipping;
+  alternates: ProductAlternate[];
+  components: ProductComponent[];
+  component_of: ProductComponent[];
+  tags: UidNameRefType[];
+  query_by_tags?: string[];
+  query_by_components?: string[];
+  query_by_component_of?: string[];
+  query_by_alternates?: string[];
+  tracking_category_name?: string;
+  uid_linked_rental?: string | null;
+  uid_linked_replacement?: string | null;
+  uid_tracking_category?: string | null;
+  webshop: ProductWebshop;
+  images?: string[];
+  xero_id: string | null;
+  xero_tracking_option_id: string | null;
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ProductAlternate`
+
+An alternate product reference.
+
+```ts
+interface ProductAlternate {
+  uid: string;
+  name: string;
+}
+```
+
+### `ProductComponent`
+
+A component product within a parent product.
+
+```ts
+interface ProductComponent {
+  uid: string;
+  path: string[];
+  name: string;
+  active?: boolean;
+  type: ComponentTypeType;
+  stock_method: StockMethodType;
+  crms_id: number | null;
+  crms_accessory_id?: number | null;
+  description?: string;
+  inclusion_type?: InclusionTypeType;
+  quantity: number;
+  zero_priced?: boolean;
+  price: typeLiteral;
+}
+```
+
+### `ProductCreated`
+
+```ts
+type ProductCreated = EventEnvelope<Product> & typeLiteral;
+```
+
+### `ProductPrice`
+
+Pricing details for a product.
+
+```ts
+interface ProductPrice {
+  base: number;
+  replacement?: number | null;
+  coa_revenue?: COARevenueType;
+  taxes: TaxRefType[];
+  formula: PriceFormulaType;
+  discountable: boolean;
+}
+```
+
+### `ProductSchema`
+
+Zod schema for a Product document.
+
+```ts
+const ProductSchema: z.ZodType<Product>;
+```
+
+### `ProductShipping`
+
+Shipping dimensions and hazard classification for a product.
+
+```ts
+interface ProductShipping {
+  weight: number;
+  height: number;
+  width: number;
+  length: number;
+  air_hazardous: boolean;
+  air_un: number | null;
+}
+```
+
+### `ProductTypeEnum`
+
+Zod schema for ProductTypeType.
+
+```ts
+const ProductTypeEnum: z.ZodType<ProductTypeType>;
+```
+
+### `ProductTypeType`
+
+Allowed values for product type.
+
+```ts
+type ProductTypeType = indexedAccess;
+```
+
+### `ProductUpdated`
+
+```ts
+type ProductUpdated = EventEnvelope<Product> & typeLiteral;
+```
+
+### `ProductWebshop`
+
+Webshop availability and description for a product.
+
+```ts
+interface ProductWebshop {
+  available: boolean;
+  description?: string | null;
+}
+```
+
+### `PropagationLogRecord`
+
+Structured log entry for a single propagation rule execution.
+
+```ts
+interface PropagationLogRecord {
+  level: LogLevelType;
+  msg: "propagation";
+  ts: string;
+  rule_id: string;
+  source: string;
+  target: string;
+  mode: PropagationModeType;
+  transaction?: string;
+  fields_mapped: number;
+  source_doc_id?: string;
+  target_doc_id?: string;
+  status: PropagationStatusType;
+  duration_ms?: number;
+  error?: string;
+  rules_fired?: string[];
+  rules_fired_count?: number;
+  rules_expected?: number;
+  target_counts?: Record<string, number>;
+  target_count?: number;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `PropagationLogRecordSchema`
+
+Zod schema for {@link PropagationLogRecord}.
+
+```ts
+const PropagationLogRecordSchema: z.ZodType<PropagationLogRecord>;
+```
+
+### `PropagationMode`
+
+How a field value moves from one document to another.
+
+```ts
+type PropagationMode = "embed" | "fan-out" | "co-write" | "derive" | "reference";
+```
+
+### `PropagationModeType`
+
+Propagation strategy used by a rule.
+
+```ts
+type PropagationModeType = indexedAccess;
+```
+
+### `PropagationStatusType`
+
+Status outcome of a propagation rule execution.
+
+```ts
+type PropagationStatusType = indexedAccess;
+```
+
+### `PublicStockSummary`
+
+A public-facing stock summary with availability data for a product over a date range.
+
+```ts
+interface PublicStockSummary {
+  uid: string;
+  uid_product: string;
+  summary_type: SummaryTypeType;
+  type: ProductTypeType;
+  dates: typeLiteral;
+  quantity_available: number;
+  store_breakdown: PublicStockSummaryStore[];
+  query_by_uid_store: string[];
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
+}
+```
+
+### `PublicStockSummaryRecalculated`
+
+```ts
+type PublicStockSummaryRecalculated = EventEnvelope<PublicStockSummary> & typeLiteral;
+```
+
+### `PublicStockSummarySchema`
+
+Zod schema for PublicStockSummary.
+
+```ts
+const PublicStockSummarySchema: z.ZodType<PublicStockSummary>;
+```
+
+### `PublicStockSummaryStore`
+
+A store entry in a public stock summary with available quantity.
+
+```ts
+interface PublicStockSummaryStore {
+  uid_store: string;
+  quantity: number;
+}
+```
+
+### `Quote`
+
+A PDF quote document associated with an order.
+
+```ts
+interface Quote {
+  uid: string;
+  uid_order: string;
+  order_number: number;
+  version: number | null;
+  is_draft: boolean;
+  uploadcare_uuid: string | null;
+  deleted_at: FirestoreTimestampType | null;
+  expires_at: FirestoreTimestampType | null;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `QuoteCreated`
+
+```ts
+type QuoteCreated = EventEnvelope<Quote> & typeLiteral;
+```
+
+### `QuoteDeleted`
+
+```ts
+type QuoteDeleted = EventEnvelope<Quote> & typeLiteral;
+```
+
+### `QuoteId`
+
+`quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
+`{uid_order}:draft` (the working draft). Built in api-cloudrun
+`src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+
+```ts
+const QuoteId: z.ZodType<string>;
+```
+
+### `QuoteRestored`
+
+```ts
+type QuoteRestored = EventEnvelope<Quote> & typeLiteral;
+```
+
+### `QuoteSchema`
+
+Zod schema for Quote.
+
+```ts
+const QuoteSchema: z.ZodType<Quote>;
+```
+
+### `RateLimit`
+
+```ts
+interface RateLimit {
+  attempt_count: number;
+  first_attempt_at: number;
+  expiresAt: FirestoreTimestampType;
+}
+```
+
+### `RateLimitSchema`
+
+```ts
+const RateLimitSchema: z.ZodType<RateLimit>;
+```
+
+### `RateType`
+
+Allowed values for rate type: percent or flat.
+
+```ts
+type RateType = indexedAccess;
+```
+
+### `RateTypeEnum`
+
+Zod schema for RateType.
+
+```ts
+const RateTypeEnum: z.ZodType<RateType>;
+```
+
+### `ReactionActionType`
+
+Allowed reaction actions.
+
+```ts
+type ReactionActionType = indexedAccess;
+```
+
+### `Recurrence`
+
+Recurrence Firestore document shape.
+
+```ts
+interface Recurrence {
+  uid: string;
+  uid_list: string;
+  status: RecurrenceStatus;
+  rule: RecurrenceRuleType;
+  active_from: string;
+  active_until: string | null;
+  horizon_through: string | null;
+  horizon_days: number | null;
+  exception_dates: string[];
+  prototype: RecurrencePrototypeType;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `RecurrenceCreated`
+
+```ts
+type RecurrenceCreated = EventEnvelope<Recurrence> & typeLiteral;
+```
+
+### `RecurrenceDeleted`
+
+```ts
+type RecurrenceDeleted = EventEnvelope<Recurrence> & typeLiteral;
+```
+
+### `RecurrenceFreq`
+
+RFC 5545 FREQ value.
+
+```ts
+type RecurrenceFreq = indexedAccess;
+```
+
+### `RecurrenceFreqEnum`
+
+Zod schema for RecurrenceFreq.
+
+```ts
+const RecurrenceFreqEnum: z.ZodType<RecurrenceFreq>;
+```
+
+### `RecurrencePrototype`
+
+Zod schema for the recurrence prototype.
+
+```ts
+const RecurrencePrototype: z.ZodType<RecurrencePrototypeType>;
+```
+
+### `RecurrencePrototypeType`
+
+The card prototype — fields that materialize verbatim into each instance
+card unless per-instance `recurrence_overrides` pin them. Mirrors
+`CreateCardInputType` minus `uid_list`, `position`, and `date`
+(those live on the Recurrence root since they're series-level concerns).
+
+```ts
+interface RecurrencePrototypeType {
+  subject: string;
+  body: CommentBodyJson | null;
+  body_text: string;
+  status: CardStatus;
+  destination: DocDestinationEndpointType | null;
+  sources: DocSourceType[];
+  attachments: CardAttachmentType[];
+  uid_assignees: string[];
+  locked: CardLockKey[];
+}
+```
+
+### `RecurrenceRule`
+
+Zod schema for a recurrence rule.
+
+```ts
+const RecurrenceRule: z.ZodType<RecurrenceRuleType>;
+```
+
+### `RecurrenceRuleType`
+
+RFC 5545 / rrule-temporal-aligned recurrence rule. Each field maps
+directly to a rrule-temporal constructor option — see
+https://jsr.io/@gsphw/rrule-temporal.
+
+```ts
+interface RecurrenceRuleType {
+  freq: RecurrenceFreq;
+  interval: number;
+  byweekday: RecurrenceWeekday[] | null;
+  bymonthday: number[] | null;
+  bymonth: number[] | null;
+  bysetpos: number[] | null;
+  count: number | null;
+  until: string | null;
+}
+```
+
+### `RecurrenceSchema`
+
+Zod schema for a Recurrence Firestore document.
+
+```ts
+const RecurrenceSchema: z.ZodType<Recurrence>;
+```
+
+### `RecurrenceStatus`
+
+Recurrence lifecycle.
+- `active` — nightly materializer rolls the horizon forward; prototype
+  edits fan out to existing instances (respecting per-card overrides).
+- `paused` — materializer skips; existing instances remain untouched.
+  Use for temporary holds ("no deliveries this month").
+- `archived` — materializer skips; instances remain but the recurrence
+  is hidden from the settings UI.
+
+```ts
+type RecurrenceStatus = indexedAccess;
+```
+
+### `RecurrenceStatusEnum`
+
+Zod schema for RecurrenceStatus.
+
+```ts
+const RecurrenceStatusEnum: z.ZodType<RecurrenceStatus>;
+```
+
+### `RecurrenceUpdated`
+
+```ts
+type RecurrenceUpdated = EventEnvelope<Recurrence> & typeLiteral;
+```
+
+### `RecurrenceWeekday`
+
+RFC 5545 BYDAY value (two-letter weekday code).
+
+```ts
+type RecurrenceWeekday = indexedAccess;
+```
+
+### `RecurrenceWeekdayEnum`
+
+Zod schema for RecurrenceWeekday.
+
+```ts
+const RecurrenceWeekdayEnum: z.ZodType<RecurrenceWeekday>;
+```
+
+### `RegisterInput`
+
+```ts
+const RegisterInput: z.ZodType<RegisterInputType>;
+```
+
+### `RegisterInputType`
+
+Input schema for POST /auth/register.
+
+```ts
+interface RegisterInputType {
+  email: string;
+  password: string;
+}
+```
+
+### `RequestLogRecord`
+
+Structured log entry for a completed HTTP request.
+
+```ts
+interface RequestLogRecord {
+  level: LogLevelType;
+  msg: "request";
+  ts: string;
+  route: string;
+  status: number;
+  duration_ms: number;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  dry_run?: boolean;
+}
+```
+
+### `RequestLogRecordSchema`
+
+Zod schema for {@link RequestLogRecord}.
+
+```ts
+const RequestLogRecordSchema: z.ZodType<RequestLogRecord>;
+```
+
+### `ResetPasswordInput`
+
+```ts
+const ResetPasswordInput: z.ZodType<ResetPasswordInputType>;
+```
+
+### `ResetPasswordInputType`
+
+Input schema for POST /auth/reset-password.
+
+```ts
+interface ResetPasswordInputType {
+  token: string;
+  password: string;
+}
+```
+
+### `RestoreQuoteInput`
+
+Zod schema for RestoreQuoteInput.
+
+```ts
+const RestoreQuoteInput: z.ZodType<RestoreQuoteInputType>;
+```
+
+### `RestoreQuoteInputType`
+
+Input for restoring a soft-deleted quote.
+
+```ts
+interface RestoreQuoteInputType {
+  uid: string;
+}
+```
+
+### `Role`
+
+A role document in Firestore.
+
+```ts
+interface Role {
+  name: string;
+  label: string;
+  permissions: string[];
+  description?: string;
+  defaultThreadId?: string;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `RoleSchema`
+
+Zod schema for Role.
+
+```ts
+const RoleSchema: z.ZodType<Role>;
+```
+
+### `RouteManifest`
+
+Runtime route manifest — emitted by api-cloudrun at GET /permissions/manifest.
+
+```ts
+interface RouteManifest {
+  version: string;
+  permissions: typeOperator;
+  routes: RouteManifestEntry[];
+}
+```
+
+### `RouteManifestEntry`
+
+A single entry in the runtime route manifest — one per protected route.
+
+```ts
+interface RouteManifestEntry {
+  method: RouteMethod;
+  path: string;
+  permission: Permission;
+  operationId?: string;
+}
+```
+
+### `RouteMethod`
+
+HTTP methods accepted by the runtime route manifest.
+
+```ts
+type RouteMethod = "get" | "post" | "put" | "delete" | "patch";
+```
+
+### `SaveQuoteVersionInput`
+
+Zod schema for SaveQuoteVersionInput.
+
+```ts
+const SaveQuoteVersionInput: z.ZodType<SaveQuoteVersionInputType>;
+```
+
+### `SaveQuoteVersionInputType`
+
+Input for saving a new quote version.
+
+```ts
+interface SaveQuoteVersionInputType {
+  uid_order: string;
+}
+```
+
+### `SchemaDocType`
+
+Union of all Firestore document types. Use with validateBeforeWrite.
+
+```ts
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User | WebhookEvent | WebshopProduct | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+```
+
+### `SchemaField`
+
+A single field entry in the schema reference.
+
+```ts
+interface SchemaField {
+  path: string;
+  type: string;
+}
+```
+
+### `Session`
+
+Full session document schema (Firestore document shape).
+Note: expiresAt kept in camelCase for Firestore TTL policy.
+
+```ts
+interface Session {
+  id: string;
+  user_id: string;
+  anonymous: boolean;
+  expiresAt: FirestoreTimestampType;
+  created_at: number;
+  user_agent: string;
+  preview_role?: string;
+}
+```
+
+### `SessionSchema`
+
+Zod schema for Session.
+
+```ts
+const SessionSchema: z.ZodType<Session>;
+```
+
+### `StockMethodEnum`
+
+Zod schema for StockMethodType.
+
+```ts
+const StockMethodEnum: z.ZodType<StockMethodType>;
+```
+
+### `StockMethodType`
+
+Allowed values for inventory stock tracking method.
+
+```ts
+type StockMethodType = indexedAccess;
+```
+
+### `StockSummary`
+
+A stock summary document aggregating availability and bookings for a product over a date range.
+
+```ts
+interface StockSummary {
+  uid: string;
+  uid_product: string;
+  summary_type: SummaryTypeType;
+  type: ProductTypeType;
+  dates: typeLiteral;
+  bookings: StockSummaryBookingEntry[];
+  bookings_breakdown: typeLiteral;
+  out_of_service_breakdown: typeLiteral;
+  quantity_available: number;
+  quantity_booked: number;
+  quantity_held: number;
+  quantity_in_service: number;
+  quantity_out_of_service: number;
+  store_breakdown: StoreBreakdownEntry[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
+}
+```
+
+### `StockSummaryBookingEntry`
+
+Slim audit-trail entry: which booking + its breakdown, no full Booking embed.
+
+```ts
+interface StockSummaryBookingEntry {
+  uid: string;
+  number: number;
+  breakdown: BookingBreakdown;
+}
+```
+
+### `StockSummaryId`
+
+`stock-summaries.uid` / `public-stock-summaries.uid` — deterministic
+composite `{uid_product}:rental:{start}:{end}` or `{uid_product}:sale:{date}`
+(dates are `YYYY-MM-DD`).
+
+```ts
+const StockSummaryId: z.ZodType<string>;
+```
+
+### `StockSummaryRecalculated`
+
+```ts
+type StockSummaryRecalculated = EventEnvelope<StockSummary> & typeLiteral;
+```
+
+### `StockSummarySchema`
+
+Zod schema for StockSummary.
+
+```ts
+const StockSummarySchema: z.ZodType<StockSummary>;
+```
+
+### `Store`
+
+A store document in Firestore.
+
+```ts
+interface Store {
+  uid: string;
+  name: string;
+  default: boolean;
+  default_location: UidNameRefType | null;
+  crms_store_id: number;
+  version: number;
+  active: boolean;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `StoreBreakdownEntry`
+
+A single store entry in a stock breakdown, containing its locations.
+
+```ts
+interface StoreBreakdownEntry {
+  uid_store: string;
+  name: string;
+  default: boolean;
+  crms_stock_level_id: number | null;
+  quantity: number;
+  locations: StoreBreakdownLocation[];
+}
+```
+
+### `StoreBreakdownEntrySchema`
+
+Zod schema for StoreBreakdownEntry.
+
+```ts
+const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry>;
+```
+
+### `StoreBreakdownLocation`
+
+A single location within a store breakdown entry.
+
+```ts
+interface StoreBreakdownLocation {
+  uid_location: string;
+  name: string;
+  quantity: number;
+  default: boolean;
+  max: number | null;
+}
+```
+
+### `StoreBreakdownLocationSchema`
+
+Zod schema for StoreBreakdownLocation.
+
+```ts
+const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;
+```
+
+### `StoreCreated`
+
+```ts
+type StoreCreated = EventEnvelope<Store> & typeLiteral;
+```
+
+### `StoreSchema`
+
+Zod schema for Store.
+
+```ts
+const StoreSchema: z.ZodType<Store>;
+```
+
+### `StoreUpdated`
+
+```ts
+type StoreUpdated = EventEnvelope<Store> & typeLiteral;
+```
+
+### `SyncErrorLogRecord`
+
+Structured log entry for a sync-pipeline failure.
+
+```ts
+interface SyncErrorLogRecord {
+  level: LogLevelType;
+  msg: "sync_error";
+  ts: string;
+  sync_service: string;
+  document_path?: string;
+  operation?: string;
+  error_name?: string;
+  error_message?: string;
+  error_stack?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `SyncErrorLogRecordSchema`
+
+Zod schema for {@link SyncErrorLogRecord}.
+
+```ts
+const SyncErrorLogRecordSchema: z.ZodType<SyncErrorLogRecord>;
+```
+
+### `TEMPLATE_PARAM_TYPES`
+
+Render-time parameter types a template can declare. v1: boolean only.
+
+```ts
+const TEMPLATE_PARAM_TYPES: "boolean"[];
+```
+
+### `TEMPLATE_SOURCE_COLLECTIONS`
+
+Collections that can serve as data sources for templates.
+
+```ts
+const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices"[];
+```
+
+### `TEMPLATE_SURFACES`
+
+Client-agnostic detail surfaces where a template family is offered. NOT route
+strings — clients map a surface to their own route (e.g. manager binds
+`"order"` → `/orders/:id`). A packing list might surface on both `"order"`
+and `"fulfillment"`; a quote only on `"order"`.
+
+```ts
+const TEMPLATE_SURFACES: "order" | "fulfillment" | "invoice"[];
+```
+
+### `TEMPLATE_TARGET_COLLECTIONS`
+
+Collections that templates can produce documents for.
+
+```ts
+const TEMPLATE_TARGET_COLLECTIONS: "quotes" | "packing_lists" | "invoices"[];
+```
+
+### `TEMPLATE_VERSION_STATUSES`
+
+Lifecycle status of a template version (mirrors the git lifecycle).
+
+```ts
+const TEMPLATE_VERSION_STATUSES: "draft" | "published" | "archived"[];
+```
+
+### `TRANSACTION_TYPES`
+
+All possible transaction type identifiers.
+
+```ts
+const TRANSACTION_TYPES: "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "sale" | "write_off" | "trade_in" | "adjustment_decrease" | "transfer_increase" | "transfer_decrease" | "acquisition" | "disposal" | "partial_disposal" | "depreciation_tax" | "depreciation_gaap"[];
+```
+
+### `Tag`
+
+A tag document in Firestore.
+
+```ts
+interface Tag {
+  uid: string;
+  name: string;
+  count?: Record<string, FirestoreFieldValue> | number;
+  products?: UidNameRefType[];
+  query_by_products?: string[];
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `TagCreated`
+
+```ts
+type TagCreated = EventEnvelope<Tag> & typeLiteral;
+```
+
+### `TagDeleted`
+
+```ts
+type TagDeleted = EventEnvelope<Tag> & typeLiteral;
+```
+
+### `TagSchema`
+
+Zod schema for Tag.
+
+```ts
+const TagSchema: z.ZodType<Tag>;
+```
+
+### `TagUpdated`
+
+```ts
+type TagUpdated = EventEnvelope<Tag> & typeLiteral;
+```
+
+### `Tax`
+
+A tax definition used for computing item-level and order-level tax amounts.
+
+```ts
+interface Tax {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  active: boolean;
+  crms_id: number | null;
+  valid_from: string;
+  valid_from_fs: FirestoreTimestampType;
+  valid_to: string | null;
+  valid_to_fs: FirestoreTimestampType | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `TaxProfileEnum`
+
+Zod schema for TaxProfileType.
+
+```ts
+const TaxProfileEnum: z.ZodType<TaxProfileType>;
+```
+
+### `TaxProfileType`
+
+Allowed values for organization-level tax profile.
+
+```ts
+type TaxProfileType = indexedAccess;
+```
+
+### `TaxRef`
+
+Zod schema for a denormalized tax snapshot without computed amount.
+
+```ts
+const TaxRef: z.ZodType<TaxRefType>;
+```
+
+### `TaxRefType`
+
+Denormalized tax snapshot without computed amount — used on product catalog entries.
+PriceModifier extends this shape with `amount` for order-time computation.
+
+```ts
+interface TaxRefType {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+}
+```
+
+### `TaxSchema`
+
+Zod schema for Tax.
+
+```ts
+const TaxSchema: z.ZodType<Tax>;
+```
+
+### `Template`
+
+A thin template *family* document — identity + rollups, no content/status.
+
+```ts
+interface Template {
+  uid: string;
+  git_path: string;
+  name: string;
+  collection_source: TemplateSourceCollectionType;
+  collection_target: TemplateTargetCollectionType;
+  surfaces: TemplateSurfaceType[];
+  uid_active: string | null;
+  active_semver?: string | null;
+  depends_on: TemplateDependsOn;
+  fixtures: FixtureMeta[];
+  draft_uids: string[];
+  version_count: number;
+  last_published_at: FirestoreTimestampType | null;
+  uid_thread: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `TemplateComponent`
+
+A thin template-component *family* document.
+
+```ts
+interface TemplateComponent {
+  uid: string;
+  git_path: string;
+  name: string;
+  uid_active: string | null;
+  draft_uids: string[];
+  version_count: number;
+  last_published_at: FirestoreTimestampType | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `TemplateComponentInputSchema`
+
+Zod schema for TemplateComponentInput.
+
+```ts
+const TemplateComponentInputSchema: z.ZodType<TemplateComponentInputType>;
+```
+
+### `TemplateComponentInputType`
+
+Input for registering a new template-component family.
+
+```ts
+interface TemplateComponentInputType {
+  name: string;
+}
+```
+
+### `TemplateComponentSchema`
+
+Zod schema for a TemplateComponent family document.
+
+```ts
+const TemplateComponentSchema: z.ZodType<TemplateComponent>;
+```
+
+### `TemplateContext`
+
+Context object passed to Eta templates at render time.
+
+```ts
+interface TemplateContext {
+  doc: Record<string, unknown>;
+  version?: number | null;
+  logo?: string;
+  params?: Record<string, unknown>;
+}
+```
+
+### `TemplateCreated`
+
+```ts
+type TemplateCreated = EventEnvelope<Template> & typeLiteral;
+```
+
+### `TemplateDependsOn`
+
+Component dependencies a template family overlays at render time.
+
+```ts
+interface TemplateDependsOn {
+  components: string[];
+}
+```
+
+### `TemplateInputSchema`
+
+Zod schema for TemplateInput.
+
+```ts
+const TemplateInputSchema: z.ZodType<TemplateInputType>;
+```
+
+### `TemplateInputType`
+
+Input for registering a new template *family*. Content is not provided here —
+registration creates the family doc + a git branch carrying the sidecar; the
+server derives `git_path = slugify(name)` and freezes it.
+
+```ts
+interface TemplateInputType {
+  name: string;
+  collection_source: TemplateSourceCollectionType;
+  collection_target: TemplateTargetCollectionType;
+  surfaces: TemplateSurfaceType[];
+  depends_on?: Partial<TemplateDependsOn>;
+}
+```
+
+### `TemplateParam`
+
+A render-time parameter declared by a template version.
+
+```ts
+interface TemplateParam {
+  key: string;
+  type: TemplateParamType;
+  label?: string;
+  default?: boolean;
+  required?: boolean;
+}
+```
+
+### `TemplateParamSchema`
+
+Zod schema for a TemplateParam.
+
+```ts
+const TemplateParamSchema: z.ZodType<TemplateParam>;
+```
+
+### `TemplateParamType`
+
+A single render-time parameter type.
+
+```ts
+type TemplateParamType = indexedAccess;
+```
+
+### `TemplateSchema`
+
+Zod schema for a Template family document.
+
+```ts
+const TemplateSchema: z.ZodType<Template>;
+```
+
+### `TemplateSourceCollectionType`
+
+Firestore collection that provides data to a template.
+
+```ts
+type TemplateSourceCollectionType = indexedAccess;
+```
+
+### `TemplateSurfaceType`
+
+A single client-agnostic surface a template is offered on.
+
+```ts
+type TemplateSurfaceType = indexedAccess;
+```
+
+### `TemplateTargetCollectionType`
+
+Firestore collection that a template produces documents for.
+
+```ts
+type TemplateTargetCollectionType = indexedAccess;
+```
+
+### `TemplateUpdated`
+
+```ts
+type TemplateUpdated = EventEnvelope<Template> & typeLiteral;
+```
+
+### `TemplateVersion`
+
+A status-discriminated template version (draft | published | archived).
+
+```ts
+interface TemplateVersion {
+  uid: string;
+  uid_template: string;
+  status: TemplateVersionStatusType;
+  content: Record<string, string>;
+  params: TemplateParam[];
+  consumed_components: string[];
+  git_branch?: string;
+  base_sha?: string;
+  base_seq?: number;
+  display_name?: string;
+  uid_thread?: string;
+  committed_content_hash?: string;
+  sha?: string;
+  semver?: string;
+  seq?: number;
+  commit_meta?: CommitMeta;
+  blob_refs?: BlobRef[];
+  pr_number?: number | null;
+  golden_results?: GoldenDiff[];
+  reconciled?: boolean;
+  written_by: ActorRefType;
+  version: number;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `TemplateVersionSchema`
+
+Zod schema for a TemplateVersion document.
+
+```ts
+const TemplateVersionSchema: z.ZodType<TemplateVersion>;
+```
+
+### `TemplateVersionStatusType`
+
+A single template-version status.
+
+```ts
+type TemplateVersionStatusType = indexedAccess;
+```
+
+### `Thread`
+
+Thread Firestore document shape.
+
+```ts
+interface Thread {
+  uid: string;
+  sources: DocSourceType[];
+  title: string | null;
+  last_message_at: FirestoreTimestampType | null;
+  last_message_preview: string;
+  comment_count: number;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ThreadCreated`
+
+```ts
+type ThreadCreated = EventEnvelope<Thread> & typeLiteral;
+```
+
+### `ThreadSchema`
+
+Zod schema for a thread Firestore document.
+
+```ts
+const ThreadSchema: z.ZodType<Thread>;
+```
+
+### `ThreadUpdated`
+
+```ts
+type ThreadUpdated = EventEnvelope<Thread> & typeLiteral;
+```
+
+### `TimestampFields`
+
+Standard timestamp fields present on most documents.
+
+```ts
+const TimestampFields: typeLiteral;
+```
+
+### `TrackingCategory`
+
+A tracking category document in Firestore.
+
+```ts
+interface TrackingCategory {
+  uid: string;
+  name: string;
+  count?: Record<string, FirestoreFieldValue> | number;
+  crms_product_group_id?: number;
+  crms_service_group_id?: number;
+  crms_product_group_name: string;
+  products: Record<string, UidNameRefType>;
+  xero_tracking_option_id: string | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `TrackingCategoryCreated`
+
+```ts
+type TrackingCategoryCreated = EventEnvelope<TrackingCategory> & typeLiteral;
+```
+
+### `TrackingCategorySchema`
+
+Zod schema for TrackingCategory.
+
+```ts
+const TrackingCategorySchema: z.ZodType<TrackingCategory>;
+```
+
+### `TrackingCategoryUpdated`
+
+```ts
+type TrackingCategoryUpdated = EventEnvelope<TrackingCategory> & typeLiteral;
+```
+
+### `Transaction`
+
+A transaction document representing an inventory movement or financial event.
+
+```ts
+interface Transaction {
+  uid: string;
+  uid_product: string;
+  type: TransactionTypeType;
+  quantity: number;
+  total_cost: number;
+  unit_cost: number;
+  unit_costs: number[];
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string;
+  source: TransactionSource;
+  stores: TransactionStore[];
+  query_by_uid_store: string[];
+  serialized_details: typeLiteral | null;
+  crms_sync: Record<string, typeLiteral>;
+  defaultThreadId?: string;
+  version: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `TransactionCreated`
+
+```ts
+type TransactionCreated = EventEnvelope<Transaction> & typeLiteral;
+```
+
+### `TransactionDefinition`
+
+Groups CollectionRules into a named atomic operation.
+
+```ts
+interface TransactionDefinition {
+  id: string;
+  description: string;
+  steps: string[];
+}
+```
+
+### `TransactionLogRecord`
+
+Structured log entry for a single Firestore transaction commit (success or failure).
+
+```ts
+interface TransactionLogRecord {
+  level: LogLevelType;
+  msg: "transaction";
+  ts: string;
+  tx_name: string;
+  status: TransactionStatusType;
+  duration_ms: number;
+  write_count: number;
+  target_counts: Record<string, number>;
+  estimated_json_bytes: number;
+  sample_doc_paths: string[];
+  error_name?: string;
+  error_message?: string;
+  error_stack?: string;
+  aborted?: boolean;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  dry_run?: boolean;
+}
+```
+
+### `TransactionLogRecordSchema`
+
+Zod schema for {@link TransactionLogRecord}.
+
+```ts
+const TransactionLogRecordSchema: z.ZodType<TransactionLogRecord>;
+```
+
+### `TransactionSchema`
+
+Zod schema for Transaction.
+
+```ts
+const TransactionSchema: z.ZodType<Transaction>;
+```
+
+### `TransactionSource`
+
+The origin source of a transaction (manual, order, or internal).
+
+```ts
+interface TransactionSource {
+  type: TransactionSourceTypeType;
+  number: string | number | null;
+  uid: string | null;
+}
+```
+
+### `TransactionStatusType`
+
+Status outcome of a Firestore transaction commit.
+
+```ts
+type TransactionStatusType = indexedAccess;
+```
+
+### `TransactionStore`
+
+A store affected by a transaction, including its locations.
+
+```ts
+interface TransactionStore {
+  uid_store: string;
+  name: string;
+  default: boolean;
+  quantity: number;
+  locations: TransactionStoreLocation[];
+}
+```
+
+### `TransactionStoreLocation`
+
+A location within a store affected by a transaction.
+
+```ts
+interface TransactionStoreLocation {
+  uid_location: string;
+  name: string;
+  quantity: number;
+  transactionQuantity: number;
+  default: boolean;
+  max: number | null;
+}
+```
+
+### `TransactionStoreLocationSchema`
+
+Zod schema for TransactionStoreLocation.
+
+```ts
+const TransactionStoreLocationSchema: z.ZodType<TransactionStoreLocation>;
+```
+
+### `TransactionStoreSchema`
+
+Zod schema for TransactionStore.
+
+```ts
+const TransactionStoreSchema: z.ZodType<TransactionStore>;
+```
+
+### `TransactionTypeType`
+
+Union of all transaction type string literals.
+
+```ts
+type TransactionTypeType = indexedAccess;
+```
+
+### `TransactionUpdated`
+
+```ts
+type TransactionUpdated = EventEnvelope<Transaction> & typeLiteral;
+```
+
+### `TypedLogRecord`
+
+Discriminated union of every typed log record, keyed by the `msg`
+literal. The new `logTyped<R extends TypedLogRecord>` API in
+api-cloudrun's `src/lib/logger.ts` constrains its argument to this
+union — TS narrows to the matching arm based on the supplied `msg`,
+giving compile-time enforcement that every field is correctly named
+and typed.
+
+Adding a new arm requires:
+  1. Define schema + interface in `./<archetype>.ts`
+  2. Re-export both above
+  3. Add to this union
+  4. Add to {@link MSG_SCHEMA_REGISTRY} below
+
+The `log-records.test.ts` coverage test asserts union ↔ registry
+symmetry so it's impossible to add one without the other.
+
+```ts
+type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;
+```
+
+### `TypesenseConfig`
+
+```ts
+interface TypesenseConfig {
+  uid: string;
+  current_collection: string;
+  schema_hash: string;
+  intended_hash?: string;
+  updates?: number;
+  last_reindex?: FirestoreTimestampType;
+  last_reindex_stats?: TypesenseConfigReindexStats;
+  reindex_attempts?: number;
+}
+```
+
+### `TypesenseConfigReindexStats`
+
+```ts
+interface TypesenseConfigReindexStats {
+  total: number;
+  success: number;
+  failed: number;
+  errors?: string[];
+}
+```
+
+### `TypesenseConfigSchema`
+
+```ts
+const TypesenseConfigSchema: z.ZodType<TypesenseConfig>;
+```
+
+### `TypesenseDisplayPrefs`
+
+User display preferences for a Typesense-backed collection view.
+
+```ts
+interface TypesenseDisplayPrefs {
+  columns: string[];
+  filters: Record<string, parenthesized[]>;
+  sort: DisplaySort;
+  group: string | null;
+  facet: string[];
+}
+```
+
+### `UidNameRef`
+
+Zod schema for a uid + name reference.
+
+```ts
+const UidNameRef: z.ZodType<UidNameRefType>;
+```
+
+### `UidNameRefType`
+
+Generic uid + name reference used across many collections.
+
+```ts
+interface UidNameRefType {
+  uid: string;
+  name: string;
+}
+```
+
+### `UpdateBookingInput`
+
+Zod schema for UpdateBookingInput.
+
+```ts
+const UpdateBookingInput: z.ZodType<UpdateBookingInputType>;
+```
+
+### `UpdateBookingInputType`
+
+Input for updating a single booking via `PUT /bookings/{uid}`.
+
+Status and breakdown are independently optional — most warehouse PUTs only
+change the breakdown. When `breakdown` is supplied it must be the complete
+next state (all 7 keys); the service requires `sum(breakdown) === quantity`
+and treats the value as an absolute write, not a partial patch. Version is
+required for optimistic concurrency.
+
+```ts
+interface UpdateBookingInputType {
+  status?: BookingStatusType;
+  breakdown?: indexedAccess;
+  version: number;
+}
+```
+
+### `UpdateCardInput`
+
+Zod schema for updating a card. Lock enforcement happens at the service
+layer (api-cloudrun) — the schema accepts any field, then service rejects
+with FIELD_LOCKED if the card's `locked[]` contains the field name.
+
+```ts
+const UpdateCardInput: z.ZodType<UpdateCardInputType>;
+```
+
+### `UpdateCardInputType`
+
+Input for PATCH /cards/:uid — all fields optional except version.
+
+```ts
+interface UpdateCardInputType {
+  uid_list?: string;
+  status?: CardStatus;
+  position?: number;
+  subject?: string;
+  body?: CommentBodyJson | null;
+  body_text?: string;
+  dates?: CardDatesType;
+  all_day?: boolean;
+  destination?: DocDestinationEndpointType | null;
+  organization?: CardOrganizationType | null;
+  sources?: DocSourceType[];
+  attachments?: CardAttachmentType[];
+  uid_assignees?: string[];
+  version: number;
+}
+```
+
+### `UpdateCommentInput`
+
+Zod schema for updating a comment.
+
+```ts
+const UpdateCommentInput: z.ZodType<UpdateCommentInputType>;
+```
+
+### `UpdateCommentInputType`
+
+Input for PATCH /comments/:uid.
+
+```ts
+interface UpdateCommentInputType {
+  body: CommentBodyJson;
+  body_text: string;
+  version: number;
+}
+```
+
+### `UpdateContactInput`
+
+Input schema for updating a contact.
+
+```ts
+const UpdateContactInput: z.ZodType<UpdateContactInputType>;
+```
+
+### `UpdateContactInputType`
+
+Input schema for PUT /contacts/:uid — partial update.
+
+```ts
+interface UpdateContactInputType {
+  uid?: string;
+  emails?: string[];
+  phones?: string[];
+  organizations?: ContactOrganizationType[];
+  version: number;
+}
+```
+
+### `UpdateInvoiceInput`
+
+Input schema for updating an invoice.
+
+```ts
+const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType>;
+```
+
+### `UpdateInvoiceInputType`
+
+Input schema for PUT /invoices/:uid — partial update.
+
+```ts
+interface UpdateInvoiceInputType {
+  status?: InvoiceStatusType;
+  items?: InvoiceItemInputType[];
+  destinations?: InvoiceDocDestinationType[];
+  date?: string;
+  due_date?: string;
+  subject?: string;
+  reference?: string | null;
+  external_notes?: string;
+  internal_notes?: string;
+  version: number;
+}
+```
+
+### `UpdateListInput`
+
+Zod schema for updating a list.
+
+```ts
+const UpdateListInput: z.ZodType<UpdateListInputType>;
+```
+
+### `UpdateListInputType`
+
+Input for PATCH /lists/:uid — all fields optional except version.
+
+```ts
+interface UpdateListInputType {
+  name?: string;
+  description?: string;
+  icon?: string | null;
+  color?: string | null;
+  position?: number;
+  locked?: ListLockKey[];
+  version: number;
+}
+```
+
+### `UpdateLocationInput`
+
+Input schema for updating a location.
+
+```ts
+const UpdateLocationInput: z.ZodType<UpdateLocationInputType>;
+```
+
+### `UpdateLocationInputType`
+
+Input type for updating a location.
+
+```ts
+interface UpdateLocationInputType {
+  uid: string;
+  name?: string;
+  default?: boolean;
+  active?: boolean;
+  version: number;
+}
+```
+
+### `UpdateLocationTypeInput`
+
+Input schema for updating a location type.
+
+```ts
+const UpdateLocationTypeInput: z.ZodType<UpdateLocationTypeInputType>;
+```
+
+### `UpdateLocationTypeInputType`
+
+Input type for updating a location type.
+
+```ts
+interface UpdateLocationTypeInputType {
+  uid: string;
+  name?: string;
+  product_capacities?: Record<string, typeLiteral>;
+  dimensions?: typeLiteral | null;
+  active?: boolean;
+  version: number;
+}
+```
+
+### `UpdateOrderInput`
+
+Input schema for updating an order.
+
+```ts
+const UpdateOrderInput: z.ZodType<UpdateOrderInputType>;
+```
+
+### `UpdateOrderInputType`
+
+Input schema for PUT /orders/:uid — partial update.
+
+```ts
+interface UpdateOrderInputType {
+  uid?: string;
+  organization?: typeLiteral;
+  status?: OrderStatusType;
+  tax_profile?: TaxProfileType;
+  destinations?: DestinationType[];
+  items?: OrderItemType[];
+  subject?: string;
+  reference?: string | null;
+  version: number;
+}
+```
+
+### `UpdateOrganizationInput`
+
+Input schema for updating an organization.
+
+```ts
+const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType>;
+```
+
+### `UpdateOrganizationInputType`
+
+Input schema for PUT /organizations/:uid — partial update.
+
+```ts
+interface UpdateOrganizationInputType {
+  uid?: string;
+  name?: string;
+  tax_profile?: TaxProfileType;
+  description?: string;
+  billing_address?: AddressType | null;
+  contacts?: OrganizationContactType[];
+  newContacts?: NewContactInputType[] | null;
+  emails?: string[];
+  phones?: string[];
+  version: number;
+}
+```
+
+### `UpdateOutOfServiceInput`
+
+Zod schema for UpdateOutOfServiceInput.
+
+```ts
+const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType>;
+```
+
+### `UpdateOutOfServiceInputType`
+
+Input for updating an out-of-service record.
+
+`breakdown` (when supplied) must be the complete next state — the writer
+enforces `sum(breakdown) === quantity`. `status` is server-derived; only
+`"canceled"` is honored from the client and translated into
+`canceled_at = now()`.
+
+`dates.start` is honored on update only when the record has no sources
+(`sources.length === 0` — manually created / ad-hoc). Source-bound records
+(booking PUT or order check-in lineage) reject `dates.start` updates with a
+400 — the start there reflects a real ledger event recorded by the upstream
+writer, and operator-side drift would desync the OOS from the source's
+audit trail.
+
+```ts
+interface UpdateOutOfServiceInputType {
+  status?: OOSStatusType;
+  breakdown?: OOSBreakdown;
+  dates?: typeLiteral;
+  stores?: OOSStore[];
+  version: number;
+}
+```
+
+### `UpdatePaymentInput`
+
+Input schema for updating a single payment on an invoice.
+
+```ts
+const UpdatePaymentInput: z.ZodType<UpdatePaymentInputType>;
+```
+
+### `UpdatePaymentInputType`
+
+Input schema for PATCH /invoices/{uid}/payments/{payment_uid} — partial update of a single payment.
+
+```ts
+interface UpdatePaymentInputType {
+  date?: string;
+  amount?: number;
+  reference?: string | null;
+  status?: indexedAccess;
+  version: number;
+}
+```
+
+### `UpdateProductInput`
+
+Input schema for updating a product.
+
+```ts
+const UpdateProductInput: z.ZodType<UpdateProductInputType>;
+```
+
+### `UpdateProductInputType`
+
+Input type for updating a product.
+
+```ts
+interface UpdateProductInputType {
+  uid: string;
+  name?: string;
+  active?: boolean;
+  type?: ProductTypeType;
+  stock_method?: StockMethodType;
+  component_only?: boolean;
+  description?: string;
+  eligible_delivery?: boolean;
+  eligible_in_store_pickup?: boolean;
+  eligible_shipping_ground?: boolean;
+  eligible_shipping_air?: boolean;
+  price?: typeLiteral;
+  shipping?: typeLiteral;
+  alternates?: UidNameRefType[];
+  components?: ProductComponent[];
+  component_of?: ProductComponent[];
+  tags?: UidNameRefType[];
+  uid_tracking_category?: string;
+  uid_linked_rental?: string;
+  uid_linked_replacement?: string;
+  webshop?: typeLiteral;
+  version: number;
+}
+```
+
+### `UpdateRecurrenceInput`
+
+Zod schema for updating a recurrence.
+
+```ts
+const UpdateRecurrenceInput: z.ZodType<UpdateRecurrenceInputType>;
+```
+
+### `UpdateRecurrenceInputType`
+
+Input for PATCH /recurrences/:uid — all fields optional. Prototype
+field patches fan out to existing instance cards at the service layer
+(skipping cards whose `recurrence_overrides` pin the field).
+
+```ts
+interface UpdateRecurrenceInputType {
+  uid_list?: string;
+  status?: RecurrenceStatus;
+  rule?: RecurrenceRuleType;
+  active_from?: string;
+  active_until?: string | null;
+  horizon_days?: number | null;
+  prototype?: typeLiteral;
+  version: number;
+}
+```
+
+### `UpdateStoreInput`
+
+Input schema for updating a store.
+
+```ts
+const UpdateStoreInput: z.ZodType<UpdateStoreInputType>;
+```
+
+### `UpdateStoreInputType`
+
+Input type for updating a store.
+
+```ts
+interface UpdateStoreInputType {
+  uid: string;
+  name?: string;
+  crms_store_id?: number;
+  default?: boolean;
+  active?: boolean;
+  version: number;
+}
+```
+
+### `UpdateStoreTransferInput`
+
+Input schema for updating a store-to-store transfer.
+
+```ts
+const UpdateStoreTransferInput: z.ZodType<UpdateStoreTransferInputType>;
+```
+
+### `UpdateStoreTransferInputType`
+
+Input type for updating a store-to-store transfer.
+
+```ts
+interface UpdateStoreTransferInputType {
+  uid_product: string;
+  transfer_number: number;
+  quantity: number;
+  date: string;
+  reference: string;
+  stores_from: InputTransactionStore[];
+  stores_to: InputTransactionStore[];
+  total_cost?: number;
+  serialized_details?: typeLiteral | null;
+  version: number;
+}
+```
+
+### `UpdateTagInput`
+
+Input schema for updating a tag.
+
+```ts
+const UpdateTagInput: z.ZodType<UpdateTagInputType>;
+```
+
+### `UpdateTagInputType`
+
+Input type for updating a tag.
+
+```ts
+interface UpdateTagInputType {
+  uid: string;
+  name: string;
+  version: number;
+}
+```
+
+### `UpdateTaxInput`
+
+Zod schema for UpdateTaxInput.
+
+```ts
+const UpdateTaxInput: z.ZodType<UpdateTaxInputType>;
+```
+
+### `UpdateTaxInputType`
+
+Input for updating an existing tax definition.
+
+```ts
+interface UpdateTaxInputType {
+  uid: string;
+  name?: string;
+  rate?: number;
+  type?: RateType;
+  active?: boolean;
+  valid_from?: string;
+  valid_to?: string | null;
+  version: number;
+}
+```
+
+### `UpdateTemplateVersionInput`
+
+Zod schema for updating a template version. NON-strict on purpose: the manager
+cache's buildDiff injects `uid`, and validateUpdate runs this against the full
+TemplateVersion entity — both rely on unknown-key stripping.
+
+```ts
+const UpdateTemplateVersionInput: z.ZodType<UpdateTemplateVersionInputType>;
+```
+
+### `UpdateTemplateVersionInputType`
+
+Input for PUT /templates-versions/:uid — partial content/params/rename + OCC token.
+
+```ts
+interface UpdateTemplateVersionInputType {
+  content?: Record<string, string>;
+  params?: TemplateParam[];
+  display_name?: string;
+  version: number;
+}
+```
+
+### `UpdateThreadInput`
+
+Zod schema for updating a thread.
+
+```ts
+const UpdateThreadInput: z.ZodType<UpdateThreadInputType>;
+```
+
+### `UpdateThreadInputType`
+
+Input for PATCH /threads/:uid — rename only.
+
+```ts
+interface UpdateThreadInputType {
+  title: string | null;
+  version: number;
+}
+```
+
+### `UpdateTrackingCategoryInput`
+
+Input schema for updating a tracking category.
+
+```ts
+const UpdateTrackingCategoryInput: z.ZodType<UpdateTrackingCategoryInputType>;
+```
+
+### `UpdateTrackingCategoryInputType`
+
+Input type for updating a tracking category.
+
+```ts
+interface UpdateTrackingCategoryInputType {
+  uid: string;
+  name: string;
+  version: number;
+}
+```
+
+### `UpdateTransactionInput`
+
+Input schema for updating a manual transaction.
+
+```ts
+const UpdateTransactionInput: z.ZodType<UpdateTransactionInputType>;
+```
+
+### `UpdateTransactionInputType`
+
+Input type for updating a manual transaction.
+
+```ts
+interface UpdateTransactionInputType {
+  uid: string;
+  uid_product: string;
+  type: indexedAccess;
+  quantity: number;
+  total_cost: number;
+  date: string;
+  reference: string;
+  stores: InputTransactionStore[];
+  serialized_details?: typeLiteral | null;
+  version: number;
+}
+```
+
+### `UpdateUserInput`
+
+Input schema for updating a user.
+
+```ts
+const UpdateUserInput: z.ZodType<UpdateUserInputType>;
+```
+
+### `UpdateUserInputType`
+
+Payload for PUT /users/:uid — full-doc replace; server-managed fields excluded.
+
+```ts
+interface UpdateUserInputType {
+  email?: string;
+  uid_contact?: string | null;
+  version: number;
+  prefs_firestore?: Record<string, FirestoreDisplayPrefs>;
+  prefs_typesense?: Record<string, TypesenseDisplayPrefs>;
+}
+```
+
+### `User`
+
+Full user document schema (Firestore document shape).
+
+```ts
+interface User {
+  uid: string;
+  email: string;
+  name: string;
+  password_hash: string;
+  email_verified: boolean;
+  uid_contact?: string | null;
+  roles?: string[];
+  token_version?: number;
+  version: number;
+  prefs_firestore: Record<string, FirestoreDisplayPrefs>;
+  prefs_typesense: Record<string, TypesenseDisplayPrefs>;
+  deleted_at?: FirestoreTimestampType | null;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `UserSchema`
+
+Zod schema for a full user Firestore document.
+
+```ts
+const UserSchema: z.ZodType<User>;
+```
+
+### `ValidationErrorLogRecord`
+
+Structured log entry for a schema validation failure.
+
+```ts
+interface ValidationErrorLogRecord {
+  level: LogLevelType;
+  msg: "validation_error";
+  ts: string;
+  label: string;
+  issues: ValidationIssue[];
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `ValidationErrorLogRecordSchema`
+
+Zod schema for {@link ValidationErrorLogRecord}.
+
+```ts
+const ValidationErrorLogRecordSchema: z.ZodType<ValidationErrorLogRecord>;
+```
+
+### `ValidationIssue`
+
+Single Zod issue, structurally.
+
+```ts
+interface ValidationIssue {
+  path?: parenthesized[];
+  code?: string;
+  message?: string;
+  keys?: string[];
+  expected?: string;
+}
+```
+
+### `WebhookEvent`
+
+An inbound webhook event stored for processing.
+
+```ts
+interface WebhookEvent {
+  id: string;
+  event: string;
+  received: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
+  payload: unknown;
+}
+```
+
+### `WebhookEventSchema`
+
+Zod schema for WebhookEvent.
+
+```ts
+const WebhookEventSchema: z.ZodType<WebhookEvent>;
+```
+
+### `WebshopProduct`
+
+A webshop product document in the webshop-products Firestore collection.
+
+```ts
+interface WebshopProduct {
+  uid: string;
+  name: string;
+  active: boolean;
+  type: WebshopProductTypeType;
+  stock_method?: StockMethodType;
+  component_only?: boolean;
+  description?: string;
+  eligible_delivery: boolean;
+  eligible_in_store_pickup: boolean;
+  eligible_shipping_ground: boolean;
+  eligible_shipping_air: boolean;
+  price: typeLiteral;
+  shipping?: WebshopProductShipping;
+  alternates: UidNameRefType[];
+  components: WebshopProductComponent[];
+  component_of: WebshopProductComponent[];
+  tags?: UidNameRefType[];
+  query_by_tags?: string[];
+  query_by_components?: string[];
+  query_by_component_of?: string[];
+  query_by_alternates?: string[];
+  webshop: typeLiteral;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `WebshopProductComponent`
+
+A component product within a webshop parent product.
+
+```ts
+interface WebshopProductComponent {
+  uid: string;
+  path: string[];
+  name: string;
+  active?: boolean;
+  type: ComponentTypeType;
+  stock_method?: StockMethodType;
+  description?: string;
+  inclusion_type?: InclusionTypeType;
+  quantity: number;
+  zero_priced?: boolean;
+  price: typeLiteral;
+}
+```
+
+### `WebshopProductSchema`
+
+Zod schema for a WebshopProduct document.
+
+```ts
+const WebshopProductSchema: z.ZodType<WebshopProduct>;
+```
+
+### `WebshopProductShipping`
+
+Shipping dimensions and hazard classification for a webshop product.
+
+```ts
+interface WebshopProductShipping {
+  weight?: number;
+  height?: number;
+  width?: number;
+  length?: number;
+  air_hazardous?: boolean;
+  air_un?: number | null;
+}
+```
+
+### `WebshopProductUpdated`
+
+```ts
+type WebshopProductUpdated = EventEnvelope<WebshopProduct> & typeLiteral;
+```
+
+### `aggregates`
+
+```ts
+const aggregates: AggregateDefinition[];
+```
+
+### `cardRules`
+
+All card-related propagation rules.
+
+```ts
+const cardRules: CollectionRule[];
+```
+
+### `createCardRules`
+
+```ts
+const createCardRules: CollectionRule[];
+```
+
+### `createCardTransaction`
+
+```ts
+const createCardTransaction: TransactionDefinition;
+```
+
+### `createCommentRules`
+
+```ts
+const createCommentRules: CollectionRule[];
+```
+
+### `createCommentTransaction`
+
+```ts
+const createCommentTransaction: TransactionDefinition;
+```
+
+### `createContactRules`
+
+```ts
+const createContactRules: CollectionRule[];
+```
+
+### `createContactTransaction`
+
+```ts
+const createContactTransaction: TransactionDefinition;
+```
+
+### `createInvoiceRules`
+
+```ts
+const createInvoiceRules: CollectionRule[];
+```
+
+### `createInvoiceTransaction`
+
+```ts
+const createInvoiceTransaction: TransactionDefinition;
+```
+
+### `createLocationRules`
+
+```ts
+const createLocationRules: CollectionRule[];
+```
+
+### `createLocationTransaction`
+
+```ts
+const createLocationTransaction: TransactionDefinition;
+```
+
+### `createOrderRules`
+
+```ts
+const createOrderRules: CollectionRule[];
+```
+
+### `createOrderTransaction`
+
+```ts
+const createOrderTransaction: TransactionDefinition;
+```
+
+### `createOrganizationRules`
+
+```ts
+const createOrganizationRules: CollectionRule[];
+```
+
+### `createOrganizationTransaction`
+
+```ts
+const createOrganizationTransaction: TransactionDefinition;
+```
+
+### `createProductRules`
+
+```ts
+const createProductRules: CollectionRule[];
+```
+
+### `createProductTransaction`
+
+```ts
+const createProductTransaction: TransactionDefinition;
+```
+
+### `createRecurrenceRules`
+
+```ts
+const createRecurrenceRules: CollectionRule[];
+```
+
+### `createRecurrenceTransaction`
+
+```ts
+const createRecurrenceTransaction: TransactionDefinition;
+```
+
+### `createRoleTransaction`
+
+`create-role` is a new named transaction introduced with Threads Phase 1 —
+role creation was a direct `ref.set(role)` before, promoted to a Firestore
+transaction so the cowrite of the default thread happens atomically.
+
+```ts
+const createRoleTransaction: TransactionDefinition;
+```
+
+### `createTemplateRules`
+
+```ts
+const createTemplateRules: CollectionRule[];
+```
+
+### `createTemplateTransaction`
+
+```ts
+const createTemplateTransaction: TransactionDefinition;
+```
+
+### `createTransactionRules`
+
+```ts
+const createTransactionRules: CollectionRule[];
+```
+
+### `createTransactionTransaction`
+
+```ts
+const createTransactionTransaction: TransactionDefinition;
+```
+
+### `createUserRules`
+
+```ts
+const createUserRules: CollectionRule[];
+```
+
+### `createUserTransaction`
+
+```ts
+const createUserTransaction: TransactionDefinition;
+```
+
+### `deleteCardRules`
+
+```ts
+const deleteCardRules: CollectionRule[];
+```
+
+### `deleteCardScopeAllRules`
+
+```ts
+const deleteCardScopeAllRules: CollectionRule[];
+```
+
+### `deleteCardScopeAllTransaction`
+
+```ts
+const deleteCardScopeAllTransaction: TransactionDefinition;
+```
+
+### `deleteCardScopeFollowingRules`
+
+```ts
+const deleteCardScopeFollowingRules: CollectionRule[];
+```
+
+### `deleteCardScopeFollowingTransaction`
+
+```ts
+const deleteCardScopeFollowingTransaction: TransactionDefinition;
+```
+
+### `deleteCardScopeThisRules`
+
+```ts
+const deleteCardScopeThisRules: CollectionRule[];
+```
+
+### `deleteCardScopeThisTransaction`
+
+```ts
+const deleteCardScopeThisTransaction: TransactionDefinition;
+```
+
+### `deleteCardTransaction`
+
+```ts
+const deleteCardTransaction: TransactionDefinition;
+```
+
+### `deleteRecurrenceRules`
+
+```ts
+const deleteRecurrenceRules: CollectionRule[];
+```
+
+### `deleteRecurrenceTransaction`
+
+```ts
+const deleteRecurrenceTransaction: TransactionDefinition;
+```
+
+### `deleteTagRules`
+
+```ts
+const deleteTagRules: CollectionRule[];
+```
+
+### `deleteUserRules`
+
+```ts
+const deleteUserRules: CollectionRule[];
+```
+
+### `deleteUserTransaction`
+
+```ts
+const deleteUserTransaction: TransactionDefinition;
+```
+
+### `deriveName(parts: PartialNameParts): string`
+
+Canonical join rule for deriving a single display string from name parts.
+Joins `[first_name, middle_name, last_name]` with single spaces (missing
+parts are dropped, never produce empty padding) and appends ` (pronunciation)`
+when set. This is the single source of truth — every `name` field on a
+stored document and `ActorRef.name` is computed by passing through here.
+
+### `enumValues(schema: z.ZodType<T>): T[]`
+
+Return the values of a `ZodEnum` in declaration order. Throws when passed a
+non-enum schema — callers should pass the enum directly (e.g.
+`enumValues(CardStatusEnum)`), not a wrapped schema.
+
+### `firestoreDisplayDefaults`
+
+Display defaults for every Firestore collection, derived from schema meta.
+
+```ts
+const firestoreDisplayDefaults: Record<string, FirestoreDisplayDefaults>;
+```
+
+### `getDisplayTransactionTypes(increaseOnly?: boolean): TransactionTypeType[]`
+
+Returns transaction types suitable for UI display in manual transaction forms.
+Excludes financial-only types (acquisition, disposal, depreciation) and transfers.
+When `increaseOnly` is true, returns only types that increase inventory
+(for first transactions / opening balance scenarios).
+
+### `getInitialValues(schema: z.ZodType): Record<string, unknown>`
+
+Walk a Zod schema and produce an initial/blank object for form binding.
+
+Derives values from schema structure: `""` for strings, `0` for numbers,
+`false` for booleans, `[]` for arrays, `{}` for records, `null` for
+nullables, first value for enums, and recursion for objects.
+Fields with `.default()` use the default value.
+Custom types (e.g. FirestoreTimestamp) are omitted.
+
+### `getNodeMeta(node: z.ZodType): Record<string, unknown> | null`
+
+Read the metadata registered on a node via `.meta(...)`. Returns `null` when
+no meta has been registered. Does not unwrap — pass the already-unwrapped
+node when reading field-level meta.
+
+### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
+
+The statuses an operator can move to from the given current status.
+Returns an empty list for computed statuses (`active`, `complete`) and
+filters the current status out of the user-settable set.
+
+### `getServerSortableColumns(schema: z.ZodType): Record<string, string>`
+
+Walk a document schema and collect all fields annotated with
+`.meta({ serverSortVia: "<firestore_field>" })`. Used by list views to
+discover which columns can drive a server-side `orderBy` clause and which
+Firestore field the sort maps to (often an `_fs` timestamp sibling).
+
+Descends one level into nested objects (matching the column walker depth).
+Arrays are not traversed.
+
+### `getTransactionMultiplier(type: TransactionTypeType): 1 | -1`
+
+Returns +1 for increase types, -1 for decrease types.
+Throws for financial-only types (acquisition, disposal, depreciation).
+
+### `getTypesenseDisplayDefaults(alias: string): TypesenseDisplayDefaults | undefined`
+
+Get the display defaults for a Typesense collection by alias.
+
+### `hasCosts(type: TransactionTypeType): boolean`
+
+Determines if a transaction type should track costs (total_cost / unit_cost).
+Returns false for transfers and financial-only types.
+
+### `isDateField(schema: z.ZodType, fieldPath: string): boolean`
+
+True when the schema's leaf at `fieldPath` is an ISO datetime, ISO date, or
+the `FirestoreTimestamp` custom type. Unwraps Optional/Default/Nullable and
+sees through `.transform()` pipes, so neither modifiers nor Chicago
+datetime factories (`chicagoInstant`, `chicagoStartOfDay`) mask the
+underlying type.
+
+### `isDateLikeNode(node: z.ZodType): boolean`
+
+True when `node` is an ISO datetime, ISO date, or `FirestoreTimestamp` —
+including when those types are wrapped in a `.transform()` pipe (e.g.
+`chicagoInstant()`, `chicagoStartOfDay()`). Takes an already-unwrapped node
+(see {@link unwrapZod} / {@link unwrapNonArray}); callers that have only a
+schema + path should use {@link isDateField} instead.
+
+### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem`
+
+Type guard that narrows an invoice doc item to a billable line item (excludes structural dividers).
+
+### `isLineItem(item: OrderDocItemType): item is OrderDocLineItemType`
+
+Type guard that narrows an order doc item to a line item (excludes destination/group dividers).
+
+### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
+
+Server-side gate for an order status write. `source: "manual"` rejects
+writes that move into a computed status or out of a computed status into
+anything other than the same value (no-op). `source: "propagation"`
+trusts the booking write path that sets `active` or `complete`.
+
+### `manageDraftRules`
+
+```ts
+const manageDraftRules: CollectionRule[];
+```
+
+### `manageDraftTransaction`
+
+```ts
+const manageDraftTransaction: TransactionDefinition;
+```
+
+### `materializeHorizonRules`
+
+```ts
+const materializeHorizonRules: CollectionRule[];
+```
+
+### `materializeHorizonTransaction`
+
+```ts
+const materializeHorizonTransaction: TransactionDefinition;
+```
+
+### `publishTemplateRules`
+
+```ts
+const publishTemplateRules: CollectionRule[];
+```
+
+### `publishTemplateTransaction`
+
+```ts
+const publishTemplateTransaction: TransactionDefinition;
+```
+
+### `recurrenceRules`
+
+All recurrence-related propagation rules.
+
+```ts
+const recurrenceRules: CollectionRule[];
+```
+
+### `resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null`
+
+Convenience: resolve a dotted path and read its meta in one call. Returns
+`null` when the path is unresolvable or the leaf has no meta.
+
+### `resolveZodField(schema: z.ZodType, fieldPath: string, opts?: typeLiteral): z.ZodType | null`
+
+Resolve a dotted field path (e.g. `"dates.end"`, `"reactions.❤️.u1.name"`) to
+the leaf schema. Each segment descends through an object shape or a record's
+value type after unwrapping. Returns `null` when any segment is missing or
+when the traversal hits a non-object/non-record node before exhausting the
+path (e.g. an array-index segment — not modelled).
+
+`opts.unwrap` (default `true`) controls the LEAF only: when `true` the leaf's
+Optional/Default/Nullable/etc. wrappers are stripped (callers reading the
+inner type / `.meta()`); when `false` the leaf is returned AS DECLARED — use
+this to validate a write VALUE against the field, so a `null` write to a
+`.nullable()` field (or `undefined` to an `.optional()` one) is accepted.
+Intermediate segments are always unwrapped (needed to descend).
+
+### `rules`
+
+All propagation rules across all transactions and cascades.
+
+```ts
+const rules: CollectionRule[];
+```
+
+### `schemas`
+
+All document schemas keyed by singular and plural collection names.
+
+```ts
+const schemas: Record<string, z.ZodType>;
+```
+
+### `templateRules`
+
+All template-related propagation rules.
+
+```ts
+const templateRules: CollectionRule[];
+```
+
+### `templateSchemaFields`
+
+Pre-compiled document field metadata for each template source collection.
+
+```ts
+const templateSchemaFields: Record<TemplateSourceCollectionType, SchemaField[]>;
+```
+
+### `threadContactRules`
+
+```ts
+const threadContactRules: CollectionRule[];
+```
+
+### `threadCowriteRules`
+
+All create-<X> cowrite rules across every entity that gets a default thread.
+
+```ts
+const threadCowriteRules: CollectionRule[];
+```
+
+### `threadInvoiceRules`
+
+```ts
+const threadInvoiceRules: CollectionRule[];
+```
+
+### `threadOrderRules`
+
+```ts
+const threadOrderRules: CollectionRule[];
+```
+
+### `threadOrganizationRules`
+
+```ts
+const threadOrganizationRules: CollectionRule[];
+```
+
+### `threadProductRules`
+
+```ts
+const threadProductRules: CollectionRule[];
+```
+
+### `threadRoleRules`
+
+```ts
+const threadRoleRules: CollectionRule[];
+```
+
+### `threadTransactionRules`
+
+```ts
+const threadTransactionRules: CollectionRule[];
+```
+
+### `transactions`
+
+```ts
+const transactions: TransactionDefinition[];
+```
+
+### `typesenseDisplayDefaults`
+
+Display defaults for every Typesense collection, derived from collection config.
+
+```ts
+const typesenseDisplayDefaults: Record<string, TypesenseDisplayDefaults>;
+```
+
+### `unwrapNonArray(node: z.ZodType): z.ZodType`
+
+Like {@link unwrapZod} but stops at `ZodArray`. In Zod 4, `ZodArray.unwrap()`
+returns the element type; callers that need to detect "is this an array?"
+use this variant so the array node is preserved.
+
+### `unwrapZod(node: z.ZodType): z.ZodType`
+
+Unwrap wrapper nodes (Optional, Default, Nullable, Prefault, Catch) to reach
+the inner schema where `.meta()` was called. Does not descend into arrays,
+records, or objects.
+
+### `updateCardScopeAllRules`
+
+```ts
+const updateCardScopeAllRules: CollectionRule[];
+```
+
+### `updateCardScopeAllTransaction`
+
+```ts
+const updateCardScopeAllTransaction: TransactionDefinition;
+```
+
+### `updateCardScopeFollowingRules`
+
+```ts
+const updateCardScopeFollowingRules: CollectionRule[];
+```
+
+### `updateCardScopeFollowingTransaction`
+
+```ts
+const updateCardScopeFollowingTransaction: TransactionDefinition;
+```
+
+### `updateContactRules`
+
+```ts
+const updateContactRules: CollectionRule[];
+```
+
+### `updateContactTransaction`
+
+```ts
+const updateContactTransaction: TransactionDefinition;
+```
+
+### `updateInvoiceOrderRules`
+
+```ts
+const updateInvoiceOrderRules: CollectionRule[];
+```
+
+### `updateLocationRules`
+
+```ts
+const updateLocationRules: CollectionRule[];
+```
+
+### `updateLocationTransaction`
+
+```ts
+const updateLocationTransaction: TransactionDefinition;
+```
+
+### `updateLocationTransactionalRules`
+
+```ts
+const updateLocationTransactionalRules: CollectionRule[];
+```
+
+### `updateLocationTypeRules`
+
+```ts
+const updateLocationTypeRules: CollectionRule[];
+```
+
+### `updateOrderInvoiceRules`
+
+```ts
+const updateOrderInvoiceRules: CollectionRule[];
+```
+
+### `updateOrderRules`
+
+```ts
+const updateOrderRules: CollectionRule[];
+```
+
+### `updateOrderTransaction`
+
+```ts
+const updateOrderTransaction: TransactionDefinition;
+```
+
+### `updateOrganizationRules`
+
+```ts
+const updateOrganizationRules: CollectionRule[];
+```
+
+### `updateOrganizationTransaction`
+
+```ts
+const updateOrganizationTransaction: TransactionDefinition;
+```
+
+### `updateProductRules`
+
+```ts
+const updateProductRules: CollectionRule[];
+```
+
+### `updateProductTransaction`
+
+```ts
+const updateProductTransaction: TransactionDefinition;
+```
+
+### `updateRecurrenceRules`
+
+```ts
+const updateRecurrenceRules: CollectionRule[];
+```
+
+### `updateRecurrenceTransaction`
+
+```ts
+const updateRecurrenceTransaction: TransactionDefinition;
+```
+
+### `updateTagRules`
+
+```ts
+const updateTagRules: CollectionRule[];
+```
+
+### `updateTrackingCategoryRules`
+
+```ts
+const updateTrackingCategoryRules: CollectionRule[];
+```
+
+### `updateUserRules`
+
+```ts
+const updateUserRules: CollectionRule[];
+```
+
+### `updateUserTransaction`
+
+```ts
+const updateUserTransaction: TransactionDefinition;
+```
+
+## `@cfs/core/schemas/common`
+
+### `ActorRef`
+
+Zod schema for an actor reference.
+
+```ts
+const ActorRef: z.ZodType<ActorRefType>;
+```
+
+### `ActorRefType`
+
+Actor reference — embedded `{uid, name}` for `created_by` / `updated_by` /
+`deleted_by` fields across document schemas. The `name` is denormalized at
+write time by the server via `deriveName(parts)` (with `uid` as a fallback
+when all parts are empty — see `buildActorRef` in api-cloudrun). Non-human
+actors (e.g. integrations, scheduled jobs) use a synthetic uid such as
+`"manager-bot"` with a matching display name. Name changes on the source
+user fan out via the `update-user:name-to-actor-refs` propagation rule.
+
+```ts
+interface ActorRefType {
+  uid: string;
+  name: string;
+}
+```
+
+### `Address`
+
+Zod schema for Address, nullable.
+
+```ts
+const Address: z.ZodType<AddressType | null>;
+```
+
+### `AddressType`
+
+Address object — shared between organizations and order destinations.
+
+```ts
+interface AddressType {
+  city: string;
+  country_name: string;
+  full: string;
+  name: string;
+  postcode: string;
+  region: string;
+  street: string;
+  street2?: string;
+  mapbox_id?: string;
+  address_coordinates?: CoordinatesType | null;
+  user_coordinates?: CoordinatesType | null;
+}
+```
+
+### `AnyUid`
+
+Any known CFS document-id shape — atomic Firestore id, divider/custom item
+id, a composite (booking / stock-summary / event-card), or a lowercase-kebab
+slug (slug-keyed collections such as `roles` and seeded `lists`). Use for
+polymorphic references (`DocSource`, `UidNameRef`) that may point at any
+collection. `ItemUid` already covers `FirestoreId | uuid | custom-`.
+
+```ts
+const AnyUid: z.ZodType<string>;
+```
+
+### `BookingId`
+
+`bookings.uid` — deterministic composite
+`{uid_order}:{item uid}:{uid_destination}` (the middle segment is the order
+item's uid, which for a custom product is `custom-{uuid}`).
+
+```ts
+const BookingId: z.ZodType<string>;
+```
+
+### `COARevenueEnum`
+
+Zod schema for COARevenueType.
+
+```ts
+const COARevenueEnum: z.ZodType<COARevenueType>;
+```
+
+### `COARevenueType`
+
+Allowed values for chart-of-accounts revenue code.
+
+```ts
+type COARevenueType = indexedAccess;
+```
+
+### `CardId`
+
+`cards.uid` — either a Firestore auto-id (kanban/to-do cards) or an
+`EventCardId` composite (auto-generated order event cards).
+
+```ts
+const CardId: z.ZodType<string>;
+```
+
+### `ComponentTypeEnum`
+
+Zod schema for ComponentTypeType.
+
+```ts
+const ComponentTypeEnum: z.ZodType<ComponentTypeType>;
+```
+
+### `ComponentTypeType`
+
+Allowed values for component type.
+
+```ts
+type ComponentTypeType = indexedAccess;
+```
+
+### `Coordinates`
+
+Zod schema for coordinates (latitude/longitude), nullable.
+
+```ts
+const Coordinates: z.ZodType<CoordinatesType | null>;
+```
+
+### `CoordinatesType`
+
+Coordinates object (latitude/longitude).
+
+```ts
+interface CoordinatesType {
+  latitude: number;
+  longitude: number;
+}
+```
+
+### `DOC_LINE_ITEM_TYPES`
+
+Billable line item types stored in order/invoice documents (excludes destination/group dividers).
+
+```ts
+const DOC_LINE_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surcharge" | "transaction_fee"[];
+```
+
+### `DocItemTypeEnum`
+
+Zod schema for DocItemTypeType.
+
+```ts
+const DocItemTypeEnum: z.ZodType<DocItemTypeType>;
+```
+
+### `DocItemTypeType`
+
+All item types accepted in order/invoice input schemas (includes structural dividers).
+
+```ts
+type DocItemTypeType = indexedAccess;
+```
+
+### `DocLineItemTypeEnum`
+
+Zod schema for DocLineItemTypeType.
+
+```ts
+const DocLineItemTypeEnum: z.ZodType<DocLineItemTypeType>;
+```
+
+### `DocLineItemTypeType`
+
+Billable line item types stored in order/invoice documents (excludes destination/group dividers).
+
+```ts
+type DocLineItemTypeType = indexedAccess;
+```
+
+### `DocSource`
+
+Zod schema for a polymorphic doc reference.
+
+```ts
+const DocSource: z.ZodType<DocSourceType>;
+```
+
+### `DocSourceType`
+
+A `{collection, uid}` pointer to any Firestore document. Used polymorphically
+by Thread, Comment, and Card to reference the source docs they belong to.
+
+Lives here (not in thread.ts where it originated) because it's a shared
+primitive — the "thread" prefix misled readers into thinking it was
+thread-specific.
+
+```ts
+interface DocSourceType {
+  collection: string;
+  uid: string;
+  label?: string | null;
+}
+```
+
+### `Email`
+
+Email string with format and length constraints.
+
+```ts
+const Email: z.ZodType<string>;
+```
+
+### `EventCardId`
+
+`cards` event-card composite id — `{uid_order}:{uid_destination}:start|end`
+(one per order delivery/collection endpoint). See `api-cloudrun
+src/lib/eventCards.ts` (`EventPosition = "start" | "end"`).
+
+```ts
+const EventCardId: z.ZodType<string>;
+```
+
+### `FirestoreFieldValue`
+
+Structural interface for Firestore FieldValue (write-time sentinel).
+
+```ts
+interface FirestoreFieldValue {
+  isEqual(other: FirestoreFieldValue): boolean;
+}
+```
+
+### `FirestoreId`
+
+Atomic Firestore auto-generated document id (`[A-Za-z0-9]{20}`).
+
+```ts
+const FirestoreId: z.ZodType<string>;
+```
+
+### `FirestoreTimestamp`
+
+Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.
+
+Tight on purpose: rejects `undefined`, `null`, plain objects, and
+`FieldValue` write-time sentinels (which only carry `isEqual`). Writers
+must stamp a real `Timestamp` (e.g. `Timestamp.now()` from
+`firebase-admin/firestore`) — `validateBeforeWrite` strips `FieldValue`
+sentinels before validation, so a sentinel-stamped timestamp would
+surface here as `undefined` and fail loudly.
+
+The accepted union still includes `FirestoreFieldValue` for back-compat
+with consumers that type fields against the union (e.g. user-facing
+`cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces
+the real-Timestamp contract.
+
+```ts
+const FirestoreTimestamp: z.ZodType<FirestoreTimestampType>;
+```
+
+### `FirestoreTimestampType`
+
+Union of Firestore Timestamp (read) and FieldValue (write).
+
+```ts
+type FirestoreTimestampType = FirestoreTimestampValue | FirestoreFieldValue;
+```
+
+### `FirestoreTimestampValue`
+
+Structural interfaces for Firestore Timestamp and FieldValue.
+Expressed structurally so the schemas package has no firebase-admin dependency.
+
+```ts
+interface FirestoreTimestampValue {
+  seconds: number;
+  nanoseconds: number;
+  toMillis(): number;
+  toDate(): Date;
+}
+```
+
+### `InclusionTypeEnum`
+
+Zod schema for InclusionTypeType.
+
+```ts
+const InclusionTypeEnum: z.ZodType<InclusionTypeType>;
+```
+
+### `InclusionTypeType`
+
+Allowed values for component inclusion type.
+
+```ts
+type InclusionTypeType = indexedAccess;
+```
+
+### `InvoiceStatusEnum`
+
+Zod schema for InvoiceStatusType.
+
+```ts
+const InvoiceStatusEnum: z.ZodType<InvoiceStatusType>;
+```
+
+### `InvoiceStatusType`
+
+Possible invoice statuses.
+
+```ts
+type InvoiceStatusType = indexedAccess;
+```
+
+### `ItemTaxProfileEnum`
+
+Zod schema for ItemTaxProfileType.
+
+```ts
+const ItemTaxProfileEnum: z.ZodType<ItemTaxProfileType>;
+```
+
+### `ItemTaxProfileType`
+
+Allowed values for item-level tax profile.
+
+```ts
+type ItemTaxProfileType = indexedAccess;
+```
+
+### `ItemUid`
+
+Polymorphic `items[].uid` + `path[]` segment in order/invoice/fulfillment
+documents: a product's Firestore id, a divider UUID, or a custom-product id.
+
+```ts
+const ItemUid: z.ZodType<string>;
+```
+
+### `ListId`
+
+`lists.uid` (and `uid_list` references) — a Firestore auto-id (user-created
+lists) or a lowercase-kebab slug (seeded/system lists, e.g. `in-store`,
+`field-service`).
+
+```ts
+const ListId: z.ZodType<string>;
+```
+
+### `NameField`
+
+Zod field for the denormalized `name` on stored documents (Contact, User,
+Invite, embedded contact refs in destinations, ActorRef-shaped objects).
+
+The 255 max is the exact upper bound of `deriveName(parts)` given the
+existing per-part maxes:
+  50 (first) + 1 (sp) + 50 (middle) + 1 (sp) + 50 (last) + 1 (sp)
+  + 1 ("(") + 100 (pronunciation) + 1 (")") = 255
+If any part's `.max(...)` changes, this ceiling must move with it or
+worst-case writes will fail validation.
+
+```ts
+const NameField: z.ZodType<string>;
+```
+
+### `NameParts`
+
+Split name fields shared across Contact, User, Invite, and any schema
+embedding a contact reference. `first_name` is required; the rest are optional.
+
+Stored documents also carry a denormalized `name: string` (use `NameField`
++ `deriveName()` below). Inputs do not — clients send parts; the server
+derives `name` at write time. See `deriveName` for the canonical join rule.
+
+```ts
+interface NameParts {
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+}
+```
+
+### `NamePartsFields`
+
+Fields object — spread into a parent `z.strictObject()` (documents) or
+`z.object()` (inputs) to attach the standard split-name fields.
+
+```ts
+const NamePartsFields: typeLiteral;
+```
+
+### `NamePartsFieldsPartial`
+
+Variant of `NamePartsFields` where every field is optional — use for partial
+update input schemas (PUT endpoints) where callers may omit `first_name`.
+
+```ts
+const NamePartsFieldsPartial: typeLiteral;
+```
+
+### `OOSReasonEnum`
+
+Zod schema for OOSReasonType.
+
+```ts
+const OOSReasonEnum: z.ZodType<OOSReasonType>;
+```
+
+### `OOSReasonType`
+
+Allowed values for out-of-service reason.
+
+```ts
+type OOSReasonType = indexedAccess;
+```
+
+### `PartialNameParts`
+
+All-optional variant of `NameParts` — use for partial update input types
+(PUT endpoints) where callers may omit `first_name`.
+
+```ts
+interface PartialNameParts {
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+}
+```
+
+### `Phone`
+
+Phone string with length constraints.
+
+```ts
+const Phone: z.ZodType<string>;
+```
+
+### `PriceFormulaEnum`
+
+Zod schema for PriceFormulaType.
+
+```ts
+const PriceFormulaEnum: z.ZodType<PriceFormulaType>;
+```
+
+### `PriceFormulaType`
+
+Allowed values for pricing formula.
+
+```ts
+type PriceFormulaType = indexedAccess;
+```
+
+### `ProductTypeEnum`
+
+Zod schema for ProductTypeType.
+
+```ts
+const ProductTypeEnum: z.ZodType<ProductTypeType>;
+```
+
+### `ProductTypeType`
+
+Allowed values for product type.
+
+```ts
+type ProductTypeType = indexedAccess;
+```
+
+### `QuoteId`
+
+`quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
+`{uid_order}:draft` (the working draft). Built in api-cloudrun
+`src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+
+```ts
+const QuoteId: z.ZodType<string>;
+```
+
+### `RateType`
+
+Allowed values for rate type: percent or flat.
+
+```ts
+type RateType = indexedAccess;
+```
+
+### `RateTypeEnum`
+
+Zod schema for RateType.
+
+```ts
+const RateTypeEnum: z.ZodType<RateType>;
+```
+
+### `StockMethodEnum`
+
+Zod schema for StockMethodType.
+
+```ts
+const StockMethodEnum: z.ZodType<StockMethodType>;
+```
+
+### `StockMethodType`
+
+Allowed values for inventory stock tracking method.
+
+```ts
+type StockMethodType = indexedAccess;
+```
+
+### `StockSummaryId`
+
+`stock-summaries.uid` / `public-stock-summaries.uid` — deterministic
+composite `{uid_product}:rental:{start}:{end}` or `{uid_product}:sale:{date}`
+(dates are `YYYY-MM-DD`).
+
+```ts
+const StockSummaryId: z.ZodType<string>;
+```
+
+### `StoreBreakdownEntry`
+
+A single store entry in a stock breakdown, containing its locations.
+
+```ts
+interface StoreBreakdownEntry {
+  uid_store: string;
+  name: string;
+  default: boolean;
+  crms_stock_level_id: number | null;
+  quantity: number;
+  locations: StoreBreakdownLocation[];
+}
+```
+
+### `StoreBreakdownEntrySchema`
+
+Zod schema for StoreBreakdownEntry.
+
+```ts
+const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry>;
+```
+
+### `StoreBreakdownLocation`
+
+A single location within a store breakdown entry.
+
+```ts
+interface StoreBreakdownLocation {
+  uid_location: string;
+  name: string;
+  quantity: number;
+  default: boolean;
+  max: number | null;
+}
+```
+
+### `StoreBreakdownLocationSchema`
+
+Zod schema for StoreBreakdownLocation.
+
+```ts
+const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;
+```
+
+### `TaxProfileEnum`
+
+Zod schema for TaxProfileType.
+
+```ts
+const TaxProfileEnum: z.ZodType<TaxProfileType>;
+```
+
+### `TaxProfileType`
+
+Allowed values for organization-level tax profile.
+
+```ts
+type TaxProfileType = indexedAccess;
+```
+
+### `TimestampFields`
+
+Standard timestamp fields present on most documents.
+
+```ts
+const TimestampFields: typeLiteral;
+```
+
+### `UidNameRef`
+
+Zod schema for a uid + name reference.
+
+```ts
+const UidNameRef: z.ZodType<UidNameRefType>;
+```
+
+### `UidNameRefType`
+
+Generic uid + name reference used across many collections.
+
+```ts
+interface UidNameRefType {
+  uid: string;
+  name: string;
+}
+```
+
+### `deriveName(parts: PartialNameParts): string`
+
+Canonical join rule for deriving a single display string from name parts.
+Joins `[first_name, middle_name, last_name]` with single spaces (missing
+parts are dropped, never produce empty padding) and appends ` (pronunciation)`
+when set. This is the single source of truth — every `name` field on a
+stored document and `ActorRef.name` is computed by passing through here.
+
+## `@cfs/core/schemas/booking`
+
+### `BOOKING_STATUSES`
+
+```ts
+const BOOKING_STATUSES: "draft" | "quoted" | "reserved" | "part-prepped" | "prepped" | "active" | "complete"[];
+```
+
+### `Booking`
+
+Full Firestore document for a booking (a single product line within an order).
+
+```ts
+interface Booking {
+  uid: string;
+  uid_order: string;
+  uid_product: string;
+  name: string;
+  number: number;
+  type: ComponentTypeType;
+  status: BookingStatusType;
+  quantity: number;
+  shortage: number;
+  subject: string;
+  unit_price: number;
+  total_price: number;
+  crms_id?: number | null;
+  crms_product_id?: number | null;
+  breakdown: BookingBreakdown;
+  dates: typeLiteral;
+  destinations: typeLiteral;
+  organization: typeLiteral;
+  stores: BookingStore[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  uid_destination_delivery: string;
+  uid_destination_collection: string;
+  version: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `BookingBreakdown`
+
+Per-status quantity breakdown for a booking — also embedded in stock-summary entries.
+
+```ts
+interface BookingBreakdown {
+  damaged: number;
+  lost: number;
+  out: number;
+  prepped: number;
+  quoted: number;
+  reserved: number;
+  returned: number;
+}
+```
+
+### `BookingBreakdownSchema`
+
+Zod schema for BookingBreakdown.
+
+```ts
+const BookingBreakdownSchema: z.ZodType<BookingBreakdown>;
+```
+
+### `BookingDestinationRef`
+
+A reference to a destination with its address, used in booking delivery/collection.
+
+```ts
+interface BookingDestinationRef {
+  uid: string;
+  address: AddressType | null;
+}
+```
+
+### `BookingSchema`
+
+Zod schema for Booking.
+
+```ts
+const BookingSchema: z.ZodType<Booking>;
+```
+
+### `BookingStatusType`
+
+```ts
+type BookingStatusType = indexedAccess;
+```
+
+### `BookingStore`
+
+A store and its locations assigned to a booking.
+
+```ts
+interface BookingStore {
+  uid_store: string;
+  name: string;
+  default: boolean;
+  quantity: number;
+  locations: BookingStoreLocation[];
+}
+```
+
+### `BookingStoreLocation`
+
+A specific location within a store allocated for a booking.
+
+```ts
+interface BookingStoreLocation {
+  uid_location: string;
+  name: string;
+  quantity: number;
+  default: boolean;
+}
+```
+
+### `BookingUpdate`
+
+```ts
+const BookingUpdate: z.ZodType<BookingUpdateType>;
+```
+
+### `BookingUpdateType`
+
+Per-row entry for the bulk fulfillment-bookings endpoint. Matches
+`UpdateBookingInputType` field-for-field, plus the booking `uid` to address
+the row (since the URL carries the fulfillment uid, not the booking uid).
+
+```ts
+interface BookingUpdateType {
+  uid: string;
+  status?: BookingStatusType;
+  breakdown?: indexedAccess;
+  version: number;
+}
+```
+
+### `BulkBookingUpdateInput`
+
+```ts
+const BulkBookingUpdateInput: z.ZodType<BulkBookingUpdateInputType>;
+```
+
+### `BulkBookingUpdateInputType`
+
+Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions
+for one order in a single Firestore transaction.
+
+Top-level `version` is the fulfillment doc version at read time. Currently
+advisory: a stale value 409s. Per-row `version` carries each booking's
+current version for optimistic concurrency.
+
+No fixed cap on `updates.length`. Bound only by the real Firestore limits
+(270s tx duration, 10 MiB request size). The bulk service rejects empty
+arrays with 400.
+
+```ts
+interface BulkBookingUpdateInputType {
+  version: number;
+  updates: BookingUpdateType[];
+}
+```
+
+### `BulkBookingUpdateResponse`
+
+```ts
+const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType>;
+```
+
+### `BulkBookingUpdateResponseType`
+
+Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row
+`results` carry the post-write booking versions in input order.
+
+```ts
+interface BulkBookingUpdateResponseType {
+  success: true;
+  order_completed: boolean;
+  oos_records_written: number;
+  results: Array<typeLiteral>;
+}
+```
+
+### `UpdateBookingInput`
+
+Zod schema for UpdateBookingInput.
+
+```ts
+const UpdateBookingInput: z.ZodType<UpdateBookingInputType>;
+```
+
+### `UpdateBookingInputType`
+
+Input for updating a single booking via `PUT /bookings/{uid}`.
+
+Status and breakdown are independently optional — most warehouse PUTs only
+change the breakdown. When `breakdown` is supplied it must be the complete
+next state (all 7 keys); the service requires `sum(breakdown) === quantity`
+and treats the value as an absolute write, not a partial patch. Version is
+required for optimistic concurrency.
+
+```ts
+interface UpdateBookingInputType {
+  status?: BookingStatusType;
+  breakdown?: indexedAccess;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/cache-geocodes`
+
+### `CacheGeocodes`
+
+Full Firestore document for a cached geocode result.
+
+```ts
+interface CacheGeocodes {
+  query: string;
+  coordinates: CoordinatesType | null;
+  mapbox_id: string;
+  address: CacheGeocodesAddress;
+  created_at?: FirestoreTimestampType;
+  expiresAt?: FirestoreTimestampType;
+}
+```
+
+### `CacheGeocodesAddress`
+
+Parsed address fields returned from a geocode lookup.
+
+```ts
+interface CacheGeocodesAddress {
+  street?: string;
+  city?: string;
+  region?: string;
+  postcode?: string;
+  country_name?: string;
+  full?: string;
+  name?: string;
+}
+```
+
+### `CacheGeocodesSchema`
+
+Zod schema for CacheGeocodes.
+
+```ts
+const CacheGeocodesSchema: z.ZodType<CacheGeocodes>;
+```
+
+## `@cfs/core/schemas/card`
+
+### `Card`
+
+Card Firestore document shape.
+
+```ts
+interface Card {
+  uid: string;
+  uid_list: string;
+  uid_thread: string;
+  status: CardStatus;
+  position: number;
+  subject: string;
+  body: CommentBodyJson | null;
+  body_text: string;
+  dates: CardDatesType;
+  all_day: boolean;
+  date_fs: FirestoreTimestampType | null;
+  destination: DocDestinationEndpointType | null;
+  organization: CardOrganizationType | null;
+  sources: DocSourceType[];
+  attachments: CardAttachmentType[];
+  uid_assignees: string[];
+  locked: CardLockKey[];
+  recurrence_parent_uid: string | null;
+  recurrence_index: number | null;
+  recurrence_overrides: string[];
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `CardAttachment`
+
+Zod schema for a card attachment.
+
+```ts
+const CardAttachment: z.ZodType<CardAttachmentType>;
+```
+
+### `CardAttachmentType`
+
+A single attachment on a card (Uploadcare UUID + display metadata).
+
+```ts
+interface CardAttachmentType {
+  uid: string;
+  type: CardAttachmentTypeEnum;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  locked: boolean;
+}
+```
+
+### `CardAttachmentTypeEnum`
+
+Semantic discriminator for a card attachment. Server-derived attachments
+(packing/quote/invoice) carry their domain meaning so the UI can render
+them as labelled chips without sniffing MIME or filename. User uploads
+default to `image` (when MIME starts with `image/`) or `file` otherwise.
+
+```ts
+type CardAttachmentTypeEnum = indexedAccess;
+```
+
+### `CardAttachmentTypeEnumSchema`
+
+Zod schema for CardAttachmentTypeEnum.
+
+```ts
+const CardAttachmentTypeEnumSchema: z.ZodType<CardAttachmentTypeEnum>;
+```
+
+### `CardDates`
+
+Zod schema for the card dates sub-object.
+
+```ts
+const CardDates: z.ZodType<CardDatesType>;
+```
+
+### `CardDatesType`
+
+Card datetime range. `start` is the canonical occurrence instant — Chicago
+offset form, idempotent through `chicagoInstant()`. `end` carries the
+occurrence's wall-clock close (deliveries with start + end times); `null`
+means single-instant or all-day. `start` is nullable so cards without a
+date (generic to-dos, shopping items) stay valid.
+
+```ts
+interface CardDatesType {
+  start: string | null;
+  end: string | null;
+}
+```
+
+### `CardLockKey`
+
+Enum of lockable card surfaces.
+
+- `"card"` — presence blocks DELETE (all other keys are field locks)
+- `"status_auto"` — narrow override slot: server auto-computes `status`,
+  but PATCH still accepts `status: "blocked"` (manual block) or a no-op of
+  the current auto value. Distinct from `"status"`, which fully locks the
+  field.
+- Any other value — presence rejects PATCH of that specific field
+
+Narrower than `(keyof Card)[]` because (a) most Card fields are
+system-managed (uid, timestamps, actor refs) and nonsensical to lock, and
+(b) we need a sentinel for "prevent delete" that doesn't collide with a
+real field name.
+
+```ts
+type CardLockKey = indexedAccess;
+```
+
+### `CardLockKeyEnum`
+
+Zod schema for CardLockKey.
+
+```ts
+const CardLockKeyEnum: z.ZodType<CardLockKey>;
+```
+
+### `CardOrganization`
+
+Zod schema for CardOrganizationType.
+
+```ts
+const CardOrganization: z.ZodType<CardOrganizationType>;
+```
+
+### `CardOrganizationType`
+
+Denormalized organization snapshot on order-derived event cards. Surfaces
+"who is this card for?" on every card-rendering surface (list, kanban,
+calendar, dashboard) without joining back to the order. `uid` is nullable
+because some organizations exist without a CFS-side uid (legacy CRMS-only
+customers).
+
+```ts
+interface CardOrganizationType {
+  uid: string | null;
+  name: string;
+}
+```
+
+### `CardSchema`
+
+Zod schema for a card Firestore document.
+
+```ts
+const CardSchema: z.ZodType<Card>;
+```
+
+### `CardStatus`
+
+Allowed card statuses. Shared across field-service, to-do, shopping, calendar.
+
+```ts
+type CardStatus = indexedAccess;
+```
+
+### `CardStatusEnum`
+
+Zod schema for CardStatus.
+
+```ts
+const CardStatusEnum: z.ZodType<CardStatus>;
+```
+
+### `CreateCardInput`
+
+Zod schema for creating a card.
+
+```ts
+const CreateCardInput: z.ZodType<CreateCardInputType>;
+```
+
+### `CreateCardInputType`
+
+Input for POST /cards.
+
+```ts
+interface CreateCardInputType {
+  uid_list: string;
+  subject: string;
+  status?: CardStatus;
+  position?: number;
+  body?: CommentBodyJson | null;
+  body_text?: string;
+  dates?: CardDatesType;
+  all_day?: boolean;
+  destination?: DocDestinationEndpointType | null;
+  organization?: CardOrganizationType | null;
+  sources?: DocSourceType[];
+  attachments?: CardAttachmentType[];
+  uid_assignees?: string[];
+  locked?: CardLockKey[];
+}
+```
+
+### `UpdateCardInput`
+
+Zod schema for updating a card. Lock enforcement happens at the service
+layer (api-cloudrun) — the schema accepts any field, then service rejects
+with FIELD_LOCKED if the card's `locked[]` contains the field name.
+
+```ts
+const UpdateCardInput: z.ZodType<UpdateCardInputType>;
+```
+
+### `UpdateCardInputType`
+
+Input for PATCH /cards/:uid — all fields optional except version.
+
+```ts
+interface UpdateCardInputType {
+  uid_list?: string;
+  status?: CardStatus;
+  position?: number;
+  subject?: string;
+  body?: CommentBodyJson | null;
+  body_text?: string;
+  dates?: CardDatesType;
+  all_day?: boolean;
+  destination?: DocDestinationEndpointType | null;
+  organization?: CardOrganizationType | null;
+  sources?: DocSourceType[];
+  attachments?: CardAttachmentType[];
+  uid_assignees?: string[];
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/chart-of-accounts`
+
+### `COACode`
+
+Zod schema for COACode.
+
+```ts
+const COACode: z.ZodType<COACodeType>;
+```
+
+### `COACodeType`
+
+Valid chart of accounts code values.
+
+```ts
+type COACodeType = indexedAccess;
+```
+
+### `COAType`
+
+Zod schema for COAType.
+
+```ts
+const COAType: z.ZodType<COATypeType>;
+```
+
+### `COATypeType`
+
+Valid chart of accounts type values.
+
+```ts
+type COATypeType = indexedAccess;
+```
+
+### `ChartOfAccounts`
+
+A chart of accounts document in Firestore.
+
+```ts
+interface ChartOfAccounts {
+  uid: string;
+  code: COACodeType;
+  name: string;
+  type: COATypeType;
+  description?: string;
+  default_tax_profile: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ChartOfAccountsSchema`
+
+Zod schema for ChartOfAccounts.
+
+```ts
+const ChartOfAccountsSchema: z.ZodType<ChartOfAccounts>;
+```
+
+## `@cfs/core/schemas/contact`
+
+### `Contact`
+
+Full contact document schema (Firestore document shape).
+
+```ts
+interface Contact {
+  uid: string;
+  name: string;
+  crms_id?: number;
+  emails: string[];
+  phones: string[];
+  organizations: ContactOrganizationType[];
+  query_by_organizations: string[];
+  uid_user?: string;
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ContactOrganization`
+
+Zod schema for an organization reference embedded in a contact.
+
+```ts
+const ContactOrganization: z.ZodType<ContactOrganizationType>;
+```
+
+### `ContactOrganizationType`
+
+Organization reference embedded in a contact document.
+
+```ts
+interface ContactOrganizationType {
+  uid: string;
+  name: string;
+}
+```
+
+### `ContactSchema`
+
+Zod schema for a full contact Firestore document.
+
+```ts
+const ContactSchema: z.ZodType<Contact>;
+```
+
+### `CreateContactInput`
+
+Input schema for creating a contact.
+
+```ts
+const CreateContactInput: z.ZodType<CreateContactInputType>;
+```
+
+### `CreateContactInputType`
+
+Input schema for POST /contacts — what the endpoint accepts.
+
+```ts
+interface CreateContactInputType {
+  uid: string;
+  emails?: string[];
+  phones?: string[];
+  organizations?: ContactOrganizationType[];
+}
+```
+
+### `UpdateContactInput`
+
+Input schema for updating a contact.
+
+```ts
+const UpdateContactInput: z.ZodType<UpdateContactInputType>;
+```
+
+### `UpdateContactInputType`
+
+Input schema for PUT /contacts/:uid — partial update.
+
+```ts
+interface UpdateContactInputType {
+  uid?: string;
+  emails?: string[];
+  phones?: string[];
+  organizations?: ContactOrganizationType[];
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/destination`
+
+### `Destination`
+
+Full Firestore document for a destination (a physical address used in orders).
+
+```ts
+interface Destination {
+  uid: string;
+  address: AddressType | null;
+  mapbox_ids: string[];
+  organizations?: UidNameRefType[];
+  query_by_organizations?: string[];
+  products?: UidNameRefType[];
+  query_by_products?: string[];
+  contacts?: DestinationContactRefType[];
+  query_by_contacts?: string[];
+  version: number;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `DestinationContactRef`
+
+Zod schema for a contact reference embedded in a destination.
+
+```ts
+const DestinationContactRef: z.ZodType<DestinationContactRefType>;
+```
+
+### `DestinationContactRefType`
+
+Contact reference embedded in a destination document.
+
+Mirrors the split-name shape used in `organizations.contacts[]` so that the
+Typesense `destinations_v5` collection can index the same `first_name /
+middle_name / last_name / pronunciation` fields without an adapter. `name`
+is the server-derived display string (see `deriveName` in common.ts).
+
+```ts
+interface DestinationContactRefType {
+  uid: string;
+  name: string;
+}
+```
+
+### `DestinationSchema`
+
+Zod schema for Destination.
+
+```ts
+const DestinationSchema: z.ZodType<Destination>;
+```
+
+## `@cfs/core/schemas/email-verification`
+
+### `EmailVerification`
+
+Full Firestore document for a single-use email verification token.
+
+```ts
+interface EmailVerification {
+  user_id: string;
+  email: string;
+  expiresAt: FirestoreTimestampType;
+  created_at: number;
+}
+```
+
+### `EmailVerificationSchema`
+
+Zod schema for EmailVerification.
+
+```ts
+const EmailVerificationSchema: z.ZodType<EmailVerification>;
+```
+
+## `@cfs/core/schemas/holiday-dates`
+
+### `HolidayDates`
+
+Full Firestore document for a single holiday date entry.
+
+```ts
+interface HolidayDates {
+  uid: string;
+  uid_holiday: string;
+  date: string;
+  date_fs?: FirestoreTimestampType;
+  name: string;
+  type: "fixed" | "variable";
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `HolidayDatesSchema`
+
+Zod schema for HolidayDates.
+
+```ts
+const HolidayDatesSchema: z.ZodType<HolidayDates>;
+```
+
+## `@cfs/core/schemas/inventory-ledger`
+
+### `InventoryLedger`
+
+An inventory ledger document tracking stock quantities and costs per product.
+
+```ts
+interface InventoryLedger {
+  uid: string;
+  uid_product: string;
+  type: ProductTypeType;
+  stock_method: InventoryStockMethodType;
+  quantity_held: number;
+  quantity_in_service: number;
+  quantity_out_of_service: number;
+  average_unit_cost: number;
+  total_cost_basis: number;
+  out_of_service_breakdown: typeLiteral;
+  store_breakdown: StoreBreakdownEntry[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `InventoryLedgerSchema`
+
+Zod schema for an InventoryLedger document.
+
+```ts
+const InventoryLedgerSchema: z.ZodType<InventoryLedger>;
+```
+
+## `@cfs/core/schemas/invite`
+
+### `AcceptInviteInput`
+
+Input schema for POST /auth/accept-invite.
+
+```ts
+const AcceptInviteInput: z.ZodType<AcceptInviteInputType>;
+```
+
+### `AcceptInviteInputType`
+
+Input to POST /auth/accept-invite. Name fields override the invite's
+captured values — each is optional; omitted means "keep the invite's value".
+
+```ts
+interface AcceptInviteInputType {
+  token: string;
+  password: string;
+}
+```
+
+### `CreateInviteInput`
+
+Input schema for POST /admin/users/invite.
+
+```ts
+const CreateInviteInput: z.ZodType<CreateInviteInputType>;
+```
+
+### `CreateInviteInputType`
+
+Input to POST /admin/users/invite.
+
+```ts
+interface CreateInviteInputType {
+  email: string;
+  roles: string[];
+}
+```
+
+### `Invite`
+
+Full Firestore document for a single-use invite.
+
+```ts
+interface Invite {
+  uid: string;
+  email: string;
+  name: string;
+  roles: string[];
+  invited_by: string;
+  used: boolean;
+  expires_at: FirestoreTimestampType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `InviteSchema`
+
+Zod schema for an Invite document.
+
+```ts
+const InviteSchema: z.ZodType<Invite>;
+```
+
+## `@cfs/core/schemas/invoice`
+
+### `CreateInvoiceInput`
+
+Input schema for creating an invoice.
+
+```ts
+const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType>;
+```
+
+### `CreateInvoiceInputType`
+
+Input schema for POST /invoices — create an invoice from orders.
+
+```ts
+interface CreateInvoiceInputType {
+  uid: string;
+  query_by_orders: string[];
+  organization: typeLiteral;
+  tax_profile: TaxProfileType;
+  items?: InvoiceItemInputType[];
+  destinations?: InvoiceDocDestinationType[];
+  date?: string;
+  due_date?: string;
+  subject?: string;
+  reference?: string | null;
+  external_notes?: string;
+  internal_notes?: string;
+}
+```
+
+### `Invoice`
+
+An invoice document in the invoices Firestore collection.
+
+```ts
+interface Invoice {
+  uid: string;
+  number: number;
+  status: InvoiceStatusType;
+  query_by_orders: string[];
+  number_orders: number[];
+  tax_profile: TaxProfileType;
+  date: string;
+  date_fs?: FirestoreTimestampType;
+  due_date?: string;
+  due_date_fs?: FirestoreTimestampType;
+  subject?: string | null;
+  reference?: string | null;
+  external_notes?: string | null;
+  internal_notes?: string | null;
+  organization: typeLiteral;
+  destinations: InvoiceDocDestinationType[];
+  items: InvoiceDocItemType[];
+  totals: InvoiceDocTotals;
+  payments: InvoicePayment[];
+  xero_id: string | null;
+  uploadcare_uuid: string | null;
+  pdf_generated_at: FirestoreTimestampType | null;
+  pdf_versions: Array<typeLiteral>;
+  crms_id?: number | null;
+  crms_opportunity_ids?: number[];
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `InvoiceDocDestination`
+
+```ts
+const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType>;
+```
+
+### `InvoiceDocDestinationType`
+
+Destination pair on an invoice — mirrors the order's `DocDestinationType`
+with a `uid_order` scope field so multi-order invoices can carry pairs
+from several orders and have them selectively synced per source order.
+Carries `dates` (rendered on the invoice) snapshotted from the source order.
+
+```ts
+interface InvoiceDocDestinationType {
+  uid_order: string;
+}
+```
+
+### `InvoiceDocItem`
+
+Zod schema for any invoice document item (line item, group, destination, or order divider).
+
+```ts
+const InvoiceDocItem: z.ZodType<InvoiceDocItemType>;
+```
+
+### `InvoiceDocItemPrice`
+
+Pricing breakdown for a single invoice line item.
+
+```ts
+interface InvoiceDocItemPrice {
+  base: number;
+  chargeable_days: number | null;
+  formula: PriceFormulaType;
+  subtotal: number;
+  subtotal_discounted: number;
+  discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  total: number;
+  discount_percent?: number;
+}
+```
+
+### `InvoiceDocItemType`
+
+Union of all item types stored in an invoice document.
+
+```ts
+type InvoiceDocItemType = InvoiceDocLineItem | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
+```
+
+### `InvoiceDocLineItem`
+
+A billable line item on an invoice.
+
+```ts
+interface InvoiceDocLineItem {
+  uid: string;
+  type: DocLineItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: InvoiceDocItemPrice;
+  path: string[];
+  coa_revenue?: COARevenueType | null;
+  tracking_category?: string | null;
+  xero_id?: string | null;
+  xero_tracking_option_id?: string | null;
+  crms_opportunity_id?: number | null;
+  crms_id?: number | string | null;
+}
+```
+
+### `InvoiceDocLineItemSchema`
+
+```ts
+const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem>;
+```
+
+### `InvoiceDocOrderItem`
+
+Zod schema for an order divider item.
+
+```ts
+const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType>;
+```
+
+### `InvoiceDocOrderItemType`
+
+Order divider item — scopes invoice items to a source order for multi-order invoices.
+
+```ts
+interface InvoiceDocOrderItemType {
+  uid: string;
+  type: "order";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `InvoiceDocTotals`
+
+Invoice-level totals with payment tracking.
+
+```ts
+interface InvoiceDocTotals {
+  subtotal: number;
+  subtotal_discounted: number;
+  discount_amount: number;
+  taxes: PriceModifierType[];
+  transaction_fees: PriceModifierType[];
+  total: number;
+  amount_paid: number;
+  amount_due: number;
+}
+```
+
+### `InvoiceItemInputPrice`
+
+Item price input — partial, server computes the rest.
+
+```ts
+interface InvoiceItemInputPrice {
+  base?: number;
+  chargeable_days?: number | null;
+  formula?: PriceFormulaType;
+  discount?: DiscountInputType | null;
+  taxes?: Array<typeLiteral>;
+}
+```
+
+### `InvoiceItemInputType`
+
+Input version of an invoice item (covers line items, groups, destinations, and order dividers).
+
+```ts
+interface InvoiceItemInputType {
+  uid: string;
+  type?: InvoiceItemTypeType;
+  name?: string;
+  description?: string;
+  quantity?: number;
+  price?: InvoiceItemInputPrice;
+  path?: string[];
+  uid_order?: string;
+  uid_delivery?: string;
+  uid_collection?: string;
+  coa_revenue?: COARevenueType | null;
+  tracking_category?: string | null;
+}
+```
+
+### `InvoiceItemTypeType`
+
+Possible invoice item types (input — includes structural dividers + order divider).
+
+```ts
+type InvoiceItemTypeType = indexedAccess;
+```
+
+### `InvoicePayment`
+
+A payment received against this invoice (synced from Xero).
+
+```ts
+interface InvoicePayment {
+  uid: string;
+  xero_payment_id: string;
+  date: string;
+  amount: number;
+  reference: string | null;
+  status: indexedAccess;
+  synced_at?: FirestoreTimestampType;
+}
+```
+
+### `InvoiceSchema`
+
+Zod schema for an Invoice document.
+
+```ts
+const InvoiceSchema: z.ZodType<Invoice>;
+```
+
+### `InvoiceStatusType`
+
+Possible invoice statuses.
+
+```ts
+type InvoiceStatusType = indexedAccess;
+```
+
+### `UpdateInvoiceInput`
+
+Input schema for updating an invoice.
+
+```ts
+const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType>;
+```
+
+### `UpdateInvoiceInputType`
+
+Input schema for PUT /invoices/:uid — partial update.
+
+```ts
+interface UpdateInvoiceInputType {
+  status?: InvoiceStatusType;
+  items?: InvoiceItemInputType[];
+  destinations?: InvoiceDocDestinationType[];
+  date?: string;
+  due_date?: string;
+  subject?: string;
+  reference?: string | null;
+  external_notes?: string;
+  internal_notes?: string;
+  version: number;
+}
+```
+
+### `UpdatePaymentInput`
+
+Input schema for updating a single payment on an invoice.
+
+```ts
+const UpdatePaymentInput: z.ZodType<UpdatePaymentInputType>;
+```
+
+### `UpdatePaymentInputType`
+
+Input schema for PATCH /invoices/{uid}/payments/{payment_uid} — partial update of a single payment.
+
+```ts
+interface UpdatePaymentInputType {
+  date?: string;
+  amount?: number;
+  reference?: string | null;
+  status?: indexedAccess;
+  version: number;
+}
+```
+
+### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem`
+
+Type guard that narrows an invoice doc item to a billable line item (excludes structural dividers).
+
+## `@cfs/core/schemas/list`
+
+### `CreateListInput`
+
+Zod schema for creating a list.
+
+```ts
+const CreateListInput: z.ZodType<CreateListInputType>;
+```
+
+### `CreateListInputType`
+
+Input for POST /lists.
+
+```ts
+interface CreateListInputType {
+  name: string;
+  description?: string;
+  icon?: string | null;
+  color?: string | null;
+  position?: number;
+  locked?: ListLockKey[];
+}
+```
+
+### `List`
+
+List Firestore document shape.
+
+```ts
+interface List {
+  uid: string;
+  name: string;
+  description: string;
+  icon: string | null;
+  color: string | null;
+  position: number;
+  locked: ListLockKey[];
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ListLockKey`
+
+Enum of lockable list surfaces. Mirrors the `CardLockKey` shape: presence in
+`List.locked[]` blocks the corresponding action. Defaults to `[]`.
+
+- `"list"` — sentinel: blocks DELETE of this list doc
+- `"create_card"` — blocks `POST /cards` with `uid_list` = this list
+- `"update_card"` — blocks `PATCH /cards/:uid` for cards on this list
+- `"delete_card"` — blocks `DELETE /cards/:uid` for cards on this list
+
+Used by system-managed lists (e.g. `field-service`, `in-store`) whose cards
+are fanned out from order events and shouldn't be created or deleted by
+users — the API still updates them, and users can still edit non-locked
+fields per `Card.locked[]`.
+
+```ts
+type ListLockKey = indexedAccess;
+```
+
+### `ListLockKeyEnum`
+
+Zod schema for ListLockKey.
+
+```ts
+const ListLockKeyEnum: z.ZodType<ListLockKey>;
+```
+
+### `ListSchema`
+
+Zod schema for a list Firestore document.
+
+```ts
+const ListSchema: z.ZodType<List>;
+```
+
+### `UpdateListInput`
+
+Zod schema for updating a list.
+
+```ts
+const UpdateListInput: z.ZodType<UpdateListInputType>;
+```
+
+### `UpdateListInputType`
+
+Input for PATCH /lists/:uid — all fields optional except version.
+
+```ts
+interface UpdateListInputType {
+  name?: string;
+  description?: string;
+  icon?: string | null;
+  color?: string | null;
+  position?: number;
+  locked?: ListLockKey[];
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/location`
+
+### `CreateLocationInput`
+
+Input schema for creating a location.
+
+```ts
+const CreateLocationInput: z.ZodType<CreateLocationInputType>;
+```
+
+### `CreateLocationInputType`
+
+Input type for creating a location.
+
+```ts
+interface CreateLocationInputType {
+  uid: string;
+  uid_store: string;
+  name: string;
+  uid_location_type?: string | null;
+}
+```
+
+### `Location`
+
+A location document in Firestore.
+
+```ts
+interface Location {
+  uid: string;
+  uid_store: string;
+  name: string;
+  default: boolean;
+  uid_location_type: string | null;
+  product_capacities: LocationProductCapacity[];
+  query_by_product_capacities: string[];
+  active: boolean;
+  products: LocationProduct[];
+  query_by_products: string[];
+  version: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `LocationProduct`
+
+A product assigned to a location.
+
+```ts
+interface LocationProduct {
+  uid: string;
+  name: string;
+  quantity: number;
+  default: boolean;
+}
+```
+
+### `LocationProductCapacity`
+
+Product capacity constraint for a location.
+
+```ts
+interface LocationProductCapacity {
+  uid: string;
+  max: number | null;
+  max_default: number | null;
+}
+```
+
+### `LocationSchema`
+
+Zod schema for Location.
+
+```ts
+const LocationSchema: z.ZodType<Location>;
+```
+
+### `UpdateLocationInput`
+
+Input schema for updating a location.
+
+```ts
+const UpdateLocationInput: z.ZodType<UpdateLocationInputType>;
+```
+
+### `UpdateLocationInputType`
+
+Input type for updating a location.
+
+```ts
+interface UpdateLocationInputType {
+  uid: string;
+  name?: string;
+  default?: boolean;
+  active?: boolean;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/location-type`
+
+### `CreateLocationTypeInput`
+
+Input schema for creating a location type.
+
+```ts
+const CreateLocationTypeInput: z.ZodType<CreateLocationTypeInputType>;
+```
+
+### `CreateLocationTypeInputType`
+
+Input type for creating a location type.
+
+```ts
+interface CreateLocationTypeInputType {
+  name: string;
+  product_capacities?: Record<string, typeLiteral>;
+  dimensions?: typeLiteral | null;
+}
+```
+
+### `LocationType`
+
+A location type document in Firestore.
+
+```ts
+interface LocationType {
+  uid: string;
+  name: string;
+  product_capacities: LocationTypeProductCapacity[];
+  query_by_product_capacities?: string[];
+  dimensions?: LocationTypeDimensions | null;
+  version: number;
+  active: boolean;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `LocationTypeDimensions`
+
+Physical dimensions for a location type.
+
+```ts
+interface LocationTypeDimensions {
+  width?: number;
+  depth?: number;
+  height?: number;
+  weight_capacity?: number;
+}
+```
+
+### `LocationTypeProductCapacity`
+
+Product capacity constraint for a location type.
+
+```ts
+interface LocationTypeProductCapacity {
+  uid: string;
+  max: number | null;
+}
+```
+
+### `LocationTypeSchema`
+
+Zod schema for LocationType.
+
+```ts
+const LocationTypeSchema: z.ZodType<LocationType>;
+```
+
+### `UpdateLocationTypeInput`
+
+Input schema for updating a location type.
+
+```ts
+const UpdateLocationTypeInput: z.ZodType<UpdateLocationTypeInputType>;
+```
+
+### `UpdateLocationTypeInputType`
+
+Input type for updating a location type.
+
+```ts
+interface UpdateLocationTypeInputType {
+  uid: string;
+  name?: string;
+  product_capacities?: Record<string, typeLiteral>;
+  dimensions?: typeLiteral | null;
+  active?: boolean;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/order`
+
+### `ConsolidatedItemType`
+
+A consolidated line item — aggregated quantity and price for display.
+Used by consolidateItems() in utilities and the manager app.
+
+```ts
+interface ConsolidatedItemType {
+  uid: string;
+  name: string;
+  type: string;
+  quantity: number;
+  total_price: number;
+  unit_price: number;
+  stock_method: string;
+}
+```
+
+### `CreateOrderInput`
+
+Input schema for creating an order.
+
+```ts
+const CreateOrderInput: z.ZodType<CreateOrderInputType>;
+```
+
+### `CreateOrderInputType`
+
+Input schema for POST /orders — what the endpoint accepts.
+
+```ts
+interface CreateOrderInputType {
+  uid: string;
+  organization: typeLiteral;
+  status: OrderStatusType;
+  tax_profile: TaxProfileType;
+  destinations: DestinationType[];
+  items?: OrderItemType[];
+  subject?: string;
+  reference?: string | null;
+}
+```
+
+### `Destination`
+
+Zod schema for a destination pair.
+
+```ts
+const Destination: z.ZodType<DestinationType>;
+```
+
+### `DestinationContact`
+
+Zod schema for destination contact reference.
+
+```ts
+const DestinationContact: z.ZodType<DestinationContactType>;
+```
+
+### `DestinationContactType`
+
+Contact reference embedded in a destination endpoint.
+When present (not null), uid and first_name are required. `name` is the
+server-derived display string (see `deriveName` in common.ts) — populated
+by api-cloudrun on every write so consumers don't re-derive client-side.
+
+```ts
+interface DestinationContactType {
+  uid: string;
+  name: string;
+  phones?: string[];
+}
+```
+
+### `DestinationEndpoint`
+
+Zod schema for a destination endpoint.
+
+```ts
+const DestinationEndpoint: z.ZodType<DestinationEndpointType>;
+```
+
+### `DestinationEndpointType`
+
+A single destination endpoint (delivery or collection).
+
+```ts
+interface DestinationEndpointType {
+  uid?: string | null;
+  address?: AddressType | null;
+  instructions?: string | null;
+  contact?: DestinationContactType | null;
+}
+```
+
+### `DestinationType`
+
+A destination pair — delivery and collection endpoints.
+
+`customer_collecting` is true when the customer picks up the items at our
+warehouse for the delivery side of this pair. `customer_returning` is true
+when the customer drops the items off at our warehouse for the collection
+side. Both default to false (we deliver / we collect).
+
+```ts
+interface DestinationType {
+  dates: OrderDatesType;
+  delivery: DestinationEndpointType;
+  collection: DestinationEndpointType;
+  customer_collecting?: boolean;
+  customer_returning?: boolean;
+}
+```
+
+### `Discount`
+
+Zod schema for an item discount.
+
+```ts
+const Discount: z.ZodType<DiscountType>;
+```
+
+### `DiscountInput`
+
+Zod schema for a discount input (without computed amount).
+
+```ts
+const DiscountInput: z.ZodType<DiscountInputType>;
+```
+
+### `DiscountInputType`
+
+Discount input — rate and type only. Amount is computed by calculateItemPrice.
+
+```ts
+interface DiscountInputType {
+  rate: number;
+  type: RateType;
+}
+```
+
+### `DiscountType`
+
+Discount applied to an item price. Nullable — null means no discount.
+rate is per-unit for flat discounts (rate × quantity × days_factor = amount).
+
+```ts
+interface DiscountType {
+  rate: number;
+  type: RateType;
+  amount: number;
+}
+```
+
+### `DocDestination`
+
+Zod schema for a document-level destination pair.
+
+```ts
+const DocDestination: z.ZodType<DocDestinationType>;
+```
+
+### `DocDestinationContact`
+
+Zod schema for destination contact reference (document version).
+
+```ts
+const DocDestinationContact: z.ZodType<DocDestinationContactType>;
+```
+
+### `DocDestinationContactType`
+
+Contact reference in a destination endpoint (document schema — uid & first_name required).
+
+```ts
+interface DocDestinationContactType {
+  uid: string;
+  name: string;
+  phones?: string[];
+}
+```
+
+### `DocDestinationEndpoint`
+
+Zod schema for a destination endpoint (document version).
+
+```ts
+const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType>;
+```
+
+### `DocDestinationEndpointType`
+
+Destination endpoint in the full document (uid is nullable, contact uses doc version).
+
+```ts
+interface DocDestinationEndpointType {
+  uid: string | null;
+  address: AddressType | null;
+  instructions: string | null;
+  contact: DocDestinationContactType | null;
+}
+```
+
+### `DocDestinationType`
+
+Document-level destination pair. See `DestinationType` for flag semantics.
+
+```ts
+interface DocDestinationType {
+  dates: OrderDocDatesType;
+  delivery: DocDestinationEndpointType;
+  collection: DocDestinationEndpointType;
+  customer_collecting: boolean;
+  customer_returning: boolean;
+}
+```
+
+### `GroupPathType`
+
+Path context for an item — which destination and group it belongs to.
+Used by getGroupPath() in utilities and consumed by the manager app.
+
+```ts
+interface GroupPathType {
+  destination: string | null;
+  group: string | null;
+  product: string | null;
+}
+```
+
+### `ItemPrice`
+
+Zod schema for item price breakdown (input).
+
+```ts
+const ItemPrice: z.ZodType<ItemPriceType>;
+```
+
+### `ItemPriceType`
+
+Price breakdown for an order item (input — client sends partial data, server computes the rest).
+
+```ts
+interface ItemPriceType {
+  base?: number;
+  replacement?: number | null;
+  chargeable_days?: number | null;
+  formula?: PriceFormulaType;
+  subtotal?: number;
+  discount?: DiscountInputType | null;
+  taxes?: Array<typeLiteral>;
+  total?: number;
+}
+```
+
+### `ORDER_COMPUTED_STATUSES`
+
+Statuses derived from booking state — set only by the API's booking write
+path (reserved → active when a booking moves quantity into out;
+active → complete when every quantity has reached a terminal state).
+
+```ts
+const ORDER_COMPUTED_STATUSES: "active" | "complete"[];
+```
+
+### `ORDER_STATUSES`
+
+```ts
+const ORDER_STATUSES: "draft" | "quoted" | "reserved" | "active" | "complete" | "canceled"[];
+```
+
+### `ORDER_USER_STATUSES`
+
+Statuses an operator may set directly via UpdateOrderInput.status.
+`active` and `complete` are computed by the booking workflow and are
+never accepted from a manual write.
+
+```ts
+const ORDER_USER_STATUSES: "draft" | "quoted" | "reserved" | "canceled"[];
+```
+
+### `Order`
+
+Full order document schema (Firestore document shape).
+Used for validation before writing to Firestore.
+
+```ts
+interface Order {
+  uid: string;
+  number: number;
+  status: OrderStatusType;
+  organization: typeLiteral;
+  destinations: DocDestinationType[];
+  items: OrderDocItemType[];
+  tax_profile: TaxProfileType;
+  totals: OrderDocTotalsType;
+  invoices: Array<typeLiteral>;
+  query_by_invoices: string[];
+  query_by_items: string[];
+  query_by_contacts: string[];
+  query_by_dates: string[];
+  bookings_breakdown: typeLiteral;
+  crms_id?: number | null;
+  crms_status?: string;
+  subject?: string;
+  reference?: string | null;
+  xero_id?: string | null;
+  defaultThreadId?: string;
+  version: number;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `OrderComputedStatusType`
+
+```ts
+type OrderComputedStatusType = indexedAccess;
+```
+
+### `OrderDates`
+
+Zod schema for order dates.
+
+```ts
+const OrderDates: z.ZodType<OrderDatesType>;
+```
+
+### `OrderDatesType`
+
+Order dates — all six date boundaries as ISO datetime strings with offset,
+or null when the boundary is unset.
+
+```ts
+interface OrderDatesType {
+  delivery_start: string | null;
+  delivery_end: string | null;
+  collection_start: string | null;
+  collection_end: string | null;
+  charge_start: string | null;
+  charge_end: string | null;
+}
+```
+
+### `OrderDocDates`
+
+Zod schema for order dates with Firestore timestamp companions.
+
+```ts
+const OrderDocDates: z.ZodType<OrderDocDatesType>;
+```
+
+### `OrderDocDatesType`
+
+Order dates with Firestore timestamp companions — the persisted, per-destination
+date set. Each destination on an order/fulfillment/invoice owns one of these;
+there is no order-level rollup (derive on demand via deriveOrderDateEnvelope).
+
+```ts
+interface OrderDocDatesType {
+  delivery_start: string | null;
+  delivery_start_fs: FirestoreTimestampType | null;
+  delivery_end: string | null;
+  delivery_end_fs: FirestoreTimestampType | null;
+  collection_start: string | null;
+  collection_start_fs: FirestoreTimestampType | null;
+  collection_end: string | null;
+  collection_end_fs: FirestoreTimestampType | null;
+  charge_start: string | null;
+  charge_start_fs: FirestoreTimestampType | null;
+  charge_end: string | null;
+  charge_end_fs: FirestoreTimestampType | null;
+  days_active: number | null;
+  days_charged: number | null;
+}
+```
+
+### `OrderDocDestinationItem`
+
+Destination divider in items array.
+
+```ts
+const OrderDocDestinationItem: z.ZodType<OrderDocDestinationItemType>;
+```
+
+### `OrderDocDestinationItemType`
+
+Destination divider item in the order document items array.
+
+```ts
+interface OrderDocDestinationItemType {
+  uid: string;
+  type: "destination";
+  name: string;
+  path: string[];
+  uid_delivery: string | null;
+  uid_collection: string | null;
+  description: string;
+}
+```
+
+### `OrderDocGroupItem`
+
+```ts
+const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType>;
+```
+
+### `OrderDocGroupItemType`
+
+Group divider in items array.
+
+```ts
+interface OrderDocGroupItemType {
+  uid: string;
+  type: "group";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `OrderDocItem`
+
+Union of all item types in the document.
+
+```ts
+const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType>;
+```
+
+### `OrderDocItemPrice`
+
+```ts
+const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType>;
+```
+
+### `OrderDocItemPriceType`
+
+Line item price in the full order document (all fields required after server compute).
+subtotal = pre-discount (base × qty × days_factor).
+subtotal_discounted = post-discount.
+total = subtotal_discounted + sum(taxes[].amount).
+
+```ts
+interface OrderDocItemPriceType {
+  base: number;
+  replacement?: number | null;
+  chargeable_days: number | null;
+  formula: PriceFormulaType;
+  subtotal: number;
+  subtotal_discounted: number;
+  discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  total: number;
+}
+```
+
+### `OrderDocItemType`
+
+Union of all item types stored in the order document.
+
+```ts
+type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType;
+```
+
+### `OrderDocLineItem`
+
+```ts
+const OrderDocLineItem: z.ZodType<OrderDocLineItemType>;
+```
+
+### `OrderDocLineItemType`
+
+Line item in the full order document.
+
+```ts
+interface OrderDocLineItemType {
+  uid: string;
+  type: DocLineItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  price?: OrderDocItemPriceType;
+  stock_method?: StockMethodType;
+  order_number?: number;
+  uid_order?: string;
+  path: string[];
+  inclusion_type?: "default" | "mandatory" | "optional" | null;
+  zero_priced?: boolean | null;
+  crms_id?: number | null;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
+}
+```
+
+### `OrderDocTotalsType`
+
+Order totals.
+
+```ts
+interface OrderDocTotalsType {
+  discount_amount: number;
+  subtotal: number;
+  subtotal_discounted: number;
+  taxes: PriceModifierType[];
+  transaction_fees: PriceModifierType[];
+  total: number;
+  replacement_total: number;
+}
+```
+
+### `OrderDocTransactionFeeItem`
+
+Zod schema for a transaction fee line item in the order document.
+
+```ts
+const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType>;
+```
+
+### `OrderDocTransactionFeeItemType`
+
+Transaction fee line item in the full order document.
+
+```ts
+interface OrderDocTransactionFeeItemType {
+  uid: string;
+  type: "transaction_fee";
+  name: string;
+  path: string[];
+  description: string;
+  quantity: number;
+  price: PriceModifierType;
+  order_number?: number;
+  uid_order?: string;
+}
+```
+
+### `OrderItem`
+
+Zod schema for an individual order item (input).
+
+```ts
+const OrderItem: z.ZodType<OrderItemType>;
+```
+
+### `OrderItemType`
+
+An individual order item (rental, replacement, sale, service, surcharge, group header, or destination).
+
+```ts
+interface OrderItemType {
+  uid: string;
+  type: DocItemTypeType;
+  name?: string;
+  description?: string;
+  quantity?: number;
+  price?: ItemPriceType;
+  stock_method?: StockMethodType;
+  path: string[];
+  inclusion_type?: InclusionTypeType | null;
+  zero_priced?: boolean | null;
+  uid_delivery?: string;
+  uid_collection?: string;
+  order_number?: number;
+  uid_order?: string;
+}
+```
+
+### `OrderSchema`
+
+Zod schema for the full order Firestore document.
+
+```ts
+const OrderSchema: z.ZodType<Order>;
+```
+
+### `OrderStatusType`
+
+```ts
+type OrderStatusType = indexedAccess;
+```
+
+### `OrderUserStatusType`
+
+```ts
+type OrderUserStatusType = indexedAccess;
+```
+
+### `PriceModifier`
+
+Zod schema for a rate-based price modifier (tax or transaction fee).
+
+```ts
+const PriceModifier: z.ZodType<PriceModifierType>;
+```
+
+### `PriceModifierType`
+
+A rate-based charge applied to an item or order (tax or transaction fee).
+uid references a tax doc (for taxes) or a product doc (for transaction fees).
+
+```ts
+interface PriceModifierType {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  amount: number;
+}
+```
+
+### `TaxRef`
+
+Zod schema for a denormalized tax snapshot without computed amount.
+
+```ts
+const TaxRef: z.ZodType<TaxRefType>;
+```
+
+### `TaxRefType`
+
+Denormalized tax snapshot without computed amount — used on product catalog entries.
+PriceModifier extends this shape with `amount` for order-time computation.
+
+```ts
+interface TaxRefType {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+}
+```
+
+### `UpdateOrderInput`
+
+Input schema for updating an order.
+
+```ts
+const UpdateOrderInput: z.ZodType<UpdateOrderInputType>;
+```
+
+### `UpdateOrderInputType`
+
+Input schema for PUT /orders/:uid — partial update.
+
+```ts
+interface UpdateOrderInputType {
+  uid?: string;
+  organization?: typeLiteral;
+  status?: OrderStatusType;
+  tax_profile?: TaxProfileType;
+  destinations?: DestinationType[];
+  items?: OrderItemType[];
+  subject?: string;
+  reference?: string | null;
+  version: number;
+}
+```
+
+### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
+
+The statuses an operator can move to from the given current status.
+Returns an empty list for computed statuses (`active`, `complete`) and
+filters the current status out of the user-settable set.
+
+### `isLineItem(item: OrderDocItemType): item is OrderDocLineItemType`
+
+Type guard that narrows an order doc item to a line item (excludes destination/group dividers).
+
+### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
+
+Server-side gate for an order status write. `source: "manual"` rejects
+writes that move into a computed status or out of a computed status into
+anything other than the same value (no-op). `source: "propagation"`
+trusts the booking write path that sets `active` or `complete`.
+
+## `@cfs/core/schemas/fulfillment`
+
+### `Fulfillment`
+
+Sanitized order document for the fulfillment client view.
+Mirrors the order by uid — one fulfillment doc per order.
+
+```ts
+interface Fulfillment {
+  uid: string;
+  number: number;
+  status: FulfillmentOrderStatusType;
+  organization: typeLiteral;
+  destinations: DocDestinationType[];
+  items: FulfillmentItemType[];
+  subject: string;
+  reference: string | null;
+  query_by_items: string[];
+  query_by_contacts: string[];
+  query_by_dates: string[];
+  version: number;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `FulfillmentDestinationItem`
+
+```ts
+const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemType>;
+```
+
+### `FulfillmentDestinationItemType`
+
+Destination divider in the fulfillment items array.
+
+```ts
+interface FulfillmentDestinationItemType {
+  uid: string;
+  type: "destination";
+  name: string;
+  path: string[];
+  uid_delivery: string | null;
+  uid_collection: string | null;
+  description: string;
+}
+```
+
+### `FulfillmentGroupItem`
+
+```ts
+const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType>;
+```
+
+### `FulfillmentGroupItemType`
+
+Group divider in the fulfillment items array.
+
+```ts
+interface FulfillmentGroupItemType {
+  uid: string;
+  type: "group";
+  name: string;
+  path: string[];
+  description: string;
+}
+```
+
+### `FulfillmentItem`
+
+```ts
+const FulfillmentItem: z.ZodType<FulfillmentItemType>;
+```
+
+### `FulfillmentItemType`
+
+Union of all item types in the fulfillment order view.
+
+```ts
+type FulfillmentItemType = FulfillmentLineItemType | FulfillmentDestinationItemType | FulfillmentGroupItemType;
+```
+
+### `FulfillmentLineItem`
+
+```ts
+const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType>;
+```
+
+### `FulfillmentLineItemType`
+
+Line item in the fulfillment order view — no price, no financial flags.
+
+```ts
+interface FulfillmentLineItemType {
+  uid: string;
+  type: FulfillmentLineItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  stock_method?: StockMethodType;
+  path: string[];
+  order_number?: number;
+  uid_order?: string;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
+  quantity_order?: number;
+  path_substituted_for?: string[];
+}
+```
+
+### `FulfillmentSchema`
+
+```ts
+const FulfillmentSchema: z.ZodType<Fulfillment>;
+```
+
+## `@cfs/core/schemas/organization`
+
+### `CreateOrganizationInput`
+
+Input schema for creating an organization.
+
+```ts
+const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType>;
+```
+
+### `CreateOrganizationInputType`
+
+Input schema for POST /organizations.
+crms_id and xero_id are obtained from external APIs — not in input.
+
+```ts
+interface CreateOrganizationInputType {
+  uid: string;
+  name: string;
+  tax_profile: TaxProfileType;
+  billing_address: AddressType | null;
+  contacts?: OrganizationContactType[];
+  newContacts?: NewContactInputType[] | null;
+  emails?: string[];
+  phones?: string[];
+}
+```
+
+### `NewContactInput`
+
+Zod schema for new contact data submitted inline with an organization.
+
+```ts
+const NewContactInput: z.ZodType<NewContactInputType>;
+```
+
+### `NewContactInputType`
+
+New contact data submitted inline when creating/updating an organization.
+
+```ts
+interface NewContactInputType {
+  uid: string;
+  emails?: string[];
+  phones?: string[];
+}
+```
+
+### `Organization`
+
+Full organization document schema (Firestore document shape).
+
+```ts
+interface Organization {
+  uid: string;
+  name: string;
+  crms_id: number;
+  xero_id: string | null;
+  tax_profile: TaxProfileType;
+  description?: string;
+  emails: string[];
+  phones: string[];
+  billing_address: AddressType | null;
+  contacts: OrganizationContactType[];
+  query_by_contacts: string[];
+  last_order?: FirestoreTimestampType | null;
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `OrganizationContact`
+
+Zod schema for a contact reference embedded in an organization.
+
+```ts
+const OrganizationContact: z.ZodType<OrganizationContactType>;
+```
+
+### `OrganizationContactType`
+
+Contact reference embedded in an organization document.
+`name` is the server-derived display string (see `deriveName` in common.ts).
+
+```ts
+interface OrganizationContactType {
+  uid: string;
+  name: string;
+  roles: string[];
+}
+```
+
+### `OrganizationSchema`
+
+Zod schema for a full organization Firestore document.
+
+```ts
+const OrganizationSchema: z.ZodType<Organization>;
+```
+
+### `UpdateOrganizationInput`
+
+Input schema for updating an organization.
+
+```ts
+const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType>;
+```
+
+### `UpdateOrganizationInputType`
+
+Input schema for PUT /organizations/:uid — partial update.
+
+```ts
+interface UpdateOrganizationInputType {
+  uid?: string;
+  name?: string;
+  tax_profile?: TaxProfileType;
+  description?: string;
+  billing_address?: AddressType | null;
+  contacts?: OrganizationContactType[];
+  newContacts?: NewContactInputType[] | null;
+  emails?: string[];
+  phones?: string[];
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/out-of-service`
+
+### `CreateOutOfServiceInput`
+
+Zod schema for CreateOutOfServiceInput.
+
+```ts
+const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType>;
+```
+
+### `CreateOutOfServiceInputType`
+
+Input for creating an out-of-service record.
+
+```ts
+interface CreateOutOfServiceInputType {
+  uid_product: string;
+  reason: OOSReasonType;
+  quantity: number;
+  dates: typeLiteral;
+  sources?: DocSourceType[];
+  stores?: OOSStore[];
+  crms_id?: number | null;
+  crms_stock_level_id?: number | null;
+}
+```
+
+### `OOSBreakdown`
+
+Per-phase quantity breakdown — sum equals top-level `quantity`.
+
+```ts
+interface OOSBreakdown {
+  draft: number;
+  planned: number;
+  active: number;
+  blocked: number;
+  written_off: number;
+  returned_to_service: number;
+}
+```
+
+### `OOSBreakdownSchema`
+
+Zod schema for OOSBreakdown.
+
+```ts
+const OOSBreakdownSchema: z.ZodType<OOSBreakdown>;
+```
+
+### `OOSDates`
+
+Date object — booking-style start/end with paired Firestore timestamps.
+
+`start` is nullable for `draft` records (operator composing) and `planned`
+records (scheduled maintenance with no pinned start instant). Once the
+record reaches `active`, `start` should be set (writer enforces).
+
+```ts
+interface OOSDates {
+  start: string | null;
+  start_fs: FirestoreTimestampType | null;
+  end: string | null;
+  end_fs: FirestoreTimestampType | null;
+}
+```
+
+### `OOSStatusEnum`
+
+Zod schema for OOSStatusType.
+
+```ts
+const OOSStatusEnum: z.ZodType<OOSStatusType>;
+```
+
+### `OOSStatusType`
+
+Allowed out-of-service statuses. Server-derived from breakdown + number + canceled_at; only "canceled" is operator-set.
+
+```ts
+type OOSStatusType = indexedAccess;
+```
+
+### `OOSStore`
+
+A store affected by an out-of-service record.
+
+```ts
+interface OOSStore {
+  uid_store: string;
+  name: string;
+  default: boolean;
+  quantity: number;
+  locations: OOSStoreLocation[];
+}
+```
+
+### `OOSStoreLocation`
+
+A location within a store affected by an out-of-service record.
+
+```ts
+interface OOSStoreLocation {
+  uid_location: string;
+  name: string;
+  quantity: number;
+  transactionQuantity: number;
+  default: boolean;
+  max?: number | null;
+}
+```
+
+### `OOSTransaction`
+
+A transaction entry within an out-of-service record.
+
+```ts
+interface OOSTransaction {
+  crms_id?: number | null;
+  crms_quarantine_id?: number | null;
+  crms_stock_level_id?: number | null;
+  crms_stock_level_uid?: string;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  quantity: number;
+  source: DocSourceType;
+  type: OOSTransactionTypeType;
+}
+```
+
+### `OOSTransactionTypeEnum`
+
+Zod schema for OOSTransactionTypeType.
+
+```ts
+const OOSTransactionTypeEnum: z.ZodType<OOSTransactionTypeType>;
+```
+
+### `OOSTransactionTypeType`
+
+Allowed types for an `OOSTransaction`. Terminal types match the breakdown
+keys 1:1 — a transaction with `type === "written_off"` and `quantity === N`
+corresponds to `breakdown.written_off += N`.
+
+```ts
+type OOSTransactionTypeType = indexedAccess;
+```
+
+### `OutOfService`
+
+An out-of-service record tracking inventory removed from active service.
+
+```ts
+interface OutOfService {
+  uid: string;
+  uid_product: string;
+  number: number;
+  reason: OOSReasonType;
+  status: OOSStatusType;
+  quantity: number;
+  breakdown: OOSBreakdown;
+  canceled_at: FirestoreTimestampType | null;
+  organization: typeLiteral | null;
+  dates: OOSDates;
+  sources: DocSourceType[];
+  query_by_sources: string[];
+  crms_id?: number | null;
+  crms_stock_level_id?: number | null;
+  stores: OOSStore[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  transactions?: OOSTransaction[];
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `OutOfServiceSchema`
+
+Zod schema for OutOfService.
+
+```ts
+const OutOfServiceSchema: z.ZodType<OutOfService>;
+```
+
+### `UpdateOutOfServiceInput`
+
+Zod schema for UpdateOutOfServiceInput.
+
+```ts
+const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType>;
+```
+
+### `UpdateOutOfServiceInputType`
+
+Input for updating an out-of-service record.
+
+`breakdown` (when supplied) must be the complete next state — the writer
+enforces `sum(breakdown) === quantity`. `status` is server-derived; only
+`"canceled"` is honored from the client and translated into
+`canceled_at = now()`.
+
+`dates.start` is honored on update only when the record has no sources
+(`sources.length === 0` — manually created / ad-hoc). Source-bound records
+(booking PUT or order check-in lineage) reject `dates.start` updates with a
+400 — the start there reflects a real ledger event recorded by the upstream
+writer, and operator-side drift would desync the OOS from the source's
+audit trail.
+
+```ts
+interface UpdateOutOfServiceInputType {
+  status?: OOSStatusType;
+  breakdown?: OOSBreakdown;
+  dates?: typeLiteral;
+  stores?: OOSStore[];
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/password-reset`
+
+### `PasswordReset`
+
+Full Firestore document for a single-use password reset token.
+
+```ts
+interface PasswordReset {
+  user_id: string;
+  email: string;
+  expiresAt: FirestoreTimestampType;
+  created_at: number;
+}
+```
+
+### `PasswordResetSchema`
+
+Zod schema for PasswordReset.
+
+```ts
+const PasswordResetSchema: z.ZodType<PasswordReset>;
+```
+
+## `@cfs/core/schemas/product`
+
+### `ComponentSchema`
+
+```ts
+const ComponentSchema: z.ZodType<ProductComponent>;
+```
+
+### `CreateProductInput`
+
+Input schema for creating a product.
+
+```ts
+const CreateProductInput: z.ZodType<CreateProductInputType>;
+```
+
+### `CreateProductInputType`
+
+Input type for creating a product.
+
+```ts
+interface CreateProductInputType {
+  uid: string;
+  name: string;
+  active: boolean;
+  type: ProductTypeType;
+  stock_method: StockMethodType;
+  component_only: boolean;
+  description: string;
+  eligible_delivery: boolean;
+  eligible_in_store_pickup: boolean;
+  eligible_shipping_ground: boolean;
+  eligible_shipping_air: boolean;
+  price: typeLiteral;
+  shipping?: typeLiteral;
+  alternates?: UidNameRefType[];
+  components?: ProductComponent[];
+  component_of?: ProductComponent[];
+  tags?: UidNameRefType[];
+  tracking_category_name?: string;
+  uid_tracking_category?: string | null;
+  uid_linked_rental?: string | null;
+  uid_linked_replacement?: string | null;
+  webshop: typeLiteral;
+  transaction?: typeLiteral;
+}
+```
+
+### `Product`
+
+A product document in the products Firestore collection.
+
+```ts
+interface Product {
+  uid: string;
+  name: string;
+  active: boolean;
+  type: ProductTypeType;
+  stock_method: StockMethodType;
+  component_only: boolean;
+  crms_id: number | null;
+  crms_rate_id?: number | null;
+  crms_stock_level_ids?: Record<string, number>;
+  crms_linked_rental_id?: number | null;
+  crms_linked_replacement_id?: number | null;
+  crms_linked_replacement_rate_id?: number | null;
+  description?: string;
+  eligible_delivery: boolean;
+  eligible_in_store_pickup: boolean;
+  eligible_shipping_ground: boolean;
+  eligible_shipping_air: boolean;
+  price: ProductPrice;
+  shipping?: ProductShipping;
+  alternates: ProductAlternate[];
+  components: ProductComponent[];
+  component_of: ProductComponent[];
+  tags: UidNameRefType[];
+  query_by_tags?: string[];
+  query_by_components?: string[];
+  query_by_component_of?: string[];
+  query_by_alternates?: string[];
+  tracking_category_name?: string;
+  uid_linked_rental?: string | null;
+  uid_linked_replacement?: string | null;
+  uid_tracking_category?: string | null;
+  webshop: ProductWebshop;
+  images?: string[];
+  xero_id: string | null;
+  xero_tracking_option_id: string | null;
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ProductAlternate`
+
+An alternate product reference.
+
+```ts
+interface ProductAlternate {
+  uid: string;
+  name: string;
+}
+```
+
+### `ProductComponent`
+
+A component product within a parent product.
+
+```ts
+interface ProductComponent {
+  uid: string;
+  path: string[];
+  name: string;
+  active?: boolean;
+  type: ComponentTypeType;
+  stock_method: StockMethodType;
+  crms_id: number | null;
+  crms_accessory_id?: number | null;
+  description?: string;
+  inclusion_type?: InclusionTypeType;
+  quantity: number;
+  zero_priced?: boolean;
+  price: typeLiteral;
+}
+```
+
+### `ProductPrice`
+
+Pricing details for a product.
+
+```ts
+interface ProductPrice {
+  base: number;
+  replacement?: number | null;
+  coa_revenue?: COARevenueType;
+  taxes: TaxRefType[];
+  formula: PriceFormulaType;
+  discountable: boolean;
+}
+```
+
+### `ProductSchema`
+
+Zod schema for a Product document.
+
+```ts
+const ProductSchema: z.ZodType<Product>;
+```
+
+### `ProductShipping`
+
+Shipping dimensions and hazard classification for a product.
+
+```ts
+interface ProductShipping {
+  weight: number;
+  height: number;
+  width: number;
+  length: number;
+  air_hazardous: boolean;
+  air_un: number | null;
+}
+```
+
+### `ProductWebshop`
+
+Webshop availability and description for a product.
+
+```ts
+interface ProductWebshop {
+  available: boolean;
+  description?: string | null;
+}
+```
+
+### `UpdateProductInput`
+
+Input schema for updating a product.
+
+```ts
+const UpdateProductInput: z.ZodType<UpdateProductInputType>;
+```
+
+### `UpdateProductInputType`
+
+Input type for updating a product.
+
+```ts
+interface UpdateProductInputType {
+  uid: string;
+  name?: string;
+  active?: boolean;
+  type?: ProductTypeType;
+  stock_method?: StockMethodType;
+  component_only?: boolean;
+  description?: string;
+  eligible_delivery?: boolean;
+  eligible_in_store_pickup?: boolean;
+  eligible_shipping_ground?: boolean;
+  eligible_shipping_air?: boolean;
+  price?: typeLiteral;
+  shipping?: typeLiteral;
+  alternates?: UidNameRefType[];
+  components?: ProductComponent[];
+  component_of?: ProductComponent[];
+  tags?: UidNameRefType[];
+  uid_tracking_category?: string;
+  uid_linked_rental?: string;
+  uid_linked_replacement?: string;
+  webshop?: typeLiteral;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/public-stock-summary`
+
+### `PublicStockSummary`
+
+A public-facing stock summary with availability data for a product over a date range.
+
+```ts
+interface PublicStockSummary {
+  uid: string;
+  uid_product: string;
+  summary_type: SummaryTypeType;
+  type: ProductTypeType;
+  dates: typeLiteral;
+  quantity_available: number;
+  store_breakdown: PublicStockSummaryStore[];
+  query_by_uid_store: string[];
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
+}
+```
+
+### `PublicStockSummarySchema`
+
+Zod schema for PublicStockSummary.
+
+```ts
+const PublicStockSummarySchema: z.ZodType<PublicStockSummary>;
+```
+
+### `PublicStockSummaryStore`
+
+A store entry in a public stock summary with available quantity.
+
+```ts
+interface PublicStockSummaryStore {
+  uid_store: string;
+  quantity: number;
+}
+```
+
+## `@cfs/core/schemas/recurrence`
+
+### `CreateRecurrenceInput`
+
+Zod schema for creating a recurrence.
+
+```ts
+const CreateRecurrenceInput: z.ZodType<CreateRecurrenceInputType>;
+```
+
+### `CreateRecurrenceInputType`
+
+Input for POST /recurrences.
+
+```ts
+interface CreateRecurrenceInputType {
+  uid_list: string;
+  status?: RecurrenceStatus;
+  rule: RecurrenceRuleType;
+  active_from: string;
+  active_until?: string | null;
+  horizon_days?: number | null;
+  prototype: typeLiteral;
+}
+```
+
+### `Recurrence`
+
+Recurrence Firestore document shape.
+
+```ts
+interface Recurrence {
+  uid: string;
+  uid_list: string;
+  status: RecurrenceStatus;
+  rule: RecurrenceRuleType;
+  active_from: string;
+  active_until: string | null;
+  horizon_through: string | null;
+  horizon_days: number | null;
+  exception_dates: string[];
+  prototype: RecurrencePrototypeType;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `RecurrenceFreq`
+
+RFC 5545 FREQ value.
+
+```ts
+type RecurrenceFreq = indexedAccess;
+```
+
+### `RecurrenceFreqEnum`
+
+Zod schema for RecurrenceFreq.
+
+```ts
+const RecurrenceFreqEnum: z.ZodType<RecurrenceFreq>;
+```
+
+### `RecurrencePrototype`
+
+Zod schema for the recurrence prototype.
+
+```ts
+const RecurrencePrototype: z.ZodType<RecurrencePrototypeType>;
+```
+
+### `RecurrencePrototypeType`
+
+The card prototype — fields that materialize verbatim into each instance
+card unless per-instance `recurrence_overrides` pin them. Mirrors
+`CreateCardInputType` minus `uid_list`, `position`, and `date`
+(those live on the Recurrence root since they're series-level concerns).
+
+```ts
+interface RecurrencePrototypeType {
+  subject: string;
+  body: CommentBodyJson | null;
+  body_text: string;
+  status: CardStatus;
+  destination: DocDestinationEndpointType | null;
+  sources: DocSourceType[];
+  attachments: CardAttachmentType[];
+  uid_assignees: string[];
+  locked: CardLockKey[];
+}
+```
+
+### `RecurrenceRule`
+
+Zod schema for a recurrence rule.
+
+```ts
+const RecurrenceRule: z.ZodType<RecurrenceRuleType>;
+```
+
+### `RecurrenceRuleType`
+
+RFC 5545 / rrule-temporal-aligned recurrence rule. Each field maps
+directly to a rrule-temporal constructor option — see
+https://jsr.io/@gsphw/rrule-temporal.
+
+```ts
+interface RecurrenceRuleType {
+  freq: RecurrenceFreq;
+  interval: number;
+  byweekday: RecurrenceWeekday[] | null;
+  bymonthday: number[] | null;
+  bymonth: number[] | null;
+  bysetpos: number[] | null;
+  count: number | null;
+  until: string | null;
+}
+```
+
+### `RecurrenceSchema`
+
+Zod schema for a Recurrence Firestore document.
+
+```ts
+const RecurrenceSchema: z.ZodType<Recurrence>;
+```
+
+### `RecurrenceStatus`
+
+Recurrence lifecycle.
+- `active` — nightly materializer rolls the horizon forward; prototype
+  edits fan out to existing instances (respecting per-card overrides).
+- `paused` — materializer skips; existing instances remain untouched.
+  Use for temporary holds ("no deliveries this month").
+- `archived` — materializer skips; instances remain but the recurrence
+  is hidden from the settings UI.
+
+```ts
+type RecurrenceStatus = indexedAccess;
+```
+
+### `RecurrenceStatusEnum`
+
+Zod schema for RecurrenceStatus.
+
+```ts
+const RecurrenceStatusEnum: z.ZodType<RecurrenceStatus>;
+```
+
+### `RecurrenceWeekday`
+
+RFC 5545 BYDAY value (two-letter weekday code).
+
+```ts
+type RecurrenceWeekday = indexedAccess;
+```
+
+### `RecurrenceWeekdayEnum`
+
+Zod schema for RecurrenceWeekday.
+
+```ts
+const RecurrenceWeekdayEnum: z.ZodType<RecurrenceWeekday>;
+```
+
+### `UpdateRecurrenceInput`
+
+Zod schema for updating a recurrence.
+
+```ts
+const UpdateRecurrenceInput: z.ZodType<UpdateRecurrenceInputType>;
+```
+
+### `UpdateRecurrenceInputType`
+
+Input for PATCH /recurrences/:uid — all fields optional. Prototype
+field patches fan out to existing instance cards at the service layer
+(skipping cards whose `recurrence_overrides` pin the field).
+
+```ts
+interface UpdateRecurrenceInputType {
+  uid_list?: string;
+  status?: RecurrenceStatus;
+  rule?: RecurrenceRuleType;
+  active_from?: string;
+  active_until?: string | null;
+  horizon_days?: number | null;
+  prototype?: typeLiteral;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/session`
+
+### `Session`
+
+Full session document schema (Firestore document shape).
+Note: expiresAt kept in camelCase for Firestore TTL policy.
+
+```ts
+interface Session {
+  id: string;
+  user_id: string;
+  anonymous: boolean;
+  expiresAt: FirestoreTimestampType;
+  created_at: number;
+  user_agent: string;
+  preview_role?: string;
+}
+```
+
+### `SessionSchema`
+
+Zod schema for Session.
+
+```ts
+const SessionSchema: z.ZodType<Session>;
+```
+
+## `@cfs/core/schemas/stock-summary`
+
+### `StockSummary`
+
+A stock summary document aggregating availability and bookings for a product over a date range.
+
+```ts
+interface StockSummary {
+  uid: string;
+  uid_product: string;
+  summary_type: SummaryTypeType;
+  type: ProductTypeType;
+  dates: typeLiteral;
+  bookings: StockSummaryBookingEntry[];
+  bookings_breakdown: typeLiteral;
+  out_of_service_breakdown: typeLiteral;
+  quantity_available: number;
+  quantity_booked: number;
+  quantity_held: number;
+  quantity_in_service: number;
+  quantity_out_of_service: number;
+  store_breakdown: StoreBreakdownEntry[];
+  query_by_uid_store: string[];
+  query_by_uid_location: string[];
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
+}
+```
+
+### `StockSummaryBookingEntry`
+
+Slim audit-trail entry: which booking + its breakdown, no full Booking embed.
+
+```ts
+interface StockSummaryBookingEntry {
+  uid: string;
+  number: number;
+  breakdown: BookingBreakdown;
+}
+```
+
+### `StockSummarySchema`
+
+Zod schema for StockSummary.
+
+```ts
+const StockSummarySchema: z.ZodType<StockSummary>;
+```
+
+## `@cfs/core/schemas/store`
+
+### `CreateStoreInput`
+
+Input schema for creating a store.
+
+```ts
+const CreateStoreInput: z.ZodType<CreateStoreInputType>;
+```
+
+### `CreateStoreInputType`
+
+Input type for creating a store.
+
+```ts
+interface CreateStoreInputType {
+  uid: string;
+  name: string;
+  crms_store_id: number;
+  default?: boolean;
+}
+```
+
+### `Store`
+
+A store document in Firestore.
+
+```ts
+interface Store {
+  uid: string;
+  name: string;
+  default: boolean;
+  default_location: UidNameRefType | null;
+  crms_store_id: number;
+  version: number;
+  active: boolean;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `StoreSchema`
+
+Zod schema for Store.
+
+```ts
+const StoreSchema: z.ZodType<Store>;
+```
+
+### `UpdateStoreInput`
+
+Input schema for updating a store.
+
+```ts
+const UpdateStoreInput: z.ZodType<UpdateStoreInputType>;
+```
+
+### `UpdateStoreInputType`
+
+Input type for updating a store.
+
+```ts
+interface UpdateStoreInputType {
+  uid: string;
+  name?: string;
+  crms_store_id?: number;
+  default?: boolean;
+  active?: boolean;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/tag`
+
+### `CreateTagInput`
+
+Input schema for creating a tag.
+
+```ts
+const CreateTagInput: z.ZodType<CreateTagInputType>;
+```
+
+### `CreateTagInputType`
+
+Input type for creating a tag.
+
+```ts
+interface CreateTagInputType {
+  uid?: string;
+  name: string;
+}
+```
+
+### `DeleteTagInput`
+
+Input schema for deleting a tag.
+
+```ts
+const DeleteTagInput: z.ZodType<DeleteTagInputType>;
+```
+
+### `DeleteTagInputType`
+
+Input type for deleting a tag.
+
+```ts
+interface DeleteTagInputType {
+  uid: string;
+}
+```
+
+### `Tag`
+
+A tag document in Firestore.
+
+```ts
+interface Tag {
+  uid: string;
+  name: string;
+  count?: Record<string, FirestoreFieldValue> | number;
+  products?: UidNameRefType[];
+  query_by_products?: string[];
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `TagSchema`
+
+Zod schema for Tag.
+
+```ts
+const TagSchema: z.ZodType<Tag>;
+```
+
+### `UpdateTagInput`
+
+Input schema for updating a tag.
+
+```ts
+const UpdateTagInput: z.ZodType<UpdateTagInputType>;
+```
+
+### `UpdateTagInputType`
+
+Input type for updating a tag.
+
+```ts
+interface UpdateTagInputType {
+  uid: string;
+  name: string;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/tracking-category`
+
+### `CreateTrackingCategoryInput`
+
+Input schema for creating a tracking category.
+
+```ts
+const CreateTrackingCategoryInput: z.ZodType<CreateTrackingCategoryInputType>;
+```
+
+### `CreateTrackingCategoryInputType`
+
+Input type for creating a tracking category.
+
+```ts
+interface CreateTrackingCategoryInputType {
+  uid: string;
+  name: string;
+  crms_product_group_id: number;
+  crms_product_group_name: string;
+}
+```
+
+### `TrackingCategory`
+
+A tracking category document in Firestore.
+
+```ts
+interface TrackingCategory {
+  uid: string;
+  name: string;
+  count?: Record<string, FirestoreFieldValue> | number;
+  crms_product_group_id?: number;
+  crms_service_group_id?: number;
+  crms_product_group_name: string;
+  products: Record<string, UidNameRefType>;
+  xero_tracking_option_id: string | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `TrackingCategorySchema`
+
+Zod schema for TrackingCategory.
+
+```ts
+const TrackingCategorySchema: z.ZodType<TrackingCategory>;
+```
+
+### `UpdateTrackingCategoryInput`
+
+Input schema for updating a tracking category.
+
+```ts
+const UpdateTrackingCategoryInput: z.ZodType<UpdateTrackingCategoryInputType>;
+```
+
+### `UpdateTrackingCategoryInputType`
+
+Input type for updating a tracking category.
+
+```ts
+interface UpdateTrackingCategoryInputType {
+  uid: string;
+  name: string;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/transaction`
+
+### `CreateStoreTransferInput`
+
+Input schema for creating a store-to-store transfer.
+
+```ts
+const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType>;
+```
+
+### `CreateStoreTransferInputType`
+
+Input type for creating a store-to-store transfer.
+
+```ts
+interface CreateStoreTransferInputType {
+  uid_product: string;
+  quantity: number;
+  date: string;
+  reference: string;
+  stores_from: InputTransactionStore[];
+  stores_to: InputTransactionStore[];
+  total_cost?: number;
+  serialized_details?: typeLiteral | null;
+}
+```
+
+### `CreateTransactionInput`
+
+Input schema for creating a manual transaction.
+
+```ts
+const CreateTransactionInput: z.ZodType<CreateTransactionInputType>;
+```
+
+### `CreateTransactionInputType`
+
+Input type for creating a manual transaction.
+
+```ts
+interface CreateTransactionInputType {
+  uid: string;
+  uid_product: string;
+  type: indexedAccess;
+  quantity: number;
+  total_cost: number;
+  date: string;
+  reference: string;
+  stores: InputTransactionStore[];
+  serialized_details?: typeLiteral | null;
+}
+```
+
+### `TRANSACTION_TYPES`
+
+All possible transaction type identifiers.
+
+```ts
+const TRANSACTION_TYPES: "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "sale" | "write_off" | "trade_in" | "adjustment_decrease" | "transfer_increase" | "transfer_decrease" | "acquisition" | "disposal" | "partial_disposal" | "depreciation_tax" | "depreciation_gaap"[];
+```
+
+### `Transaction`
+
+A transaction document representing an inventory movement or financial event.
+
+```ts
+interface Transaction {
+  uid: string;
+  uid_product: string;
+  type: TransactionTypeType;
+  quantity: number;
+  total_cost: number;
+  unit_cost: number;
+  unit_costs: number[];
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string;
+  source: TransactionSource;
+  stores: TransactionStore[];
+  query_by_uid_store: string[];
+  serialized_details: typeLiteral | null;
+  crms_sync: Record<string, typeLiteral>;
+  defaultThreadId?: string;
+  version: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `TransactionSchema`
+
+Zod schema for Transaction.
+
+```ts
+const TransactionSchema: z.ZodType<Transaction>;
+```
+
+### `TransactionSource`
+
+The origin source of a transaction (manual, order, or internal).
+
+```ts
+interface TransactionSource {
+  type: TransactionSourceTypeType;
+  number: string | number | null;
+  uid: string | null;
+}
+```
+
+### `TransactionStore`
+
+A store affected by a transaction, including its locations.
+
+```ts
+interface TransactionStore {
+  uid_store: string;
+  name: string;
+  default: boolean;
+  quantity: number;
+  locations: TransactionStoreLocation[];
+}
+```
+
+### `TransactionStoreLocation`
+
+A location within a store affected by a transaction.
+
+```ts
+interface TransactionStoreLocation {
+  uid_location: string;
+  name: string;
+  quantity: number;
+  transactionQuantity: number;
+  default: boolean;
+  max: number | null;
+}
+```
+
+### `TransactionStoreLocationSchema`
+
+Zod schema for TransactionStoreLocation.
+
+```ts
+const TransactionStoreLocationSchema: z.ZodType<TransactionStoreLocation>;
+```
+
+### `TransactionStoreSchema`
+
+Zod schema for TransactionStore.
+
+```ts
+const TransactionStoreSchema: z.ZodType<TransactionStore>;
+```
+
+### `TransactionTypeType`
+
+Union of all transaction type string literals.
+
+```ts
+type TransactionTypeType = indexedAccess;
+```
+
+### `UpdateStoreTransferInput`
+
+Input schema for updating a store-to-store transfer.
+
+```ts
+const UpdateStoreTransferInput: z.ZodType<UpdateStoreTransferInputType>;
+```
+
+### `UpdateStoreTransferInputType`
+
+Input type for updating a store-to-store transfer.
+
+```ts
+interface UpdateStoreTransferInputType {
+  uid_product: string;
+  transfer_number: number;
+  quantity: number;
+  date: string;
+  reference: string;
+  stores_from: InputTransactionStore[];
+  stores_to: InputTransactionStore[];
+  total_cost?: number;
+  serialized_details?: typeLiteral | null;
+  version: number;
+}
+```
+
+### `UpdateTransactionInput`
+
+Input schema for updating a manual transaction.
+
+```ts
+const UpdateTransactionInput: z.ZodType<UpdateTransactionInputType>;
+```
+
+### `UpdateTransactionInputType`
+
+Input type for updating a manual transaction.
+
+```ts
+interface UpdateTransactionInputType {
+  uid: string;
+  uid_product: string;
+  type: indexedAccess;
+  quantity: number;
+  total_cost: number;
+  date: string;
+  reference: string;
+  stores: InputTransactionStore[];
+  serialized_details?: typeLiteral | null;
+  version: number;
+}
+```
+
+### `getDisplayTransactionTypes(increaseOnly?: boolean): TransactionTypeType[]`
+
+Returns transaction types suitable for UI display in manual transaction forms.
+Excludes financial-only types (acquisition, disposal, depreciation) and transfers.
+When `increaseOnly` is true, returns only types that increase inventory
+(for first transactions / opening balance scenarios).
+
+### `getTransactionMultiplier(type: TransactionTypeType): 1 | -1`
+
+Returns +1 for increase types, -1 for decrease types.
+Throws for financial-only types (acquisition, disposal, depreciation).
+
+### `hasCosts(type: TransactionTypeType): boolean`
+
+Determines if a transaction type should track costs (total_cost / unit_cost).
+Returns false for transfers and financial-only types.
+
+## `@cfs/core/schemas/user`
+
+### `CreateUserInput`
+
+Input schema for creating a user (internal — not exposed as a public route).
+
+```ts
+const CreateUserInput: z.ZodType<CreateUserInputType>;
+```
+
+### `CreateUserInputType`
+
+Payload for creating a user — used internally by the accept-invite flow.
+
+```ts
+interface CreateUserInputType {
+  email: string;
+  password: string;
+  roles?: string[];
+  uid_contact?: string | null;
+}
+```
+
+### `DisplaySort`
+
+Sort configuration for a display preference (column + direction).
+
+```ts
+interface DisplaySort {
+  column: string | null;
+  direction: "asc" | "desc";
+}
+```
+
+### `FirestoreDisplayPrefs`
+
+User display preferences for a Firestore-backed collection view.
+
+```ts
+interface FirestoreDisplayPrefs {
+  columns: string[];
+  filters: Record<string, parenthesized[]>;
+  sort: DisplaySort;
+}
+```
+
+### `TypesenseDisplayPrefs`
+
+User display preferences for a Typesense-backed collection view.
+
+```ts
+interface TypesenseDisplayPrefs {
+  columns: string[];
+  filters: Record<string, parenthesized[]>;
+  sort: DisplaySort;
+  group: string | null;
+  facet: string[];
+}
+```
+
+### `UpdateUserInput`
+
+Input schema for updating a user.
+
+```ts
+const UpdateUserInput: z.ZodType<UpdateUserInputType>;
+```
+
+### `UpdateUserInputType`
+
+Payload for PUT /users/:uid — full-doc replace; server-managed fields excluded.
+
+```ts
+interface UpdateUserInputType {
+  email?: string;
+  uid_contact?: string | null;
+  version: number;
+  prefs_firestore?: Record<string, FirestoreDisplayPrefs>;
+  prefs_typesense?: Record<string, TypesenseDisplayPrefs>;
+}
+```
+
+### `User`
+
+Full user document schema (Firestore document shape).
+
+```ts
+interface User {
+  uid: string;
+  email: string;
+  name: string;
+  password_hash: string;
+  email_verified: boolean;
+  uid_contact?: string | null;
+  roles?: string[];
+  token_version?: number;
+  version: number;
+  prefs_firestore: Record<string, FirestoreDisplayPrefs>;
+  prefs_typesense: Record<string, TypesenseDisplayPrefs>;
+  deleted_at?: FirestoreTimestampType | null;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `UserSchema`
+
+Zod schema for a full user Firestore document.
+
+```ts
+const UserSchema: z.ZodType<User>;
+```
+
+## `@cfs/core/schemas/webshop-product`
+
+### `WebshopProduct`
+
+A webshop product document in the webshop-products Firestore collection.
+
+```ts
+interface WebshopProduct {
+  uid: string;
+  name: string;
+  active: boolean;
+  type: WebshopProductTypeType;
+  stock_method?: StockMethodType;
+  component_only?: boolean;
+  description?: string;
+  eligible_delivery: boolean;
+  eligible_in_store_pickup: boolean;
+  eligible_shipping_ground: boolean;
+  eligible_shipping_air: boolean;
+  price: typeLiteral;
+  shipping?: WebshopProductShipping;
+  alternates: UidNameRefType[];
+  components: WebshopProductComponent[];
+  component_of: WebshopProductComponent[];
+  tags?: UidNameRefType[];
+  query_by_tags?: string[];
+  query_by_components?: string[];
+  query_by_component_of?: string[];
+  query_by_alternates?: string[];
+  webshop: typeLiteral;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `WebshopProductComponent`
+
+A component product within a webshop parent product.
+
+```ts
+interface WebshopProductComponent {
+  uid: string;
+  path: string[];
+  name: string;
+  active?: boolean;
+  type: ComponentTypeType;
+  stock_method?: StockMethodType;
+  description?: string;
+  inclusion_type?: InclusionTypeType;
+  quantity: number;
+  zero_priced?: boolean;
+  price: typeLiteral;
+}
+```
+
+### `WebshopProductSchema`
+
+Zod schema for a WebshopProduct document.
+
+```ts
+const WebshopProductSchema: z.ZodType<WebshopProduct>;
+```
+
+### `WebshopProductShipping`
+
+Shipping dimensions and hazard classification for a webshop product.
+
+```ts
+interface WebshopProductShipping {
+  weight?: number;
+  height?: number;
+  width?: number;
+  length?: number;
+  air_hazardous?: boolean;
+  air_un?: number | null;
+}
+```
+
+## `@cfs/core/schemas/typesense`
+
+### `BookingDocument`
+
+Typesense document type for bookings.
+
+```ts
+interface BookingDocument {
+  id: string;
+  uid: string;
+  uid_product: string;
+  uid_order: string;
+  number: number;
+  number_str?: string;
+  crms_id?: number;
+  crms_id_str?: string;
+  crms_product_id?: number;
+  crms_product_id_str?: string;
+  status: string;
+  type: string;
+  name: string;
+  subject?: string;
+  organization: typeLiteral;
+  breakdown: typeLiteral;
+  quantity: number;
+  shortage?: number;
+  total_price?: number;
+  unit_price?: number;
+  dates: typeLiteral;
+  destinations?: typeLiteral;
+  stores?: Array<typeLiteral>;
+  uid_destination_delivery?: string;
+  uid_destination_collection?: string;
+  created_at?: number;
+  updated_at: number;
+}
+```
+
+### `ChartOfAccountsDocument`
+
+Typesense document type for chart of accounts.
+
+```ts
+interface ChartOfAccountsDocument {
+  id: string;
+  uid: string;
+  name: string;
+  code: number;
+  code_str?: string;
+  type: string;
+  default_tax_profile: string;
+  description?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  updated_at: number;
+}
+```
+
+### `CommentDocument`
+
+Typesense document type for comments.
+
+```ts
+interface CommentDocument {
+  id: string;
+  uid: string;
+  uid_thread: string;
+  sources: Array<typeLiteral>;
+  body_text: string;
+  created_by: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  deleted_by?: TypesenseActorRef;
+  deleted_at?: number;
+  created_at: number;
+  updated_at?: number;
+}
+```
+
+### `ContactDocument`
+
+Typesense document type for contacts.
+
+```ts
+interface ContactDocument {
+  id: string;
+  uid: string;
+  name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+  crms_id?: number;
+  crms_id_str?: string;
+  emails: string[];
+  phones: string[];
+  organizations?: Array<typeLiteral>;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  created_at?: number;
+  updated_at: number;
+}
+```
+
+### `DestinationDocument`
+
+Typesense document type for destinations.
+
+```ts
+interface DestinationDocument {
+  id: string;
+  uid: string;
+  mapbox_ids: string[];
+  address?: TypesenseAddressFields;
+  organizations?: Array<typeLiteral>;
+  products?: Array<typeLiteral>;
+  contacts?: Array<typeLiteral>;
+  created_at?: number;
+  updated_at: number;
+}
+```
+
+### `FulfillmentDocument`
+
+Typesense document type for the sanitized fulfillment order view.
+
+Mirrors `OrderDocument` but strips pricing, totals, tax profile,
+invoice refs, CRM/Xero ids, and financial line-item fields.
+
+```ts
+interface FulfillmentDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  status: string;
+  deliveries?: boolean;
+  pickups?: boolean;
+  subject?: string;
+  reference?: string;
+  organization: typeLiteral;
+  dates: typeLiteral;
+  destinations: Array<typeLiteral>;
+  items?: Array<typeLiteral>;
+  created_at?: number;
+  updated_at: number;
+}
+```
+
+### `GroupByAxis`
+
+Describes how a client should enumerate the keys a groupBy axis produces.
+
+- `enum` — keys come from the Zod enum at `field` (e.g. card status).
+- `collectionFeed` — keys come from a live Firestore collection (e.g. one
+  section per list); `collection` names the source.
+- `dateBucket` — keys are computed client-side from the row's date value;
+  no separate per-key query.
+
+A single "None" / ungrouped axis is represented with `field: null` and no
+`kind` — the axis lists which *groupings are available*, and "no grouping"
+is always one of them.
+
+```ts
+interface GroupByAxis {
+  field: string | null;
+  label: string;
+  kind?: "enum" | "collectionFeed" | "dateBucket";
+  collection?: string;
+}
+```
+
+### `GroupByAxisSchema`
+
+Zod schema for GroupByAxis.
+
+```ts
+const GroupByAxisSchema: z.ZodType<GroupByAxis>;
+```
+
+### `InvoiceDocument`
+
+Typesense document type for invoices.
+
+```ts
+interface InvoiceDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  crms_id?: number;
+  crms_id_str?: string;
+  status: string;
+  tax_profile: string;
+  number_orders?: number[];
+  number_orders_str?: string[];
+  subject?: string;
+  reference?: string;
+  external_notes?: string;
+  internal_notes?: string;
+  organization: typeLiteral;
+  items?: Array<typeLiteral>;
+  totals?: typeLiteral;
+  crms_opportunity_ids?: number[];
+  xero_id?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  date_fs: number;
+  due_date_fs?: number;
+  created_at?: number;
+  updated_at?: number;
+}
+```
+
+### `LocationDocument`
+
+Typesense document type for locations.
+
+```ts
+interface LocationDocument {
+  id: string;
+  uid: string;
+  name: string;
+  uid_store: string;
+  active: boolean;
+  default?: boolean;
+  uid_location_type?: string;
+  products?: Array<typeLiteral>;
+  product_capacities?: Array<typeLiteral>;
+  created_at: number;
+  updated_at?: number;
+}
+```
+
+### `OrderDocument`
+
+Typesense document type for orders.
+
+```ts
+interface OrderDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  crms_id?: number;
+  crms_id_str?: string;
+  status: string;
+  tax_profile: string;
+  deliveries?: boolean;
+  pickups?: boolean;
+  subject?: string;
+  reference?: string;
+  crms_status?: string;
+  invoices?: Array<typeLiteral>;
+  organization: typeLiteral;
+  dates: typeLiteral;
+  destinations: Array<typeLiteral>;
+  totals: typeLiteral;
+  items?: Array<typeLiteral>;
+  created_at?: number;
+  updated_at: number;
+}
+```
+
+### `OrganizationDocument`
+
+Typesense document type for organizations.
+
+```ts
+interface OrganizationDocument {
+  id: string;
+  uid: string;
+  name: string;
+  description?: string;
+  crms_id: number;
+  crms_id_str?: string;
+  xero_id?: string;
+  tax_profile: string;
+  emails?: string[];
+  phones?: string[];
+  billing_address: TypesenseAddressFields;
+  contacts: Array<typeLiteral>;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  last_order?: number;
+  created_at?: number;
+  updated_at: number;
+}
+```
+
+### `OutOfServiceDocument`
+
+Typesense document type for out-of-service records.
+
+```ts
+interface OutOfServiceDocument {
+  id: string;
+  uid: string;
+  uid_product: string;
+  number: number;
+  number_str?: string;
+  reason: string;
+  status: string;
+  quantity: number;
+  breakdown: typeLiteral;
+  organization?: typeLiteral;
+  dates: typeLiteral;
+  stores?: Array<typeLiteral>;
+  query_by_sources?: string[];
+  canceled_at?: number;
+  created_at?: number;
+  updated_at: number;
+}
+```
+
+### `ProductDocument`
+
+Typesense document type for products.
+
+```ts
+interface ProductDocument {
+  id: string;
+  uid: string;
+  name: string;
+  description?: string;
+  tracking_category_name?: string;
+  type: string;
+  stock_method: string;
+  active: boolean;
+  component_only: boolean;
+  eligible_delivery?: boolean;
+  eligible_in_store_pickup?: boolean;
+  eligible_shipping_ground?: boolean;
+  eligible_shipping_air?: boolean;
+  price?: typeLiteral;
+  webshop?: typeLiteral;
+  alternates?: Array<typeLiteral>;
+  crms_id?: number;
+  crms_id_str?: string;
+  uid_tracking_category?: string;
+  uid_linked_replacement?: string;
+  uid_linked_rental?: string;
+  xero_id?: string;
+  xero_tracking_option_id?: string;
+  crms_rate_id?: number;
+  crms_linked_rental_id?: number;
+  crms_linked_replacement_id?: number;
+  crms_linked_replacement_rate_id?: number;
+  shipping?: typeLiteral;
+  tags?: Array<typeLiteral>;
+  components?: ProductDocumentComponent[];
+  component_of?: ProductDocumentComponent[];
+  query_by_components?: string[];
+  query_by_component_of?: string[];
+  crms_stock_level_ids?: number[];
+  images?: string[];
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  updated_at: number;
+  created_at?: number;
+}
+```
+
+### `ProductDocumentComponent`
+
+Typesense document type for a product component entry.
+
+```ts
+interface ProductDocumentComponent {
+  uid?: string;
+  path?: string[];
+  name?: string;
+  quantity?: number;
+  active?: boolean;
+  type?: string;
+  stock_method?: string;
+  crms_id?: number;
+  crms_accessory_id?: number;
+  description?: string;
+  inclusion_type?: string;
+  zero_priced?: boolean;
+  price?: typeLiteral;
+}
+```
+
+### `SEARCH_PERMISSION_BY_ALIAS`
+
+```ts
+const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permission>>;
+```
+
+### `StoreDocument`
+
+Typesense document type for stores.
+
+```ts
+interface StoreDocument {
+  id: string;
+  uid: string;
+  name: string;
+  default: boolean;
+  active: boolean;
+  default_location?: typeLiteral;
+  crms_store_id: number;
+  crms_store_id_str?: string;
+  created_at: number;
+  updated_at?: number;
+}
+```
+
+### `TagDocument`
+
+Typesense document type for tags.
+
+```ts
+interface TagDocument {
+  id: string;
+  uid: string;
+  name: string;
+  count: number;
+  products?: Array<typeLiteral>;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  updated_at: number;
+}
+```
+
+### `TemplateComponentDocument`
+
+Typesense document type for template-component families.
+
+```ts
+interface TemplateComponentDocument {
+  id: string;
+  uid: string;
+  git_path: string;
+  name: string;
+  uid_active?: string;
+  version_count: number;
+  version: number;
+  created_at: number;
+  updated_at: number;
+}
+```
+
+### `TemplateDocument`
+
+Typesense document type for templates.
+
+```ts
+interface TemplateDocument {
+  id: string;
+  uid: string;
+  uid_template: string;
+  name: string;
+  collection_source: string;
+  collection_target: string;
+  scope: string;
+  version: number;
+  version_str?: string;
+  source_filename?: string;
+  created_at: number;
+  updated_at: number;
+}
+```
+
+### `TrackingCategoryDocument`
+
+Typesense document type for tracking categories.
+
+```ts
+interface TrackingCategoryDocument {
+  id: string;
+  uid: string;
+  name: string;
+  crms_product_group_name: string;
+  count: number;
+  crms_product_group_id?: number;
+  crms_product_group_id_str?: string;
+  crms_service_group_id?: number;
+  crms_service_group_id_str?: string;
+  xero_tracking_option_id?: string;
+  products?: Array<typeLiteral>;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  updated_at: number;
+}
+```
+
+### `TypesenseAddressFields`
+
+Shared address fields used across Typesense document types.
+
+Coordinates are stored as `[latitude, longitude]` geopoints.
+The API translates Firestore `{latitude, longitude}` objects into this format.
+
+```ts
+interface TypesenseAddressFields {
+  full?: string;
+  name?: string;
+  city?: string;
+  region?: string;
+  street?: string;
+  street2?: string;
+  postcode?: string;
+  country_name?: string;
+  mapbox_id?: string;
+  address_coordinates?: [number, number];
+  user_coordinates?: [number, number];
+}
+```
+
+### `TypesenseAlias`
+
+Union of all Typesense collection alias names.
+
+```ts
+type TypesenseAlias = "bookings" | "cards" | "chart-of-accounts" | "comments" | "contacts" | "destinations" | "invoices" | "locations" | "orders" | "fulfillments" | "organizations" | "out-of-service" | "products" | "stores" | "tags" | "templates" | "template-components" | "threads" | "tracking-categories" | "users" | "webshop-products";
+```
+
+### `TypesenseCollectionConfig`
+
+Full collection config with alias, version, and Firestore mapping.
+
+```ts
+interface TypesenseCollectionConfig {
+  alias: string;
+  version: number;
+  firestoreCollection: string;
+  collectionName: string;
+  schema: TypesenseSchema;
+  synonyms: TypesenseSynonym[];
+  displayDefaults: TypesenseDisplayDefaults;
+  enabled?: boolean;
+}
+```
+
+### `TypesenseCollectionConfigSchema`
+
+Zod schema for TypesenseCollectionConfig.
+
+```ts
+const TypesenseCollectionConfigSchema: z.ZodType<TypesenseCollectionConfig>;
+```
+
+### `TypesenseDisplayDefaults`
+
+Display defaults for a Typesense collection in the UI.
+
+```ts
+interface TypesenseDisplayDefaults {
+  columns: string[];
+  filters: Record<string, parenthesized[]>;
+  sort: typeLiteral;
+  group: string | null;
+  facet: string[];
+  groupBy?: GroupByAxis[];
+}
+```
+
+### `TypesenseDisplayDefaultsSchema`
+
+Zod schema for TypesenseDisplayDefaults.
+
+```ts
+const TypesenseDisplayDefaultsSchema: z.ZodType<TypesenseDisplayDefaults>;
+```
+
+### `TypesenseDocument`
+
+Union of all Typesense document types.
+
+```ts
+type TypesenseDocument = BookingDocument | ChartOfAccountsDocument | CommentDocument | ContactDocument | DestinationDocument | InvoiceDocument | LocationDocument | OrderDocument | FulfillmentDocument | OrganizationDocument | OutOfServiceDocument | ProductDocument | StoreDocument | TagDocument | TemplateDocument | TemplateComponentDocument | TrackingCategoryDocument | UserDocument | WebshopProductDocument;
+```
+
+### `TypesenseDocumentMap`
+
+Map from collection alias to its document type.
+
+```ts
+interface TypesenseDocumentMap {
+  bookings: BookingDocument;
+  chart-of-accounts: ChartOfAccountsDocument;
+  comments: CommentDocument;
+  contacts: ContactDocument;
+  destinations: DestinationDocument;
+  invoices: InvoiceDocument;
+  locations: LocationDocument;
+  orders: OrderDocument;
+  fulfillments: FulfillmentDocument;
+  organizations: OrganizationDocument;
+  out-of-service: OutOfServiceDocument;
+  products: ProductDocument;
+  stores: StoreDocument;
+  tags: TagDocument;
+  templates: TemplateDocument;
+  template-components: TemplateComponentDocument;
+  tracking-categories: TrackingCategoryDocument;
+  users: UserDocument;
+  webshop-products: WebshopProductDocument;
+}
+```
+
+### `TypesenseField`
+
+A single field definition in a Typesense collection schema.
+
+```ts
+interface TypesenseField {
+  name: string;
+  type: TypesenseFieldType;
+  sort?: boolean;
+  stem?: boolean;
+  facet?: boolean;
+  index?: boolean;
+  optional?: boolean;
+}
+```
+
+### `TypesenseFieldSchema`
+
+Zod schema for TypesenseField.
+
+```ts
+const TypesenseFieldSchema: z.ZodType<TypesenseField>;
+```
+
+### `TypesenseFieldType`
+
+Field type in a Typesense collection schema.
+
+```ts
+type TypesenseFieldType = indexedAccess;
+```
+
+### `TypesenseFieldTypeEnum`
+
+Zod schema for TypesenseFieldType.
+
+```ts
+const TypesenseFieldTypeEnum: z.ZodType<TypesenseFieldType>;
+```
+
+### `TypesenseMultiWaySynonym`
+
+A multi-way synonym where all terms are interchangeable.
+
+```ts
+interface TypesenseMultiWaySynonym {
+  id: string;
+  synonyms: string[];
+}
+```
+
+### `TypesenseMultiWaySynonymSchema`
+
+Zod schema for TypesenseMultiWaySynonym.
+
+```ts
+const TypesenseMultiWaySynonymSchema: z.ZodType<TypesenseMultiWaySynonym>;
+```
+
+### `TypesenseOneWaySynonym`
+
+A one-way synonym where a root term expands to alternatives.
+
+```ts
+interface TypesenseOneWaySynonym {
+  id: string;
+  root: string;
+  synonyms: string[];
+}
+```
+
+### `TypesenseOneWaySynonymSchema`
+
+Zod schema for TypesenseOneWaySynonym.
+
+```ts
+const TypesenseOneWaySynonymSchema: z.ZodType<TypesenseOneWaySynonym>;
+```
+
+### `TypesenseSchema`
+
+The schema portion passed to the Typesense collections API.
+
+```ts
+interface TypesenseSchema {
+  name: string;
+  enable_nested_fields?: boolean;
+  token_separators?: string[];
+  fields: TypesenseField[];
+  default_sorting_field?: string;
+}
+```
+
+### `TypesenseSchemaSchema`
+
+Zod schema for TypesenseSchema.
+
+```ts
+const TypesenseSchemaSchema: z.ZodType<TypesenseSchema>;
+```
+
+### `TypesenseSynonym`
+
+A synonym rule for a Typesense collection.
+
+```ts
+type TypesenseSynonym = TypesenseMultiWaySynonym | TypesenseOneWaySynonym;
+```
+
+### `TypesenseSynonymSchema`
+
+Zod schema for TypesenseSynonym.
+
+```ts
+const TypesenseSynonymSchema: z.ZodType<TypesenseSynonym>;
+```
+
+### `UserDocument`
+
+Typesense document type for users.
+
+```ts
+interface UserDocument {
+  id: string;
+  uid: string;
+  email: string;
+  name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
+  pronunciation?: string;
+  roles?: string[];
+  email_verified: boolean;
+  uid_contact?: string;
+  created_at?: number;
+  updated_at: number;
+}
+```
+
+### `WebshopProductDocument`
+
+Typesense document type for webshop products.
+
+```ts
+interface WebshopProductDocument {
+  id: string;
+  uid: string;
+  name: string;
+  description?: string;
+  type: string;
+  stock_method?: string;
+  active: boolean;
+  component_only?: boolean;
+  eligible_delivery?: boolean;
+  eligible_in_store_pickup?: boolean;
+  eligible_shipping_ground?: boolean;
+  eligible_shipping_air?: boolean;
+  price: typeLiteral;
+  webshop: typeLiteral;
+  alternates?: Array<typeLiteral>;
+  shipping?: typeLiteral;
+  tags?: Array<typeLiteral>;
+  components?: WebshopProductDocumentComponent[];
+  component_of?: WebshopProductDocumentComponent[];
+  updated_at?: number;
+  created_at?: number;
+}
+```
+
+### `WebshopProductDocumentComponent`
+
+Typesense document type for a webshop product component entry.
+
+```ts
+interface WebshopProductDocumentComponent {
+  uid?: string;
+  path?: string[];
+  name?: string;
+  quantity?: number;
+  active?: boolean;
+  type?: string;
+  stock_method?: string;
+  description?: string;
+  inclusion_type?: string;
+  zero_priced?: boolean;
+  price?: typeLiteral;
+}
+```
+
+### `bookings`
+
+Typesense collection config for bookings.
+
+```ts
+const bookings: TypesenseCollectionConfig;
+```
+
+### `cards`
+
+```ts
+const cards: TypesenseCollectionConfig;
+```
+
+### `chartOfAccounts`
+
+Typesense collection config for chart of accounts.
+
+```ts
+const chartOfAccounts: TypesenseCollectionConfig;
+```
+
+### `comments`
+
+Typesense collection config for comments.
+
+```ts
+const comments: TypesenseCollectionConfig;
+```
+
+### `contacts`
+
+Typesense collection config for contacts.
+
+```ts
+const contacts: TypesenseCollectionConfig;
+```
+
+### `destinations`
+
+Typesense collection config for destinations.
+
+```ts
+const destinations: TypesenseCollectionConfig;
+```
+
+### `fulfillments`
+
+Typesense collection config for the sanitized fulfillment order view.
+
+Mirrors `orders` by uid but strips all pricing, totals, tax profile,
+invoice refs, CRM/Xero ids, and financial line-item fields. The default
+sort is `number` (non-optional, always set) because Typesense rejects
+optional fields as default_sorting_field; the fulfillment UI overrides
+this at query time via `displayDefaults.sort` to order by delivery date.
+
+```ts
+const fulfillments: TypesenseCollectionConfig;
+```
+
+### `getDefaultSortDirection(alias: string): "asc" | "desc" | null`
+
+Default sort direction for a Typesense collection's default sorting field.
+Numeric types (`int32`, `int64`, `float`) sort descending (recent/large
+first); everything else sorts ascending. Returns `null` when the collection
+has no default sorting field.
+
+### `getDefaultSortingField(alias: string): string | null`
+
+Look up the default sorting field for a Typesense collection. Returns
+`null` when the alias is unknown or the config does not declare one.
+
+### `getSearchAlias(collection: string): string | null`
+
+Resolve a Firestore collection name (singular or plural) to its Typesense
+alias. Returns `null` when no matching Typesense collection exists.
+
+### `invoices`
+
+Typesense collection config for invoices.
+
+```ts
+const invoices: TypesenseCollectionConfig;
+```
+
+### `locations`
+
+Typesense collection config for locations.
+
+```ts
+const locations: TypesenseCollectionConfig;
+```
+
+### `orders`
+
+Typesense collection config for orders.
+
+```ts
+const orders: TypesenseCollectionConfig;
+```
+
+### `organizations`
+
+Typesense collection config for organizations.
+
+```ts
+const organizations: TypesenseCollectionConfig;
+```
+
+### `outOfService`
+
+Typesense collection config for out-of-service records.
+
+```ts
+const outOfService: TypesenseCollectionConfig;
+```
+
+### `products`
+
+Typesense collection config for products.
+
+```ts
+const products: TypesenseCollectionConfig;
+```
+
+### `stores`
+
+Typesense collection config for stores.
+
+```ts
+const stores: TypesenseCollectionConfig;
+```
+
+### `tags`
+
+Typesense collection config for tags.
+
+```ts
+const tags: TypesenseCollectionConfig;
+```
+
+### `templateComponents`
+
+Typesense collection config for template-*component* families (git-canonical
+system). Indexes the thin component family doc — identity + rollups, no
+content (content lives in git, projected into `templates-versions`, not
+indexed here). Backs the components list + the register form's `depends_on`
+picker. A component is thinner than a template family: no
+source/target/surfaces.
+
+```ts
+const templateComponents: TypesenseCollectionConfig;
+```
+
+### `templates`
+
+Typesense collection config for template *families* (git-canonical system).
+
+Indexes the thin family doc — identity + rollups, no content. Content lives
+in git and is projected into `templates-versions` (not indexed here). Bumped
+to v2 when the family shape changed (dropped `scope`/`source`/per-version
+fields; added `git_path`/`surfaces`/`uid_active`/rollups).
+
+```ts
+const templates: TypesenseCollectionConfig;
+```
+
+### `threads`
+
+Typesense collection config for threads.
+
+Reserved slot — threads aren't currently indexed (Phase 1 searches comments
+directly; thread-level search can pivot off comment hits). `enabled: false`
+so provisioning skips this collection; the schema exists only to keep the
+`threads.search` permission mapped in `SEARCH_PERMISSION_BY_ALIAS`.
+
+```ts
+const threads: TypesenseCollectionConfig;
+```
+
+### `trackingCategories`
+
+Typesense collection config for tracking categories.
+
+```ts
+const trackingCategories: TypesenseCollectionConfig;
+```
+
+### `typesenseAddressFields(prefix: string, _: unknown): TypesenseField[]`
+
+Generate Typesense field definitions for a nested address object.
+
+Coordinates use the `geopoint` type with `[latitude, longitude]` order.
+The API translates Firestore `{latitude, longitude}` objects into this format.
+
+### `typesenseEnabledCollections`
+
+Firestore collection names that are actively synced to Typesense (enabled !== false).
+
+```ts
+const typesenseEnabledCollections: Set<string>;
+```
+
+### `typesenseSchemas`
+
+All Typesense collection configs keyed by alias.
+
+```ts
+const typesenseSchemas: Record<TypesenseAlias, TypesenseCollectionConfig>;
+```
+
+### `users`
+
+Typesense collection config for users.
+
+```ts
+const users: TypesenseCollectionConfig;
+```
+
+### `webshopProducts`
+
+Typesense collection config for webshop products.
+
+```ts
+const webshopProducts: TypesenseCollectionConfig;
+```
+
+## `@cfs/core/schemas/typesense/cards`
+
+### `cards`
+
+```ts
+const cards: TypesenseCollectionConfig;
+```
+
+## `@cfs/core/schemas/quote`
+
+### `Quote`
+
+A PDF quote document associated with an order.
+
+```ts
+interface Quote {
+  uid: string;
+  uid_order: string;
+  order_number: number;
+  version: number | null;
+  is_draft: boolean;
+  uploadcare_uuid: string | null;
+  deleted_at: FirestoreTimestampType | null;
+  expires_at: FirestoreTimestampType | null;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `QuoteSchema`
+
+Zod schema for Quote.
+
+```ts
+const QuoteSchema: z.ZodType<Quote>;
+```
+
+### `RestoreQuoteInput`
+
+Zod schema for RestoreQuoteInput.
+
+```ts
+const RestoreQuoteInput: z.ZodType<RestoreQuoteInputType>;
+```
+
+### `RestoreQuoteInputType`
+
+Input for restoring a soft-deleted quote.
+
+```ts
+interface RestoreQuoteInputType {
+  uid: string;
+}
+```
+
+### `SaveQuoteVersionInput`
+
+Zod schema for SaveQuoteVersionInput.
+
+```ts
+const SaveQuoteVersionInput: z.ZodType<SaveQuoteVersionInputType>;
+```
+
+### `SaveQuoteVersionInputType`
+
+Input for saving a new quote version.
+
+```ts
+interface SaveQuoteVersionInputType {
+  uid_order: string;
+}
+```
+
+## `@cfs/core/schemas/template`
+
+### `FixtureMeta`
+
+A fixture manifest entry — the operator-facing label/description for one
+git-canonical fixture (`fixtures/<git_path>/<slug>.json`). Files are
+authoritative: discovery globs the directory; this manifest only enriches
+the manager list with labels. An orphaned manifest entry (slug with no
+matching file) is ignored at render/golden time — never breaks a render.
+
+```ts
+interface FixtureMeta {
+  slug: string;
+  label: string;
+  description?: string;
+}
+```
+
+### `FixtureMetaSchema`
+
+Zod schema for a fixture manifest entry.
+
+```ts
+const FixtureMetaSchema: z.ZodType<FixtureMeta>;
+```
+
+### `TEMPLATE_SOURCE_COLLECTIONS`
+
+Collections that can serve as data sources for templates.
+
+```ts
+const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices"[];
+```
+
+### `TEMPLATE_SURFACES`
+
+Client-agnostic detail surfaces where a template family is offered. NOT route
+strings — clients map a surface to their own route (e.g. manager binds
+`"order"` → `/orders/:id`). A packing list might surface on both `"order"`
+and `"fulfillment"`; a quote only on `"order"`.
+
+```ts
+const TEMPLATE_SURFACES: "order" | "fulfillment" | "invoice"[];
+```
+
+### `TEMPLATE_TARGET_COLLECTIONS`
+
+Collections that templates can produce documents for.
+
+```ts
+const TEMPLATE_TARGET_COLLECTIONS: "quotes" | "packing_lists" | "invoices"[];
+```
+
+### `Template`
+
+A thin template *family* document — identity + rollups, no content/status.
+
+```ts
+interface Template {
+  uid: string;
+  git_path: string;
+  name: string;
+  collection_source: TemplateSourceCollectionType;
+  collection_target: TemplateTargetCollectionType;
+  surfaces: TemplateSurfaceType[];
+  uid_active: string | null;
+  active_semver?: string | null;
+  depends_on: TemplateDependsOn;
+  fixtures: FixtureMeta[];
+  draft_uids: string[];
+  version_count: number;
+  last_published_at: FirestoreTimestampType | null;
+  uid_thread: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `TemplateContext`
+
+Context object passed to Eta templates at render time.
+
+```ts
+interface TemplateContext {
+  doc: Record<string, unknown>;
+  version?: number | null;
+  logo?: string;
+  params?: Record<string, unknown>;
+}
+```
+
+### `TemplateDependsOn`
+
+Component dependencies a template family overlays at render time.
+
+```ts
+interface TemplateDependsOn {
+  components: string[];
+}
+```
+
+### `TemplateInputSchema`
+
+Zod schema for TemplateInput.
+
+```ts
+const TemplateInputSchema: z.ZodType<TemplateInputType>;
+```
+
+### `TemplateInputType`
+
+Input for registering a new template *family*. Content is not provided here —
+registration creates the family doc + a git branch carrying the sidecar; the
+server derives `git_path = slugify(name)` and freezes it.
+
+```ts
+interface TemplateInputType {
+  name: string;
+  collection_source: TemplateSourceCollectionType;
+  collection_target: TemplateTargetCollectionType;
+  surfaces: TemplateSurfaceType[];
+  depends_on?: Partial<TemplateDependsOn>;
+}
+```
+
+### `TemplateSchema`
+
+Zod schema for a Template family document.
+
+```ts
+const TemplateSchema: z.ZodType<Template>;
+```
+
+### `TemplateSourceCollectionType`
+
+Firestore collection that provides data to a template.
+
+```ts
+type TemplateSourceCollectionType = indexedAccess;
+```
+
+### `TemplateSurfaceType`
+
+A single client-agnostic surface a template is offered on.
+
+```ts
+type TemplateSurfaceType = indexedAccess;
+```
+
+### `TemplateTargetCollectionType`
+
+Firestore collection that a template produces documents for.
+
+```ts
+type TemplateTargetCollectionType = indexedAccess;
+```
+
+## `@cfs/core/schemas/webhook-event`
+
+### `WebhookEvent`
+
+An inbound webhook event stored for processing.
+
+```ts
+interface WebhookEvent {
+  id: string;
+  event: string;
+  received: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
+  payload: unknown;
+}
+```
+
+### `WebhookEventSchema`
+
+Zod schema for WebhookEvent.
+
+```ts
+const WebhookEventSchema: z.ZodType<WebhookEvent>;
+```
+
+## `@cfs/core/schemas/log`
+
+### `ACCESS_CONTROL_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const ACCESS_CONTROL_EVENT_MSGS: "rbac_registry_drift" | "rbac_user_missing" | "role_create_conflict" | "role_created" | "role_invalid_permission" | "role_permission_unknown" | "role_schema_invalid" | "role_update_not_found" | "role_updated" | "permission_denied" | "service_oidc_observed" | "preview_role_self_healed" | "preview_role_started" | "preview_role_stopped" | "preview_role_subset_violation"[];
+```
+
+### `AccessControlEventLogRecord`
+
+Structured log entry for any RBAC / role / preview-role event.
+
+```ts
+interface AccessControlEventLogRecord {
+  level: LogLevelType;
+  msg: AccessControlEventMsg;
+  ts: string;
+  role_name?: string;
+  permission?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `AccessControlEventLogRecordSchema`
+
+Zod schema for {@link AccessControlEventLogRecord}.
+
+```ts
+const AccessControlEventLogRecordSchema: z.ZodType<AccessControlEventLogRecord>;
+```
+
+### `AccessControlEventMsg`
+
+Discriminated msg union for Access-Control-archetype log records.
+
+```ts
+type AccessControlEventMsg = indexedAccess;
+```
+
+### `BaseLogFields`
+
+TypeScript shape of {@link baseLogFields} — for use in archetype
+interfaces that want to declare the envelope explicitly.
+
+```ts
+interface BaseLogFields {
+  level: LogLevelType;
+  ts: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  duration_ms?: number;
+  dry_run?: boolean;
+}
+```
+
+### `CALENDAR_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const CALENDAR_EVENT_MSGS: "calendar_event_adopted" | "calendar_event_not_found" | "calendar_event_stale" | "calendar_missing_date" | "calendar_not_configured" | "calendar_not_found" | "calendar_search_failed" | "calendar_stale_event_cleared" | "calendar_update_superseded"[];
+```
+
+### `CLOUD_TASK_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const CLOUD_TASK_EVENT_MSGS: "cloud_task_already_exists" | "cloud_task_cancel_error" | "cloud_task_cancel_failed" | "cloud_task_canceled" | "cloud_task_create_failed" | "cloud_task_created" | "cloud_task_not_configured" | "cloud_task_sa_unavailable"[];
+```
+
+### `CalendarEventLogRecord`
+
+Structured log entry for any Google Calendar sync event.
+
+```ts
+interface CalendarEventLogRecord {
+  level: LogLevelType;
+  msg: CalendarEventMsg;
+  ts: string;
+  booking_uid?: string;
+  calendar_event_id?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `CalendarEventLogRecordSchema`
+
+Zod schema for {@link CalendarEventLogRecord}.
+
+```ts
+const CalendarEventLogRecordSchema: z.ZodType<CalendarEventLogRecord>;
+```
+
+### `CalendarEventMsg`
+
+Discriminated msg union for Calendar-archetype log records.
+
+```ts
+type CalendarEventMsg = indexedAccess;
+```
+
+### `ClientAppType`
+
+Identifier for a client application that emits logs.
+
+```ts
+type ClientAppType = indexedAccess;
+```
+
+### `ClientLogBatch`
+
+A batch of client log entries submitted in a single request.
+
+```ts
+interface ClientLogBatch {
+  logs: ClientLogEntry[];
+}
+```
+
+### `ClientLogBatchSchema`
+
+Zod schema for {@link ClientLogBatch}.
+
+```ts
+const ClientLogBatchSchema: z.ZodType<ClientLogBatch>;
+```
+
+### `ClientLogEntry`
+
+A single log entry sent from a client application.
+
+```ts
+interface ClientLogEntry {
+  level: LogLevelType;
+  msg: string;
+  ts: string;
+  app: ClientAppType;
+  page?: string;
+  request_id?: string;
+  data?: Record<string, unknown>;
+}
+```
+
+### `ClientLogEntrySchema`
+
+Zod schema for {@link ClientLogEntry}.
+
+The `data` field is capped at 20 top-level keys + 4 KB stringified to
+defend against runaway client-side payloads. Manager logs in practice
+carry ≤5 keys and <500 bytes per entry, so this cap is far above the
+legitimate ceiling.
+
+```ts
+const ClientLogEntrySchema: z.ZodType<ClientLogEntry>;
+```
+
+### `ClientLogRecord`
+
+Server-emitted log record for browser-shipped events.
+
+api-cloudrun's `src/routes/clientLogs.ts` re-emits each ingested
+{@link ClientLogEntry} as `msg: "client_log"` with the wire entry's
+envelope rewritten into `client_*` namespaced fields (`client_msg`,
+`client_ts`, `client_level` — to avoid collision with the server
+envelope's `msg`/`ts`/`level`) and the `data` payload spread to the
+top level. PII-shaped passthrough keys are declared here with their
+`pii: "mask"` meta so the schema walker masks them partial-form
+instead of Tier 2 fully redacting.
+
+```ts
+interface ClientLogRecord {
+  level: BaseLogLevelType;
+  msg: "client_log";
+  ts: string;
+  source: "browser";
+  app: ClientAppType;
+  client_msg: string;
+  client_ts: string;
+  client_level: BaseLogLevelType;
+  page?: string;
+  request_id?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  email?: string;
+  to?: string;
+  subject?: string;
+}
+```
+
+### `ClientLogRecordSchema`
+
+Zod schema for {@link ClientLogRecord}.
+
+```ts
+const ClientLogRecordSchema: z.ZodType<ClientLogRecord>;
+```
+
+### `CloudTaskEventLogRecord`
+
+Structured log entry for any Cloud Tasks lifecycle event.
+
+```ts
+interface CloudTaskEventLogRecord {
+  level: LogLevelType;
+  msg: CloudTaskEventMsg;
+  ts: string;
+  queue?: string;
+  task_name?: string;
+  document_path?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `CloudTaskEventLogRecordSchema`
+
+Zod schema for {@link CloudTaskEventLogRecord}.
+
+```ts
+const CloudTaskEventLogRecordSchema: z.ZodType<CloudTaskEventLogRecord>;
+```
+
+### `CloudTaskEventMsg`
+
+Discriminated msg union for Cloud-Task-archetype log records.
+
+```ts
+type CloudTaskEventMsg = indexedAccess;
+```
+
+### `DOMAIN_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_failed" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "location_cascade_skip" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_summaries_pruned" | "fulfillment_custom_item_qty_override"[];
+```
+
+### `DmarcAggregateLogRecord`
+
+Structured log entry for one record from a DMARC aggregate report.
+
+```ts
+interface DmarcAggregateLogRecord {
+  level: LogLevelType;
+  msg: "dmarc_aggregate_record";
+  ts: string;
+  source_ip: string;
+  count: number;
+  disposition: string;
+  dkim_result: string;
+  spf_result: string;
+  dkim_aligned: boolean;
+  spf_aligned: boolean;
+  header_from: string;
+  org_name: string;
+  report_id: string;
+  domain: string;
+  date_range_begin: number;
+  date_range_end: number;
+  dmarc_pass: "true" | "false";
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `DmarcAggregateLogRecordSchema`
+
+Zod schema for {@link DmarcAggregateLogRecord}.
+
+```ts
+const DmarcAggregateLogRecordSchema: z.ZodType<DmarcAggregateLogRecord>;
+```
+
+### `DomainEventLogRecord`
+
+Structured log entry for any domain-aggregate lifecycle event.
+
+```ts
+interface DomainEventLogRecord {
+  level: LogLevelType;
+  msg: DomainEventMsg;
+  ts: string;
+  order_uid?: string;
+  invoice_uid?: string;
+  product_uid?: string;
+  organization_uid?: string;
+  document_path?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `DomainEventLogRecordSchema`
+
+Zod schema for {@link DomainEventLogRecord}.
+
+```ts
+const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord>;
+```
+
+### `DomainEventMsg`
+
+Discriminated msg union for Domain-archetype log records.
+
+```ts
+type DomainEventMsg = indexedAccess;
+```
+
+### `EmailSendFailedLogRecord`
+
+Structured log entry for a failed outbound email.
+
+```ts
+interface EmailSendFailedLogRecord {
+  level: LogLevelType;
+  msg: "email_send_failed";
+  ts: string;
+  status: number;
+  body?: string;
+  email_from: string;
+  to?: string;
+  subject?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `EmailSendFailedLogRecordSchema`
+
+Zod schema for {@link EmailSendFailedLogRecord}.
+
+```ts
+const EmailSendFailedLogRecordSchema: z.ZodType<EmailSendFailedLogRecord>;
+```
+
+### `EmailSentLogRecord`
+
+Structured log entry for a successful outbound email.
+
+```ts
+interface EmailSentLogRecord {
+  level: LogLevelType;
+  msg: "email_sent";
+  ts: string;
+  email_from: string;
+  to?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `EmailSentLogRecordSchema`
+
+Zod schema for {@link EmailSentLogRecord}.
+
+```ts
+const EmailSentLogRecordSchema: z.ZodType<EmailSentLogRecord>;
+```
+
+### `INTEGRATION_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const INTEGRATION_EVENT_MSGS: "crms_invoice_items_uniqueness_violation" | "crms_invoice_multidest_flat" | "crms_invoice_multiple_orders_found" | "crms_invoice_order_not_found" | "crms_mark_paid_failed" | "crms_product_not_found" | "uploadcare_attachment_cleanup_failed" | "uploadcare_draft_cleanup_failed" | "uploadcare_file_not_found" | "uploadcare_invoice_cleanup_failed" | "uploadcare_invoice_version_cleanup_failed" | "uploadcare_metadata_failed" | "uploadcare_orphan_batch_failed" | "uploadcare_orphan_cleanup_failed" | "uploadcare_orphan_sweep_completed" | "processUpload_delete_original_failed" | "processUpload_no_file_id" | "processUpload_skipped" | "process_upload_failed" | "dmarc_report_ingest_failed" | "dmarc_report_processor_run" | "eventarc_duplicate_event" | "eventarc_processed" | "trello_locked" | "trello_newer_update_detected" | "trello_no_new_updates" | "trello_queue_error" | "mirror_deleted" | "mirror_failed" | "mirror_set" | "mirror_set_failed_terminal" | "mirror_set_queue_failed" | "mirror_skipped_stale" | "draft_quote_skipped_deleted" | "draft_quote_skipped_invalid_order" | "draft_quote_superseded" | "dns_record_check" | "dns_record_check_resolve_failed" | "sync_collection_completed" | "sync_collection_skipped" | "sync_started" | "geocode_cache_write_failed" | "geocode_poi_fallback" | "geocoding_failed" | "member_geocode_skipped" | "user_name_cascade_batch" | "customer_linking_failed"[];
+```
+
+### `IntegrationEventLogRecord`
+
+Structured log entry for any external-integration event.
+
+```ts
+interface IntegrationEventLogRecord {
+  level: LogLevelType;
+  msg: IntegrationEventMsg;
+  ts: string;
+  service?: string;
+  document_path?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `IntegrationEventLogRecordSchema`
+
+Zod schema for {@link IntegrationEventLogRecord}.
+
+```ts
+const IntegrationEventLogRecordSchema: z.ZodType<IntegrationEventLogRecord>;
+```
+
+### `IntegrationEventMsg`
+
+Discriminated msg union for Integration-archetype log records.
+
+```ts
+type IntegrationEventMsg = indexedAccess;
+```
+
+### `LogLevelEnum`
+
+Zod enum for log levels — exported for reuse in arm schemas.
+
+```ts
+const LogLevelEnum: z.ZodType<LogLevelType>;
+```
+
+### `LogLevelType`
+
+Log severity level.
+
+```ts
+type LogLevelType = indexedAccess;
+```
+
+### `LogRecord`
+
+Structured log envelope emitted by the API (OpenAPI shape).
+
+```ts
+interface LogRecord {
+  level: LogLevelType;
+  msg: string;
+  ts: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  duration_ms?: number;
+  dry_run?: boolean;
+}
+```
+
+### `LogRecordSchema`
+
+Zod schema for {@link LogRecord} — generic envelope, OpenAPI-only.
+
+```ts
+const LogRecordSchema: z.ZodType<LogRecord>;
+```
+
+### `MCP_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const MCP_EVENT_MSGS: "mcp_autogen_tool_error" | "mcp_autogen_tools_registered" | "mcp_bearer_invalid" | "mcp_bearer_unconfigured" | "mcp_legacy_bearer_used" | "mcp_template_tool_error" | "mcp_template_tools_registered"[];
+```
+
+### `MSG_SCHEMA_REGISTRY`
+
+Runtime msg → schema lookup. The structured logger's `emit()` reads
+`record.msg`, looks up the matching schema here, and (if present)
+passes the record through the schema-driven PII walker in
+`@cfs/core/schemas/pii` before stringification.
+
+Records whose `msg` is NOT in this registry fall through to the
+runtime key-name denylist tier (forward defense). The coverage test
+in api-cloudrun keeps the registry exhaustive over what the source
+tree emits.
+
+```ts
+const MSG_SCHEMA_REGISTRY: ReadonlyMap<string, z.ZodType>;
+```
+
+### `McpEventLogRecord`
+
+Structured log entry for any MCP tool / bearer-auth event.
+
+```ts
+interface McpEventLogRecord {
+  level: LogLevelType;
+  msg: McpEventMsg;
+  ts: string;
+  tool?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `McpEventLogRecordSchema`
+
+Zod schema for {@link McpEventLogRecord}.
+
+```ts
+const McpEventLogRecordSchema: z.ZodType<McpEventLogRecord>;
+```
+
+### `McpEventMsg`
+
+Discriminated msg union for MCP-archetype log records.
+
+```ts
+type McpEventMsg = indexedAccess;
+```
+
+### `OAUTH_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const OAUTH_EVENT_MSGS: "oauth_401_retry" | "oauth_alert_email_failed" | "oauth_refresh_attempt" | "oauth_refresh_chain_broken" | "oauth_refresh_failed_response" | "oauth_refresh_scheduled" | "oauth_refresh_stale_task" | "oauth_token_exchanged" | "oauth_token_expired" | "oauth_token_expired_refreshing" | "oauth_token_refresh_skipped" | "oauth_token_refreshed" | "oauth_token_response" | "mcp_oauth_authorize_staged" | "mcp_oauth_client_registered" | "mcp_oauth_code_consume_failed" | "mcp_oauth_consent_approved" | "mcp_oauth_consent_denied" | "mcp_oauth_scope_denied" | "mcp_oauth_token_invalid" | "mcp_oauth_token_minted" | "mcp_oauth_user_missing" | "token_refresh_failed" | "crms_token_exchange_failed" | "xero_token_exchange_failed"[];
+```
+
+### `OAuthEventLogRecord`
+
+Structured log entry for any OAuth / token-lifecycle event.
+
+```ts
+interface OAuthEventLogRecord {
+  level: LogLevelType;
+  msg: OAuthEventMsg;
+  ts: string;
+  service?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `OAuthEventLogRecordSchema`
+
+Zod schema for {@link OAuthEventLogRecord}.
+
+```ts
+const OAuthEventLogRecordSchema: z.ZodType<OAuthEventLogRecord>;
+```
+
+### `OAuthEventMsg`
+
+Discriminated msg union for OAuth-archetype log records.
+
+```ts
+type OAuthEventMsg = indexedAccess;
+```
+
+### `OAuthRefreshLogRecord`
+
+Structured log entry for an OAuth token refresh.
+
+```ts
+interface OAuthRefreshLogRecord {
+  level: LogLevelType;
+  msg: "oauth_refresh";
+  ts: string;
+  service: string;
+  grant_type?: string;
+  scope?: string;
+  token_type?: string;
+  expires_in?: number;
+  token_age_hours?: number;
+  refreshed_at_debug?: string;
+  recovered?: boolean;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `OAuthRefreshLogRecordSchema`
+
+Zod schema for {@link OAuthRefreshLogRecord}.
+
+```ts
+const OAuthRefreshLogRecordSchema: z.ZodType<OAuthRefreshLogRecord>;
+```
+
+### `PiiClassification`
+
+PII classification vocabulary.
+
+Applied via `.meta({ pii: "..." })` on any Zod field; the schema-driven
+walker in `./walker.ts` reads these tags and dispatches to the matching
+leaf transform.
+
+- `"none"`   — safe field, no processing
+- `"mask"`   — partial reveal (`alice@x.com` → `a****@x.com`, last-4 for opaque strings)
+- `"hash"`   — deterministic HMAC-SHA256 prefix (server-side only; needs a key)
+- `"redact"` — full removal → `"[REDACTED]"`
+
+```ts
+type PiiClassification = "none" | "mask" | "hash" | "redact";
+```
+
+### `PropagationLogRecord`
+
+Structured log entry for a single propagation rule execution.
+
+```ts
+interface PropagationLogRecord {
+  level: LogLevelType;
+  msg: "propagation";
+  ts: string;
+  rule_id: string;
+  source: string;
+  target: string;
+  mode: PropagationModeType;
+  transaction?: string;
+  fields_mapped: number;
+  source_doc_id?: string;
+  target_doc_id?: string;
+  status: PropagationStatusType;
+  duration_ms?: number;
+  error?: string;
+  rules_fired?: string[];
+  rules_fired_count?: number;
+  rules_expected?: number;
+  target_counts?: Record<string, number>;
+  target_count?: number;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `PropagationLogRecordSchema`
+
+Zod schema for {@link PropagationLogRecord}.
+
+```ts
+const PropagationLogRecordSchema: z.ZodType<PropagationLogRecord>;
+```
+
+### `PropagationModeType`
+
+Propagation strategy used by a rule.
+
+```ts
+type PropagationModeType = indexedAccess;
+```
+
+### `PropagationStatusType`
+
+Status outcome of a propagation rule execution.
+
+```ts
+type PropagationStatusType = indexedAccess;
+```
+
+### `RequestLogRecord`
+
+Structured log entry for a completed HTTP request.
+
+```ts
+interface RequestLogRecord {
+  level: LogLevelType;
+  msg: "request";
+  ts: string;
+  route: string;
+  status: number;
+  duration_ms: number;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  dry_run?: boolean;
+}
+```
+
+### `RequestLogRecordSchema`
+
+Zod schema for {@link RequestLogRecord}.
+
+```ts
+const RequestLogRecordSchema: z.ZodType<RequestLogRecord>;
+```
+
+### `SYSTEM_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const SYSTEM_EVENT_MSGS: "dev_guard_skip" | "dry_run_skip" | "rate_limit_exceeded" | "retry_attempt" | "startup_error" | "unhandled_error" | "health_check_firestore_error" | "preview_served" | "validation_failed"[];
+```
+
+### `SyncErrorLogRecord`
+
+Structured log entry for a sync-pipeline failure.
+
+```ts
+interface SyncErrorLogRecord {
+  level: LogLevelType;
+  msg: "sync_error";
+  ts: string;
+  sync_service: string;
+  document_path?: string;
+  operation?: string;
+  error_name?: string;
+  error_message?: string;
+  error_stack?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `SyncErrorLogRecordSchema`
+
+Zod schema for {@link SyncErrorLogRecord}.
+
+```ts
+const SyncErrorLogRecordSchema: z.ZodType<SyncErrorLogRecord>;
+```
+
+### `SystemEventLogRecord`
+
+Structured log entry for any system-lifecycle event.
+
+```ts
+interface SystemEventLogRecord {
+  level: LogLevelType;
+  msg: SystemEventMsg;
+  ts: string;
+  attempt?: number;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `SystemEventLogRecordSchema`
+
+Zod schema for {@link SystemEventLogRecord}.
+
+```ts
+const SystemEventLogRecordSchema: z.ZodType<SystemEventLogRecord>;
+```
+
+### `SystemEventMsg`
+
+Discriminated msg union for System-archetype log records.
+
+```ts
+type SystemEventMsg = indexedAccess;
+```
+
+### `TEMPLATE_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const TEMPLATE_EVENT_MSGS: "fixture_saved" | "fixture_deleted" | "template_abandon_close_pr_failed" | "template_component_file_missing" | "template_component_no_content" | "template_component_sidecar_parse_failed" | "template_metadata_pr_opened" | "template_metadata_close_pr_failed" | "template_metadata_automerge_unavailable" | "template_preview_store_failed" | "template_preview_stored" | "template_publish_affected" | "template_publish_base_ref_rejected" | "template_publish_no_merge_sha" | "template_publish_noop" | "template_publish_skipped_no_app" | "template_publish_unknown_component" | "template_rebuild_from_git" | "template_release_auto_merge_failed" | "template_render_config_parse_failed" | "template_render_failed" | "draft_git_backfill_failed" | "template_sandbox_diverged" | "template_sandbox_fast_forwarded" | "template_sandbox_force_resynced" | "template_sync_skipped_no_app" | "get_quote_template_failed" | "golden_diff_oidc_identity_rejected" | "golden_diff_oidc_unconfigured" | "golden_diff_oidc_verify_failed" | "golden_diff_result" | "golden_verdict_persist_failed" | "github_templates_no_merge_sha" | "github_templates_publish_failed" | "comment_sync_awaiting_create" | "comment_sync_github_unconfigured" | "comment_sync_no_pr" | "comment_sync_posted"[];
+```
+
+### `TYPESENSE_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const TYPESENSE_EVENT_MSGS: "typesense_alias_mismatch" | "typesense_batch_import_failed" | "typesense_build_delete_failed" | "typesense_cleanup_old_collections_failed" | "typesense_collection_created" | "typesense_count_mismatch" | "typesense_delete" | "typesense_import_failed" | "typesense_orphan_delete_failed" | "typesense_parent_keys_missing" | "typesense_parent_keys_parse_failed" | "typesense_purge_orphans_failed" | "typesense_reindex_enqueued" | "typesense_reindex_superseded" | "typesense_reindex_swapped" | "typesense_scoped_key_parent_missing" | "typesense_swap_alias_failed" | "typesense_sync_check_failed" | "typesense_sync_synonyms_failed" | "typesense_synonyms_synced" | "typesense_translate_failed" | "typesense_upsert"[];
+```
+
+### `TemplateEventLogRecord`
+
+Structured log entry for any template / golden-diff event.
+
+```ts
+interface TemplateEventLogRecord {
+  level: LogLevelType;
+  msg: TemplateEventMsg;
+  ts: string;
+  template_uid?: string;
+  template_version_uid?: string;
+  branch?: string;
+  pr_number?: number;
+  commit_sha?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `TemplateEventLogRecordSchema`
+
+Zod schema for {@link TemplateEventLogRecord}.
+
+```ts
+const TemplateEventLogRecordSchema: z.ZodType<TemplateEventLogRecord>;
+```
+
+### `TemplateEventMsg`
+
+Discriminated msg union for Template-archetype log records.
+
+```ts
+type TemplateEventMsg = indexedAccess;
+```
+
+### `TransactionLogRecord`
+
+Structured log entry for a single Firestore transaction commit (success or failure).
+
+```ts
+interface TransactionLogRecord {
+  level: LogLevelType;
+  msg: "transaction";
+  ts: string;
+  tx_name: string;
+  status: TransactionStatusType;
+  duration_ms: number;
+  write_count: number;
+  target_counts: Record<string, number>;
+  estimated_json_bytes: number;
+  sample_doc_paths: string[];
+  error_name?: string;
+  error_message?: string;
+  error_stack?: string;
+  aborted?: boolean;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  dry_run?: boolean;
+}
+```
+
+### `TransactionLogRecordSchema`
+
+Zod schema for {@link TransactionLogRecord}.
+
+```ts
+const TransactionLogRecordSchema: z.ZodType<TransactionLogRecord>;
+```
+
+### `TransactionStatusType`
+
+Status outcome of a Firestore transaction commit.
+
+```ts
+type TransactionStatusType = indexedAccess;
+```
+
+### `TypedLogRecord`
+
+Discriminated union of every typed log record, keyed by the `msg`
+literal. The new `logTyped<R extends TypedLogRecord>` API in
+api-cloudrun's `src/lib/logger.ts` constrains its argument to this
+union — TS narrows to the matching arm based on the supplied `msg`,
+giving compile-time enforcement that every field is correctly named
+and typed.
+
+Adding a new arm requires:
+  1. Define schema + interface in `./<archetype>.ts`
+  2. Re-export both above
+  3. Add to this union
+  4. Add to {@link MSG_SCHEMA_REGISTRY} below
+
+The `log-records.test.ts` coverage test asserts union ↔ registry
+symmetry so it's impossible to add one without the other.
+
+```ts
+type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;
+```
+
+### `TypesenseEventLogRecord`
+
+Structured log entry for any Typesense pipeline event.
+
+```ts
+interface TypesenseEventLogRecord {
+  level: LogLevelType;
+  msg: TypesenseEventMsg;
+  ts: string;
+  collection?: string;
+  typesense_collection?: string;
+  document_id?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `TypesenseEventLogRecordSchema`
+
+Zod schema for {@link TypesenseEventLogRecord}.
+
+```ts
+const TypesenseEventLogRecordSchema: z.ZodType<TypesenseEventLogRecord>;
+```
+
+### `TypesenseEventMsg`
+
+Discriminated msg union for Typesense-archetype log records.
+
+```ts
+type TypesenseEventMsg = indexedAccess;
+```
+
+### `USER_SESSION_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const USER_SESSION_EVENT_MSGS: "invite_accepted" | "invite_created" | "invite_preview" | "session_replaced_on_invite_accept" | "session_user_preload" | "turnstile_verification_failed"[];
+```
+
+### `UserSessionEventLogRecord`
+
+Structured log entry for any user-session / invite / turnstile event.
+
+```ts
+interface UserSessionEventLogRecord {
+  level: LogLevelType;
+  msg: UserSessionEventMsg;
+  ts: string;
+  invite_uid?: string;
+  session_uid?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `UserSessionEventLogRecordSchema`
+
+Zod schema for {@link UserSessionEventLogRecord}.
+
+```ts
+const UserSessionEventLogRecordSchema: z.ZodType<UserSessionEventLogRecord>;
+```
+
+### `UserSessionEventMsg`
+
+Discriminated msg union for User-Session-archetype log records.
+
+```ts
+type UserSessionEventMsg = indexedAccess;
+```
+
+### `ValidationErrorLogRecord`
+
+Structured log entry for a schema validation failure.
+
+```ts
+interface ValidationErrorLogRecord {
+  level: LogLevelType;
+  msg: "validation_error";
+  ts: string;
+  label: string;
+  issues: ValidationIssue[];
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `ValidationErrorLogRecordSchema`
+
+Zod schema for {@link ValidationErrorLogRecord}.
+
+```ts
+const ValidationErrorLogRecordSchema: z.ZodType<ValidationErrorLogRecord>;
+```
+
+### `ValidationIssue`
+
+Single Zod issue, structurally.
+
+```ts
+interface ValidationIssue {
+  path?: parenthesized[];
+  code?: string;
+  message?: string;
+  keys?: string[];
+  expected?: string;
+}
+```
+
+### `XERO_EVENT_MSGS`
+
+Msg literals this archetype absorbs.
+
+```ts
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_synced" | "xero_rate_limit" | "xero_tracking_option_create_failed" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
+```
+
+### `XeroEventLogRecord`
+
+Structured log entry for any Xero sync event.
+
+```ts
+interface XeroEventLogRecord {
+  level: LogLevelType;
+  msg: XeroEventMsg;
+  ts: string;
+  xero_invoice_id?: string;
+  xero_payment_id?: string;
+  xero_contact_id?: string;
+  invoice_uid?: string;
+  order_uid?: string;
+  request_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  user_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `XeroEventLogRecordSchema`
+
+Zod schema for {@link XeroEventLogRecord}.
+
+```ts
+const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord>;
+```
+
+### `XeroEventMsg`
+
+Discriminated msg union for Xero-archetype log records.
+
+```ts
+type XeroEventMsg = indexedAccess;
+```
+
+## `@cfs/core/schemas/pii`
+
+### `PiiClassification`
+
+PII classification vocabulary.
+
+Applied via `.meta({ pii: "..." })` on any Zod field; the schema-driven
+walker in `./walker.ts` reads these tags and dispatches to the matching
+leaf transform.
+
+- `"none"`   — safe field, no processing
+- `"mask"`   — partial reveal (`alice@x.com` → `a****@x.com`, last-4 for opaque strings)
+- `"hash"`   — deterministic HMAC-SHA256 prefix (server-side only; needs a key)
+- `"redact"` — full removal → `"[REDACTED]"`
+
+```ts
+type PiiClassification = "none" | "mask" | "hash" | "redact";
+```
+
+### `PiiStrategy`
+
+How to transform a leaf value given its PII classification. Consumers
+provide their own strategy; the structured logger uses
+{@link createLoggerStrategy} below.
+
+The walker calls `apply` with the leaf value, the field's classification,
+and the dotted field path (for strategies that want path-dependent output
+like the fixture sanitizer's deterministic fakes).
+
+```ts
+interface PiiStrategy {
+  apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown;
+}
+```
+
+### `RUNTIME_DENYLIST`
+
+Runtime key-name denylist for the structured logger's untyped-passthrough
+scrub tier. Recursive **exact-key** match (NOT substring) against log
+payload keys; matching values are redacted in-place.
+
+Curated set, intentionally different from the schema-enforcement
+dictionary (`./dictionary.ts`):
+
+- **Drops** ambiguous tokens like `name` and bare `address` — too noisy
+  in logs that legitimately carry `store_name`, `collection_name`,
+  `delivery_address`, etc. Schema-level PII tags handle the
+  contact/org/user cases via the walker; runtime denylist is the safety
+  net for the un-schematized passthrough surface.
+- **Adds** transport / secret / network identifiers that are never schema
+  fields but absolutely flow through log payloads (Authorization headers,
+  OAuth tokens, request-source IPs).
+
+Empirically validated against 316k log records (dev + prod, 2026-05-23 →
+2026-05-27): no `email` / `phone` / `address` / `password` / `token` keys
+appear in current logs at all — but `source_ip` and `header_from` do
+(DMARC ingest, 3,772 hits each in prod), which is why those are here.
+
+The `_debug` suffix convention is intentionally OUT of this denylist's
+purview: `*_debug` fields are an internal-diagnostics marker, not a
+sensitivity marker — `refreshed_at_debug` and friends are deliberately
+present in logs for ops correlation.
+
+```ts
+const RUNTIME_DENYLIST: ReadonlySet<string>;
+```
+
+### `SAFE_PASSTHROUGH`
+
+Keys that the runtime scrubber MUST preserve untouched, regardless of
+value content. Protects against accidental over-scrubbing — without this
+allowlist, a `request_id` UUID that happens to match a regex pattern
+could be redacted, breaking trace correlation across logs.
+
+Strictly limited to structural / diagnostic fields that are *definitionally*
+not personal data:
+
+- log envelope fields (`level`, `msg`, `ts`)
+- correlation IDs (`request_id`, `trace_id`, `span_id`)
+- HTTP routing metadata (`route`, `method`, `path`, `status`)
+- timing / size measurements (`duration_ms`, `write_count`, etc.)
+- schema-event identifiers (`tx_name`, `rule_id`, `source_doc_id`, `collection`)
+
+Any field whose value is *user-supplied* (even if it currently appears
+benign) belongs in the schema as a `pii`-tagged field instead, NOT here.
+
+```ts
+const SAFE_PASSTHROUGH: ReadonlySet<string>;
+```
+
+### `SENSITIVE_EXACT`
+
+Field names that MUST carry a `pii` meta when they appear at any depth in a schema.
+
+```ts
+const SENSITIVE_EXACT: ReadonlySet<string>;
+```
+
+### `SENSITIVE_NAME_FIELD`
+
+Field name treated as sensitive only inside contact / org / user-adjacent schemas.
+
+```ts
+const SENSITIVE_NAME_FIELD: "name";
+```
+
+### `applyPii(record: T, schema: z.ZodType<T>, strategy: PiiStrategy): T`
+
+Recursively apply the strategy's PII transforms to every field in
+`record` whose schema position carries a `.meta({ pii })` tag.
+
+Returns a shallow-cloned record at each object level — never mutates the
+input. Safe to call on the same record repeatedly; idempotent for mask /
+redact (hash is deterministic).
+
+### `createLoggerStrategy(hashFn?: fnOrConstructor): PiiStrategy`
+
+Default strategy for the structured logger.
+
+- `mask`   → partial reveal via {@link mask}
+- `redact` → literal `[REDACTED]`
+- `hash`   → calls `hashFn(value)` if supplied; otherwise FAIL-CLOSED to
+             `redact()` (never raw passthrough, never throws). Logging
+             must never throw, so a missing key degrades gracefully.
+- `none`   → pass through unchanged
+
+Non-string values are passed through unchanged — the schema's PII tags
+only apply to string leaves (number / boolean fields cannot carry PII
+directly; arrays and objects are recursed into by the walker, not handed
+to the strategy).
+
+**Parameters**
+
+- `hashFn` — Optional sync HMAC function. The api-cloudrun logger
+supplies `(v) => nodeHash(v, LOG_HMAC_KEY)`; browser
+consumers omit it (no sync HMAC available — manager
+pre-scrub should only use `mask` / `redact` classifications
+in its records).
+
+### `mask(value: string): string`
+
+Partial-reveal mask. Shape-preserving so masked values stay debuggable
+(you can tell two masked emails differ) without exposing PII.
+
+- **Emails** (contain a single `@` mid-string): keep first char of local
+  part, mask the rest, keep the full domain.
+  `alice@example.com` → `a****@example.com`
+- **Other strings** of length ≥ 4: keep first and last char, mask between.
+  `abcdefg` → `a*****g`
+- **Short strings** (length < 4): fully redact — masking would leak too
+  much of a 2–3 char value.
+  `ab` → `[REDACTED]`
+
+### `redact(): string`
+
+Full redaction. Returns the literal string `[REDACTED]`.
+
+## `@cfs/core/schemas/pii/hash-node`
+
+### `nodeHash(value: string, key: string): string`
+
+Compute `HMAC-SHA256(value, key)` and return the first 16 hex chars of
+the digest — collision-resistant enough for log correlation, short enough
+to keep records compact.
+
+Callers should stringify non-string values before invoking. An empty
+string is hashed normally (no special case), so two empty values
+correlate; ensure the caller has skipped null/undefined.
+
+**Parameters**
+
+- `value` — Raw string to pseudonymize.
+- `key` — HMAC secret. Must be stable across instances for correlation.
+
+## `@cfs/core/schemas/role`
+
+### `Role`
+
+A role document in Firestore.
+
+```ts
+interface Role {
+  name: string;
+  label: string;
+  permissions: string[];
+  description?: string;
+  defaultThreadId?: string;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `RoleSchema`
+
+Zod schema for Role.
+
+```ts
+const RoleSchema: z.ZodType<Role>;
+```
+
+## `@cfs/core/schemas/permissions`
+
+### `PERMISSIONS`
+
+The full catalog of permissions. Adding a new route? Add its permission here first.
+
+```ts
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+```
+
+### `Permission`
+
+Union type of every permission string in the catalog.
+
+```ts
+type Permission = indexedAccess;
+```
+
+### `RouteManifest`
+
+Runtime route manifest — emitted by api-cloudrun at GET /permissions/manifest.
+
+```ts
+interface RouteManifest {
+  version: string;
+  permissions: typeOperator;
+  routes: RouteManifestEntry[];
+}
+```
+
+### `RouteManifestEntry`
+
+A single entry in the runtime route manifest — one per protected route.
+
+```ts
+interface RouteManifestEntry {
+  method: RouteMethod;
+  path: string;
+  permission: Permission;
+  operationId?: string;
+}
+```
+
+### `RouteMethod`
+
+HTTP methods accepted by the runtime route manifest.
+
+```ts
+type RouteMethod = "get" | "post" | "put" | "delete" | "patch";
+```
+
+## `@cfs/core/schemas/thread`
+
+### `Thread`
+
+Thread Firestore document shape.
+
+```ts
+interface Thread {
+  uid: string;
+  sources: DocSourceType[];
+  title: string | null;
+  last_message_at: FirestoreTimestampType | null;
+  last_message_preview: string;
+  comment_count: number;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `ThreadSchema`
+
+Zod schema for a thread Firestore document.
+
+```ts
+const ThreadSchema: z.ZodType<Thread>;
+```
+
+### `UpdateThreadInput`
+
+Zod schema for updating a thread.
+
+```ts
+const UpdateThreadInput: z.ZodType<UpdateThreadInputType>;
+```
+
+### `UpdateThreadInputType`
+
+Input for PATCH /threads/:uid — rename only.
+
+```ts
+interface UpdateThreadInputType {
+  title: string | null;
+  version: number;
+}
+```
+
+## `@cfs/core/schemas/comment`
+
+### `Comment`
+
+Comment Firestore document shape.
+
+```ts
+interface Comment {
+  uid: string;
+  uid_thread: string;
+  sources: DocSourceType[];
+  body: CommentBodyJson;
+  body_text: string;
+  reactions: Record<string, Record<string, ActorRefType>>;
+  git?: CommentGitMirror;
+  version: number;
+  created_by: ActorRefType;
+  deleted_at: FirestoreTimestampType | null;
+  deleted_by: ActorRefType | null;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `CommentBody`
+
+Zod schema for the Tiptap JSON body.
+
+```ts
+const CommentBody: z.ZodType<CommentBodyJson>;
+```
+
+### `CommentBodyJson`
+
+Tiptap JSON body payload. Stored as a loose record to keep the schema
+forward-compatible with Tiptap's node spec. The composer owns shape
+correctness; the `body_text` mirror is the authoritative plain-text form.
+
+```ts
+type CommentBodyJson = Record<string, unknown>;
+```
+
+### `CommentGitMirror`
+
+GitHub PR-comment mirror metadata. Set only on template branch-thread
+comments by the comment-sync Cloud Task after the external POST: `comment_id`
+is the GitHub issue-comment id (the idempotency key for later update/tombstone
+PATCHes). `synced_at` is an internal machine timestamp marking the last
+successful mirror — it is NEVER transmitted to GitHub (GitHub server-stamps
+its own comment times).
+
+```ts
+interface CommentGitMirror {
+  comment_id: number;
+  node_id?: string;
+  html_url?: string;
+  synced_at: FirestoreTimestampType;
+}
+```
+
+### `CommentGitMirrorSchema`
+
+Zod schema for a comment's GitHub-mirror metadata.
+
+```ts
+const CommentGitMirrorSchema: z.ZodType<CommentGitMirror>;
+```
+
+### `CommentReactionInput`
+
+Zod schema for a comment reaction add/remove.
+
+```ts
+const CommentReactionInput: z.ZodType<CommentReactionInputType>;
+```
+
+### `CommentReactionInputType`
+
+Input for POST /comments/:uid/reactions.
+
+```ts
+interface CommentReactionInputType {
+  emoji: string;
+  action: ReactionActionType;
+}
+```
+
+### `CommentSchema`
+
+Zod schema for a comment Firestore document.
+
+```ts
+const CommentSchema: z.ZodType<Comment>;
+```
+
+### `CreateCommentInput`
+
+Zod schema for creating a comment.
+
+```ts
+const CreateCommentInput: z.ZodType<CreateCommentInputType>;
+```
+
+### `CreateCommentInputType`
+
+Input for POST /comments.
+
+```ts
+interface CreateCommentInputType {
+  uid_thread: string;
+  body: CommentBodyJson;
+  body_text: string;
+}
+```
+
+### `ReactionActionType`
+
+Allowed reaction actions.
+
+```ts
+type ReactionActionType = indexedAccess;
+```
+
+### `UpdateCommentInput`
+
+Zod schema for updating a comment.
+
+```ts
+const UpdateCommentInput: z.ZodType<UpdateCommentInputType>;
+```
+
+### `UpdateCommentInputType`
+
+Input for PATCH /comments/:uid.
+
+```ts
+interface UpdateCommentInputType {
+  body: CommentBodyJson;
+  body_text: string;
+  version: number;
+}
+```
+
+## `@cfs/core/utils/bookings`
+
+Pure helpers over the booking breakdown shape and the order's denormalized
+roll-up. Used both server-side (api-cloudrun) and client-side (manager) so
+the warehouse picker sees instant optimistic updates and the order detail
+page can compute "is this order done?" without a round-trip.
+
+```ts
+import {
+  sumBookingBreakdown,
+  isOrderBookingsClosed,
+  mergeBookingBreakdown,
+} from "@cfs/core/utils/bookings";
+```
+
+### `BOOKING_BREAKDOWN_KEYS`
+
+All seven keys of the booking lifecycle breakdown. Order matches the schema.
+
+```ts
+const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
+```
+
+### `BOOKING_BREAKDOWN_OPEN_KEYS`
+
+Keys representing items that are still in flight (pre-terminal).
+
+```ts
+const BOOKING_BREAKDOWN_OPEN_KEYS: "quoted" | "reserved" | "prepped" | "out"[];
+```
+
+### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
+
+Keys representing items that have reached a terminal state.
+
+```ts
+const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged"[];
+```
+
+### `applyBookingBreakdownDelta(orderBreakdown: indexedAccess, prev: indexedAccess, next: indexedAccess): void`
+
+Apply a per-key delta to an order's bookings_breakdown roll-up in place.
+
+Given a booking's previous and next breakdown, mutate the order roll-up by
+`+= next[k] - prev[k]` for each key. Useful both server-side (where
+`updateBooking` applies a single-doc delta to avoid reading every sibling
+booking) and client-side (where the manager can apply the same delta
+locally for instant feedback).
+
+### `calculateBookingBreakdown(status: string, type: string, quantity: number, existingBreakdown?: indexedAccess): indexedAccess`
+
+Project a booking's breakdown for a given order status, item type, and
+total quantity. Pure sync — no I/O.
+
+The new bucket (`quoted` for status `quoted`, `reserved` for `reserved`/
+`active`, `returned`/`out` for `complete`) is computed as
+`quantity - (carried-over progress)` so the resulting breakdown always
+sums to `quantity`. The carry-over set is `prepped + out + returned + lost
++ damaged` — the previous `quoted` and `reserved` values are intentionally
+dropped, which is what fixes the "two open buckets after a status flip"
+data corruption that surfaced in opportunity webhook ingestion.
+
+Status rules:
+  draft / canceled  → all zeros (cleared on cancel/draft)
+  quoted            → quoted = quantity − carry; preserves prepped/out/terminals
+  reserved / active → reserved = quantity − carry; preserves prepped/out/terminals
+  complete + rental → returned = quantity − (lost + damaged); zero everything else
+  complete + sale   → out = quantity; zero everything else
+  anything else     → all zeros
+
+### `emptyBookingsBreakdown(): indexedAccess`
+
+The empty breakdown shape — all seven keys at zero.
+
+Use as the seed for new orders and as the target shape for fresh bookings.
+
+```ts
+const order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };
+```
+
+### `isBookingClosed(b: Pick<Booking, "type" | "breakdown">): boolean`
+
+Per-booking closure rule.
+
+`quoted + reserved + prepped` must always be zero. The treatment of `out`
+depends on `booking.type`:
+
+- `rental`: `out` is in-flight — units must be returned (or lost/damaged)
+  before the booking is closed.
+- any other type (`sale`, defensively `service`/`surcharge`): `out` is
+  terminal — checkout is delivery and the units don't come back. The
+  booking can sit in `out` indefinitely without blocking completion.
+
+Sale items still expose Return/Lost/Damaged actions in the picker (a sold
+item *can* be returned for credit and lost/damaged-in-transit is real) —
+they're available, just not required for closure.
+
+### `isOrderBookingsClosed(bookings: ReadonlyArray<Pick<Booking, "type" | "breakdown">>): boolean`
+
+Predicate: is the order fully closed?
+
+An order is closed when every booking is closed (per `isBookingClosed`)
+and the order has at least one booking. The non-empty guard prevents
+auto-completing an empty order simply because it has nothing in flight.
+
+Drives the auto-cascade in the booking write path: when this predicate
+flips to true after applying booking deltas, the order's status is set to
+"complete" in the same Firestore transaction.
+
+### `mergeBookingBreakdown(current: indexedAccess, patch: Partial<indexedAccess> | undefined): indexedAccess`
+
+Merge a `Partial<breakdown>` over a current breakdown. Missing keys are
+inherited from `current`. Useful for the optimistic UI path: a picker
+types "returned: 1, out: 2" and the manager renders the merged result
+before the API confirms.
+
+### `sumBookingBreakdown(b: indexedAccess): number`
+
+Sum the seven values of a single booking's breakdown.
+
+The booking-level invariant is `sumBookingBreakdown(booking.breakdown) === booking.quantity`.
+Use this to verify that a proposed breakdown change preserves the invariant
+before submitting it through `PUT /bookings/{uid}`.
+
+### `sumBookingsBreakdown(bookings: Array<typeLiteral>): indexedAccess`
+
+Sum a list of booking breakdowns into the order's roll-up shape.
+
+Mirrors the keys of `stock-summaries.bookings_breakdown` (which aggregates
+along the *product* axis) but aggregated along the *order* axis. Used to
+seed `order.bookings_breakdown` at create/update time and to recompute it
+client-side from cached bookings when the order doc isn't authoritative
+yet.
+
+## `@cfs/core/utils/cards`
+
+Pure helpers over event-card lifecycle. Shared by api-cloudrun (writers
+inside the booking-update transaction) and the manager (optimistic
+client-side projections in `applyBookingActions`) so both sides agree on
+exactly what `card.status` becomes after a booking write.
+
+```ts
+import { computeCardStatusFromBookings } from "@cfs/core/utils/cards";
+```
+
+### `CardSiblingBooking`
+
+Subset of `Booking` the formula reads. Keeps the helper dependency-light.
+
+```ts
+type CardSiblingBooking = Pick<Booking, "type" | "quantity" | "breakdown">;
+```
+
+### `CardSide`
+
+Which side of the order's lifecycle a card represents:
+- `"start"` — delivery event (items leave the warehouse for a destination).
+  Backed by sibling bookings filtered by `uid_destination_delivery`.
+- `"end"`   — collection event (items return from a destination).
+  Backed by sibling bookings filtered by `uid_destination_collection`.
+
+```ts
+type CardSide = "start" | "end";
+```
+
+### `computeCardStatusFromBookings(side: CardSide, siblings: CardSiblingBooking[], current: CardStatus): CardStatus`
+
+Recompute an event card's `status` from its sibling bookings on the
+destination it belongs to. Pure function — no Firestore reads.
+
+Preserves manual overrides:
+- `"blocked"` — manually set on the card; sticks until either the parent
+  order transitions to canceled (handled in update-order) or a future
+  "Clear block" affordance writes a new auto value through the same path.
+- `"canceled"` — terminal; sourced from order.status only.
+
+Otherwise, applies per-side roll-up rules:
+
+**Start card (delivery)** — siblings filtered to `uid_destination_delivery`:
+  - `pre_delivery = Σ (quoted + reserved + prepped)` — still in the warehouse.
+  - `out          = Σ breakdown.out` — delivery in flight.
+  - if `pre_delivery === 0`            → `complete` (everything has at least left)
+  - else if `out > 0`                  → `active`   (delivery in progress)
+  - else                                → `planned`  (nothing has moved yet)
+
+**End card (collection)** — siblings filtered to `uid_destination_collection`:
+  Sale-type bookings are excluded — sales have no collection event, so the
+  end card stays planned↔complete based on rental siblings only.
+  - `terminal  = Σ (returned + lost + damaged)`
+  - `total     = Σ booking.quantity`
+  - `still_out = Σ breakdown.out`
+  - if `terminal === total`              → `complete` (everything collected/written-off)
+  - else if `terminal > 0 || still_out > 0` → `active`   (collection in progress)
+  - else                                  → `planned`  (nothing has come back yet)
+
+If the end-side roll-up has no rental siblings (e.g. a sale-only
+destination), the card resolves to `complete` — there is nothing to collect.
+
+**Parameters**
+
+- `side` — Which card side this is — drives which key set we sum and
+which sibling set the caller is expected to have prepared.
+- `siblings` — Bookings filtered to the relevant destination side.
+- `current` — The card's current status — preserved if `blocked` or
+`canceled` so manual overrides aren't clobbered.
+
+## `@cfs/core/utils/contact-name`
+
+Contact name helpers — re-exports the canonical `deriveName` from
+`@cfs/core/schemas` so manager and other utilities consumers can import it
+from a single, stable runtime location.
+
+```ts
+import { deriveName } from "@cfs/core/utils/contact-name";
+
+deriveName({ first_name: "Alex", last_name: "Hughes" }); // "Alex Hughes"
+deriveName({ first_name: "Alex", pronunciation: "al-ix" }); // "Alex (al-ix)"
+```
+
+Stored documents (Contact, User, Invite, embedded contact refs) carry a
+denormalized `name` field populated by the server via this helper. Use
+`entity.name` directly when the doc has been read back; only call
+`deriveName` for in-flight objects whose `name` hasn't been server-derived
+yet (e.g. manager-side optimistic state before the API responds).
+
+### `deriveName(parts: PartialNameParts): string`
+
+Canonical join rule for deriving a single display string from name parts.
+Joins `[first_name, middle_name, last_name]` with single spaces (missing
+parts are dropped, never produce empty padding) and appends ` (pronunciation)`
+when set. This is the single source of truth — every `name` field on a
+stored document and `ActorRef.name` is computed by passing through here.
+
+## `@cfs/core/utils/dates`
+
+Pure date helper functions for CFS applications.
+All functions accept holidays as a parameter to enable client-side calculations.
+
+```ts
+import { formatChargeDays, countCfsBusinessDays } from "@cfs/core/utils/dates";
+
+const result = formatChargeDays(10);
+console.log(result.periodLabel); // "2 weeks"
+
+const start = new Date("2025-01-06");
+const end = new Date("2025-01-10");
+const days = countCfsBusinessDays(start, end, []);
+console.log(days.days); // 5
+```
+
+Published in lockstep with `@cfs/core/schemas` — version bumps track the
+schemas package so consumers pin one pair of beta versions without
+resolving dual shapes (Card.recurrence_overrides, Recurrence collection
+rollout, etc.).
+
+### `BusinessDaysResult`
+
+Result of a business-day count between two dates.
+
+```ts
+interface BusinessDaysResult {
+  calendarDays: number;
+  calendarWeeks: number;
+  days: number;
+  weeks: number;
+  label: ChargeDaysLabel;
+  periodLabel: string;
+}
+```
+
+### `ChargeDaysLabel`
+
+Display values returned by {@link formatChargeDays}.
+
+```ts
+type ChargeDaysLabel = "day" | "days" | "week" | "weeks";
+```
+
+### `DurationDates`
+
+Date strings required by {@link getDuration}. Nullable to mirror OrderDocDatesType — runtime guards throw when either boundary is null.
+
+```ts
+interface DurationDates {
+  delivery_start: string | null;
+  collection_start: string | null;
+  charge_start?: string | null;
+  charge_end?: string | null;
+}
+```
+
+### `DurationResult`
+
+Active and chargeable duration breakdown returned by {@link getDuration}.
+
+```ts
+interface DurationResult {
+  activeDays: number;
+  activeWeeks: number;
+  activeLabel: string;
+  activePeriodLabel: string;
+  chargeDays: number;
+  chargeWeeks: number;
+  chargeLabel: string;
+  chargePeriodLabel: string;
+}
+```
+
+### `FormatChargeDaysResult`
+
+```ts
+interface FormatChargeDaysResult {
+  value: number;
+  label: ChargeDaysLabel;
+  periodLabel: string;
+  isWeeks: boolean;
+  step: number;
+}
+```
+
+### `countCfsBusinessDays(start: Date, end: Date, holidays: string[]): BusinessDaysResult`
+
+Count CFS business days between two dates (excludes weekends and CFS holidays).
+
+### `formatChargeDays(days: number, unit?: "day" | "days" | "week" | "weeks"): FormatChargeDaysResult`
+
+Format a chargeable days number into display values for a duration input.
+
+**Parameters**
+
+- `days` — A positive number of chargeable days.
+- `unit` — Display unit: `"day"`, `"days"`, `"week"`, or `"weeks"`. When omitted, weeks are used if `days >= 5`.
+
+### `getDefaultStartDate(holidays: string[]): Date`
+
+Get the default start date for a rental (next business day at 9am).
+If after 8am today, defaults to tomorrow. Skips weekends and holidays.
+
+### `getDuration(dates: DurationDates, holidays: string[]): DurationResult`
+
+Calculate active and chargeable durations for an order's dates.
+
+### `getEndDateByChargePeriod(startDate: Date, chargePeriod: number, holidays: string[]): Date`
+
+Calculate end date based on start date and number of chargeable days.
+Chargeable days exclude weekends and holidays.
+
+### `isHoliday(testDate: Date, holidays: string[]): boolean`
+
+Test if a given date is a CFS holiday.
+
+### `isOffHours(date: Date): boolean`
+
+Test if a date/time is outside business hours (before 8am or after 4pm).
+
+### `toChargeDays(inputValue: number, isWeeks: boolean): number`
+
+Convert a duration input value back to chargeable days.
+
+### `toChicagoInstant(input: string): string`
+
+Canonicalize any valid ISO datetime string to Chicago offset form,
+preserving the instant. Idempotent.
+
+```ts
+toChicagoInstant("2025-12-22T15:15:00.000Z");      // "2025-12-22T09:15:00.000-06:00"
+toChicagoInstant("2025-12-22T09:15:00.000-06:00"); // "2025-12-22T09:15:00.000-06:00" (no-op)
+toChicagoInstant("2025-12-23T00:15:00.000+09:00"); // "2025-12-22T09:15:00.000-06:00" (same instant)
+```
+
+### `toChicagoStartOfDay(input: string): string`
+
+Canonicalize to Chicago local midnight for the calendar date containing
+the input instant. Use for fields that semantically represent a date
+(invoice.date, invoice.due_date, payments[].date). Idempotent.
+
+```ts
+toChicagoStartOfDay("2025-12-22T15:15:00.000Z"); // "2025-12-22T00:00:00.000-06:00"
+toChicagoStartOfDay("2025-12-22T03:00:00.000Z"); // "2025-12-21T00:00:00.000-06:00" (Chicago day = Dec 21)
+toChicagoStartOfDay("2025-07-04");               // "2025-07-04T00:00:00.000-05:00" (CDT)
+```
+
+### `toChicagoYmd(input: string): string`
+
+Format an ISO datetime as the Chicago calendar date in `YYYY-MM-DD` form.
+The inverse of {@link toChicagoStartOfDay} — use to populate
+`<input type="date">` from a canonical Chicago-offset value.
+
+```ts
+toChicagoYmd("2025-02-14T00:00:00.000-06:00"); // "2025-02-14"
+toChicagoYmd("2025-02-14T03:00:00.000Z");      // "2025-02-13" (Chicago day)
+toChicagoYmd("2025-07-04T00:00:00.000-05:00"); // "2025-07-04" (CDT)
+```
+
+## `@cfs/core/utils/invoices`
+
+Shared invoice utility functions for CFS applications.
+Re-exports generic item helpers from orders and adds invoice-specific utilities.
+
+```ts
+import { flattenForXero, isPriceableItem, syncOrderItems } from "@cfs/core/utils/invoices";
+
+const billableItems = flattenForXero(invoice.items);
+```
+
+### `ConsolidatedItem`
+
+```ts
+type ConsolidatedItem = ConsolidatedItemType;
+```
+
+### `Discount`
+
+```ts
+type Discount = DiscountType;
+```
+
+### `GroupPath`
+
+```ts
+type GroupPath = GroupPathType;
+```
+
+### `InvoiceDestinationPair`
+
+Invoice-side destination pair — matches the schemas-next
+`InvoiceDocDestinationType` (a `DocDestinationType` plus a `uid_order`
+scope field). Defined structurally here so this module can be published
+ahead of / alongside the schemas-next beta that adds the type.
+
+```ts
+interface InvoiceDestinationPair {
+  uid_order: string;
+}
+```
+
+### `InvoiceItem`
+
+An invoice item with optional order-scoping and invoice-specific fields.
+Extends LineItem with properties that should be carried forward during sync
+and fields needed for Xero mapping.
+
+`price` accepts both the utility's intermediate PriceObject and the full
+InvoiceDocItemPrice from schemas to avoid type drift.
+
+```ts
+interface InvoiceItem {
+  uid_order?: string | null;
+  description?: string;
+  price?: PriceObject | PriceModifierType | InvoiceDocItemPrice;
+  coa_revenue?: COARevenueType | null;
+  tracking_category?: string | null;
+  xero_id?: string | null;
+  xero_tracking_option_id?: string | null;
+  crms_id?: number | string | null;
+}
+```
+
+### `InvoiceTotals`
+
+```ts
+type InvoiceTotals = InvoiceDocTotals;
+```
+
+### `ItemPathIssue`
+
+A single path mismatch reported by {@link validateItemPaths} or
+{@link validateInvoiceItemPaths} (re-exported from `@cfs/core/utils/invoices`).
+
+```ts
+interface ItemPathIssue {
+  index: number;
+  uid: string | undefined;
+  path: string[];
+  expected: string[];
+}
+```
+
+### `ItemUniquenessIssue`
+
+A single uniqueness violation reported by {@link validateItemUniqueness}
+(and the invoice-scoped variant in `@cfs/core/utils/invoices`).
+
+```ts
+interface ItemUniquenessIssue {
+  index: number;
+  uid: string;
+  parentUid: string | null;
+  firstIndex: number;
+}
+```
+
+### `LineItem`
+
+A single line item in an order (product, destination, group, surcharge, or fee).
+Loose interface compatible with all OrderDocItemType members — utility functions
+use type guards (isPriceableItem, isTransactionFeeItem) before accessing
+member-specific fields.
+
+```ts
+interface LineItem {
+  uid: string;
+  name: string;
+  type: string;
+  quantity?: number;
+  price?: PriceObject | PriceModifierType;
+  stock_method?: string;
+  path: string[];
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
+  zero_priced?: boolean | null;
+  description?: string;
+  order_number?: number;
+  uid_order?: string | null;
+}
+```
+
+### `PreTaxLineItem`
+
+A pre-tax line item with a full price object (rental, sale, service, surcharge, replacement).
+
+```ts
+interface PreTaxLineItem {
+  type: "rental" | "sale" | "service" | "surcharge" | "replacement";
+  quantity: number;
+  price: PriceObject;
+}
+```
+
+### `PriceModifier`
+
+```ts
+type PriceModifier = PriceModifierType;
+```
+
+### `PriceObject`
+
+```ts
+type PriceObject = OrderDocItemPriceType;
+```
+
+### `PriceableLineItem`
+
+Any item that has pricing — pre-tax or transaction fee.
+
+```ts
+type PriceableLineItem = PreTaxLineItem | TransactionFeeLineItem;
+```
+
+### `Tax`
+
+Subset of the full Tax document needed by utility functions.
+
+```ts
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type">;
+```
+
+### `TransactionFeeLineItem`
+
+A transaction fee line item with a PriceModifier price.
+
+```ts
+interface TransactionFeeLineItem {
+  type: "transaction_fee";
+  quantity: number;
+  price: PriceModifierType;
+}
+```
+
+### `buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): InvoiceItem`
+
+Build an invoice destination divider from a source order's destination item.
+Single source of truth for the divider shape — reused by
+`projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice
+webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.
+
+`path` defaults to `[]` so callers that run `computeInvoiceItemPaths`
+afterward (the webhook + backfill) get positional path assignment; the
+order-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.
+
+### `buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceItem[]`
+
+Build invoice items from an order's items, scoped under an order divider.
+Projects each order item to its invoice-item shape and prepends the order
+divider uid to its path.
+
+**Parameters**
+
+- `orderItems` — The order's items array (may contain destination/group/line items)
+- `orderDividerUid` — The uid of the order divider these items belong under
+
+**Returns** — Items projected to invoice shape with path prepended by orderDividerUid
+
+### `calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], payments?: typeLiteral[]): InvoiceTotals`
+
+Calculate aggregated pricing totals for an invoice.
+
+Composes from the same atomic building blocks as orders (calculateItemSubtotal,
+getTaxTotals, etc.) but assembled independently — shared per-item math,
+independent aggregation. This avoids business logic drift if invoices need
+different totals logic in the future (credit notes, partial billing, etc.).
+
+**Parameters**
+
+- `items` — Full invoice items array (structural items are filtered out)
+- `taxes` — Tax definitions for tax calculation
+- `payments` — Optional payments array for amount_paid/amount_due
+
+### `calculateItemDiscount(item: LineItem): number`
+
+Calculate the discount dollar amount for a single line item.
+
+### `calculateItemPrice(item: LineItem, taxes: Tax[]): typeLiteral`
+
+Calculate the complete price for a single line item.
+Runs the full pipeline: subtotal → discount → taxes → total.
+
+### `calculateItemSubtotal(item: LineItem): typeLiteral`
+
+Calculate the pre-discount and post-discount subtotals for a single line item.
+
+### `calculateItemTax(item: LineItem, taxes: Tax[]): PriceModifier[]`
+
+Calculate tax amounts for a single line item from the Tax[] parameter.
+Returns a PriceModifier[] with computed amounts.
+
+### `calculateItemTotal(item: LineItem, taxes: Tax[]): number`
+
+Calculate the total (subtotal_discounted + taxes) for a single line item.
+Handles both PriceObject (regular items) and PriceModifier (transaction fee items).
+
+### `carryForwardOverrides(rebuiltItems: InvoiceItem[], existingItems: InvoiceItem[]): InvoiceItem[]`
+
+Carry forward invoice-specific overrides from existing items to rebuilt items.
+Matches by uid — if a rebuilt item has the same uid as an existing invoice item,
+the invoice-specific fields (coa_revenue, tracking_category, xero_id,
+xero_tracking_option_id) are preserved from the existing item.
+
+**Parameters**
+
+- `rebuiltItems` — Items rebuilt from the order
+- `existingItems` — Current invoice items (to carry forward overrides from)
+
+**Returns** — Rebuilt items with invoice-specific overrides applied
+
+### `computeInvoiceItemPaths(items: InvoiceItem[]): InvoiceItem[]`
+
+Compute paths for all invoice items, respecting order divider scoping.
+Wraps computeItemPaths — strips divider prefix per scope, delegates
+to the shared order path logic, then re-adds the prefix.
+
+Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
+safe to pass items that originate from a Solid store proxy. Callers should
+replace their working array with the return value.
+
+### `computeItemPaths(items: T[]): T[]`
+
+Compute full structural paths for a flat items array AND linearize it
+depth-first with `zero_priced` items sorted before priced ones inside each
+parent's direct-children block.
+
+Each item's path = [structural context...] + [component ancestry...] + [self uid].
+
+Client-sent paths carry component ancestry (from ProductComponent.path).
+This function prepends structural context (dest/group) and appends self uid.
+
+Three transforms in order:
+ 1. Recompute every item's `path`. Strip ALL structural uids (every dest +
+    group currently in the array) and the item's own uid from the
+    client-supplied path; also strip orphan ancestor uids — segments that
+    don't resolve to any item in the array (e.g. catalog-only intermediate
+    kit uids that were never materialized). Then prepend the structural
+    prefix and append the item's own uid.
+ 2. Linearize line items inside each (destination, group) block as a tree:
+    each parent product is followed by its full subtree before the next
+    sibling. Destination and group dividers stay where they are; only the
+    line items between them are reordered.
+ 3. Within each parent's direct-children, stable-sort `zero_priced === true`
+    before others. Drag-drop reorders preserve intra-band order.
+
+Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
+safe to pass items that originate from a Solid store proxy (the manager app
+routes reordered arrays through this function inside `setEntity` updaters).
+Callers should replace their working array with the return value.
+
+Post-condition (under the within-parent uniqueness invariant): a parent and
+its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
+and `getGroupItems` can rely on path-prefix matching alone.
+
+### `derivePaymentStatus(currentStatus: string, amountPaid: number, amountDue: number): string`
+
+Derive invoice status from payment amounts.
+Pure function — does not mutate the invoice.
+
+**Parameters**
+
+- `currentStatus` — Current invoice status
+- `amountPaid` — Total amount paid
+- `amountDue` — Total amount still due
+
+**Returns** — The derived status
+
+### `flattenForXero(items: LineItem[]): LineItem[]`
+
+Filter out structural items (group/destination/order dividers) and return only
+billable line items suitable for Xero sync or totals calculation.
+
+### `getItemSubtreeRange(items: T[], index: number): typeLiteral`
+
+Return the contiguous index range covering an item and every descendant of it,
+derived purely from `path` (not from item types or adjacency rules).
+
+`computeItemPaths` lays items out depth-first, so descendants of `items[index]`
+are always contiguous starting at `index + 1` and run until the first item
+whose path does not start with `items[index].path`.
+
+Generic over any `{ path: string[] }` so it works on order line items, invoice
+line items (whose paths are scoped by an order divider uid), and any other
+path-keyed flat array.
+
+### `getOrderScopedItems(items: InvoiceItem[], orderDividerUid: string): InvoiceItem[]`
+
+Get all invoice items scoped to a specific order divider.
+Returns the order divider itself plus all items whose path starts
+with the order divider's uid.
+
+**Parameters**
+
+- `items` — Full invoice items array
+- `orderDividerUid` — The uid of the order divider item
+
+**Returns** — Items scoped to that order (divider + children)
+
+### `getParentProductUid(item: LineItem, structuralUids: Set<string>): string | null`
+
+Get the parent product uid from an item's path.
+Returns null for non-components (where path.at(-2) is a structural uid or absent).
+
+### `getSharedFields(keysA: string[], keysB: string[], excludes: string[]): string[]`
+
+Return the intersection of two key arrays, minus any keys in the exclude set.
+Used to derive comparable fields from two schema shapes without hardcoding.
+
+**Parameters**
+
+- `keysA` — Field names from schema A
+- `keysB` — Field names from schema B
+- `excludes` — Field names to exclude from the result
+
+**Returns** — Shared field names, excluding the exclude set
+
+### `getStructuralUids(items: LineItem[]): Set<string>`
+
+Build a set of structural item uids (dest/group) from items array.
+Used to distinguish structural path elements from product parent refs.
+
+### `getXeroUnitAmount(subtotal: number, quantity: number): number`
+
+Compute the Xero unit amount from subtotal and quantity.
+Bakes duration (chargeable_days × formula) into per-unit price,
+since Xero has no concept of rental duration.
+
+**Parameters**
+
+- `subtotal` — Pre-discount subtotal (base × days × formula × quantity)
+- `quantity` — Item quantity
+
+**Returns** — Per-unit amount for Xero, or 0 if quantity is 0
+
+### `isItemSynced(prevOrderItem: LineItem, invoiceItem: InvoiceItem, orderDividerUid: string): boolean`
+
+Compare a previous order item to a current invoice item to detect overrides.
+Returns true if the invoice item is "synced" (matches the order item on all
+non-invoice-only fields), false if it has been manually overridden.
+
+The comparison strips the order divider prefix from the invoice item's path
+and ignores invoice-only fields (coa_revenue, tracking_category, xero_id,
+xero_tracking_option_id).
+
+**Parameters**
+
+- `prevOrderItem` — The order item from the previous version of the order
+- `invoiceItem` — The current invoice item (with order-scoped path)
+- `orderDividerUid` — The uid of the order divider (for path prefix stripping)
+
+**Returns** — true if the item is synced (not overridden), false if overridden
+
+### `isPreTaxItem(item: LineItem): item is PreTaxLineItem`
+
+Determine whether a line item participates in subtotal/discount/tax calculations.
+Standalone predicate (not composed) because TS doesn't support negated predicates.
+
+### `isPriceableItem(item: LineItem): item is PriceableLineItem`
+
+Determine whether a line item is priceable (has a price object, not a structural item).
+
+### `isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem`
+
+Determine whether a line item is a transaction fee.
+
+### `recomputePaymentTotals(total: number, payments: typeLiteral[]): typeLiteral`
+
+Compute amount_paid and amount_due from a payments array.
+Pure function — returns values instead of mutating.
+
+**Parameters**
+
+- `total` — Invoice total amount
+- `payments` — Payments array with amount and status fields
+
+**Returns** — Computed amount_paid and amount_due
+
+### `removeOrderScopedDestinations(dests: InvoiceDestinationPair[], uidOrder: string): InvoiceDestinationPair[]`
+
+Remove all destination pairs scoped to a specific order.
+Mirrors `removeOrderScopedItems` for the items array.
+
+### `removeOrderScopedItems(items: InvoiceItem[], orderDividerUid: string): InvoiceItem[]`
+
+Remove all invoice items scoped to a specific order divider.
+Returns a new array with the order divider and all items whose path
+starts with the order divider's uid removed.
+
+**Parameters**
+
+- `items` — Full invoice items array
+- `orderDividerUid` — The uid of the order divider item to remove
+
+**Returns** — Items with the order scope removed
+
+### `syncObjectWithOverride(prevOrderValue: T, newOrderValue: T, currentInvoiceValue: T, keys?: parenthesized[]): T`
+
+Object co-write with override detection. Like `syncScalarWithOverride` but
+compares two objects for deep equality via JSON.stringify. If `keys` is
+provided, only those keys are compared (useful when one side carries
+fields the other doesn't — e.g. invoice.organization.tax_profile has no
+equivalent on the order snapshot).
+
+### `syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string): InvoiceDestinationPair[]`
+
+Selectively sync one order's destination pairs into an invoice's destinations,
+respecting invoice-side overrides. Per-pair matching is by
+`(uid_order, delivery.uid, collection.uid)`; only pairs scoped to `uidOrder`
+are touched — pairs from other orders pass through unchanged.
+
+Policy per pair:
+- Not in invoice (new in order) → add, tagged with `uid_order`.
+- In invoice AND prev order matches current invoice → replace with new order pair.
+- In invoice BUT prev order ≠ invoice → overridden, keep invoice version.
+- In invoice but not in new order:
+  - prev matches invoice → deleted from order, drop.
+  - prev ≠ invoice → overridden, keep.
+
+**Parameters**
+
+- `prevOrderDests` — Pairs from the previous version of the order
+- `newOrderDests` — Pairs from the new version of the order
+- `currentInvoiceDests` — Current full invoice destinations array (all orders)
+- `uidOrder` — The order uid this sync is scoped to
+
+**Returns** — Updated full invoice destinations array
+
+### `syncOrderItems(invoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): InvoiceItem[]`
+
+Sync a single order's items into an invoice's items array.
+Replaces all items scoped to the order divider with rebuilt items from the order,
+carrying forward invoice-specific overrides on matched uids.
+
+**Parameters**
+
+- `invoiceItems` — Current full invoice items array
+- `orderItems` — The order's current items array
+- `orderDividerUid` — The uid of the order divider in the invoice
+
+**Returns** — Updated invoice items array
+
+### `syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceItem[], orderDividerUid: string): InvoiceItem[]`
+
+Selectively sync order items into an invoice, respecting invoice-side overrides.
+
+Items are matched by **path** (not uid), since the same product can appear at
+multiple positions in the items array. For each item:
+
+- **Synced** (prev order matches current invoice, minus invoice-only fields):
+  replaced with the new order item, carrying forward invoice-only overrides
+- **Overridden** (invoice item differs from prev order): left unchanged
+- **New** (in new order, not in prev): added under the order divider
+- **Removed** (in prev order, not in new): removed only if synced, kept if overridden
+
+**Parameters**
+
+- `prevOrderItems` — Items from the previous version of the order
+- `newOrderItems` — Items from the new version of the order
+- `currentInvoiceItems` — Items scoped to this order in the current invoice (without order divider)
+- `orderDividerUid` — The uid of the order divider in the invoice
+
+**Returns** — Updated invoice items (scoped under the order divider, ready for insertion)
+
+### `syncScalarWithOverride(prevOrderValue: T | undefined, newOrderValue: T | undefined, currentInvoiceValue: T | undefined): T | undefined`
+
+Scalar co-write with override detection. Returns the new order value if
+the invoice value still matches the previous order value (i.e. the invoice
+has not been manually edited on this field); otherwise returns the current
+invoice value (treated as an override, preserved).
+
+Values are compared by strict equality (`===`). Both `undefined` and `null`
+participate in the match — a field that was `null` on prev and is `null`
+on the invoice will accept a new non-null order value.
+
+### `validateInvoiceItemPaths(items: T[]): ItemPathIssue[]`
+
+Assert every invoice item's `path` matches what {@link computeInvoiceItemPaths}
+would produce — the order-divider-scoped variant of {@link computeItemPaths}.
+
+Use as a defensive write-time invariant: any client that writes invoices
+should pipe `items` through `computeInvoiceItemPaths` first, so a non-empty
+result here means the client skipped the recompute step. Also flags index
+positions whose `uid` doesn't match the recomputed array's uid at the same
+index — under depth-first contiguity, a uid mismatch means the array needs
+re-linearization.
+
+Returns `[]` when every path is clean and order is canonical.
+
+### `validateInvoiceItemUniqueness(items: T[]): ItemUniquenessIssue[]`
+
+Within-parent uniqueness check for invoice items.
+
+Reuses {@link validateItemUniqueness}'s logic — the parent uid is the
+second-to-last `path` segment, which for invoice items naturally captures
+each scope:
+ - top-level destination/group/product under an order divider →
+   parentUid is the order divider uid (first segment),
+ - product under a destination → parentUid is the destination uid,
+ - product under a group → parentUid is the group uid,
+ - component → parentUid is the parent product line uid.
+
+So the `(parentUid, uid)` key naturally scopes per order divider for
+top-level entries, and per parent product for nested ones.
+
+Returns `[]` when uniqueness holds.
+
+### `validateItemPaths(items: T[]): ItemPathIssue[]`
+
+Assert every line item's `path` matches what {@link computeItemPaths} would
+produce — i.e. structural prefix + component ancestry + self uid, with no
+stale dest/group uids from prior drag positions.
+
+Use as a defensive write-time invariant: any client (manager, webhook
+handlers, manual firestore_admin pokes) that writes orders should pipe
+`items` through `computeItemPaths` first, so a non-empty result here means
+the client skipped the recompute step.
+
+Reports per-index mismatches; under the depth-first contiguity invariant,
+an index whose `uid` doesn't match the recomputed array's uid at the same
+index is also a violation (the array needs re-linearization). The original
+path is reported so the caller can diff against `expected`.
+
+Returns `[]` when every path is clean and order is canonical.
+
+### `validateItemUniqueness(items: T[]): ItemUniquenessIssue[]`
+
+Assert that within each items array, no two entries share the same `uid`
+AND the same immediate structural parent. The immediate structural parent
+is the second-to-last `path` segment (or `null` for items whose path is
+just `[self.uid]`).
+
+This is the uniqueness invariant orders/invoices rely on so that path-based
+line identity is unambiguous. Violations indicate a duplicate that should
+be merged — `mergeStagedIntoOrder` and the migration script consolidate.
+
+Returns `[]` when uniqueness holds.
+
+## `@cfs/core/utils/orders`
+
+Shared order utility functions for CFS applications.
+Includes pricing calculations, item consolidation, and destination grouping.
+All arithmetic uses currency.js for safe floating-point calculations.
+
+```ts
+import { calculateOrderTotals } from "@cfs/core/utils/orders";
+
+const items = [
+  {
+    type: "rental",
+    quantity: 1,
+    price: {
+      base: 100,
+      formula: "five_day_week",
+      chargeable_days: 5,
+      discount: null,
+      taxes: [],
+      subtotal: 100,
+      subtotal_discounted: 100,
+    },
+  },
+];
+const totals = calculateOrderTotals(items, []);
+console.log(totals.total); // 100
+```
+
+### `ConsolidatedItem`
+
+```ts
+type ConsolidatedItem = ConsolidatedItemType;
+```
+
+### `DestinationGroup`
+
+A destination section with its delivery/collection UIDs and child items.
+
+```ts
+interface DestinationGroup {
+  uid_delivery: string;
+  uid_collection: string;
+  items: LineItem[];
+  packing_list_delivery: LineItem[];
+  packing_list_collection: LineItem[];
+}
+```
+
+### `Discount`
+
+```ts
+type Discount = DiscountType;
+```
+
+### `GroupPath`
+
+```ts
+type GroupPath = GroupPathType;
+```
+
+### `GroupTotalsResult`
+
+Count and pricing totals for a collapsed destination or group section.
+
+```ts
+interface GroupTotalsResult {
+  count: number;
+  subtotal: number;
+  subtotal_discounted: number;
+  total: number;
+}
+```
+
+### `ItemPathIssue`
+
+A single path mismatch reported by {@link validateItemPaths} or
+{@link validateInvoiceItemPaths} (re-exported from `@cfs/core/utils/invoices`).
+
+```ts
+interface ItemPathIssue {
+  index: number;
+  uid: string | undefined;
+  path: string[];
+  expected: string[];
+}
+```
+
+### `ItemUniquenessIssue`
+
+A single uniqueness violation reported by {@link validateItemUniqueness}
+(and the invoice-scoped variant in `@cfs/core/utils/invoices`).
+
+```ts
+interface ItemUniquenessIssue {
+  index: number;
+  uid: string;
+  parentUid: string | null;
+  firstIndex: number;
+}
+```
+
+### `LineItem`
+
+A single line item in an order (product, destination, group, surcharge, or fee).
+Loose interface compatible with all OrderDocItemType members — utility functions
+use type guards (isPriceableItem, isTransactionFeeItem) before accessing
+member-specific fields.
+
+```ts
+interface LineItem {
+  uid: string;
+  name: string;
+  type: string;
+  quantity?: number;
+  price?: PriceObject | PriceModifierType;
+  stock_method?: string;
+  path: string[];
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
+  zero_priced?: boolean | null;
+  description?: string;
+  order_number?: number;
+  uid_order?: string | null;
+}
+```
+
+### `OrderDateEnvelope`
+
+Order-level date envelope derived on demand from per-destination dates.
+
+Mirrors the field set of the old top-level `order.dates`, except the `_fs`
+companions are nullable: utilities can't mint a Firestore Timestamp, so each
+boundary copies the `_fs` from whichever destination owns the extreme value
+(and is null when no destination sets that boundary).
+
+```ts
+interface OrderDateEnvelope {
+  delivery_start: string | null;
+  delivery_start_fs: FirestoreTimestampType | null;
+  delivery_end: string | null;
+  delivery_end_fs: FirestoreTimestampType | null;
+  collection_start: string | null;
+  collection_start_fs: FirestoreTimestampType | null;
+  collection_end: string | null;
+  collection_end_fs: FirestoreTimestampType | null;
+  charge_start: string | null;
+  charge_start_fs: FirestoreTimestampType | null;
+  charge_end: string | null;
+  charge_end_fs: FirestoreTimestampType | null;
+  days_active: number | null;
+  days_charged: number | null;
+}
+```
+
+### `OrderTotals`
+
+```ts
+type OrderTotals = OrderDocTotalsType;
+```
+
+### `PackingListItem`
+
+An expanded packing list entry preserving group context.
+
+```ts
+interface PackingListItem {
+  uid: string;
+  name: string;
+  type: string;
+  quantity: number;
+  stock_method: string;
+  group_name: string | null;
+}
+```
+
+### `PreTaxLineItem`
+
+A pre-tax line item with a full price object (rental, sale, service, surcharge, replacement).
+
+```ts
+interface PreTaxLineItem {
+  type: "rental" | "sale" | "service" | "surcharge" | "replacement";
+  quantity: number;
+  price: PriceObject;
+}
+```
+
+### `PriceModifier`
+
+```ts
+type PriceModifier = PriceModifierType;
+```
+
+### `PriceObject`
+
+```ts
+type PriceObject = OrderDocItemPriceType;
+```
+
+### `PriceableLineItem`
+
+Any item that has pricing — pre-tax or transaction fee.
+
+```ts
+type PriceableLineItem = PreTaxLineItem | TransactionFeeLineItem;
+```
+
+### `ReplacementTotals`
+
+Replacement cost totals for an order, with and without tax.
+
+```ts
+interface ReplacementTotals {
+  subtotal: number;
+  tax: number;
+  total: number;
+}
+```
+
+### `Tax`
+
+Subset of the full Tax document needed by utility functions.
+
+```ts
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type">;
+```
+
+### `TransactionFeeLineItem`
+
+A transaction fee line item with a PriceModifier price.
+
+```ts
+interface TransactionFeeLineItem {
+  type: "transaction_fee";
+  quantity: number;
+  price: PriceModifierType;
+}
+```
+
+### `buildPackingList(items: LineItem[], consolidated?: boolean, destinationUid?: string): PackingListItem[] | ConsolidatedItem[]`
+
+Build a packing list from order line items.
+
+When `consolidated` is true, deduplicates by product UID and sums quantities
+(delegates to {@link consolidateItems}). When false (default), returns
+expanded entries with `group_name` preserved.
+
+Pass `destinationUid` to scope to a single destination; omit for the full order.
+
+Excludes structural rows, surcharges, transaction fees, and services.
+
+### `buildQueryByDates(destinations: ReadonlyArray<QueryByDatesDestination>): string[]`
+
+Deduped, ascending list of Chicago `YYYY-MM-DD` boundary days across every
+destination's delivery + collection windows. Server-maintained on the order
+(and fulfillment) doc as `query_by_dates`, reserved for exact-day Firestore
+`array-contains` lookups. Charge dates are billing-only and excluded.
+
+### `calculateItemDiscount(item: LineItem): number`
+
+Calculate the discount dollar amount for a single line item.
+
+### `calculateItemPrice(item: LineItem, taxes: Tax[]): typeLiteral`
+
+Calculate the complete price for a single line item.
+Runs the full pipeline: subtotal → discount → taxes → total.
+
+### `calculateItemSubtotal(item: LineItem): typeLiteral`
+
+Calculate the pre-discount and post-discount subtotals for a single line item.
+
+### `calculateItemTax(item: LineItem, taxes: Tax[]): PriceModifier[]`
+
+Calculate tax amounts for a single line item from the Tax[] parameter.
+Returns a PriceModifier[] with computed amounts.
+
+### `calculateItemTotal(item: LineItem, taxes: Tax[]): number`
+
+Calculate the total (subtotal_discounted + taxes) for a single line item.
+Handles both PriceObject (regular items) and PriceModifier (transaction fee items).
+
+### `calculateOrderTotals(items: LineItem[], taxes: Tax[]): OrderTotals`
+
+Calculate aggregated pricing totals for an entire order.
+Owns the two-pass computation: pre-tax items first, then transaction fees.
+
+### `calculateReplacementTotals(items: LineItem[], taxes: Tax[]): ReplacementTotals`
+
+Calculate the total replacement cost across all pre-tax items that have
+a replacement value on their price object.
+
+Returns `subtotal` (sum of replacement × quantity), `tax` (taxes applied
+to that subtotal), and `total` (subtotal + tax).
+
+### `computeItemPaths(items: T[]): T[]`
+
+Compute full structural paths for a flat items array AND linearize it
+depth-first with `zero_priced` items sorted before priced ones inside each
+parent's direct-children block.
+
+Each item's path = [structural context...] + [component ancestry...] + [self uid].
+
+Client-sent paths carry component ancestry (from ProductComponent.path).
+This function prepends structural context (dest/group) and appends self uid.
+
+Three transforms in order:
+ 1. Recompute every item's `path`. Strip ALL structural uids (every dest +
+    group currently in the array) and the item's own uid from the
+    client-supplied path; also strip orphan ancestor uids — segments that
+    don't resolve to any item in the array (e.g. catalog-only intermediate
+    kit uids that were never materialized). Then prepend the structural
+    prefix and append the item's own uid.
+ 2. Linearize line items inside each (destination, group) block as a tree:
+    each parent product is followed by its full subtree before the next
+    sibling. Destination and group dividers stay where they are; only the
+    line items between them are reordered.
+ 3. Within each parent's direct-children, stable-sort `zero_priced === true`
+    before others. Drag-drop reorders preserve intra-band order.
+
+Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
+safe to pass items that originate from a Solid store proxy (the manager app
+routes reordered arrays through this function inside `setEntity` updaters).
+Callers should replace their working array with the return value.
+
+Post-condition (under the within-parent uniqueness invariant): a parent and
+its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
+and `getGroupItems` can rely on path-prefix matching alone.
+
+### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
+
+Deduplicate line items by product UID and sum quantities.
+
+### `deriveOrderDateEnvelope(destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>): OrderDateEnvelope`
+
+Collapse per-destination dates into one order-level envelope.
+
+There is no persisted order-level `dates` anymore — every destination owns
+its own range. This derives a bounding envelope on demand for the consumers
+that still want one order-level range: the Typesense projection's sort key
+and the quote / Xero / Calendar / Trello exporters.
+
+`*_start` boundaries take the earliest value across destinations, `*_end`
+boundaries take the latest; `days_active` / `days_charged` take the largest
+non-null value. For a single-destination order the envelope equals that
+destination's dates exactly.
+
+### `getDefaultChargeDays(dates: OrderDatesType, holidays: string[]): number | null`
+
+Compute default chargeable days from order dates and holidays.
+Returns null if required dates are missing.
+
+### `getDestinationPairItemName(destination: DestinationType, index: number): string`
+
+Build a display name for a destination pair from its delivery/collection addresses.
+Falls back to "Destination N" when no addresses are present.
+
+### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
+
+Pair-derived legend strings for the order's start/end dates.
+
+Each pair contributes a label based on its `customer_collecting` /
+`customer_returning` flags. Labels are deduped and joined with " / ", so
+a mixed-mode order (one pair we deliver, one pair the customer picks up)
+renders as "Pickup / Delivery".
+
+Mapping:
+  start: customer_collecting === true → "Pickup", else → "Delivery"
+  end:   customer_returning  === true → "Return", else → "Pickup"
+
+Empty input returns empty strings.
+
+### `getGroupItems(items: LineItem[], index: number): LineItem[]`
+
+Collect the child product items belonging to a collapsible section.
+
+Destination / group: walk forward to the next divider of the same or
+outer level, collecting every line item.
+
+Product: walk only its own contiguous subtree (via `getItemSubtreeRange`)
+and return the immediate children (`path.at(-2) === item.uid`). Under the
+within-parent uniqueness invariant, `path.at(-2) === uid` is unambiguous
+inside the subtree; constraining to the subtree range protects against
+accidental cross-parent collisions if an upstream invariant violation
+slips through.
+
+### `getGroupPath(items: LineItem[], index: number): GroupPath`
+
+Walk backwards from `index` to determine which destination and group
+an item belongs to. `destination` is the destination's `uid_delivery`;
+`group` is the group item's `uid` (not its display name) — keying on
+uid lets group display names be edited without losing collapse state
+or risking collisions between two groups that happen to share a name.
+
+### `getGroupTotals(items: LineItem[], index: number, taxes: Tax[]): GroupTotalsResult`
+
+Get count and pricing totals for a collapsed section.
+
+### `getItemSubtreeRange(items: T[], index: number): typeLiteral`
+
+Return the contiguous index range covering an item and every descendant of it,
+derived purely from `path` (not from item types or adjacency rules).
+
+`computeItemPaths` lays items out depth-first, so descendants of `items[index]`
+are always contiguous starting at `index + 1` and run until the first item
+whose path does not start with `items[index].path`.
+
+Generic over any `{ path: string[] }` so it works on order line items, invoice
+line items (whose paths are scoped by an order divider uid), and any other
+path-keyed flat array.
+
+### `getParentProductUid(item: LineItem, structuralUids: Set<string>): string | null`
+
+Get the parent product uid from an item's path.
+Returns null for non-components (where path.at(-2) is a structural uid or absent).
+
+### `getRemovalIndices(items: LineItem[], index: number): number[]`
+
+Collect the indices of all items that should be removed when the item
+at `index` is deleted — the item itself plus all its descendants.
+Returns indices sorted ascending.
+
+### `getStructuralUids(items: LineItem[]): Set<string>`
+
+Build a set of structural item uids (dest/group) from items array.
+Used to distinguish structural path elements from product parent refs.
+
+### `getTaxTotals(items: LineItem[], taxes: Tax[]): PriceModifier[]`
+
+Aggregate tax PriceModifiers by name across all pre-tax items.
+
+### `getTotalDiscount(items: LineItem[]): number`
+
+Calculate the total discount amount across all pre-tax items.
+
+### `getTransactionFeeTotals(items: LineItem[]): PriceModifier[]`
+
+Aggregate transaction fee PriceModifiers across all fee items.
+
+### `groupByDestination(items: LineItem[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]`
+
+Slice the flat items array into destination sections.
+
+### `isPreTaxItem(item: LineItem): item is PreTaxLineItem`
+
+Determine whether a line item participates in subtotal/discount/tax calculations.
+Standalone predicate (not composed) because TS doesn't support negated predicates.
+
+### `isPriceableItem(item: LineItem): item is PriceableLineItem`
+
+Determine whether a line item is priceable (has a price object, not a structural item).
+
+### `isSameAsDeliveryDates(dates: OrderDatesType): boolean`
+
+Whether charge dates match the delivery/collection dates
+(i.e. no custom charge period has been set).
+
+### `isSameAsDeliveryDestination(destination: DestinationType): boolean`
+
+Whether a destination's collection endpoint matches its delivery endpoint
+(address, contact, and instructions are all equal).
+
+### `isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem`
+
+Determine whether a line item is a transaction fee.
+
+### `orderHasDiscount(items: LineItem[]): boolean`
+
+Check whether any pre-tax line item has a discount.
+
+### `orderHasRentals(items: LineItem[]): boolean`
+
+Check whether any line item is a rental.
+
+### `orderHasTax(items: LineItem[]): boolean`
+
+Check whether any pre-tax line item has taxes applied.
+
+### `syncChargeDaysToItems(items: LineItem[], previousDefault: number | null, newDefault: number | null): void`
+
+Update chargeable_days on line items that still match the previous default.
+Skips structural items, items without a price, and manual overrides.
+
+### `validateItemPaths(items: T[]): ItemPathIssue[]`
+
+Assert every line item's `path` matches what {@link computeItemPaths} would
+produce — i.e. structural prefix + component ancestry + self uid, with no
+stale dest/group uids from prior drag positions.
+
+Use as a defensive write-time invariant: any client (manager, webhook
+handlers, manual firestore_admin pokes) that writes orders should pipe
+`items` through `computeItemPaths` first, so a non-empty result here means
+the client skipped the recompute step.
+
+Reports per-index mismatches; under the depth-first contiguity invariant,
+an index whose `uid` doesn't match the recomputed array's uid at the same
+index is also a violation (the array needs re-linearization). The original
+path is reported so the caller can diff against `expected`.
+
+Returns `[]` when every path is clean and order is canonical.
+
+### `validateItemUniqueness(items: T[]): ItemUniquenessIssue[]`
+
+Assert that within each items array, no two entries share the same `uid`
+AND the same immediate structural parent. The immediate structural parent
+is the second-to-last `path` segment (or `null` for items whose path is
+just `[self.uid]`).
+
+This is the uniqueness invariant orders/invoices rely on so that path-based
+line identity is unambiguous. Violations indicate a duplicate that should
+be merged — `mergeStagedIntoOrder` and the migration script consolidate.
+
+Returns `[]` when uniqueness holds.
+
+## `@cfs/core/utils/products`
+
+Shared product utility functions for CFS applications.
+
+```ts
+import { buildComponentEntries } from "@cfs/core/utils/products";
+
+// When adding component B to product A, copy B's nested components
+// into A's components array with adjusted paths:
+const nested = buildComponentEntries("A", productB.components, 1);
+```
+
+### `buildComponentEntries(parentUid: string, sourceComponents: ProductComponent[], baseDepth: number, maxDepth?: number): ProductComponent[]`
+
+Build component entries for a parent product from a component product's
+own `components` array. Each entry's `path` is prepended with `parentUid`
+so it reflects its position in the parent's tree.
+
+No recursion needed — the source product's `components` already contains
+its full descendant tree as a flat array.
+
+**Parameters**
+
+- `parentUid` — UID of the product receiving the component
+- `sourceComponents` — The component product's own `components` array
+- `baseDepth` — Depth of the direct component in the parent (typically 1)
+- `maxDepth` — If set, exclude entries whose depth in the parent exceeds this
+
+**Returns** — New `ProductComponent[]` entries with adjusted paths
+
+### `removeComponentEntries(components: ProductComponent[], path: string[]): ProductComponent[]`
+
+Remove a component and all its descendants from a flat components array.
+An entry is removed if its `path` starts with the given path prefix —
+this covers the component itself and every entry nested beneath it.
+
+**Parameters**
+
+- `components` — The product's current `components` array
+- `path` — Full path of the component to remove (e.g. `["A", "B"]`)
+
+**Returns** — New array with the component and its descendants removed
+
+## `@cfs/core/utils/templates`
+
+Template helpers for the git-canonical template system — pure functions
+shared by api-cloudrun and manager.
+
+- `slugify` derives a `git_path` from a family display name (frozen at create).
+- `deriveBump` maps a conventional-commit type → semver bump level, and
+  `bumpSemver` applies that bump to the family's previous version.
+- `resolveRenderParams` validates caller-provided render params against the
+  version's declared params **strictly** — unknown params throw (the API
+  maps `RenderParamError` → HTTP 422).
+
+No runtime dependency on `@cfs/core/schemas`: the declared-param shape is accepted
+structurally so this module type-checks independent of the schemas publish
+cadence. `@cfs/core/schemas`' `TemplateParam` is structurally compatible.
+
+### `BumpLevel`
+
+A semantic-version bump level.
+
+```ts
+type BumpLevel = "major" | "minor" | "patch";
+```
+
+### `RenderParamDecl`
+
+A render-time parameter declaration (structurally `@cfs/core/schemas`' `TemplateParam`).
+
+```ts
+interface RenderParamDecl {
+  key: string;
+  type: string;
+  label?: string;
+  default?: boolean;
+  required?: boolean;
+}
+```
+
+### `RenderParamError`
+
+_(class — see source)_
+
+### `bumpSemver(current: string | null | undefined, bump: BumpLevel): string`
+
+Apply a bump level to a `MAJOR.MINOR.PATCH` semver string. A missing/invalid
+`current` is treated as `0.0.0` (so the first publish off `deriveBump` yields
+`1.0.0` for a major, `0.1.0` for a minor, `0.0.1` for a patch).
+
+### `deriveBump(type: string, breaking: boolean): BumpLevel`
+
+Map a conventional-commit type + breaking flag to a semver bump level.
+Breaking always wins (`major`). `feat` → `minor`. Everything else
+(`fix`, `refactor`, `chore`, `docs`, …) → `patch`.
+
+### `fixtureDir(gitPath: string): string`
+
+Directory holding a template family's fixtures: `fixtures/<git_path>/`.
+
+### `fixturePath(gitPath: string, slug: string): string`
+
+Path to one fixture: `fixtures/<git_path>/<slug>.json`.
+
+### `goldenPath(branch: string, gitPath: string, slug: string): string`
+
+Path to one branch-keyed golden: `goldens/<branch>/<git_path>/<slug>.png`.
+
+### `hashTemplateContent(content: Record<string, string>): string`
+
+Order-independent fingerprint of a template/component content map
+(path → file text). The API stamps a version's `committed_content_hash` with
+this when it pushes content to git (commit / release); the manager hashes the
+live draft content the same way to detect "dirty since last commit" and warn
+at approve-to-merge.
+
+Pure, synchronous, and runtime-agnostic (Deno + browser) so both sides agree
+byte-for-byte. A non-cryptographic 64-bit FNV-1a digest (two seeded streams):
+collision resistance is irrelevant here — it only answers "did the content
+change since the last push?".
+
+```ts
+hashTemplateContent({ "a.eta": "x" }) === hashTemplateContent({ "a.eta": "x" }); // true
+```
+
+### `parseFixturePath(path: string): typeLiteral | null`
+
+Parse a fixture path back to `{ gitPath, slug }`. Returns `null` for any
+path that isn't of the form `fixtures/<gp>/<slug>.json`. The affected-set
+classifier consumes this to route fixture-only PR changes into the
+`goldenOnly` bucket (golden re-run, no version bump).
+
+### `resolveRenderParams(declared: typeOperator, provided: Record<string, unknown> | undefined): Record<string, boolean>`
+
+Resolve caller-provided render params against a version's declared params,
+**strictly**:
+- any provided key not declared → throw `RenderParamError`;
+- a provided value of the wrong type → throw;
+- a declared param absent from input → its `default` (or `false` for a
+  boolean with no default), unless `required` with no default → throw.
+
+Returns a fully-resolved param map safe to hand to the render context.
+
+### `rewriteDocFieldRefs(content: Record<string, string>, fieldMap: Record<string, string | null>): Record<string, string>`
+
+Rewrite `it.doc.<from>` → `it.doc.<to>` across a content map per `fieldMap`
+(normalized paths from `scanDocFieldRefs`). Entries mapped to `null` (or to
+themselves) are left untouched — the operator resolves those by hand. Array
+indices are preserved (`items[0].name` with map `items[].name`→`lines[].name`
+becomes `lines[0].name`). Longest `from` rewritten first so a nested path is
+handled before its prefix.
+
+### `scanDocFieldRefs(content: Record<string, string>): string[]`
+
+Distinct `it.doc.<path>` references across a content map, with array indices
+normalized (`it.doc.items[0].name` → `items[].name`) so paths match the
+`templateSchemaFields` catalog. Sorted, deduped.
+
+BEST-EFFORT — does NOT catch loop-aliased refs (`it.doc.items.forEach(i =>
+i.name)`) or optional chaining. Most line-item fields are loop-aliased, which
+is exactly where order/invoice schemas diverge, so treat the result as a
+head-start, never a complete list.
+
+### `slugify(name: string): string`
+
+Derive a URL/git-safe slug from a display name. Lowercases, replaces every
+run of non-alphanumeric characters with a single hyphen, and trims leading/
+trailing hyphens. Two distinct display names can collapse to the same slug
+(e.g. "Quote!" and "quote") — callers enforce slug uniqueness at create.
+
+```ts
+slugify("Packing List (v2)"); // "packing-list-v2"
+```

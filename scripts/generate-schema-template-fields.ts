@@ -3,13 +3,13 @@
  *
  * Walks each TEMPLATE_SOURCE_COLLECTIONS schema and outputs a typed
  * Record<TemplateSourceCollectionType, SchemaField[]> to
- * src/template-schema-fields.generated.ts — committed, not gitignored.
+ * src/schemas/template-schema-fields.generated.ts — committed, not gitignored.
  *
  * Run: deno task generate-schema-template-fields
  */
 import { z } from "zod";
-import { schemas } from "../src/mod.ts";
-import { TEMPLATE_SOURCE_COLLECTIONS } from "../src/template.ts";
+import { schemas } from "../src/schemas/mod.ts";
+import { TEMPLATE_SOURCE_COLLECTIONS } from "../src/schemas/template.ts";
 
 // ── Zod introspection helpers (same pattern as tests/pii.test.ts) ───
 
@@ -231,6 +231,6 @@ ${entries.join(",\n")},
 };
 `;
 
-const outPath = new URL("../src/template-schema-fields.generated.ts", import.meta.url);
+const outPath = new URL("../src/schemas/template-schema-fields.generated.ts", import.meta.url);
 await Deno.writeTextFile(outPath, output);
 console.log(`Wrote ${outPath.pathname} (${TEMPLATE_SOURCE_COLLECTIONS.length} collections)`);

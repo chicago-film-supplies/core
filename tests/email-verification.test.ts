@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { EmailVerificationSchema } from "../src/email-verification.ts";
+import { EmailVerificationSchema } from "../src/schemas/email-verification.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("EmailVerificationSchema validates a complete token document", () => {

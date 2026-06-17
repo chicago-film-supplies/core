@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { TrackingCategorySchema } from "../src/tracking-category.ts";
+import { TrackingCategorySchema } from "../src/schemas/tracking-category.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };

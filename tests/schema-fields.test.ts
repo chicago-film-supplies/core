@@ -5,9 +5,9 @@
  * check that re-runs the generator and compares against the committed file.
  */
 import { assertEquals, assertNotEquals } from "@std/assert";
-import { TEMPLATE_SOURCE_COLLECTIONS } from "../src/template.ts";
-import { templateSchemaFields } from "../src/template-schema-fields.generated.ts";
-import type { SchemaField } from "../src/template-schema-fields.generated.ts";
+import { TEMPLATE_SOURCE_COLLECTIONS } from "../src/schemas/template.ts";
+import { templateSchemaFields } from "../src/schemas/template-schema-fields.generated.ts";
+import type { SchemaField } from "../src/schemas/template-schema-fields.generated.ts";
 
 // ── Structural tests ────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ Deno.test("order items union variants are shown separately", () => {
 
 Deno.test("generated file is up to date", async () => {
   const scriptPath = new URL("../scripts/generate-schema-template-fields.ts", import.meta.url);
-  const generatedPath = new URL("../src/template-schema-fields.generated.ts", import.meta.url);
+  const generatedPath = new URL("../src/schemas/template-schema-fields.generated.ts", import.meta.url);
 
   const committed = await Deno.readTextFile(generatedPath);
 

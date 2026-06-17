@@ -23,7 +23,7 @@ import {
   type TypesenseAlias,
   users,
   webshopProducts,
-} from "../src/typesense/mod.ts";
+} from "../src/schemas/typesense/mod.ts";
 
 const allConfigs = [
   bookings,

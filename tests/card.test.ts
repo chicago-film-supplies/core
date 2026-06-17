@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { CardSchema, CreateCardInput, UpdateCardInput } from "../src/card.ts";
+import { CardSchema, CreateCardInput, UpdateCardInput } from "../src/schemas/card.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validCard = {

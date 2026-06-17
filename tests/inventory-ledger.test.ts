@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { InventoryLedgerSchema } from "../src/inventory-ledger.ts";
+import { InventoryLedgerSchema } from "../src/schemas/inventory-ledger.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const validLedger = {

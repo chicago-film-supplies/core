@@ -3,7 +3,7 @@ import {
   ContactSchema,
   CreateContactInput,
   UpdateContactInput,
-} from "../src/contact.ts";
+} from "../src/schemas/contact.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const actor = { uid: "testuser100000000000", name: "Test User" };

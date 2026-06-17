@@ -4,7 +4,7 @@ import {
   CreateCommentInput,
   UpdateCommentInput,
   CommentReactionInput,
-} from "../src/comment.ts";
+} from "../src/schemas/comment.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const tiptapBody = {

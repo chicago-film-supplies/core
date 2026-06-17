@@ -5,7 +5,7 @@
  * so this list only enriches the manager UI with labels.
  */
 import { assertEquals } from "@std/assert";
-import { FixtureMetaSchema, TemplateSchema } from "../src/template.ts";
+import { FixtureMetaSchema, TemplateSchema } from "../src/schemas/template.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 function baseFamily(extra: Record<string, unknown> = {}): Record<string, unknown> {

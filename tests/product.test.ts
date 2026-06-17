@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { CreateProductInput, ProductSchema } from "../src/product.ts";
-import { getInitialValues } from "../src/initial.ts";
+import { CreateProductInput, ProductSchema } from "../src/schemas/product.ts";
+import { getInitialValues } from "../src/schemas/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const base = getInitialValues(ProductSchema);

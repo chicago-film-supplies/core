@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { getInitialValues } from "../src/initial.ts";
-import { TaxSchema, CreateTaxInput, UpdateTaxInput } from "../src/tax.ts";
+import { getInitialValues } from "../src/schemas/initial.ts";
+import { TaxSchema, CreateTaxInput, UpdateTaxInput } from "../src/schemas/tax.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const taxBase = getInitialValues(TaxSchema) as Record<string, unknown>;

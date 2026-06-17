@@ -7,25 +7,25 @@
 import { assertEquals } from "@std/assert";
 import type { z } from "zod";
 
-import { getNodeMeta, unwrapZod } from "../src/zod-walk.ts";
-import { ContactSchema, CreateContactInput, UpdateContactInput } from "../src/contact.ts";
+import { getNodeMeta, unwrapZod } from "../src/schemas/zod-walk.ts";
+import { ContactSchema, CreateContactInput, UpdateContactInput } from "../src/schemas/contact.ts";
 import {
   OrganizationSchema,
   CreateOrganizationInput,
   UpdateOrganizationInput,
   NewContactInput,
-} from "../src/organization.ts";
+} from "../src/schemas/organization.ts";
 import {
   OrderSchema,
   CreateOrderInput,
   UpdateOrderInput,
-} from "../src/order.ts";
-import { InvoiceSchema } from "../src/invoice.ts";
-import { BookingSchema } from "../src/booking.ts";
-import { UserSchema } from "../src/user.ts";
-import { LoginInput, RegisterInput, ResetPasswordInput, EmailInput } from "../src/auth.ts";
-import { LogRecordSchema } from "../src/log/mod.ts";
-import { SENSITIVE_EXACT, SENSITIVE_NAME_FIELD } from "../src/pii/dictionary.ts";
+} from "../src/schemas/order.ts";
+import { InvoiceSchema } from "../src/schemas/invoice.ts";
+import { BookingSchema } from "../src/schemas/booking.ts";
+import { UserSchema } from "../src/schemas/user.ts";
+import { LoginInput, RegisterInput, ResetPasswordInput, EmailInput } from "../src/schemas/auth.ts";
+import { LogRecordSchema } from "../src/schemas/log/mod.ts";
+import { SENSITIVE_EXACT, SENSITIVE_NAME_FIELD } from "../src/schemas/pii/dictionary.ts";
 
 // The sensitive-field dictionary lives in `src/pii/dictionary.ts` (promoted
 // from this file 2026-05-27 so the runtime PII scrubber and this test

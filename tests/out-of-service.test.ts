@@ -3,7 +3,7 @@ import {
   CreateOutOfServiceInput,
   OutOfServiceSchema,
   UpdateOutOfServiceInput,
-} from "../src/out-of-service.ts";
+} from "../src/schemas/out-of-service.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const fs = mockTimestamp;

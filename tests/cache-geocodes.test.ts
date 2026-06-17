@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { CacheGeocodesSchema } from "../src/cache-geocodes.ts";
+import { CacheGeocodesSchema } from "../src/schemas/cache-geocodes.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const ts = { created_at: mockTimestamp, expiresAt: mockTimestamp };

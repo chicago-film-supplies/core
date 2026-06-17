@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { getInitialValues } from "../src/initial.ts";
-import { BookingSchema } from "../src/booking.ts";
+import { getInitialValues } from "../src/schemas/initial.ts";
+import { BookingSchema } from "../src/schemas/booking.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const bookingBase = getInitialValues(BookingSchema) as Record<string, unknown>;

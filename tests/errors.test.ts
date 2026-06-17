@@ -1,8 +1,8 @@
 import { assertEquals } from "@std/assert";
-import { ContactSchema, CreateContactInput } from "../src/contact.ts";
-import { OrganizationSchema } from "../src/organization.ts";
-import { CreateOrderInput } from "../src/order.ts";
-import { Email, Phone } from "../src/common.ts";
+import { ContactSchema, CreateContactInput } from "../src/schemas/contact.ts";
+import { OrganizationSchema } from "../src/schemas/organization.ts";
+import { CreateOrderInput } from "../src/schemas/order.ts";
+import { Email, Phone } from "../src/schemas/common.ts";
 
 /** Helper: extract issue messages from a failed safeParse result. */
 function getMessages(result: { success: false; error: { issues: { message: string }[] } }): string[] {

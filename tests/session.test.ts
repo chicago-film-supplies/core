@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { SessionSchema } from "../src/session.ts";
+import { SessionSchema } from "../src/schemas/session.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 Deno.test("SessionSchema validates a complete session document", () => {

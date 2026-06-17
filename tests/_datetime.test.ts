@@ -4,10 +4,10 @@ import {
   chicagoStartOfDay,
   toChicagoInstant,
   toChicagoStartOfDay,
-} from "../src/_datetime.ts";
+} from "../src/schemas/_datetime.ts";
 
 // Note: the _datetime.ts transforms are intentionally duplicated from
-// @cfs/utilities/dates to avoid a cross-package runtime dependency.
+// @cfs/core/utils/dates to avoid a cross-package runtime dependency.
 // The expectation strings below are the parity contract — they must
 // match the corresponding expectations in utilities-next/tests/dates.test.ts
 // exactly. If you change one suite, change the other.

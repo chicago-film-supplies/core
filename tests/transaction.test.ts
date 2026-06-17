@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { getInitialValues } from "../src/initial.ts";
-import { TransactionSchema, getTransactionMultiplier } from "../src/transaction.ts";
+import { getInitialValues } from "../src/schemas/initial.ts";
+import { TransactionSchema, getTransactionMultiplier } from "../src/schemas/transaction.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const transactionBase = getInitialValues(TransactionSchema) as Record<string, unknown>;

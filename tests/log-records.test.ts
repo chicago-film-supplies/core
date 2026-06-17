@@ -13,7 +13,7 @@
 
 import { assertEquals } from "@std/assert";
 import type { z } from "zod";
-import { MSG_SCHEMA_REGISTRY } from "../src/log/mod.ts";
+import { MSG_SCHEMA_REGISTRY } from "../src/schemas/log/mod.ts";
 
 interface ZodInternalDef {
   type: string;

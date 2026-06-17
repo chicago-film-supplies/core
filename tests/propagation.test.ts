@@ -79,8 +79,8 @@ import {
   updateOutOfServiceTransaction,
   updateFulfillmentItemsRules,
   updateFulfillmentItemsTransaction,
-} from "../src/propagation/mod.ts";
-import { schemas } from "../src/mod.ts";
+} from "../src/schemas/propagation/mod.ts";
+import { schemas } from "../src/schemas/mod.ts";
 
 // ── Rule integrity ───────────────────────────────────────────────
 
