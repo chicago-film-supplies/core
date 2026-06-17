@@ -1,13 +1,23 @@
-# @cfs/schemas
+# @cfs/core
 
-Shared Zod 4 schemas for CFS Firestore collections and Typesense collections, published to JSR as `@cfs/schemas`. Also includes programmatically enforceable propagation rules and shared TypeScript types and interfaces.
+The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces, **no bare root export**:
+
+- **`@cfs/core/schemas[/*]`** — Zod 4 schemas for Firestore + Typesense collections, programmatically enforceable propagation rules, and shared TypeScript types/interfaces (sources under `src/schemas/`).
+- **`@cfs/core/utils/*`** — pure helper functions: dates, invoices, orders, products, bookings, cards, contact-name, templates (sources under `src/utils/`).
+
+Utils depend one-way on schemas (via the relative `../schemas/mod.ts` barrel), so the two ship in one publish — no cross-package lockstep.
 
 ## Usage
 
 ```ts
-import { ContactSchema, type Contact } from "jsr:@cfs/schemas";
-import { CreateOrderInput } from "jsr:@cfs/schemas/order";
-import { type BookingDocument, bookings } from "jsr:@cfs/schemas/typesense";
+// Schemas — the ./schemas barrel re-exports everything (incl. typesense, log, pii).
+import { ContactSchema, type Contact } from "jsr:@cfs/core/schemas";
+import { CreateOrderInput } from "jsr:@cfs/core/schemas/order";
+import { type BookingDocument, bookings } from "jsr:@cfs/core/schemas/typesense";
+
+// Utils — one entrypoint per module.
+import { toChicagoStartOfDay, countCfsBusinessDays } from "jsr:@cfs/core/utils/dates";
+import { calculateOrderTotals, consolidateItems } from "jsr:@cfs/core/utils/orders";
 
 // Validate a Firestore document
 const contact: Contact = ContactSchema.parse(firestoreDoc);
@@ -17,6 +27,9 @@ const input = CreateOrderInput.parse(requestBody);
 
 // Access Typesense collection config
 console.log(bookings.schema.name); // "bookings"
+
+// Compute order pricing totals
+const totals = calculateOrderTotals(items, taxes);
 ```
 
 ## Setup
@@ -81,9 +94,10 @@ Any commit that removes a field, renames an export, or changes validation in a w
 
 ## Project structure
 
-- `src/common.ts` — shared fragments (Email, Phone, Address, Coordinates, TimestampFields)
-- `src/mod.ts` — re-exports all schemas
-- `src/typesense/` — Typesense collection schemas
+- `src/schemas/common.ts` — shared fragments (Email, Phone, Address, Coordinates, TimestampFields)
+- `src/schemas/mod.ts` — re-exports all schemas (the `@cfs/core/schemas` barrel)
+- `src/schemas/typesense/` — Typesense collection schemas
+- `src/utils/` — pure helper modules (`@cfs/core/utils/*`: dates, orders, invoices, products, bookings, cards, contact-name, templates)
 - `tests/` — test suite
 
 ## Schema conventions

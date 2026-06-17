@@ -2,7 +2,7 @@
 
 ## Overview
 
-Shared Zod 4 schemas for CFS Firestore collections and Typesense collections published to JSR as `@cfs/schemas`. Also includes programatically enforceable propagation rules and shared ts types and interfaces.
+The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces with **no bare root export**: `@cfs/core/schemas[/*]` — Zod 4 schemas for Firestore + Typesense collections, programmatically enforceable propagation rules, and shared TS types (sources in `src/schemas/`); and `@cfs/core/utils/*` — pure helper functions for dates/invoices/orders/products/etc. (sources in `src/utils/`). Utils import schemas one-way via the relative `../schemas/mod.ts` barrel, so both ship in a single publish (no cross-package lockstep). Merged 2026-06 from the former `schemas-next`/`utilities-next` repos.
 
 ## Setup
 
@@ -11,7 +11,7 @@ Shared Zod 4 schemas for CFS Firestore collections and Typesense collections pub
 
 ## Commands
 
-- `deno task check` — type-check (`deno check src/mod.ts`)
+- `deno task check` — type-check (`deno check src/` — covers `src/schemas/` + `src/utils/`)
 - `deno task lint` — lint (includes JSR `no-slow-types` validation)
 - `deno task test` — run tests
 
@@ -99,10 +99,11 @@ For the full Zod 4 API reference, read `.claude/zod-llms.txt` (auto-fetched from
 
 ### Schema structure
 
-- `src/common.ts` — shared fragments (Email, Phone, Address, Coordinates, TimestampFields)
-- `src/contact.ts` — contact document + input schemas
-- `src/organization.ts` — organization document schema
-- `src/mod.ts` — re-exports everything
+- `src/schemas/common.ts` — shared fragments (Email, Phone, Address, Coordinates, TimestampFields)
+- `src/schemas/contact.ts` — contact document + input schemas
+- `src/schemas/organization.ts` — organization document schema
+- `src/schemas/mod.ts` — re-exports everything (the `@cfs/core/schemas` barrel)
+- `src/utils/` — pure helper modules (`@cfs/core/utils/*`)
 
 Each schema file exports: Zod schema object, TypeScript interface, and input schemas (where applicable).
 
@@ -116,7 +117,7 @@ When introducing a new dependency, always double check you are introducing the l
 
 ### PII classification
 
-When adding or changing a field, always consider whether it needs a `.meta({ pii })` annotation. Sensitive fields must be classified so API middleware can mask, hash, or redact them in logs. See `src/log.ts` for the `PiiClassification` type (`"none"`, `"mask"`, `"hash"`, `"redact"`). The `tests/pii.test.ts` enforcement test will fail if a field matching a sensitive pattern (email, phone, password, address, name, notes, etc.) is missing a `pii` meta value.
+When adding or changing a field, always consider whether it needs a `.meta({ pii })` annotation. Sensitive fields must be classified so API middleware can mask, hash, or redact them in logs. See `src/schemas/log/` for the `PiiClassification` type (`"none"`, `"mask"`, `"hash"`, `"redact"`). The `tests/pii.test.ts` enforcement test will fail if a field matching a sensitive pattern (email, phone, password, address, name, notes, etc.) is missing a `pii` meta value.
 
 ### Document vs input schemas
 
