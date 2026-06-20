@@ -30,6 +30,7 @@ export const TEMPLATE_EVENT_MSGS = [
   "template_publish_skipped_no_app",
   "template_publish_unknown_component",
   "template_rebuild_from_git",
+  "template_reconcile_sweep",
   "template_release_auto_merge_failed",
   "template_render_config_parse_failed",
   "template_render_failed",
