@@ -27,6 +27,13 @@ export const TEMPLATE_EVENT_MSGS = [
   "template_publish_base_ref_rejected",
   "template_publish_no_merge_sha",
   "template_publish_noop",
+  // Publish-pipeline advisory (warn). A `reason` discriminator selects the
+  // sub-event: "unconventional_commit_title" (merged PR title wasn't a
+  // conventional commit → patch/chore fallback) or "changed_files_truncated"
+  // (the squash-merge diff hit GitHub's 300-file getCommit cap, so the
+  // affected-set may be incomplete). Carries free-form context fields via the
+  // record's passthrough (e.g. `derived_type`, `pr_title`, `file_count`).
+  "template_publish_warning",
   "template_publish_skipped_no_app",
   "template_publish_unknown_component",
   "template_rebuild_from_git",
