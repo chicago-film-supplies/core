@@ -57,6 +57,33 @@ export type CardStatus = typeof CARD_STATUSES[number];
 /** Zod schema for CardStatus. */
 export const CardStatusEnum: z.ZodType<CardStatus> = z.enum(CARD_STATUSES);
 
+// ── Action (denormalized next-step button) ──────────────────────────
+
+const CARD_FULFILLMENT_ACTIONS = ["prep", "checkout", "return"] as const;
+/** The next fulfillment step a fulfillment-sourced card surfaces on its button. */
+export type CardFulfillmentAction = typeof CARD_FULFILLMENT_ACTIONS[number];
+/** Zod schema for CardFulfillmentAction. */
+export const CardFulfillmentActionEnum: z.ZodType<CardFulfillmentAction> = z.enum(
+  CARD_FULFILLMENT_ACTIONS,
+);
+
+/**
+ * Denormalized "next action" for a card's primary button, computed server-side
+ * on every booking write (alongside `status`). Surfaces on Dashboard/Calendar
+ * surfaces where no bookings are loaded, so the button can show the *next* step
+ * without a join.
+ *
+ * A discriminated object (not a flat enum) so non-fulfillment sources can be
+ * added as purely additive arms (e.g. `{ source: "out_of_service", value: … }`)
+ * without a cross-repo field rename. `null` when nothing is actionable
+ * (terminal status, or no pending step on this side).
+ */
+export type CardAction = { source: "fulfillment"; value: CardFulfillmentAction };
+/** Zod schema for CardAction (discriminated on `source`; JSR no-slow-types-safe). */
+export const CardActionSchema: z.ZodType<CardAction> = z.discriminatedUnion("source", [
+  z.strictObject({ source: z.literal("fulfillment"), value: CardFulfillmentActionEnum }),
+]);
+
 // ── Lock keys ───────────────────────────────────────────────────────
 
 const CARD_LOCK_KEYS = [
@@ -173,6 +200,7 @@ export interface Card {
   uid_list: string;
   uid_thread: string;
   status: CardStatus;
+  action: CardAction | null;
   position: number;
   subject: string;
   body: CommentBodyJson | null;
@@ -208,6 +236,7 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   uid_list: ListId,
   uid_thread: FirestoreId,
   status: CardStatusEnum,
+  action: CardActionSchema.nullable().default(null),
   position: z.number(),
   subject: z.string().max(200).meta({ pii: "mask" }).default(""),
   body: CommentBody.nullable(),

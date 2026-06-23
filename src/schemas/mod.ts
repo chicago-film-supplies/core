@@ -343,19 +343,23 @@ export {
 } from "./list.ts";
 
 export {
+  CardActionSchema,
   CardSchema,
   CardAttachment,
   CardAttachmentTypeEnumSchema,
   CardDates,
+  CardFulfillmentActionEnum,
   CardLockKeyEnum,
   CardOrganization,
   CardStatusEnum,
   CreateCardInput,
   UpdateCardInput,
   type Card,
+  type CardAction,
   type CardAttachmentType,
   type CardAttachmentTypeEnum,
   type CardDatesType,
+  type CardFulfillmentAction,
   type CardLockKey,
   type CardOrganizationType,
   type CardStatus,

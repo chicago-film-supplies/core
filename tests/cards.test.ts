@@ -1,6 +1,10 @@
 import { assertEquals } from "@std/assert";
-import { computeCardStatusFromBookings, type CardSiblingBooking } from "../src/utils/cards.ts";
-import type { Booking } from "../src/schemas/mod.ts";
+import {
+  computeCardActionFromBookings,
+  computeCardStatusFromBookings,
+  type CardSiblingBooking,
+} from "../src/utils/cards.ts";
+import type { Booking, CardStatus } from "../src/schemas/mod.ts";
 
 const breakdown = (overrides: Partial<Booking["breakdown"]> = {}): Booking["breakdown"] => ({
   quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0,
@@ -78,3 +82,92 @@ Deno.test("end: blocked preserved", () => {
   const siblings = [rental(5, { returned: 5 })];
   assertEquals(computeCardStatusFromBookings("end", siblings, "blocked"), "blocked");
 });
+
+// ── computeCardActionFromBookings ──────────────────────────────────
+
+// start side
+Deno.test("action start: reserved → prep", () => {
+  const siblings = [rental(5, { reserved: 5 }), rental(3, { reserved: 3 })];
+  assertEquals(computeCardActionFromBookings("start", siblings, "planned"), {
+    source: "fulfillment",
+    value: "prep",
+  });
+});
+
+Deno.test("action start: prepped-only → checkout", () => {
+  const siblings = [rental(5, { prepped: 5 })];
+  assertEquals(computeCardActionFromBookings("start", siblings, "active"), {
+    source: "fulfillment",
+    value: "checkout",
+  });
+});
+
+Deno.test("action start: mixed reserved + prepped → prep (still unprepped quantity)", () => {
+  const siblings = [rental(5, { reserved: 2, prepped: 3 })];
+  assertEquals(computeCardActionFromBookings("start", siblings, "active"), {
+    source: "fulfillment",
+    value: "prep",
+  });
+});
+
+Deno.test("action start: fully out → null", () => {
+  const siblings = [rental(5, { out: 5 }), rental(3, { out: 1, returned: 2 })];
+  assertEquals(computeCardActionFromBookings("start", siblings, "active"), null);
+});
+
+Deno.test("action start: quote-only (nothing reserved/prepped) → null", () => {
+  const siblings = [rental(5, { quoted: 5 })];
+  assertEquals(computeCardActionFromBookings("start", siblings, "planned"), null);
+});
+
+Deno.test("action start: sale lines count (no sale filter on start) → prep", () => {
+  const siblings = [sale(2, { reserved: 2 })];
+  assertEquals(computeCardActionFromBookings("start", siblings, "planned"), {
+    source: "fulfillment",
+    value: "prep",
+  });
+});
+
+// end side
+Deno.test("action end: out > 0 → return", () => {
+  const siblings = [rental(5, { out: 5 })];
+  assertEquals(computeCardActionFromBookings("end", siblings, "active"), {
+    source: "fulfillment",
+    value: "return",
+  });
+});
+
+Deno.test("action end: nothing out yet → null", () => {
+  const siblings = [rental(5, { reserved: 5 })];
+  assertEquals(computeCardActionFromBookings("end", siblings, "planned"), null);
+});
+
+Deno.test("action end: all returned → null", () => {
+  const siblings = [rental(5, { returned: 5 })];
+  assertEquals(computeCardActionFromBookings("end", siblings, "active"), null);
+});
+
+Deno.test("action end: sale-only out → null (sales excluded from end)", () => {
+  const siblings = [sale(2, { out: 2 }), sale(1, { out: 1 })];
+  assertEquals(computeCardActionFromBookings("end", siblings, "planned"), null);
+});
+
+Deno.test("action end: mixed sale(out) + rental(out) → return (rental drives)", () => {
+  const siblings = [sale(2, { out: 2 }), rental(3, { out: 3 })];
+  assertEquals(computeCardActionFromBookings("end", siblings, "active"), {
+    source: "fulfillment",
+    value: "return",
+  });
+});
+
+// terminal / non-actionable statuses → null on either side
+for (const current of ["blocked", "canceled", "complete", "draft"] as CardStatus[]) {
+  Deno.test(`action: ${current} start with reserved → null`, () => {
+    const siblings = [rental(5, { reserved: 5 })];
+    assertEquals(computeCardActionFromBookings("start", siblings, current), null);
+  });
+  Deno.test(`action: ${current} end with out → null`, () => {
+    const siblings = [rental(5, { out: 5 })];
+    assertEquals(computeCardActionFromBookings("end", siblings, current), null);
+  });
+}

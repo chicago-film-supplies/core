@@ -10,7 +10,7 @@
  *
  * @module
  */
-import type { Booking, CardStatus } from "../schemas/mod.ts";
+import type { Booking, CardAction, CardStatus } from "../schemas/mod.ts";
 
 /**
  * Which side of the order's lifecycle a card represents:
@@ -96,4 +96,71 @@ export function computeCardStatusFromBookings(
   if (terminal === total) return "complete";
   if (terminal > 0 || stillOut > 0) return "active";
   return "planned";
+}
+
+/**
+ * Recompute a card's denormalized **next fulfillment action** from its sibling
+ * bookings — the value the `CardTile` button shows on surfaces (Dashboard
+ * kanban, Calendar agenda) where no bookings are loaded. Pure function — no
+ * Firestore reads. Computed in lockstep with `computeCardStatusFromBookings`
+ * on every booking write.
+ *
+ * Returns `null` (no actionable next step) when:
+ * - `current` is `blocked | canceled | complete | draft` — **wider than the
+ *   status helper**, which only preserves `blocked`/`canceled`. A complete or
+ *   draft card must never surface a stale action.
+ * - the relevant side has nothing pending (see per-side rules).
+ *
+ * **Start side (delivery)** — siblings filtered to `uid_destination_delivery`.
+ * No sale filter: sale lines are genuinely prepped + checked out on delivery.
+ *   - `reserved > 0` → `prep`     (still has unprepped quantity)
+ *   - else `prepped > 0` → `checkout` (prepped, awaiting check-out)
+ *   - else → `null`               (nothing reserved/prepped; quote-only or fully out)
+ *
+ * **End side (collection)** — **rentals only** (`b.type !== "sale"`), mirroring
+ * the end-card status formula. Sales have no collection event.
+ *   - `out > 0` → `return`        (checked-out rental quantity awaiting return)
+ *   - else → `null`               (nothing out yet — end card shows no action
+ *                                  until check-out produces `out > 0`)
+ *
+ * Side-scoped by design: a start card never reports `return` and an end card
+ * never reports `prep`/`checkout` — unlike the manager's destination-wide
+ * `getStageForBookings`, which collapses both sides into one stage.
+ *
+ * @param side     Which card side — selects the per-side rule + sibling set.
+ * @param siblings Bookings filtered to the relevant destination side.
+ * @param current  The card's current status — non-actionable statuses null out.
+ */
+export function computeCardActionFromBookings(
+  side: CardSide,
+  siblings: CardSiblingBooking[],
+  current: CardStatus,
+): CardAction | null {
+  if (
+    current === "blocked" || current === "canceled" ||
+    current === "complete" || current === "draft"
+  ) {
+    return null;
+  }
+
+  if (side === "start") {
+    let reserved = 0;
+    let prepped = 0;
+    for (const b of siblings) {
+      reserved += b.breakdown.reserved;
+      prepped += b.breakdown.prepped;
+    }
+    if (reserved > 0) return { source: "fulfillment", value: "prep" };
+    if (prepped > 0) return { source: "fulfillment", value: "checkout" };
+    return null;
+  }
+
+  // side === "end" — rentals only; sales have no collection event.
+  let out = 0;
+  for (const b of siblings) {
+    if (b.type === "sale") continue;
+    out += b.breakdown.out;
+  }
+  if (out > 0) return { source: "fulfillment", value: "return" };
+  return null;
 }

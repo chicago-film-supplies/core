@@ -445,6 +445,7 @@ export const updateBookingRules: CollectionRule[] = [
     transaction: "update-booking",
     fields: [
       { source: ["breakdown"], target: ["status"], transform: "computeCardStatusFromBookings(side, siblings, current) — see invariant" },
+      { source: ["breakdown"], target: ["action"], transform: "computeCardActionFromBookings(side, siblings, current) — denormalized next fulfillment step for the card button: {source:'fulfillment', value:'prep'|'checkout'|'return'} or null on terminal/non-actionable status. start: reserved>0→prep; else prepped>0→checkout; else null. end (rentals only): out>0→return; else null." },
       { source: [], target: ["version"], transform: "incremented" },
     ],
   },
