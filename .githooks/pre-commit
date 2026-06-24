@@ -4,3 +4,7 @@ deno task lint
 
 echo "Running tests..."
 deno task test
+
+echo "Regenerating API docs..."
+deno task docs
+git add API.md API.json

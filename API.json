@@ -243,8 +243,20 @@
         {
           "kind": "interface",
           "name": "Card",
-          "declaration": "interface Card {\n  uid: string;\n  uid_list: string;\n  uid_thread: string;\n  status: CardStatus;\n  position: number;\n  subject: string;\n  body: CommentBodyJson | null;\n  body_text: string;\n  dates: CardDatesType;\n  all_day: boolean;\n  date_fs: FirestoreTimestampType | null;\n  destination: DocDestinationEndpointType | null;\n  organization: CardOrganizationType | null;\n  sources: DocSourceType[];\n  attachments: CardAttachmentType[];\n  uid_assignees: string[];\n  locked: CardLockKey[];\n  recurrence_parent_uid: string | null;\n  recurrence_index: number | null;\n  recurrence_overrides: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Card {\n  uid: string;\n  uid_list: string;\n  uid_thread: string;\n  status: CardStatus;\n  action: CardAction | null;\n  position: number;\n  subject: string;\n  body: CommentBodyJson | null;\n  body_text: string;\n  dates: CardDatesType;\n  all_day: boolean;\n  date_fs: FirestoreTimestampType | null;\n  destination: DocDestinationEndpointType | null;\n  organization: CardOrganizationType | null;\n  sources: DocSourceType[];\n  attachments: CardAttachmentType[];\n  uid_assignees: string[];\n  locked: CardLockKey[];\n  recurrence_parent_uid: string | null;\n  recurrence_index: number | null;\n  recurrence_overrides: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
           "doc": "Card Firestore document shape."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CardAction",
+          "declaration": "type CardAction = typeLiteral;",
+          "doc": "Denormalized \"next action\" for a card's primary button, computed server-side\non every booking write (alongside `status`). Surfaces on Dashboard/Calendar\nsurfaces where no bookings are loaded, so the button can show the *next* step\nwithout a join.\n\nA discriminated object (not a flat enum) so non-fulfillment sources can be\nadded as purely additive arms (e.g. `{ source: \"out_of_service\", value: … }`)\nwithout a cross-repo field rename. `null` when nothing is actionable\n(terminal status, or no pending step on this side)."
+        },
+        {
+          "kind": "variable",
+          "name": "CardActionSchema",
+          "declaration": "const CardActionSchema: z.ZodType<CardAction>;",
+          "doc": "Zod schema for CardAction (discriminated on `source`; JSR no-slow-types-safe)."
         },
         {
           "kind": "variable",
@@ -293,6 +305,18 @@
           "name": "CardDeleted",
           "declaration": "type CardDeleted = EventEnvelope<Card> & typeLiteral;",
           "doc": ""
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CardFulfillmentAction",
+          "declaration": "type CardFulfillmentAction = indexedAccess;",
+          "doc": "The next fulfillment step a fulfillment-sourced card surfaces on its button."
+        },
+        {
+          "kind": "variable",
+          "name": "CardFulfillmentActionEnum",
+          "declaration": "const CardFulfillmentActionEnum: z.ZodType<CardFulfillmentAction>;",
+          "doc": "Zod schema for CardFulfillmentAction."
         },
         {
           "kind": "variable",
@@ -2416,7 +2440,7 @@
           "kind": "interface",
           "name": "RegisterInputType",
           "declaration": "interface RegisterInputType {\n  email: string;\n  password: string;\n}",
-          "doc": "Input schema for POST /auth/register."
+          "doc": "Input schema for POST /auth/register.\n\nCarries the split-name parts (`first_name` required, the rest optional) the\nregister route derives the denormalized `name` from via `deriveName()`. No\n`name` field — inputs send parts; the server derives `name` at write time."
         },
         {
           "kind": "interface",
@@ -4573,8 +4597,20 @@
         {
           "kind": "interface",
           "name": "Card",
-          "declaration": "interface Card {\n  uid: string;\n  uid_list: string;\n  uid_thread: string;\n  status: CardStatus;\n  position: number;\n  subject: string;\n  body: CommentBodyJson | null;\n  body_text: string;\n  dates: CardDatesType;\n  all_day: boolean;\n  date_fs: FirestoreTimestampType | null;\n  destination: DocDestinationEndpointType | null;\n  organization: CardOrganizationType | null;\n  sources: DocSourceType[];\n  attachments: CardAttachmentType[];\n  uid_assignees: string[];\n  locked: CardLockKey[];\n  recurrence_parent_uid: string | null;\n  recurrence_index: number | null;\n  recurrence_overrides: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Card {\n  uid: string;\n  uid_list: string;\n  uid_thread: string;\n  status: CardStatus;\n  action: CardAction | null;\n  position: number;\n  subject: string;\n  body: CommentBodyJson | null;\n  body_text: string;\n  dates: CardDatesType;\n  all_day: boolean;\n  date_fs: FirestoreTimestampType | null;\n  destination: DocDestinationEndpointType | null;\n  organization: CardOrganizationType | null;\n  sources: DocSourceType[];\n  attachments: CardAttachmentType[];\n  uid_assignees: string[];\n  locked: CardLockKey[];\n  recurrence_parent_uid: string | null;\n  recurrence_index: number | null;\n  recurrence_overrides: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
           "doc": "Card Firestore document shape."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CardAction",
+          "declaration": "type CardAction = typeLiteral;",
+          "doc": "Denormalized \"next action\" for a card's primary button, computed server-side\non every booking write (alongside `status`). Surfaces on Dashboard/Calendar\nsurfaces where no bookings are loaded, so the button can show the *next* step\nwithout a join.\n\nA discriminated object (not a flat enum) so non-fulfillment sources can be\nadded as purely additive arms (e.g. `{ source: \"out_of_service\", value: … }`)\nwithout a cross-repo field rename. `null` when nothing is actionable\n(terminal status, or no pending step on this side)."
+        },
+        {
+          "kind": "variable",
+          "name": "CardActionSchema",
+          "declaration": "const CardActionSchema: z.ZodType<CardAction>;",
+          "doc": "Zod schema for CardAction (discriminated on `source`; JSR no-slow-types-safe)."
         },
         {
           "kind": "variable",
@@ -4611,6 +4647,18 @@
           "name": "CardDatesType",
           "declaration": "interface CardDatesType {\n  start: string | null;\n  end: string | null;\n}",
           "doc": "Card datetime range. `start` is the canonical occurrence instant — Chicago\noffset form, idempotent through `chicagoInstant()`. `end` carries the\noccurrence's wall-clock close (deliveries with start + end times); `null`\nmeans single-instant or all-day. `start` is nullable so cards without a\ndate (generic to-dos, shopping items) stay valid."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CardFulfillmentAction",
+          "declaration": "type CardFulfillmentAction = indexedAccess;",
+          "doc": "The next fulfillment step a fulfillment-sourced card surfaces on its button."
+        },
+        {
+          "kind": "variable",
+          "name": "CardFulfillmentActionEnum",
+          "declaration": "const CardFulfillmentActionEnum: z.ZodType<CardFulfillmentAction>;",
+          "doc": "Zod schema for CardFulfillmentAction."
         },
         {
           "kind": "typeAlias",
@@ -7415,7 +7463,7 @@
         {
           "kind": "variable",
           "name": "TEMPLATE_EVENT_MSGS",
-          "declaration": "const TEMPLATE_EVENT_MSGS: \"fixture_saved\" | \"fixture_deleted\" | \"template_abandon_close_pr_failed\" | \"template_component_file_missing\" | \"template_component_no_content\" | \"template_component_sidecar_parse_failed\" | \"template_metadata_pr_opened\" | \"template_metadata_close_pr_failed\" | \"template_metadata_automerge_unavailable\" | \"template_preview_store_failed\" | \"template_preview_stored\" | \"template_publish_affected\" | \"template_publish_base_ref_rejected\" | \"template_publish_no_merge_sha\" | \"template_publish_noop\" | \"template_publish_skipped_no_app\" | \"template_publish_unknown_component\" | \"template_rebuild_from_git\" | \"template_release_auto_merge_failed\" | \"template_render_config_parse_failed\" | \"template_render_failed\" | \"draft_git_backfill_failed\" | \"template_sandbox_diverged\" | \"template_sandbox_fast_forwarded\" | \"template_sandbox_force_resynced\" | \"template_sync_skipped_no_app\" | \"get_quote_template_failed\" | \"golden_diff_oidc_identity_rejected\" | \"golden_diff_oidc_unconfigured\" | \"golden_diff_oidc_verify_failed\" | \"golden_diff_result\" | \"golden_verdict_persist_failed\" | \"github_templates_no_merge_sha\" | \"github_templates_publish_failed\" | \"comment_sync_awaiting_create\" | \"comment_sync_github_unconfigured\" | \"comment_sync_no_pr\" | \"comment_sync_posted\"[];",
+          "declaration": "const TEMPLATE_EVENT_MSGS: \"fixture_saved\" | \"fixture_deleted\" | \"template_abandon_close_pr_failed\" | \"template_component_file_missing\" | \"template_component_no_content\" | \"template_component_sidecar_parse_failed\" | \"template_metadata_pr_opened\" | \"template_metadata_close_pr_failed\" | \"template_metadata_automerge_unavailable\" | \"template_preview_store_failed\" | \"template_preview_stored\" | \"template_publish_affected\" | \"template_publish_base_ref_rejected\" | \"template_publish_no_merge_sha\" | \"template_publish_noop\" | \"template_publish_warning\" | \"template_publish_skipped_no_app\" | \"template_publish_unknown_component\" | \"template_rebuild_from_git\" | \"template_reconcile_sweep\" | \"template_release_auto_merge_failed\" | \"template_render_config_parse_failed\" | \"template_render_failed\" | \"draft_git_backfill_failed\" | \"template_sandbox_diverged\" | \"template_sandbox_fast_forwarded\" | \"template_sandbox_force_resynced\" | \"template_sync_skipped_no_app\" | \"get_quote_template_failed\" | \"golden_diff_oidc_identity_rejected\" | \"golden_diff_oidc_unconfigured\" | \"golden_diff_oidc_verify_failed\" | \"golden_diff_result\" | \"golden_verdict_persist_failed\" | \"github_templates_no_merge_sha\" | \"github_templates_publish_failed\" | \"comment_sync_awaiting_create\" | \"comment_sync_github_unconfigured\" | \"comment_sync_no_pr\" | \"comment_sync_posted\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
@@ -7928,6 +7976,27 @@
         },
         {
           "kind": "function",
+          "name": "computeCardActionFromBookings",
+          "signature": "computeCardActionFromBookings(side: CardSide, siblings: CardSiblingBooking[], current: CardStatus): CardAction | null",
+          "doc": "Recompute a card's denormalized **next fulfillment action** from its sibling\nbookings — the value the `CardTile` button shows on surfaces (Dashboard\nkanban, Calendar agenda) where no bookings are loaded. Pure function — no\nFirestore reads. Computed in lockstep with `computeCardStatusFromBookings`\non every booking write.\n\nReturns `null` (no actionable next step) when:\n- `current` is `blocked | canceled | complete | draft` — **wider than the\n  status helper**, which only preserves `blocked`/`canceled`. A complete or\n  draft card must never surface a stale action.\n- the relevant side has nothing pending (see per-side rules).\n\n**Start side (delivery)** — siblings filtered to `uid_destination_delivery`.\nNo sale filter: sale lines are genuinely prepped + checked out on delivery.\n  - `reserved > 0` → `prep`     (still has unprepped quantity)\n  - else `prepped > 0` → `checkout` (prepped, awaiting check-out)\n  - else → `null`               (nothing reserved/prepped; quote-only or fully out)\n\n**End side (collection)** — **rentals only** (`b.type !== \"sale\"`), mirroring\nthe end-card status formula. Sales have no collection event.\n  - `out > 0` → `return`        (checked-out rental quantity awaiting return)\n  - else → `null`               (nothing out yet — end card shows no action\n                                 until check-out produces `out > 0`)\n\nSide-scoped by design: a start card never reports `return` and an end card\nnever reports `prep`/`checkout` — unlike the manager's destination-wide\n`getStageForBookings`, which collapses both sides into one stage.",
+          "paramTags": [
+            {
+              "name": "side",
+              "doc": "Which card side — selects the per-side rule + sibling set."
+            },
+            {
+              "name": "siblings",
+              "doc": "Bookings filtered to the relevant destination side."
+            },
+            {
+              "name": "current",
+              "doc": "The card's current status — non-actionable statuses null out."
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "computeCardStatusFromBookings",
           "signature": "computeCardStatusFromBookings(side: CardSide, siblings: CardSiblingBooking[], current: CardStatus): CardStatus",
           "doc": "Recompute an event card's `status` from its sibling bookings on the\ndestination it belongs to. Pure function — no Firestore reads.\n\nPreserves manual overrides:\n- `\"blocked\"` — manually set on the card; sticks until either the parent\n  order transitions to canceled (handled in update-order) or a future\n  \"Clear block\" affordance writes a new auto value through the same path.\n- `\"canceled\"` — terminal; sourced from order.status only.\n\nOtherwise, applies per-side roll-up rules:\n\n**Start card (delivery)** — siblings filtered to `uid_destination_delivery`:\n  - `pre_delivery = Σ (quoted + reserved + prepped)` — still in the warehouse.\n  - `out          = Σ breakdown.out` — delivery in flight.\n  - if `pre_delivery === 0`            → `complete` (everything has at least left)\n  - else if `out > 0`                  → `active`   (delivery in progress)\n  - else                                → `planned`  (nothing has moved yet)\n\n**End card (collection)** — siblings filtered to `uid_destination_collection`:\n  Sale-type bookings are excluded — sales have no collection event, so the\n  end card stays planned↔complete based on rental siblings only.\n  - `terminal  = Σ (returned + lost + damaged)`\n  - `total     = Σ booking.quantity`\n  - `still_out = Σ breakdown.out`\n  - if `terminal === total`              → `complete` (everything collected/written-off)\n  - else if `terminal > 0 || still_out > 0` → `active`   (collection in progress)\n  - else                                  → `planned`  (nothing has come back yet)\n\nIf the end-side roll-up has no rental siblings (e.g. a sale-only\ndestination), the card resolves to `complete` — there is nothing to collect.",
@@ -8119,10 +8188,10 @@
           "doc": ""
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "InvoiceDestinationPair",
-          "declaration": "interface InvoiceDestinationPair {\n  uid_order: string;\n}",
-          "doc": "Invoice-side destination pair — matches the schemas-next\n`InvoiceDocDestinationType` (a `DocDestinationType` plus a `uid_order`\nscope field). Defined structurally here so this module can be published\nahead of / alongside the schemas-next beta that adds the type."
+          "declaration": "type InvoiceDestinationPair = InvoiceDocDestinationType;",
+          "doc": "Invoice-side destination pair: a {@link DocDestinationType} plus a `uid_order`\nscope field, so a multi-order invoice can carry pairs from several orders and\nhave them selectively synced per source order. Alias of the canonical\n`InvoiceDocDestinationType` from `@cfs/core/schemas`."
         },
         {
           "kind": "interface",

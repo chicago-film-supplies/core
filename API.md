@@ -451,6 +451,7 @@ interface Card {
   uid_list: string;
   uid_thread: string;
   status: CardStatus;
+  action: CardAction | null;
   position: number;
   subject: string;
   body: CommentBodyJson | null;
@@ -473,6 +474,30 @@ interface Card {
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
+```
+
+### `CardAction`
+
+Denormalized "next action" for a card's primary button, computed server-side
+on every booking write (alongside `status`). Surfaces on Dashboard/Calendar
+surfaces where no bookings are loaded, so the button can show the *next* step
+without a join.
+
+A discriminated object (not a flat enum) so non-fulfillment sources can be
+added as purely additive arms (e.g. `{ source: "out_of_service", value: … }`)
+without a cross-repo field rename. `null` when nothing is actionable
+(terminal status, or no pending step on this side).
+
+```ts
+type CardAction = typeLiteral;
+```
+
+### `CardActionSchema`
+
+Zod schema for CardAction (discriminated on `source`; JSR no-slow-types-safe).
+
+```ts
+const CardActionSchema: z.ZodType<CardAction>;
 ```
 
 ### `CardAttachment`
@@ -550,6 +575,22 @@ interface CardDatesType {
 
 ```ts
 type CardDeleted = EventEnvelope<Card> & typeLiteral;
+```
+
+### `CardFulfillmentAction`
+
+The next fulfillment step a fulfillment-sourced card surfaces on its button.
+
+```ts
+type CardFulfillmentAction = indexedAccess;
+```
+
+### `CardFulfillmentActionEnum`
+
+Zod schema for CardFulfillmentAction.
+
+```ts
+const CardFulfillmentActionEnum: z.ZodType<CardFulfillmentAction>;
 ```
 
 ### `CardId`
@@ -4567,6 +4608,10 @@ const RegisterInput: z.ZodType<RegisterInputType>;
 
 Input schema for POST /auth/register.
 
+Carries the split-name parts (`first_name` required, the rest optional) the
+register route derives the denormalized `name` from via `deriveName()`. No
+`name` field — inputs send parts; the server derives `name` at write time.
+
 ```ts
 interface RegisterInputType {
   email: string;
@@ -8020,6 +8065,7 @@ interface Card {
   uid_list: string;
   uid_thread: string;
   status: CardStatus;
+  action: CardAction | null;
   position: number;
   subject: string;
   body: CommentBodyJson | null;
@@ -8042,6 +8088,30 @@ interface Card {
   created_at?: FirestoreTimestampType;
   updated_at?: FirestoreTimestampType;
 }
+```
+
+### `CardAction`
+
+Denormalized "next action" for a card's primary button, computed server-side
+on every booking write (alongside `status`). Surfaces on Dashboard/Calendar
+surfaces where no bookings are loaded, so the button can show the *next* step
+without a join.
+
+A discriminated object (not a flat enum) so non-fulfillment sources can be
+added as purely additive arms (e.g. `{ source: "out_of_service", value: … }`)
+without a cross-repo field rename. `null` when nothing is actionable
+(terminal status, or no pending step on this side).
+
+```ts
+type CardAction = typeLiteral;
+```
+
+### `CardActionSchema`
+
+Zod schema for CardAction (discriminated on `source`; JSR no-slow-types-safe).
+
+```ts
+const CardActionSchema: z.ZodType<CardAction>;
 ```
 
 ### `CardAttachment`
@@ -8107,6 +8177,22 @@ interface CardDatesType {
   start: string | null;
   end: string | null;
 }
+```
+
+### `CardFulfillmentAction`
+
+The next fulfillment step a fulfillment-sourced card surfaces on its button.
+
+```ts
+type CardFulfillmentAction = indexedAccess;
+```
+
+### `CardFulfillmentActionEnum`
+
+Zod schema for CardFulfillmentAction.
+
+```ts
+const CardFulfillmentActionEnum: z.ZodType<CardFulfillmentAction>;
 ```
 
 ### `CardLockKey`
@@ -13685,7 +13771,7 @@ type SystemEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const TEMPLATE_EVENT_MSGS: "fixture_saved" | "fixture_deleted" | "template_abandon_close_pr_failed" | "template_component_file_missing" | "template_component_no_content" | "template_component_sidecar_parse_failed" | "template_metadata_pr_opened" | "template_metadata_close_pr_failed" | "template_metadata_automerge_unavailable" | "template_preview_store_failed" | "template_preview_stored" | "template_publish_affected" | "template_publish_base_ref_rejected" | "template_publish_no_merge_sha" | "template_publish_noop" | "template_publish_skipped_no_app" | "template_publish_unknown_component" | "template_rebuild_from_git" | "template_release_auto_merge_failed" | "template_render_config_parse_failed" | "template_render_failed" | "draft_git_backfill_failed" | "template_sandbox_diverged" | "template_sandbox_fast_forwarded" | "template_sandbox_force_resynced" | "template_sync_skipped_no_app" | "get_quote_template_failed" | "golden_diff_oidc_identity_rejected" | "golden_diff_oidc_unconfigured" | "golden_diff_oidc_verify_failed" | "golden_diff_result" | "golden_verdict_persist_failed" | "github_templates_no_merge_sha" | "github_templates_publish_failed" | "comment_sync_awaiting_create" | "comment_sync_github_unconfigured" | "comment_sync_no_pr" | "comment_sync_posted"[];
+const TEMPLATE_EVENT_MSGS: "fixture_saved" | "fixture_deleted" | "template_abandon_close_pr_failed" | "template_component_file_missing" | "template_component_no_content" | "template_component_sidecar_parse_failed" | "template_metadata_pr_opened" | "template_metadata_close_pr_failed" | "template_metadata_automerge_unavailable" | "template_preview_store_failed" | "template_preview_stored" | "template_publish_affected" | "template_publish_base_ref_rejected" | "template_publish_no_merge_sha" | "template_publish_noop" | "template_publish_warning" | "template_publish_skipped_no_app" | "template_publish_unknown_component" | "template_rebuild_from_git" | "template_reconcile_sweep" | "template_release_auto_merge_failed" | "template_render_config_parse_failed" | "template_render_failed" | "draft_git_backfill_failed" | "template_sandbox_diverged" | "template_sandbox_fast_forwarded" | "template_sandbox_force_resynced" | "template_sync_skipped_no_app" | "get_quote_template_failed" | "golden_diff_oidc_identity_rejected" | "golden_diff_oidc_unconfigured" | "golden_diff_oidc_verify_failed" | "golden_diff_result" | "golden_verdict_persist_failed" | "github_templates_no_merge_sha" | "github_templates_publish_failed" | "comment_sync_awaiting_create" | "comment_sync_github_unconfigured" | "comment_sync_no_pr" | "comment_sync_posted"[];
 ```
 
 ### `TYPESENSE_EVENT_MSGS`
@@ -14588,6 +14674,42 @@ Which side of the order's lifecycle a card represents:
 type CardSide = "start" | "end";
 ```
 
+### `computeCardActionFromBookings(side: CardSide, siblings: CardSiblingBooking[], current: CardStatus): CardAction | null`
+
+Recompute a card's denormalized **next fulfillment action** from its sibling
+bookings — the value the `CardTile` button shows on surfaces (Dashboard
+kanban, Calendar agenda) where no bookings are loaded. Pure function — no
+Firestore reads. Computed in lockstep with `computeCardStatusFromBookings`
+on every booking write.
+
+Returns `null` (no actionable next step) when:
+- `current` is `blocked | canceled | complete | draft` — **wider than the
+  status helper**, which only preserves `blocked`/`canceled`. A complete or
+  draft card must never surface a stale action.
+- the relevant side has nothing pending (see per-side rules).
+
+**Start side (delivery)** — siblings filtered to `uid_destination_delivery`.
+No sale filter: sale lines are genuinely prepped + checked out on delivery.
+  - `reserved > 0` → `prep`     (still has unprepped quantity)
+  - else `prepped > 0` → `checkout` (prepped, awaiting check-out)
+  - else → `null`               (nothing reserved/prepped; quote-only or fully out)
+
+**End side (collection)** — **rentals only** (`b.type !== "sale"`), mirroring
+the end-card status formula. Sales have no collection event.
+  - `out > 0` → `return`        (checked-out rental quantity awaiting return)
+  - else → `null`               (nothing out yet — end card shows no action
+                                 until check-out produces `out > 0`)
+
+Side-scoped by design: a start card never reports `return` and an end card
+never reports `prep`/`checkout` — unlike the manager's destination-wide
+`getStageForBookings`, which collapses both sides into one stage.
+
+**Parameters**
+
+- `side` — Which card side — selects the per-side rule + sibling set.
+- `siblings` — Bookings filtered to the relevant destination side.
+- `current` — The card's current status — non-actionable statuses null out.
+
 ### `computeCardStatusFromBookings(side: CardSide, siblings: CardSiblingBooking[], current: CardStatus): CardStatus`
 
 Recompute an event card's `status` from its sibling bookings on the
@@ -14848,15 +14970,13 @@ type GroupPath = GroupPathType;
 
 ### `InvoiceDestinationPair`
 
-Invoice-side destination pair — matches the schemas-next
-`InvoiceDocDestinationType` (a `DocDestinationType` plus a `uid_order`
-scope field). Defined structurally here so this module can be published
-ahead of / alongside the schemas-next beta that adds the type.
+Invoice-side destination pair: a {@link DocDestinationType} plus a `uid_order`
+scope field, so a multi-order invoice can carry pairs from several orders and
+have them selectively synced per source order. Alias of the canonical
+`InvoiceDocDestinationType` from `@cfs/core/schemas`.
 
 ```ts
-interface InvoiceDestinationPair {
-  uid_order: string;
-}
+type InvoiceDestinationPair = InvoiceDocDestinationType;
 ```
 
 ### `InvoiceItem`

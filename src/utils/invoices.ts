@@ -41,7 +41,7 @@ export {
 } from "./orders.ts";
 
 import currency from "currency.js";
-import type { COARevenueType, DocDestinationType, DocLineItemTypeType, InvoiceDocItemPrice, InvoiceDocTotals, PriceFormulaType, PriceModifierType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, DocLineItemTypeType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocTotals, PriceFormulaType, PriceModifierType } from "../schemas/mod.ts";
 import {
   calculateItemSubtotal,
   computeItemPaths,
@@ -744,14 +744,12 @@ export function syncOrderItems(
 // ── Top-level field co-write helpers ────────────────────────────
 
 /**
- * Invoice-side destination pair — matches the schemas-next
- * `InvoiceDocDestinationType` (a `DocDestinationType` plus a `uid_order`
- * scope field). Defined structurally here so this module can be published
- * ahead of / alongside the schemas-next beta that adds the type.
+ * Invoice-side destination pair: a {@link DocDestinationType} plus a `uid_order`
+ * scope field, so a multi-order invoice can carry pairs from several orders and
+ * have them selectively synced per source order. Alias of the canonical
+ * `InvoiceDocDestinationType` from `@cfs/core/schemas`.
  */
-export interface InvoiceDestinationPair extends DocDestinationType {
-  uid_order: string;
-}
+export type InvoiceDestinationPair = InvoiceDocDestinationType;
 
 /**
  * Stable key for matching a destination pair by its endpoint uids.
