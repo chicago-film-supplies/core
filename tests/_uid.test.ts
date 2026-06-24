@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { BookingId, FirestoreId, ItemUid, QuoteId, StockSummaryId } from "../src/schemas/_uid.ts";
+import { BookingId, EventCardId, FirestoreId, ItemUid, QuoteId, StockSummaryId, ThreadId } from "../src/schemas/_uid.ts";
 import { bookingId, fid, stockSummaryId } from "./helpers/ids.ts";
 
 const accepts = (s: { safeParse(v: unknown): { success: boolean } }, v: string) =>
@@ -66,6 +66,35 @@ Deno.test("QuoteId rejects bad order segment / version / arity", () => {
   rejects(QuoteId, "00iNtfho7YCp6FllPi9f:v"); // missing version number
   rejects(QuoteId, "00iNtfho7YCp6FllPi9f:draft:extra"); // extra segment
   rejects(QuoteId, "00iNtfho7YCp6FllPi9f"); // plain FirestoreId, not a quote uid
+});
+
+Deno.test("EventCardId accepts {order}:{dest}:start|end", () => {
+  accepts(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:start");
+  accepts(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:end");
+});
+
+Deno.test("EventCardId rejects bad position / non-id segments / sentinel middle", () => {
+  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:middle"); // bad position
+  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk"); // missing position
+  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:unknown:start"); // sentinel dest, not a fid
+});
+
+Deno.test("ThreadId accepts a plain FirestoreId (default-thread cowrite)", () => {
+  accepts(ThreadId, "0BIQ73UMiHTtd8mo0yNk");
+});
+
+Deno.test("ThreadId accepts an EventCardId composite (deterministic event-card thread)", () => {
+  // Event-card threads are minted at id === card uid so a delete→recreate burst
+  // reuses the same thread doc; see api-cloudrun eventCardReconcile.eventCardThreadId.
+  accepts(ThreadId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:start");
+  accepts(ThreadId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:end");
+});
+
+Deno.test("ThreadId rejects garbage / wrong-shaped composites", () => {
+  rejects(ThreadId, "thread-1"); // hyphens
+  rejects(ThreadId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk"); // booking-arity, no position
+  rejects(ThreadId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:start:extra"); // extra segment
+  rejects(ThreadId, ""); // empty
 });
 
 Deno.test("fixture id helpers produce validator-compliant ids", () => {

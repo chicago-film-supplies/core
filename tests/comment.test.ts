@@ -49,6 +49,14 @@ Deno.test("CommentSchema rejects legacy uid-array reactions", () => {
   assertEquals(CommentSchema.safeParse(doc).success, false);
 });
 
+Deno.test("CommentSchema accepts an EventCardId composite uid_thread (comment on an event-card thread)", () => {
+  const doc = {
+    ...validComment,
+    uid_thread: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+  };
+  assertEquals(CommentSchema.safeParse(doc).success, true);
+});
+
 Deno.test("CommentSchema rejects empty sources array", () => {
   const doc = { ...validComment, sources: [] };
   assertEquals(CommentSchema.safeParse(doc).success, false);
@@ -118,6 +126,19 @@ Deno.test("CreateCommentInput accepts valid input", () => {
   assertEquals(
     CreateCommentInput.safeParse({
       uid_thread: "thread10000000000000",
+      body: tiptapBody,
+      body_text: "Hello",
+    }).success,
+    true,
+  );
+});
+
+Deno.test("CreateCommentInput accepts a composite (event-card) uid_thread", () => {
+  // The load-bearing one: POST /comments on an event-card thread would 400
+  // without ThreadId here, since event-card threads are keyed by card uid.
+  assertEquals(
+    CreateCommentInput.safeParse({
+      uid_thread: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
       body: tiptapBody,
       body_text: "Hello",
     }).success,

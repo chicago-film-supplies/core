@@ -5436,6 +5436,21 @@ interface Thread {
 type ThreadCreated = EventEnvelope<Thread> & typeLiteral;
 ```
 
+### `ThreadId`
+
+`threads.uid` (and the `uid_thread` references on `cards` + `comments`) —
+either a Firestore auto-id (the default-thread cowrite for most entities) or
+an `EventCardId` composite. Event-card threads are minted at a **deterministic
+id equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so
+the delete→recreate churn of a CRMS opportunity-webhook burst reuses the one
+stable `threads/{cardUid}` doc instead of piling up random-id orphans (and
+comments survive across the cycle). Structurally identical to `CardId`; see
+`services/eventCardReconcile.ts` `eventCardThreadId`.
+
+```ts
+const ThreadId: z.ZodType<string>;
+```
+
 ### `ThreadSchema`
 
 Zod schema for a thread Firestore document.
@@ -7763,6 +7778,21 @@ Allowed values for organization-level tax profile.
 
 ```ts
 type TaxProfileType = indexedAccess;
+```
+
+### `ThreadId`
+
+`threads.uid` (and the `uid_thread` references on `cards` + `comments`) —
+either a Firestore auto-id (the default-thread cowrite for most entities) or
+an `EventCardId` composite. Event-card threads are minted at a **deterministic
+id equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so
+the delete→recreate churn of a CRMS opportunity-webhook burst reuses the one
+stable `threads/{cardUid}` doc instead of piling up random-id orphans (and
+comments survive across the cycle). Structurally identical to `CardId`; see
+`services/eventCardReconcile.ts` `eventCardThreadId`.
+
+```ts
+const ThreadId: z.ZodType<string>;
 ```
 
 ### `TimestampFields`

@@ -240,6 +240,7 @@ export {
   EventCardId,
   ListId,
   QuoteId,
+  ThreadId,
 } from "./common.ts";
 
 export {

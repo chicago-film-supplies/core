@@ -30,6 +30,25 @@ Deno.test("ThreadSchema accepts multi-source threads", () => {
   assertEquals(ThreadSchema.safeParse(doc).success, true);
 });
 
+Deno.test("ThreadSchema accepts an EventCardId composite uid (deterministic event-card thread)", () => {
+  // Event-card threads are minted at id === card uid (see api-cloudrun
+  // eventCardReconcile.eventCardThreadId) so churn reuses one stable doc.
+  const doc = {
+    ...validThread,
+    uid: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+    sources: [
+      { collection: "cards", uid: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start" },
+      { collection: "orders", uid: "order100000000000000" },
+    ],
+  };
+  assertEquals(ThreadSchema.safeParse(doc).success, true);
+});
+
+Deno.test("ThreadSchema rejects a malformed composite uid", () => {
+  const doc = { ...validThread, uid: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:middle" };
+  assertEquals(ThreadSchema.safeParse(doc).success, false);
+});
+
 Deno.test("ThreadSchema rejects empty sources array", () => {
   const doc = { ...validThread, sources: [] };
   assertEquals(ThreadSchema.safeParse(doc).success, false);

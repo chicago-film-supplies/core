@@ -2888,6 +2888,12 @@
         },
         {
           "kind": "variable",
+          "name": "ThreadId",
+          "declaration": "const ThreadId: z.ZodType<string>;",
+          "doc": "`threads.uid` (and the `uid_thread` references on `cards` + `comments`) —\neither a Firestore auto-id (the default-thread cowrite for most entities) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
+        },
+        {
+          "kind": "variable",
           "name": "ThreadSchema",
           "declaration": "const ThreadSchema: z.ZodType<Thread>;",
           "doc": "Zod schema for a thread Firestore document."
@@ -4429,6 +4435,12 @@
           "name": "TaxProfileType",
           "declaration": "type TaxProfileType = indexedAccess;",
           "doc": "Allowed values for organization-level tax profile."
+        },
+        {
+          "kind": "variable",
+          "name": "ThreadId",
+          "declaration": "const ThreadId: z.ZodType<string>;",
+          "doc": "`threads.uid` (and the `uid_thread` references on `cards` + `comments`) —\neither a Firestore auto-id (the default-thread cowrite for most entities) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
         },
         {
           "kind": "variable",

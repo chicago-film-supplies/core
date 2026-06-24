@@ -25,7 +25,7 @@
  *   when the parent recurrence's prototype updates fan out to siblings.
  */
 import { z } from "zod";
-import { CardId, FirestoreId, ListId } from "./_uid.ts";
+import { CardId, FirestoreId, ListId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -234,7 +234,7 @@ export const CardDates: z.ZodType<CardDatesType> = z.strictObject({
 export const CardSchema: z.ZodType<Card> = z.strictObject({
   uid: CardId,
   uid_list: ListId,
-  uid_thread: FirestoreId,
+  uid_thread: ThreadId,
   status: CardStatusEnum,
   action: CardActionSchema.nullable().default(null),
   position: z.number(),

@@ -51,6 +51,20 @@ Deno.test("CardSchema accepts multiple polymorphic sources", () => {
   assertEquals(CardSchema.safeParse(doc).success, true);
 });
 
+Deno.test("CardSchema accepts an EventCardId composite uid_thread (deterministic event-card thread)", () => {
+  const doc = {
+    ...validCard,
+    uid: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+    uid_thread: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+  };
+  assertEquals(CardSchema.safeParse(doc).success, true);
+});
+
+Deno.test("CardSchema rejects a malformed composite uid_thread", () => {
+  const doc = { ...validCard, uid_thread: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:middle" };
+  assertEquals(CardSchema.safeParse(doc).success, false);
+});
+
 Deno.test("CardSchema rejects invalid status", () => {
   const doc = { ...validCard, status: "done" };
   assertEquals(CardSchema.safeParse(doc).success, false);
