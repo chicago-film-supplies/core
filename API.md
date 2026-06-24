@@ -14694,8 +14694,9 @@ No sale filter: sale lines are genuinely prepped + checked out on delivery.
   - else `prepped > 0` → `checkout` (prepped, awaiting check-out)
   - else → `null`               (nothing reserved/prepped; quote-only or fully out)
 
-**End side (collection)** — **rentals only** (`b.type !== "sale"`), mirroring
-the end-card status formula. Sales have no collection event.
+**End side (collection)** — **rentals only** (`b.type === "rental"`),
+mirroring the end-card status formula. Sale, service, and surcharge lines
+have no collection event.
   - `out > 0` → `return`        (checked-out rental quantity awaiting return)
   - else → `null`               (nothing out yet — end card shows no action
                                  until check-out produces `out > 0`)
@@ -14730,9 +14731,24 @@ Otherwise, applies per-side roll-up rules:
   - else if `out > 0`                  → `active`   (delivery in progress)
   - else                                → `planned`  (nothing has moved yet)
 
-**End card (collection)** — siblings filtered to `uid_destination_collection`:
-  Sale-type bookings are excluded — sales have no collection event, so the
-  end card stays planned↔complete based on rental siblings only.
+  Known limitation: `pre_delivery === 0 → complete` would read `complete` for
+  a hypothetical phased order where every unit has *at least* left the
+  warehouse but some legs are still mid-cycle. No live incidence today;
+  tracked as a low-priority follow-up, not a code change.
+
+**End card (collection)** — siblings filtered to `uid_destination_collection`,
+  then to **rentals only** (`b.type === "rental"`). Only a rental has a
+  collection event — checked out (`breakdown.out > 0`) and later returned —
+  so only a rental can drive the card to `complete`. Sale, service, and
+  surcharge lines are all excluded:
+  - a kept **sale** sits permanently at `out = quantity` (a sale is only
+    rarely returned, and then via the fulfillment flow, never via the card);
+  - **service** / **surcharge** lines have no return event at all, so their
+    `breakdown.out` is always 0 and they never reach a terminal
+    `returned`/`lost`/`damaged` count.
+  Counting any of their `quantity` toward `total` would leave
+  `terminal < total` forever and pin the end card `active` after the rentals
+  are all back.
   - `terminal  = Σ (returned + lost + damaged)`
   - `total     = Σ booking.quantity`
   - `still_out = Σ breakdown.out`
@@ -14740,7 +14756,7 @@ Otherwise, applies per-side roll-up rules:
   - else if `terminal > 0 || still_out > 0` → `active`   (collection in progress)
   - else                                  → `planned`  (nothing has come back yet)
 
-If the end-side roll-up has no rental siblings (e.g. a sale-only
+If the end-side roll-up has no rental siblings (e.g. a sale/service-only
 destination), the card resolves to `complete` — there is nothing to collect.
 
 **Parameters**

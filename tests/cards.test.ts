@@ -19,6 +19,14 @@ const sale = (qty: number, b: Partial<Booking["breakdown"]> = {}): CardSiblingBo
   type: "sale", quantity: qty, breakdown: breakdown(b),
 });
 
+const service = (qty: number, b: Partial<Booking["breakdown"]> = {}): CardSiblingBooking => ({
+  type: "service", quantity: qty, breakdown: breakdown(b),
+});
+
+const surcharge = (qty: number, b: Partial<Booking["breakdown"]> = {}): CardSiblingBooking => ({
+  type: "surcharge", quantity: qty, breakdown: breakdown(b),
+});
+
 // ── start side ─────────────────────────────────────────────────────
 
 Deno.test("start: nothing has moved → planned", () => {
@@ -76,6 +84,35 @@ Deno.test("end: sale-only siblings → complete (no collection event)", () => {
 Deno.test("end: mixed sale + rental excludes sale from roll-up", () => {
   const siblings = [sale(2, { out: 2 }), rental(3, { returned: 3 })];
   assertEquals(computeCardStatusFromBookings("end", siblings, "active"), "complete");
+});
+
+Deno.test("end: service line + rentals all returned → complete (service excluded)", () => {
+  // Service lines carry a quantity but never produce an `out`/return event;
+  // counting them in `total` is what pinned end cards `active` forever (#710 et al).
+  const siblings = [service(1, { reserved: 1 }), rental(4, { returned: 4 })];
+  assertEquals(computeCardStatusFromBookings("end", siblings, "active"), "complete");
+});
+
+Deno.test("end: surcharge line + rentals all returned → complete (surcharge excluded)", () => {
+  const siblings = [surcharge(1), rental(2, { returned: 2 })];
+  assertEquals(computeCardStatusFromBookings("end", siblings, "active"), "complete");
+});
+
+Deno.test("end: #866-shape — some reserved, rest returned, no out → active (do not over-complete)", () => {
+  // Mid-cycle order: units never shipped sit `reserved`, so terminal < total.
+  // Must stay active — order isn't done; the fix must not collapse this to complete.
+  const siblings = [rental(6, { reserved: 4, returned: 2 })];
+  assertEquals(computeCardStatusFromBookings("end", siblings, "active"), "active");
+});
+
+Deno.test("end: #893-shape — rental still out → active", () => {
+  const siblings = [rental(3, { out: 3 })];
+  assertEquals(computeCardStatusFromBookings("end", siblings, "active"), "active");
+});
+
+Deno.test("end: sale + service only (no rentals) → complete (nothing to collect)", () => {
+  const siblings = [sale(2, { out: 2 }), service(1, { reserved: 1 })];
+  assertEquals(computeCardStatusFromBookings("end", siblings, "planned"), "complete");
 });
 
 Deno.test("end: blocked preserved", () => {
@@ -158,6 +195,11 @@ Deno.test("action end: mixed sale(out) + rental(out) → return (rental drives)"
     source: "fulfillment",
     value: "return",
   });
+});
+
+Deno.test("action end: service/surcharge only → null (non-rental excluded from gate)", () => {
+  const siblings = [service(1, { reserved: 1 }), surcharge(1)];
+  assertEquals(computeCardActionFromBookings("end", siblings, "active"), null);
 });
 
 // terminal / non-actionable statuses → null on either side
