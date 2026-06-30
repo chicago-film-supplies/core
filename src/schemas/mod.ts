@@ -401,6 +401,27 @@ export {
 } from "./holiday-dates.ts";
 
 export {
+  HolidayDefinitionSchema,
+  CreateHolidayDefinitionInput,
+  UpdateHolidayDefinitionInput,
+  type HolidayDefinition,
+  type HolidayType,
+  type HolidayWeekInputType,
+  type CreateHolidayDefinitionInputType,
+  type CreateFixedHolidayInputType,
+  type CreateVariableHolidayInputType,
+  type UpdateHolidayDefinitionInputType,
+  type UpdateFixedHolidayInputType,
+  type UpdateVariableHolidayInputType,
+} from "./holiday-definition.ts";
+
+export {
+  HolidaySnapshotSchema,
+  type HolidaySnapshot,
+  type HolidaySnapshotYearRange,
+} from "./holiday-snapshot.ts";
+
+export {
   CacheGeocodesSchema,
   type CacheGeocodes,
   type CacheGeocodesAddress,
@@ -874,6 +895,8 @@ import type { Destination as DestinationDocType } from "./destination.ts";
 import type { EmailVerification } from "./email-verification.ts";
 import type { Fulfillment } from "./fulfillment.ts";
 import type { HolidayDates } from "./holiday-dates.ts";
+import type { HolidayDefinition } from "./holiday-definition.ts";
+import type { HolidaySnapshot } from "./holiday-snapshot.ts";
 import type { InventoryLedger } from "./inventory-ledger.ts";
 import type { Invite } from "./invite.ts";
 import type { Invoice } from "./invoice.ts";
@@ -913,7 +936,7 @@ import type {
 /** Union of all Firestore document types. Use with validateBeforeWrite. */
 export type SchemaDocType =
   | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
-  | EmailVerification | HolidayDates | InventoryLedger | Invite | Invoice | List | Location
+  | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
   | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
   | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User
@@ -936,6 +959,8 @@ import { DestinationSchema } from "./destination.ts";
 import { EmailVerificationSchema } from "./email-verification.ts";
 import { FulfillmentSchema } from "./fulfillment.ts";
 import { HolidayDatesSchema } from "./holiday-dates.ts";
+import { HolidayDefinitionSchema } from "./holiday-definition.ts";
+import { HolidaySnapshotSchema } from "./holiday-snapshot.ts";
 import { InventoryLedgerSchema } from "./inventory-ledger.ts";
 import { InviteSchema } from "./invite.ts";
 import { InvoiceSchema } from "./invoice.ts";
@@ -990,6 +1015,8 @@ export const schemas: Record<string, z.ZodType> = {
   // `dates` is the live key — holiday date instances live at config/{id}/dates;
   // same shape as HolidayDates (the `holiday-dates` key is a display alias).
   "dates": HolidayDatesSchema,
+  "holiday-definition": HolidayDefinitionSchema, "holiday-definitions": HolidayDefinitionSchema,
+  "holiday-snapshot": HolidaySnapshotSchema,
   "inventory-ledger": InventoryLedgerSchema, "inventory-ledgers": InventoryLedgerSchema,
   "invite": InviteSchema, "invites": InviteSchema,
   "invoice": InvoiceSchema, "invoices": InvoiceSchema,

@@ -14,6 +14,8 @@
     "./schemas/destination": "./src/schemas/destination.ts",
     "./schemas/email-verification": "./src/schemas/email-verification.ts",
     "./schemas/holiday-dates": "./src/schemas/holiday-dates.ts",
+    "./schemas/holiday-definition": "./src/schemas/holiday-definition.ts",
+    "./schemas/holiday-snapshot": "./src/schemas/holiday-snapshot.ts",
     "./schemas/inventory-ledger": "./src/schemas/inventory-ledger.ts",
     "./schemas/invite": "./src/schemas/invite.ts",
     "./schemas/invoice": "./src/schemas/invoice.ts",

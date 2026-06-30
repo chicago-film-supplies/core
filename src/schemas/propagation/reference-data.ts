@@ -134,3 +134,47 @@ export const updateLocationRules: CollectionRule[] = [
     ],
   },
 ];
+
+// ── Holiday cascades ─────────────────────────────────────────────
+
+export const rematerializeHolidaySnapshotRules: CollectionRule[] = [
+  {
+    id: "holiday-dates:rematerialize-snapshot",
+    source: "holiday-dates",
+    target: "holiday-snapshot",
+    mode: "derive",
+    invariant: "holiday-snapshot/current is the per-render hot-path read (1 doc + TTL cache); it must be recomputed from the full holiday-dates set on every holiday-dates write so getHolidayDates() never scans the instance collection",
+    trigger: "holiday definition create/update/soft-delete/regenerate + monthly horizon cron — post-transaction recompute-from-source",
+    fields: [
+      { source: ["date"], target: ["materialized_dates"], transform: "sorted-unique ISO array of every holiday-dates.date; also stamps materialized_count + materialized_year_range" },
+    ],
+  },
+];
+
+export const recomputeHolidayDraftOrderRules: CollectionRule[] = [
+  {
+    id: "holiday-change:recompute-draft-orders",
+    source: "holiday-definitions",
+    target: "orders",
+    mode: "fan-out",
+    invariant: "A draft order is not committed, so a holiday change must re-run its destination date/duration math (durations drive prices/totals); finalized (non-draft) orders stay frozen for historical fidelity",
+    trigger: "holiday definition create/update/soft-delete/regenerate — coalesced Cloud Task, status == 'draft' only (the monthly horizon cron does NOT enqueue — its far-future additions don't affect current drafts)",
+    fields: [
+      { source: [], target: ["destinations", "dates"], transform: "re-run canonicalizeDestinationDates → getDuration with the new holiday set, then syncChargeDaysToItems + recompute totals" },
+    ],
+  },
+];
+
+export const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
+  {
+    id: "holiday-change:recompute-draft-invoices",
+    source: "orders",
+    target: "invoices",
+    mode: "fan-out",
+    invariant: "A recomputed draft order must re-sync its draft invoices' chargeable_days/prices; terminal invoices (payments.length > 0 or status in {paid, void}) stay frozen",
+    trigger: "draft-order recompute — transitive via updateOrder's existing draft-invoice sync (projectOrderItemToInvoiceItem inherits the recomputed durations)",
+    fields: [
+      { source: ["items", "chargeable_days"], target: ["items", "chargeable_days"], transform: "inherited via projectOrderItemToInvoiceItem; draft invoices only — terminal ones skipped" },
+    ],
+  },
+];

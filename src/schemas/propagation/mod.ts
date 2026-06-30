@@ -131,6 +131,9 @@ export {
   updateTrackingCategoryRules,
   updateLocationTypeRules,
   updateLocationRules,
+  rematerializeHolidaySnapshotRules,
+  recomputeHolidayDraftOrderRules,
+  recomputeHolidayDraftInvoiceRules,
 } from "./reference-data.ts";
 
 // ── Threads & comments rules ─────────────────────────────────────────
@@ -228,7 +231,7 @@ import { createLocationRules, createLocationTransaction, updateLocationTransacti
 import { createInvoiceRules, createInvoiceTransaction, updateInvoiceOrderRules, updateInvoiceTransaction, updateOrderInvoiceRules } from "./invoices.ts";
 import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
 import { updateTaxRules } from "./taxes.ts";
-import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules } from "./reference-data.ts";
+import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
 import {
   threadCowriteRules,
   createCommentRules,
@@ -335,6 +338,9 @@ export const rules: CollectionRule[] = [
   ...createLocationRules,
   ...updateLocationTransactionalRules,
   ...updateLocationRules,
+  ...rematerializeHolidaySnapshotRules,
+  ...recomputeHolidayDraftOrderRules,
+  ...recomputeHolidayDraftInvoiceRules,
   ...threadCowriteRules,
   ...createCommentRules,
   ...cardRules,

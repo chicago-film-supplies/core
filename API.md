@@ -1107,6 +1107,36 @@ interface CreateContactInputType {
 }
 ```
 
+### `CreateFixedHolidayInputType`
+
+Input type for creating a fixed-date holiday.
+
+```ts
+interface CreateFixedHolidayInputType {
+  uid?: string;
+  type: "fixed";
+  name: string;
+  month: number;
+  date: number;
+}
+```
+
+### `CreateHolidayDefinitionInput`
+
+Input schema for creating a holiday definition.
+
+```ts
+const CreateHolidayDefinitionInput: z.ZodType<CreateHolidayDefinitionInputType>;
+```
+
+### `CreateHolidayDefinitionInputType`
+
+Input type for creating a holiday definition.
+
+```ts
+type CreateHolidayDefinitionInputType = CreateFixedHolidayInputType | CreateVariableHolidayInputType;
+```
+
 ### `CreateInviteInput`
 
 Input schema for POST /admin/users/invite.
@@ -1512,6 +1542,21 @@ interface CreateUserInputType {
   password: string;
   roles?: string[];
   uid_contact?: string | null;
+}
+```
+
+### `CreateVariableHolidayInputType`
+
+Input type for creating a variable-date holiday.
+
+```ts
+interface CreateVariableHolidayInputType {
+  uid?: string;
+  type: "variable";
+  name: string;
+  month: number;
+  day: number;
+  week: HolidayWeekInputType;
 }
 ```
 
@@ -2392,6 +2437,93 @@ Zod schema for HolidayDates.
 
 ```ts
 const HolidayDatesSchema: z.ZodType<HolidayDates>;
+```
+
+### `HolidayDefinition`
+
+A holiday definition document in Firestore (collection: holiday-definitions).
+
+`type: "fixed"` rules carry `date` (day-of-month); `type: "variable"` rules
+carry `day`/`display_day`/`week`/`display_suffix` (e.g. "3rd Monday"). The
+variant fields are optional on the document because both shapes share one
+collection; the input schemas guarantee the correct set per type.
+
+```ts
+interface HolidayDefinition {
+  uid: string;
+  type: HolidayType;
+  name: string;
+  display_month: number;
+  js_month: number;
+  date?: number;
+  day?: string;
+  display_day?: string;
+  week?: string;
+  display_suffix?: string;
+  active: boolean;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `HolidayDefinitionSchema`
+
+Zod schema for HolidayDefinition.
+
+```ts
+const HolidayDefinitionSchema: z.ZodType<HolidayDefinition>;
+```
+
+### `HolidaySnapshot`
+
+The materialized holiday snapshot singleton (`holiday-snapshot/current`).
+
+```ts
+interface HolidaySnapshot {
+  uid: "current";
+  materialized_dates: string[];
+  materialized_count: number;
+  materialized_year_range: HolidaySnapshotYearRange;
+  materialized_at?: FirestoreTimestampType;
+}
+```
+
+### `HolidaySnapshotSchema`
+
+Zod schema for HolidaySnapshot.
+
+```ts
+const HolidaySnapshotSchema: z.ZodType<HolidaySnapshot>;
+```
+
+### `HolidaySnapshotYearRange`
+
+Inclusive year span covered by the materialized snapshot.
+
+```ts
+interface HolidaySnapshotYearRange {
+  from: number;
+  to: number;
+}
+```
+
+### `HolidayType`
+
+Holiday rule discriminator.
+
+```ts
+type HolidayType = "fixed" | "variable";
+```
+
+### `HolidayWeekInputType`
+
+Ordinal-week selector for a variable holiday — string or numeric form.
+
+```ts
+type HolidayWeekInputType = "1" | "2" | "3" | "4" | "last" | 1 | 2 | 3 | 4;
 ```
 
 ### `HorizonMaterialized`
@@ -4764,7 +4896,7 @@ interface SaveQuoteVersionInputType {
 Union of all Firestore document types. Use with validateBeforeWrite.
 
 ```ts
-type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User | WebhookEvent | WebshopProduct | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User | WebhookEvent | WebshopProduct | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 ```
 
 ### `SchemaField`
@@ -5875,6 +6007,37 @@ interface UpdateContactInputType {
 }
 ```
 
+### `UpdateFixedHolidayInputType`
+
+Input type for updating a fixed-date holiday (full rule replacement).
+
+```ts
+interface UpdateFixedHolidayInputType {
+  uid: string;
+  version: number;
+  type: "fixed";
+  name: string;
+  month: number;
+  date: number;
+}
+```
+
+### `UpdateHolidayDefinitionInput`
+
+Input schema for updating a holiday definition (in-place edit, version-checked).
+
+```ts
+const UpdateHolidayDefinitionInput: z.ZodType<UpdateHolidayDefinitionInputType>;
+```
+
+### `UpdateHolidayDefinitionInputType`
+
+Input type for updating a holiday definition. Carries `version` for the optimistic-lock check.
+
+```ts
+type UpdateHolidayDefinitionInputType = UpdateFixedHolidayInputType | UpdateVariableHolidayInputType;
+```
+
 ### `UpdateInvoiceInput`
 
 Input schema for updating an invoice.
@@ -6349,6 +6512,22 @@ interface UpdateUserInputType {
   version: number;
   prefs_firestore?: Record<string, FirestoreDisplayPrefs>;
   prefs_typesense?: Record<string, TypesenseDisplayPrefs>;
+}
+```
+
+### `UpdateVariableHolidayInputType`
+
+Input type for updating a variable-date holiday (full rule replacement).
+
+```ts
+interface UpdateVariableHolidayInputType {
+  uid: string;
+  version: number;
+  type: "variable";
+  name: string;
+  month: number;
+  day: number;
+  week: HolidayWeekInputType;
 }
 ```
 
@@ -8624,6 +8803,189 @@ Zod schema for HolidayDates.
 
 ```ts
 const HolidayDatesSchema: z.ZodType<HolidayDates>;
+```
+
+## `@cfs/core/schemas/holiday-definition`
+
+### `CreateFixedHolidayInputType`
+
+Input type for creating a fixed-date holiday.
+
+```ts
+interface CreateFixedHolidayInputType {
+  uid?: string;
+  type: "fixed";
+  name: string;
+  month: number;
+  date: number;
+}
+```
+
+### `CreateHolidayDefinitionInput`
+
+Input schema for creating a holiday definition.
+
+```ts
+const CreateHolidayDefinitionInput: z.ZodType<CreateHolidayDefinitionInputType>;
+```
+
+### `CreateHolidayDefinitionInputType`
+
+Input type for creating a holiday definition.
+
+```ts
+type CreateHolidayDefinitionInputType = CreateFixedHolidayInputType | CreateVariableHolidayInputType;
+```
+
+### `CreateVariableHolidayInputType`
+
+Input type for creating a variable-date holiday.
+
+```ts
+interface CreateVariableHolidayInputType {
+  uid?: string;
+  type: "variable";
+  name: string;
+  month: number;
+  day: number;
+  week: HolidayWeekInputType;
+}
+```
+
+### `HolidayDefinition`
+
+A holiday definition document in Firestore (collection: holiday-definitions).
+
+`type: "fixed"` rules carry `date` (day-of-month); `type: "variable"` rules
+carry `day`/`display_day`/`week`/`display_suffix` (e.g. "3rd Monday"). The
+variant fields are optional on the document because both shapes share one
+collection; the input schemas guarantee the correct set per type.
+
+```ts
+interface HolidayDefinition {
+  uid: string;
+  type: HolidayType;
+  name: string;
+  display_month: number;
+  js_month: number;
+  date?: number;
+  day?: string;
+  display_day?: string;
+  week?: string;
+  display_suffix?: string;
+  active: boolean;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at?: FirestoreTimestampType;
+  updated_at?: FirestoreTimestampType;
+}
+```
+
+### `HolidayDefinitionSchema`
+
+Zod schema for HolidayDefinition.
+
+```ts
+const HolidayDefinitionSchema: z.ZodType<HolidayDefinition>;
+```
+
+### `HolidayType`
+
+Holiday rule discriminator.
+
+```ts
+type HolidayType = "fixed" | "variable";
+```
+
+### `HolidayWeekInputType`
+
+Ordinal-week selector for a variable holiday — string or numeric form.
+
+```ts
+type HolidayWeekInputType = "1" | "2" | "3" | "4" | "last" | 1 | 2 | 3 | 4;
+```
+
+### `UpdateFixedHolidayInputType`
+
+Input type for updating a fixed-date holiday (full rule replacement).
+
+```ts
+interface UpdateFixedHolidayInputType {
+  uid: string;
+  version: number;
+  type: "fixed";
+  name: string;
+  month: number;
+  date: number;
+}
+```
+
+### `UpdateHolidayDefinitionInput`
+
+Input schema for updating a holiday definition (in-place edit, version-checked).
+
+```ts
+const UpdateHolidayDefinitionInput: z.ZodType<UpdateHolidayDefinitionInputType>;
+```
+
+### `UpdateHolidayDefinitionInputType`
+
+Input type for updating a holiday definition. Carries `version` for the optimistic-lock check.
+
+```ts
+type UpdateHolidayDefinitionInputType = UpdateFixedHolidayInputType | UpdateVariableHolidayInputType;
+```
+
+### `UpdateVariableHolidayInputType`
+
+Input type for updating a variable-date holiday (full rule replacement).
+
+```ts
+interface UpdateVariableHolidayInputType {
+  uid: string;
+  version: number;
+  type: "variable";
+  name: string;
+  month: number;
+  day: number;
+  week: HolidayWeekInputType;
+}
+```
+
+## `@cfs/core/schemas/holiday-snapshot`
+
+### `HolidaySnapshot`
+
+The materialized holiday snapshot singleton (`holiday-snapshot/current`).
+
+```ts
+interface HolidaySnapshot {
+  uid: "current";
+  materialized_dates: string[];
+  materialized_count: number;
+  materialized_year_range: HolidaySnapshotYearRange;
+  materialized_at?: FirestoreTimestampType;
+}
+```
+
+### `HolidaySnapshotSchema`
+
+Zod schema for HolidaySnapshot.
+
+```ts
+const HolidaySnapshotSchema: z.ZodType<HolidaySnapshot>;
+```
+
+### `HolidaySnapshotYearRange`
+
+Inclusive year span covered by the materialized snapshot.
+
+```ts
+interface HolidaySnapshotYearRange {
+  from: number;
+  to: number;
+}
 ```
 
 ## `@cfs/core/schemas/inventory-ledger`
