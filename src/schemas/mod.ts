@@ -1012,8 +1012,10 @@ export const schemas: Record<string, z.ZodType> = {
   "destination": DestinationSchema, "destinations": DestinationSchema,
   "email-verification": EmailVerificationSchema, "email-verifications": EmailVerificationSchema,
   "holiday-dates": HolidayDatesSchema,
-  // `dates` is the live key — holiday date instances live at config/{id}/dates;
-  // same shape as HolidayDates (the `holiday-dates` key is a display alias).
+  // `holiday-dates` is now the live top-level collection. `dates` is a retained
+  // legacy alias for the old `config/{id}/dates` subcollection (migrated to
+  // top-level + deleted 2026-06); kept only so historical tooling that resolves
+  // that key still validates against HolidayDatesSchema.
   "dates": HolidayDatesSchema,
   "holiday-definition": HolidayDefinitionSchema, "holiday-definitions": HolidayDefinitionSchema,
   "holiday-snapshot": HolidaySnapshotSchema,
