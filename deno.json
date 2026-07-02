@@ -57,6 +57,7 @@
     "./utils/invoices": "./src/utils/invoices.ts",
     "./utils/orders": "./src/utils/orders.ts",
     "./utils/products": "./src/utils/products.ts",
+    "./utils/taxes": "./src/utils/taxes.ts",
     "./utils/templates": "./src/utils/templates.ts"
   },
   "tasks": {

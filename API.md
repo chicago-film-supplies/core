@@ -15503,9 +15503,12 @@ type PriceableLineItem = PreTaxLineItem | TransactionFeeLineItem;
 ### `Tax`
 
 Subset of the full Tax document needed by utility functions.
+`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in
+`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so
+partial `Tax` literals in tests/callers keep type-checking.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type">;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
 ```
 
 ### `TransactionFeeLineItem`
@@ -16145,9 +16148,12 @@ interface ReplacementTotals {
 ### `Tax`
 
 Subset of the full Tax document needed by utility functions.
+`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in
+`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so
+partial `Tax` literals in tests/callers keep type-checking.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type">;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
 ```
 
 ### `TransactionFeeLineItem`
@@ -16250,6 +16256,17 @@ Callers should replace their working array with the return value.
 Post-condition (under the within-parent uniqueness invariant): a parent and
 its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
 and `getGroupItems` can rely on path-prefix matching alone.
+
+### `computeItemTaxAmount(tax: Pick<Tax, "rate" | "type">, subtotalDiscounted: number, quantity: number): number`
+
+Pure per-item tax amount for one tax against a given subtotal.
+`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.
+
+`subtotalDiscounted` is a **parameter** (not recomputed) so both the order
+path (which passes its `calculateItemSubtotal` result) and the CRMS invoice
+webhook (which passes its `charge_total`-authoritative stored subtotal) share
+one formula. Lives here (base module) and is re-exported from
+`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.
 
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
@@ -16478,6 +16495,81 @@ this covers the component itself and every entry nested beneath it.
 - `path` — Full path of the component to remove (e.g. `["A", "B"]`)
 
 **Returns** — New array with the component and its descendants removed
+
+## `@cfs/core/utils/taxes`
+
+Shared tax helpers for CFS applications — the single home for doc-level
+`tax_profile` override logic + as-of Tax-catalog resolution, so the API
+(orders + invoice webhook) and the manager (optimistic recompute) share one
+implementation.
+
+Depends one-way on `./orders.ts` (base pricing module) — no cycle.
+
+### `TAX_PROFILE_OVERRIDE_NAME`
+
+Doc-level location tax profiles → the Tax doc `name` they resolve to (by
+`findTaxAt`, as-of date). `tax_applied` (no override) and `tax_exempt`
+(handled separately) are absent.
+
+```ts
+const TAX_PROFILE_OVERRIDE_NAME: Partial<Record<TaxProfileType, string>>;
+```
+
+### `Tax`
+
+Subset of the full Tax document needed by utility functions.
+`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in
+`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so
+partial `Tax` literals in tests/callers keep type-checking.
+
+```ts
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
+```
+
+### `computeItemTaxAmount(tax: Pick<Tax, "rate" | "type">, subtotalDiscounted: number, quantity: number): number`
+
+Pure per-item tax amount for one tax against a given subtotal.
+`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.
+
+`subtotalDiscounted` is a **parameter** (not recomputed) so both the order
+path (which passes its `calculateItemSubtotal` result) and the CRMS invoice
+webhook (which passes its `charge_total`-authoritative stored subtotal) share
+one formula. Lives here (base module) and is re-exported from
+`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.
+
+### `findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null`
+
+Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched
+by exact `name`. Returns null when nothing matches (e.g. `asOf` before any
+historical doc). Throws on catalog drift (two same-name docs bracket the same
+instant). A missing `valid_from` is treated as an open start; missing/null
+`valid_to` as an open end.
+
+Comparison is by instant (ms since epoch), so Chicago-offset strings with
+heterogeneous DST (-05:00 vs -06:00) compare correctly.
+
+### `getEffectiveProfileTax(orgProfile: string, docProfile: string, taxCatalog: Tax[], asOf: string): Tax | "exempt" | null`
+
+Resolve the effective doc-level override from the org + doc `tax_profile`
+pair, as-of `asOf`. Precedence: `tax_exempt` wins (a tax-exempt customer pays
+no tax regardless of location) → else the doc-level location profile
+(doc over org) resolved to its Tax → else `null` (no override, `tax_applied`).
+
+**Returns** — `"exempt"` (→ empty taxes) | a resolved `Tax` | `null` (no override).
+
+### `overrideItemTaxesForProfile(items: LineItem[], orgProfile: string, docProfile: string, taxCatalog: Tax[], asOf: string): void`
+
+Materialize a doc-level `tax_profile` override onto each priceable item's
+`price.taxes` (single mode — mutates in place):
+- `tax_exempt` → `taxes = []`, `total = subtotal_discounted`.
+- `tax_rantoul` / `tax_frankfort` → `taxes = [<resolved tax>]` with amount
+  computed from the item's **existing** `subtotal_discounted` + `total`
+  refreshed. (Orders re-run `calculateItemPrice` after, which recomputes both
+  from the rewritten uid; the CRMS invoice webhook keeps the amounts computed
+  here on its `charge_total`-authoritative subtotal.)
+- `tax_applied` / no active override doc → item left untouched.
+
+Non-priceable items (destination/group/transaction_fee) are skipped.
 
 ## `@cfs/core/utils/templates`
 

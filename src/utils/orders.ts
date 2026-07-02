@@ -56,8 +56,15 @@ export type PriceModifier = PriceModifierType;
 /** @see {@link OrderDocItemPriceType} from `@cfs/core/schemas` */
 export type PriceObject = OrderDocItemPriceType;
 
-/** Subset of the full Tax document needed by utility functions. */
-export type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type">;
+/**
+ * Subset of the full Tax document needed by utility functions.
+ * `valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in
+ * `@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so
+ * partial `Tax` literals in tests/callers keep type-checking.
+ */
+export type Tax =
+  & Pick<SchemaTax, "uid" | "name" | "rate" | "type">
+  & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
 
 /**
  * A single line item in an order (product, destination, group, surcharge, or fee).
@@ -461,6 +468,27 @@ export function calculateItemDiscount(item: LineItem): number {
 }
 
 /**
+ * Pure per-item tax amount for one tax against a given subtotal.
+ * `percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.
+ *
+ * `subtotalDiscounted` is a **parameter** (not recomputed) so both the order
+ * path (which passes its `calculateItemSubtotal` result) and the CRMS invoice
+ * webhook (which passes its `charge_total`-authoritative stored subtotal) share
+ * one formula. Lives here (base module) and is re-exported from
+ * `@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.
+ */
+export function computeItemTaxAmount(
+  tax: Pick<Tax, "rate" | "type">,
+  subtotalDiscounted: number,
+  quantity: number,
+): number {
+  if (tax.type === "percent") {
+    return currency(subtotalDiscounted).multiply(tax.rate / 100).value;
+  }
+  return currency(tax.rate).multiply(quantity).value;
+}
+
+/**
  * Calculate tax amounts for a single line item from the Tax[] parameter.
  * Returns a PriceModifier[] with computed amounts.
  */
@@ -483,19 +511,12 @@ export function calculateItemTax(
       throw new Error("Unknown tax uid: " + itemTax.uid);
     }
 
-    let amount: number;
-    if (taxDoc.type === "percent") {
-      amount = currency(subtotal_discounted).multiply(taxDoc.rate / 100).value;
-    } else {
-      amount = currency(taxDoc.rate).multiply(quantity).value;
-    }
-
     return {
       uid: taxDoc.uid,
       name: taxDoc.name,
       rate: taxDoc.rate,
       type: taxDoc.type,
-      amount,
+      amount: computeItemTaxAmount(taxDoc, subtotal_discounted, quantity),
     };
   });
 }

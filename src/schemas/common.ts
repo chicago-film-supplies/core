@@ -279,7 +279,7 @@ export type StockMethodType = typeof STOCK_METHODS[number];
 /** Zod schema for StockMethodType. */
 export const StockMethodEnum: z.ZodType<StockMethodType> = z.enum(STOCK_METHODS);
 
-const TAX_PROFILES = ["tax_applied", "tax_exempt", "tax_rantoul"] as const;
+const TAX_PROFILES = ["tax_applied", "tax_exempt", "tax_rantoul", "tax_frankfort"] as const;
 /** Allowed values for organization-level tax profile. */
 export type TaxProfileType = typeof TAX_PROFILES[number];
 /** Zod schema for TaxProfileType. */
