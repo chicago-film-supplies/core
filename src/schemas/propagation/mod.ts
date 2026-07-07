@@ -136,6 +136,10 @@ export {
   recomputeHolidayDraftInvoiceRules,
 } from "./reference-data.ts";
 
+// ── Store rules ──────────────────────────────────────────────────────
+
+export { createStoreRules, updateStoreRules } from "./stores.ts";
+
 // ── Threads & comments rules ─────────────────────────────────────────
 
 export {
@@ -232,6 +236,7 @@ import { createInvoiceRules, createInvoiceTransaction, updateInvoiceOrderRules, 
 import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
 import { updateTaxRules } from "./taxes.ts";
 import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
+import { createStoreRules, updateStoreRules } from "./stores.ts";
 import {
   threadCowriteRules,
   createCommentRules,
@@ -335,6 +340,8 @@ export const rules: CollectionRule[] = [
   ...deleteTagRules,
   ...updateTrackingCategoryRules,
   ...updateLocationTypeRules,
+  ...createStoreRules,
+  ...updateStoreRules,
   ...createLocationRules,
   ...updateLocationTransactionalRules,
   ...updateLocationRules,
