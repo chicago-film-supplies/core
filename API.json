@@ -1989,7 +1989,7 @@
         {
           "kind": "interface",
           "name": "OrderDocItemPriceType",
-          "declaration": "interface OrderDocItemPriceType {\n  base: number;\n  replacement?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total: number;\n}",
+          "declaration": "interface OrderDocItemPriceType {\n  base: number;\n  replacement?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total: number;\n}",
           "doc": "Line item price in the full order document (all fields required after server compute).\nsubtotal = pre-discount (base × qty × days_factor).\nsubtotal_discounted = post-discount.\ntotal = subtotal_discounted + sum(taxes[].amount)."
         },
         {
@@ -5697,7 +5697,7 @@
         {
           "kind": "interface",
           "name": "OrderDocItemPriceType",
-          "declaration": "interface OrderDocItemPriceType {\n  base: number;\n  replacement?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total: number;\n}",
+          "declaration": "interface OrderDocItemPriceType {\n  base: number;\n  replacement?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total: number;\n}",
           "doc": "Line item price in the full order document (all fields required after server compute).\nsubtotal = pre-discount (base × qty × days_factor).\nsubtotal_discounted = post-discount.\ntotal = subtotal_discounted + sum(taxes[].amount)."
         },
         {

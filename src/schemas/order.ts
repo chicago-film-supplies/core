@@ -489,6 +489,16 @@ export interface OrderDocItemPriceType {
   subtotal_discounted: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
+  /**
+   * Intrinsic (pre-override) tax snapshot — the tax this item would carry under
+   * `tax_applied` (product default, or the tax a custom/CRMS item was created
+   * with). Set once at item-build time and never touched by the doc-level
+   * `tax_profile` override (which only rewrites `taxes`), so a `tax_profile`-only
+   * revert can restore `taxes` from it losslessly — for product AND custom
+   * items, with zero reads. Optional: absent on pre-`taxes_base` docs (the
+   * revert path falls back to a batched product read for those).
+   */
+  taxes_base?: TaxRefType[];
   total: number;
 }
 
@@ -501,6 +511,7 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   subtotal_discounted: z.number().default(0),
   discount: Discount.nullable().default(null),
   taxes: z.array(PriceModifier).default([]),
+  taxes_base: z.array(TaxRef).optional(),
   total: z.number().default(0),
 });
 

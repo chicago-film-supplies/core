@@ -3776,6 +3776,7 @@ interface OrderDocItemPriceType {
   subtotal_discounted: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
+  taxes_base?: TaxRefType[];
   total: number;
 }
 ```
@@ -10161,6 +10162,7 @@ interface OrderDocItemPriceType {
   subtotal_discounted: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
+  taxes_base?: TaxRefType[];
   total: number;
 }
 ```
