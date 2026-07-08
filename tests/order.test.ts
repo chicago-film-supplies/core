@@ -473,6 +473,38 @@ Deno.test("OrderSchema validates a complete document", () => {
   assertEquals(OrderSchema.safeParse(doc).success, true);
 });
 
+Deno.test("OrderDocItemPrice round-trips an optional taxes_base snapshot", () => {
+  const parsed = OrderDocItemPrice.parse({
+    ...priceBase,
+    base: 100,
+    subtotal: 100,
+    subtotal_discounted: 100,
+    taxes: [{ uid: "testfrankforttax0000", name: "Frankfort Sales Tax", rate: 8, type: "percent", amount: 8 }],
+    taxes_base: [{ uid: "testchisalestax00000", name: "Chicago Sales Tax", rate: 10.25, type: "percent" }],
+    total: 108,
+  });
+  assertEquals(parsed.taxes_base?.length, 1);
+  assertEquals(parsed.taxes_base?.[0].uid, "testchisalestax00000");
+  // taxes_base is amount-less (TaxRef) — the charged tax stays on `taxes`.
+  assertEquals("amount" in (parsed.taxes_base![0] as unknown as Record<string, unknown>), false);
+});
+
+Deno.test("OrderDocItemPrice accepts a price without taxes_base (optional, back-compat)", () => {
+  // A pre-`taxes_base` doc omits the key entirely — it must still validate and
+  // leave taxes_base undefined (no default injected).
+  const { taxes_base: _omit, ...withoutBase } = priceBase as Record<string, unknown>;
+  const parsed = OrderDocItemPrice.parse(withoutBase);
+  assertEquals(parsed.taxes_base, undefined);
+});
+
+Deno.test("OrderDocItemPrice rejects an amount on a taxes_base entry (strict TaxRef)", () => {
+  const result = OrderDocItemPrice.safeParse({
+    ...priceBase,
+    taxes_base: [{ uid: "testchisalestax00000", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount: 10 }],
+  });
+  assertEquals(result.success, false);
+});
+
 Deno.test("OrderSchema rejects non-integer number", () => {
   const doc = { ...minimalDoc, number: 1.5 };
   assertEquals(OrderSchema.safeParse(doc).success, false);
