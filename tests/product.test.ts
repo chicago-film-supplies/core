@@ -208,3 +208,18 @@ Deno.test("CreateProductInput requires price.replacement for rental components",
     true,
   );
 });
+
+Deno.test("ProductSchema xero_code: optional, nullable, non-empty", () => {
+  // Back-compat: existing docs have no xero_code at all.
+  assertEquals(ProductSchema.safeParse(validProduct).success, true);
+  // Explicit null (product never pushed to Xero).
+  assertEquals(ProductSchema.safeParse({ ...validProduct, xero_code: null }).success, true);
+  // A real Xero Item Code — strings, not numbers (e.g. "406 - A", "312-Archived").
+  const parsed = ProductSchema.safeParse({ ...validProduct, xero_code: "406 - A" });
+  assertEquals(parsed.success, true);
+  if (parsed.success) assertEquals(parsed.data.xero_code, "406 - A");
+  // Empty string is meaningless — reject rather than silently emit an empty ItemCode.
+  assertEquals(ProductSchema.safeParse({ ...validProduct, xero_code: "" }).success, false);
+  // Codes are strings; a number is a type error, not a coercion.
+  assertEquals(ProductSchema.safeParse({ ...validProduct, xero_code: 406 }).success, false);
+});

@@ -119,6 +119,21 @@ export interface Product {
   webshop: ProductWebshop;
   images?: string[];
   xero_id: string | null;
+  /**
+   * The Xero Item `Code` of the Item that `xero_id` points at — i.e. the
+   * identifier we must send as a line's `ItemCode`. Kept alongside `xero_id`
+   * (the Xero `ItemID`) because Xero's document validator resolves lines by
+   * Code, not by ItemID, and the two are independent: an Item can be renamed
+   * or re-coded without its ItemID changing.
+   *
+   * Historically the push paths emitted `crms_id` as the `ItemCode` on the
+   * assumption `Code == crms_id`. That convention has three defect classes in
+   * the live catalog (suffix-renamed codes, duplicated codes, and codes with
+   * no Item), so it is not load-bearing. Populated by `xeroItemCreateUpdate`
+   * from the Xero response. `null` when the product has never been pushed to
+   * Xero — in which case no `ItemCode` may be emitted at all.
+   */
+  xero_code?: string | null;
   xero_tracking_option_id: string | null;
   defaultThreadId?: string;
   version: number;
@@ -207,6 +222,9 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   }),
   images: z.array(z.string()).optional(),
   xero_id: z.uuid().nullable(),
+  // Optional (not `.nullable()`-required) so the ~531 existing product docs
+  // validate unchanged before the backfill lands.
+  xero_code: z.string().min(1).nullable().optional(),
   xero_tracking_option_id: z.uuid().nullable(),
   defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),

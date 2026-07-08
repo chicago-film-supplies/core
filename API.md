@@ -4244,6 +4244,7 @@ interface Product {
   webshop: ProductWebshop;
   images?: string[];
   xero_id: string | null;
+  xero_code?: string | null;
   xero_tracking_option_id: string | null;
   defaultThreadId?: string;
   version: number;
@@ -10967,6 +10968,7 @@ interface Product {
   webshop: ProductWebshop;
   images?: string[];
   xero_id: string | null;
+  xero_code?: string | null;
   xero_tracking_option_id: string | null;
   defaultThreadId?: string;
   version: number;
@@ -14415,8 +14417,20 @@ interface ValidationIssue {
 
 Msg literals this archetype absorbs.
 
+Quote-push terminal/diagnostic arms (added 2026-07 with the queue restore):
+- `xero_quote_validation_rejected` — Xero returned 400 `ValidationException`.
+  The task is dropped (handler returns 200) rather than retried 15×; a
+  malformed payload never becomes well-formed on retry.
+- `xero_quote_transition_rejected` — a Status POST was rejected by Xero's
+  quote state machine and swallowed as idempotent. Previously silent, which
+  made a masked failure indistinguishable from success.
+- `xero_quote_tax_unmapped` — an order item carries a tax uid with no Xero
+  TaxType mapping. Previously `throw` → 500 → 15 retries.
+- `xero_quote_noop` — the Xero quote is already at the target Status; no
+  write was issued.
+
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_synced" | "xero_rate_limit" | "xero_tracking_option_create_failed" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_transition_rejected" | "xero_quote_validation_rejected" | "xero_rate_limit" | "xero_tracking_option_create_failed" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
 ```
 
 ### `XeroEventLogRecord`
