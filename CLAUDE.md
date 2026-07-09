@@ -60,6 +60,25 @@ Any commit that removes a field, renames an export, or changes validation in a w
 
 ## Conventions
 
+### Money arithmetic — never a float factor
+
+`currency.js` is the money type; **BigInt integer cents is the arithmetic whenever a factor or ratio is applied to money.** currency.js quantizes *every* intermediate at its `precision`, so a pre-divided float factor rides its representation error straight into the cents. `precision` is configurable, so precision is rarely the objection — **operation order** is.
+
+- Apply factors as `× n ÷ d`, never `× (n / d)`. Neither `chargeable_days / 5` nor `(100 − rate) / 100` is representable in binary.
+- Never `currency(a).divide(b)` to get a ratio: it quantizes the *ratio*, leaving only `precision − 2` decimals once you scale to a percent, and a ratio near 1 collapses to exactly 1.
+- Round **once**, at the end, half-up.
+
+```ts
+const toCents = (money: number) => BigInt(Math.round(money * 100)); // inputs are 2dp → lossless
+const roundDivHalfUp = (num: bigint, den: bigint) => (2n * num + den) / (2n * den); // non-negative num only
+```
+
+`calculateItemSubtotal` (`src/utils/orders.ts`) is the reference: the day factor is `× days ÷ 5`, the percent discount is `× (100·S − rate·S) ÷ 100·S`. Verified against an exact BigInt rational reference over 300k random lines, 0 disagreements. The float form it replaced mis-rounded ~1 line in 21,000 by a cent, always upward.
+
+`currency.js` stays for **summing** money (`calculateOrderTotals`) — that is what it is good at.
+
+`Discount.rate` means two things: for `percent` it is a percentage bounded `[0, 100]`; for `flat` it is **dollars per unit, per pricing factor** (`rate × quantity × pricingFactor === amount`), unbounded above, never negative. `RateType` is `["percent", "flat"]` — there is no `"amount"` member. Full cross-repo rule: workspace `CLAUDE.md` → "Money arithmetic (authoritative)".
+
 ### JSR imports over npm
 
 Prefer `jsr:` imports over `npm:` when a package is available on JSR. JSR packages are Deno-native, faster to install, and have better type integration.
