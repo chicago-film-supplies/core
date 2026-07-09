@@ -15591,6 +15591,10 @@ Runs the full pipeline: subtotal → discount → taxes → total.
 
 Calculate the pre-discount and post-discount subtotals for a single line item.
 
+`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,
+or `base × quantity` for `fixed`. The one-week floor means the day factor only
+applies above 5 chargeable days.
+
 ### `calculateItemTax(item: LineItem, taxes: Tax[]): PriceModifier[]`
 
 Calculate tax amounts for a single line item from the Tax[] parameter.
@@ -16215,6 +16219,10 @@ Runs the full pipeline: subtotal → discount → taxes → total.
 ### `calculateItemSubtotal(item: LineItem): typeLiteral`
 
 Calculate the pre-discount and post-discount subtotals for a single line item.
+
+`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,
+or `base × quantity` for `fixed`. The one-week floor means the day factor only
+applies above 5 chargeable days.
 
 ### `calculateItemTax(item: LineItem, taxes: Tax[]): PriceModifier[]`
 

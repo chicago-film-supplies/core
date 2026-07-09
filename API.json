@@ -8529,7 +8529,7 @@
           "kind": "function",
           "name": "calculateItemSubtotal",
           "signature": "calculateItemSubtotal(item: LineItem): typeLiteral",
-          "doc": "Calculate the pre-discount and post-discount subtotals for a single line item.",
+          "doc": "Calculate the pre-discount and post-discount subtotals for a single line item.\n\n`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,\nor `base × quantity` for `fixed`. The one-week floor means the day factor only\napplies above 5 chargeable days.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9046,7 +9046,7 @@
           "kind": "function",
           "name": "calculateItemSubtotal",
           "signature": "calculateItemSubtotal(item: LineItem): typeLiteral",
-          "doc": "Calculate the pre-discount and post-discount subtotals for a single line item.",
+          "doc": "Calculate the pre-discount and post-discount subtotals for a single line item.\n\n`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,\nor `base × quantity` for `fixed`. The one-week floor means the day factor only\napplies above 5 chargeable days.",
           "paramTags": [],
           "returnsTag": null
         },

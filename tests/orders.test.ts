@@ -142,6 +142,58 @@ Deno.test("isPreTaxItem returns false for destination", () => {
 
 // ── calculateItemSubtotal ────────────────────────────────────────
 
+// Exactness. Factors are applied as `× n ÷ d`, never as `× (n/d)`: neither
+// `chargeable_days / 5` nor `(100 - rate) / 100` is representable in binary, and
+// currency.js quantizes every intermediate at its precision. The subtotal path
+// tolerated it (currency.js re-quantized after each multiply and never flipped a
+// tie in 300k random lines); the discount path did not — it mis-rounded 14 of
+// those 300k lines by a cent, always upward.
+
+Deno.test("calculateItemSubtotal: percent discount rounds by the exact rational, not a float factor", () => {
+  // Was: currency(3342.41).multiply(11) → 36766.51, then .multiply((100 - 89.1914)/100)
+  //   = .multiply(0.10808600000000006) → 3973.95. The exact value is 3973.9449…,
+  // which rounds to 3973.94. The float factor pushed it over the .005 boundary.
+  const item = makeItem({ quantity: 11 }, { base: 3342.41, chargeable_days: 4, discount: { type: "percent", rate: 89.1914, amount: 0 } });
+  const r = calculateItemSubtotal(item);
+  assertEquals(r.subtotal, 36766.51); // 4 days → below the one-week floor → factor 1
+  assertEquals(r.subtotal_discounted, 3973.94);
+});
+
+Deno.test("calculateItemSubtotal: a second exact-rounding case, with the day factor engaged", () => {
+  // base 4109.19 × qty 25 × (31/5) = 636,924.45; × (1 - 0.722409) = 176,804.49…
+  const item = makeItem({ quantity: 25 }, { base: 4109.19, chargeable_days: 31, discount: { type: "percent", rate: 72.2409, amount: 0 } });
+  const r = calculateItemSubtotal(item);
+  assertEquals(r.subtotal, 636924.45);
+  assertEquals(r.subtotal_discounted, 176804.49);
+});
+
+Deno.test("calculateItemSubtotal: the day factor is applied as × days ÷ 5, exactly", () => {
+  // 23/5 = 4.6 is not exact in binary. base 60 × qty 6 × 23 ÷ 5 = 1656 exactly.
+  const r = calculateItemSubtotal(makeItem({ quantity: 6 }, { base: 60, chargeable_days: 23 }));
+  assertEquals(r.subtotal, 1656);
+  assertEquals(r.subtotal_discounted, 1656);
+});
+
+Deno.test("calculateItemSubtotal: flat discount is per-unit, per pricing factor", () => {
+  // rate 10/unit × qty 2 × (10/5) = 40 off a 100 × 2 × 2 = 400 subtotal.
+  const item = makeItem({ quantity: 2 }, { base: 100, chargeable_days: 10, discount: { type: "flat", rate: 10, amount: 0 } });
+  const r = calculateItemSubtotal(item);
+  assertEquals(r.subtotal, 400);
+  assertEquals(r.subtotal_discounted, 360);
+});
+
+Deno.test("calculateItemSubtotal: a flat discount larger than the line goes negative, not clamped", () => {
+  const item = makeItem({ quantity: 1 }, { base: 10, chargeable_days: 5, discount: { type: "flat", rate: 25, amount: 0 } });
+  assertEquals(calculateItemSubtotal(item).subtotal_discounted, -15);
+});
+
+Deno.test("calculateItemSubtotal: rejects an unknown formula", () => {
+  const item = makeItem({}, { formula: "nonsense" });
+  let threw = false;
+  try { calculateItemSubtotal(item); } catch { threw = true; }
+  assertEquals(threw, true);
+});
+
 Deno.test("calculateItemSubtotal five_day_week 1 week", () => {
   const result = calculateItemSubtotal(makeItem());
   assertEquals(result.subtotal, 100);

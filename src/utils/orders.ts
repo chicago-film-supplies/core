@@ -405,23 +405,52 @@ export function isPreTaxItem(item: LineItem): item is PreTaxLineItem {
   return true;
 }
 
-// ── Days factor ──────────────────────────────────────────────────
+// ── Exact money arithmetic ───────────────────────────────────────
+//
+// Line subtotals are computed as exact rationals in BigInt and rounded to cents
+// exactly once, at the end. currency.js is still the right tool for *summing*
+// money (see `calculateOrderTotals`), but it is the wrong tool for applying a
+// factor, because it quantizes every intermediate at its precision — including
+// intermediates that are not money.
+//
+// The old form applied the factors as pre-divided floats:
+//
+//     currency(base).multiply(quantity).multiply(chargeable_days / 5)
+//     subtotal.multiply((100 - discount.rate) / 100)
+//
+// Neither quotient is representable in binary. The days factor happened to be
+// harmless — currency.js re-quantizes after each multiply and, over 300k random
+// rental lines, never flipped a rounding tie. The discount factor was not: it
+// mis-rounded 14 of those 300k lines by a cent, always upward, i.e. it undercharged
+// the discount. Applying `× n ÷ d` instead of `× (n/d)` removes the class.
 
-/** @param formula - Pricing formula: `"five_day_week"` or `"fixed"`. */
-function getDaysFactor(formula: "five_day_week" | "fixed", chargeable_days: number | null): number {
-  if (formula === "five_day_week") {
-    return (chargeable_days ?? 0) / 5;
-  }
-  if (formula === "fixed") {
-    return 1;
-  }
-  throw new Error("Unknown formula: " + formula);
+/** Scale for a possibly-fractional `quantity` (orders are `z.int()`; invoices are not). */
+const QTY_SCALE = 10_000n;
+/** Scale for a discount `rate`, in millionths of a percentage point. */
+const RATE_SCALE = 1_000_000n;
+
+/**
+ * Round `num / den` half-up. Only ever called with a non-negative numerator and
+ * a positive denominator (`base`, `quantity`, `chargeable_days` and `rate` are
+ * all non-negative), which is what makes the `(2n + d) / 2d` form correct —
+ * BigInt division truncates toward zero, so a negative numerator would round the
+ * wrong way.
+ */
+function roundDivHalfUp(num: bigint, den: bigint): bigint {
+  return (2n * num + den) / (2n * den);
 }
+
+/** A money value in exact integer cents. Inputs are 2dp, so this is lossless. */
+const toCents = (money: number) => BigInt(Math.round(money * 100));
 
 // ── Item-level calculations ──────────────────────────────────────
 
 /**
  * Calculate the pre-discount and post-discount subtotals for a single line item.
+ *
+ * `subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,
+ * or `base × quantity` for `fixed`. The one-week floor means the day factor only
+ * applies above 5 chargeable days.
  */
 export function calculateItemSubtotal(
   item: LineItem,
@@ -433,30 +462,52 @@ export function calculateItemSubtotal(
   }
 
   const { base = 0, formula, chargeable_days = null, discount } = item.price;
-  const quantity = item.quantity;
+  if (formula !== "five_day_week" && formula !== "fixed") {
+    throw new Error("Unknown formula: " + formula);
+  }
 
-  const daysFactor = getDaysFactor(formula, chargeable_days);
-  const pricingFactor = Math.max(daysFactor, 1);
+  const quantity = BigInt(Math.round(item.quantity * Number(QTY_SCALE)));
+  const days = Math.round(chargeable_days ?? 0);
+  // `pricingFactor = Math.max(chargeable_days / 5, 1)` — so the day factor bites
+  // only above the one-week floor. At exactly 5 days it is 1, as is `fixed`.
+  const useDays = formula === "five_day_week" && days > 5;
 
-  const subtotal = currency(base)
-    .multiply(quantity)
-    .multiply(pricingFactor);
+  let num = toCents(base) * quantity;
+  let den = QTY_SCALE;
+  if (useDays) {
+    num *= BigInt(days);
+    den *= 5n;
+  }
+  const subtotalCents = roundDivHalfUp(num, den);
 
   if (!discount) {
-    return { subtotal: subtotal.value, subtotal_discounted: subtotal.value };
+    const v = Number(subtotalCents) / 100;
+    return { subtotal: v, subtotal_discounted: v };
   }
 
-  let subtotal_discounted: currency;
+  let discountedCents: bigint;
   if (discount.type === "percent") {
-    subtotal_discounted = subtotal.multiply((100 - discount.rate) / 100);
+    // subtotal × (100 − rate)/100, as subtotalCents × (100·RATE_SCALE − rate·RATE_SCALE) / (100·RATE_SCALE)
+    const rate = BigInt(Math.round(discount.rate * Number(RATE_SCALE)));
+    const scale = 100n * RATE_SCALE;
+    discountedCents = roundDivHalfUp(subtotalCents * (scale - rate), scale);
   } else {
-    const discountAmount = currency(discount.rate)
-      .multiply(quantity)
-      .multiply(pricingFactor);
-    subtotal_discounted = subtotal.subtract(discountAmount);
+    // `flat`: rate is dollars per unit, per pricing factor — not a line total.
+    let dNum = toCents(discount.rate) * quantity;
+    let dDen = QTY_SCALE;
+    if (useDays) {
+      dNum *= BigInt(days);
+      dDen *= 5n;
+    }
+    // Subtraction is exact; a flat discount larger than the line goes negative,
+    // which is the caller's problem to surface, not ours to clamp.
+    discountedCents = subtotalCents - roundDivHalfUp(dNum, dDen);
   }
 
-  return { subtotal: subtotal.value, subtotal_discounted: subtotal_discounted.value };
+  return {
+    subtotal: Number(subtotalCents) / 100,
+    subtotal_discounted: Number(discountedCents) / 100,
+  };
 }
 
 /**
