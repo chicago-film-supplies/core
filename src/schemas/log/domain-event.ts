@@ -22,7 +22,6 @@ export const DOMAIN_EVENT_MSGS = [
   "after_product_write_not_found",
   "after_product_write_skip_create",
   "update_order_no_changes",
-  "order_docs_failed",
   "order_docs_skipped",
   "order_invoice_count_high",
   "invoice_created",
