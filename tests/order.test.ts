@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { CreateOrderInput, DocDestination, OrderDocDates, OrderDocItemPrice, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
+import { CreateOrderInput, Discount, DiscountInput, DocDestination, OrderDocDates, OrderDocItemPrice, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const orderBase = getInitialValues(OrderSchema) as Record<string, unknown>;
@@ -898,4 +898,46 @@ Deno.test("isValidOrderStatusTransition allows manual transitions between user s
   assertEquals(isValidOrderStatusTransition("draft", "quoted", "manual"), true);
   assertEquals(isValidOrderStatusTransition("quoted", "reserved", "manual"), true);
   assertEquals(isValidOrderStatusTransition("reserved", "canceled", "manual"), true);
+});
+
+// ── Discount rate bounds ──────────────────────────────────────────
+//
+// `rate` means two different things depending on `type`, so a single
+// `.min(0).max(100)` would be wrong. For `percent` it is a percentage and must
+// sit in [0, 100] — Xero's `DiscountRate` rejects anything else, and
+// `calculateItemSubtotal` would otherwise drive `subtotal_discounted` above the
+// subtotal or below zero. For `flat` it is dollars per unit per pricing factor
+// (`rate × quantity × pricingFactor === amount`), so it is unbounded above.
+
+Deno.test("Discount: percent rate must be within [0, 100]", () => {
+  assertEquals(Discount.safeParse({ type: "percent", rate: 0, amount: 0 }).success, true);
+  assertEquals(Discount.safeParse({ type: "percent", rate: 50, amount: 10 }).success, true);
+  assertEquals(Discount.safeParse({ type: "percent", rate: 100, amount: 10 }).success, true);
+  assertEquals(Discount.safeParse({ type: "percent", rate: 100.01, amount: 10 }).success, false);
+  assertEquals(Discount.safeParse({ type: "percent", rate: -0.01, amount: 10 }).success, false);
+});
+
+Deno.test("Discount: flat rate is per-unit dollars — unbounded above, never negative", () => {
+  // A $150/unit discount on a $200/unit line is legal; capping at 100 would ban it.
+  assertEquals(Discount.safeParse({ type: "flat", rate: 150, amount: 300 }).success, true);
+  assertEquals(Discount.safeParse({ type: "flat", rate: 0, amount: 0 }).success, true);
+  assertEquals(Discount.safeParse({ type: "flat", rate: -1, amount: 0 }).success, false);
+});
+
+Deno.test("Discount: computed amount is never negative", () => {
+  assertEquals(Discount.safeParse({ type: "percent", rate: 10, amount: -1 }).success, false);
+});
+
+Deno.test("DiscountInput: same rate bounds as the stored discount", () => {
+  assertEquals(DiscountInput.safeParse({ type: "percent", rate: 100 }).success, true);
+  assertEquals(DiscountInput.safeParse({ type: "percent", rate: 101 }).success, false);
+  assertEquals(DiscountInput.safeParse({ type: "percent", rate: -1 }).success, false);
+  assertEquals(DiscountInput.safeParse({ type: "flat", rate: 150 }).success, true);
+  assertEquals(DiscountInput.safeParse({ type: "flat", rate: -1 }).success, false);
+});
+
+Deno.test("Discount: the rate error names the field, not the object", () => {
+  const r = Discount.safeParse({ type: "percent", rate: 120, amount: 10 });
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues[0].path, ["rate"]);
 });

@@ -321,12 +321,46 @@ export interface DiscountType {
   amount: number;
 }
 
+/**
+ * `rate` means two different things depending on `type`, so the bounds differ:
+ *
+ * - `percent` → a percentage, and the only valid range is `[0, 100]`. Xero's
+ *   `DiscountRate` rejects anything outside it, and `calculateItemSubtotal`
+ *   would otherwise produce a `subtotal_discounted` above the subtotal (rate < 0)
+ *   or below zero (rate > 100).
+ * - `flat` → dollars **per unit, per pricing factor**
+ *   (`rate × quantity × pricingFactor === amount`), so it has no upper bound —
+ *   a $150/unit discount on a $200/unit line is legal — but it cannot be negative.
+ *
+ * A single `.min(0).max(100)` on `rate` would therefore be wrong: it silently
+ * forbids most flat discounts.
+ */
+function checkDiscountRate(
+  d: { rate: number; type: RateType },
+  ctx: z.RefinementCtx,
+): void {
+  if (d.type === "percent" && (d.rate < 0 || d.rate > 100)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["rate"],
+      message: `percent discount rate must be between 0 and 100, got ${d.rate}`,
+    });
+  }
+  if (d.type === "flat" && d.rate < 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["rate"],
+      message: `flat discount rate must not be negative, got ${d.rate}`,
+    });
+  }
+}
+
 /** Zod schema for an item discount. */
 export const Discount: z.ZodType<DiscountType> = z.strictObject({
   rate: z.number(),
   type: RateTypeEnum,
-  amount: z.number(),
-});
+  amount: z.number().min(0),
+}).superRefine(checkDiscountRate);
 
 /** Discount input — rate and type only. Amount is computed by calculateItemPrice. */
 export interface DiscountInputType {
@@ -338,7 +372,7 @@ export interface DiscountInputType {
 export const DiscountInput: z.ZodType<DiscountInputType> = z.object({
   rate: z.number(),
   type: RateTypeEnum,
-});
+}).superRefine(checkDiscountRate);
 
 // ── Input schemas ─────────────────────────────────────────────────
 
