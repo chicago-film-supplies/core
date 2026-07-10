@@ -25,6 +25,19 @@ export interface Location {
   uid: string;
   uid_store: string;
   name: string;
+  /**
+   * Canonical uniqueness key — `normalizeLocationName(name)` from
+   * `@cfs/core/utils/locations`. Backs the case- and separator-insensitive
+   * "one active name per store" check on every write path. Optional so a
+   * doc predating the backfill still validates on its next full-doc write:
+   * `updateLocation`'s `{...existing, ...updates}` merge, `stageLocationUpdates`
+   * / `stageLocationReversal`'s `transaction.set({...existing, …})`, and
+   * `resyncLocationQuantities` all re-validate the whole doc, so a *required*
+   * field would 500 on any not-yet-backfilled location. (The `locationTypes.ts`
+   * cascade writes field-by-field via `validatedPatch`, never a full-doc parse,
+   * so it is not the constraint — do not narrow this optional window by it.)
+   */
+  name_key?: string;
   default: boolean;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
@@ -42,6 +55,9 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
   uid: FirestoreId,
   uid_store: FirestoreId,
   name: z.string().min(1).max(100),
+  // Derived denorm (see the interface note). Optional through the backfill
+  // window; no `.min(1)` because a name of pure separators normalizes to "".
+  name_key: z.string().max(100).optional(),
   default: z.boolean(),
   uid_location_type: FirestoreId.nullable(),
   product_capacities: z.array(z.strictObject({

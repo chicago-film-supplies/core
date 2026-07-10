@@ -1605,7 +1605,7 @@
         {
           "kind": "interface",
           "name": "Location",
-          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  default: boolean;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location document in Firestore."
         },
         {
@@ -5379,7 +5379,7 @@
         {
           "kind": "interface",
           "name": "Location",
-          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  default: boolean;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location document in Firestore."
         },
         {
@@ -7415,7 +7415,7 @@
         {
           "kind": "variable",
           "name": "DOMAIN_EVENT_MSGS",
-          "declaration": "const DOMAIN_EVENT_MSGS: \"afterOrderWrite_order_not_found\" | \"after_product_write_no_changes\" | \"after_product_write_not_found\" | \"after_product_write_skip_create\" | \"update_order_no_changes\" | \"order_docs_skipped\" | \"order_invoice_count_high\" | \"invoice_created\" | \"invoice_org_bootstrapped_from_crms\" | \"invoice_pdf_not_found\" | \"invoice_pdf_skip\" | \"invoice_updated\" | \"payment_added\" | \"payment_updated\" | \"organization_check_failed\" | \"organization_no_crms_id\" | \"organization_no_xero_id\" | \"receive_invoice_hook_failed\" | \"receive_member_update_failed\" | \"receive_opportunity_hook_failed\" | \"receive_quarantine_hook_failed\" | \"item_path_invariant_failed\" | \"location_cascade_skip\" | \"stock_recalc_item_added\" | \"stock_recalc_item_modified\" | \"stock_recalc_item_removed\" | \"stock_recalc_items\" | \"stock_recalc_status_changed\" | \"stock_summaries_pruned\" | \"fulfillment_custom_item_qty_override\"[];",
+          "declaration": "const DOMAIN_EVENT_MSGS: \"afterOrderWrite_order_not_found\" | \"after_product_write_no_changes\" | \"after_product_write_not_found\" | \"after_product_write_skip_create\" | \"update_order_no_changes\" | \"order_docs_skipped\" | \"order_invoice_count_high\" | \"invoice_created\" | \"invoice_org_bootstrapped_from_crms\" | \"invoice_pdf_not_found\" | \"invoice_pdf_skip\" | \"invoice_updated\" | \"payment_added\" | \"payment_updated\" | \"organization_check_failed\" | \"organization_no_crms_id\" | \"organization_no_xero_id\" | \"receive_invoice_hook_failed\" | \"receive_member_update_failed\" | \"receive_opportunity_hook_failed\" | \"receive_quarantine_hook_failed\" | \"item_path_invariant_failed\" | \"location_cascade_skip\" | \"location_reversal_skip\" | \"location_quantity_negative\" | \"stock_recalc_item_added\" | \"stock_recalc_item_modified\" | \"stock_recalc_item_removed\" | \"stock_recalc_items\" | \"stock_recalc_status_changed\" | \"stock_summaries_pruned\" | \"fulfillment_custom_item_qty_override\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
@@ -8893,6 +8893,20 @@
           "name": "validateItemUniqueness",
           "signature": "validateItemUniqueness(items: T[]): ItemUniquenessIssue[]",
           "doc": "Assert that within each items array, no two entries share the same `uid`\nAND the same immediate structural parent. The immediate structural parent\nis the second-to-last `path` segment (or `null` for items whose path is\njust `[self.uid]`).\n\nThis is the uniqueness invariant orders/invoices rely on so that path-based\nline identity is unambiguous. Violations indicate a duplicate that should\nbe merged — `mergeStagedIntoOrder` and the migration script consolidate.\n\nReturns `[]` when uniqueness holds.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/locations",
+      "moduleDoc": "Location helpers — pure, dependency-free canonicalization shared by every\nservice that enforces \"one active location name per store\".",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "normalizeLocationName",
+          "signature": "normalizeLocationName(name: string): string",
+          "doc": "Canonical uniqueness key for a location name, scoped within its store.\n\nLocation names are unique per active store, but operators type the same bin\nmany ways — \"Shelf A\", \"shelf-a\", \"SHELF / A\", \"Shelf_A\" all name the same\nshelf. This folds those to one comparable key so the uniqueness checks on the\nCRUD path (`createLocation` / `updateLocation`) and the inventory-transaction\npath (`stageLocationUpdates`) agree. Two paths normalizing differently is the\nexact bug this exists to prevent, so it MUST be the only normalizer any writer\nor uniqueness query uses.\n\nThe transform, in order:\n - NFKD-decompose and strip combining marks so diacritics fold (\"Café\" →\n   \"cafe\").\n - collapse every run of non-alphanumerics — space, hyphen, slash, underscore,\n   punctuation — to a single space (Unicode letters/numbers of any script are\n   kept), then trim.\n - lowercase.\n\nSeparators are interchangeable and insignificant, but a *missing* separator\nstays significant: \"Shelf A\" and \"Shelf-A\" collide; \"Shelfa\" does not. The\nstored value stays human-readable (\"shelf a\") so it reads cleanly in the\nFirestore console and in \"name already exists\" error messages.\n\nPersisted on `Location.name_key`.",
           "paramTags": [],
           "returnsTag": null
         }

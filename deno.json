@@ -55,6 +55,7 @@
     "./utils/contact-name": "./src/utils/contact-name.ts",
     "./utils/dates": "./src/utils/dates.ts",
     "./utils/invoices": "./src/utils/invoices.ts",
+    "./utils/locations": "./src/utils/locations.ts",
     "./utils/orders": "./src/utils/orders.ts",
     "./utils/products": "./src/utils/products.ts",
     "./utils/taxes": "./src/utils/taxes.ts",

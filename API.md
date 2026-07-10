@@ -3030,6 +3030,7 @@ interface Location {
   uid: string;
   uid_store: string;
   name: string;
+  name_key?: string;
   default: boolean;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
@@ -9547,6 +9548,7 @@ interface Location {
   uid: string;
   uid_store: string;
   name: string;
+  name_key?: string;
   default: boolean;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
@@ -13605,7 +13607,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "location_cascade_skip" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_summaries_pruned" | "fulfillment_custom_item_qty_override"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_summaries_pruned" | "fulfillment_custom_item_qty_override"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -15945,6 +15947,38 @@ line identity is unambiguous. Violations indicate a duplicate that should
 be merged — `mergeStagedIntoOrder` and the migration script consolidate.
 
 Returns `[]` when uniqueness holds.
+
+## `@cfs/core/utils/locations`
+
+Location helpers — pure, dependency-free canonicalization shared by every
+service that enforces "one active location name per store".
+
+### `normalizeLocationName(name: string): string`
+
+Canonical uniqueness key for a location name, scoped within its store.
+
+Location names are unique per active store, but operators type the same bin
+many ways — "Shelf A", "shelf-a", "SHELF / A", "Shelf_A" all name the same
+shelf. This folds those to one comparable key so the uniqueness checks on the
+CRUD path (`createLocation` / `updateLocation`) and the inventory-transaction
+path (`stageLocationUpdates`) agree. Two paths normalizing differently is the
+exact bug this exists to prevent, so it MUST be the only normalizer any writer
+or uniqueness query uses.
+
+The transform, in order:
+ - NFKD-decompose and strip combining marks so diacritics fold ("Café" →
+   "cafe").
+ - collapse every run of non-alphanumerics — space, hyphen, slash, underscore,
+   punctuation — to a single space (Unicode letters/numbers of any script are
+   kept), then trim.
+ - lowercase.
+
+Separators are interchangeable and insignificant, but a *missing* separator
+stays significant: "Shelf A" and "Shelf-A" collide; "Shelfa" does not. The
+stored value stays human-readable ("shelf a") so it reads cleanly in the
+Firestore console and in "name already exists" error messages.
+
+Persisted on `Location.name_key`.
 
 ## `@cfs/core/utils/orders`
 

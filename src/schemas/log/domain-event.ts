@@ -40,6 +40,17 @@ export const DOMAIN_EVENT_MSGS = [
   "receive_quarantine_hook_failed",
   "item_path_invariant_failed",
   "location_cascade_skip",
+  // updateTransaction / updateStoreTransfer reversing the previous version out
+  // of a location doc found the doc or its product row missing, or repointed a
+  // uid-drifted doc. Pure drift signals the caller can't remediate — logged, not
+  // thrown. `{ location_id, uid_product, reason, expected_decrement }`. Emitted
+  // from `src/lib/transactionHelpers.ts` in api-cloudrun.
+  "location_reversal_skip",
+  // A location doc's `products[].quantity` went negative after a reversal —
+  // only possible if its stored base was already drifted. Detector for the drift
+  // `resyncLocationQuantities` repairs; does not throw. `{ location_id,
+  // uid_product, quantity }`. Emitted from `src/lib/transactionHelpers.ts`.
+  "location_quantity_negative",
   "stock_recalc_item_added",
   "stock_recalc_item_modified",
   "stock_recalc_item_removed",
