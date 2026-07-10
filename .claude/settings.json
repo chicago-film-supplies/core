@@ -1,0 +1,14 @@
+{
+  "extraKnownMarketplaces": {
+    "cfs": {
+      "source": {
+        "source": "github",
+        "repo": "chicago-film-supplies/claude-plugins"
+      },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "cfs-skills@cfs": true
+  }
+}
