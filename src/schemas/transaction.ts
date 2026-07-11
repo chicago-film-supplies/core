@@ -124,6 +124,29 @@ export interface Transaction {
   updated_at: FirestoreTimestampType;
 }
 
+/**
+ * Indices in a store's `locations[]` whose `uid_location` already appeared
+ * earlier in the same array. A store may not list the same location twice: a
+ * duplicate is silently SUMMED into the ledger's `store_breakdown` while location
+ * staging collapses to one last-write-wins doc, so the two desync (#287). Shared
+ * by the document AND input store schemas so every transaction/transfer writer
+ * (createTransaction/updateTransaction, create/updateStoreTransfer, the
+ * products.ts opening-balance) is covered. Purely intra-array — no Firestore
+ * needed, so it lives entirely in core.
+ */
+function duplicateLocationIndices(
+  locations: ReadonlyArray<{ uid_location: string }>,
+): Array<{ index: number; uid: string }> {
+  const seen = new Set<string>();
+  const dups: Array<{ index: number; uid: string }> = [];
+  for (let i = 0; i < locations.length; i++) {
+    const uid = locations[i].uid_location;
+    if (seen.has(uid)) dups.push({ index: i, uid });
+    else seen.add(uid);
+  }
+  return dups;
+}
+
 /** Zod schema for TransactionStoreLocation. */
 export const TransactionStoreLocationSchema: z.ZodType<TransactionStoreLocation> = z.strictObject({
   uid_location: FirestoreId,
@@ -141,6 +164,14 @@ export const TransactionStoreSchema: z.ZodType<TransactionStore> = z.strictObjec
   default: z.boolean(),
   quantity: z.number(),
   locations: z.array(TransactionStoreLocationSchema).default([]),
+}).superRefine((store, ctx) => {
+  for (const { index, uid } of duplicateLocationIndices(store.locations)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["locations", index, "uid_location"],
+      message: `Duplicate uid_location "${uid}" within a single store`,
+    });
+  }
 });
 
 const SourceSchema: z.ZodType<TransactionSource> = z.strictObject({
@@ -227,6 +258,14 @@ const InputTransactionStoreSchema: z.ZodType<InputTransactionStore> = z.object({
   default: z.boolean(),
   quantity: z.number(),
   locations: z.array(InputTransactionStoreLocationSchema).min(1),
+}).superRefine((store, ctx) => {
+  for (const { index, uid } of duplicateLocationIndices(store.locations)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["locations", index, "uid_location"],
+      message: `Duplicate uid_location "${uid}" within a single store`,
+    });
+  }
 });
 
 /** Input type for creating a manual transaction. */

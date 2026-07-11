@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { TransactionSchema, getTransactionMultiplier } from "../src/schemas/transaction.ts";
+import { CreateTransactionInput, TransactionSchema, getTransactionMultiplier } from "../src/schemas/transaction.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const transactionBase = getInitialValues(TransactionSchema) as Record<string, unknown>;
@@ -99,6 +99,60 @@ Deno.test("TransactionSchema validates with crms_sync", () => {
 Deno.test("TransactionSchema rejects additional properties", () => {
   const doc = { ...validTransaction, bogus: true };
   assertEquals(TransactionSchema.safeParse(doc).success, false);
+});
+
+// ── #287: a store may not list the same location twice ────────────
+
+const twoLocationStore = (locA: string, locB: string) => ({
+  uid_store: "teststore10000000000",
+  name: "Main",
+  default: true,
+  quantity: 10,
+  locations: [
+    { uid_location: locA, name: "Shelf A", quantity: 20, transactionQuantity: 5, default: true, max: null },
+    { uid_location: locB, name: "Shelf B", quantity: 20, transactionQuantity: 5, default: false, max: null },
+  ],
+});
+
+Deno.test("TransactionSchema rejects a duplicate uid_location within one store (#287)", () => {
+  const doc = { ...validTransaction, stores: [twoLocationStore("testloc1000000000000", "testloc1000000000000")] };
+  assertEquals(TransactionSchema.safeParse(doc).success, false);
+});
+
+Deno.test("TransactionSchema allows two DIFFERENT uid_locations in one store", () => {
+  const doc = { ...validTransaction, stores: [twoLocationStore("testloc1000000000000", "testloc2000000000000")] };
+  assertEquals(TransactionSchema.safeParse(doc).success, true);
+});
+
+const createInputStore = (locA: string, locB: string) => ({
+  uid_store: "teststore10000000000",
+  name: "Main",
+  default: true,
+  quantity: 10,
+  locations: [
+    { uid_location: locA, name: "Shelf A", transactionQuantity: 5, default: true, max: null },
+    { uid_location: locB, name: "Shelf B", transactionQuantity: 5, default: false, max: null },
+  ],
+});
+
+const validCreateInput = {
+  uid: "testtxn1000000000000",
+  uid_product: "testprod100000000000",
+  type: "purchase",
+  quantity: 10,
+  total_cost: 2500,
+  date: "2026-03-01T00:00:00Z",
+  reference: "PO-001",
+};
+
+Deno.test("CreateTransactionInput rejects a duplicate uid_location within one store (#287)", () => {
+  const input = { ...validCreateInput, stores: [createInputStore("testloc1000000000000", "testloc1000000000000")] };
+  assertEquals(CreateTransactionInput.safeParse(input).success, false);
+});
+
+Deno.test("CreateTransactionInput accepts distinct uid_locations in one store", () => {
+  const input = { ...validCreateInput, stores: [createInputStore("testloc1000000000000", "testloc2000000000000")] };
+  assertEquals(CreateTransactionInput.safeParse(input).success, true);
 });
 
 // getTransactionMultiplier tests
