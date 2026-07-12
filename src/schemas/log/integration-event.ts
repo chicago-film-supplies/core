@@ -54,6 +54,8 @@ export const INTEGRATION_EVENT_MSGS = [
   "draft_quote_superseded",
   "dns_record_check",
   "dns_record_check_resolve_failed",
+  "location_integrity_check",
+  "location_integrity_check_failed",
   "sync_collection_completed",
   "sync_collection_skipped",
   "sync_started",

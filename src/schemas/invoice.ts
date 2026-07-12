@@ -323,6 +323,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   crms_id: z.number().nullable().optional(),
   crms_opportunity_ids: z.array(z.number()).optional(),
   defaultThreadId: z.string().optional(),
+  /** Optimistic-concurrency if-match token — bumped on every whole-doc write, not a revision pointer (mirrors orders/orgs/contacts). */
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,
