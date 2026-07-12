@@ -15,11 +15,11 @@ const meta = {
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };
-const UUID = "11111111-1111-4111-8111-111111111111";
+const DEF_ID = "aB3dE5gH7jK9mN1pQ3rT";
 
 Deno.test("HolidayDefinitionSchema validates a fixed-date holiday", () => {
   const doc = {
-    uid: UUID,
+    uid: DEF_ID,
     type: "fixed",
     name: "Christmas Day",
     display_month: 12,
@@ -32,7 +32,7 @@ Deno.test("HolidayDefinitionSchema validates a fixed-date holiday", () => {
 
 Deno.test("HolidayDefinitionSchema validates a variable-date holiday", () => {
   const doc = {
-    uid: UUID,
+    uid: DEF_ID,
     type: "variable",
     name: "Thanksgiving",
     display_month: 11,
@@ -48,7 +48,7 @@ Deno.test("HolidayDefinitionSchema validates a variable-date holiday", () => {
 
 Deno.test("HolidayDefinitionSchema applies active/version defaults when omitted", () => {
   const doc = {
-    uid: UUID,
+    uid: DEF_ID,
     type: "fixed",
     name: "New Year's Day",
     display_month: 1,
@@ -67,9 +67,9 @@ Deno.test("HolidayDefinitionSchema applies active/version defaults when omitted"
   }
 });
 
-Deno.test("HolidayDefinitionSchema rejects a non-uuid uid", () => {
+Deno.test("HolidayDefinitionSchema rejects a uuid uid (Firestore auto-id only)", () => {
   const doc = {
-    uid: "not-a-uuid",
+    uid: "11111111-1111-4111-8111-111111111111",
     type: "fixed",
     name: "Christmas Day",
     display_month: 12,
@@ -82,7 +82,7 @@ Deno.test("HolidayDefinitionSchema rejects a non-uuid uid", () => {
 
 Deno.test("HolidayDefinitionSchema rejects additional properties", () => {
   const doc = {
-    uid: UUID,
+    uid: DEF_ID,
     type: "fixed",
     name: "Christmas Day",
     display_month: 12,
@@ -133,7 +133,7 @@ Deno.test("CreateHolidayDefinitionInput rejects a variable input missing week", 
 Deno.test("UpdateHolidayDefinitionInput requires uid + version", () => {
   assertEquals(
     UpdateHolidayDefinitionInput.safeParse({
-      uid: UUID,
+      uid: DEF_ID,
       version: 3,
       type: "fixed",
       name: "Christmas Day",
@@ -145,7 +145,7 @@ Deno.test("UpdateHolidayDefinitionInput requires uid + version", () => {
   // Missing version → rejected.
   assertEquals(
     UpdateHolidayDefinitionInput.safeParse({
-      uid: UUID,
+      uid: DEF_ID,
       type: "fixed",
       name: "Christmas Day",
       month: 12,

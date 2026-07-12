@@ -21,6 +21,7 @@ import {
   type FirestoreTimestampType,
   TimestampFields,
 } from "./common.ts";
+import { FirestoreId } from "./_uid.ts";
 
 /** Holiday rule discriminator. */
 export type HolidayType = "fixed" | "variable";
@@ -63,7 +64,7 @@ export interface HolidayDefinition {
 
 /** Zod schema for HolidayDefinition. */
 export const HolidayDefinitionSchema: z.ZodType<HolidayDefinition> = z.strictObject({
-  uid: z.uuid(),
+  uid: FirestoreId,
   type: z.enum(["fixed", "variable"]),
   name: z.string().min(1).max(100),
   display_month: z.int().min(1).max(12),
@@ -135,14 +136,14 @@ export type CreateHolidayDefinitionInputType =
 export const CreateHolidayDefinitionInput: z.ZodType<CreateHolidayDefinitionInputType> = z
   .discriminatedUnion("type", [
     z.object({
-      uid: z.uuid().optional(),
+      uid: FirestoreId.optional(),
       type: z.literal("fixed"),
       name: z.string().min(1).max(100),
       month: z.int().min(1).max(12),
       date: z.int().min(1).max(31),
     }),
     z.object({
-      uid: z.uuid().optional(),
+      uid: FirestoreId.optional(),
       type: z.literal("variable"),
       name: z.string().min(1).max(100),
       month: z.int().min(1).max(12),
@@ -179,7 +180,7 @@ export type UpdateHolidayDefinitionInputType =
 export const UpdateHolidayDefinitionInput: z.ZodType<UpdateHolidayDefinitionInputType> = z
   .discriminatedUnion("type", [
     z.object({
-      uid: z.uuid(),
+      uid: FirestoreId,
       version: z.int().min(0),
       type: z.literal("fixed"),
       name: z.string().min(1).max(100),
@@ -187,7 +188,7 @@ export const UpdateHolidayDefinitionInput: z.ZodType<UpdateHolidayDefinitionInpu
       date: z.int().min(1).max(31),
     }),
     z.object({
-      uid: z.uuid(),
+      uid: FirestoreId,
       version: z.int().min(0),
       type: z.literal("variable"),
       name: z.string().min(1).max(100),
