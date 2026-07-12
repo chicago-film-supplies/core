@@ -1084,3 +1084,19 @@ export const firestoreDisplayDefaults: Record<string, FirestoreDisplayDefaults> 
 
 export type { SchemaField } from "./template-schema-fields.generated.ts";
 export { templateSchemaFields } from "./template-schema-fields.generated.ts";
+
+// ── Template helper catalogue (static, generated) ──────────────────
+
+export type { TemplateHelperEntry } from "./template-helpers.generated.ts";
+export { templateHelpers } from "./template-helpers.generated.ts";
+
+// ── Template render context (which `it.*` namespaces a template gets) ──
+
+export type { TemplateCollectionType } from "./template-context.ts";
+export {
+  ALWAYS_ON_UTIL_NAMESPACES,
+  availableUtilNamespaces,
+  TEMPLATE_COLLECTION_UTILS,
+  TEMPLATE_LIB_GLOBALS,
+  TEMPLATE_SCALAR_GLOBALS,
+} from "./template-context.ts";

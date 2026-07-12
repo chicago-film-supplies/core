@@ -4,6 +4,14 @@ _Generated from source by `scripts/generate-api-docs.ts` — do not edit by hand
 
 ## `@cfs/core/schemas`
 
+### `ALWAYS_ON_UTIL_NAMESPACES`
+
+Utils namespaces injected for every template regardless of collection.
+
+```ts
+const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];
+```
+
 ### `AcceptInviteInput`
 
 Input schema for POST /auth/accept-invite.
@@ -4850,7 +4858,7 @@ Runtime route manifest — emitted by api-cloudrun at GET /permissions/manifest.
 ```ts
 interface RouteManifest {
   version: string;
-  permissions: typeOperator;
+  permissions: readonly Permission[];
   routes: RouteManifestEntry[];
 }
 ```
@@ -5134,12 +5142,49 @@ Zod schema for {@link SyncErrorLogRecord}.
 const SyncErrorLogRecordSchema: z.ZodType<SyncErrorLogRecord>;
 ```
 
+### `TEMPLATE_COLLECTION_UTILS`
+
+Collection → the `@cfs/core/utils` namespace injected for it, exposed as
+`it.<namespace>` inside a template.
+
+`Partial` on purpose: a collection need not have a utils namespace.
+`quotes` and `packing_lists` have none — templates *produce* those, they
+don't compute over them.
+
+Values must be valid `it.<ns>` identifiers. `contact-name` is deliberately
+unmapped for that reason; a future collection needing it would map to
+`"contactName"`.
+
+```ts
+const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, string>>;
+```
+
+### `TEMPLATE_LIB_GLOBALS`
+
+Third-party libraries injected as `it.*` globals for every template
+(`it.currency`, `it.dateFns`, `it.tz`). Not `@cfs/core` utils — documented
+here so the render context has one authoritative inventory.
+
+```ts
+const TEMPLATE_LIB_GLOBALS: readonly string[];
+```
+
 ### `TEMPLATE_PARAM_TYPES`
 
 Render-time parameter types a template can declare. v1: boolean only.
 
 ```ts
 const TEMPLATE_PARAM_TYPES: "boolean"[];
+```
+
+### `TEMPLATE_SCALAR_GLOBALS`
+
+Per-render scalars injected as `it.*` globals for every template. `it.doc` is
+always the **source** document — a template never reads its target, it
+produces it.
+
+```ts
+const TEMPLATE_SCALAR_GLOBALS: readonly string[];
 ```
 
 ### `TEMPLATE_SOURCE_COLLECTIONS`
@@ -5328,6 +5373,14 @@ interface Template {
 }
 ```
 
+### `TemplateCollectionType`
+
+Any collection a template can read from or produce.
+
+```ts
+type TemplateCollectionType = TemplateSourceCollectionType | TemplateTargetCollectionType;
+```
+
 ### `TemplateComponent`
 
 A thin template-component *family* document.
@@ -5401,6 +5454,19 @@ Component dependencies a template family overlays at render time.
 ```ts
 interface TemplateDependsOn {
   components: string[];
+}
+```
+
+### `TemplateHelperEntry`
+
+One callable helper in the template editor's helper panel.
+
+```ts
+interface TemplateHelperEntry {
+  name: string;
+  expr: string;
+  desc: string;
+  returns: string;
 }
 ```
 
@@ -6718,6 +6784,29 @@ type WebshopProductUpdated = EventEnvelope<WebshopProduct> & typeLiteral;
 const aggregates: AggregateDefinition[];
 ```
 
+### `availableUtilNamespaces(sources: readonly TemplateCollectionType[], targets: readonly TemplateCollectionType[]): string[]`
+
+Resolve the `@cfs/core/utils` namespaces available to a template, as the union
+of the always-on set plus each source/target collection's namespace.
+
+```ts
+availableUtilNamespaces(["orders"], ["quotes"]);     // ["dates", "orders"]
+availableUtilNamespaces(["orders"], ["invoices"]);   // ["dates", "orders", "invoices"]
+availableUtilNamespaces(["invoices"], ["invoices"]); // ["dates", "invoices"]
+```
+
+Note that a **target**-derived namespace is forward-looking: `it.doc` is the
+source document, so e.g. an orders→invoices template gets `it.invoices`
+helpers with no invoice document to apply them to until the author builds
+invoice-shaped data themselves.
+
+**Parameters**
+
+- `sources` — The template's source collections (single-element today).
+- `targets` — The template's target collections (single-element today).
+
+**Returns** — Deduped namespace list, always-on first, in collection order.
+
 ### `cardRules`
 
 All card-related propagation rules.
@@ -7144,6 +7233,19 @@ All document schemas keyed by singular and plural collection names.
 const schemas: Record<string, z.ZodType>;
 ```
 
+### `templateHelpers`
+
+Helper catalogue keyed by utils namespace — `templateHelpers["orders"]` is what
+a template calls as `it.orders.*`.
+
+Generated for every `./utils/*` entrypoint; which of them a given template can
+actually call is resolved from its collections by `availableUtilNamespaces()`
+in `./template-context.ts`.
+
+```ts
+const templateHelpers: Record<string, TemplateHelperEntry[]>;
+```
+
 ### `templateRules`
 
 All template-related propagation rules.
@@ -7154,10 +7256,12 @@ const templateRules: CollectionRule[];
 
 ### `templateSchemaFields`
 
-Pre-compiled document field metadata for each template source collection.
+Pre-compiled document field metadata for every template source and target
+collection. Source collections are always present; a target is present only if
+it has a walkable schema — `packing_lists` has none, hence `Partial`.
 
 ```ts
-const templateSchemaFields: Record<TemplateSourceCollectionType, SchemaField[]>;
+const templateSchemaFields: Partial<Record<TemplateSourceCollectionType | TemplateTargetCollectionType, SchemaField[]>>;
 ```
 
 ### `threadContactRules`
@@ -13322,6 +13426,99 @@ Firestore collection that a template produces documents for.
 type TemplateTargetCollectionType = indexedAccess;
 ```
 
+## `@cfs/core/schemas/template-context`
+
+Template render-context descriptor — the single source of truth for **which
+`it.*` namespaces a template can call**, shared by the API's render context
+and the manager's editor reference panels.
+
+A template's available helpers are determined by its **collections**, not by a
+fixed list. `api-cloudrun`'s `eta.ts` used to inject `it.orders` + `it.dates`
+unconditionally, so an invoices-source template got order helpers and no
+invoice helpers. Both the runtime injection and the editor panels now resolve
+the same set through {@link availableUtilNamespaces}, so the panel can never
+advertise a helper the server won't provide.
+
+The resolver takes **lists** even though `collection_source`/`collection_target`
+are single-valued today (`z.enum` on the family doc). When a template grows to
+multiple sources/targets, only the call sites change — not this contract.
+
+### `ALWAYS_ON_UTIL_NAMESPACES`
+
+Utils namespaces injected for every template regardless of collection.
+
+```ts
+const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];
+```
+
+### `TEMPLATE_COLLECTION_UTILS`
+
+Collection → the `@cfs/core/utils` namespace injected for it, exposed as
+`it.<namespace>` inside a template.
+
+`Partial` on purpose: a collection need not have a utils namespace.
+`quotes` and `packing_lists` have none — templates *produce* those, they
+don't compute over them.
+
+Values must be valid `it.<ns>` identifiers. `contact-name` is deliberately
+unmapped for that reason; a future collection needing it would map to
+`"contactName"`.
+
+```ts
+const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, string>>;
+```
+
+### `TEMPLATE_LIB_GLOBALS`
+
+Third-party libraries injected as `it.*` globals for every template
+(`it.currency`, `it.dateFns`, `it.tz`). Not `@cfs/core` utils — documented
+here so the render context has one authoritative inventory.
+
+```ts
+const TEMPLATE_LIB_GLOBALS: readonly string[];
+```
+
+### `TEMPLATE_SCALAR_GLOBALS`
+
+Per-render scalars injected as `it.*` globals for every template. `it.doc` is
+always the **source** document — a template never reads its target, it
+produces it.
+
+```ts
+const TEMPLATE_SCALAR_GLOBALS: readonly string[];
+```
+
+### `TemplateCollectionType`
+
+Any collection a template can read from or produce.
+
+```ts
+type TemplateCollectionType = TemplateSourceCollectionType | TemplateTargetCollectionType;
+```
+
+### `availableUtilNamespaces(sources: readonly TemplateCollectionType[], targets: readonly TemplateCollectionType[]): string[]`
+
+Resolve the `@cfs/core/utils` namespaces available to a template, as the union
+of the always-on set plus each source/target collection's namespace.
+
+```ts
+availableUtilNamespaces(["orders"], ["quotes"]);     // ["dates", "orders"]
+availableUtilNamespaces(["orders"], ["invoices"]);   // ["dates", "orders", "invoices"]
+availableUtilNamespaces(["invoices"], ["invoices"]); // ["dates", "invoices"]
+```
+
+Note that a **target**-derived namespace is forward-looking: `it.doc` is the
+source document, so e.g. an orders→invoices template gets `it.invoices`
+helpers with no invoice document to apply them to until the author builds
+invoice-shaped data themselves.
+
+**Parameters**
+
+- `sources` — The template's source collections (single-element today).
+- `targets` — The template's target collections (single-element today).
+
+**Returns** — Deduped namespace list, always-on first, in collection order.
+
 ## `@cfs/core/schemas/webhook-event`
 
 ### `WebhookEvent`
@@ -14700,7 +14897,7 @@ Runtime route manifest — emitted by api-cloudrun at GET /permissions/manifest.
 ```ts
 interface RouteManifest {
   version: string;
-  permissions: typeOperator;
+  permissions: readonly Permission[];
   routes: RouteManifestEntry[];
 }
 ```
@@ -16775,7 +16972,7 @@ path that isn't of the form `fixtures/<gp>/<slug>.json`. The affected-set
 classifier consumes this to route fixture-only PR changes into the
 `goldenOnly` bucket (golden re-run, no version bump).
 
-### `resolveRenderParams(declared: typeOperator, provided: Record<string, unknown> | undefined): Record<string, boolean>`
+### `resolveRenderParams(declared: readonly RenderParamDecl[], provided: Record<string, unknown> | undefined): Record<string, boolean>`
 
 Resolve caller-provided render params against a version's declared params,
 **strictly**:

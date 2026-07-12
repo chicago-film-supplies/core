@@ -3,37 +3,76 @@
  *
  * Verifies correctness of the static output and includes a staleness
  * check that re-runs the generator and compares against the committed file.
+ *
+ * The generator derives its fields from `z.toJSONSchema()`. Two of its
+ * behaviours cannot be proven by the generated output alone and are guarded by
+ * the synthetic test at the bottom — see the comment there.
  */
-import { assertEquals, assertNotEquals } from "@std/assert";
-import { TEMPLATE_SOURCE_COLLECTIONS } from "../src/schemas/template.ts";
+import { assert, assertEquals, assertExists, assertNotEquals } from "@std/assert";
+import { z } from "zod";
+import { TEMPLATE_SOURCE_COLLECTIONS, TEMPLATE_TARGET_COLLECTIONS } from "../src/schemas/template.ts";
+import { schemas } from "../src/schemas/mod.ts";
 import { templateSchemaFields } from "../src/schemas/template-schema-fields.generated.ts";
 import type { SchemaField } from "../src/schemas/template-schema-fields.generated.ts";
+import { walkSchema } from "../scripts/schema-walk.ts";
+
+/**
+ * `templateSchemaFields` is `Partial`, so indexing it yields
+ * `SchemaField[] | undefined` under `strict: true`. Narrow once, here, rather
+ * than sprinkling non-null assertions through the assertions below.
+ */
+function fieldsFor(collection: string): SchemaField[] {
+  const fields = templateSchemaFields[collection as keyof typeof templateSchemaFields];
+  assertExists(fields, `missing fields for ${collection}`);
+  return fields;
+}
+
+/** Collections we expect to be present: every source, plus targets with a schema. */
+const PRESENT_COLLECTIONS = [
+  ...new Set<string>([...TEMPLATE_SOURCE_COLLECTIONS, ...TEMPLATE_TARGET_COLLECTIONS]),
+].filter((c) => schemas[c]);
 
 // ── Structural tests ────────────────────────────────────────────────
 
 Deno.test("every source collection has a non-empty field array", () => {
   for (const collection of TEMPLATE_SOURCE_COLLECTIONS) {
-    const fields = templateSchemaFields[collection];
-    assertNotEquals(fields, undefined, `missing fields for ${collection}`);
-    assertNotEquals(fields.length, 0, `empty fields for ${collection}`);
+    assertNotEquals(fieldsFor(collection).length, 0, `empty fields for ${collection}`);
   }
 });
 
+Deno.test("target collections with a schema are present and non-empty", () => {
+  // `quotes` has a real z.strictObject schema and must be walked.
+  const quotes = fieldsFor("quotes");
+  assertNotEquals(quotes.length, 0, "empty fields for quotes");
+  assertExists(quotes.find((f) => f.path === "uid_order"), "quotes.uid_order missing");
+
+  // `invoices` is both a source and a target — one entry serves both.
+  assertNotEquals(fieldsFor("invoices").length, 0, "empty fields for invoices");
+});
+
+Deno.test("packing_lists is absent — it has no walkable schema", () => {
+  assertEquals(
+    templateSchemaFields["packing_lists"],
+    undefined,
+    "packing_lists has no schema in the `schemas` map, so it must not be emitted",
+  );
+  // Guard the premise: if a schema is ever added, this test should force a re-think.
+  assertEquals(schemas["packing_lists"], undefined);
+});
+
 Deno.test("no _fs suffix fields appear", () => {
-  for (const collection of TEMPLATE_SOURCE_COLLECTIONS) {
-    const fields = templateSchemaFields[collection];
-    const fsFields = fields.filter((f: SchemaField) => {
+  for (const collection of PRESENT_COLLECTIONS) {
+    const fsFields = fieldsFor(collection).filter((f) => {
       const lastSegment = f.path.split(".").at(-1) || "";
       return lastSegment.endsWith("_fs");
     });
-    assertEquals(fsFields, [], `_fs fields found in ${collection}: ${fsFields.map((f: SchemaField) => f.path).join(", ")}`);
+    assertEquals(fsFields, [], `_fs fields found in ${collection}: ${fsFields.map((f) => f.path).join(", ")}`);
   }
 });
 
 Deno.test("no created_at/updated_at fields appear", () => {
-  for (const collection of TEMPLATE_SOURCE_COLLECTIONS) {
-    const fields = templateSchemaFields[collection];
-    const timestampFields = fields.filter((f: SchemaField) =>
+  for (const collection of PRESENT_COLLECTIONS) {
+    const timestampFields = fieldsFor(collection).filter((f) =>
       f.path === "created_at" || f.path === "updated_at"
     );
     assertEquals(timestampFields, [], `timestamp fields found in ${collection}`);
@@ -41,9 +80,8 @@ Deno.test("no created_at/updated_at fields appear", () => {
 });
 
 Deno.test("no query_by_ fields appear", () => {
-  for (const collection of TEMPLATE_SOURCE_COLLECTIONS) {
-    const fields = templateSchemaFields[collection];
-    const queryFields = fields.filter((f: SchemaField) => {
+  for (const collection of PRESENT_COLLECTIONS) {
+    const queryFields = fieldsFor(collection).filter((f) => {
       const firstSegment = f.path.split(".")[0];
       return firstSegment.startsWith("query_by_");
     });
@@ -53,26 +91,106 @@ Deno.test("no query_by_ fields appear", () => {
 
 Deno.test("nested paths appear (e.g. organization.name)", () => {
   for (const collection of TEMPLATE_SOURCE_COLLECTIONS) {
-    const fields = templateSchemaFields[collection];
-    const nested = fields.filter((f: SchemaField) => f.path.includes("."));
+    const fields = fieldsFor(collection);
+    const nested = fields.filter((f) => f.path.includes("."));
     assertNotEquals(nested.length, 0, `no nested fields in ${collection}`);
-    const orgName = fields.find((f: SchemaField) => f.path === "organization.name");
+    const orgName = fields.find((f) => f.path === "organization.name");
     assertNotEquals(orgName, undefined, `organization.name missing in ${collection}`);
   }
 });
 
 Deno.test("order items union variants are shown separately", () => {
-  const fields = templateSchemaFields["orders"];
-  const variantPaths = fields.filter((f: SchemaField) => f.path.includes("items[] (type:"));
+  const fields = fieldsFor("orders");
+  const variantPaths = fields.filter((f) => f.path.includes("items[] (type:"));
   assertNotEquals(variantPaths.length, 0, "no union variant paths found");
 
-  // Check destination variant exists
-  const destinationVariant = variantPaths.find((f: SchemaField) => f.path.includes("(type: destination)"));
+  const destinationVariant = variantPaths.find((f) => f.path.includes("(type: destination)"));
   assertNotEquals(destinationVariant, undefined, "destination variant missing");
 
-  // Check group variant exists
-  const groupVariant = variantPaths.find((f: SchemaField) => f.path.includes("(type: group)"));
+  const groupVariant = variantPaths.find((f) => f.path.includes("(type: group)"));
   assertNotEquals(groupVariant, undefined, "group variant missing");
+});
+
+Deno.test("nullable fields are labelled nullable", () => {
+  // Regression guard for the bug the toJSONSchema migration fixed: the old
+  // walker recursed `optional` but not `default`, so a `.nullable().default(null)`
+  // field (TS: `string | null`) was labelled a plain non-null `string`.
+  const dates = fieldsFor("orders").find((f) => f.path === "destinations[].dates.delivery_start");
+  assertExists(dates, "destinations[].dates.delivery_start missing");
+  assert(
+    dates.type.includes("| null"),
+    `delivery_start is \`.nullable().default(null)\` but labelled "${dates.type}"`,
+  );
+});
+
+// ── PII ─────────────────────────────────────────────────────────────
+
+Deno.test("no pii:\"redact\" path leaks into any collection (incl. targets)", () => {
+  for (const collection of PRESENT_COLLECTIONS) {
+    const schema = schemas[collection];
+    const redactPaths = collectRedactPaths(schema);
+    const emitted = new Set(fieldsFor(collection).map((f) => f.path));
+
+    for (const path of redactPaths) {
+      assert(!emitted.has(path), `pii:"redact" path ${collection}.${path} leaked into the reference`);
+    }
+  }
+});
+
+/** Walk a Zod schema for the top-level keys tagged `pii: "redact"`. */
+function collectRedactPaths(schema: z.ZodType): string[] {
+  const json = z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }) as {
+    properties?: Record<string, { pii?: string }>;
+  };
+  return Object.entries(json.properties ?? {})
+    .filter(([, node]) => node?.pii === "redact")
+    .map(([key]) => key);
+}
+
+/**
+ * **The synthetic PII guard.**
+ *
+ * The migration to `z.toJSONSchema()` had to preserve PII omission, but the
+ * parity diff could not prove it: `pii: "redact"` exists only on auth/user/
+ * invite/log/email schemas, and *none* of those are walked here. orders /
+ * invoices / quotes carry only `pii: "mask"` / `"hash"`, which are deliberately
+ * shown. So the redact branch is never exercised by the real collections — the
+ * test above is vacuously green and would stay green if omission broke entirely.
+ *
+ * This builds a schema that *does* reach the branch, with the leaf behind every
+ * wrapper the walker must see through (optional / nullable / default / array /
+ * nested object), and asserts the path is gone while a sibling `mask` field —
+ * which must NOT be omitted — survives.
+ */
+Deno.test("synthetic: pii:\"redact\" leaves are omitted under every wrapper", () => {
+  const Nested = z.object({
+    secret: z.string().meta({ pii: "redact" }),
+    kept: z.string(),
+  });
+
+  const Synthetic = z.object({
+    direct: z.string().meta({ pii: "redact" }),
+    optional: z.string().meta({ pii: "redact" }).optional(),
+    nullable: z.string().meta({ pii: "redact" }).nullable(),
+    defaulted: z.string().meta({ pii: "redact" }).default("x"),
+    array: z.array(z.string().meta({ pii: "redact" })),
+    nested: Nested,
+    masked: z.string().meta({ pii: "mask" }),
+    plain: z.string(),
+  });
+
+  const paths = new Set(walkSchema(Synthetic).map((f) => f.path));
+
+  for (const omitted of ["direct", "optional", "nullable", "defaulted", "array", "nested.secret"]) {
+    assert(!paths.has(omitted), `pii:"redact" path "${omitted}" was NOT omitted`);
+  }
+
+  // Omission must be surgical: `mask`/`hash` are intentionally shown, and a
+  // redact leaf must not take its whole parent object down with it.
+  assert(paths.has("masked"), 'pii:"mask" field was omitted — only "redact" should be');
+  assert(paths.has("plain"), "an untagged field was omitted");
+  assert(paths.has("nested"), "the parent object of a redact leaf was omitted");
+  assert(paths.has("nested.kept"), "a clean sibling of a redact leaf was omitted");
 });
 
 // ── Staleness check ─────────────────────────────────────────────────

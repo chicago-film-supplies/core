@@ -42,6 +42,7 @@
     "./schemas/typesense/cards": "./src/schemas/typesense/cards.ts",
     "./schemas/quote": "./src/schemas/quote.ts",
     "./schemas/template": "./src/schemas/template.ts",
+    "./schemas/template-context": "./src/schemas/template-context.ts",
     "./schemas/webhook-event": "./src/schemas/webhook-event.ts",
     "./schemas/log": "./src/schemas/log/mod.ts",
     "./schemas/pii": "./src/schemas/pii/mod.ts",
@@ -68,6 +69,7 @@
     "setup": "deno install && git config core.hooksPath .githooks && deno task fetch-llms-docs",
     "fetch-llms-docs": "deno run --allow-net=zod.dev,docs.deno.com --allow-read --allow-write scripts/fetch-llms-docs.ts",
     "generate-schema-template-fields": "deno run --allow-read --allow-write scripts/generate-schema-template-fields.ts",
+    "generate-template-helpers": "deno run --allow-run --allow-read --allow-write scripts/generate-template-helpers.ts",
     "docs": "deno run --allow-run --allow-read --allow-write scripts/generate-api-docs.ts",
     "docs:check": "deno task docs && git diff --exit-code -- API.md API.json"
   },
