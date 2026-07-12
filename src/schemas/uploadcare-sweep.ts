@@ -18,13 +18,14 @@
  * would make the collapse the next run's normal.
  */
 import { z } from "zod";
+import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 
 /** One recorded sweep run. */
 export interface UploadcareSweepRun {
   /** Per-`${projectId}/${collection}` uuid counts, e.g. `{"cfs-3100/documents": 1836}`. */
   ref_counts: Record<string, number>;
-  /** ISO datetime the counts were observed. Machine timestamp — `Z` form is fine. */
-  recorded_at: string;
+  /** When the counts were observed. Server-stamped with `Timestamp.now()`. */
+  recorded_at: FirestoreTimestampType;
 }
 
 /** Zod schema for UploadcareSweepRun. */
@@ -33,7 +34,12 @@ export const UploadcareSweepRunSchema: z.ZodType<UploadcareSweepRun> = z.strictO
   // canary's `current < previous * 0.5` comparison would silently misbehave on
   // one rather than reject it.
   ref_counts: z.record(z.string(), z.int().min(0)),
-  recorded_at: z.iso.datetime(),
+  // A Firestore Timestamp, not an ISO string: this is a server-stamped,
+  // non-user-facing field, which is what `FirestoreTimestamp` is for across every
+  // operational doc here (sessions, webhook-events, rate-limits). It is also the
+  // only form a Firestore TTL policy can read, should this doc ever want one.
+  // `z.iso.datetime()` is for log/payload timestamps, not Firestore documents.
+  recorded_at: FirestoreTimestamp,
 }).meta({
   title: "Uploadcare Sweep Run",
   collection: "uploadcare-sweep",

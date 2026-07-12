@@ -6613,7 +6613,7 @@ One recorded sweep run.
 ```ts
 interface UploadcareSweepRun {
   ref_counts: Record<string, number>;
-  recorded_at: string;
+  recorded_at: FirestoreTimestampType;
 }
 ```
 
@@ -14990,7 +14990,7 @@ One recorded sweep run.
 ```ts
 interface UploadcareSweepRun {
   ref_counts: Record<string, number>;
-  recorded_at: string;
+  recorded_at: FirestoreTimestampType;
 }
 ```
 
