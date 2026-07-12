@@ -9164,7 +9164,7 @@
           "kind": "function",
           "name": "getDestinationsLegend",
           "signature": "getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral",
-          "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
+          "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
           "paramTags": [],
           "returnsTag": null
         },

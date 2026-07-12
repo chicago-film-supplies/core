@@ -16417,11 +16417,11 @@ Pair-derived legend strings for the order's start/end dates.
 Each pair contributes a label based on its `customer_collecting` /
 `customer_returning` flags. Labels are deduped and joined with " / ", so
 a mixed-mode order (one pair we deliver, one pair the customer picks up)
-renders as "Pickup / Delivery".
+renders as "In Store Pickup / Delivery".
 
 Mapping:
-  start: customer_collecting === true → "Pickup", else → "Delivery"
-  end:   customer_returning  === true → "Return", else → "Pickup"
+  start: customer_collecting === true → "In Store Pickup", else → "Delivery"
+  end:   customer_returning  === true → "In Store Return", else → "Pickup"
 
 Empty input returns empty strings.
 

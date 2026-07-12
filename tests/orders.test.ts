@@ -1061,7 +1061,7 @@ Deno.test("getDestinationsLegend default flags render Delivery / Pickup", () => 
   assertEquals(getDestinationsLegend([dest]), { start: "Delivery", end: "Pickup" });
 });
 
-Deno.test("getDestinationsLegend customer-collecting renders Pickup / Pickup", () => {
+Deno.test("getDestinationsLegend customer-collecting renders In Store Pickup / Pickup", () => {
   const dest: DestinationType = {
     dates: NO_DATES,
     delivery: {},
@@ -1069,10 +1069,10 @@ Deno.test("getDestinationsLegend customer-collecting renders Pickup / Pickup", (
     customer_collecting: true,
     customer_returning: false,
   };
-  assertEquals(getDestinationsLegend([dest]), { start: "Pickup", end: "Pickup" });
+  assertEquals(getDestinationsLegend([dest]), { start: "In Store Pickup", end: "Pickup" });
 });
 
-Deno.test("getDestinationsLegend customer-returning renders Delivery / Return", () => {
+Deno.test("getDestinationsLegend customer-returning renders Delivery / In Store Return", () => {
   const dest: DestinationType = {
     dates: NO_DATES,
     delivery: {},
@@ -1080,7 +1080,7 @@ Deno.test("getDestinationsLegend customer-returning renders Delivery / Return", 
     customer_collecting: false,
     customer_returning: true,
   };
-  assertEquals(getDestinationsLegend([dest]), { start: "Delivery", end: "Return" });
+  assertEquals(getDestinationsLegend([dest]), { start: "Delivery", end: "In Store Return" });
 });
 
 Deno.test("getDestinationsLegend dedupes identical pairs", () => {
@@ -1091,7 +1091,7 @@ Deno.test("getDestinationsLegend dedupes identical pairs", () => {
     customer_collecting: true,
     customer_returning: true,
   };
-  assertEquals(getDestinationsLegend([dest, dest]), { start: "Pickup", end: "Return" });
+  assertEquals(getDestinationsLegend([dest, dest]), { start: "In Store Pickup", end: "In Store Return" });
 });
 
 Deno.test("getDestinationsLegend joins mixed pairs with ' / '", () => {
@@ -1110,8 +1110,8 @@ Deno.test("getDestinationsLegend joins mixed pairs with ' / '", () => {
     customer_returning: true,
   };
   assertEquals(getDestinationsLegend([a, b]), {
-    start: "Delivery / Pickup",
-    end: "Pickup / Return",
+    start: "Delivery / In Store Pickup",
+    end: "Pickup / In Store Return",
   });
 });
 
