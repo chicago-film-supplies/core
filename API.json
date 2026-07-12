@@ -8282,18 +8282,18 @@
           "kind": "function",
           "name": "formatChargeDays",
           "signature": "formatChargeDays(days: number, unit?: \"day\" | \"days\" | \"week\" | \"weeks\"): FormatChargeDaysResult",
-          "doc": "Format a chargeable days number into display values for a duration input.",
+          "doc": "Format a chargeable days number into display values for a duration input.\n\nThe unit (day vs. week) is chosen one of two ways:\n- **Explicit** — pass `unit` (`\"day\"`, `\"days\"`, `\"week\"`, or `\"weeks\"`); the\n  caller's choice wins, and singular/plural is normalized from the computed value.\n- **Auto (omit `unit`)** — the mode is derived from the day count: weeks when\n  `days >= 5`, days when `days < 5` (the boundary `days === 5` formats as `1 week`).\n  Omitting the argument *is* the auto path — there is no separate `\"default\"`/`\"auto\"` unit value.\n\nIn weeks mode `value = days / 5` and `step = 0.2`; in days mode `value = days` and\n`step = 1`. `label` is always one of the four concrete {@link ChargeDaysLabel} literals,\nsingularized when `value === 1`.",
           "paramTags": [
             {
               "name": "days",
-              "doc": "A positive number of chargeable days."
+              "doc": "A positive, finite number of chargeable days. Throws on `<= 0` / non-finite."
             },
             {
               "name": "unit",
-              "doc": "Display unit: `\"day\"`, `\"days\"`, `\"week\"`, or `\"weeks\"`. When omitted, weeks are used if `days >= 5`."
+              "doc": "Optional display unit. Omit to auto-derive from `days` (see above)."
             }
           ],
-          "returnsTag": null
+          "returnsTag": "— `{ value, label, periodLabel, isWeeks, step }`."
         },
         {
           "kind": "function",

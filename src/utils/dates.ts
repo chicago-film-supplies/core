@@ -95,8 +95,21 @@ export interface FormatChargeDaysResult {
 
 /**
  * Format a chargeable days number into display values for a duration input.
- * @param days - A positive number of chargeable days.
- * @param unit - Display unit: `"day"`, `"days"`, `"week"`, or `"weeks"`. When omitted, weeks are used if `days >= 5`.
+ *
+ * The unit (day vs. week) is chosen one of two ways:
+ * - **Explicit** — pass `unit` (`"day"`, `"days"`, `"week"`, or `"weeks"`); the
+ *   caller's choice wins, and singular/plural is normalized from the computed value.
+ * - **Auto (omit `unit`)** — the mode is derived from the day count: weeks when
+ *   `days >= 5`, days when `days < 5` (the boundary `days === 5` formats as `1 week`).
+ *   Omitting the argument *is* the auto path — there is no separate `"default"`/`"auto"` unit value.
+ *
+ * In weeks mode `value = days / 5` and `step = 0.2`; in days mode `value = days` and
+ * `step = 1`. `label` is always one of the four concrete {@link ChargeDaysLabel} literals,
+ * singularized when `value === 1`.
+ *
+ * @param days - A positive, finite number of chargeable days. Throws on `<= 0` / non-finite.
+ * @param unit - Optional display unit. Omit to auto-derive from `days` (see above).
+ * @returns {@link FormatChargeDaysResult} — `{ value, label, periodLabel, isWeeks, step }`.
  */
 export function formatChargeDays(
   days: number,
