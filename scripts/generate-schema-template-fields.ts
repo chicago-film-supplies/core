@@ -1,9 +1,26 @@
 /**
  * Generates static template schema field metadata from Zod schemas.
  *
- * Walks each TEMPLATE_SOURCE_COLLECTIONS schema and outputs a typed
- * Record<TemplateSourceCollectionType, SchemaField[]> to
+ * Walks each template collection schema and outputs a typed
+ * Record<collection, SchemaField[]> to
  * src/schemas/template-schema-fields.generated.ts — committed, not gitignored.
+ *
+ * **Engine: Zod 4's public `z.toJSONSchema()`.** Earlier revisions poked
+ * `schema._zod.def` directly — an internal API with no stability guarantee that
+ * could break silently on a Zod upgrade. We now convert once to JSON Schema and
+ * walk *that*, using the public `override` hook to carry across the two things
+ * JSON Schema alone cannot express:
+ *
+ * 1. **PII** — `z.meta({ pii: "redact" })` leaves are stamped `x-omit` and are
+ *    dropped from the output entirely (they must never reach a template author).
+ *    Only `redact` is omitted; `mask`/`hash` fields are deliberately shown.
+ * 2. **Firestore Timestamps** — `z.custom()` is unrepresentable, so
+ *    `unrepresentable: "any"` renders it as a bare `{}` that is indistinguishable
+ *    from `any`/`unknown`/`function`. We stamp `x-timestamp` on the custom node
+ *    instead and label from that.
+ *
+ * `io: "input"` resolves `.transform()` pipes (chicagoInstant / chicagoStartOfDay)
+ * to their input side, so business datetimes label as `string` rather than `pipe`.
  *
  * Run: deno task generate-schema-template-fields
  */
@@ -11,60 +28,115 @@ import { z } from "zod";
 import { schemas } from "../src/schemas/mod.ts";
 import { TEMPLATE_SOURCE_COLLECTIONS } from "../src/schemas/template.ts";
 
-// ── Zod introspection helpers (same pattern as tests/pii.test.ts) ───
+// ── JSON Schema node model ──────────────────────────────────────────
 
-type ZodDef = {
-  type: string;
-  innerType?: z.ZodType;
-  element?: z.ZodType;
-  shape?: Record<string, z.ZodType>;
-  entries?: Record<string, string>;
-  values?: string[];
-  options?: z.ZodType[];
-  in?: z.ZodType;
-  out?: z.ZodType;
-};
+/** Marker: this leaf is `pii: "redact"` — omit it from the reference entirely. */
+const OMIT = "x-omit";
+/** Marker: this leaf is a `z.custom()` Firestore Timestamp. */
+const TIMESTAMP = "x-timestamp";
+/** Marker: this field's outermost wrapper is `.optional()`. */
+const OPTIONAL = "x-optional";
 
-function getDef(schema: z.ZodType): ZodDef {
-  return (schema as unknown as { _zod: { def: ZodDef } })._zod.def;
+interface JsonNode {
+  type?: string | string[];
+  properties?: Record<string, JsonNode>;
+  required?: string[];
+  items?: JsonNode;
+  anyOf?: JsonNode[];
+  enum?: unknown[];
+  const?: unknown;
+  default?: unknown;
+  additionalProperties?: boolean | JsonNode;
+  propertyNames?: JsonNode;
+  $ref?: string;
+  [OMIT]?: boolean;
+  [TIMESTAMP]?: boolean;
+  [OPTIONAL]?: boolean;
 }
 
-function unwrap(schema: z.ZodType): z.ZodType {
-  const def = getDef(schema);
-  if (
-    (def.type === "optional" || def.type === "default" || def.type === "nullable") &&
-    def.innerType
-  ) {
-    return unwrap(def.innerType);
-  }
-  if (def.type === "pipe" && def.in) {
-    // Produced by `.transform()` factories (chicagoInstant, chicagoStartOfDay).
-    // Unwrap to the input side so datetime/offset fields label as "string"
-    // instead of "pipe".
-    return unwrap(def.in);
-  }
-  return schema;
+type Defs = Record<string, JsonNode>;
+
+/**
+ * Convert a Zod schema to JSON Schema, stamping the two markers the plain
+ * conversion loses (see the module doc).
+ */
+function toJson(schema: z.ZodType): { root: JsonNode; defs: Defs } {
+  const root = z.toJSONSchema(schema, {
+    io: "input",
+    unrepresentable: "any",
+    override: (ctx) => {
+      const zodSchema = ctx.zodSchema as z.ZodType;
+      const node = ctx.jsonSchema as JsonNode;
+
+      // Public metadata API — no internal poking.
+      const meta = zodSchema.meta() as { pii?: string } | undefined;
+      if (meta?.pii === "redact") node[OMIT] = true;
+
+      // The wrapper *kind* is the one thing with no public accessor, and JSON
+      // Schema cannot round-trip either of these two:
+      const def = (zodSchema as unknown as { _zod?: { def?: { type?: string } } })._zod?.def;
+
+      // A Firestore Timestamp is a z.custom() — unrepresentable, so it would
+      // otherwise emit an anonymous `{}` indistinguishable from any/unknown.
+      if (def?.type === "custom") node[TIMESTAMP] = true;
+
+      // Optionality: `.default(x)` and `.default(x).optional()` are BYTE-IDENTICAL
+      // in JSON Schema (both carry `default` and drop out of `required`), and a
+      // `.default()` over a `.transform()` pipe loses its `default` key entirely
+      // under `io: "input"`. Neither the `required` array nor the `default` key
+      // can therefore recover "is this field optional?". Stamping the outermost
+      // `.optional()` wrapper is what preserves it.
+      if (def?.type === "optional") node[OPTIONAL] = true;
+    },
+  }) as JsonNode & { $defs?: Defs };
+
+  return { root, defs: root.$defs ?? {} };
 }
 
-function getShape(schema: z.ZodType): Record<string, z.ZodType> | null {
-  const def = getDef(schema);
-  if (def.shape) return def.shape;
-  if (def.innerType) return getShape(def.innerType);
-  return null;
+/**
+ * Resolve a `$ref` against `$defs`. Zod inlines reused schemas by default, so
+ * refs only appear for recursive shapes — this is defensive, not load-bearing.
+ * Sibling keys on the referencing node (e.g. a stamped marker) win over the
+ * target's.
+ */
+function deref(node: JsonNode, defs: Defs, depth = 0): JsonNode {
+  if (!node.$ref || depth > 10) return node;
+  const key = node.$ref.replace(/^#\/\$defs\//, "");
+  const target = defs[key];
+  if (!target) return node;
+  const { $ref: _drop, ...siblings } = node;
+  return deref({ ...target, ...siblings }, defs, depth + 1);
 }
 
-function getMeta(schema: z.ZodType): Record<string, unknown> | undefined {
-  return z.globalRegistry.get(schema) as Record<string, unknown> | undefined;
+/** Is this the `{ type: "null" }` branch a `.nullable()` contributes? */
+function isNullNode(node: JsonNode): boolean {
+  return node.type === "null";
 }
 
-function isOptional(schema: z.ZodType): boolean {
-  return getDef(schema).type === "optional";
+/**
+ * Split a `.nullable()` node into its non-null inner shape + a nullable flag.
+ * A genuine union keeps its remaining branches (labelled `union` downstream).
+ */
+function stripNull(node: JsonNode): { inner: JsonNode; nullable: boolean } {
+  if (!node.anyOf) return { inner: node, nullable: false };
+  const nonNull = node.anyOf.filter((b) => !isNullNode(b));
+  if (nonNull.length === node.anyOf.length) return { inner: node, nullable: false };
+  if (nonNull.length === 1) return { inner: nonNull[0], nullable: true };
+  return { inner: { anyOf: nonNull }, nullable: true };
 }
 
-function isNullable(schema: z.ZodType): boolean {
-  const def = getDef(schema);
-  if (def.type === "nullable") return true;
-  if (def.type === "optional" && def.innerType) return isNullable(def.innerType);
+/**
+ * Does this property carry a `pii: "redact"` leaf anywhere under its wrapper
+ * chain? Mirrors the wrappers the old Zod-side check recursed through:
+ * optional/default (marker sits on the node), nullable (marker sits inside
+ * `anyOf`), array (marker sits on `items`).
+ */
+function hasPiiRedact(node: JsonNode, defs: Defs, depth = 0): boolean {
+  if (depth > 6) return false;
+  const n = deref(node, defs);
+  if (n[OMIT]) return true;
+  if (n.anyOf?.some((b) => hasPiiRedact(b, defs, depth + 1))) return true;
+  if (n.items && hasPiiRedact(n.items, defs, depth + 1)) return true;
   return false;
 }
 
@@ -81,44 +153,37 @@ function shouldHide(fieldName: string, fullPath: string): boolean {
   return false;
 }
 
-function hasPiiRedact(schema: z.ZodType): boolean {
-  const meta = getMeta(schema);
-  if (meta?.pii === "redact") return true;
-  const def = getDef(schema);
-  if ((def.type === "optional" || def.type === "default" || def.type === "nullable") && def.innerType) {
-    return hasPiiRedact(def.innerType);
-  }
-  if (def.type === "array" && def.element) {
-    return hasPiiRedact(def.element);
-  }
-  return false;
-}
-
 // ── Type label ──────────────────────────────────────────────────────
 
-function typeLabel(schema: z.ZodType): string {
-  const def = getDef(schema);
-  switch (def.type) {
-    case "string": return "string";
-    case "number": case "int": return "number";
-    case "boolean": return "boolean";
-    case "enum": {
-      const values = def.entries ? Object.values(def.entries) : def.values;
-      return values?.join(" | ") || "enum";
-    }
-    case "literal":
-      return def.values?.join(" | ") || "literal";
-    case "array": {
-      const el = unwrap(def.element!);
-      const inner = typeLabel(el);
-      return inner + "[]";
-    }
-    case "object": return "object";
-    case "union": return "union";
-    case "record": return "Record<string, ...>";
-    case "custom": return "Timestamp";
-    default: return def.type;
+/** Compact display label for a resolved (non-null-stripped) JSON Schema node. */
+function typeLabel(node: JsonNode, defs: Defs): string {
+  const n = deref(node, defs);
+
+  if (n[TIMESTAMP]) return "Timestamp";
+  if (n.const !== undefined) return String(n.const);
+  if (Array.isArray(n.enum)) return n.enum.join(" | ");
+
+  const t = Array.isArray(n.type) ? n.type[0] : n.type;
+  switch (t) {
+    case "string":
+      return "string";
+    case "number":
+    case "integer":
+      return "number";
+    case "boolean":
+      return "boolean";
+    case "array":
+      return typeLabel(n.items ?? {}, defs) + "[]";
+    case "object":
+      // A z.record() has no declared `properties` — only key/value constraints.
+      if (!n.properties && (n.propertyNames || typeof n.additionalProperties === "object")) {
+        return "Record<string, ...>";
+      }
+      return "object";
   }
+
+  if (n.anyOf) return "union";
+  return t ?? "unknown";
 }
 
 // ── Schema walker ───────────────────────────────────────────────────
@@ -128,18 +193,22 @@ interface SchemaField {
   type: string;
 }
 
-function getUnionDiscriminantLabel(option: z.ZodType): string | null {
-  const shape = getShape(option);
-  if (!shape?.type) return null;
-  const typeField = unwrap(shape.type);
-  const def = getDef(typeField);
-  if (def.type === "literal" && def.values?.length) {
-    return def.values.join(" | ");
-  }
-  if (def.type === "enum") {
-    const values = def.entries ? Object.values(def.entries) as string[] : def.values;
-    if (!values?.length) return null;
-    // Shorten long enum lists to avoid unwieldy labels
+/**
+ * Label for one variant of a discriminated array union, read off its `type`
+ * field. Long enums are shortened so the path prefix stays readable.
+ */
+function getUnionDiscriminantLabel(option: JsonNode, defs: Defs): string | null {
+  const o = deref(option, defs);
+  const typeField = o.properties?.type;
+  if (!typeField) return null;
+
+  const { inner } = stripNull(deref(typeField, defs));
+  const n = deref(inner, defs);
+
+  if (n.const !== undefined) return String(n.const);
+  if (Array.isArray(n.enum)) {
+    const values = n.enum.map(String);
+    if (!values.length) return null;
     if (values.length > 3) return values.slice(0, 2).join(", ") + ", ...";
     return values.join(" | ");
   }
@@ -147,49 +216,56 @@ function getUnionDiscriminantLabel(option: z.ZodType): string | null {
 }
 
 function walkShape(
-  schema: z.ZodType,
+  node: JsonNode,
+  defs: Defs,
   prefix: string,
   depth: number,
   results: SchemaField[],
 ): void {
   if (depth > 3) return;
-  const u = unwrap(schema);
-  const shape = getShape(u);
-  if (!shape) return;
+  const { inner } = stripNull(deref(node, defs));
+  const obj = deref(inner, defs);
+  if (!obj.properties) return;
 
-  for (const [key, val] of Object.entries(shape)) {
+  for (const [key, rawVal] of Object.entries(obj.properties)) {
     const path = prefix ? `${prefix}.${key}` : key;
     if (shouldHide(key, path)) continue;
-    if (hasPiiRedact(val)) continue;
+    if (hasPiiRedact(rawVal, defs)) continue;
 
-    const opt = isOptional(val);
-    const nul = isNullable(val);
-    const inner = unwrap(val);
-    const suffix = (opt ? "?" : "") + (nul ? " | null" : "");
-    results.push({ path, type: typeLabel(inner) + suffix });
+    const val = deref(rawVal, defs);
 
-    const innerDef = getDef(inner);
+    // `x-optional`, not the `required` array — a `.default()` field also drops
+    // out of `required` but is always present on the stored document the
+    // template actually reads. See the override hook.
+    const opt = val[OPTIONAL] === true;
+    const { inner: unwrapped, nullable } = stripNull(val);
+    const resolved = deref(unwrapped, defs);
+
+    const suffix = (opt ? "?" : "") + (nullable ? " | null" : "");
+    results.push({ path, type: typeLabel(resolved, defs) + suffix });
+
+    const resolvedType = Array.isArray(resolved.type) ? resolved.type[0] : resolved.type;
 
     // Recurse into nested objects
-    if (innerDef.type === "object" && innerDef.shape) {
-      walkShape(inner, path, depth + 1, results);
+    if (resolvedType === "object" && resolved.properties) {
+      walkShape(resolved, defs, path, depth + 1, results);
     }
 
     // Recurse into arrays
-    if (innerDef.type === "array" && innerDef.element) {
-      const el = unwrap(innerDef.element);
-      const elDef = getDef(el);
+    if (resolvedType === "array" && resolved.items) {
+      const { inner: elInner } = stripNull(deref(resolved.items, defs));
+      const el = deref(elInner, defs);
 
-      if (elDef.type === "object" && elDef.shape) {
-        walkShape(el, `${path}[]`, depth + 1, results);
+      if (el.properties) {
+        walkShape(el, defs, `${path}[]`, depth + 1, results);
       }
 
       // Union arrays — walk each variant separately
-      if (elDef.type === "union" && elDef.options) {
-        for (const option of elDef.options) {
-          const label = getUnionDiscriminantLabel(option);
+      if (el.anyOf) {
+        for (const option of el.anyOf) {
+          const label = getUnionDiscriminantLabel(option, defs);
           const variantPrefix = label ? `${path}[] (type: ${label})` : `${path}[]`;
-          walkShape(option, variantPrefix, depth + 1, results);
+          walkShape(option, defs, variantPrefix, depth + 1, results);
         }
       }
     }
@@ -198,17 +274,17 @@ function walkShape(
 
 // ── Generate ────────────────────────────────────────────────────────
 
+/** PARITY-GATE SCAFFOLD (Layer 3a) — sources only; Layer 3b widens to targets. */
+const COLLECTIONS = [...TEMPLATE_SOURCE_COLLECTIONS] as string[];
+
 const entries: string[] = [];
 
-for (const collection of TEMPLATE_SOURCE_COLLECTIONS) {
+for (const collection of COLLECTIONS) {
   const schema = schemas[collection];
-  if (!schema) {
-    console.error(`No schema found for collection: ${collection}`);
-    Deno.exit(1);
-  }
+  const { root, defs } = toJson(schema);
 
   const fields: SchemaField[] = [];
-  walkShape(schema, "", 0, fields);
+  walkShape(root, defs, "", 0, fields);
 
   const fieldLines = fields
     .map((f) => `    { path: ${JSON.stringify(f.path)}, type: ${JSON.stringify(f.type)} },`)
@@ -233,4 +309,4 @@ ${entries.join(",\n")},
 
 const outPath = new URL("../src/schemas/template-schema-fields.generated.ts", import.meta.url);
 await Deno.writeTextFile(outPath, output);
-console.log(`Wrote ${outPath.pathname} (${TEMPLATE_SOURCE_COLLECTIONS.length} collections)`);
+console.log(`Wrote ${outPath.pathname} (${COLLECTIONS.length} collections: ${COLLECTIONS.join(", ")})`);
