@@ -741,6 +741,147 @@ export function syncOrderItems(
   return result;
 }
 
+// ── On-demand order → invoice resync (operator-triggered) ───────────
+
+/**
+ * Compare two invoice-shaped items for sync equality, ignoring the invoice-only
+ * override fields ({@link INVOICE_ONLY_ITEM_FIELDS}). Key-set + per-key JSON
+ * comparison — order-insensitive, the same normalization {@link isItemSynced}
+ * applies at the order↔invoice boundary. Both items must already be
+ * invoice-shaped with full (divider-scoped) paths.
+ */
+function invoiceProjectionMatches(expected: InvoiceItem, current: InvoiceItem): boolean {
+  const comparableKeys = (it: InvoiceItem) =>
+    Object.keys(it).filter((k) => !INVOICE_ONLY_ITEM_FIELDS.has(k));
+  const eKeys = comparableKeys(expected);
+  const cKeys = comparableKeys(current);
+  if (eKeys.length !== cKeys.length) return false;
+  const cSet = new Set(cKeys);
+  for (const k of eKeys) if (!cSet.has(k)) return false;
+  const e = expected as unknown as Record<string, unknown>;
+  const c = current as unknown as Record<string, unknown>;
+  for (const k of eKeys) {
+    if (JSON.stringify(e[k]) !== JSON.stringify(c[k])) return false;
+  }
+  return true;
+}
+
+/**
+ * Re-project an order's lines into an invoice, on demand.
+ *
+ * The automatic `syncOrderToInvoiceSelective` (inside `updateOrder`) keeps
+ * non-overridden lines current as the order changes. This is the operator's
+ * manual trigger to either snap a whole order's scope back to the order after
+ * edits, or re-pull individual lines by `path` — the escape hatch for a line
+ * that was overridden on the invoice and should now track the order again.
+ *
+ * Pure: returns a fresh items array; the input is not mutated. Scoped to one
+ * **order divider** — a multi-order invoice loops its linked orders. Invoice-only
+ * override fields (`coa_revenue`, `tracking_category`, `xero_id`,
+ * `xero_tracking_option_id`) are always carried forward.
+ *
+ * - `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from
+ *   the order — a hard snap-to-order, so price overrides are discarded and lines
+ *   the order dropped are removed. Delegates to {@link syncOrderItems}.
+ * - `targetPaths` given → **per-line**: only lines at those full, divider-scoped
+ *   paths are replaced with a fresh projection of the matching order line; every
+ *   other line — siblings and untargeted overrides — is left untouched. A target
+ *   path the order no longer has is left as-is (use a whole resync to drop
+ *   removed lines); a target path not on the invoice is a no-op.
+ *
+ * The caller re-linearizes paths via {@link computeInvoiceItemPaths} and
+ * recomputes `totals` via {@link calculateInvoiceTotals} before writing.
+ */
+export function resyncInvoiceLines(
+  currentInvoiceItems: InvoiceItem[],
+  orderItems: LineItem[],
+  orderDividerUid: string,
+  targetPaths?: string[][],
+): InvoiceItem[] {
+  // Whole snap-to-order: rebuild the divider's entire scope from the order.
+  if (!targetPaths) {
+    return syncOrderItems(currentInvoiceItems, orderItems, orderDividerUid);
+  }
+
+  // Per-line: replace only the targeted lines in place, others untouched.
+  const orderByPath = new Map<string, LineItem>();
+  for (const oi of orderItems) orderByPath.set(itemPathKey(oi.path ?? []), oi);
+
+  const targetRelKeys = new Set(
+    targetPaths.map((p) => itemPathKey(stripOrderPrefix(p, orderDividerUid))),
+  );
+
+  return currentInvoiceItems.map((item) => {
+    // The divider itself and items outside this order's scope pass through.
+    if (item.type === "order" && item.uid === orderDividerUid) return item;
+    if (item.path[0] !== orderDividerUid) return item;
+
+    const relKey = itemPathKey(stripOrderPrefix(item.path, orderDividerUid));
+    if (!targetRelKeys.has(relKey)) return item;
+
+    const orderItem = orderByPath.get(relKey);
+    if (!orderItem) return item; // order dropped this line — leave it (whole resync removes)
+
+    return {
+      ...projectOrderItemToInvoiceItem(orderItem, orderDividerUid),
+      ...pickInvoiceOnlyFields(item),
+    };
+  });
+}
+
+/**
+ * Derive each order-scoped invoice line's sync status against the CURRENT order
+ * projection — no stored flag (minimal-state, derived). A line is `out_of_sync`
+ * when it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same
+ * `path`, ignoring the invoice-only override fields
+ * ({@link INVOICE_ONLY_ITEM_FIELDS}); otherwise `in_sync`. Consumed by the
+ * manager to badge lines and offer per-line/whole resync (see
+ * {@link resyncInvoiceLines}).
+ *
+ * Keyed by the full, divider-scoped `path` (`join("/")`), matching what the
+ * invoice stores. Scoped to one order divider; a multi-order invoice merges the
+ * per-divider maps. Reports as `out_of_sync`:
+ * - an order line the invoice is missing (keyed by its projected path), and
+ * - an order-scoped invoice line with no matching order line (removed upstream).
+ */
+export function computeInvoiceSyncStatus(
+  currentInvoiceItems: InvoiceItem[],
+  orderItems: LineItem[],
+  orderDividerUid: string,
+): Map<string, "in_sync" | "out_of_sync"> {
+  const status = new Map<string, "in_sync" | "out_of_sync">();
+
+  // Index this divider's invoice lines by order-relative path key.
+  const invoiceByRelPath = new Map<string, InvoiceItem>();
+  for (const item of currentInvoiceItems) {
+    if (item.type === "order" && item.uid === orderDividerUid) continue;
+    if (item.path[0] !== orderDividerUid) continue;
+    invoiceByRelPath.set(itemPathKey(stripOrderPrefix(item.path, orderDividerUid)), item);
+  }
+
+  const matchedRelKeys = new Set<string>();
+  for (const orderItem of orderItems) {
+    const relKey = itemPathKey(orderItem.path ?? []);
+    matchedRelKeys.add(relKey);
+    const fullKey = itemPathKey([orderDividerUid, ...(orderItem.path ?? [])]);
+    const current = invoiceByRelPath.get(relKey);
+    if (!current) {
+      status.set(fullKey, "out_of_sync"); // order has a line the invoice lacks
+      continue;
+    }
+    const expected = projectOrderItemToInvoiceItem(orderItem, orderDividerUid);
+    status.set(fullKey, invoiceProjectionMatches(expected, current) ? "in_sync" : "out_of_sync");
+  }
+
+  // Invoice-scoped lines the order no longer has.
+  for (const [relKey, item] of invoiceByRelPath) {
+    if (matchedRelKeys.has(relKey)) continue;
+    status.set(itemPathKey(item.path), "out_of_sync");
+  }
+
+  return status;
+}
+
 // ── Top-level field co-write helpers ────────────────────────────
 
 /**

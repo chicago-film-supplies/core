@@ -6,6 +6,7 @@ import {
   calculateInvoiceTotals,
   carryForwardOverrides,
   computeInvoiceItemPaths,
+  computeInvoiceSyncStatus,
   derivePaymentStatus,
   flattenForXero,
   getOrderScopedItems,
@@ -17,6 +18,7 @@ import {
   recomputePaymentTotals,
   removeOrderScopedDestinations,
   removeOrderScopedItems,
+  resyncInvoiceLines,
   syncObjectWithOverride,
   syncOrderDestinationsSelective,
   syncOrderItems,
@@ -1004,4 +1006,127 @@ Deno.test("buildInvoiceDestinationDivider nulls missing collection, accepts expl
   assertEquals(divider.path, [ORDER_DIV_1, destUid]);
   const parsed = OrderDocDestinationItem.safeParse(divider);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
+});
+
+// ── resyncInvoiceLines + computeInvoiceSyncStatus ───────────────
+
+// Raw order items (order-root-relative paths, order-only fields present) that
+// project cleanly into the invoice divider scope via buildOrderScopedItems.
+const RESYNC_DEST: LineItem = {
+  uid: DEST_1, type: "destination", name: "Main Venue",
+  uid_delivery: DEL_1, uid_collection: null, description: "", path: [DEST_1],
+};
+const RESYNC_LINE_A: LineItem = {
+  uid: ITEM_1, type: "rental", name: "Spot Light", quantity: 2, path: [DEST_1, ITEM_1],
+  stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
+  price: {
+    base: 100, chargeable_days: 5, formula: "five_day_week",
+    subtotal: 200, subtotal_discounted: 200, discount: null, taxes: [], total: 200, replacement: 5000,
+  },
+} as unknown as LineItem;
+const RESYNC_LINE_B: LineItem = {
+  uid: ITEM_2, type: "sale", name: "Tripod", quantity: 1, path: [DEST_1, ITEM_2],
+  stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
+  price: {
+    base: 300, chargeable_days: null, formula: "fixed",
+    subtotal: 300, subtotal_discounted: 300, discount: null, taxes: [], total: 300, replacement: 0,
+  },
+} as unknown as LineItem;
+const RESYNC_ORDER_ITEMS: LineItem[] = [RESYNC_DEST, RESYNC_LINE_A, RESYNC_LINE_B];
+
+const KEY_DEST = [ORDER_DIV_1, DEST_1].join("/");
+const KEY_A = [ORDER_DIV_1, DEST_1, ITEM_1].join("/");
+const KEY_B = [ORDER_DIV_1, DEST_1, ITEM_2].join("/");
+
+// In-sync invoice baseline: order divider + the exact projection of the order.
+function baselineInvoice(): InvoiceItem[] {
+  return [orderDivider, ...buildOrderScopedItems(RESYNC_ORDER_ITEMS, ORDER_DIV_1)];
+}
+
+// Order where line A grew from qty 2 → 9 (invoice not yet resynced).
+function changedOrderItems(): LineItem[] {
+  const priceA = (RESYNC_LINE_A as unknown as { price: Record<string, unknown> }).price;
+  return [
+    RESYNC_DEST,
+    { ...RESYNC_LINE_A, quantity: 9, price: { ...priceA, subtotal: 900, subtotal_discounted: 900, total: 900 } } as unknown as LineItem,
+    RESYNC_LINE_B,
+  ];
+}
+
+Deno.test("computeInvoiceSyncStatus: all lines in_sync when invoice matches the order projection", () => {
+  const status = computeInvoiceSyncStatus(baselineInvoice(), RESYNC_ORDER_ITEMS, ORDER_DIV_1);
+  assertEquals(status.get(KEY_DEST), "in_sync");
+  assertEquals(status.get(KEY_A), "in_sync");
+  assertEquals(status.get(KEY_B), "in_sync");
+});
+
+Deno.test("computeInvoiceSyncStatus: only the changed line is out_of_sync", () => {
+  const status = computeInvoiceSyncStatus(baselineInvoice(), changedOrderItems(), ORDER_DIV_1);
+  assertEquals(status.get(KEY_A), "out_of_sync"); // qty changed on the order
+  assertEquals(status.get(KEY_B), "in_sync"); // untouched
+});
+
+Deno.test("computeInvoiceSyncStatus: invoice-only overrides do not count as drift", () => {
+  const inv = baselineInvoice().map((it) =>
+    it.uid === ITEM_1 ? ({ ...it, coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceItem) : it
+  );
+  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1);
+  assertEquals(status.get(KEY_A), "in_sync"); // coa_revenue / xero_id excluded from comparison
+});
+
+Deno.test("computeInvoiceSyncStatus: order line missing from the invoice is out_of_sync", () => {
+  const inv = baselineInvoice().filter((it) => it.uid !== ITEM_2);
+  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1);
+  assertEquals(status.get(KEY_B), "out_of_sync");
+});
+
+Deno.test("computeInvoiceSyncStatus: invoice line the order dropped is out_of_sync", () => {
+  const status = computeInvoiceSyncStatus(baselineInvoice(), [RESYNC_DEST, RESYNC_LINE_A], ORDER_DIV_1);
+  assertEquals(status.get(KEY_B), "out_of_sync");
+});
+
+Deno.test("resyncInvoiceLines per-line: re-projects only the targeted line, sibling untouched", () => {
+  const result = resyncInvoiceLines(baselineInvoice(), changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
+  const a = result.find((i) => i.uid === ITEM_1)!;
+  const b = result.find((i) => i.uid === ITEM_2)!;
+  assertEquals(a.quantity, 9); // snapped to the order
+  assertEquals(b.quantity, 1); // sibling untouched
+  assertEquals((a.price as { subtotal: number }).subtotal, 900);
+});
+
+Deno.test("resyncInvoiceLines per-line: carries forward invoice-only override fields", () => {
+  const inv = baselineInvoice().map((it) =>
+    it.uid === ITEM_1 ? ({ ...it, coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceItem) : it
+  );
+  const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
+  const a = result.find((i) => i.uid === ITEM_1) as InvoiceItem;
+  assertEquals(a.quantity, 9); // body snapped to the order
+  assertEquals(a.coa_revenue, 4100); // override preserved
+  assertEquals(a.xero_id, "00000000-0000-4000-8000-000000000abc");
+});
+
+Deno.test("resyncInvoiceLines per-line: an untargeted overridden line is left as-is", () => {
+  const inv = baselineInvoice().map((it) => (it.uid === ITEM_2 ? { ...it, quantity: 7 } : it));
+  const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
+  assertEquals(result.find((i) => i.uid === ITEM_2)!.quantity, 7); // override kept
+});
+
+Deno.test("resyncInvoiceLines per-line: a target the order dropped is left untouched (not removed)", () => {
+  const result = resyncInvoiceLines(baselineInvoice(), [RESYNC_DEST, RESYNC_LINE_A], ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_2]]);
+  assertEquals(result.find((i) => i.uid === ITEM_2) !== undefined, true);
+});
+
+Deno.test("resyncInvoiceLines whole: snaps every scoped line back to the order, discarding overrides", () => {
+  const inv = baselineInvoice().map((it) => (it.uid === ITEM_2 ? { ...it, quantity: 7 } : it));
+  const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1);
+  assertEquals(result.find((i) => i.uid === ITEM_1)!.quantity, 9); // order value
+  assertEquals(result.find((i) => i.uid === ITEM_2)!.quantity, 1); // override discarded
+});
+
+Deno.test("resyncInvoiceLines: leaves other order dividers' scopes untouched", () => {
+  const inv = [...baselineInvoice(), orderDivider2, lineItem3];
+  const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
+  const l3 = result.find((i) => i.uid === ITEM_3)!;
+  assertEquals(l3.quantity, 1);
+  assertEquals(l3.path, [ORDER_DIV_2, ITEM_3]);
 });

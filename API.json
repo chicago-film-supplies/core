@@ -8576,6 +8576,14 @@
         },
         {
           "kind": "function",
+          "name": "computeInvoiceSyncStatus",
+          "signature": "computeInvoiceSyncStatus(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): Map<string, \"in_sync\" | \"out_of_sync\">",
+          "doc": "Derive each order-scoped invoice line's sync status against the CURRENT order\nprojection — no stored flag (minimal-state, derived). A line is `out_of_sync`\nwhen it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same\n`path`, ignoring the invoice-only override fields\n({@link INVOICE_ONLY_ITEM_FIELDS}); otherwise `in_sync`. Consumed by the\nmanager to badge lines and offer per-line/whole resync (see\n{@link resyncInvoiceLines}).\n\nKeyed by the full, divider-scoped `path` (`join(\"/\")`), matching what the\ninvoice stores. Scoped to one order divider; a multi-order invoice merges the\nper-divider maps. Reports as `out_of_sync`:\n- an order line the invoice is missing (keyed by its projected path), and\n- an order-scoped invoice line with no matching order line (removed upstream).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "computeItemPaths",
           "signature": "computeItemPaths(items: T[]): T[]",
           "doc": "Compute full structural paths for a flat items array AND linearize it\ndepth-first with `zero_priced` items sorted before priced ones inside each\nparent's direct-children block.\n\nEach item's path = [structural context...] + [component ancestry...] + [self uid].\n\nClient-sent paths carry component ancestry (from ProductComponent.path).\nThis function prepends structural context (dest/group) and appends self uid.\n\nThree transforms in order:\n 1. Recompute every item's `path`. Strip ALL structural uids (every dest +\n    group currently in the array) and the item's own uid from the\n    client-supplied path; also strip orphan ancestor uids — segments that\n    don't resolve to any item in the array (e.g. catalog-only intermediate\n    kit uids that were never materialized). Then prepend the structural\n    prefix and append the item's own uid.\n 2. Linearize line items inside each (destination, group) block as a tree:\n    each parent product is followed by its full subtree before the next\n    sibling. Destination and group dividers stay where they are; only the\n    line items between them are reordered.\n 3. Within each parent's direct-children, stable-sort `zero_priced === true`\n    before others. Drag-drop reorders preserve intra-band order.\n\nPure: returns a fresh array of fresh items. Inputs are not mutated, so it is\nsafe to pass items that originate from a Solid store proxy (the manager app\nroutes reordered arrays through this function inside `setEntity` updaters).\nCallers should replace their working array with the return value.\n\nPost-condition (under the within-parent uniqueness invariant): a parent and\nits full subtree occupy a contiguous index range, so `getItemSubtreeRange`\nand `getGroupItems` can rely on path-prefix matching alone.",
@@ -8776,6 +8784,14 @@
             }
           ],
           "returnsTag": "Items with the order scope removed"
+        },
+        {
+          "kind": "function",
+          "name": "resyncInvoiceLines",
+          "signature": "resyncInvoiceLines(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string, targetPaths?: string[][]): InvoiceItem[]",
+          "doc": "Re-project an order's lines into an invoice, on demand.\n\nThe automatic `syncOrderToInvoiceSelective` (inside `updateOrder`) keeps\nnon-overridden lines current as the order changes. This is the operator's\nmanual trigger to either snap a whole order's scope back to the order after\nedits, or re-pull individual lines by `path` — the escape hatch for a line\nthat was overridden on the invoice and should now track the order again.\n\nPure: returns a fresh items array; the input is not mutated. Scoped to one\n**order divider** — a multi-order invoice loops its linked orders. Invoice-only\noverride fields (`coa_revenue`, `tracking_category`, `xero_id`,\n`xero_tracking_option_id`) are always carried forward.\n\n- `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from\n  the order — a hard snap-to-order, so price overrides are discarded and lines\n  the order dropped are removed. Delegates to {@link syncOrderItems}.\n- `targetPaths` given → **per-line**: only lines at those full, divider-scoped\n  paths are replaced with a fresh projection of the matching order line; every\n  other line — siblings and untargeted overrides — is left untouched. A target\n  path the order no longer has is left as-is (use a whole resync to drop\n  removed lines); a target path not on the invoice is a no-op.\n\nThe caller re-linearizes paths via {@link computeInvoiceItemPaths} and\nrecomputes `totals` via {@link calculateInvoiceTotals} before writing.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",

@@ -15631,6 +15631,22 @@ Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
 safe to pass items that originate from a Solid store proxy. Callers should
 replace their working array with the return value.
 
+### `computeInvoiceSyncStatus(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): Map<string, "in_sync" | "out_of_sync">`
+
+Derive each order-scoped invoice line's sync status against the CURRENT order
+projection — no stored flag (minimal-state, derived). A line is `out_of_sync`
+when it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same
+`path`, ignoring the invoice-only override fields
+({@link INVOICE_ONLY_ITEM_FIELDS}); otherwise `in_sync`. Consumed by the
+manager to badge lines and offer per-line/whole resync (see
+{@link resyncInvoiceLines}).
+
+Keyed by the full, divider-scoped `path` (`join("/")`), matching what the
+invoice stores. Scoped to one order divider; a multi-order invoice merges the
+per-divider maps. Reports as `out_of_sync`:
+- an order line the invoice is missing (keyed by its projected path), and
+- an order-scoped invoice line with no matching order line (removed upstream).
+
 ### `computeItemPaths(items: T[]): T[]`
 
 Compute full structural paths for a flat items array AND linearize it
@@ -15805,6 +15821,33 @@ starts with the order divider's uid removed.
 - `orderDividerUid` — The uid of the order divider item to remove
 
 **Returns** — Items with the order scope removed
+
+### `resyncInvoiceLines(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string, targetPaths?: string[][]): InvoiceItem[]`
+
+Re-project an order's lines into an invoice, on demand.
+
+The automatic `syncOrderToInvoiceSelective` (inside `updateOrder`) keeps
+non-overridden lines current as the order changes. This is the operator's
+manual trigger to either snap a whole order's scope back to the order after
+edits, or re-pull individual lines by `path` — the escape hatch for a line
+that was overridden on the invoice and should now track the order again.
+
+Pure: returns a fresh items array; the input is not mutated. Scoped to one
+**order divider** — a multi-order invoice loops its linked orders. Invoice-only
+override fields (`coa_revenue`, `tracking_category`, `xero_id`,
+`xero_tracking_option_id`) are always carried forward.
+
+- `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from
+  the order — a hard snap-to-order, so price overrides are discarded and lines
+  the order dropped are removed. Delegates to {@link syncOrderItems}.
+- `targetPaths` given → **per-line**: only lines at those full, divider-scoped
+  paths are replaced with a fresh projection of the matching order line; every
+  other line — siblings and untargeted overrides — is left untouched. A target
+  path the order no longer has is left as-is (use a whole resync to drop
+  removed lines); a target path not on the invoice is a no-op.
+
+The caller re-linearizes paths via {@link computeInvoiceItemPaths} and
+recomputes `totals` via {@link calculateInvoiceTotals} before writing.
 
 ### `syncObjectWithOverride(prevOrderValue: T, newOrderValue: T, currentInvoiceValue: T, keys?: parenthesized[]): T`
 
