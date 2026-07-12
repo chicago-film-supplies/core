@@ -4913,7 +4913,7 @@ interface SaveQuoteVersionInputType {
 Union of all Firestore document types. Use with validateBeforeWrite.
 
 ```ts
-type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User | WebhookEvent | WebshopProduct | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 ```
 
 ### `SchemaField`
@@ -6604,6 +6604,25 @@ interface UpdateVariableHolidayInputType {
   day: number;
   week: HolidayWeekInputType;
 }
+```
+
+### `UploadcareSweepRun`
+
+One recorded sweep run.
+
+```ts
+interface UploadcareSweepRun {
+  ref_counts: Record<string, number>;
+  recorded_at: string;
+}
+```
+
+### `UploadcareSweepRunSchema`
+
+Zod schema for UploadcareSweepRun.
+
+```ts
+const UploadcareSweepRunSchema: z.ZodType<UploadcareSweepRun>;
 ```
 
 ### `User`
@@ -14961,6 +14980,27 @@ container markers stripped (`pdf_versions[].uploadcare_uuid` → `pdf_versions`)
 
 Throws on an unknown collection rather than returning `[]`: an empty
 projection would silently under-count the sweep's canary.
+
+## `@cfs/core/schemas/uploadcare-sweep`
+
+### `UploadcareSweepRun`
+
+One recorded sweep run.
+
+```ts
+interface UploadcareSweepRun {
+  ref_counts: Record<string, number>;
+  recorded_at: string;
+}
+```
+
+### `UploadcareSweepRunSchema`
+
+Zod schema for UploadcareSweepRun.
+
+```ts
+const UploadcareSweepRunSchema: z.ZodType<UploadcareSweepRun>;
+```
 
 ## `@cfs/core/schemas/role`
 

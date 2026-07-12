@@ -622,6 +622,11 @@ export {
 } from "./typesense-config.ts";
 
 export {
+  UploadcareSweepRunSchema,
+  type UploadcareSweepRun,
+} from "./uploadcare-sweep.ts";
+
+export {
   WebhookEventSchema,
   type WebhookEvent,
 } from "./webhook-event.ts";
@@ -921,6 +926,7 @@ import type { Tax } from "./tax.ts";
 import type { TrackingCategory } from "./tracking-category.ts";
 import type { Transaction } from "./transaction.ts";
 import type { TypesenseConfig } from "./typesense-config.ts";
+import type { UploadcareSweepRun } from "./uploadcare-sweep.ts";
 import type { User } from "./user.ts";
 import type { WebhookEvent } from "./webhook-event.ts";
 import type { WebshopProduct } from "./webshop-product.ts";
@@ -939,7 +945,7 @@ export type SchemaDocType =
   | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
   | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
-  | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | User
+  | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | UploadcareSweepRun | User
   | WebhookEvent | WebshopProduct
   | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 
@@ -989,6 +995,7 @@ import { TrackingCategorySchema } from "./tracking-category.ts";
 import { TransactionSchema } from "./transaction.ts";
 import { UserSchema } from "./user.ts";
 import { TypesenseConfigSchema } from "./typesense-config.ts";
+import { UploadcareSweepRunSchema } from "./uploadcare-sweep.ts";
 import { WebhookEventSchema as WebhookEventSchema_ } from "./webhook-event.ts";
 import { WebshopProductSchema } from "./webshop-product.ts";
 import { OrderDocumentSchema as OrderDocumentSchema_ } from "./order-document.ts";
@@ -1053,6 +1060,7 @@ export const schemas: Record<string, z.ZodType> = {
   "events": WebhookEventSchema_,
   "webshop-product": WebshopProductSchema, "webshop-products": WebshopProductSchema,
   "typesense-config": TypesenseConfigSchema, "typesense": TypesenseConfigSchema,
+  "uploadcare-sweep": UploadcareSweepRunSchema,
   "documents": OrderDocumentSchema_,
   "template_previews": PreviewRecordSchema_,
   "mcp-oauth-clients": McpOAuthClientSchema_,
