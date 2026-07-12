@@ -31,6 +31,11 @@ export const INTEGRATION_EVENT_MSGS = [
   "uploadcare_orphan_batch_failed",
   "uploadcare_orphan_cleanup_failed",
   "uploadcare_orphan_sweep_completed",
+  // A CDN file was uploaded but the transaction that would have recorded a
+  // reference to it failed ambiguously (e.g. a lost commit ack), so we
+  // deliberately do NOT delete it — the write may have landed. Left for the
+  // orphan sweep to reap; deleting here risks a live order with dead PDF links.
+  "uploadcare_upload_abandoned",
   "processUpload_delete_original_failed",
   "processUpload_no_file_id",
   "processUpload_skipped",

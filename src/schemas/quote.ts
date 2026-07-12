@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { FirestoreId, QuoteId } from "./_uid.ts";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
+import { uploadcareRef } from "./uploadcare/ref.ts";
 
 /** A PDF quote document associated with an order. */
 export interface Quote {
@@ -29,7 +30,7 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   order_number: z.number(),
   version: z.int().min(0).nullable(),
   is_draft: z.boolean(),
-  uploadcare_uuid: z.string().nullable(),
+  uploadcare_uuid: uploadcareRef(z.string().nullable()),
   deleted_at: FirestoreTimestamp.nullable(),
   expires_at: FirestoreTimestamp.nullable(),
   created_at: FirestoreTimestamp,

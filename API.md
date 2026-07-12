@@ -512,6 +512,12 @@ const CardActionSchema: z.ZodType<CardAction>;
 
 Zod schema for a card attachment.
 
+One node, seven consumers — `CardSchema`, `RecurrenceSchema`'s prototype, and
+the create/update inputs of both all reference this same instance (no
+`.extend()` / `.omit()` / `.pick()` anywhere in `src/schemas/`), and
+`z.globalRegistry` is a WeakMap keyed on the instance. So the single
+`uploadcareRef()` below annotates `uid` for every one of them.
+
 ```ts
 const CardAttachment: z.ZodType<CardAttachmentType>;
 ```
@@ -8434,6 +8440,12 @@ const CardActionSchema: z.ZodType<CardAction>;
 
 Zod schema for a card attachment.
 
+One node, seven consumers — `CardSchema`, `RecurrenceSchema`'s prototype, and
+the create/update inputs of both all reference this same instance (no
+`.extend()` / `.omit()` / `.pick()` anywhere in `src/schemas/`), and
+`z.globalRegistry` is a WeakMap keyed on the instance. So the single
+`uploadcareRef()` below annotates `uid` for every one of them.
+
 ```ts
 const CardAttachment: z.ZodType<CardAttachmentType>;
 ```
@@ -13954,7 +13966,7 @@ const EmailSentLogRecordSchema: z.ZodType<EmailSentLogRecord>;
 Msg literals this archetype absorbs.
 
 ```ts
-const INTEGRATION_EVENT_MSGS: "crms_invoice_items_uniqueness_violation" | "crms_invoice_multidest_flat" | "crms_invoice_multiple_orders_found" | "crms_invoice_order_not_found" | "crms_mark_paid_failed" | "crms_product_not_found" | "uploadcare_attachment_cleanup_failed" | "uploadcare_draft_cleanup_failed" | "uploadcare_file_not_found" | "uploadcare_invoice_cleanup_failed" | "uploadcare_invoice_version_cleanup_failed" | "uploadcare_metadata_failed" | "uploadcare_orphan_batch_failed" | "uploadcare_orphan_cleanup_failed" | "uploadcare_orphan_sweep_completed" | "processUpload_delete_original_failed" | "processUpload_no_file_id" | "processUpload_skipped" | "process_upload_failed" | "dmarc_report_ingest_failed" | "dmarc_report_processor_run" | "eventarc_duplicate_event" | "eventarc_processed" | "trello_locked" | "trello_newer_update_detected" | "trello_no_new_updates" | "trello_queue_error" | "mirror_deleted" | "mirror_failed" | "mirror_set" | "mirror_set_failed_terminal" | "mirror_set_queue_failed" | "mirror_skipped_stale" | "draft_quote_skipped_deleted" | "draft_quote_skipped_invalid_order" | "draft_quote_superseded" | "dns_record_check" | "dns_record_check_resolve_failed" | "location_integrity_check" | "location_integrity_check_failed" | "sync_collection_completed" | "sync_collection_skipped" | "sync_started" | "geocode_cache_write_failed" | "geocode_poi_fallback" | "geocoding_failed" | "member_geocode_skipped" | "user_name_cascade_batch" | "customer_linking_failed"[];
+const INTEGRATION_EVENT_MSGS: "crms_invoice_items_uniqueness_violation" | "crms_invoice_multidest_flat" | "crms_invoice_multiple_orders_found" | "crms_invoice_order_not_found" | "crms_mark_paid_failed" | "crms_product_not_found" | "uploadcare_attachment_cleanup_failed" | "uploadcare_draft_cleanup_failed" | "uploadcare_file_not_found" | "uploadcare_invoice_cleanup_failed" | "uploadcare_invoice_version_cleanup_failed" | "uploadcare_metadata_failed" | "uploadcare_orphan_batch_failed" | "uploadcare_orphan_cleanup_failed" | "uploadcare_orphan_sweep_completed" | "uploadcare_upload_abandoned" | "processUpload_delete_original_failed" | "processUpload_no_file_id" | "processUpload_skipped" | "process_upload_failed" | "dmarc_report_ingest_failed" | "dmarc_report_processor_run" | "eventarc_duplicate_event" | "eventarc_processed" | "trello_locked" | "trello_newer_update_detected" | "trello_no_new_updates" | "trello_queue_error" | "mirror_deleted" | "mirror_failed" | "mirror_set" | "mirror_set_failed_terminal" | "mirror_set_queue_failed" | "mirror_skipped_stale" | "draft_quote_skipped_deleted" | "draft_quote_skipped_invalid_order" | "draft_quote_superseded" | "dns_record_check" | "dns_record_check_resolve_failed" | "location_integrity_check" | "location_integrity_check_failed" | "sync_collection_completed" | "sync_collection_skipped" | "sync_started" | "geocode_cache_write_failed" | "geocode_poi_fallback" | "geocoding_failed" | "member_geocode_skipped" | "user_name_cascade_batch" | "customer_linking_failed"[];
 ```
 
 ### `IntegrationEventLogRecord`
@@ -14845,6 +14857,110 @@ correlate; ensure the caller has skipped null/undefined.
 
 - `value` — Raw string to pseudonymize.
 - `key` — HMAC secret. Must be stable across instances for correlation.
+
+## `@cfs/core/schemas/uploadcare`
+
+### `MEDIA_CONTAINER_RE`
+
+Field/parent names that conventionally *contain* CDN files.
+
+**Do not widen this list.** Adding `icons?|logos?|…` makes `lists::icon`
+(`list.ts`, a UI icon/colour pair) a candidate with no exemption, and the
+lint fails on day one for a field that has nothing to do with the CDN. The
+residual — a CDN field named `logo` or `signature` — is deliberately left to
+the harvest, which does not care what a field is called.
+
+```ts
+const MEDIA_CONTAINER_RE: RegExp;
+```
+
+### `UPLOADCARE_CANDIDATE_EXEMPTIONS`
+
+Candidate leaves that are NOT CDN file ids. Keyed `<collection>::<leaf path>`.
+
+A stale entry here is an ergonomics bug, never a data-loss bug — the harvest
+protects files regardless of what this map says. `uploadcareRef.test.ts`
+asserts in both directions, so an exemption for a field that no longer exists
+fails the build.
+
+```ts
+const UPLOADCARE_CANDIDATE_EXEMPTIONS: ReadonlyMap<string, string>;
+```
+
+### `UPLOADCARE_COLLECTION_KEYS`
+
+The collections that hold CDN refs today, **pinned**.
+
+Pinned rather than derived because the `schemas` record deliberately maps a
+singular *and* a plural key to the same instance (`"card"` and `"cards"` are
+the same node), so "dedupe by instance" is underdetermined — first-wins gives
+the singular, last-wins the plural, and only one of them is the Firestore
+collection name the sweep counts against.
+
+These are `schemas`-record keys, NOT the schema-level `.meta({ collection })`:
+`OrderDocumentSchema`'s meta reads `"orders/{uid}/documents"`, which matches
+neither the sweep's `collectionCounts` keys nor `db.collectionGroup("documents")`.
+
+```ts
+const UPLOADCARE_COLLECTION_KEYS: "quotes" | "invoices" | "products" | "cards" | "recurrences" | "templates-versions" | "documents"[];
+```
+
+### `UPLOADCARE_REF_META`
+
+The `.meta()` key `uploadcareRef()` sets. Read by the walker + the lint.
+
+```ts
+const UPLOADCARE_REF_META: "uploadcareRef";
+```
+
+### `UploadcareCollectionKey`
+
+A key of {@link UPLOADCARE_COLLECTION_KEYS}.
+
+```ts
+type UploadcareCollectionKey = indexedAccess;
+```
+
+### `isUploadcareCandidate(leaf: LeafPath): boolean`
+
+True when a leaf looks like it holds an Uploadcare CDN file id.
+
+The `type === "string"` gate is REQUIRED, not cosmetic: without it the
+predicate also matches `attachments[].{type,size_bytes,locked}` and yields 19
+candidates instead of 13.
+
+A `format === "uuid"` heuristic is unusable as an arm here — dozens of leaves
+carry it, because `ItemUid` is a union containing `z.uuid()` and spreads
+through orders / invoices / fulfillments / tags / stores, and every `xero_id`
+is a `z.uuid()` too.
+
+### `uploadcareRef(schema: T): T`
+
+Mark a schema node as holding an Uploadcare CDN file id.
+
+Wrap the **leaf**, not its container: `z.array(uploadcareRef(z.string()))`,
+never `uploadcareRef(z.array(z.string()))`. `collectLeafPaths` merges meta
+down a node's own wrapper chain (`.optional()`, `.nullable()`, …) but not
+across a container boundary, so an annotation on the array node would be
+invisible to `uploadcareRefPaths()`. The lint catches that: the element leaf
+stays an unwrapped candidate and assertion 1 fails.
+
+### `uploadcareRefPaths(): Record<string, string[]>`
+
+Every `uploadcareRef()`-annotated leaf, grouped by collection.
+
+Paths carry `collectLeafPaths`' container markers, e.g.
+`{ invoices: ["uploadcare_uuid", "pdf_versions[].uploadcare_uuid"] }`.
+Sorted for a stable snapshot.
+
+### `uploadcareSelectFields(collection: string): string[]`
+
+The top-level Firestore field names a `.select()` projection must carry to
+reach every CDN ref in `collection` — the first path segment of each ref,
+container markers stripped (`pdf_versions[].uploadcare_uuid` → `pdf_versions`).
+
+Throws on an unknown collection rather than returning `[]`: an empty
+projection would silently under-count the sweep's canary.
 
 ## `@cfs/core/schemas/role`
 

@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
+import { uploadcareRef } from "./uploadcare/ref.ts";
 import { type TransactionStore, TransactionStoreSchema } from "./transaction.ts";
 import {
   ActorRef,
@@ -220,7 +221,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     available: z.boolean().default(false),
     description: z.string().nullable().optional(),
   }),
-  images: z.array(z.string()).optional(),
+  images: z.array(uploadcareRef(z.string())).optional(),
   xero_id: z.uuid().nullable(),
   // Optional (not `.nullable()`-required) so the ~531 existing product docs
   // validate unchanged before the backfill lands.

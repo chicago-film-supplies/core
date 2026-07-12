@@ -27,6 +27,7 @@
 import { z } from "zod";
 import { CardId, FirestoreId, ListId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
+import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -150,9 +151,17 @@ export interface CardAttachmentType {
   locked: boolean;
 }
 
-/** Zod schema for a card attachment. */
+/**
+ * Zod schema for a card attachment.
+ *
+ * One node, seven consumers — `CardSchema`, `RecurrenceSchema`'s prototype, and
+ * the create/update inputs of both all reference this same instance (no
+ * `.extend()` / `.omit()` / `.pick()` anywhere in `src/schemas/`), and
+ * `z.globalRegistry` is a WeakMap keyed on the instance. So the single
+ * `uploadcareRef()` below annotates `uid` for every one of them.
+ */
 export const CardAttachment: z.ZodType<CardAttachmentType> = z.strictObject({
-  uid: z.uuid(),
+  uid: uploadcareRef(z.uuid()),
   type: CardAttachmentTypeEnumSchema,
   filename: z.string().min(1).max(260).meta({ pii: "mask" }),
   mime_type: z.string().min(1).max(120),

@@ -10,6 +10,7 @@
  */
 import { z } from "zod";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
+import { uploadcareRef } from "./uploadcare/ref.ts";
 
 /** Metadata for a single generated order document (quote / packing list PDF). */
 export interface OrderDocument {
@@ -23,7 +24,7 @@ export interface OrderDocument {
 export const OrderDocumentSchema: z.ZodType<OrderDocument> = z.strictObject({
   // Uploadcare CDN file id — kept a plain non-empty string (not z.uuid()) so a
   // non-UUID CDN id can never block a regen write.
-  uuid: z.string().min(1),
+  uuid: uploadcareRef(z.string().min(1)),
   mime: z.string().min(1),
   name: z.string().min(1),
   orderUpdatedAt: FirestoreTimestamp,

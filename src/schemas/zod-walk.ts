@@ -28,6 +28,8 @@ interface ZodInternalDef {
   format?: string;
   in?: z.ZodType;
   out?: z.ZodType;
+  /** Member schemas of a `z.union()` / `z.discriminatedUnion()`. */
+  options?: z.ZodType[];
 }
 
 function getDef(node: z.ZodType): ZodInternalDef {
@@ -243,4 +245,199 @@ export function getServerSortableColumns(
 
   walk(schema, "", 0);
   return out;
+}
+
+// ── collectLeafPaths ─────────────────────────────────────────────────
+
+/**
+ * Nodes that annotate the schema below them without changing its shape. Walked
+ * through transparently, accumulating `.meta()` on the way down: `.meta()`
+ * registers on the *instance it is called on*, so `f(z.string()).nullable()` and
+ * `f(z.string().nullable())` land the meta on different nodes and only a merge
+ * finds both. (Same lesson as `hasPii` in `tests/pii.test.ts`.)
+ */
+const TRANSPARENT_TYPES: ReadonlySet<string> = new Set([
+  "optional",
+  "default",
+  "nullable",
+  "prefault",
+  "catch",
+  "readonly",
+  "nonoptional",
+]);
+
+/**
+ * Node types emitted as leaves. Atomic — none of them can hide a subtree, which
+ * is what makes it safe to stop here. Anything not in this set and not descended
+ * below lands in `unhandled` (see {@link collectLeafPaths}).
+ */
+const LEAF_TYPES: ReadonlySet<string> = new Set([
+  "string",
+  "number",
+  "boolean",
+  "enum",
+  "literal",
+  "template_literal",
+  "custom",
+  "unknown",
+  "any",
+  "null",
+  "undefined",
+  "date",
+  "bigint",
+]);
+
+/** A scalar leaf reached by {@link collectLeafPaths}. */
+export interface LeafPath {
+  /** Dotted path with container markers: `pdf_versions[].uploadcare_uuid`,
+   *  `images[]`, `golden_results[].image_uuids.candidate`, `content.<key>`. */
+  path: string;
+  /** The leaf node, wrappers stripped. */
+  node: z.ZodType;
+  /** `_zod.def.type` of the stripped leaf. */
+  type: string;
+  /** `_zod.def.format` when present (`"uuid"`, `"datetime"`, `"email"`, …). */
+  format?: string;
+  /** Merged `.meta()` from the leaf and every transparent wrapper above it. */
+  meta: Record<string, unknown>;
+}
+
+/** Result of {@link collectLeafPaths}. `unhandled` MUST be empty — see below. */
+export interface CollectLeafPathsResult {
+  leaves: LeafPath[];
+  /** Nodes the walker refused to interpret. A non-empty array means the walk is
+   *  incomplete and any assertion built on `leaves` is unsound. */
+  unhandled: Array<{ path: string; type: string }>;
+}
+
+/**
+ * Walk a schema and collect every scalar leaf with its dotted path and merged
+ * meta. Backs the Uploadcare authoring lint (`schemas/uploadcare/`) — a third
+ * meta-collecting walker alongside `applyPii` and `getServerSortableColumns`,
+ * neither of which is reusable here (the latter is depth-capped at 1 and skips
+ * arrays entirely).
+ *
+ * **It fails CLOSED.** A walker that emits unrecognised nodes as leaves would
+ * silently swallow their subtree — a field named `attachments` typed
+ * `z.tuple([...])` would vanish from the walk and be invisible to every
+ * assertion built on it. So the type allowlist is two-sided: descend the known
+ * containers, emit the known scalars, and push everything else into
+ * `unhandled`, which callers are expected to assert is empty.
+ *
+ * Traversal:
+ * - **transparent wrappers** (`optional`, `default`, `nullable`, `prefault`,
+ *   `catch`, `readonly`, `nonoptional`) and **pipes** (`def.in` — the input side
+ *   of `chicagoInstant()` et al) are walked through, merging meta at each level;
+ * - **object** → each field, `path.key`;
+ * - **array** → the element, `path[]`;
+ * - **record** → the value type, `path.<key>` (dynamic keys aren't enumerable);
+ * - **union / discriminatedUnion** → every member at the *same* path, deduped by
+ *   (path, node identity) so shared nodes are visited once.
+ *
+ * Meta does **not** cross a container boundary: an object's schema-level
+ * `.meta({ title, collection })` must not leak onto its fields, and by symmetry
+ * an annotation on an array node does not reach its element. Annotate the leaf.
+ *
+ * `maxDepth` defaults to **24**. Wrappers are nodes, so depth counts them: the
+ * deepest chain in core today measures 10, and an obvious-looking 12 would have
+ * been one `.optional().nullable()` away from silently truncating. Hitting the
+ * cap pushes a `__depth_cap__` entry into `unhandled` rather than returning
+ * quietly.
+ */
+export function collectLeafPaths(
+  schema: z.ZodType,
+  opts?: { maxDepth?: number },
+): CollectLeafPathsResult {
+  const maxDepth = opts?.maxDepth ?? 24;
+  const leaves: LeafPath[] = [];
+  const unhandled: Array<{ path: string; type: string }> = [];
+  /** (path → nodes already visited at it) — dedupes union members and, as a
+   *  side effect, makes a self-referential schema terminate. */
+  const visited = new Map<string, Set<z.ZodType>>();
+
+  function walk(
+    node: z.ZodType,
+    path: string,
+    depth: number,
+    inherited: Record<string, unknown>,
+  ): void {
+    if (depth > maxDepth) {
+      unhandled.push({ path, type: "__depth_cap__" });
+      return;
+    }
+
+    let seenAtPath = visited.get(path);
+    if (!seenAtPath) {
+      seenAtPath = new Set();
+      visited.set(path, seenAtPath);
+    }
+    if (seenAtPath.has(node)) return;
+    seenAtPath.add(node);
+
+    const def = getDef(node);
+    const own = getNodeMeta(node);
+    const meta = own ? { ...inherited, ...own } : inherited;
+
+    if (TRANSPARENT_TYPES.has(def.type) && def.innerType) {
+      walk(def.innerType, path, depth + 1, meta);
+      return;
+    }
+    if (def.type === "pipe" && def.in) {
+      walk(def.in, path, depth + 1, meta);
+      return;
+    }
+
+    if (def.type === "object") {
+      if (!def.shape) {
+        unhandled.push({ path, type: def.type });
+        return;
+      }
+      for (const [key, child] of Object.entries(def.shape)) {
+        walk(child, path ? `${path}.${key}` : key, depth + 1, {});
+      }
+      return;
+    }
+    if (def.type === "array") {
+      if (!def.element) {
+        unhandled.push({ path, type: def.type });
+        return;
+      }
+      walk(def.element, `${path}[]`, depth + 1, {});
+      return;
+    }
+    if (def.type === "record") {
+      if (!def.valueType) {
+        unhandled.push({ path, type: def.type });
+        return;
+      }
+      walk(def.valueType, `${path}.<key>`, depth + 1, {});
+      return;
+    }
+    if (def.type === "union") {
+      if (!def.options) {
+        unhandled.push({ path, type: def.type });
+        return;
+      }
+      for (const option of def.options) {
+        walk(option, path, depth + 1, meta);
+      }
+      return;
+    }
+
+    if (LEAF_TYPES.has(def.type)) {
+      leaves.push({
+        path,
+        node,
+        type: def.type,
+        ...(def.format ? { format: def.format } : {}),
+        meta,
+      });
+      return;
+    }
+
+    unhandled.push({ path, type: def.type });
+  }
+
+  walk(schema, "", 0, {});
+  return { leaves, unhandled };
 }

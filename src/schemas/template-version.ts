@@ -19,6 +19,7 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
+import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -129,8 +130,8 @@ export const GoldenDiffSchema: z.ZodType<GoldenDiff> = z.strictObject({
   verdict: z.enum(GOLDEN_DIFF_VERDICTS),
   delta: z.number(),
   image_uuids: z.strictObject({
-    candidate: z.string().optional(),
-    diff: z.string().optional(),
+    candidate: uploadcareRef(z.string().optional()),
+    diff: uploadcareRef(z.string().optional()),
   }),
   sha: z.string().min(1),
   checked_at: FirestoreTimestamp,

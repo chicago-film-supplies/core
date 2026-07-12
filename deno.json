@@ -47,6 +47,7 @@
     "./schemas/log": "./src/schemas/log/mod.ts",
     "./schemas/pii": "./src/schemas/pii/mod.ts",
     "./schemas/pii/hash-node": "./src/schemas/pii/hash-node.ts",
+    "./schemas/uploadcare": "./src/schemas/uploadcare/mod.ts",
     "./schemas/role": "./src/schemas/role.ts",
     "./schemas/permissions": "./src/schemas/permissions.ts",
     "./schemas/thread": "./src/schemas/thread.ts",

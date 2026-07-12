@@ -268,7 +268,7 @@
           "kind": "variable",
           "name": "CardAttachment",
           "declaration": "const CardAttachment: z.ZodType<CardAttachmentType>;",
-          "doc": "Zod schema for a card attachment."
+          "doc": "Zod schema for a card attachment.\n\nOne node, seven consumers — `CardSchema`, `RecurrenceSchema`'s prototype, and\nthe create/update inputs of both all reference this same instance (no\n`.extend()` / `.omit()` / `.pick()` anywhere in `src/schemas/`), and\n`z.globalRegistry` is a WeakMap keyed on the instance. So the single\n`uploadcareRef()` below annotates `uid` for every one of them."
         },
         {
           "kind": "interface",
@@ -4777,7 +4777,7 @@
           "kind": "variable",
           "name": "CardAttachment",
           "declaration": "const CardAttachment: z.ZodType<CardAttachmentType>;",
-          "doc": "Zod schema for a card attachment."
+          "doc": "Zod schema for a card attachment.\n\nOne node, seven consumers — `CardSchema`, `RecurrenceSchema`'s prototype, and\nthe create/update inputs of both all reference this same instance (no\n`.extend()` / `.omit()` / `.pick()` anywhere in `src/schemas/`), and\n`z.globalRegistry` is a WeakMap keyed on the instance. So the single\n`uploadcareRef()` below annotates `uid` for every one of them."
         },
         {
           "kind": "interface",
@@ -7587,7 +7587,7 @@
         {
           "kind": "variable",
           "name": "INTEGRATION_EVENT_MSGS",
-          "declaration": "const INTEGRATION_EVENT_MSGS: \"crms_invoice_items_uniqueness_violation\" | \"crms_invoice_multidest_flat\" | \"crms_invoice_multiple_orders_found\" | \"crms_invoice_order_not_found\" | \"crms_mark_paid_failed\" | \"crms_product_not_found\" | \"uploadcare_attachment_cleanup_failed\" | \"uploadcare_draft_cleanup_failed\" | \"uploadcare_file_not_found\" | \"uploadcare_invoice_cleanup_failed\" | \"uploadcare_invoice_version_cleanup_failed\" | \"uploadcare_metadata_failed\" | \"uploadcare_orphan_batch_failed\" | \"uploadcare_orphan_cleanup_failed\" | \"uploadcare_orphan_sweep_completed\" | \"processUpload_delete_original_failed\" | \"processUpload_no_file_id\" | \"processUpload_skipped\" | \"process_upload_failed\" | \"dmarc_report_ingest_failed\" | \"dmarc_report_processor_run\" | \"eventarc_duplicate_event\" | \"eventarc_processed\" | \"trello_locked\" | \"trello_newer_update_detected\" | \"trello_no_new_updates\" | \"trello_queue_error\" | \"mirror_deleted\" | \"mirror_failed\" | \"mirror_set\" | \"mirror_set_failed_terminal\" | \"mirror_set_queue_failed\" | \"mirror_skipped_stale\" | \"draft_quote_skipped_deleted\" | \"draft_quote_skipped_invalid_order\" | \"draft_quote_superseded\" | \"dns_record_check\" | \"dns_record_check_resolve_failed\" | \"location_integrity_check\" | \"location_integrity_check_failed\" | \"sync_collection_completed\" | \"sync_collection_skipped\" | \"sync_started\" | \"geocode_cache_write_failed\" | \"geocode_poi_fallback\" | \"geocoding_failed\" | \"member_geocode_skipped\" | \"user_name_cascade_batch\" | \"customer_linking_failed\"[];",
+          "declaration": "const INTEGRATION_EVENT_MSGS: \"crms_invoice_items_uniqueness_violation\" | \"crms_invoice_multidest_flat\" | \"crms_invoice_multiple_orders_found\" | \"crms_invoice_order_not_found\" | \"crms_mark_paid_failed\" | \"crms_product_not_found\" | \"uploadcare_attachment_cleanup_failed\" | \"uploadcare_draft_cleanup_failed\" | \"uploadcare_file_not_found\" | \"uploadcare_invoice_cleanup_failed\" | \"uploadcare_invoice_version_cleanup_failed\" | \"uploadcare_metadata_failed\" | \"uploadcare_orphan_batch_failed\" | \"uploadcare_orphan_cleanup_failed\" | \"uploadcare_orphan_sweep_completed\" | \"uploadcare_upload_abandoned\" | \"processUpload_delete_original_failed\" | \"processUpload_no_file_id\" | \"processUpload_skipped\" | \"process_upload_failed\" | \"dmarc_report_ingest_failed\" | \"dmarc_report_processor_run\" | \"eventarc_duplicate_event\" | \"eventarc_processed\" | \"trello_locked\" | \"trello_newer_update_detected\" | \"trello_no_new_updates\" | \"trello_queue_error\" | \"mirror_deleted\" | \"mirror_failed\" | \"mirror_set\" | \"mirror_set_failed_terminal\" | \"mirror_set_queue_failed\" | \"mirror_skipped_stale\" | \"draft_quote_skipped_deleted\" | \"draft_quote_skipped_invalid_order\" | \"draft_quote_superseded\" | \"dns_record_check\" | \"dns_record_check_resolve_failed\" | \"location_integrity_check\" | \"location_integrity_check_failed\" | \"sync_collection_completed\" | \"sync_collection_skipped\" | \"sync_started\" | \"geocode_cache_write_failed\" | \"geocode_poi_fallback\" | \"geocoding_failed\" | \"member_geocode_skipped\" | \"user_name_cascade_batch\" | \"customer_linking_failed\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
@@ -8014,6 +8014,74 @@
               "doc": "HMAC secret. Must be stable across instances for correlation."
             }
           ],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/uploadcare",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "MEDIA_CONTAINER_RE",
+          "declaration": "const MEDIA_CONTAINER_RE: RegExp;",
+          "doc": "Field/parent names that conventionally *contain* CDN files.\n\n**Do not widen this list.** Adding `icons?|logos?|…` makes `lists::icon`\n(`list.ts`, a UI icon/colour pair) a candidate with no exemption, and the\nlint fails on day one for a field that has nothing to do with the CDN. The\nresidual — a CDN field named `logo` or `signature` — is deliberately left to\nthe harvest, which does not care what a field is called."
+        },
+        {
+          "kind": "variable",
+          "name": "UPLOADCARE_CANDIDATE_EXEMPTIONS",
+          "declaration": "const UPLOADCARE_CANDIDATE_EXEMPTIONS: ReadonlyMap<string, string>;",
+          "doc": "Candidate leaves that are NOT CDN file ids. Keyed `<collection>::<leaf path>`.\n\nA stale entry here is an ergonomics bug, never a data-loss bug — the harvest\nprotects files regardless of what this map says. `uploadcareRef.test.ts`\nasserts in both directions, so an exemption for a field that no longer exists\nfails the build."
+        },
+        {
+          "kind": "variable",
+          "name": "UPLOADCARE_COLLECTION_KEYS",
+          "declaration": "const UPLOADCARE_COLLECTION_KEYS: \"quotes\" | \"invoices\" | \"products\" | \"cards\" | \"recurrences\" | \"templates-versions\" | \"documents\"[];",
+          "doc": "The collections that hold CDN refs today, **pinned**.\n\nPinned rather than derived because the `schemas` record deliberately maps a\nsingular *and* a plural key to the same instance (`\"card\"` and `\"cards\"` are\nthe same node), so \"dedupe by instance\" is underdetermined — first-wins gives\nthe singular, last-wins the plural, and only one of them is the Firestore\ncollection name the sweep counts against.\n\nThese are `schemas`-record keys, NOT the schema-level `.meta({ collection })`:\n`OrderDocumentSchema`'s meta reads `\"orders/{uid}/documents\"`, which matches\nneither the sweep's `collectionCounts` keys nor `db.collectionGroup(\"documents\")`."
+        },
+        {
+          "kind": "variable",
+          "name": "UPLOADCARE_REF_META",
+          "declaration": "const UPLOADCARE_REF_META: \"uploadcareRef\";",
+          "doc": "The `.meta()` key `uploadcareRef()` sets. Read by the walker + the lint."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UploadcareCollectionKey",
+          "declaration": "type UploadcareCollectionKey = indexedAccess;",
+          "doc": "A key of {@link UPLOADCARE_COLLECTION_KEYS}."
+        },
+        {
+          "kind": "function",
+          "name": "isUploadcareCandidate",
+          "signature": "isUploadcareCandidate(leaf: LeafPath): boolean",
+          "doc": "True when a leaf looks like it holds an Uploadcare CDN file id.\n\nThe `type === \"string\"` gate is REQUIRED, not cosmetic: without it the\npredicate also matches `attachments[].{type,size_bytes,locked}` and yields 19\ncandidates instead of 13.\n\nA `format === \"uuid\"` heuristic is unusable as an arm here — dozens of leaves\ncarry it, because `ItemUid` is a union containing `z.uuid()` and spreads\nthrough orders / invoices / fulfillments / tags / stores, and every `xero_id`\nis a `z.uuid()` too.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "uploadcareRef",
+          "signature": "uploadcareRef(schema: T): T",
+          "doc": "Mark a schema node as holding an Uploadcare CDN file id.\n\nWrap the **leaf**, not its container: `z.array(uploadcareRef(z.string()))`,\nnever `uploadcareRef(z.array(z.string()))`. `collectLeafPaths` merges meta\ndown a node's own wrapper chain (`.optional()`, `.nullable()`, …) but not\nacross a container boundary, so an annotation on the array node would be\ninvisible to `uploadcareRefPaths()`. The lint catches that: the element leaf\nstays an unwrapped candidate and assertion 1 fails.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "uploadcareRefPaths",
+          "signature": "uploadcareRefPaths(): Record<string, string[]>",
+          "doc": "Every `uploadcareRef()`-annotated leaf, grouped by collection.\n\nPaths carry `collectLeafPaths`' container markers, e.g.\n`{ invoices: [\"uploadcare_uuid\", \"pdf_versions[].uploadcare_uuid\"] }`.\nSorted for a stable snapshot.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "uploadcareSelectFields",
+          "signature": "uploadcareSelectFields(collection: string): string[]",
+          "doc": "The top-level Firestore field names a `.select()` projection must carry to\nreach every CDN ref in `collection` — the first path segment of each ref,\ncontainer markers stripped (`pdf_versions[].uploadcare_uuid` → `pdf_versions`).\n\nThrows on an unknown collection rather than returning `[]`: an empty\nprojection would silently under-count the sweep's canary.",
+          "paramTags": [],
           "returnsTag": null
         }
       ]

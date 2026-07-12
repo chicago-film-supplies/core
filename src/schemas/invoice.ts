@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
+import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -311,11 +312,11 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   totals: InvoiceDocTotalsSchema,
   payments: z.array(InvoicePaymentSchema).default([]),
   xero_id: z.uuid().nullable(),
-  uploadcare_uuid: z.string().nullable().default(null),
+  uploadcare_uuid: uploadcareRef(z.string().nullable().default(null)),
   pdf_generated_at: FirestoreTimestamp.nullable().default(null),
   pdf_versions: z.array(z.strictObject({
     version: z.number(),
-    uploadcare_uuid: z.string(),
+    uploadcare_uuid: uploadcareRef(z.string()),
     created_at: FirestoreTimestamp,
     created_by: ActorRef,
     deleted_at: FirestoreTimestamp.nullable(),
