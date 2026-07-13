@@ -41,6 +41,23 @@ import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
  */
 export type XeroResetsAtSource = "retry_after" | "inferred_rollover";
 
+/**
+ * How a *throttle's* `resets_at` was determined. A superset of
+ * {@link XeroResetsAtSource}, because Xero throttles on two independent windows
+ * and only the daily one rolls over:
+ *
+ * - `assumed_minute` — a minute / app-minute / concurrent 429 that carried no
+ *   `Retry-After` (per Xero's docs the concurrent and app-minute limits don't send
+ *   one), so `now + 60s` was assumed — the width of the minute window.
+ *
+ * Deliberately NOT added to {@link XeroBudgetSchema}: the persisted
+ * `xero-budget/current` doc describes the **day** window only, and a minute-limit
+ * refusal must never be able to write a 60-second `resets_at` into it. Widening the
+ * doc schema would let a transient throttle masquerade as the daily budget and make
+ * the gate fail open a minute later.
+ */
+export type XeroThrottleResetsAtSource = XeroResetsAtSource | "assumed_minute";
+
 /** The persisted Xero daily-budget snapshot (`xero-budget/current`). */
 export interface XeroBudget {
   uid: "current";

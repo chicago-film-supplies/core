@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 import { baseLogFields, type LogLevelType } from "./base.ts";
+import type { XeroThrottleResetsAtSource } from "../xero-budget.ts";
 
 /**
  * Msg literals this archetype absorbs.
@@ -38,11 +39,22 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
  * - `xero_quote_superseded` — the order's push-determining state changed between
  *   enqueue and execution, so the task returned without issuing ANY Xero call.
  * - `xero_invoice_push_skipped` — `/tasks/push-xero-invoice` re-read the invoice
- *   and found nothing to do. Usually benign and expected: the deferred task is
- *   idempotent because it derives issue-vs-void from the invoice DOC rather than
- *   from its payload, so a re-run (or a run after a human fixed the invoice by
- *   hand) is a no-op instead of a double-create in Xero. At `error` level it
+ *   and found nothing to do. Usually benign and expected: the deferred task derives
+ *   issue-vs-void from the invoice DOC rather than from its payload, so a re-run (or
+ *   a run after a human fixed the invoice by hand) is a no-op. At `error` level it
  *   means the re-deferral itself failed to enqueue — a genuinely dropped write.
+ *
+ *   Note what does NOT protect us here. Deriving intent from the doc keys on
+ *   `xero_id == null`, and that means "CFS holds no receipt", NOT "Xero holds no
+ *   invoice" — the two diverge, because the POST and the `xero_id` write-back are
+ *   not atomic. Prod invoice 2312 proves it. What actually prevents a double-create
+ *   is that the push POSTs, and Xero's `POST /Invoices` is upsert-by-InvoiceNumber;
+ *   `PUT` would duplicate. The idempotency is Xero's, not ours.
+ * - `xero_defer_escalated` — a deferred Xero write hit the re-deferral cap and was
+ *   abandoned. `defer_attempt` is otherwise unbounded (the task handler returns 200,
+ *   so Cloud Tasks' `max_attempts` never applies), which lets an unpushable write
+ *   re-defer forever, silently. This is the event that makes that loud; it is always
+ *   a dropped write needing a human.
  */
 export const XERO_EVENT_MSGS = [
   "xero_id_self_healed",
@@ -69,6 +81,7 @@ export const XERO_EVENT_MSGS = [
   "xero_quota_exhausted",
   "xero_rate_limit",
   "xero_write_deferred",
+  "xero_defer_escalated",
   "xero_tracking_option_create_failed",
   "xero_tracking_option_update_failed",
   "xero_void_failed",
@@ -98,8 +111,13 @@ export interface XeroEventLogRecord {
    * value is what makes `resets_at` auditable after the fact.
    */
   retry_after_s?: number;
-  /** How `resets_at` was determined — a reported value vs an inferred rollover. */
-  resets_at_source?: "retry_after" | "inferred_rollover";
+  /** How `resets_at` was determined — reported, inferred rollover, or an assumed
+   * 60s minute window. See {@link XeroThrottleResetsAtSource}. */
+  resets_at_source?: XeroThrottleResetsAtSource;
+  /** Which Xero window refused the call: the daily cap vs a minute/concurrent limit. */
+  throttle_reason?: "day_budget" | "minute_limit";
+  /** How many times a deferred write has now been re-deferred. */
+  defer_attempt?: number;
   /** When the Xero day window rolls over (ISO). */
   resets_at?: string;
   /** Calls left in the tenant's day window at decision time. */
@@ -131,7 +149,9 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   invoice_uid: z.string().optional(),
   order_uid: z.string().optional(),
   retry_after_s: z.number().optional(),
-  resets_at_source: z.enum(["retry_after", "inferred_rollover"]).optional(),
+  resets_at_source: z.enum(["retry_after", "inferred_rollover", "assumed_minute"]).optional(),
+  throttle_reason: z.enum(["day_budget", "minute_limit"]).optional(),
+  defer_attempt: z.number().optional(),
   resets_at: z.string().optional(),
   day_remaining: z.number().optional(),
   critical: z.boolean().optional(),

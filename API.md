@@ -14749,14 +14749,25 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
 - `xero_quote_superseded` — the order's push-determining state changed between
   enqueue and execution, so the task returned without issuing ANY Xero call.
 - `xero_invoice_push_skipped` — `/tasks/push-xero-invoice` re-read the invoice
-  and found nothing to do. Usually benign and expected: the deferred task is
-  idempotent because it derives issue-vs-void from the invoice DOC rather than
-  from its payload, so a re-run (or a run after a human fixed the invoice by
-  hand) is a no-op instead of a double-create in Xero. At `error` level it
+  and found nothing to do. Usually benign and expected: the deferred task derives
+  issue-vs-void from the invoice DOC rather than from its payload, so a re-run (or
+  a run after a human fixed the invoice by hand) is a no-op. At `error` level it
   means the re-deferral itself failed to enqueue — a genuinely dropped write.
 
+  Note what does NOT protect us here. Deriving intent from the doc keys on
+  `xero_id == null`, and that means "CFS holds no receipt", NOT "Xero holds no
+  invoice" — the two diverge, because the POST and the `xero_id` write-back are
+  not atomic. Prod invoice 2312 proves it. What actually prevents a double-create
+  is that the push POSTs, and Xero's `POST /Invoices` is upsert-by-InvoiceNumber;
+  `PUT` would duplicate. The idempotency is Xero's, not ours.
+- `xero_defer_escalated` — a deferred Xero write hit the re-deferral cap and was
+  abandoned. `defer_attempt` is otherwise unbounded (the task handler returns 200,
+  so Cloud Tasks' `max_attempts` never applies), which lets an unpushable write
+  re-defer forever, silently. This is the event that makes that loud; it is always
+  a dropped write needing a human.
+
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_transition_rejected" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_tracking_option_create_failed" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_transition_rejected" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -14774,7 +14785,9 @@ interface XeroEventLogRecord {
   invoice_uid?: string;
   order_uid?: string;
   retry_after_s?: number;
-  resets_at_source?: "retry_after" | "inferred_rollover";
+  resets_at_source?: XeroThrottleResetsAtSource;
+  throttle_reason?: "day_budget" | "minute_limit";
+  defer_attempt?: number;
   resets_at?: string;
   day_remaining?: number;
   critical?: boolean;
