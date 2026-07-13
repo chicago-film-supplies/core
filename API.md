@@ -4922,7 +4922,7 @@ interface SaveQuoteVersionInputType {
 Union of all Firestore document types. Use with validateBeforeWrite.
 
 ```ts
-type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 ```
 
 ### `SchemaField`
@@ -6810,6 +6810,67 @@ interface WebshopProductShipping {
 
 ```ts
 type WebshopProductUpdated = EventEnvelope<WebshopProduct> & typeLiteral;
+```
+
+### `XeroBudget`
+
+The persisted Xero daily-budget snapshot (`xero-budget/current`).
+
+```ts
+interface XeroBudget {
+  uid: "current";
+  day_remaining: number;
+  observed_at: string;
+  resets_at: string;
+  resets_at_source: XeroResetsAtSource;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `XeroBudgetSchema`
+
+Zod schema for XeroBudget.
+
+```ts
+const XeroBudgetSchema: z.ZodType<XeroBudget>;
+```
+
+### `XeroResetsAtSource`
+
+How `resets_at` was determined.
+
+- `retry_after` — derived from Xero's `Retry-After` header on a day-429. Xero
+  sends it only on a 429, but it *does* send it on a day-429 and the raw
+  value is the real time-to-reset. Trust it.
+- `inferred_rollover` — no `Retry-After` was available, so the next observed
+  ~20:00–20:20 UTC tenant rollover was assumed (corroborated across
+  2026-07-09/10/12), clamped to `now + 24h`.
+
+Stamped so an inferred value is *visible* rather than indistinguishable from
+a reported one.
+
+```ts
+type XeroResetsAtSource = "retry_after" | "inferred_rollover";
+```
+
+### `XeroSyncState`
+
+The per-order Xero-quote sync watermark (`orders/{uid}/xero-sync/state`).
+
+```ts
+interface XeroSyncState {
+  uid: "state";
+  pushed_hash: string;
+  pushed_at: FirestoreTimestampType;
+}
+```
+
+### `XeroSyncStateSchema`
+
+Zod schema for XeroSyncState.
+
+```ts
+const XeroSyncStateSchema: z.ZodType<XeroSyncState>;
 ```
 
 ### `aggregates`
@@ -14677,8 +14738,19 @@ Quote-push terminal/diagnostic arms (added 2026-07 with the queue restore):
 - `xero_quote_noop` — the Xero quote is already at the target Status; no
   write was issued.
 
+Quota-gate arms (added 2026-07 with the daily-budget gate):
+- `xero_quota_exhausted` — a call was refused **pre-flight**, before touching
+  Xero, because the persisted day budget was at/below the caller's floor.
+  Carries `resets_at` so the deferral's schedule is auditable.
+- `xero_write_deferred` — a Xero write that could not run now was re-enqueued
+  past the day reset under a distinct `xq-defer-…` task name. The `outcome`
+  field is load-bearing: a `"deduped"` here is the intended storm-coalescing,
+  but a `"skipped"` would be a silently-dropped write.
+- `xero_quote_superseded` — the order's push-determining state changed between
+  enqueue and execution, so the task returned without issuing ANY Xero call.
+
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_transition_rejected" | "xero_quote_validation_rejected" | "xero_rate_limit" | "xero_tracking_option_create_failed" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_transition_rejected" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_tracking_option_create_failed" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -14695,6 +14767,12 @@ interface XeroEventLogRecord {
   xero_contact_id?: string;
   invoice_uid?: string;
   order_uid?: string;
+  retry_after_s?: number;
+  resets_at_source?: "retry_after" | "inferred_rollover";
+  resets_at?: string;
+  day_remaining?: number;
+  critical?: boolean;
+  outcome?: "created" | "deduped" | "skipped";
   request_id?: string;
   method?: string;
   path?: string;

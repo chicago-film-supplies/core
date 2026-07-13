@@ -92,6 +92,17 @@ export {
 } from "./rate-limit.ts";
 
 export {
+  XeroBudgetSchema,
+  type XeroBudget,
+  type XeroResetsAtSource,
+} from "./xero-budget.ts";
+
+export {
+  XeroSyncStateSchema,
+  type XeroSyncState,
+} from "./xero-sync-state.ts";
+
+export {
   OrderSchema,
   CreateOrderInput,
   UpdateOrderInput,
@@ -930,6 +941,8 @@ import type { UploadcareSweepRun } from "./uploadcare-sweep.ts";
 import type { User } from "./user.ts";
 import type { WebhookEvent } from "./webhook-event.ts";
 import type { WebshopProduct } from "./webshop-product.ts";
+import type { XeroBudget } from "./xero-budget.ts";
+import type { XeroSyncState } from "./xero-sync-state.ts";
 import type { OrderDocument } from "./order-document.ts";
 import type { PreviewRecord } from "./template-preview.ts";
 import type {
@@ -946,7 +959,7 @@ export type SchemaDocType =
   | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
   | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
   | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | UploadcareSweepRun | User
-  | WebhookEvent | WebshopProduct
+  | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState
   | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 
 // ── Schema record keyed by collection name ─────────────────────────
@@ -998,6 +1011,8 @@ import { TypesenseConfigSchema } from "./typesense-config.ts";
 import { UploadcareSweepRunSchema } from "./uploadcare-sweep.ts";
 import { WebhookEventSchema as WebhookEventSchema_ } from "./webhook-event.ts";
 import { WebshopProductSchema } from "./webshop-product.ts";
+import { XeroBudgetSchema as XeroBudgetSchema_ } from "./xero-budget.ts";
+import { XeroSyncStateSchema as XeroSyncStateSchema_ } from "./xero-sync-state.ts";
 import { OrderDocumentSchema as OrderDocumentSchema_ } from "./order-document.ts";
 import { PreviewRecordSchema as PreviewRecordSchema_ } from "./template-preview.ts";
 import {
@@ -1061,6 +1076,14 @@ export const schemas: Record<string, z.ZodType> = {
   "webshop-product": WebshopProductSchema, "webshop-products": WebshopProductSchema,
   "typesense-config": TypesenseConfigSchema, "typesense": TypesenseConfigSchema,
   "uploadcare-sweep": UploadcareSweepRunSchema,
+  // Singleton `xero-budget/current` — the persisted daily-quota snapshot the
+  // Xero gate reads pre-flight. Deliberately NOT a `config/…` doc: `config` is
+  // in api-cloudrun's UNVALIDATED_COLLECTIONS, which would exempt it from
+  // validateBeforeWrite.
+  "xero-budget": XeroBudgetSchema_,
+  // Sidecar `orders/{uid}/xero-sync/state` — the last-successfully-pushed hash
+  // the order eventarc fan-out gates its quote enqueue on.
+  "xero-sync": XeroSyncStateSchema_,
   "documents": OrderDocumentSchema_,
   "template_previews": PreviewRecordSchema_,
   "mcp-oauth-clients": McpOAuthClientSchema_,

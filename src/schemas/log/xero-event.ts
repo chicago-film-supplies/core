@@ -26,6 +26,17 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
  *   TaxType mapping. Previously `throw` → 500 → 15 retries.
  * - `xero_quote_noop` — the Xero quote is already at the target Status; no
  *   write was issued.
+ *
+ * Quota-gate arms (added 2026-07 with the daily-budget gate):
+ * - `xero_quota_exhausted` — a call was refused **pre-flight**, before touching
+ *   Xero, because the persisted day budget was at/below the caller's floor.
+ *   Carries `resets_at` so the deferral's schedule is auditable.
+ * - `xero_write_deferred` — a Xero write that could not run now was re-enqueued
+ *   past the day reset under a distinct `xq-defer-…` task name. The `outcome`
+ *   field is load-bearing: a `"deduped"` here is the intended storm-coalescing,
+ *   but a `"skipped"` would be a silently-dropped write.
+ * - `xero_quote_superseded` — the order's push-determining state changed between
+ *   enqueue and execution, so the task returned without issuing ANY Xero call.
  */
 export const XERO_EVENT_MSGS = [
   "xero_id_self_healed",
@@ -43,11 +54,14 @@ export const XERO_EVENT_MSGS = [
   "xero_quote_skip_draft",
   "xero_quote_skip_missing_order",
   "xero_quote_skip_no_org_crms_id",
+  "xero_quote_superseded",
   "xero_quote_synced",
   "xero_quote_tax_unmapped",
   "xero_quote_transition_rejected",
   "xero_quote_validation_rejected",
+  "xero_quota_exhausted",
   "xero_rate_limit",
+  "xero_write_deferred",
   "xero_tracking_option_create_failed",
   "xero_tracking_option_update_failed",
   "xero_void_failed",
@@ -69,6 +83,27 @@ export interface XeroEventLogRecord {
   xero_contact_id?: string;
   invoice_uid?: string;
   order_uid?: string;
+  /**
+   * Xero's raw `Retry-After` on a 429, in seconds — **un-clamped**. The in-process
+   * sleep clamps this to 5 min so a server-side bug can't pin a worker, but the
+   * clamped value must never be used for *scheduling*: on a day-429 the raw value
+   * is the real time-to-reset and routinely exceeds the clamp. Logging the raw
+   * value is what makes `resets_at` auditable after the fact.
+   */
+  retry_after_s?: number;
+  /** How `resets_at` was determined — a reported value vs an inferred rollover. */
+  resets_at_source?: "retry_after" | "inferred_rollover";
+  /** When the Xero day window rolls over (ISO). */
+  resets_at?: string;
+  /** Calls left in the tenant's day window at decision time. */
+  day_remaining?: number;
+  /** Whether the refused/deferred call was on the reserved money path. */
+  critical?: boolean;
+  /**
+   * Cloud Tasks outcome of a deferral. Load-bearing: `"deduped"` is the intended
+   * storm-coalescing, but `"skipped"` means the write was silently dropped.
+   */
+  outcome?: "created" | "deduped" | "skipped";
   request_id?: string;
   method?: string;
   path?: string;
@@ -88,4 +123,10 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   xero_contact_id: z.string().optional(),
   invoice_uid: z.string().optional(),
   order_uid: z.string().optional(),
+  retry_after_s: z.number().optional(),
+  resets_at_source: z.enum(["retry_after", "inferred_rollover"]).optional(),
+  resets_at: z.string().optional(),
+  day_remaining: z.number().optional(),
+  critical: z.boolean().optional(),
+  outcome: z.enum(["created", "deduped", "skipped"]).optional(),
 }).passthrough().meta({ title: "XeroEventLogRecord" });
