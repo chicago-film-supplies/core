@@ -571,7 +571,14 @@ export interface OrderDocLineItemType {
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject({
   uid: ItemUid,
   type: DocLineItemTypeEnum,
-  name: z.string().min(1).max(100),
+  // Catalog product name ("Dewalt Work Light") — NOT customer data, so it
+  // survives fixture sanitization verbatim, which is the whole point of drawing
+  // fixture line items from real orders. Tagged explicitly rather than left
+  // untagged so the decision is visible and the drift gate can see it. Custom
+  // items put operator-typed text here, but it is equipment/service text by
+  // convention; the free-text `description` below is where a customer's words
+  // actually land, and that one masks.
+  name: z.string().min(1).max(100).meta({ pii: "none" }),
   // Free-text — for custom items the operator routinely paraphrases the
   // customer's request; mask in fixtures + logs.
   description: z.string().meta({ pii: "mask" }).default(""),

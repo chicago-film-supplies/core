@@ -392,14 +392,25 @@ export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.stric
 
 // ── Address ─────────────────────────────────────────────────────────
 
-/** Zod schema for Address, nullable. */
+/**
+ * Zod schema for Address, nullable.
+ *
+ * The object carries the `pii: "mask"` tag and every leaf inherits it, so a
+ * new field added here is masked by default — the safe direction. The three
+ * coarse-geography leaves opt OUT explicitly: a city / state / country cannot
+ * identify anyone on their own, they are what makes a sanitized fixture still
+ * look like a plausible address, and faking them produces nonsense (the mask
+ * transform reads `"United States"` as a person's name and `"IL"` as a city).
+ * The identifying parts — `street`, `street2`, `full`, `name`, `postcode`, and
+ * the two `Coordinates` — stay masked.
+ */
 export const Address: z.ZodType<AddressType | null> = z.strictObject({
-  city: z.string().default(""),
-  country_name: z.string().default(""),
+  city: z.string().default("").meta({ pii: "none" }),
+  country_name: z.string().default("").meta({ pii: "none" }),
   full: z.string().default(""),
   name: z.string().max(100).default(""),
   postcode: z.string().default(""),
-  region: z.string().default(""),
+  region: z.string().default("").meta({ pii: "none" }),
   street: z.string().default(""),
   street2: z.string().default("").optional(),
   mapbox_id: z.string().default("").optional(),

@@ -82,6 +82,42 @@ export function getNodeMeta(node: z.ZodType): Record<string, unknown> | null {
 }
 
 /**
+ * Read one meta key from a node, checking **every wrapper level** rather than
+ * only the fully-unwrapped node.
+ *
+ * `.meta()` registers on the exact instance it is called on, so where the tag
+ * lands depends on the order the author chained the builders:
+ *
+ *   z.string().meta({ pii: "mask" }).nullable()  → tag on the ZodString
+ *   z.string().nullable().meta({ pii: "mask" })  → tag on the ZodNullable
+ *
+ * Both are legitimate authoring styles and both appear in these schemas
+ * (`Address` is `.nullable().meta(...)`). A reader that unwraps first and then
+ * reads meta sees the tag in the first case and `undefined` in the second —
+ * which is how `Address`'s `pii: "mask"` became a silent no-op in the PII
+ * walker. Read through the chain instead, and stop at the first hit.
+ *
+ * Stops at `ZodArray` (the array node's own meta is returned if tagged);
+ * callers that need the element's tag pass the element schema.
+ */
+export function readMetaThroughWrappers<T>(
+  node: z.ZodType,
+  key: string,
+): T | undefined {
+  let n = node;
+  while (true) {
+    const value = getNodeMeta(n)?.[key];
+    if (value !== undefined) return value as T;
+    const def = getDef(n);
+    if (WRAPPER_TYPES.has(def.type) && def.innerType) {
+      n = def.innerType;
+      continue;
+    }
+    return undefined;
+  }
+}
+
+/**
  * Resolve the object shape for a node by unwrapping wrappers. Returns `null`
  * when the node is not an object. (Object-only — does not descend into records;
  * `getServerSortableColumns` walks fixed object shapes, not dynamic maps.)

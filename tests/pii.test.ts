@@ -7,7 +7,8 @@
 import { assertEquals } from "@std/assert";
 import type { z } from "zod";
 
-import { getNodeMeta, unwrapZod } from "../src/schemas/zod-walk.ts";
+import { unwrapNonArray, unwrapZod } from "../src/schemas/zod-walk.ts";
+import { readPiiTag } from "../src/schemas/pii/walker.ts";
 import { ContactSchema, CreateContactInput, UpdateContactInput } from "../src/schemas/contact.ts";
 import {
   OrganizationSchema,
@@ -40,22 +41,21 @@ type WrapperDef = { type: string; innerType?: z.ZodType; element?: z.ZodType };
  * value. `.meta()` registers on the specific instance it's called on, so
  * `z.email().meta({ pii: "mask" }).nullable()` stores the meta on the email
  * node — we must check at every wrapper level, not just the leaf.
+ *
+ * Delegates to `readPiiTag`, the SAME reader the runtime walker uses. This used
+ * to be a private wrapper-chain walk here while the walker unwrapped first and
+ * read only the final node — so this test stayed green on `Address`'s
+ * `.nullable().meta({pii:"mask"})` while `applyPii` never saw the tag at all.
+ * One reader, or the guard does not guard.
  */
 function hasPii(schema: z.ZodType): boolean {
-  let n: z.ZodType = schema;
-  while (true) {
-    if (getNodeMeta(n)?.pii) return true;
-    const def = (n as unknown as { _zod: { def: WrapperDef } })._zod.def;
-    if (
-      (def.type === "optional" || def.type === "default" || def.type === "nullable") &&
-      def.innerType
-    ) {
-      n = def.innerType;
-      continue;
-    }
-    if (def.type === "array" && def.element) return hasPii(def.element);
-    return false;
-  }
+  if (readPiiTag(schema) !== undefined) return true;
+  // `readPiiTag` stops at a ZodArray (an array's element tag is read separately
+  // by the walker); an array field like `z.array(Phone).optional()` is tagged on
+  // its element, so unwrap to the array node and recurse into it.
+  const def = (unwrapNonArray(schema) as unknown as { _zod: { def: WrapperDef } })._zod.def;
+  if (def.type === "array" && def.element) return hasPii(def.element);
+  return false;
 }
 
 function getShape(schema: z.ZodType): Record<string, z.ZodType> | null {

@@ -29,9 +29,22 @@
  */
 
 import type { z } from "zod";
-import { getNodeMeta, unwrapNonArray, unwrapZod } from "../zod-walk.ts";
+import { readMetaThroughWrappers, unwrapNonArray, unwrapZod } from "../zod-walk.ts";
 import type { PiiClassification } from "./classification.ts";
 import { mask, redact } from "./transforms.ts";
+
+/**
+ * Read a field's `pii` classification, checking every wrapper level.
+ *
+ * The one reader for both the runtime walker and the schema-drift test
+ * (`tests/pii.test.ts`) — they used to disagree about *where* a tag lives (the
+ * test walked the wrapper chain, the walker unwrapped first and read only the
+ * final node), which is exactly how `Address`'s object-level `pii: "mask"`
+ * stayed green in the test while doing nothing at runtime.
+ */
+export function readPiiTag(node: z.ZodType): PiiClassification | undefined {
+  return readMetaThroughWrappers<PiiClassification>(node, "pii");
+}
 
 // ── Strategy interface ──────────────────────────────────────────────
 
@@ -43,6 +56,14 @@ import { mask, redact } from "./transforms.ts";
  * The walker calls `apply` with the leaf value, the field's classification,
  * and the dotted field path (for strategies that want path-dependent output
  * like the fixture sanitizer's deterministic fakes).
+ *
+ * `apply` is also offered every CONTAINER inside a tagged subtree (the tagged
+ * object itself, and each nested object/array within it) before the walker
+ * recurses into it. Return the value unchanged to let the walker keep
+ * descending to the leaves; return anything else to replace the container
+ * wholesale and stop the descent. The fixture sanitizer uses this to null a
+ * whole `Coordinates` object — a leaf-by-leaf transform cannot, because
+ * `latitude` is a `z.number()` and there is no in-band "absent" value for it.
  */
 export interface PiiStrategy {
   apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown;
@@ -58,10 +79,14 @@ export interface PiiStrategy {
  *              must never throw, so a missing key degrades gracefully.
  * - `none`   → pass through unchanged
  *
- * Non-string values are passed through unchanged — the schema's PII tags
- * only apply to string leaves (number / boolean fields cannot carry PII
- * directly; arrays and objects are recursed into by the walker, not handed
- * to the strategy).
+ * Non-string values are passed through unchanged, so the walker keeps
+ * descending to the string leaves. Note this means a NUMERIC leaf inside a
+ * tagged subtree is not scrubbed by the logger — `Address.address_coordinates`
+ * is a 6dp geocode (≈0.11 m) and would pass through raw. That is acceptable
+ * only because no log record schema embeds an `Address` (every `pii` tag under
+ * `schemas/log/` sits on a bare `z.string()`, and `log/*.ts` imports nothing
+ * from `common.ts`). If that ever changes, this strategy needs the same
+ * container hook the fixture sanitizer uses.
  *
  * @param hashFn Optional sync HMAC function. The api-cloudrun logger
  *               supplies `(v) => nodeHash(v, LOG_HMAC_KEY)`; browser
@@ -205,36 +230,91 @@ function walkObject(
   return out;
 }
 
+/**
+ * Apply a classification inherited from a `pii`-tagged node to a value of any
+ * shape: scalars go to the strategy, containers are walked so the tag reaches
+ * every leaf inside them.
+ *
+ * A tag on an OBJECT (`Address` is `.strictObject({…}).nullable().meta({pii:"mask"})`)
+ * used to be handed straight to the strategy, and every strategy opens with
+ * `if (typeof value !== "string") return value` — so the object came back
+ * untouched and the tag was a no-op. Recurse instead.
+ *
+ * The strategy still gets first refusal on a container: it is called with the
+ * object/array, and if it returns something other than what it was given, that
+ * replacement wins and we do not recurse. That is the seam the fixture
+ * sanitizer needs to null a whole `Coordinates` object (a 6dp geocode is
+ * precise location data, and nulling `latitude` alone would fail `z.number()`
+ * on the way back in). A strategy that ignores non-strings just falls through
+ * to the recursion below.
+ *
+ * A child's OWN tag overrides the inherited one, so a `pii: "none"` leaf inside
+ * a masked object (`Address.city`) opts out.
+ */
+function applyTagged(
+  value: unknown,
+  schema: z.ZodType,
+  pii: PiiClassification,
+  strategy: PiiStrategy,
+  path: string,
+): unknown {
+  if (value === null || value === undefined) return value;
+
+  if (typeof value !== "object") return strategy.apply(value, pii, path);
+
+  // Containers: strategy first refusal, then walk.
+  const replaced = strategy.apply(value, pii, path);
+  if (replaced !== value) return replaced;
+
+  const unwrapped = unwrapNonArray(schema);
+  const def = getDef(unwrapped);
+
+  if (Array.isArray(value)) {
+    const elem = def.element;
+    return value.map((v) =>
+      elem ? applyTagged(v, elem, pii, strategy, path) : strategy.apply(v, pii, path)
+    );
+  }
+
+  const shape = getShape(unwrapped);
+  if (!shape) return value;
+  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (const [key, childSchema] of Object.entries(shape)) {
+    if (!(key in out)) continue;
+    const childPath = `${path}.${key}`;
+    const childPii = readPiiTag(childSchema) ?? pii;
+    if (childPii === "none") continue;
+    out[key] = applyTagged(out[key], childSchema, childPii, strategy, childPath);
+  }
+  return out;
+}
+
 function transformField(
   value: unknown,
   fieldSchema: z.ZodType,
   strategy: PiiStrategy,
   path: string,
 ): unknown {
-  // The field's own PII tag (after unwrapping Optional / Default / Nullable / etc.)
-  // takes precedence — apply the leaf transform and short-circuit recursion.
-  const unwrapped = unwrapNonArray(fieldSchema);
-  const meta = getNodeMeta(unwrapped);
-  const pii = meta?.pii as PiiClassification | undefined;
+  // The field's own PII tag takes precedence. Read it through the whole wrapper
+  // chain — `.nullable().meta({pii})` parks the tag on the ZodNullable, which an
+  // unwrap-then-read misses entirely.
+  const pii = readPiiTag(fieldSchema);
 
   if (pii && pii !== "none") {
-    if (Array.isArray(value)) {
-      return value.map((v) => strategy.apply(v, pii, path));
-    }
-    return strategy.apply(value, pii, path);
+    return applyTagged(value, fieldSchema, pii, strategy, path);
   }
 
+  const unwrapped = unwrapNonArray(fieldSchema);
   const def = getDef(unwrapped);
 
   // Array of objects (or array of pii-tagged primitives): recurse per-element.
   if (def.type === "array" && def.element && Array.isArray(value)) {
     const elem = def.element;
-    const elemUnwrapped = unwrapNonArray(elem);
-    const elemMeta = getNodeMeta(elemUnwrapped);
-    const elemPii = elemMeta?.pii as PiiClassification | undefined;
+    const elemPii = readPiiTag(elem);
     if (elemPii && elemPii !== "none") {
-      return value.map((v) => strategy.apply(v, elemPii, path));
+      return value.map((v) => applyTagged(v, elem, elemPii, strategy, path));
     }
+    const elemUnwrapped = unwrapNonArray(elem);
     const elemDef = getDef(elemUnwrapped);
     if (
       (elemDef.type === "object" && elemDef.shape) ||

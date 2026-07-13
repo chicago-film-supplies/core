@@ -40,7 +40,7 @@
           "kind": "variable",
           "name": "Address",
           "declaration": "const Address: z.ZodType<AddressType | null>;",
-          "doc": "Zod schema for Address, nullable."
+          "doc": "Zod schema for Address, nullable.\n\nThe object carries the `pii: \"mask\"` tag and every leaf inherits it, so a\nnew field added here is masked by default — the safe direction. The three\ncoarse-geography leaves opt OUT explicitly: a city / state / country cannot\nidentify anyone on their own, they are what makes a sanitized fixture still\nlook like a plausible address, and faking them produces nonsense (the mask\ntransform reads `\"United States\"` as a person's name and `\"IL\"` as a city).\nThe identifying parts — `street`, `street2`, `full`, `name`, `postcode`, and\nthe two `Coordinates` — stay masked."
         },
         {
           "kind": "interface",
@@ -4259,7 +4259,7 @@
           "kind": "variable",
           "name": "Address",
           "declaration": "const Address: z.ZodType<AddressType | null>;",
-          "doc": "Zod schema for Address, nullable."
+          "doc": "Zod schema for Address, nullable.\n\nThe object carries the `pii: \"mask\"` tag and every leaf inherits it, so a\nnew field added here is masked by default — the safe direction. The three\ncoarse-geography leaves opt OUT explicitly: a city / state / country cannot\nidentify anyone on their own, they are what makes a sanitized fixture still\nlook like a plausible address, and faking them produces nonsense (the mask\ntransform reads `\"United States\"` as a person's name and `\"IL\"` as a city).\nThe identifying parts — `street`, `street2`, `full`, `name`, `postcode`, and\nthe two `Coordinates` — stay masked."
         },
         {
           "kind": "interface",
@@ -7942,7 +7942,7 @@
           "kind": "interface",
           "name": "PiiStrategy",
           "declaration": "interface PiiStrategy {\n  apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown;\n}",
-          "doc": "How to transform a leaf value given its PII classification. Consumers\nprovide their own strategy; the structured logger uses\n{@link createLoggerStrategy} below.\n\nThe walker calls `apply` with the leaf value, the field's classification,\nand the dotted field path (for strategies that want path-dependent output\nlike the fixture sanitizer's deterministic fakes)."
+          "doc": "How to transform a leaf value given its PII classification. Consumers\nprovide their own strategy; the structured logger uses\n{@link createLoggerStrategy} below.\n\nThe walker calls `apply` with the leaf value, the field's classification,\nand the dotted field path (for strategies that want path-dependent output\nlike the fixture sanitizer's deterministic fakes).\n\n`apply` is also offered every CONTAINER inside a tagged subtree (the tagged\nobject itself, and each nested object/array within it) before the walker\nrecurses into it. Return the value unchanged to let the walker keep\ndescending to the leaves; return anything else to replace the container\nwholesale and stop the descent. The fixture sanitizer uses this to null a\nwhole `Coordinates` object — a leaf-by-leaf transform cannot, because\n`latitude` is a `z.number()` and there is no in-band \"absent\" value for it."
         },
         {
           "kind": "variable",
@@ -7980,7 +7980,7 @@
           "kind": "function",
           "name": "createLoggerStrategy",
           "signature": "createLoggerStrategy(hashFn?: fnOrConstructor): PiiStrategy",
-          "doc": "Default strategy for the structured logger.\n\n- `mask`   → partial reveal via {@link mask}\n- `redact` → literal `[REDACTED]`\n- `hash`   → calls `hashFn(value)` if supplied; otherwise FAIL-CLOSED to\n             `redact()` (never raw passthrough, never throws). Logging\n             must never throw, so a missing key degrades gracefully.\n- `none`   → pass through unchanged\n\nNon-string values are passed through unchanged — the schema's PII tags\nonly apply to string leaves (number / boolean fields cannot carry PII\ndirectly; arrays and objects are recursed into by the walker, not handed\nto the strategy).",
+          "doc": "Default strategy for the structured logger.\n\n- `mask`   → partial reveal via {@link mask}\n- `redact` → literal `[REDACTED]`\n- `hash`   → calls `hashFn(value)` if supplied; otherwise FAIL-CLOSED to\n             `redact()` (never raw passthrough, never throws). Logging\n             must never throw, so a missing key degrades gracefully.\n- `none`   → pass through unchanged\n\nNon-string values are passed through unchanged, so the walker keeps\ndescending to the string leaves. Note this means a NUMERIC leaf inside a\ntagged subtree is not scrubbed by the logger — `Address.address_coordinates`\nis a 6dp geocode (≈0.11 m) and would pass through raw. That is acceptable\nonly because no log record schema embeds an `Address` (every `pii` tag under\n`schemas/log/` sits on a bare `z.string()`, and `log/*.ts` imports nothing\nfrom `common.ts`). If that ever changes, this strategy needs the same\ncontainer hook the fixture sanitizer uses.",
           "paramTags": [
             {
               "name": "hashFn",
@@ -7994,6 +7994,14 @@
           "name": "mask",
           "signature": "mask(value: string): string",
           "doc": "Partial-reveal mask. Shape-preserving so masked values stay debuggable\n(you can tell two masked emails differ) without exposing PII.\n\n- **Emails** (contain a single `@` mid-string): keep first char of local\n  part, mask the rest, keep the full domain.\n  `alice@example.com` → `a****@example.com`\n- **Other strings** of length ≥ 4: keep first and last char, mask between.\n  `abcdefg` → `a*****g`\n- **Short strings** (length < 4): fully redact — masking would leak too\n  much of a 2–3 char value.\n  `ab` → `[REDACTED]`",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "readPiiTag",
+          "signature": "readPiiTag(node: z.ZodType): PiiClassification | undefined",
+          "doc": "Read a field's `pii` classification, checking every wrapper level.\n\nThe one reader for both the runtime walker and the schema-drift test\n(`tests/pii.test.ts`) — they used to disagree about *where* a tag lives (the\ntest walked the wrapper chain, the walker unwrapped first and read only the\nfinal node), which is exactly how `Address`'s object-level `pii: \"mask\"`\nstayed green in the test while doing nothing at runtime.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -61,6 +61,15 @@ interface ActorRefType {
 
 Zod schema for Address, nullable.
 
+The object carries the `pii: "mask"` tag and every leaf inherits it, so a
+new field added here is masked by default — the safe direction. The three
+coarse-geography leaves opt OUT explicitly: a city / state / country cannot
+identify anyone on their own, they are what makes a sanitized fixture still
+look like a plausible address, and faking them produces nonsense (the mask
+transform reads `"United States"` as a person's name and `"IL"` as a city).
+The identifying parts — `street`, `street2`, `full`, `name`, `postcode`, and
+the two `Coordinates` — stay masked.
+
 ```ts
 const Address: z.ZodType<AddressType | null>;
 ```
@@ -7540,6 +7549,15 @@ interface ActorRefType {
 
 Zod schema for Address, nullable.
 
+The object carries the `pii: "mask"` tag and every leaf inherits it, so a
+new field added here is masked by default — the safe direction. The three
+coarse-geography leaves opt OUT explicitly: a city / state / country cannot
+identify anyone on their own, they are what makes a sanitized fixture still
+look like a plausible address, and faking them produces nonsense (the mask
+transform reads `"United States"` as a person's name and `"IL"` as a city).
+The identifying parts — `street`, `street2`, `full`, `name`, `postcode`, and
+the two `Coordinates` — stay masked.
+
 ```ts
 const Address: z.ZodType<AddressType | null>;
 ```
@@ -14732,6 +14750,14 @@ The walker calls `apply` with the leaf value, the field's classification,
 and the dotted field path (for strategies that want path-dependent output
 like the fixture sanitizer's deterministic fakes).
 
+`apply` is also offered every CONTAINER inside a tagged subtree (the tagged
+object itself, and each nested object/array within it) before the walker
+recurses into it. Return the value unchanged to let the walker keep
+descending to the leaves; return anything else to replace the container
+wholesale and stop the descent. The fixture sanitizer uses this to null a
+whole `Coordinates` object — a leaf-by-leaf transform cannot, because
+`latitude` is a `z.number()` and there is no in-band "absent" value for it.
+
 ```ts
 interface PiiStrategy {
   apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown;
@@ -14829,10 +14855,14 @@ Default strategy for the structured logger.
              must never throw, so a missing key degrades gracefully.
 - `none`   → pass through unchanged
 
-Non-string values are passed through unchanged — the schema's PII tags
-only apply to string leaves (number / boolean fields cannot carry PII
-directly; arrays and objects are recursed into by the walker, not handed
-to the strategy).
+Non-string values are passed through unchanged, so the walker keeps
+descending to the string leaves. Note this means a NUMERIC leaf inside a
+tagged subtree is not scrubbed by the logger — `Address.address_coordinates`
+is a 6dp geocode (≈0.11 m) and would pass through raw. That is acceptable
+only because no log record schema embeds an `Address` (every `pii` tag under
+`schemas/log/` sits on a bare `z.string()`, and `log/*.ts` imports nothing
+from `common.ts`). If that ever changes, this strategy needs the same
+container hook the fixture sanitizer uses.
 
 **Parameters**
 
@@ -14855,6 +14885,16 @@ Partial-reveal mask. Shape-preserving so masked values stay debuggable
 - **Short strings** (length < 4): fully redact — masking would leak too
   much of a 2–3 char value.
   `ab` → `[REDACTED]`
+
+### `readPiiTag(node: z.ZodType): PiiClassification | undefined`
+
+Read a field's `pii` classification, checking every wrapper level.
+
+The one reader for both the runtime walker and the schema-drift test
+(`tests/pii.test.ts`) — they used to disagree about *where* a tag lives (the
+test walked the wrapper chain, the walker unwrapped first and read only the
+final node), which is exactly how `Address`'s object-level `pii: "mask"`
+stayed green in the test while doing nothing at runtime.
 
 ### `redact(): string`
 

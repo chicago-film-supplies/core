@@ -353,4 +353,213 @@ Deno.test("walker: masks line-item + divider description/name on OrderSchema", a
   assertNotEquals(out.items[1].description, "no-flash gear only");
   // Custom line item description masked.
   assertNotEquals(out.items[2].description, "for John's birthday wedding video");
+  // ...but the catalog product NAME is not PII and must survive verbatim — it is
+  // what makes a fixture drawn from a real order worth drawing.
+  assertEquals(out.items[2].name, "Custom item");
+});
+
+// ── Tag-shape coverage ──────────────────────────────────────────────
+//
+// `.meta()` registers on the instance it is called on, so the builder ORDER
+// decides which node holds the tag. All four shapes below are legitimate and
+// all appear in these schemas; all four must reach the strategy.
+//
+// The bug this guards: `Address` is `.strictObject({…}).nullable().meta({pii})`,
+// so the tag sat on the ZodNullable. The walker unwrapped first and read only
+// the final node, saw no tag, and passed every street/postcode/geocode straight
+// through — while `pii.test.ts` (which walked the wrapper chain) stayed green.
+
+/** Rewrites string leaves only — the logger's contract, made explicit. */
+const stringOnly = {
+  apply(value: unknown, classification: string) {
+    if (typeof value !== "string") return value;
+    return classification === "none" ? value : "XXX";
+  },
+};
+
+Deno.test("tag shape: on a bare leaf — z.string().meta()", () => {
+  const schema = z.strictObject({ a: z.string().meta({ pii: "mask" }) });
+  assertEquals(applyPii({ a: "hi" }, schema, stringOnly), { a: "XXX" });
+});
+
+Deno.test("tag shape: BEFORE the wrapper — .meta().default()", () => {
+  const schema = z.strictObject({ a: z.string().meta({ pii: "mask" }).default("") });
+  assertEquals(applyPii({ a: "hi" }, schema, stringOnly), { a: "XXX" });
+});
+
+Deno.test("tag shape: AFTER the wrapper — .default().meta() (the ordering trap)", () => {
+  const schema = z.strictObject({ a: z.string().default("").meta({ pii: "mask" }) });
+  assertEquals(applyPii({ a: "hi" }, schema, stringOnly), { a: "XXX" });
+});
+
+Deno.test("tag shape: on an OBJECT — the tag must reach the leaves", () => {
+  const schema = z.strictObject({
+    addr: z.strictObject({ street: z.string(), postcode: z.string() }).meta({ pii: "mask" }),
+  });
+  assertEquals(
+    applyPii({ addr: { street: "3100 W Fillmore St", postcode: "60612" } }, schema, stringOnly),
+    { addr: { street: "XXX", postcode: "XXX" } },
+  );
+});
+
+Deno.test("tag shape: on an object BEHIND a wrapper — .nullable().meta() (the Address shape)", () => {
+  const schema = z.strictObject({
+    addr: z.strictObject({ street: z.string() }).nullable().meta({ pii: "mask" }),
+  });
+  assertEquals(
+    applyPii({ addr: { street: "3100 W Fillmore St" } }, schema, stringOnly),
+    { addr: { street: "XXX" } },
+  );
+});
+
+Deno.test("walker: a child's own tag overrides the inherited classification", () => {
+  const schema = z.strictObject({
+    addr: z.strictObject({
+      street: z.string(),
+      city: z.string().meta({ pii: "none" }),
+    }).nullable().meta({ pii: "mask" }),
+  });
+  assertEquals(
+    applyPii({ addr: { street: "3100 W Fillmore St", city: "Chicago" } }, schema, stringOnly),
+    { addr: { street: "XXX", city: "Chicago" } },
+  );
+});
+
+Deno.test("walker: a strategy may replace a whole container and stop the descent", () => {
+  const schema = z.strictObject({
+    addr: z.strictObject({
+      street: z.string(),
+      coords: z.strictObject({ latitude: z.number(), longitude: z.number() }).nullable(),
+    }).nullable().meta({ pii: "mask" }),
+  });
+  // Mirrors the fixture sanitizer: null a {latitude,longitude} pair wholesale.
+  // Nulling `latitude` on its own would fail `z.number()` on the way back in,
+  // so a leaf-only transform cannot express this.
+  const nullCoords = {
+    apply(value: unknown, classification: string) {
+      if (value !== null && typeof value === "object" && "latitude" in value) return null;
+      if (typeof value !== "string") return value;
+      return classification === "none" ? value : "XXX";
+    },
+  };
+  assertEquals(
+    applyPii(
+      { addr: { street: "3100 W Fillmore St", coords: { latitude: 41.8708, longitude: -87.7036 } } },
+      schema,
+      nullCoords,
+    ),
+    { addr: { street: "XXX", coords: null } },
+  );
+});
+
+// ── Reachability gate on the real OrderSchema ───────────────────────
+//
+// The tests above this section all set `address: null`, which is exactly why the
+// suite was green while `applyPii` leaked every address into git. Populate it.
+
+/** Records every (path, classification) the walker offers, passing values through. */
+function probeStrategy(): { seen: string[]; strategy: { apply: (v: unknown, c: string, p: string) => unknown } } {
+  const seen: string[] = [];
+  return {
+    seen,
+    strategy: {
+      apply(value: unknown, classification: string, fieldPath: string) {
+        seen.push(`${fieldPath}:${classification}`);
+        return value;
+      },
+    },
+  };
+}
+
+const SAMPLE_ADDRESS = {
+  city: "Chicago",
+  country_name: "United States",
+  full: "3100 W Fillmore St, Chicago, IL, 60612, United States",
+  name: "Chicago Film Supplies",
+  postcode: "60612",
+  region: "IL",
+  street: "3100 W Fillmore St",
+  street2: "",
+  mapbox_id: "dXJuOm1ieGFkcjo0Mg",
+  address_coordinates: { latitude: 41.8708, longitude: -87.7036 },
+  user_coordinates: { latitude: 41.8708, longitude: -87.7036 },
+};
+
+function orderWithAddresses(): Record<string, unknown> {
+  return {
+    uid: "o3000000000000000000",
+    number: 3,
+    status: "draft",
+    organization: {
+      uid: "org10000000000000000",
+      name: "Lakeshore Pictures",
+      xero_id: null,
+      billing_address: { ...SAMPLE_ADDRESS },
+    },
+    destinations: [{
+      delivery: { uid: null, address: { ...SAMPLE_ADDRESS }, instructions: null, contact: null },
+      collection: { uid: null, address: { ...SAMPLE_ADDRESS }, instructions: null, contact: null },
+    }],
+    items: [],
+  };
+}
+
+Deno.test("gate: every scalar under a masked Address is OFFERED to the strategy", async () => {
+  const { OrderSchema } = await import("../src/schemas/order.ts");
+  const { seen, strategy } = probeStrategy();
+  // deno-lint-ignore no-explicit-any
+  applyPii(orderWithAddresses() as any, OrderSchema as any, strategy);
+
+  // The exact set that leaked. A tag the walker never offers is a tag that does
+  // nothing — which is not something a presence check can see.
+  const required = [
+    "organization.billing_address.street:mask",
+    "organization.billing_address.full:mask",
+    "organization.billing_address.name:mask",
+    "organization.billing_address.postcode:mask",
+    "organization.billing_address.mapbox_id:mask",
+    "organization.billing_address.address_coordinates.latitude:mask",
+    "organization.billing_address.address_coordinates.longitude:mask",
+    "organization.billing_address.user_coordinates.latitude:mask",
+    "destinations.delivery.address.street:mask",
+    "destinations.delivery.address.full:mask",
+    "destinations.delivery.address.address_coordinates.latitude:mask",
+    "destinations.collection.address.street:mask",
+  ];
+  for (const path of required) {
+    assert(
+      seen.includes(path),
+      `walker never offered "${path}" to the strategy — its pii tag is a no-op`,
+    );
+  }
+});
+
+Deno.test("gate: a pii:none leaf is NOT transformed (the explicit opt-out is honoured)", async () => {
+  const { OrderSchema } = await import("../src/schemas/order.ts");
+  const { seen, strategy } = probeStrategy();
+  // deno-lint-ignore no-explicit-any
+  applyPii(orderWithAddresses() as any, OrderSchema as any, strategy);
+  for (const path of ["organization.billing_address.city", "organization.billing_address.region"]) {
+    assert(
+      !seen.some((s) => s.startsWith(`${path}:`)),
+      `"${path}" is tagged pii:"none" but the walker still handed it to the strategy`,
+    );
+  }
+});
+
+Deno.test("gate: no identifying address string survives a masking pass", async () => {
+  const { OrderSchema } = await import("../src/schemas/order.ts");
+  // deno-lint-ignore no-explicit-any
+  const out = applyPii(orderWithAddresses() as any, OrderSchema as any, stringOnly) as any;
+  const billing = out.organization.billing_address;
+  for (const leaf of ["street", "full", "name", "postcode", "mapbox_id"]) {
+    assertEquals(billing[leaf], "XXX", `billing_address.${leaf} survived unmasked`);
+  }
+  assertEquals(out.destinations[0].delivery.address.street, "XXX");
+  assertEquals(out.destinations[0].collection.address.full, "XXX");
+  // Coarse geography is opted out on purpose — it identifies nobody, and it is
+  // what keeps a sanitized address plausible.
+  assertEquals(billing.city, "Chicago");
+  assertEquals(billing.region, "IL");
+  assertEquals(billing.country_name, "United States");
 });
