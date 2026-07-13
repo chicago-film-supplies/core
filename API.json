@@ -3577,6 +3577,12 @@
           "doc": "Zod schema for XeroSyncState."
         },
         {
+          "kind": "typeAlias",
+          "name": "XeroThrottleResetsAtSource",
+          "declaration": "type XeroThrottleResetsAtSource = XeroResetsAtSource | \"assumed_minute\";",
+          "doc": "How a *throttle's* `resets_at` was determined. A superset of\n{@link XeroResetsAtSource}, because Xero throttles on two independent windows\nand only the daily one rolls over:\n\n- `assumed_minute` — a minute / app-minute / concurrent 429 that carried no\n  `Retry-After` (per Xero's docs the concurrent and app-minute limits don't send\n  one), so `now + 60s` was assumed — the width of the minute window.\n\nDeliberately NOT added to {@link XeroBudgetSchema}: the persisted\n`xero-budget/current` doc describes the **day** window only, and a minute-limit\nrefusal must never be able to write a 60-second `resets_at` into it. Widening the\ndoc schema would let a transient throttle masquerade as the daily budget and make\nthe gate fail open a minute later."
+        },
+        {
           "kind": "variable",
           "name": "aggregates",
           "declaration": "const aggregates: AggregateDefinition[];",

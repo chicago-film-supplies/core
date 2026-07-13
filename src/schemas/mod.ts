@@ -95,6 +95,7 @@ export {
   XeroBudgetSchema,
   type XeroBudget,
   type XeroResetsAtSource,
+  type XeroThrottleResetsAtSource,
 } from "./xero-budget.ts";
 
 export {
