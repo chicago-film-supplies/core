@@ -1,0 +1,5 @@
+#!/bin/sh
+# Reject commit messages release-please's PEG parser would choke on — an
+# unparseable message is silently omitted from CHANGELOG.md and the release
+# notes. See scripts/check-commit-msg.ts.
+deno run --allow-read scripts/check-commit-msg.ts "$1" || exit 1
