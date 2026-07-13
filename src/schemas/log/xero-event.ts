@@ -37,10 +37,17 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
  *   but a `"skipped"` would be a silently-dropped write.
  * - `xero_quote_superseded` — the order's push-determining state changed between
  *   enqueue and execution, so the task returned without issuing ANY Xero call.
+ * - `xero_invoice_push_skipped` — `/tasks/push-xero-invoice` re-read the invoice
+ *   and found nothing to do. Usually benign and expected: the deferred task is
+ *   idempotent because it derives issue-vs-void from the invoice DOC rather than
+ *   from its payload, so a re-run (or a run after a human fixed the invoice by
+ *   hand) is a no-op instead of a double-create in Xero. At `error` level it
+ *   means the re-deferral itself failed to enqueue — a genuinely dropped write.
  */
 export const XERO_EVENT_MSGS = [
   "xero_id_self_healed",
   "xero_invoice_issued",
+  "xero_invoice_push_skipped",
   "xero_payment_already_synced",
   "xero_payment_appended",
   "xero_payment_backfilled",
