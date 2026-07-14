@@ -14784,19 +14784,18 @@ Quote-push terminal/diagnostic arms (added 2026-07 with the queue restore):
 - `xero_quote_validation_rejected` — Xero returned 400 `ValidationException`.
   The task is dropped (handler returns 200) rather than retried 15×; a
   malformed payload never becomes well-formed on retry.
-- `xero_quote_locked` — the quote sits in a state with **no legal move** to the
-  target, so the push made ZERO Xero calls. This is the honest outcome that
-  replaces the swallow: for 30 days every one of the 27 rejected transitions
-  was ALSO logged `xero_quote_synced`, because the swallow fell through to the
-  success path and advanced the push watermark. `reason` says which wall we hit:
+- `xero_quote_locked` — the quote sits in a state CFS refuses to move out of, so
+  the push made ZERO Xero calls. This is the honest outcome that replaces the
+  swallow: for 30 days every one of the 27 rejected transitions was ALSO logged
+  `xero_quote_synced`, because the swallow fell through to the success path and
+  advanced the push watermark. There is exactly one `reason`:
 
-    - `accepted_locked` — Xero write-locks an ACCEPTED quote; the only legal move
-      out is INVOICED. Re-asserting ACCEPTED (a content edit) and ACCEPTED →
-      DECLINED are both refused (0/24 and 0/3 in 30d of prod traffic).
     - `invoiced_terminal` — the quote is INVOICED and the target is not. Xero
       will actually *permit* INVOICED → SENT → DECLINED, and that is precisely
       the bug: we un-invoiced 3 live quotes that way. INVOICED is terminal for
-      CFS regardless of what Xero tolerates.
+      CFS regardless of what Xero tolerates. (There is deliberately no
+      `accepted_locked` — an ACCEPTED quote is NOT write-locked; a canceled
+      order's quote declines via the legal ACCEPTED → SENT → DECLINED walk.)
 - `xero_quote_tax_unmapped` — an order item carries a tax uid with no Xero
   TaxType mapping. Previously `throw` → 500 → 15 retries.
 - `xero_quote_noop` — the Xero quote is already at the target Status; no
