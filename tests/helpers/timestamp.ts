@@ -10,3 +10,25 @@ export const mockTimestamp = {
   toMillis: () => 0,
   toDate: () => new Date(0),
 };
+
+/**
+ * A structural Timestamp pinned to a real instant — the `_fs` twin of an ISO
+ * bound. `mockTimestamp` is frozen at the epoch, which is fine for a schema
+ * shape check but useless for interval arithmetic (every bound would collide at
+ * 0), so anything exercising `computeAvailability` needs this instead.
+ */
+export function tsAt(iso: string): {
+  seconds: number;
+  nanoseconds: number;
+  toMillis: () => number;
+  toDate: () => Date;
+} {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) throw new Error("tsAt: unparseable ISO string: " + iso);
+  return {
+    seconds: Math.floor(ms / 1000),
+    nanoseconds: (ms % 1000) * 1e6,
+    toMillis: () => ms,
+    toDate: () => new Date(ms),
+  };
+}

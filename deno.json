@@ -53,6 +53,7 @@
     "./schemas/permissions": "./src/schemas/permissions.ts",
     "./schemas/thread": "./src/schemas/thread.ts",
     "./schemas/comment": "./src/schemas/comment.ts",
+    "./utils/availability": "./src/utils/availability.ts",
     "./utils/bookings": "./src/utils/bookings.ts",
     "./utils/cards": "./src/utils/cards.ts",
     "./utils/contact-name": "./src/utils/contact-name.ts",

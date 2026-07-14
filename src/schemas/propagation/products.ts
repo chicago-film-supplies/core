@@ -4,6 +4,7 @@
  * Traced from: api-cloudrun/src/services/products.ts
  */
 import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import { seedStockSummaryRules } from "./stock-summaries.ts";
 
 // ── create-product ───────────────────────────────────────────────
 
@@ -59,6 +60,10 @@ export const createProductRules: CollectionRule[] = [
       { source: ["stock_method"], target: ["stock_method"] },
     ],
   },
+  ...seedStockSummaryRules(
+    "create-product",
+    "A product that gets an inventory ledger gets a stock summary in the same transaction — the two are created and destroyed together. The summary starts empty (no bookings, no OOS) and carries the ledger's type + quantity_held.",
+  ),
   {
     id: "create-product:product-to-webshop",
     source: "products",
@@ -95,6 +100,8 @@ export const createProductTransaction: TransactionDefinition = {
     "create-product:product-to-tracking-categories",
     "create-product:product-to-components",
     "create-product:product-to-ledger",
+    "create-product:ledger-to-stock-summary",
+    "create-product:stock-summary-to-public",
     "create-product:product-to-webshop",
     "cowrite-thread:products-to-thread",
     "cowrite-thread:thread-to-products",
@@ -241,10 +248,24 @@ export const updateProductRules: CollectionRule[] = [
     source: "products",
     target: "inventory-ledgers",
     mode: "co-write",
-    invariant: "Changing stock method to 'none' deletes the ledger; changing from 'none' creates one",
+    invariant: "Changing stock_method to 'none' deletes the ledger AND the product's stock summary and its public twin; changing away from 'none' creates all three. The summary exists if and only if the ledger does — see seedStockSummaryRules. The old rule described only the ledger, while the code also deleted summaries (and leaked their public twins).",
     transaction: "update-product",
     fields: [
       { source: ["stock_method"], target: [], transform: "delete ledger if 'none', create empty ledger if 'bulk'/'serialized'" },
+      { source: ["stock_method"], target: [], transform: "stock-summaries/{uid} + public-stock-summaries/{uid} deleted or seeded in lockstep with the ledger" },
+    ],
+  },
+  {
+    id: "update-product:type-change",
+    source: "products",
+    target: "inventory-ledgers",
+    mode: "co-write",
+    invariant: "Changing type to service/surcharge/replacement deletes the ledger, the stock summary and its public twin — none of those types hold stock. Changing to rental/sale creates the ledger when moving from a non-stock type, and the summary is (re)seeded rather than deleted: a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. The summary's `type` field follows the product's.",
+    transaction: "update-product",
+    fields: [
+      { source: ["type"], target: [], transform: "delete ledger + summary + public twin for service/surcharge/replacement" },
+      { source: ["type"], target: [], transform: "create ledger + summary + public twin when entering rental/sale from a non-stock type" },
+      { source: ["type"], target: ["type"], transform: "the summary's type field tracks the product's on a rental↔sale flip" },
     ],
   },
 ];
@@ -284,5 +305,6 @@ export const updateProductTransaction: TransactionDefinition = {
     "update-product:tags-to-tags",
     "update-product:tracking-category-change",
     "update-product:stock-method-change",
+    "update-product:type-change",
   ],
 };

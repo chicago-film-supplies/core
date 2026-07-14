@@ -1,65 +1,76 @@
 /**
  * PublicStockSummary document schema — Firestore collection: public-stock-summaries
+ *
+ * The sanitized projection of `stock-summaries/{productUid}` (same doc id).
+ * Bookings and out-of-service records are merged into one anonymous
+ * `unavailable[]` list of intervals: no uid, no booking number, no order, no OOS
+ * reason. An outsider can't tell "booked" from "in for repair" — but
+ *
+ *   quantity_available(w) = quantity_held − Σ quantity over `unavailable` overlapping w
+ *
+ * still yields the **exact** number, so the public storefront derives real
+ * availability for any window with no privileged read and no round-trip.
+ *
+ * Only stock-*consuming* entries appear: a booking contributes
+ * `reserved + prepped + out` (the `quantity_booked` definition — a `quoted`
+ * booking holds no units), and zero-quantity entries are dropped entirely.
+ *
+ * `end: null` means open-ended, and carries real weight here — a pending sale
+ * booking has no end date, so it must keep the unit unavailable in every later
+ * window. See the note in `stock-summary.ts`.
  */
 import { z } from "zod";
-import { FirestoreId, StockSummaryId } from "./_uid.ts";
-import { FirestoreTimestamp, type FirestoreTimestampType, ProductTypeEnum, type ProductTypeType } from "./common.ts";
+import { FirestoreId } from "./_uid.ts";
+import { chicagoInstant } from "./_datetime.ts";
+import {
+  FirestoreTimestamp,
+  type FirestoreTimestampType,
+  ProductTypeEnum,
+  type ProductTypeType,
+} from "./common.ts";
 
-const SUMMARY_TYPES = ["sale", "rental"] as const;
-type SummaryTypeType = typeof SUMMARY_TYPES[number];
-
-/** A store entry in a public stock summary with available quantity. */
-export interface PublicStockSummaryStore {
-  uid_store: string;
+/** One anonymous unavailable interval — a booking or an OOS record, indistinguishable. */
+export interface PublicUnavailableEntry {
+  start: string | null;
+  start_fs: FirestoreTimestampType | null;
+  end: string | null;
+  end_fs: FirestoreTimestampType | null;
   quantity: number;
 }
 
-/** A public-facing stock summary with availability data for a product over a date range. */
+/** Window-independent, public-safe availability inputs for one product. */
 export interface PublicStockSummary {
   uid: string;
   uid_product: string;
-  summary_type: SummaryTypeType;
   type: ProductTypeType;
-  dates: {
-    start: string;
-    start_fs: FirestoreTimestampType;
-    end: string | null;
-    end_fs: FirestoreTimestampType | null;
-  };
-  quantity_available: number;
-  store_breakdown: PublicStockSummaryStore[];
-  query_by_uid_store: string[];
+  quantity_held: number;
+  unavailable: PublicUnavailableEntry[];
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
-  expiresAt: FirestoreTimestampType;
 }
+
+const PublicUnavailableEntrySchema: z.ZodType<PublicUnavailableEntry> = z.strictObject({
+  start: chicagoInstant().nullable(),
+  start_fs: FirestoreTimestamp.nullable(),
+  end: chicagoInstant().nullable(),
+  end_fs: FirestoreTimestamp.nullable(),
+  quantity: z.number(),
+});
 
 /** Zod schema for PublicStockSummary. */
 export const PublicStockSummarySchema: z.ZodType<PublicStockSummary> = z.strictObject({
-  uid: StockSummaryId,
+  uid: FirestoreId,
   uid_product: FirestoreId,
-  summary_type: z.enum(SUMMARY_TYPES),
   type: ProductTypeEnum,
-  dates: z.strictObject({
-    start: z.string(),
-    start_fs: FirestoreTimestamp,
-    end: z.string().nullable(),
-    end_fs: FirestoreTimestamp.nullable(),
-  }),
-  quantity_available: z.number(),
-  store_breakdown: z.array(z.strictObject({
-    uid_store: FirestoreId,
-    quantity: z.number(),
-  })).default([]),
-  query_by_uid_store: z.array(FirestoreId).default([]),
+  quantity_held: z.number(),
+  unavailable: z.array(PublicUnavailableEntrySchema).default([]),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
-  expiresAt: FirestoreTimestamp,
 }).meta({
   title: "Public Stock Summary",
   collection: "public-stock-summaries",
   displayDefaults: {
-    columns: ["type", "summary_type", "quantity_available", "store_breakdown"],
+    columns: ["type", "quantity_held", "unavailable"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

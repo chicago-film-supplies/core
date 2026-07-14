@@ -9,6 +9,7 @@ import {
   isOffHours,
   toChargeDays,
   toChicagoInstant,
+  toChicagoEndOfDay,
   toChicagoStartOfDay,
   toChicagoYmd,
 } from "../src/utils/dates.ts";
@@ -412,6 +413,62 @@ Deno.test("toChicagoStartOfDay produces CDT offset for date inside DST window", 
     toChicagoStartOfDay("2025-07-04T12:00:00.000Z"),
     "2025-07-04T00:00:00.000-05:00",
   );
+});
+
+// ── toChicagoEndOfDay ───────────────────────────────────────────
+
+Deno.test("toChicagoEndOfDay snaps instant to the last ms of the Chicago day (CST)", () => {
+  assertEquals(
+    toChicagoEndOfDay("2025-12-22T15:15:00.000Z"),
+    "2025-12-22T23:59:59.999-06:00",
+  );
+});
+
+Deno.test("toChicagoEndOfDay crosses back to the previous Chicago day", () => {
+  // 03:00Z is still Dec 21 in Chicago.
+  assertEquals(
+    toChicagoEndOfDay("2025-12-22T03:00:00.000Z"),
+    "2025-12-21T23:59:59.999-06:00",
+  );
+});
+
+Deno.test("toChicagoEndOfDay handles a date-only string (CDT)", () => {
+  assertEquals(
+    toChicagoEndOfDay("2025-07-04"),
+    "2025-07-04T23:59:59.999-05:00",
+  );
+});
+
+Deno.test("toChicagoEndOfDay is idempotent", () => {
+  const once = toChicagoEndOfDay("2025-12-22T15:15:00.000Z");
+  assertEquals(toChicagoEndOfDay(once), once);
+});
+
+Deno.test("toChicagoEndOfDay closes the window its start-of-day twin opens", () => {
+  // The pair must bracket the whole calendar day with no gap and no overlap.
+  const start = toChicagoStartOfDay("2025-12-22T15:15:00.000Z");
+  const end = toChicagoEndOfDay("2025-12-22T15:15:00.000Z");
+  assertEquals(Date.parse(end) - Date.parse(start), 24 * 60 * 60 * 1000 - 1);
+});
+
+Deno.test("toChicagoEndOfDay: DST spring-forward day is 23h long", () => {
+  // 2025-03-09: America/Chicago loses an hour at 02:00. The day still ends at
+  // 23:59:59.999 local, but only 23h after its start — and the offset flips
+  // CST→CDT across the boundary, which a naive +24h would get wrong.
+  const start = toChicagoStartOfDay("2025-03-09T12:00:00.000Z");
+  const end = toChicagoEndOfDay("2025-03-09T12:00:00.000Z");
+  assertEquals(start, "2025-03-09T00:00:00.000-06:00");
+  assertEquals(end, "2025-03-09T23:59:59.999-05:00");
+  assertEquals(Date.parse(end) - Date.parse(start), 23 * 60 * 60 * 1000 - 1);
+});
+
+Deno.test("toChicagoEndOfDay: DST fall-back day is 25h long", () => {
+  // 2025-11-02: America/Chicago repeats an hour at 02:00 (CDT→CST).
+  const start = toChicagoStartOfDay("2025-11-02T12:00:00.000Z");
+  const end = toChicagoEndOfDay("2025-11-02T12:00:00.000Z");
+  assertEquals(start, "2025-11-02T00:00:00.000-05:00");
+  assertEquals(end, "2025-11-02T23:59:59.999-06:00");
+  assertEquals(Date.parse(end) - Date.parse(start), 25 * 60 * 60 * 1000 - 1);
 });
 
 // ── toChicagoYmd ────────────────────────────────────────────────

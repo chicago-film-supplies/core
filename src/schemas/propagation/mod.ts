@@ -140,6 +140,19 @@ export {
 
 export { createStoreRules, updateStoreRules } from "./stores.ts";
 
+// ── Store-transfer rules ─────────────────────────────────────────────
+
+export {
+  createStoreTransferRules,
+  createStoreTransferTransaction,
+  updateStoreTransferRules,
+  updateStoreTransferTransaction,
+} from "./store-transfers.ts";
+
+// ── Stock-summary rule factories ─────────────────────────────────────
+
+export { seedStockSummaryRules, stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
+
 // ── Threads & comments rules ─────────────────────────────────────────
 
 export {
@@ -238,6 +251,12 @@ import { updateTaxRules } from "./taxes.ts";
 import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
 import { createStoreRules, updateStoreRules } from "./stores.ts";
 import {
+  createStoreTransferRules,
+  createStoreTransferTransaction,
+  updateStoreTransferRules,
+  updateStoreTransferTransaction,
+} from "./store-transfers.ts";
+import {
   threadCowriteRules,
   createCommentRules,
   createCommentTransaction,
@@ -279,6 +298,8 @@ export const transactions: TransactionDefinition[] = [
   updateOutOfServiceTransaction,
   createTransactionTransaction,
   updateTransactionTransaction,
+  createStoreTransferTransaction,
+  updateStoreTransferTransaction,
   createProductTransaction,
   updateProductTransaction,
   createOrganizationTransaction,
@@ -321,6 +342,8 @@ export const rules: CollectionRule[] = [
   ...updateOutOfServiceRules,
   ...createTransactionRules,
   ...updateTransactionRules,
+  ...createStoreTransferRules,
+  ...updateStoreTransferRules,
   ...createProductRules,
   ...updateProductRules,
   ...updateProductOrderRules,

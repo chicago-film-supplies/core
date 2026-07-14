@@ -246,7 +246,6 @@ export {
   FirestoreId,
   ItemUid,
   BookingId,
-  StockSummaryId,
   AnyUid,
   CardId,
   EventCardId,
@@ -619,12 +618,13 @@ export {
   StockSummarySchema,
   type StockSummary,
   type StockSummaryBookingEntry,
+  type StockSummaryOOSEntry,
 } from "./stock-summary.ts";
 
 export {
   PublicStockSummarySchema,
   type PublicStockSummary,
-  type PublicStockSummaryStore,
+  type PublicUnavailableEntry,
 } from "./public-stock-summary.ts";
 
 export {

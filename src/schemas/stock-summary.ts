@@ -1,117 +1,122 @@
 /**
  * StockSummary document schema — Firestore collection: stock-summaries
+ *
+ * **One doc per product; the doc id IS the product uid.** The doc caches the
+ * *inputs* to an availability answer, never an answer itself:
+ *
+ *   quantity_booked(s,e) = Σ (reserved+prepped+out)  over bookings overlapping [s,e]
+ *   quantity_oos(s,e)    = Σ quantity                over OOS records overlapping [s,e]
+ *   quantity_available   = quantity_held − quantity_booked(s,e) − quantity_oos(s,e)
+ *
+ * The window enters only as an overlap filter, so any window is derivable from
+ * this one doc by `computeAvailability` (`@cfs/core/utils/availability`) — in
+ * Deno or in the browser, with no round-trip. Keying on the *question* instead
+ * (the old `{product}:rental:{start}:{end}` id) made storage scale with every
+ * date range anyone ever asked about, which is what forced the 50-doc cap, the
+ * TTL, the pruner, and the mint-on-read from an unauthenticated endpoint.
+ *
+ * **Interval bounds are nullable on both sides, and null means open-ended**
+ * (`start: null` = −∞, `end: null` = +∞) — one rule for bookings and OOS alike.
+ * This is not a formality: a *sale* booking carries `end: null` because a sold
+ * unit does not come back, so it must keep consuming stock in every window after
+ * its sale date until the booking completes and an operator's `sale` transaction
+ * drops `quantity_held`. Treating a null end as a point event (`end = start`)
+ * would hand those units back as "available" the day after the sale — a live
+ * oversell. Bookings with a null `start` (none exist today, but the Booking
+ * schema permits it) are −∞ by the same rule, which under-sells rather than
+ * over-sells.
  */
 import { z } from "zod";
-import { BookingId, FirestoreId, StockSummaryId } from "./_uid.ts";
+import { BookingId, FirestoreId } from "./_uid.ts";
+import { chicagoInstant } from "./_datetime.ts";
 import {
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  StoreBreakdownEntrySchema,
-  type StoreBreakdownEntry,
+  OOSReasonEnum,
+  type OOSReasonType,
   ProductTypeEnum,
   type ProductTypeType,
 } from "./common.ts";
 import { type BookingBreakdown, BookingBreakdownSchema } from "./booking.ts";
+import { OOSStatusEnum, type OOSStatusType } from "./out-of-service.ts";
 
-const SUMMARY_TYPES = ["sale", "rental"] as const;
-type SummaryTypeType = typeof SUMMARY_TYPES[number];
-
-/** Slim audit-trail entry: which booking + its breakdown, no full Booking embed. */
+/**
+ * A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`
+ * null = open-ended (see the module note — this is the sale case).
+ */
 export interface StockSummaryBookingEntry {
   uid: string;
   number: number;
+  start: string | null;
+  start_fs: FirestoreTimestampType | null;
+  end: string | null;
+  end_fs: FirestoreTimestampType | null;
   breakdown: BookingBreakdown;
 }
 
-/** A stock summary document aggregating availability and bookings for a product over a date range. */
+/** A non-terminal out-of-service record as an interval + its quantity. */
+export interface StockSummaryOOSEntry {
+  uid: string;
+  start: string | null;
+  start_fs: FirestoreTimestampType | null;
+  end: string | null;
+  end_fs: FirestoreTimestampType | null;
+  quantity: number;
+  reason: OOSReasonType;
+  status: OOSStatusType;
+}
+
+/**
+ * Window-independent availability inputs for one product. Doc id == `uid` ==
+ * `uid_product` == the product's / inventory-ledger's Firestore id.
+ */
 export interface StockSummary {
   uid: string;
   uid_product: string;
-  summary_type: SummaryTypeType;
   type: ProductTypeType;
-  dates: {
-    start: string;
-    start_fs: FirestoreTimestampType;
-    end: string | null;
-    end_fs: FirestoreTimestampType | null;
-  };
-  bookings: StockSummaryBookingEntry[];
-  bookings_breakdown: {
-    quoted: number;
-    reserved: number;
-    prepped: number;
-    out: number;
-    returned: number;
-    lost: number;
-    damaged: number;
-  };
-  out_of_service_breakdown: {
-    cleaning: number;
-    damaged: number;
-    maintenance: number;
-    lost: number;
-  };
-  quantity_available: number;
-  quantity_booked: number;
   quantity_held: number;
-  quantity_in_service: number;
-  quantity_out_of_service: number;
-  store_breakdown: StoreBreakdownEntry[];
-  query_by_uid_store: string[];
-  query_by_uid_location: string[];
+  bookings: StockSummaryBookingEntry[];
+  out_of_service: StockSummaryOOSEntry[];
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
-  expiresAt: FirestoreTimestampType;
 }
+
+const StockSummaryBookingEntrySchema: z.ZodType<StockSummaryBookingEntry> = z.strictObject({
+  uid: BookingId,
+  number: z.number(),
+  start: chicagoInstant().nullable(),
+  start_fs: FirestoreTimestamp.nullable(),
+  end: chicagoInstant().nullable(),
+  end_fs: FirestoreTimestamp.nullable(),
+  breakdown: BookingBreakdownSchema,
+});
+
+const StockSummaryOOSEntrySchema: z.ZodType<StockSummaryOOSEntry> = z.strictObject({
+  uid: FirestoreId,
+  start: chicagoInstant().nullable(),
+  start_fs: FirestoreTimestamp.nullable(),
+  end: chicagoInstant().nullable(),
+  end_fs: FirestoreTimestamp.nullable(),
+  quantity: z.number(),
+  reason: OOSReasonEnum,
+  status: OOSStatusEnum,
+});
 
 /** Zod schema for StockSummary. */
 export const StockSummarySchema: z.ZodType<StockSummary> = z.strictObject({
-  uid: StockSummaryId,
+  uid: FirestoreId,
   uid_product: FirestoreId,
-  summary_type: z.enum(SUMMARY_TYPES),
   type: ProductTypeEnum,
-  dates: z.strictObject({
-    start: z.string(),
-    start_fs: FirestoreTimestamp,
-    end: z.string().nullable(),
-    end_fs: FirestoreTimestamp.nullable(),
-  }),
-  bookings: z.array(z.strictObject({
-    uid: BookingId,
-    number: z.number(),
-    breakdown: BookingBreakdownSchema,
-  })),
-  bookings_breakdown: z.strictObject({
-    quoted: z.number(),
-    reserved: z.number(),
-    prepped: z.number(),
-    out: z.number(),
-    returned: z.number(),
-    lost: z.number(),
-    damaged: z.number(),
-  }),
-  out_of_service_breakdown: z.strictObject({
-    cleaning: z.number(),
-    damaged: z.number(),
-    maintenance: z.number(),
-    lost: z.number(),
-  }),
-  quantity_available: z.number(),
-  quantity_booked: z.number(),
   quantity_held: z.number(),
-  quantity_in_service: z.number(),
-  quantity_out_of_service: z.number(),
-  store_breakdown: z.array(StoreBreakdownEntrySchema).default([]),
-  query_by_uid_store: z.array(FirestoreId).default([]),
-  query_by_uid_location: z.array(FirestoreId).default([]),
+  bookings: z.array(StockSummaryBookingEntrySchema).default([]),
+  out_of_service: z.array(StockSummaryOOSEntrySchema).default([]),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
-  expiresAt: FirestoreTimestamp,
 }).meta({
   title: "Stock Summary",
   collection: "stock-summaries",
   displayDefaults: {
-    columns: ["type", "summary_type", "quantity_available", "quantity_booked", "store_breakdown"],
+    columns: ["type", "quantity_held", "bookings", "out_of_service"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

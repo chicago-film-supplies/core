@@ -11,7 +11,6 @@
  * |------------------|-----------------------------------------|----------|
  * | `FirestoreId`    | `[A-Za-z0-9]{20}`                       | own `uid` on normal collections + every `uid_*` doc reference |
  * | `BookingId`      | `{id}:{itemUid}:{id}`                   | `bookings.uid` = `{uid_order}:{item uid}:{uid_destination}` |
- * | `StockSummaryId` | `{id}:rental:{date}:{date}` / `:sale:`  | `stock-summaries.uid`, `public-stock-summaries.uid` |
  * | `ItemUid`        | `FirestoreId | uuid | custom-{uuid}`    | order/invoice/fulfillment `items[].uid` + `path[]` segments |
  * | `QuoteId`        | `{id}:v{N}` / `{id}:draft`              | `quotes.uid` (saved versions + working draft) |
  *
@@ -67,16 +66,6 @@ export const BookingId: z.ZodType<string> = z.templateLiteral([
 ]);
 
 /**
- * `stock-summaries.uid` / `public-stock-summaries.uid` — deterministic
- * composite `{uid_product}:rental:{start}:{end}` or `{uid_product}:sale:{date}`
- * (dates are `YYYY-MM-DD`).
- */
-export const StockSummaryId: z.ZodType<string> = z.union([
-  z.templateLiteral([firestoreId, ":rental:", z.iso.date(), ":", z.iso.date()]),
-  z.templateLiteral([firestoreId, ":sale:", z.iso.date()]),
-]);
-
-/**
  * `quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
  * `{uid_order}:draft` (the working draft). Built in api-cloudrun
  * `src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
@@ -129,15 +118,14 @@ export const ListId: z.ZodType<string> = z.union([
 
 /**
  * Any known CFS document-id shape — atomic Firestore id, divider/custom item
- * id, a composite (booking / stock-summary / event-card), or a lowercase-kebab
- * slug (slug-keyed collections such as `roles` and seeded `lists`). Use for
- * polymorphic references (`DocSource`, `UidNameRef`) that may point at any
- * collection. `ItemUid` already covers `FirestoreId | uuid | custom-`.
+ * id, a composite (booking / event-card), or a lowercase-kebab slug (slug-keyed
+ * collections such as `roles` and seeded `lists`). Use for polymorphic
+ * references (`DocSource`, `UidNameRef`) that may point at any collection.
+ * `ItemUid` already covers `FirestoreId | uuid | custom-`.
  */
 export const AnyUid: z.ZodType<string> = z.union([
   ItemUid,
   BookingId,
-  StockSummaryId,
   EventCardId,
   z.string().regex(/^[a-z][a-z0-9-]*$/, "Must be a slug"),
 ]);

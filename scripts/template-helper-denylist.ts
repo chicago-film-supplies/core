@@ -36,6 +36,17 @@
  * `./utils/*` entrypoint so a new collection needs no generator change.
  */
 export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
+  // The whole availability engine. It answers "how many units are free over this
+  // window?" from a StockSummary — and a template's render context never holds
+  // one (templates render orders, invoices and quotes). There is no argument a
+  // template could ever pass these, so surfacing them in the helper panel would
+  // be pure dead surface. `toChicagoEndOfDay` stays visible under `dates`,
+  // though: that one is a genuine date helper.
+  availability: [
+    "computeAvailability", // needs a StockSummary — never in a render context
+    "computePublicAvailability", // needs a PublicStockSummary — likewise
+    "toPublicStockSummary", // write-path projection, not a render helper
+  ],
   orders: [
     "computeItemPaths", // canonical path computation — write-path only
     "validateItemPaths", // invariant assertion — write-path only

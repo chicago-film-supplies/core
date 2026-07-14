@@ -3,7 +3,8 @@
  *
  * `create-out-of-service-record` — direct admin POST or born from a booking
  * update (warehouse marks items lost/damaged on check-in). Cowrites a default
- * thread; updates stock-summaries via the OOS pass of recalculateAllStockSummaries.
+ * thread; rebuilds the product's stock summary (`buildStockSummary`), which
+ * re-derives `out_of_service[]` from the live non-terminal records.
  *
  * `update-out-of-service-record` — operator/system PUT moves units between
  * `breakdown` buckets, sets `dates.end`, or cancels the record. Top-level
@@ -17,6 +18,7 @@
  * breakdown.
  */
 import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import { stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
 
 export const createOutOfServiceRules: CollectionRule[] = [
   {
@@ -36,19 +38,7 @@ export const createOutOfServiceRules: CollectionRule[] = [
       { source: [], target: ["stores"] },
     ],
   },
-  {
-    id: "create-out-of-service-record:record-to-stock-summaries",
-    source: "out-of-service",
-    target: "stock-summaries",
-    mode: "co-write",
-    invariant: "Creating an OOS record updates stock-summaries.out_of_service_breakdown and quantity_out_of_service for the product (recalculateAllStockSummaries('outOfService', ledger, recordUid, { reason, quantity }))",
-    transaction: "create-out-of-service-record",
-    fields: [
-      { source: ["reason"], target: ["out_of_service_breakdown"], transform: "incremented by quantity at the matching reason key" },
-      { source: ["quantity"], target: ["quantity_out_of_service"], transform: "+= quantity" },
-      { source: [], target: ["quantity_available"], transform: "quantity_held - quantity_booked - quantity_out_of_service" },
-    ],
-  },
+  ...stockSummaryRules("create-out-of-service-record", "Creating an OOS record"),
 ];
 
 export const createOutOfServiceTransaction: TransactionDefinition = {
@@ -56,25 +46,17 @@ export const createOutOfServiceTransaction: TransactionDefinition = {
   description: "Creates an out-of-service record, recomputes the affected product's stock-summaries, and cowrites a default thread for the record.",
   steps: [
     "create-out-of-service-record:sources-to-record",
-    "create-out-of-service-record:record-to-stock-summaries",
+    ...stockSummarySteps("create-out-of-service-record"),
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],
 };
 
 export const updateOutOfServiceRules: CollectionRule[] = [
-  {
-    id: "update-out-of-service-record:record-to-stock-summaries",
-    source: "out-of-service",
-    target: "stock-summaries",
-    mode: "co-write",
-    invariant: "OOS quantity changes recompute stock-summaries.out_of_service_breakdown and quantity_out_of_service.",
-    transaction: "update-out-of-service-record",
-    fields: [
-      { source: ["reason"], target: ["out_of_service_breakdown"], transform: "delta applied at the matching reason key" },
-      { source: ["quantity"], target: ["quantity_out_of_service"], transform: "delta" },
-    ],
-  },
+  ...stockSummaryRules(
+    "update-out-of-service-record",
+    "Any OOS quantity/date/status change (including a cancel, which drops the record from the array entirely)",
+  ),
   {
     id: "update-out-of-service-record:record-to-transactions",
     source: "out-of-service",
@@ -109,7 +91,7 @@ export const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
   description: "Updates an out-of-service record. Quantity changes recompute stock summaries. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock-summary update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown.",
   steps: [
-    "update-out-of-service-record:record-to-stock-summaries",
+    ...stockSummarySteps("update-out-of-service-record"),
     "update-out-of-service-record:record-to-transactions",
     "update-out-of-service-record:transactions-to-ledger",
   ],

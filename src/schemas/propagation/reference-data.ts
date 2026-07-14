@@ -89,17 +89,14 @@ export const updateLocationRules: CollectionRule[] = [
       { source: ["name"], target: ["store_breakdown", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
     ],
   },
-  {
-    id: "update-location:name-to-stock-summaries",
-    source: "locations",
-    target: "stock-summaries",
-    mode: "fan-out",
-    invariant: "Stock summaries embed location names in store_breakdown — a location rename must cascade to all stock summaries containing that location",
-    trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
-    fields: [
-      { source: ["name"], target: ["store_breakdown", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
-    ],
-  },
+  // No `update-location:name-to-stock-summaries` rule, deliberately. Stock
+  // summaries used to embed `store_breakdown` (location names and all), so a
+  // rename had to fan out across every summary of every product stored at that
+  // location — a BulkWriter pass whose only job was to fix a denormalized string.
+  // The summary now carries no store placement at all (nothing read it: the
+  // manager's per-store panel is still a stub, and it reads inventory-ledgers
+  // directly when it lands), so there is no location name on it to rename. The
+  // ledger, bookings and OOS records still get the cascade below.
   {
     id: "update-location:name-to-bookings",
     source: "locations",

@@ -24,6 +24,7 @@
 
 import {
   addDays,
+  endOfDay,
   format,
   getHours,
   isAfter,
@@ -64,6 +65,24 @@ export function toChicagoInstant(input: string): string {
  */
 export function toChicagoStartOfDay(input: string): string {
   return startOfDay(parseISO(input, { in: tz("America/Chicago") }))
+    .toISOString();
+}
+
+/**
+ * Canonicalize to the last representable instant of the Chicago calendar date
+ * containing the input (`23:59:59.999` local). The closing twin of
+ * {@link toChicagoStartOfDay} — together they turn a pair of dates into the
+ * half-open-in-spirit, closed-in-fact window `[startOfDay(s), endOfDay(e)]` that
+ * {@link module:availability} overlaps intervals against. Idempotent, DST-aware.
+ *
+ * ```ts
+ * toChicagoEndOfDay("2025-12-22T15:15:00.000Z"); // "2025-12-22T23:59:59.999-06:00"
+ * toChicagoEndOfDay("2025-12-22T03:00:00.000Z"); // "2025-12-21T23:59:59.999-06:00" (Chicago day = Dec 21)
+ * toChicagoEndOfDay("2025-07-04");               // "2025-07-04T23:59:59.999-05:00" (CDT)
+ * ```
+ */
+export function toChicagoEndOfDay(input: string): string {
+  return endOfDay(parseISO(input, { in: tz("America/Chicago") }))
     .toISOString();
 }
 

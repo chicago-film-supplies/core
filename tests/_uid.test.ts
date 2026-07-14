@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { BookingId, EventCardId, FirestoreId, ItemUid, QuoteId, StockSummaryId, ThreadId } from "../src/schemas/_uid.ts";
-import { bookingId, fid, stockSummaryId } from "./helpers/ids.ts";
+import { BookingId, EventCardId, FirestoreId, ItemUid, QuoteId, ThreadId } from "../src/schemas/_uid.ts";
+import { bookingId, fid } from "./helpers/ids.ts";
 
 const accepts = (s: { safeParse(v: unknown): { success: boolean } }, v: string) =>
   assertEquals(s.safeParse(v).success, true, `expected accept: ${v}`);
@@ -43,16 +43,6 @@ Deno.test("BookingId accepts {order}:{item}:{dest}, incl. custom middle", () => 
 Deno.test("BookingId rejects wrong arity / bad segments", () => {
   rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk"); // 2 parts
   rejects(BookingId, "00iNtfho7YCp6FllPi9f:bad:gka5vla5wQO1xlSsR7UG");
-});
-
-Deno.test("StockSummaryId accepts rental + sale forms", () => {
-  accepts(StockSummaryId, "0q6NhsjASVnRH5PqKLKP:rental:2026-05-31:2036-05-31");
-  accepts(StockSummaryId, "0q6NhsjASVnRH5PqKLKP:sale:2026-05-31");
-});
-
-Deno.test("StockSummaryId rejects bad type / missing date", () => {
-  rejects(StockSummaryId, "0q6NhsjASVnRH5PqKLKP:rental:2026-05-31"); // missing end
-  rejects(StockSummaryId, "0q6NhsjASVnRH5PqKLKP:lease:2026-05-31"); // bad type
 });
 
 Deno.test("QuoteId accepts {order}:v{N} and {order}:draft", () => {
@@ -103,6 +93,4 @@ Deno.test("fixture id helpers produce validator-compliant ids", () => {
   accepts(FirestoreId, prod);
   accepts(ItemUid, prod);
   accepts(BookingId, bookingId(fid("o"), fid("p"), fid("d")));
-  accepts(StockSummaryId, stockSummaryId(fid("p"), "rental", "2026-03-01", "2036-03-01"));
-  accepts(StockSummaryId, stockSummaryId(fid("p"), "sale", "2026-03-01"));
 });

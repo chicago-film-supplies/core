@@ -58,7 +58,7 @@
           "kind": "variable",
           "name": "AnyUid",
           "declaration": "const AnyUid: z.ZodType<string>;",
-          "doc": "Any known CFS document-id shape — atomic Firestore id, divider/custom item\nid, a composite (booking / stock-summary / event-card), or a lowercase-kebab\nslug (slug-keyed collections such as `roles` and seeded `lists`). Use for\npolymorphic references (`DocSource`, `UidNameRef`) that may point at any\ncollection. `ItemUid` already covers `FirestoreId | uuid | custom-`."
+          "doc": "Any known CFS document-id shape — atomic Firestore id, divider/custom item\nid, a composite (booking / event-card), or a lowercase-kebab slug (slug-keyed\ncollections such as `roles` and seeded `lists`). Use for polymorphic\nreferences (`DocSource`, `UidNameRef`) that may point at any collection.\n`ItemUid` already covers `FirestoreId | uuid | custom-`."
         },
         {
           "kind": "variable",
@@ -2325,8 +2325,8 @@
         {
           "kind": "interface",
           "name": "PublicStockSummary",
-          "declaration": "interface PublicStockSummary {\n  uid: string;\n  uid_product: string;\n  summary_type: SummaryTypeType;\n  type: ProductTypeType;\n  dates: typeLiteral;\n  quantity_available: number;\n  store_breakdown: PublicStockSummaryStore[];\n  query_by_uid_store: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n  expiresAt: FirestoreTimestampType;\n}",
-          "doc": "A public-facing stock summary with availability data for a product over a date range."
+          "declaration": "interface PublicStockSummary {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  quantity_held: number;\n  unavailable: PublicUnavailableEntry[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "Window-independent, public-safe availability inputs for one product."
         },
         {
           "kind": "typeAlias",
@@ -2342,9 +2342,9 @@
         },
         {
           "kind": "interface",
-          "name": "PublicStockSummaryStore",
-          "declaration": "interface PublicStockSummaryStore {\n  uid_store: string;\n  quantity: number;\n}",
-          "doc": "A store entry in a public stock summary with available quantity."
+          "name": "PublicUnavailableEntry",
+          "declaration": "interface PublicUnavailableEntry {\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  quantity: number;\n}",
+          "doc": "One anonymous unavailable interval — a booking or an OOS record, indistinguishable."
         },
         {
           "kind": "interface",
@@ -2631,20 +2631,20 @@
         {
           "kind": "interface",
           "name": "StockSummary",
-          "declaration": "interface StockSummary {\n  uid: string;\n  uid_product: string;\n  summary_type: SummaryTypeType;\n  type: ProductTypeType;\n  dates: typeLiteral;\n  bookings: StockSummaryBookingEntry[];\n  bookings_breakdown: typeLiteral;\n  out_of_service_breakdown: typeLiteral;\n  quantity_available: number;\n  quantity_booked: number;\n  quantity_held: number;\n  quantity_in_service: number;\n  quantity_out_of_service: number;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n  expiresAt: FirestoreTimestampType;\n}",
-          "doc": "A stock summary document aggregating availability and bookings for a product over a date range."
+          "declaration": "interface StockSummary {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  quantity_held: number;\n  bookings: StockSummaryBookingEntry[];\n  out_of_service: StockSummaryOOSEntry[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id."
         },
         {
           "kind": "interface",
           "name": "StockSummaryBookingEntry",
-          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  breakdown: BookingBreakdown;\n}",
-          "doc": "Slim audit-trail entry: which booking + its breakdown, no full Booking embed."
+          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  breakdown: BookingBreakdown;\n}",
+          "doc": "A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`\nnull = open-ended (see the module note — this is the sale case)."
         },
         {
-          "kind": "variable",
-          "name": "StockSummaryId",
-          "declaration": "const StockSummaryId: z.ZodType<string>;",
-          "doc": "`stock-summaries.uid` / `public-stock-summaries.uid` — deterministic\ncomposite `{uid_product}:rental:{start}:{end}` or `{uid_product}:sale:{date}`\n(dates are `YYYY-MM-DD`)."
+          "kind": "interface",
+          "name": "StockSummaryOOSEntry",
+          "declaration": "interface StockSummaryOOSEntry {\n  uid: string;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  quantity: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n}",
+          "doc": "A non-terminal out-of-service record as an interval + its quantity."
         },
         {
           "kind": "typeAlias",
@@ -4307,7 +4307,7 @@
           "kind": "variable",
           "name": "AnyUid",
           "declaration": "const AnyUid: z.ZodType<string>;",
-          "doc": "Any known CFS document-id shape — atomic Firestore id, divider/custom item\nid, a composite (booking / stock-summary / event-card), or a lowercase-kebab\nslug (slug-keyed collections such as `roles` and seeded `lists`). Use for\npolymorphic references (`DocSource`, `UidNameRef`) that may point at any\ncollection. `ItemUid` already covers `FirestoreId | uuid | custom-`."
+          "doc": "Any known CFS document-id shape — atomic Firestore id, divider/custom item\nid, a composite (booking / event-card), or a lowercase-kebab slug (slug-keyed\ncollections such as `roles` and seeded `lists`). Use for polymorphic\nreferences (`DocSource`, `UidNameRef`) that may point at any collection.\n`ItemUid` already covers `FirestoreId | uuid | custom-`."
         },
         {
           "kind": "variable",
@@ -4590,12 +4590,6 @@
           "name": "StockMethodType",
           "declaration": "type StockMethodType = indexedAccess;",
           "doc": "Allowed values for inventory stock tracking method."
-        },
-        {
-          "kind": "variable",
-          "name": "StockSummaryId",
-          "declaration": "const StockSummaryId: z.ZodType<string>;",
-          "doc": "`stock-summaries.uid` / `public-stock-summaries.uid` — deterministic\ncomposite `{uid_product}:rental:{start}:{end}` or `{uid_product}:sale:{date}`\n(dates are `YYYY-MM-DD`)."
         },
         {
           "kind": "interface",
@@ -6272,8 +6266,8 @@
         {
           "kind": "interface",
           "name": "PublicStockSummary",
-          "declaration": "interface PublicStockSummary {\n  uid: string;\n  uid_product: string;\n  summary_type: SummaryTypeType;\n  type: ProductTypeType;\n  dates: typeLiteral;\n  quantity_available: number;\n  store_breakdown: PublicStockSummaryStore[];\n  query_by_uid_store: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n  expiresAt: FirestoreTimestampType;\n}",
-          "doc": "A public-facing stock summary with availability data for a product over a date range."
+          "declaration": "interface PublicStockSummary {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  quantity_held: number;\n  unavailable: PublicUnavailableEntry[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "Window-independent, public-safe availability inputs for one product."
         },
         {
           "kind": "variable",
@@ -6283,9 +6277,9 @@
         },
         {
           "kind": "interface",
-          "name": "PublicStockSummaryStore",
-          "declaration": "interface PublicStockSummaryStore {\n  uid_store: string;\n  quantity: number;\n}",
-          "doc": "A store entry in a public stock summary with available quantity."
+          "name": "PublicUnavailableEntry",
+          "declaration": "interface PublicUnavailableEntry {\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  quantity: number;\n}",
+          "doc": "One anonymous unavailable interval — a booking or an OOS record, indistinguishable."
         }
       ]
     },
@@ -6416,14 +6410,20 @@
         {
           "kind": "interface",
           "name": "StockSummary",
-          "declaration": "interface StockSummary {\n  uid: string;\n  uid_product: string;\n  summary_type: SummaryTypeType;\n  type: ProductTypeType;\n  dates: typeLiteral;\n  bookings: StockSummaryBookingEntry[];\n  bookings_breakdown: typeLiteral;\n  out_of_service_breakdown: typeLiteral;\n  quantity_available: number;\n  quantity_booked: number;\n  quantity_held: number;\n  quantity_in_service: number;\n  quantity_out_of_service: number;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n  expiresAt: FirestoreTimestampType;\n}",
-          "doc": "A stock summary document aggregating availability and bookings for a product over a date range."
+          "declaration": "interface StockSummary {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  quantity_held: number;\n  bookings: StockSummaryBookingEntry[];\n  out_of_service: StockSummaryOOSEntry[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id."
         },
         {
           "kind": "interface",
           "name": "StockSummaryBookingEntry",
-          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  breakdown: BookingBreakdown;\n}",
-          "doc": "Slim audit-trail entry: which booking + its breakdown, no full Booking embed."
+          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  breakdown: BookingBreakdown;\n}",
+          "doc": "A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`\nnull = open-ended (see the module note — this is the sale case)."
+        },
+        {
+          "kind": "interface",
+          "name": "StockSummaryOOSEntry",
+          "declaration": "interface StockSummaryOOSEntry {\n  uid: string;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  quantity: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n}",
+          "doc": "A non-terminal out-of-service record as an interval + its quantity."
         },
         {
           "kind": "variable",
@@ -8329,6 +8329,60 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/availability",
+      "moduleDoc": "The availability engine — the single source of the CFS availability formula.\n\nA stock summary caches the *inputs* to an availability answer (one doc per\nproduct: `quantity_held` + the live booking intervals + the live OOS\nintervals). The window enters only as an overlap filter, so any window is\nderivable from that one doc, by anyone holding it:\n\n```ts\nimport { computeAvailability } from \"@cfs/core/utils/availability\";\n\nconst { quantity_available } = computeAvailability(summary, {\n  start: \"2026-06-01T00:00:00.000-05:00\",\n  end:   \"2026-06-05T00:00:00.000-05:00\",\n});\n```\n\nPure and db-free: interval arithmetic runs off `FirestoreTimestampValue`'s\nstructural `toMillis()` (or the paired ISO string), so this runs unchanged in\nDeno on the server, in the browser against an `onSnapshot` doc, and over a\nplain JSON fixture in a test. No Firestore SDK import, either side.\n\n**Availability is always Chicago wall clock, and this module owns that rule.**\nThe shop is in Chicago; a requester in California asking for \"June 1 – June 5\"\nmeans Chicago `Jun 1 00:00:00.000` → `Jun 5 23:59:59.999`, no matter where the\nbrowser is. The window is normalized here — `toChicagoStartOfDay` on `start`,\n`toChicagoEndOfDay` on `end` — so a `-08:00`, a `Z` and a `-06:00` spelling of\nthe same day produce identical numbers. Callers pass offset-carrying ISO\nstrings; a bare `YYYY-MM-DD` is rejected upstream by the schema factories.\n\n**This must not be decomposed into a per-day rollup.** With `held = 2`, a\nbooking on days 1–2 and another on days 4–5, the answer for window `[1, 5]` is\nexactly **0** — no single unit is free for the whole span — while a\nmin-over-days curve says 1. Overstating availability oversells. Intervals give\nthe exact answer; a daily curve does not.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "AvailabilityResult",
+          "declaration": "interface AvailabilityResult {\n  quantity_held: number;\n  quantity_booked: number;\n  quantity_out_of_service: number;\n  quantity_in_service: number;\n  quantity_available: number;\n  bookings_breakdown: BookingBreakdown;\n  out_of_service_breakdown: OutOfServiceBreakdown;\n  bookings: StockSummaryBookingEntry[];\n}",
+          "doc": "Everything the manager's availability cells and stock panel need for one window."
+        },
+        {
+          "kind": "interface",
+          "name": "AvailabilityWindow",
+          "declaration": "interface AvailabilityWindow {\n  start: string;\n  end: string;\n}",
+          "doc": "The window an availability question is asked about. Offset-carrying ISO strings."
+        },
+        {
+          "kind": "interface",
+          "name": "OutOfServiceBreakdown",
+          "declaration": "interface OutOfServiceBreakdown {\n  cleaning: number;\n  damaged: number;\n  maintenance: number;\n  lost: number;\n}",
+          "doc": "Per-reason out-of-service quantities over the window."
+        },
+        {
+          "kind": "interface",
+          "name": "PublicAvailabilityResult",
+          "declaration": "interface PublicAvailabilityResult {\n  quantity_held: number;\n  quantity_unavailable: number;\n  quantity_available: number;\n}",
+          "doc": "The public storefront's answer — no booking/OOS detail, same exact numbers."
+        },
+        {
+          "kind": "function",
+          "name": "computeAvailability",
+          "signature": "computeAvailability(summary: StockSummary, window: AvailabilityWindow): AvailabilityResult",
+          "doc": "Compute availability for one product over one window, from the cached inputs.\n\n```\nquantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)\n```\n\nNegative results are preserved, never clamped: an oversold product must stay\nvisibly oversold.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "computePublicAvailability",
+          "signature": "computePublicAvailability(summary: PublicStockSummary, window: AvailabilityWindow): PublicAvailabilityResult",
+          "doc": "The public-storefront form. Same arithmetic, run over the sanitized\n`unavailable[]` list (bookings ∪ OOS, merged and anonymized), so an outsider\ngets the exact number without learning what made a unit unavailable.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "toPublicStockSummary",
+          "signature": "toPublicStockSummary(summary: StockSummary): PublicStockSummary",
+          "doc": "Project the internal summary to its public twin — the one place the sanitized\nshape is defined, so the API's writer and any rebuild script can't drift.\n\nBookings and OOS records merge into one anonymous interval list. Only\nstock-*consuming* entries survive: a booking contributes `heldByBooking` (a\n`quoted` booking holds nothing), and zero-quantity entries are dropped\noutright — they'd leak the existence of a booking without affecting any answer.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/bookings",
       "moduleDoc": "Pure helpers over the booking breakdown shape and the order's denormalized\nroll-up. Used both server-side (api-cloudrun) and client-side (manager) so\nthe warehouse picker sees instant optimistic updates and the order detail\npage can compute \"is this order done?\" without a round-trip.\n\n```ts\nimport {\n  sumBookingBreakdown,\n  isOrderBookingsClosed,\n  mergeBookingBreakdown,\n} from \"@cfs/core/utils/bookings\";\n```",
       "symbols": [
@@ -8594,6 +8648,14 @@
           "name": "toChargeDays",
           "signature": "toChargeDays(inputValue: number, isWeeks: boolean): number",
           "doc": "Convert a duration input value back to chargeable days.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "toChicagoEndOfDay",
+          "signature": "toChicagoEndOfDay(input: string): string",
+          "doc": "Canonicalize to the last representable instant of the Chicago calendar date\ncontaining the input (`23:59:59.999` local). The closing twin of\n{@link toChicagoStartOfDay} — together they turn a pair of dates into the\nhalf-open-in-spirit, closed-in-fact window `[startOfDay(s), endOfDay(e)]` that\n{@link module:availability} overlaps intervals against. Idempotent, DST-aware.\n\n```ts\ntoChicagoEndOfDay(\"2025-12-22T15:15:00.000Z\"); // \"2025-12-22T23:59:59.999-06:00\"\ntoChicagoEndOfDay(\"2025-12-22T03:00:00.000Z\"); // \"2025-12-21T23:59:59.999-06:00\" (Chicago day = Dec 21)\ntoChicagoEndOfDay(\"2025-07-04\");               // \"2025-07-04T23:59:59.999-05:00\" (CDT)\n```",
           "paramTags": [],
           "returnsTag": null
         },

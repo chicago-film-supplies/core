@@ -21,6 +21,9 @@ export interface TemplateHelperEntry {
  * in `./template-context.ts`.
  */
 export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
+  "availability": [
+
+  ],
   "bookings": [
     { name: "applyBookingBreakdownDelta", expr: "it.bookings.applyBookingBreakdownDelta(orderBreakdown, prev, next)", desc: "Apply a per-key delta to an order's bookings_breakdown roll-up in place.", returns: "void" },
     { name: "calculateBookingBreakdown", expr: "it.bookings.calculateBookingBreakdown(status, type, quantity, existingBreakdown)", desc: "Project a booking's breakdown for a given order status, item type, and total quantity. Pure sync — no I/O.", returns: "indexedAccess" },
@@ -47,6 +50,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "isHoliday", expr: "it.dates.isHoliday(testDate, holidays)", desc: "Test if a given date is a CFS holiday.", returns: "boolean" },
     { name: "isOffHours", expr: "it.dates.isOffHours(date)", desc: "Test if a date/time is outside business hours (before 8am or after 4pm).", returns: "boolean" },
     { name: "toChargeDays", expr: "it.dates.toChargeDays(inputValue, isWeeks)", desc: "Convert a duration input value back to chargeable days.", returns: "number" },
+    { name: "toChicagoEndOfDay", expr: "it.dates.toChicagoEndOfDay(input)", desc: "Canonicalize to the last representable instant of the Chicago calendar date containing the input (`23:59:59.999` local). The closing twin of {@link toChicagoStartOfDay} — together they turn a pair of dates into the half-open-in-spirit, closed-in-fact window `[startOfDay(s), endOfDay(e)]` that {@link module:availability} overlaps intervals against. Idempotent, DST-aware.", returns: "string" },
     { name: "toChicagoInstant", expr: "it.dates.toChicagoInstant(input)", desc: "Canonicalize any valid ISO datetime string to Chicago offset form, preserving the instant. Idempotent.", returns: "string" },
     { name: "toChicagoStartOfDay", expr: "it.dates.toChicagoStartOfDay(input)", desc: "Canonicalize to Chicago local midnight for the calendar date containing the input instant. Use for fields that semantically represent a date (invoice.date, invoice.due_date, payments[].date). Idempotent.", returns: "string" },
     { name: "toChicagoYmd", expr: "it.dates.toChicagoYmd(input)", desc: "Format an ISO datetime as the Chicago calendar date in `YYYY-MM-DD` form. The inverse of {@link toChicagoStartOfDay} — use to populate `<input type=\"date\">` from a canonical Chicago-offset value.", returns: "string" },

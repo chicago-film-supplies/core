@@ -14,14 +14,5 @@ export function bookingId(uidOrder: string, uidProduct: string, uidDest: string)
   return `${uidOrder}:${uidProduct}:${uidDest}`;
 }
 
-/** A stock-summary composite id: `{uid_product}:rental:{start}:{end}` or `:sale:{date}`. */
-export function stockSummaryId(
-  uidProduct: string,
-  type: "rental" | "sale",
-  start: string,
-  end?: string,
-): string {
-  return type === "sale"
-    ? `${uidProduct}:sale:${start}`
-    : `${uidProduct}:rental:${start}:${end}`;
-}
+// No stock-summary id builder: a stock summary's doc id IS the product uid
+// (a plain FirestoreId) — there is no composite form any more.
