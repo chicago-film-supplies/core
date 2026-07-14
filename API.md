@@ -454,6 +454,21 @@ interface CacheGeocodesAddress {
 
 Zod schema for CacheGeocodes.
 
+Every field here except the timestamps describes ONE customer address, so the
+whole document is PII and is tagged as such. It is the untagged twin of
+`Address` (`common.ts`) — hand-rolled from the Mapbox response rather than
+reusing the primitive — and it stayed untagged because `cache-geocodes` was
+not in `tests/pii.test.ts`'s old hand-maintained schema list.
+
+Tagged to match `Address` exactly: `mask` on the object so a new field is
+masked by default, with the three coarse-geography leaves opting OUT (a city
+/ state / country identifies no one alone, and the mask transform mangles
+them). `query`, `coordinates` and `mapbox_id` are tagged individually because
+they sit OUTSIDE the address object — and each one resolves to the same
+street address on its own, so masking `address` while leaving them raw would
+be theatre. Note `query`/`coordinates`/`mapbox_id` are invisible to the
+name-dictionary in `pii/dictionary.ts`: no lint would have caught them.
+
 ```ts
 const CacheGeocodesSchema: z.ZodType<CacheGeocodes>;
 ```
@@ -8481,6 +8496,21 @@ interface CacheGeocodesAddress {
 
 Zod schema for CacheGeocodes.
 
+Every field here except the timestamps describes ONE customer address, so the
+whole document is PII and is tagged as such. It is the untagged twin of
+`Address` (`common.ts`) — hand-rolled from the Mapbox response rather than
+reusing the primitive — and it stayed untagged because `cache-geocodes` was
+not in `tests/pii.test.ts`'s old hand-maintained schema list.
+
+Tagged to match `Address` exactly: `mask` on the object so a new field is
+masked by default, with the three coarse-geography leaves opting OUT (a city
+/ state / country identifies no one alone, and the mask transform mangles
+them). `query`, `coordinates` and `mapbox_id` are tagged individually because
+they sit OUTSIDE the address object — and each one resolves to the same
+street address on its own, so masking `address` while leaving them raw would
+be theatre. Note `query`/`coordinates`/`mapbox_id` are invisible to the
+name-dictionary in `pii/dictionary.ts`: no lint would have caught them.
+
 ```ts
 const CacheGeocodesSchema: z.ZodType<CacheGeocodes>;
 ```
@@ -14844,6 +14874,24 @@ type XeroEventMsg = indexedAccess;
 
 ## `@cfs/core/schemas/pii`
 
+### `NAME_SENSITIVE`
+
+Schemas in which a bare `name` field is a PERSON or ORGANIZATION name rather
+than a label, keyed by `schemas`-record key or by exported input-schema name.
+
+This replaces the `nameIsSensitive` boolean that used to live in
+`tests/pii.test.ts`'s hand-maintained schema tuple. It has to be explicit:
+`name` means a customer in `contact`, and a catalog product in `product`, and
+nothing structural distinguishes them. Defaults to FALSE for any schema not
+listed — an unlisted schema's `name` is treated as a label.
+
+A parent-segment heuristic is not a substitute: a root-level `name` has no
+parent segment, so it would silently drop `contact::name` itself.
+
+```ts
+const NAME_SENSITIVE: ReadonlySet<string>;
+```
+
 ### `PiiClassification`
 
 PII classification vocabulary.
@@ -14942,7 +14990,14 @@ const SAFE_PASSTHROUGH: ReadonlySet<string>;
 
 ### `SENSITIVE_EXACT`
 
-Field names that MUST carry a `pii` meta when they appear at any depth in a schema.
+Field names that MUST carry a `pii` meta when they appear at any depth in a
+schema — matched against EVERY segment of a leaf's path, not just the last.
+
+The any-segment rule is load-bearing: `address` and `billing_address` are
+object-typed everywhere in core, so they are never a leaf's own name. A
+leaf-only match would make those two entries dead letters and would miss an
+untagged address container entirely — which is the exact class of bug the
+`Address` object-level tag was introduced to fix.
 
 ```ts
 const SENSITIVE_EXACT: ReadonlySet<string>;
@@ -14976,14 +15031,29 @@ Default strategy for the structured logger.
              must never throw, so a missing key degrades gracefully.
 - `none`   → pass through unchanged
 
-Non-string values are passed through unchanged, so the walker keeps
-descending to the string leaves. Note this means a NUMERIC leaf inside a
-tagged subtree is not scrubbed by the logger — `Address.address_coordinates`
-is a 6dp geocode (≈0.11 m) and would pass through raw. That is acceptable
-only because no log record schema embeds an `Address` (every `pii` tag under
-`schemas/log/` sits on a bare `z.string()`, and `log/*.ts` imports nothing
-from `common.ts`). If that ever changes, this strategy needs the same
-container hook the fixture sanitizer uses.
+**Non-string SCALARS under a tag fail closed** — a number or boolean is
+`[REDACTED]`, not passed through. It used to pass through, which meant a
+numeric leaf inside a tagged subtree was never scrubbed:
+`Address.address_coordinates` is a 6dp geocode (≈0.11 m) and went to the log
+raw. That was survivable only while no log record schema embedded an
+`Address`, an invariant nothing enforced (it is now pinned by
+`tests/log-imports.test.ts`) and which was never the real guarantee anyway —
+a log arm can write `z.number().meta({pii:"mask"})` inline without importing
+anything at all.
+
+Two deliberate passthroughs remain:
+
+- **`null` / `undefined`** — they carry no PII, and callers rely on the
+  absent-stays-absent contract.
+- **Containers (objects and arrays)** — returned by reference so the walker
+  keeps descending to the leaves. This is load-bearing, not an oversight:
+  {@link PiiStrategy} is offered every container before descent and treats a
+  changed return value as "replace this wholesale and stop", so redacting here
+  would collapse a masked `Address` to a single `"[REDACTED]"` string and
+  destroy the `city` / `region` / `country_name` `pii: "none"` opt-outs inside
+  it. The consequence, by construction, is that an OBJECT-shaped scalar (a
+  `Date`, a Firestore `Timestamp`) still passes through raw — no schema has
+  one under a tag today.
 
 **Parameters**
 

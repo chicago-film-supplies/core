@@ -33,7 +33,8 @@ export interface Session {
 /** Zod schema for Session. */
 export const SessionSchema: z.ZodType<Session> = z.strictObject({
   id: z.string().length(40),
-  user_id: z.string(),
+  // Internal Firestore uid, not customer data — same call as `log/base.ts`.
+  user_id: z.string().meta({ pii: "none" }),
   anonymous: z.boolean(),
   expiresAt: FirestoreTimestamp,
   created_at: z.number(),

@@ -24,9 +24,14 @@ export interface PreviewRecord {
 export const PreviewRecordSchema: z.ZodType<PreviewRecord> = z.strictObject({
   // 64-hex capability token, not a Firestore auto-id — kept a plain string.
   uid: z.string(),
-  user_id: z.string(),
+  // Internal Firestore uid, not customer data — same call as `log/base.ts`.
+  user_id: z.string().meta({ pii: "none" }),
   pdf_base64: z.string(),
-  filename: z.string(),
+  // NOT a server-fixed name: a template's `renderConfig.filename` is itself an
+  // Eta source rendered against the full document context (api-cloudrun
+  // `lib/templates/render.ts`), so an author can interpolate the organization
+  // name straight into it.
+  filename: z.string().meta({ pii: "mask" }),
   created_at: FirestoreTimestamp,
   expires_at: FirestoreTimestamp,
 }).meta({

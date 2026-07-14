@@ -79,14 +79,29 @@ export interface PiiStrategy {
  *              must never throw, so a missing key degrades gracefully.
  * - `none`   → pass through unchanged
  *
- * Non-string values are passed through unchanged, so the walker keeps
- * descending to the string leaves. Note this means a NUMERIC leaf inside a
- * tagged subtree is not scrubbed by the logger — `Address.address_coordinates`
- * is a 6dp geocode (≈0.11 m) and would pass through raw. That is acceptable
- * only because no log record schema embeds an `Address` (every `pii` tag under
- * `schemas/log/` sits on a bare `z.string()`, and `log/*.ts` imports nothing
- * from `common.ts`). If that ever changes, this strategy needs the same
- * container hook the fixture sanitizer uses.
+ * **Non-string SCALARS under a tag fail closed** — a number or boolean is
+ * `[REDACTED]`, not passed through. It used to pass through, which meant a
+ * numeric leaf inside a tagged subtree was never scrubbed:
+ * `Address.address_coordinates` is a 6dp geocode (≈0.11 m) and went to the log
+ * raw. That was survivable only while no log record schema embedded an
+ * `Address`, an invariant nothing enforced (it is now pinned by
+ * `tests/log-imports.test.ts`) and which was never the real guarantee anyway —
+ * a log arm can write `z.number().meta({pii:"mask"})` inline without importing
+ * anything at all.
+ *
+ * Two deliberate passthroughs remain:
+ *
+ * - **`null` / `undefined`** — they carry no PII, and callers rely on the
+ *   absent-stays-absent contract.
+ * - **Containers (objects and arrays)** — returned by reference so the walker
+ *   keeps descending to the leaves. This is load-bearing, not an oversight:
+ *   {@link PiiStrategy} is offered every container before descent and treats a
+ *   changed return value as "replace this wholesale and stop", so redacting here
+ *   would collapse a masked `Address` to a single `"[REDACTED]"` string and
+ *   destroy the `city` / `region` / `country_name` `pii: "none"` opt-outs inside
+ *   it. The consequence, by construction, is that an OBJECT-shaped scalar (a
+ *   `Date`, a Firestore `Timestamp`) still passes through raw — no schema has
+ *   one under a tag today.
  *
  * @param hashFn Optional sync HMAC function. The api-cloudrun logger
  *               supplies `(v) => nodeHash(v, LOG_HMAC_KEY)`; browser
@@ -97,7 +112,13 @@ export interface PiiStrategy {
 export function createLoggerStrategy(hashFn?: (value: string) => string): PiiStrategy {
   return {
     apply(value, classification) {
-      if (typeof value !== "string") return value;
+      if (classification === "none") return value;
+      if (value === null || value === undefined) return value;
+      // Containers descend; see the note above. MUST be by reference.
+      if (typeof value === "object") return value;
+      // Any other non-string scalar under a tag: fail closed.
+      if (typeof value !== "string") return redact();
+
       switch (classification) {
         case "mask":
           return mask(value);
@@ -105,7 +126,6 @@ export function createLoggerStrategy(hashFn?: (value: string) => string): PiiStr
           return redact();
         case "hash":
           return hashFn ? hashFn(value) : redact();
-        case "none":
         default:
           return value;
       }

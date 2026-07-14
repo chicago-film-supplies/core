@@ -26,4 +26,4 @@ export { mask, redact } from "./transforms.ts";
 export { applyPii, createLoggerStrategy, type PiiStrategy, readPiiTag } from "./walker.ts";
 export { RUNTIME_DENYLIST } from "./runtime-denylist.ts";
 export { SAFE_PASSTHROUGH } from "./safe-passthrough.ts";
-export { SENSITIVE_EXACT, SENSITIVE_NAME_FIELD } from "./dictionary.ts";
+export { NAME_SENSITIVE, SENSITIVE_EXACT, SENSITIVE_NAME_FIELD } from "./dictionary.ts";

@@ -14,11 +14,12 @@
  *   runtime denylist tier, not here)
  */
 
-import { assert, assertEquals, assertNotEquals } from "@std/assert";
+import { assert, assertEquals, assertNotEquals, assertStrictEquals } from "@std/assert";
 import { z } from "zod";
-import { applyPii, createLoggerStrategy } from "../src/schemas/pii/walker.ts";
+import { applyPii, createLoggerStrategy, readPiiTag } from "../src/schemas/pii/walker.ts";
 import { mask, redact } from "../src/schemas/pii/transforms.ts";
 import { nodeHash } from "../src/schemas/pii/hash-node.ts";
+import { collectLeafPaths } from "../src/schemas/zod-walk.ts";
 
 // ── Leaf transforms ─────────────────────────────────────────────────
 
@@ -87,11 +88,34 @@ Deno.test("createLoggerStrategy: none passes through unchanged", () => {
   assertEquals(strategy.apply("hello", "none", "x"), "hello");
 });
 
-Deno.test("createLoggerStrategy: non-string values pass through regardless of classification", () => {
+Deno.test("createLoggerStrategy: non-string SCALARS under a tag fail closed", () => {
   const strategy = createLoggerStrategy(undefined);
-  assertEquals(strategy.apply(42, "mask", "x"), 42);
-  assertEquals(strategy.apply(true, "redact", "x"), true);
+  // These used to pass through raw, which is how a 6dp geocode reached the log.
+  assertEquals(strategy.apply(42, "mask", "x"), "[REDACTED]");
+  assertEquals(strategy.apply(true, "redact", "x"), "[REDACTED]");
+  assertEquals(strategy.apply(41.8781, "mask", "coordinates.latitude"), "[REDACTED]");
+  assertEquals(strategy.apply(10n, "hash", "x"), "[REDACTED]");
+});
+
+Deno.test("createLoggerStrategy: null and undefined still pass through", () => {
+  const strategy = createLoggerStrategy(undefined);
   assertEquals(strategy.apply(null, "hash", "x"), null);
+  assertEquals(strategy.apply(null, "mask", "x"), null);
+  assertEquals(strategy.apply(undefined, "redact", "x"), undefined);
+  // `none` short-circuits before any of it.
+  assertEquals(strategy.apply(42, "none", "x"), 42);
+});
+
+Deno.test("createLoggerStrategy: containers pass through BY REFERENCE so the walker descends", () => {
+  const strategy = createLoggerStrategy(undefined);
+  const obj = { city: "Chicago" };
+  const arr = [1, 2];
+  // Reference identity is the contract `applyTagged` keys off: return the same
+  // reference → keep descending; return anything else → replace wholesale. If
+  // these were redacted, a masked `Address` would collapse to "[REDACTED]" and
+  // its city/region/country_name `none` opt-outs would be destroyed.
+  assertStrictEquals(strategy.apply(obj, "mask", "address"), obj);
+  assertStrictEquals(strategy.apply(arr, "redact", "xs"), arr);
 });
 
 // ── Walker on representative shapes ─────────────────────────────────
@@ -562,4 +586,82 @@ Deno.test("gate: no identifying address string survives a masking pass", async (
   assertEquals(billing.city, "Chicago");
   assertEquals(billing.region, "IL");
   assertEquals(billing.country_name, "United States");
+});
+
+// ── One reader ──────────────────────────────────────────────────────
+
+/**
+ * The guard (`tests/pii.test.ts`) reads tags via `collectLeafPaths`' merged
+ * `leaf.meta.pii`. The runtime reads them via `readPiiTag`. If those two ever
+ * disagree about WHERE a tag is allowed to live, the guard reports a field as
+ * protected while `applyPii` logs it raw — which is exactly how `Address`'s
+ * object-level tag stayed green in the test while doing nothing at runtime.
+ *
+ * They HAVE disagreed: `collectLeafPaths` looked through `.readonly()`,
+ * `.nonoptional()` and `.transform()`; `readMetaThroughWrappers` did not. So
+ * `z.string().meta({pii:"mask"}).transform(s => s.trim())` read `mask` in the
+ * test and `undefined` at runtime. `WRAPPER_TYPES` was widened to match and a
+ * pipe arm added to the meta reader.
+ *
+ * This is the regression test. It covers every wrapper form, with the tag placed
+ * both BEFORE and AFTER each wrapper, and asserts three things agree:
+ * the two readers, and that `applyPii` actually transforms the value.
+ */
+Deno.test("one reader: readPiiTag, collectLeafPaths and applyPii agree on every wrapper form", () => {
+  const fields: Record<string, z.ZodType> = {
+    bare: z.string().meta({ pii: "mask" }),
+
+    // Tag BEFORE the wrapper (registers on the inner node).
+    optional_inner: z.string().meta({ pii: "mask" }).optional(),
+    nullable_inner: z.string().meta({ pii: "mask" }).nullable(),
+    default_inner: z.string().meta({ pii: "mask" }).default("x"),
+    catch_inner: z.string().meta({ pii: "mask" }).catch("x"),
+    prefault_inner: z.string().meta({ pii: "mask" }).prefault("x"),
+    readonly_inner: z.string().meta({ pii: "mask" }).readonly(),
+    nonoptional_inner: z.string().meta({ pii: "mask" }).optional().nonoptional(),
+    // A ZodPipe: the tag is on the input side of the transform.
+    transform_inner: z.string().meta({ pii: "mask" }).transform((s) => s.trim()),
+
+    // Tag AFTER the wrapper (registers on the wrapper node) — the `Address` shape.
+    optional_outer: z.string().optional().meta({ pii: "mask" }),
+    nullable_outer: z.string().nullable().meta({ pii: "mask" }),
+    default_outer: z.string().default("x").meta({ pii: "mask" }),
+    catch_outer: z.string().catch("x").meta({ pii: "mask" }),
+    readonly_outer: z.string().readonly().meta({ pii: "mask" }),
+  };
+
+  const schema = z.object(fields);
+  const { leaves, unhandled } = collectLeafPaths(schema, { inherit: ["pii"] });
+  assertEquals(unhandled, [], "collectLeafPaths could not interpret the wrapper fixture");
+
+  const record: Record<string, string> = {};
+  for (const key of Object.keys(fields)) record[key] = "sensitive@example.com";
+
+  // deno-lint-ignore no-explicit-any
+  const scrubbed = applyPii(record, schema as any, stringOnly) as Record<string, unknown>;
+
+  const disagreements: string[] = [];
+  for (const key of Object.keys(fields)) {
+    const viaReadPiiTag = readPiiTag(fields[key]);
+    const leaf = leaves.find((l) => l.path === key);
+    const viaCollect = leaf?.meta.pii;
+
+    if (viaReadPiiTag !== "mask") {
+      disagreements.push(`${key}: readPiiTag → ${viaReadPiiTag} (expected "mask")`);
+    }
+    if (viaCollect !== "mask") {
+      disagreements.push(`${key}: collectLeafPaths → ${viaCollect} (expected "mask")`);
+    }
+    // The reads agreeing is necessary but not sufficient — the DESCENT has to
+    // reach the field too, which is a different code path (`unwrapZod`).
+    if (scrubbed[key] !== "XXX") {
+      disagreements.push(`${key}: applyPii left it as ${JSON.stringify(scrubbed[key])} — tag is decorative`);
+    }
+  }
+
+  assertEquals(
+    disagreements,
+    [],
+    `The two tag readers and the runtime must agree:\n  ${disagreements.join("\n  ")}`,
+  );
 });

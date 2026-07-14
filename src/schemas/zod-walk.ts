@@ -9,12 +9,26 @@
 import { z } from "zod";
 import { FirestoreTimestamp } from "./common.ts";
 
+/**
+ * Nodes that wrap a schema without changing its shape. Kept deliberately equal
+ * to {@link TRANSPARENT_TYPES}: `collectLeafPaths` walks through the latter and
+ * merges `.meta()` on the way down, while `readMetaThroughWrappers` /
+ * `unwrapZod` walk through this one. When the two sets disagree, a tag becomes
+ * visible to one reader and invisible to the other — which is precisely the
+ * `Address` bug (a tag on a wrapper the walker never looked at). `readonly` and
+ * `nonoptional` are here for that reason and no other: they have zero instances
+ * in `src/schemas/` today, so this is prophylaxis, not a fix for a live leak.
+ *
+ * `pipe` is NOT a wrapper here — see {@link readMetaThroughWrappers}.
+ */
 const WRAPPER_TYPES: ReadonlySet<string> = new Set([
   "optional",
   "default",
   "nullable",
   "prefault",
   "catch",
+  "readonly",
+  "nonoptional",
 ]);
 
 interface ZodInternalDef {
@@ -99,6 +113,13 @@ export function getNodeMeta(node: z.ZodType): Record<string, unknown> | null {
  *
  * Stops at `ZodArray` (the array node's own meta is returned if tagged);
  * callers that need the element's tag pass the element schema.
+ *
+ * Looks through `ZodPipe` via `def.in` as well — so a tag survives a
+ * `.transform()`: `z.string().meta({pii:"mask"}).transform(s => s.trim())` reads
+ * `mask`, not `undefined`. This arm lives HERE and not in {@link WRAPPER_TYPES}
+ * on purpose: `unwrapZod` must keep treating a pipe as opaque so that
+ * pipe-level `.meta()` (`serverSortVia`, see `unwrapPipes` below) stays
+ * discoverable. Meta readers look through pipes; type readers do not.
  */
 export function readMetaThroughWrappers<T>(
   node: z.ZodType,
@@ -111,6 +132,10 @@ export function readMetaThroughWrappers<T>(
     const def = getDef(n);
     if (WRAPPER_TYPES.has(def.type) && def.innerType) {
       n = def.innerType;
+      continue;
+    }
+    if (def.type === "pipe" && def.in) {
+      n = def.in;
       continue;
     }
     return undefined;
@@ -370,23 +395,46 @@ export interface CollectLeafPathsResult {
  * - **union / discriminatedUnion** → every member at the *same* path, deduped by
  *   (path, node identity) so shared nodes are visited once.
  *
- * Meta does **not** cross a container boundary: an object's schema-level
- * `.meta({ title, collection })` must not leak onto its fields, and by symmetry
- * an annotation on an array node does not reach its element. Annotate the leaf.
+ * Meta does **not** cross a container boundary by default: an object's
+ * schema-level `.meta({ title, collection })` must not leak onto its fields, and
+ * by symmetry an annotation on an array node does not reach its element.
+ * Annotate the leaf.
+ *
+ * `opts.inherit` names the meta keys that DO cross, for annotations whose whole
+ * point is to cover a subtree. `pii` is the motivating case: `Address` is tagged
+ * `.nullable().meta({ pii: "mask" })` on the object, and the runtime walker
+ * (`pii/walker.ts` `applyTagged`) pushes that tag down to every leaf, with a
+ * child's own tag winning and `pii: "none"` opting back out — exactly the
+ * `{...inherited, ...own}` merge this function already performs through
+ * wrappers. Without it, the PII lint would report every leaf under a correctly
+ * tagged `Address` as a violation (measured: 213 of them).
+ *
+ * Default `[]` — no key crosses, so every existing caller is bit-identical.
  *
  * `maxDepth` defaults to **24**. Wrappers are nodes, so depth counts them: the
- * deepest chain in core today measures 10, and an obvious-looking 12 would have
+ * deepest chain in core today measures 11, and an obvious-looking 12 would have
  * been one `.optional().nullable()` away from silently truncating. Hitting the
  * cap pushes a `__depth_cap__` entry into `unhandled` rather than returning
  * quietly.
  */
 export function collectLeafPaths(
   schema: z.ZodType,
-  opts?: { maxDepth?: number },
+  opts?: { maxDepth?: number; inherit?: readonly string[] },
 ): CollectLeafPathsResult {
   const maxDepth = opts?.maxDepth ?? 24;
+  const inheritKeys = opts?.inherit ?? [];
   const leaves: LeafPath[] = [];
   const unhandled: Array<{ path: string; type: string }> = [];
+
+  /** The meta a container hands to its children: only the `inherit` keys survive. */
+  function carried(meta: Record<string, unknown>): Record<string, unknown> {
+    if (inheritKeys.length === 0) return {};
+    const out: Record<string, unknown> = {};
+    for (const key of inheritKeys) {
+      if (meta[key] !== undefined) out[key] = meta[key];
+    }
+    return out;
+  }
   /** (path → nodes already visited at it) — dedupes union members and, as a
    *  side effect, makes a self-referential schema terminate. */
   const visited = new Map<string, Set<z.ZodType>>();
@@ -429,7 +477,7 @@ export function collectLeafPaths(
         return;
       }
       for (const [key, child] of Object.entries(def.shape)) {
-        walk(child, path ? `${path}.${key}` : key, depth + 1, {});
+        walk(child, path ? `${path}.${key}` : key, depth + 1, carried(meta));
       }
       return;
     }
@@ -438,7 +486,7 @@ export function collectLeafPaths(
         unhandled.push({ path, type: def.type });
         return;
       }
-      walk(def.element, `${path}[]`, depth + 1, {});
+      walk(def.element, `${path}[]`, depth + 1, carried(meta));
       return;
     }
     if (def.type === "record") {
@@ -446,7 +494,7 @@ export function collectLeafPaths(
         unhandled.push({ path, type: def.type });
         return;
       }
-      walk(def.valueType, `${path}.<key>`, depth + 1, {});
+      walk(def.valueType, `${path}.<key>`, depth + 1, carried(meta));
       return;
     }
     if (def.type === "union") {
