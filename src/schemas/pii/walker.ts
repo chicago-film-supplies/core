@@ -11,9 +11,20 @@
  *   the transform per-element (e.g. `z.array(Email)`).
  * - **Arrays of objects**: recurses into each element using the element schema.
  * - **Nested objects**: recurses, applying the same walker logic.
- * - **`.passthrough()` / `z.record()` / un-shaped values**: left untouched —
- *   the runtime key-name denylist tier (separate, in the logger) handles
- *   those.
+ * - **`z.record()`**: recurses into every entry against the record's VALUE
+ *   schema. The path segment is the literal `<key>`, never the map key — a map
+ *   key is exactly as arbitrary as an array index (which the array arm likewise
+ *   omits), and it matches the grammar `collectLeafPaths` emits.
+ * - **Bare unions** (a union in a field position, not just as an array element):
+ *   narrowed to the member matching the value's literal/enum discriminator, then
+ *   walked.
+ * - **`.passthrough()` extras / un-shaped values**: left untouched — the runtime
+ *   key-name denylist tier (separate, in the logger) handles those.
+ *
+ * Inside a TAGGED subtree the walker **fails closed**: a container it cannot
+ * descend (a `z.custom`, a `z.date`, a union no discriminator resolves) is
+ * `[REDACTED]` wholesale rather than passed through raw. A tag the walker cannot
+ * honour must not quietly ship the value.
  *
  * The {@link PiiStrategy} interface is the seam for non-logger consumers —
  * notably the upcoming templates golden-diff fixture sanitizer, which
@@ -58,12 +69,14 @@ export function readPiiTag(node: z.ZodType): PiiClassification | undefined {
  * like the fixture sanitizer's deterministic fakes).
  *
  * `apply` is also offered every CONTAINER inside a tagged subtree (the tagged
- * object itself, and each nested object/array within it) before the walker
- * recurses into it. Return the value unchanged to let the walker keep
- * descending to the leaves; return anything else to replace the container
- * wholesale and stop the descent. The fixture sanitizer uses this to null a
- * whole `Coordinates` object — a leaf-by-leaf transform cannot, because
- * `latitude` is a `z.number()` and there is no in-band "absent" value for it.
+ * object itself, each nested object/array within it, and each ENTRY of a nested
+ * `z.record`, at `path.<key>`) before the walker recurses into it. An untagged
+ * record's own object is never offered — only its entries, and only once a tag
+ * is in scope. Return the value unchanged to let the walker keep descending to
+ * the leaves; return anything else to replace the container wholesale and stop
+ * the descent. The fixture sanitizer uses this to null a whole `Coordinates`
+ * object — a leaf-by-leaf transform cannot, because `latitude` is a `z.number()`
+ * and there is no in-band "absent" value for it.
  */
 export interface PiiStrategy {
   apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown;
@@ -99,9 +112,14 @@ export interface PiiStrategy {
  *   changed return value as "replace this wholesale and stop", so redacting here
  *   would collapse a masked `Address` to a single `"[REDACTED]"` string and
  *   destroy the `city` / `region` / `country_name` `pii: "none"` opt-outs inside
- *   it. The consequence, by construction, is that an OBJECT-shaped scalar (a
- *   `Date`, a Firestore `Timestamp`) still passes through raw — no schema has
- *   one under a tag today.
+ *   it.
+ *
+ * Returning a container by reference is therefore a *descend* instruction, never
+ * a passthrough — and the walker holds up its end: a tagged container it cannot
+ * descend (an OBJECT-shaped scalar such as a `Date` or a Firestore `Timestamp`)
+ * is redacted by {@link applyPii} itself rather than emitted raw. It used to be
+ * emitted raw; nothing in this file guaranteed otherwise except the observation
+ * that no schema had one under a tag.
  *
  * @param hashFn Optional sync HMAC function. The api-cloudrun logger
  *               supplies `(v) => nodeHash(v, LOG_HMAC_KEY)`; browser
@@ -140,6 +158,8 @@ interface ZodInternalDef {
   innerType?: z.ZodType;
   element?: z.ZodType;
   shape?: Record<string, z.ZodType>;
+  /** Value schema of a `z.record(keyType, valueType)`. */
+  valueType?: z.ZodType;
   options?: z.ZodType[];
   /** `literal` def values (Zod 4 stores the literal set as an array). */
   values?: unknown[];
@@ -149,12 +169,26 @@ interface ZodInternalDef {
   entries?: Record<string, unknown>;
 }
 
+/**
+ * The path segment a record's entries are reported under. A dynamic map key is
+ * exactly as arbitrary as an array index — and the array arm deliberately emits
+ * no index, because the fixture sanitizer seeds its deterministic fakes on
+ * `(path, value)` and a reordered array would otherwise reseed every one of them
+ * and churn every golden. Also the grammar `collectLeafPaths` already emits, so
+ * the lint's leaf set and the runtime's offered paths are directly comparable.
+ */
+const RECORD_KEY_SEGMENT = "<key>";
+
 function getDef(node: z.ZodType): ZodInternalDef {
   return (node as unknown as { _zod: { def: ZodInternalDef } })._zod.def;
 }
 
 function getShape(node: z.ZodType): Record<string, z.ZodType> | null {
   return getDef(unwrapZod(node)).shape ?? null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
@@ -268,8 +302,9 @@ function walkObject(
  * on the way back in). A strategy that ignores non-strings just falls through
  * to the recursion below.
  *
- * A child's OWN tag overrides the inherited one, so a `pii: "none"` leaf inside
- * a masked object (`Address.city`) opts out.
+ * Children — object fields, array elements, record entries alike — go through
+ * {@link applyInherited}, which is where a child's OWN tag overrides the
+ * inherited one and where `pii: "none"` opts that child out.
  */
 function applyTagged(
   value: unknown,
@@ -291,20 +326,101 @@ function applyTagged(
 
   if (Array.isArray(value)) {
     const elem = def.element;
-    return value.map((v) =>
-      elem ? applyTagged(v, elem, pii, strategy, path) : strategy.apply(v, pii, path)
-    );
+    // No element schema (an array value under a tagged non-array node) — nothing
+    // to descend with. Fail closed, same reasoning as the `!shape` note below.
+    if (!elem) return redact();
+    return value.map((v) => applyInherited(v, elem, pii, strategy, path));
   }
 
-  const shape = getShape(unwrapped);
-  if (!shape) return value;
+  // Record — must precede `getShape`, which is `null` for one. Every entry is
+  // walked against the record's value schema, under the literal `<key>` segment.
+  if (def.type === "record" && def.valueType) {
+    return walkRecord(value as Record<string, unknown>, def.valueType, strategy, path, pii);
+  }
+
+  // A bare union is narrowed to the member the value discriminates to, exactly
+  // as `walkObject` does; without this a tagged union would land on `!shape`.
+  const narrowed = resolveUnionMember(unwrapped, value as Record<string, unknown>);
+  const shape = getShape(narrowed ?? unwrapped);
+
+  // FAIL CLOSED. We are inside a tagged subtree, the strategy declined first
+  // refusal (it handed back the same reference, which is its way of saying
+  // "descend"), and we cannot descend: a `z.custom` (a Firestore `Timestamp`), a
+  // `z.date`, a union no discriminator resolves. Passing the value through raw is
+  // the one remaining way a `pii` tag can be decorative — so don't.
+  //
+  // In the fixture-capture flow this makes `saveFixture`'s Zod re-parse fail (a
+  // string where an object is declared) and the capture 422. That is the point: a
+  // tag the walker cannot honour must not silently ship real PII into git.
+  //
+  // Scoped to `applyTagged` deliberately — never `transformField`. Redacting an
+  // UNTAGGED undescendable node would nuke `card.body` (Tiptap), `deleted_at`
+  // timestamps, `transaction.crms_sync`, and much else. Zero schemas reach this
+  // arm today (measured: every own-tag in the package sits on a string or an
+  // object).
+  //
+  // `strategy.apply` is NOT called a second time here: first refusal already ran.
+  if (!shape) return redact();
+
   const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
   for (const [key, childSchema] of Object.entries(shape)) {
     if (!(key in out)) continue;
-    const childPath = `${path}.${key}`;
-    const childPii = readPiiTag(childSchema) ?? pii;
-    if (childPii === "none") continue;
-    out[key] = applyTagged(out[key], childSchema, childPii, strategy, childPath);
+    out[key] = applyInherited(out[key], childSchema, pii, strategy, `${path}.${key}`);
+  }
+  return out;
+}
+
+/**
+ * Hand a value the classification inherited from a `pii`-tagged ancestor, letting
+ * the value's OWN tag win where it has one.
+ *
+ * The one place the override rule lives, so the object arm, the array arm and the
+ * record arm cannot drift apart — they had: the array arm never read the
+ * element's own tag at all, and the object arm treated a child's `pii: "none"` as
+ * a hard `continue` that pruned the entire subtree below it. Tagging a container
+ * `none` silently exempted everything beneath it.
+ *
+ * `none` opts out THIS NODE, not its subtree. Re-entering {@link transformField}
+ * (rather than skipping) lets every tag BELOW the opted-out node still govern. For
+ * a `none` SCALAR leaf (`Address.city`) `transformField` falls straight through to
+ * `return value` and the strategy is never called — byte-identical to the old
+ * `continue`, which is what keeps the explicit opt-out an opt-out.
+ */
+function applyInherited(
+  value: unknown,
+  schema: z.ZodType,
+  inherited: PiiClassification,
+  strategy: PiiStrategy,
+  path: string,
+): unknown {
+  const effective = readPiiTag(schema) ?? inherited;
+  if (effective === "none") return transformField(value, schema, strategy, path);
+  return applyTagged(value, schema, effective, strategy, path);
+}
+
+/**
+ * Walk every entry of a `z.record` against the record's VALUE schema.
+ *
+ * `inherited` absent — the record itself is untagged, so each entry re-enters
+ * {@link transformField} and only tags at or below the value schema govern.
+ * `inherited` present — we are inside a tagged subtree, so the tag is pushed down
+ * to each entry (which gets its own first refusal at `path.<key>`).
+ */
+function walkRecord(
+  value: Record<string, unknown>,
+  valueSchema: z.ZodType,
+  strategy: PiiStrategy,
+  path: string,
+  inherited?: PiiClassification,
+): Record<string, unknown> {
+  const entryPath = path ? `${path}.${RECORD_KEY_SEGMENT}` : RECORD_KEY_SEGMENT;
+  const out: Record<string, unknown> = { ...value };
+  for (const key of Object.keys(out)) {
+    const entry = out[key];
+    if (entry === null || entry === undefined) continue;
+    out[key] = inherited === undefined
+      ? transformField(entry, valueSchema, strategy, entryPath)
+      : applyInherited(entry, valueSchema, inherited, strategy, entryPath);
   }
   return out;
 }
@@ -327,36 +443,27 @@ function transformField(
   const unwrapped = unwrapNonArray(fieldSchema);
   const def = getDef(unwrapped);
 
-  // Array of objects (or array of pii-tagged primitives): recurse per-element.
+  // Array: delegate per element. `transformField` already dispatches on tag /
+  // object / union / record, so the array arm composes with every arm below it
+  // for free — arrays of records, arrays of unions, nested arrays. The path
+  // carries NO index, deliberately (see {@link RECORD_KEY_SEGMENT}).
   if (def.type === "array" && def.element && Array.isArray(value)) {
     const elem = def.element;
-    const elemPii = readPiiTag(elem);
-    if (elemPii && elemPii !== "none") {
-      return value.map((v) => applyTagged(v, elem, elemPii, strategy, path));
-    }
-    const elemUnwrapped = unwrapNonArray(elem);
-    const elemDef = getDef(elemUnwrapped);
-    if (
-      (elemDef.type === "object" && elemDef.shape) ||
-      elemDef.type === "union"
-    ) {
-      // `walkObject` handles both: a plain object element walks the element's
-      // shape, a union element is narrowed by `resolveUnionMember` first.
-      return value.map((v) =>
-        v !== null && typeof v === "object" && !Array.isArray(v)
-          ? walkObject(v as Record<string, unknown>, elem, strategy, path)
-          : v
-      );
-    }
-    return value;
+    return value.map((v) =>
+      v === null || v === undefined ? v : transformField(v, elem, strategy, path)
+    );
   }
 
-  // Nested object — recurse.
-  if (
-    def.type === "object" && def.shape &&
-    value !== null && typeof value === "object" && !Array.isArray(value)
-  ) {
-    return walkObject(value as Record<string, unknown>, unwrapped, strategy, path);
+  // Record — descend the value schema. Tags below a record used to be decorative:
+  // `getShape` is `null` for a record, so the walk stopped here and every tagged
+  // leaf under `comment.reactions` went to the log and into git unscrubbed.
+  if (def.type === "record" && def.valueType && isPlainObject(value)) {
+    return walkRecord(value, def.valueType, strategy, path);
+  }
+
+  // Object OR bare union — `walkObject` handles both (it narrows a union first).
+  if (((def.type === "object" && def.shape) || def.type === "union") && isPlainObject(value)) {
+    return walkObject(value, unwrapped, strategy, path);
   }
 
   return value;

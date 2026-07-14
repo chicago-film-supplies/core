@@ -14920,12 +14920,14 @@ and the dotted field path (for strategies that want path-dependent output
 like the fixture sanitizer's deterministic fakes).
 
 `apply` is also offered every CONTAINER inside a tagged subtree (the tagged
-object itself, and each nested object/array within it) before the walker
-recurses into it. Return the value unchanged to let the walker keep
-descending to the leaves; return anything else to replace the container
-wholesale and stop the descent. The fixture sanitizer uses this to null a
-whole `Coordinates` object — a leaf-by-leaf transform cannot, because
-`latitude` is a `z.number()` and there is no in-band "absent" value for it.
+object itself, each nested object/array within it, and each ENTRY of a nested
+`z.record`, at `path.<key>`) before the walker recurses into it. An untagged
+record's own object is never offered — only its entries, and only once a tag
+is in scope. Return the value unchanged to let the walker keep descending to
+the leaves; return anything else to replace the container wholesale and stop
+the descent. The fixture sanitizer uses this to null a whole `Coordinates`
+object — a leaf-by-leaf transform cannot, because `latitude` is a `z.number()`
+and there is no in-band "absent" value for it.
 
 ```ts
 interface PiiStrategy {
@@ -15051,9 +15053,14 @@ Two deliberate passthroughs remain:
   changed return value as "replace this wholesale and stop", so redacting here
   would collapse a masked `Address` to a single `"[REDACTED]"` string and
   destroy the `city` / `region` / `country_name` `pii: "none"` opt-outs inside
-  it. The consequence, by construction, is that an OBJECT-shaped scalar (a
-  `Date`, a Firestore `Timestamp`) still passes through raw — no schema has
-  one under a tag today.
+  it.
+
+Returning a container by reference is therefore a *descend* instruction, never
+a passthrough — and the walker holds up its end: a tagged container it cannot
+descend (an OBJECT-shaped scalar such as a `Date` or a Firestore `Timestamp`)
+is redacted by {@link applyPii} itself rather than emitted raw. It used to be
+emitted raw; nothing in this file guaranteed otherwise except the observation
+that no schema had one under a tag.
 
 **Parameters**
 
