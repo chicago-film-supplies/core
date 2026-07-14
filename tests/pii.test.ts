@@ -32,6 +32,21 @@
  *    `applyPii` logged the value raw. `WRAPPER_TYPES` was widened to match, and
  *    `tests/pii-walker.test.ts` pins the equivalence. That is the whole lesson of
  *    the `Address` bug: one reader, or the guard does not guard.
+ *
+ * ## …and the one thing that makes it *sufficient*
+ *
+ * Everything above checks that a tag is PRESENT. Nothing above checks that the
+ * tag DOES anything — and a tag that does nothing is the failure mode this file
+ * keeps rediscovering. `Address` was tagged and unscrubbed. Then
+ * `comment::reactions.<key>.<key>.name` was tagged and unscrubbed, behind a
+ * `z.record` the walker had no arm for — while a static tripwire written to catch
+ * exactly that sat green, because it gated on the name dictionary rather than on
+ * the tag.
+ *
+ * So the last gate here drives the **real `applyPii`** over synthesized documents
+ * (`tests/helpers/sample-value.ts`) and asserts it actually offers every tagged
+ * leaf to the strategy. A static rule cannot audit the runtime; only the runtime
+ * can.
  */
 import { assertEquals } from "@std/assert";
 import type { z } from "zod";
@@ -40,7 +55,7 @@ import * as barrel from "../src/schemas/mod.ts";
 import { schemas } from "../src/schemas/mod.ts";
 import { MSG_SCHEMA_REGISTRY } from "../src/schemas/log/mod.ts";
 import { collectLeafPaths, type LeafPath } from "../src/schemas/zod-walk.ts";
-import { readPiiTag } from "../src/schemas/pii/walker.ts";
+import { applyPii, type PiiStrategy, readPiiTag } from "../src/schemas/pii/walker.ts";
 import {
   AMBIGUOUS,
   NAME_SENSITIVE,
@@ -48,6 +63,7 @@ import {
   SENSITIVE_NAME_FIELD,
 } from "../src/schemas/pii/dictionary.ts";
 import { RUNTIME_DENYLIST } from "../src/schemas/pii/runtime-denylist.ts";
+import { resolveLeafValues, sampleValues } from "./helpers/sample-value.ts";
 
 // ── Coverage sources ─────────────────────────────────────────────────
 
@@ -169,27 +185,170 @@ Deno.test("the walk interprets every node — no schema is silently skipped", ()
   assertEquals(unhandled, [], `collectLeafPaths could not interpret:\n${unhandled.join("\n")}`);
 });
 
-Deno.test("no sensitive field hides behind a dynamic-key map", () => {
-  // `applyPii` has no `z.record` arm — it returns the value untouched. So a
-  // sensitive field under a record would be tagged, pass this suite, and never
-  // actually be scrubbed. Zero such leaves today; this fires the day that
-  // changes, at which point teaching the runtime to descend records becomes a
-  // decision rather than a silent false green.
-  const behindRecord: string[] = [];
+// ── The runtime reach gate ───────────────────────────────────────────
+
+/**
+ * The lint's path grammar vs the runtime's: identical except for arrays.
+ * `collectLeafPaths` writes `items[].name`; the walker writes `items.name`,
+ * because it deliberately emits no array INDEX — the fixture sanitizer seeds its
+ * deterministic fakes on `(path, value)`, so an index would reseed every fake the
+ * day someone reordered a line item and churn every golden. Records already agree:
+ * both say `.<key>`.
+ *
+ * The mapping is many-to-one in principle, which would let an offer for `a.b`
+ * satisfy the requirement for `a[].b` — a false green. The injectivity test below
+ * asserts it never actually is.
+ */
+function toRuntimePath(lintPath: string): string {
+  return lintPath.replaceAll("[]", "");
+}
+
+/** Leaves whose EFFECTIVE pii — own tag, or one inherited from a tagged container — demands a scrub. */
+function expectScrubbed(schema: z.ZodType): Set<string> {
+  const out = new Set<string>();
+  for (const leaf of collectLeafPaths(schema, { inherit: ["pii"] }).leaves) {
+    const pii = leaf.meta.pii;
+    if (pii === undefined || pii === "none") continue;
+    // `z.union([z.string(), z.null()])` under a tag emits a tagged `null` leaf.
+    // The walker skips null/undefined by documented contract (absent stays
+    // absent), so demanding an offer for one would be a permanent false red.
+    // Zero such leaves today — this is a landmine, not a bug.
+    if (leaf.type === "null" || leaf.type === "undefined") continue;
+    out.add(toRuntimePath(leaf.path));
+  }
+  return out;
+}
+
+Deno.test("no pii tag is decorative — the real walker reaches every tagged leaf", () => {
+  // EVERY other guard in this file keys off something that is not the walker: the
+  // name dictionary, the tag readers, the lint's leaf set. Each has been green
+  // while `applyPii` shipped the value raw — `Address`'s object-level tag, then
+  // `comment::reactions.<key>.<key>.name` behind a `z.record`. That last one was
+  // supposed to be caught by a static "nothing sensitive behind a dynamic-key map"
+  // tripwire, which this test replaces: the tripwire gated on the NAME dictionary,
+  // `reactions` and `name` are not in it for a comment, and so it sat green on the
+  // exact leaf it was written to catch.
+  //
+  // A static rule cannot see a hole in the runtime, because the runtime is the
+  // thing being checked. So drive the real walker and watch what it touches.
+  const unreached: string[] = [];
 
   for (const [schema, label] of coverageSources()) {
-    const nameIsSensitive = NAME_SENSITIVE.has(label);
-    for (const leaf of collectLeafPaths(schema, { inherit: ["pii"] }).leaves) {
-      if (!leaf.path.includes("<key>")) continue;
-      if (!isSensitive(leaf, nameIsSensitive)) continue;
-      behindRecord.push(`${label}::${leaf.path}`);
+    const expected = expectScrubbed(schema);
+    if (expected.size === 0) continue;
+
+    const offered = new Set<string>();
+    const probe: PiiStrategy = {
+      apply(value, _classification, fieldPath) {
+        // Only NON-container offers count as "reached". A container is offered for
+        // FIRST REFUSAL before the walker descends it, so a tagged `z.custom` (a
+        // Firestore Timestamp) is "offered" as an object and then cannot be
+        // descended at all. Counting that as reached would be a false green on
+        // precisely the leak being hunted.
+        if (value === null || typeof value !== "object") offered.add(fieldPath);
+        return value;
+      },
+    };
+
+    for (const doc of sampleValues(schema)) {
+      applyPii(doc as Record<string, unknown>, schema as z.ZodType<Record<string, unknown>>, probe);
+    }
+    for (const path of expected) {
+      if (!offered.has(path)) unreached.push(`${label}::${path}`);
     }
   }
 
   assertEquals(
-    behindRecord,
+    unreached,
     [],
-    `Sensitive fields behind a z.record — applyPii cannot reach these:\n${behindRecord.join("\n")}`,
+    "These fields carry a pii tag the runtime walker never applies. They are tagged, " +
+      "they are green in every static guard in this file, and they ship raw:\n" +
+      unreached.map((u) => `  ${u}`).join("\n"),
+  );
+});
+
+Deno.test("the sample generator populates every leaf — the reach gate is not vacuous", () => {
+  // The reach gate asserts "every expected path was offered". If the generator
+  // quietly failed to populate a field, the walker would never be handed it, and…
+  // the gate would still be red (the expected set comes from `collectLeafPaths`,
+  // not from the generator). So a generator bug cannot fake a pass. This asserts
+  // the containment directly anyway, because a gate whose inputs you cannot
+  // characterise is a gate you will eventually mis-read.
+  const unpopulated: string[] = [];
+
+  for (const [schema, label] of coverageSources()) {
+    const docs = sampleValues(schema);
+    for (const leaf of collectLeafPaths(schema, { inherit: ["pii"] }).leaves) {
+      // `z.undefined()`'s only inhabitant IS the absent value.
+      if (leaf.type === "undefined") continue;
+      if (docs.some((doc) => resolveLeafValues(doc, leaf.path).length > 0)) continue;
+      unpopulated.push(`${label}::${leaf.path} (${leaf.type})`);
+    }
+  }
+
+  assertEquals(
+    unpopulated,
+    [],
+    `The sample generator never produced a value at these leaves, so the walker was ` +
+      `never offered them:\n${unpopulated.map((u) => `  ${u}`).join("\n")}`,
+  );
+});
+
+Deno.test("stripping array markers is injective — no two leaves collide on one runtime path", () => {
+  // `toRuntimePath` deletes `[]`, so `a[].b` and `a.b` would normalize onto the
+  // same string and an offer for either would satisfy the requirement for both.
+  // Zero collisions today. One assert closes the hole.
+  const collisions: string[] = [];
+
+  for (const [schema, label] of coverageSources()) {
+    const byRuntimePath = new Map<string, string>();
+    for (const leaf of collectLeafPaths(schema, { inherit: ["pii"] }).leaves) {
+      const runtime = toRuntimePath(leaf.path);
+      const prior = byRuntimePath.get(runtime);
+      if (prior !== undefined && prior !== leaf.path) {
+        collisions.push(`${label}: "${prior}" and "${leaf.path}" both → "${runtime}"`);
+      }
+      byRuntimePath.set(runtime, leaf.path);
+    }
+  }
+
+  assertEquals(
+    collisions,
+    [],
+    `Two distinct leaves share one runtime path — the reach gate above can be ` +
+      `satisfied for one by an offer for the other:\n${collisions.join("\n")}`,
+  );
+});
+
+Deno.test("no pii tag sits on an opaque leaf (unknown / any)", () => {
+  // NOT redundant with the reach gate — it is the one thing the reach gate
+  // structurally cannot see. The generator emits a STRING at a `z.unknown()` leaf,
+  // so the walker masks it and the gate goes green. In production the value may be
+  // an object, in which case the walker has no shape to descend and fails closed
+  // to `[REDACTED]` wholesale. Neither outcome is a leak — but which one you get
+  // depends on the VALUE, not the schema, and a scrub you cannot predict from the
+  // schema is not a scrub you can reason about.
+  //
+  // This is also what makes tagging `CommentBody` (the Tiptap `z.record(z.string(),
+  // z.unknown())` comment body) fail loudly instead of looking scrubbed and not
+  // being. If a rich-text body ever does need scrubbing, the answer is wholesale
+  // replacement, expressed as such — not a `mask` tag on an opaque leaf.
+  const opaque: string[] = [];
+
+  for (const [schema, label] of coverageSources()) {
+    for (const leaf of collectLeafPaths(schema, { inherit: ["pii"] }).leaves) {
+      if (leaf.type !== "unknown" && leaf.type !== "any") continue;
+      const pii = leaf.meta.pii;
+      if (pii === undefined || pii === "none") continue;
+      opaque.push(`${label}::${leaf.path} (${leaf.type}, pii: ${String(pii)})`);
+    }
+  }
+
+  assertEquals(
+    opaque,
+    [],
+    `A pii tag on an opaque leaf scrubs differently depending on the runtime value ` +
+      `(string → masked, object → redacted wholesale):\n${opaque.map((o) => `  ${o}`).join("\n")}`,
   );
 });
 

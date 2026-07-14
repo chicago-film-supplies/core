@@ -588,6 +588,310 @@ Deno.test("gate: no identifying address string survives a masking pass", async (
   assertEquals(billing.country_name, "United States");
 });
 
+// ── Records ─────────────────────────────────────────────────────────
+//
+// `applyPii` had no `z.record` arm: `getShape` is `null` for one, so both callers
+// fell through to `return value` and every tag underneath a dynamic-key map was
+// decorative. `comment::reactions.<key>.<key>.name` was tagged `mask`, passed the
+// whole PII suite, and was 100% unscrubbed at runtime.
+
+Deno.test("record: a tagged field on the VALUE schema is scrubbed in every entry", () => {
+  const schema = z.strictObject({
+    members: z.record(z.string(), z.strictObject({
+      uid: z.string(),
+      name: z.string().meta({ pii: "mask" }),
+    })),
+  });
+  assertEquals(
+    applyPii(
+      { members: { alice: { uid: "u1", name: "Alice Ng" }, bob: { uid: "u2", name: "Bob Roy" } } },
+      schema,
+      stringOnly,
+    ),
+    { members: { alice: { uid: "u1", name: "XXX" }, bob: { uid: "u2", name: "XXX" } } },
+  );
+});
+
+Deno.test("record: the path segment is the literal <key>, never the map key", () => {
+  // Load-bearing, not cosmetic. A map key is exactly as arbitrary as an array
+  // index — and the array arm omits the index precisely so that the fixture
+  // sanitizer, which seeds its deterministic fakes on (path, value), does not
+  // reseed every fake and churn every golden the day someone reorders an array.
+  // Echoing the map key here would reintroduce that for maps. It is also the
+  // grammar `collectLeafPaths` emits, which is what lets `tests/pii.test.ts`
+  // compare the lint's leaf set against the paths the walker offers.
+  const schema = z.strictObject({
+    members: z.record(z.string(), z.strictObject({ name: z.string().meta({ pii: "mask" }) })),
+  });
+  const { seen, strategy } = probeStrategy();
+  applyPii({ members: { alice: { name: "Alice Ng" } } }, schema, strategy);
+
+  assert(seen.includes("members.<key>.name:mask"), `offered: ${JSON.stringify(seen)}`);
+  assert(!seen.some((s) => s.includes("alice")), "the walker echoed the map key into the path");
+});
+
+Deno.test("record: a tag on the VALUE schema itself scrubs every entry", () => {
+  const schema = z.strictObject({
+    aliases: z.record(z.string(), z.string().meta({ pii: "mask" })),
+  });
+  assertEquals(
+    applyPii({ aliases: { home: "alice@x.com", work: "a.ng@corp.com" } }, schema, stringOnly),
+    { aliases: { home: "XXX", work: "XXX" } },
+  );
+});
+
+Deno.test("record: nested records compose — the `comment.reactions` shape", () => {
+  // The exact schema that shipped a tagged, unscrubbed leaf:
+  // `reactions: z.record(z.string(), z.record(z.string(), ActorRef))`, with
+  // `ActorRef.name` tagged `mask`.
+  const schema = z.strictObject({
+    reactions: z.record(
+      z.string(),
+      z.record(z.string(), z.strictObject({ uid: z.string(), name: z.string().meta({ pii: "mask" }) })),
+    ),
+  });
+  assertEquals(
+    applyPii({ reactions: { "❤️": { u1: { uid: "u1", name: "Alice Ng" } } } }, schema, stringOnly),
+    { reactions: { "❤️": { u1: { uid: "u1", name: "XXX" } } } },
+  );
+});
+
+Deno.test("record: under a TAG, the classification pushes down into every entry", () => {
+  const schema = z.strictObject({
+    secrets: z.record(z.string(), z.strictObject({ label: z.string(), value: z.string() }))
+      .meta({ pii: "redact" }),
+  });
+  const { seen, strategy } = probeStrategy();
+  const out = applyPii({ secrets: { a: { label: "db", value: "hunter2" } } }, schema, strategy);
+
+  // Each ENTRY gets first refusal as a container, at `path.<key>` — the seam the
+  // fixture sanitizer uses to replace a whole object wholesale.
+  assert(seen.includes("secrets.<key>:redact"), `offered: ${JSON.stringify(seen)}`);
+  assert(seen.includes("secrets.<key>.label:redact"));
+  assert(seen.includes("secrets.<key>.value:redact"));
+  assertEquals(out.secrets.a.value, "hunter2"); // probe passes values through
+});
+
+Deno.test("record: a `none` field under a tagged record still opts out", () => {
+  const schema = z.strictObject({
+    people: z.record(z.string(), z.strictObject({
+      name: z.string(),
+      city: z.string().meta({ pii: "none" }),
+    })).meta({ pii: "mask" }),
+  });
+  assertEquals(
+    applyPii({ people: { a: { name: "Alice Ng", city: "Chicago" } } }, schema, stringOnly),
+    { people: { a: { name: "XXX", city: "Chicago" } } },
+  );
+});
+
+Deno.test("record: an array of records composes", () => {
+  const schema = z.strictObject({
+    pages: z.array(z.record(z.string(), z.strictObject({ name: z.string().meta({ pii: "mask" }) }))),
+  });
+  assertEquals(
+    applyPii({ pages: [{ a: { name: "Alice" } }, { b: { name: "Bob" } }] }, schema, stringOnly),
+    { pages: [{ a: { name: "XXX" } }, { b: { name: "XXX" } }] },
+  );
+});
+
+Deno.test("record: idempotent, and does not mutate the input", () => {
+  const schema = z.strictObject({
+    members: z.record(z.string(), z.strictObject({ name: z.string().meta({ pii: "mask" }) })),
+  });
+  const input = { members: { alice: { name: "Alice Ng" } } };
+  const once = applyPii(input, schema, stringOnly);
+  const twice = applyPii(once, schema, stringOnly);
+  assertEquals(input.members.alice.name, "Alice Ng", "input was mutated");
+  assertEquals(once, twice);
+});
+
+// ── Bare unions ─────────────────────────────────────────────────────
+//
+// `resolveUnionMember` was only ever reached via `walkObject` — i.e. for a union
+// sitting as an ARRAY ELEMENT (an order's `items[]`). A union in a plain field
+// position hit `def.type === "object"`, failed, and returned the value untouched.
+// No shipped schema has a tagged leaf under a bare union today; this is the arm
+// that keeps the next one from being a silent leak.
+
+Deno.test("union: a bare union field is narrowed by its discriminator and walked", () => {
+  const schema = z.strictObject({
+    action: z.union([
+      z.strictObject({ kind: z.literal("email"), address: z.string().meta({ pii: "mask" }) }),
+      z.strictObject({ kind: z.literal("call"), phone: z.string().meta({ pii: "mask" }) }),
+    ]),
+  });
+  assertEquals(
+    applyPii({ action: { kind: "email", address: "alice@x.com" } }, schema, stringOnly),
+    { action: { kind: "email", address: "XXX" } },
+  );
+  assertEquals(
+    applyPii({ action: { kind: "call", phone: "+13125550123" } }, schema, stringOnly),
+    { action: { kind: "call", phone: "XXX" } },
+  );
+});
+
+Deno.test("union: un-narrowable and UNTAGGED is left alone — the walker never guesses", () => {
+  // No literal/enum discriminator, so no member can be identified. Guessing would
+  // mean applying one member's tags to another member's data.
+  const schema = z.strictObject({
+    payload: z.union([
+      z.strictObject({ a: z.string().meta({ pii: "mask" }) }),
+      z.strictObject({ b: z.string() }),
+    ]),
+  });
+  assertEquals(
+    applyPii({ payload: { a: "alice@x.com" } }, schema, stringOnly),
+    { payload: { a: "alice@x.com" } },
+  );
+});
+
+Deno.test("union: un-narrowable but TAGGED fails closed to [REDACTED]", () => {
+  // Inside a tagged subtree, "can't descend" must not mean "ship it raw".
+  const schema = z.strictObject({
+    payload: z.union([
+      z.strictObject({ a: z.string() }),
+      z.strictObject({ b: z.string() }),
+    ]).meta({ pii: "mask" }),
+  });
+  assertEquals(
+    applyPii({ payload: { a: "alice@x.com" } }, schema, stringOnly) as unknown,
+    { payload: "[REDACTED]" },
+  );
+});
+
+Deno.test("union: an all-scalar tagged union is scrubbed as a scalar", () => {
+  const schema = z.strictObject({
+    contact: z.union([z.string(), z.number()]).meta({ pii: "mask" }),
+  });
+  assertEquals(applyPii({ contact: "alice@x.com" }, schema, stringOnly), { contact: "XXX" });
+});
+
+// ── Fail-closed on an undescendable tagged node ─────────────────────
+
+Deno.test("fail-closed: a tagged z.custom is [REDACTED], not passed through raw", () => {
+  // A Firestore `Timestamp` is a `z.custom` — object-shaped, no shape to descend.
+  // The strategy declined first refusal (it handed the object back by reference,
+  // which is its way of saying "descend"), and we cannot. Raw passthrough is the
+  // one remaining way a tag can be decorative.
+  const stamp = z.custom<{ seconds: number; nanoseconds: number }>(
+    (v) => typeof v === "object" && v !== null && "seconds" in v,
+  );
+  const schema = z.strictObject({ born_at: stamp.meta({ pii: "redact" }) });
+  assertEquals(
+    applyPii({ born_at: { seconds: 1, nanoseconds: 2 } }, schema, stringOnly) as unknown,
+    { born_at: "[REDACTED]" },
+  );
+});
+
+Deno.test("fail-closed: a tagged z.date is [REDACTED]", () => {
+  const schema = z.strictObject({ dob: z.date().meta({ pii: "mask" }) });
+  assertEquals(applyPii({ dob: new Date(0) }, schema, stringOnly) as unknown, { dob: "[REDACTED]" });
+});
+
+Deno.test("fail-closed does NOT apply to untagged undescendable nodes", () => {
+  // Scoped to `applyTagged` on purpose. Redacting every undescendable node the
+  // walker meets would nuke `card.body` (a Tiptap `z.record(z.string(),
+  // z.unknown())`), every `deleted_at` timestamp, `transaction.crms_sync`, …
+  const stamp = z.custom<{ seconds: number }>(() => true);
+  const schema = z.strictObject({ deleted_at: stamp.nullable() });
+  assertEquals(
+    applyPii({ deleted_at: { seconds: 7 } }, schema, stringOnly),
+    { deleted_at: { seconds: 7 } },
+  );
+});
+
+// ── `none` opts out ONE node, not a subtree ─────────────────────────
+
+Deno.test("none: a `none` CONTAINER inside a tagged subtree does not prune its children", () => {
+  // The old `applyTagged` did `if (childPii === "none") continue`, skipping the
+  // entire subtree below the opted-out node. So a `mask`-tagged GRANDCHILD under a
+  // `none` container was silently exempted — tagging a container `none` quietly
+  // turned off everything beneath it.
+  const schema = z.strictObject({
+    profile: z.strictObject({
+      street: z.string(),
+      contact: z.strictObject({
+        label: z.string().meta({ pii: "none" }),
+        email: z.string().meta({ pii: "mask" }),
+      }).meta({ pii: "none" }),
+    }).meta({ pii: "mask" }),
+  });
+  assertEquals(
+    applyPii(
+      { profile: { street: "3100 W Fillmore St", contact: { label: "work", email: "alice@x.com" } } },
+      schema,
+      stringOnly,
+    ),
+    { profile: { street: "XXX", contact: { label: "work", email: "XXX" } } },
+  );
+});
+
+Deno.test("none: a `none` SCALAR is never handed to the strategy at all", () => {
+  // The opt-out has to stay a true opt-out: byte-identical to the old `continue`,
+  // with the strategy never invoked. `Address.city` / `.region` / `.country_name`
+  // depend on this — coarse geography is what keeps a sanitized address plausible.
+  const schema = z.strictObject({
+    addr: z.strictObject({
+      street: z.string(),
+      city: z.string().meta({ pii: "none" }),
+    }).meta({ pii: "mask" }),
+  });
+  const { seen, strategy } = probeStrategy();
+  applyPii({ addr: { street: "3100 W Fillmore St", city: "Chicago" } }, schema, strategy);
+  assert(seen.includes("addr.street:mask"));
+  assert(
+    !seen.some((s) => s.startsWith("addr.city:")),
+    `pii:"none" leaf was still offered to the strategy: ${JSON.stringify(seen)}`,
+  );
+});
+
+// ── Arrays ──────────────────────────────────────────────────────────
+
+Deno.test("array: an element's OWN tag beats the one inherited from the array", () => {
+  // The old array arm in `applyTagged` never read the element's tag — it always
+  // pushed the inherited one down. Same bug class as the `none`-prunes-a-subtree
+  // one above, a few lines apart.
+  const schema = z.strictObject({
+    opted_out: z.array(z.string().meta({ pii: "none" })).meta({ pii: "mask" }),
+    escalated: z.array(z.string().meta({ pii: "redact" })).meta({ pii: "mask" }),
+  });
+  const out = applyPii(
+    { opted_out: ["Chicago", "Illinois"], escalated: ["hunter2"] },
+    schema,
+    createLoggerStrategy(undefined),
+  );
+  assertEquals(out.opted_out, ["Chicago", "Illinois"]);
+  assertEquals(out.escalated, ["[REDACTED]"]);
+});
+
+Deno.test("array: paths carry NO index — the golden-churn tripwire", () => {
+  // The fixture sanitizer seeds deterministic fakes on (path, value). Adding an
+  // index would reseed every fake in an array the moment a line item moved, and
+  // churn every golden in `templates/`. If this ever fails, a golden re-bless is
+  // about to land on someone.
+  const schema = z.strictObject({
+    items: z.array(z.strictObject({ name: z.string().meta({ pii: "mask" }) })),
+  });
+  const { seen, strategy } = probeStrategy();
+  applyPii({ items: [{ name: "Alice" }, { name: "Bob" }] }, schema, strategy);
+
+  assert(seen.includes("items.name:mask"), `offered: ${JSON.stringify(seen)}`);
+  assert(!seen.some((s) => s.includes("[")), `an array index leaked into a path: ${JSON.stringify(seen)}`);
+});
+
+Deno.test("containers: an empty {} or [] under a tag does not throw", () => {
+  const schema = z.strictObject({
+    people: z.record(z.string(), z.strictObject({ name: z.string() })).meta({ pii: "mask" }),
+    tags: z.array(z.string()).meta({ pii: "mask" }),
+    empty: z.strictObject({ name: z.string().optional() }).meta({ pii: "mask" }),
+  });
+  assertEquals(
+    applyPii({ people: {}, tags: [], empty: {} }, schema, stringOnly),
+    { people: {}, tags: [], empty: {} },
+  );
+});
+
 // ── One reader ──────────────────────────────────────────────────────
 
 /**
