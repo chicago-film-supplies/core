@@ -57,6 +57,44 @@ export const SENSITIVE_EXACT: ReadonlySet<string> = new Set([
 export const SENSITIVE_NAME_FIELD = "name";
 
 /**
+ * Schema-sensitive names that are deliberately NOT in `RUNTIME_DENYLIST`.
+ *
+ * The two sets do different jobs and are allowed to differ — but only here, and
+ * only on purpose. `tests/pii.test.ts` asserts
+ *
+ *     RUNTIME_DENYLIST ⊇ (SENSITIVE_EXACT \ AMBIGUOUS)
+ *
+ * so adding a name to the schema dictionary now forces a decision about the
+ * runtime scrubber instead of silently letting the two drift. It also asserts
+ * the reverse — every name here must still BE schema-sensitive — so a stale
+ * exemption cannot outlive the dictionary entry it exempts.
+ *
+ * Each entry earns its place by being a false-positive magnet in an untyped log
+ * payload, where the scrubber matches raw key names with no schema context:
+ *
+ * - `address` — logs legitimately carry `delivery_address`, `store_address`.
+ * - `name` — `store_name`, `collection_name`, `template_name`. The single
+ *   noisiest token there is; this is why the schema side gates it on
+ *   {@link NAME_SENSITIVE} rather than matching it everywhere.
+ * - `title` — a thread title is user text, but `.meta({ title })` is *schema
+ *   metadata* and `title` is a routine ops field. Unusable as a runtime key.
+ * - `filename` — PII in `template_previews` only because a template author can
+ *   interpolate an organization name into it. As a raw log key it is almost
+ *   always a script, bundle, or render artefact, and redacting those blinds ops.
+ * - `user_id` — in the dictionary so a NEW `user_id` field is forced to make an
+ *   explicit call, but every existing one is tagged `pii: "none"`: it is an
+ *   internal Firestore uid, not customer data, and it is a deliberate log
+ *   correlation key. Redacting it at runtime would be actively harmful.
+ */
+export const AMBIGUOUS: ReadonlySet<string> = new Set([
+  "address",
+  "name",
+  "title",
+  "filename",
+  "user_id",
+]);
+
+/**
  * Schemas in which a bare `name` field is a PERSON or ORGANIZATION name rather
  * than a label, keyed by `schemas`-record key or by exported input-schema name.
  *

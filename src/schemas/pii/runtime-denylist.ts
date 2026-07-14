@@ -26,7 +26,13 @@
  * present in logs for ops correlation.
  */
 export const RUNTIME_DENYLIST: ReadonlySet<string> = new Set([
-  // Schema dictionary subset (unambiguous in any context)
+  // Schema dictionary subset (unambiguous in any context).
+  //
+  // This block is not curated by hand any more — `tests/pii.test.ts` asserts
+  // RUNTIME_DENYLIST ⊇ (SENSITIVE_EXACT \ AMBIGUOUS), so every schema-sensitive
+  // name that is not explicitly exempted in `AMBIGUOUS` MUST appear here. Add a
+  // name to the schema dictionary and the test tells you to make a call about
+  // this list; it can no longer drift silently.
   "email",
   "emails",
   "password",
@@ -36,6 +42,15 @@ export const RUNTIME_DENYLIST: ReadonlySet<string> = new Set([
   "billing_address",
   "external_notes",
   "internal_notes",
+  // Person-name parts. Unambiguous: a log key literally called `first_name`
+  // holds a first name. (`name` itself is the opposite — see AMBIGUOUS.)
+  "first_name",
+  "middle_name",
+  "last_name",
+  "pronunciation",
+  // User-authored free text — comment/card bodies and delivery instructions.
+  "body_text",
+  "instructions",
   // Transport / secret keys (never schema fields, but appear in log payloads)
   "authorization",
   "cookie",

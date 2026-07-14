@@ -42,10 +42,12 @@ import { MSG_SCHEMA_REGISTRY } from "../src/schemas/log/mod.ts";
 import { collectLeafPaths, type LeafPath } from "../src/schemas/zod-walk.ts";
 import { readPiiTag } from "../src/schemas/pii/walker.ts";
 import {
+  AMBIGUOUS,
   NAME_SENSITIVE,
   SENSITIVE_EXACT,
   SENSITIVE_NAME_FIELD,
 } from "../src/schemas/pii/dictionary.ts";
+import { RUNTIME_DENYLIST } from "../src/schemas/pii/runtime-denylist.ts";
 
 // ── Coverage sources ─────────────────────────────────────────────────
 
@@ -214,4 +216,45 @@ Deno.test("the dictionary and the walker agree on every tag they can both see", 
   }
 
   assertEquals(divergent, [], `Tag readers disagree:\n${divergent.join("\n")}`);
+});
+
+// ── The two sets ─────────────────────────────────────────────────────
+
+/**
+ * `SENSITIVE_EXACT` and `RUNTIME_DENYLIST` protect the same data at two
+ * different layers: the schema tag covers a field we modelled, the runtime
+ * key-name scrubber covers the same field when it arrives in an unmodelled
+ * passthrough payload. Their headers describe the relationship between them in
+ * careful prose — and nothing enforced a word of it, so the two could drift
+ * apart silently. These two tests turn the prose into an assertion.
+ */
+Deno.test("every unambiguous schema-sensitive name is also in the runtime denylist", () => {
+  const missing = [...SENSITIVE_EXACT]
+    .filter((name) => !AMBIGUOUS.has(name))
+    .filter((name) => !RUNTIME_DENYLIST.has(name))
+    .sort();
+
+  assertEquals(
+    missing,
+    [],
+    "These names are sensitive in a schema but would sail through the runtime " +
+      "scrubber untouched if they showed up as a raw key in an untyped log payload.\n" +
+      "Either add them to RUNTIME_DENYLIST, or add them to AMBIGUOUS with a reason:\n" +
+      missing.map((n) => `  ${n}`).join("\n"),
+  );
+});
+
+Deno.test("no stale exemption: every AMBIGUOUS name is still schema-sensitive", () => {
+  // Guards the other direction. An exemption that outlives the dictionary entry
+  // it exempts is a lie in the source — it reads as a considered decision when
+  // it is really a leftover.
+  const stale = [...AMBIGUOUS]
+    .filter((name) => !SENSITIVE_EXACT.has(name) && name !== SENSITIVE_NAME_FIELD)
+    .sort();
+
+  assertEquals(
+    stale,
+    [],
+    `AMBIGUOUS exempts names that are no longer schema-sensitive:\n${stale.map((n) => `  ${n}`).join("\n")}`,
+  );
 });
