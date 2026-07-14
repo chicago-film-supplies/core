@@ -32,6 +32,22 @@ export interface TransactionLogRecord {
   target_counts: Record<string, number>;
   estimated_json_bytes: number;
   sample_doc_paths: string[];
+  /**
+   * What the transaction READ, in the order it asked — and the only field that can say
+   * what it is *stuck on*.
+   *
+   * `sample_doc_paths` records what it WROTE, which is the wrong set for diagnosing a
+   * hang: Firestore takes its pessimistic lock at `tx.get()`, so a blocked transaction
+   * is waiting on a READ and has staged no writes at all. Worse, the write counts
+   * accumulate across Firestore's internal contention retries, so a doc an earlier
+   * attempt managed to stage still appears — which is exactly how api-cloudrun#335 was
+   * misdiagnosed twice, in both directions.
+   *
+   * Entries are appended BEFORE each read is awaited, so on a deadline abort the LAST
+   * entry is the read that never returned: the contended document, named. That is what
+   * finally identified `counters/transactions`.
+   */
+  read_paths?: string[];
   error_name?: string;
   error_message?: string;
   error_stack?: string;
@@ -58,6 +74,7 @@ export const TransactionLogRecordSchema: z.ZodType<TransactionLogRecord> = z.obj
   target_counts: z.record(z.string(), z.number()),
   estimated_json_bytes: z.number(),
   sample_doc_paths: z.array(z.string()).max(10),
+  read_paths: z.array(z.string()).max(20).optional(),
   error_name: z.string().max(200).optional(),
   error_message: z.string().max(500).optional(),
   error_stack: z.string().max(2048).optional(),

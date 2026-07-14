@@ -5793,6 +5793,7 @@ interface TransactionLogRecord {
   target_counts: Record<string, number>;
   estimated_json_bytes: number;
   sample_doc_paths: string[];
+  read_paths?: string[];
   error_name?: string;
   error_message?: string;
   error_stack?: string;
@@ -14563,6 +14564,7 @@ interface TransactionLogRecord {
   target_counts: Record<string, number>;
   estimated_json_bytes: number;
   sample_doc_paths: string[];
+  read_paths?: string[];
   error_name?: string;
   error_message?: string;
   error_stack?: string;
