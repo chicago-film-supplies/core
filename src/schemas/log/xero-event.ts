@@ -20,9 +20,6 @@ import type { XeroThrottleResetsAtSource } from "../xero-budget.ts";
  * - `xero_quote_validation_rejected` — Xero returned 400 `ValidationException`.
  *   The task is dropped (handler returns 200) rather than retried 15×; a
  *   malformed payload never becomes well-formed on retry.
- * - `xero_quote_transition_rejected` — a Status POST was rejected by Xero's
- *   quote state machine and swallowed as idempotent. Previously silent, which
- *   made a masked failure indistinguishable from success.
  * - `xero_quote_locked` — the quote sits in a state with **no legal move** to the
  *   target, so the push made ZERO Xero calls. This is the honest outcome that
  *   replaces the swallow: for 30 days every one of the 27 rejected transitions
@@ -90,7 +87,13 @@ export const XERO_EVENT_MSGS = [
   "xero_quote_superseded",
   "xero_quote_synced",
   "xero_quote_tax_unmapped",
-  "xero_quote_transition_rejected",
+  // NOTE: `xero_quote_transition_rejected` was REMOVED. It was the log the old
+  // swallow emitted when Xero refused a Status hop — and that swallow then fell
+  // through to `xero_quote_synced`, so the two fired together 27 times in 30 days
+  // and a failure was indistinguishable from a success. The push no longer attempts
+  // a transition Xero cannot make (`planXeroQuotePush`), so a refusal is not an
+  // expected outcome any more: it is either `xero_quote_locked` (foreseen, no call
+  // made) or a genuine 400 → `xero_quote_validation_rejected`.
   "xero_quote_validation_rejected",
   "xero_quota_exhausted",
   "xero_rate_limit",
