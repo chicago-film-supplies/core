@@ -69,6 +69,19 @@ export const XERO_EVENT_MSGS = [
   "xero_id_self_healed",
   "xero_invoice_issued",
   "xero_invoice_push_skipped",
+  // A number-keyed GET resolved a Xero twin for a CFS invoice with no `xero_id`.
+  // `adopted` — a LIVE ACCREC twin was accepted and its GUID persisted onto the
+  // invoice. `refused` — the only twin was VOIDED/DELETED and the CFS invoice is
+  // not itself void, so the push made NO Xero write and left `xero_id` null
+  // (prod 1859 is the exemplar). A refusal is a real divergence for the
+  // reconcile script, never a create — see `selectXeroInvoiceTwin`.
+  "xero_invoice_twin_adopted",
+  "xero_invoice_twin_refused",
+  // The CRMS invoice webhook found a tracked-inventory sale line short of stock
+  // and posted an ACCPAY stock-adjustment bill to Xero. CFS persists no ACCPAY
+  // doc, so this log is the ONLY audit trail: it carries the returned bill
+  // `xero_invoice_id`, the `delta` posted, and the pre-bill `quantity_on_hand`.
+  "xero_stock_adjustment_bill",
   "xero_payment_already_synced",
   "xero_payment_appended",
   "xero_payment_backfilled",
