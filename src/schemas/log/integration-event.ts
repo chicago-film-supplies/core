@@ -19,6 +19,13 @@ export const INTEGRATION_EVENT_MSGS = [
   "crms_invoice_items_uniqueness_violation",
   "crms_invoice_multidest_flat",
   "crms_invoice_multiple_orders_found",
+  // A CRMS webhook resolved a doc by an external id via a first-wins
+  // `where(field,"==",…).docs[0]` query and found MORE THAN ONE match — crms_id
+  // is assumed unique per collection but not enforced, so a duplicate (e.g. a
+  // leaked test orphan, or a real data-integrity drift) would otherwise bind the
+  // wrong doc silently. Emitted (warn) at the products/organizations binds that
+  // lack a size>1 guard; carries `collection` + `filter_value` + `count`. #342.
+  "crms_multiple_matches_found",
   "crms_invoice_order_not_found",
   "crms_mark_paid_failed",
   "crms_product_not_found",
