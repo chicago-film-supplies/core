@@ -16740,6 +16740,9 @@ be merged — `mergeStagedIntoOrder` and the migration script consolidate.
 
 Returns `[]` when uniqueness holds.
 
+NOTE: assumes the self-INCLUDED `path` convention. Product `components`
+exclude self from `path` — use {@link validateComponentUniqueness} for them.
+
 ## `@cfs/core/utils/locations`
 
 Location helpers — pure, dependency-free canonicalization shared by every
@@ -17272,6 +17275,20 @@ Check whether any pre-tax line item has taxes applied.
 Update chargeable_days on line items that still match the previous default.
 Skips structural items, items without a price, and manual overrides.
 
+### `validateComponentUniqueness(items: T[]): ItemUniquenessIssue[]`
+
+Products' `components` variant of {@link validateItemUniqueness}. A product
+component `path` is the ancestor chain and EXCLUDES the component's own uid,
+so the immediate parent is the LAST segment (`path[-1]`), not the
+second-to-last. Reusing {@link validateItemUniqueness} here is off by one: it
+keys a depth->=2 entry on its GRANDparent, so the same sub-product placed
+under two different direct children — a placement the product editor supports
+— collapses into one key and is falsely rejected (api-cloudrun#348).
+Exact-duplicate rows (identical full `path` + `uid`) still collide and are
+still rejected.
+
+Returns `[]` when uniqueness holds.
+
 ### `validateItemPaths(items: T[]): ItemPathIssue[]`
 
 Assert every line item's `path` matches what {@link computeItemPaths} would
@@ -17302,6 +17319,9 @@ line identity is unambiguous. Violations indicate a duplicate that should
 be merged — `mergeStagedIntoOrder` and the migration script consolidate.
 
 Returns `[]` when uniqueness holds.
+
+NOTE: assumes the self-INCLUDED `path` convention. Product `components`
+exclude self from `path` — use {@link validateComponentUniqueness} for them.
 
 ## `@cfs/core/utils/products`
 

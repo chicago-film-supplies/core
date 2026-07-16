@@ -9230,7 +9230,7 @@
           "kind": "function",
           "name": "validateItemUniqueness",
           "signature": "validateItemUniqueness(items: T[]): ItemUniquenessIssue[]",
-          "doc": "Assert that within each items array, no two entries share the same `uid`\nAND the same immediate structural parent. The immediate structural parent\nis the second-to-last `path` segment (or `null` for items whose path is\njust `[self.uid]`).\n\nThis is the uniqueness invariant orders/invoices rely on so that path-based\nline identity is unambiguous. Violations indicate a duplicate that should\nbe merged — `mergeStagedIntoOrder` and the migration script consolidate.\n\nReturns `[]` when uniqueness holds.",
+          "doc": "Assert that within each items array, no two entries share the same `uid`\nAND the same immediate structural parent. The immediate structural parent\nis the second-to-last `path` segment (or `null` for items whose path is\njust `[self.uid]`).\n\nThis is the uniqueness invariant orders/invoices rely on so that path-based\nline identity is unambiguous. Violations indicate a duplicate that should\nbe merged — `mergeStagedIntoOrder` and the migration script consolidate.\n\nReturns `[]` when uniqueness holds.\n\nNOTE: assumes the self-INCLUDED `path` convention. Product `components`\nexclude self from `path` — use {@link validateComponentUniqueness} for them.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -9652,6 +9652,14 @@
         },
         {
           "kind": "function",
+          "name": "validateComponentUniqueness",
+          "signature": "validateComponentUniqueness(items: T[]): ItemUniquenessIssue[]",
+          "doc": "Products' `components` variant of {@link validateItemUniqueness}. A product\ncomponent `path` is the ancestor chain and EXCLUDES the component's own uid,\nso the immediate parent is the LAST segment (`path[-1]`), not the\nsecond-to-last. Reusing {@link validateItemUniqueness} here is off by one: it\nkeys a depth->=2 entry on its GRANDparent, so the same sub-product placed\nunder two different direct children — a placement the product editor supports\n— collapses into one key and is falsely rejected (api-cloudrun#348).\nExact-duplicate rows (identical full `path` + `uid`) still collide and are\nstill rejected.\n\nReturns `[]` when uniqueness holds.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "validateItemPaths",
           "signature": "validateItemPaths(items: T[]): ItemPathIssue[]",
           "doc": "Assert every line item's `path` matches what {@link computeItemPaths} would\nproduce — i.e. structural prefix + component ancestry + self uid, with no\nstale dest/group uids from prior drag positions.\n\nUse as a defensive write-time invariant: any client (manager, webhook\nhandlers, manual firestore_admin pokes) that writes orders should pipe\n`items` through `computeItemPaths` first, so a non-empty result here means\nthe client skipped the recompute step.\n\nReports per-index mismatches; under the depth-first contiguity invariant,\nan index whose `uid` doesn't match the recomputed array's uid at the same\nindex is also a violation (the array needs re-linearization). The original\npath is reported so the caller can diff against `expected`.\n\nReturns `[]` when every path is clean and order is canonical.",
@@ -9662,7 +9670,7 @@
           "kind": "function",
           "name": "validateItemUniqueness",
           "signature": "validateItemUniqueness(items: T[]): ItemUniquenessIssue[]",
-          "doc": "Assert that within each items array, no two entries share the same `uid`\nAND the same immediate structural parent. The immediate structural parent\nis the second-to-last `path` segment (or `null` for items whose path is\njust `[self.uid]`).\n\nThis is the uniqueness invariant orders/invoices rely on so that path-based\nline identity is unambiguous. Violations indicate a duplicate that should\nbe merged — `mergeStagedIntoOrder` and the migration script consolidate.\n\nReturns `[]` when uniqueness holds.",
+          "doc": "Assert that within each items array, no two entries share the same `uid`\nAND the same immediate structural parent. The immediate structural parent\nis the second-to-last `path` segment (or `null` for items whose path is\njust `[self.uid]`).\n\nThis is the uniqueness invariant orders/invoices rely on so that path-based\nline identity is unambiguous. Violations indicate a duplicate that should\nbe merged — `mergeStagedIntoOrder` and the migration script consolidate.\n\nReturns `[]` when uniqueness holds.\n\nNOTE: assumes the self-INCLUDED `path` convention. Product `components`\nexclude self from `path` — use {@link validateComponentUniqueness} for them.",
           "paramTags": [],
           "returnsTag": null
         }

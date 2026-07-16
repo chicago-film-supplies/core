@@ -51,6 +51,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "computeItemPaths", // canonical path computation — write-path only
     "validateItemPaths", // invariant assertion — write-path only
     "validateItemUniqueness", // invariant assertion — write-path only
+    "validateComponentUniqueness", // invariant assertion — write-path only
     "getStructuralUids", // path machinery
     "getParentProductUid", // path machinery
     "getItemSubtreeRange", // path machinery

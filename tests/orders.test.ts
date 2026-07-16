@@ -15,6 +15,7 @@ import {
   consolidateItems,
   validateItemPaths,
   validateItemUniqueness,
+  validateComponentUniqueness,
   getGroupItems,
   getGroupPath,
   getGroupTotals,
@@ -1586,6 +1587,49 @@ Deno.test("validateItemUniqueness flags duplicate component under same parent", 
   assertEquals(issues[0].parentUid, "P");
   assertEquals(issues[0].index, 3);
   assertEquals(issues[0].firstIndex, 2);
+});
+
+// ── validateComponentUniqueness (products' self-EXCLUDED path convention) ──
+// Product `components` paths are the ancestor chain WITHOUT self, so the
+// immediate parent is path[-1] (not path[-2] as in orders items). Model a kit
+// "K" with two direct children "c1"/"c2" (path [K]) and a grandchild under each.
+
+Deno.test("validateComponentUniqueness allows the same sub-product under two different direct children (depth 2) — the api-cloudrun#348 case", () => {
+  const items: LineItem[] = [
+    makeItem({ uid: "c1", path: ["K"] }),
+    makeItem({ uid: "X", path: ["K", "c1"] }), // parent = c1 (path[-1])
+    makeItem({ uid: "c2", path: ["K"] }),
+    makeItem({ uid: "X", path: ["K", "c2"] }), // parent = c2 — legal, distinct
+  ];
+  assertEquals(validateComponentUniqueness(items), []);
+  // Contrast: the orders-shaped check keys X on its GRANDparent (path[-2] = "K")
+  // for BOTH, so it FALSELY flags this legal tree — exactly the off-by-one #348.
+  assertEquals(validateItemUniqueness(items).length, 1);
+});
+
+Deno.test("validateComponentUniqueness flags an exact-duplicate component row (a doubled tree)", () => {
+  const items: LineItem[] = [
+    makeItem({ uid: "c1", path: ["K"] }),
+    makeItem({ uid: "X", path: ["K", "c1"] }),
+    makeItem({ uid: "X", path: ["K", "c1"] }), // identical full path + uid → still rejected
+  ];
+  const issues = validateComponentUniqueness(items);
+  assertEquals(issues.length, 1);
+  assertEquals(issues[0].uid, "X");
+  assertEquals(issues[0].parentUid, "c1"); // names the TRUE immediate parent
+  assertEquals(issues[0].index, 2);
+  assertEquals(issues[0].firstIndex, 1);
+});
+
+Deno.test("validateComponentUniqueness flags a duplicate direct child (keyed on the root product)", () => {
+  const items: LineItem[] = [
+    makeItem({ uid: "X", path: ["K"] }),
+    makeItem({ uid: "X", path: ["K"] }), // same product twice as a direct child → rejected
+  ];
+  const issues = validateComponentUniqueness(items);
+  assertEquals(issues.length, 1);
+  assertEquals(issues[0].uid, "X");
+  assertEquals(issues[0].parentUid, "K");
 });
 
 // ── getStructuralUids ───────────────────────────────────────────

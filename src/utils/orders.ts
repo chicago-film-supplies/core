@@ -981,6 +981,41 @@ export interface ItemUniquenessIssue {
 }
 
 /**
+ * Shared engine for the two path-keyed uniqueness checks below.
+ * `parentIndexFromEnd` selects which `path` segment names the immediate
+ * structural parent:
+ *
+ *  - `2` — orders/invoices/fulfillments `items`, whose `path` is self-INCLUDED
+ *    (`computeItemPaths` writes `[...ancestors, self]`), so the parent is `path[-2]`.
+ *  - `1` — products' `components`, whose `path` is the ancestor chain and
+ *    EXCLUDES self, so the immediate parent is `path[-1]`.
+ *
+ * Keying with the wrong index conflates the same sub-item placed under two
+ * DIFFERENT parents at depth >= 2 — a legal multi-occupancy — into one key and
+ * falsely reports it as a duplicate.
+ */
+function collectUniquenessIssues<T extends LineItem>(
+  items: T[],
+  parentIndexFromEnd: 1 | 2,
+): ItemUniquenessIssue[] {
+  const seen = new Map<string, number>();
+  const issues: ItemUniquenessIssue[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const path = item.path ?? [];
+    const parentUid = path.length >= parentIndexFromEnd ? path[path.length - parentIndexFromEnd] : null;
+    const key = (parentUid ?? "\0root") + "\0" + item.uid;
+    const firstIndex = seen.get(key);
+    if (firstIndex !== undefined) {
+      issues.push({ index: i, uid: item.uid, parentUid, firstIndex });
+    } else {
+      seen.set(key, i);
+    }
+  }
+  return issues;
+}
+
+/**
  * Assert that within each items array, no two entries share the same `uid`
  * AND the same immediate structural parent. The immediate structural parent
  * is the second-to-last `path` segment (or `null` for items whose path is
@@ -991,23 +1026,29 @@ export interface ItemUniquenessIssue {
  * be merged — `mergeStagedIntoOrder` and the migration script consolidate.
  *
  * Returns `[]` when uniqueness holds.
+ *
+ * NOTE: assumes the self-INCLUDED `path` convention. Product `components`
+ * exclude self from `path` — use {@link validateComponentUniqueness} for them.
  */
 export function validateItemUniqueness<T extends LineItem>(items: T[]): ItemUniquenessIssue[] {
-  const seen = new Map<string, number>();
-  const issues: ItemUniquenessIssue[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const path = item.path ?? [];
-    const parentUid = path.length >= 2 ? path[path.length - 2] : null;
-    const key = (parentUid ?? "\0root") + "\0" + item.uid;
-    const firstIndex = seen.get(key);
-    if (firstIndex !== undefined) {
-      issues.push({ index: i, uid: item.uid, parentUid, firstIndex });
-    } else {
-      seen.set(key, i);
-    }
-  }
-  return issues;
+  return collectUniquenessIssues(items, 2);
+}
+
+/**
+ * Products' `components` variant of {@link validateItemUniqueness}. A product
+ * component `path` is the ancestor chain and EXCLUDES the component's own uid,
+ * so the immediate parent is the LAST segment (`path[-1]`), not the
+ * second-to-last. Reusing {@link validateItemUniqueness} here is off by one: it
+ * keys a depth->=2 entry on its GRANDparent, so the same sub-product placed
+ * under two different direct children — a placement the product editor supports
+ * — collapses into one key and is falsely rejected (api-cloudrun#348).
+ * Exact-duplicate rows (identical full `path` + `uid`) still collide and are
+ * still rejected.
+ *
+ * Returns `[]` when uniqueness holds.
+ */
+export function validateComponentUniqueness<T extends LineItem>(items: T[]): ItemUniquenessIssue[] {
+  return collectUniquenessIssues(items, 1);
 }
 
 /**
