@@ -17,6 +17,7 @@ export const CLOUD_TASK_EVENT_MSGS = [
   "cloud_task_create_failed",
   "cloud_task_created",
   "cloud_task_not_configured",
+  "cloud_task_payload_rejected",
   "cloud_task_sa_unavailable",
 ] as const;
 

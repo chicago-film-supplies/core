@@ -13787,7 +13787,7 @@ const CALENDAR_EVENT_MSGS: "calendar_event_adopted" | "calendar_event_not_found"
 Msg literals this archetype absorbs.
 
 ```ts
-const CLOUD_TASK_EVENT_MSGS: "cloud_task_already_exists" | "cloud_task_cancel_error" | "cloud_task_cancel_failed" | "cloud_task_canceled" | "cloud_task_create_failed" | "cloud_task_created" | "cloud_task_not_configured" | "cloud_task_sa_unavailable"[];
+const CLOUD_TASK_EVENT_MSGS: "cloud_task_already_exists" | "cloud_task_cancel_error" | "cloud_task_cancel_failed" | "cloud_task_canceled" | "cloud_task_create_failed" | "cloud_task_created" | "cloud_task_not_configured" | "cloud_task_payload_rejected" | "cloud_task_sa_unavailable"[];
 ```
 
 ### `CalendarEventLogRecord`
