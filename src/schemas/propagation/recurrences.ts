@@ -136,7 +136,7 @@ export const deleteRecurrenceRules: CollectionRule[] = [
     target: "cards",
     mode: "fan-out",
     invariant:
-      "Deleting a recurrence cascades to every instance card in the series. Each card's own `delete-card` cascade (thread + comments) fires per-card as usual — this rule describes only the recurrence → cards fan-out; the downstream card cascade is modeled by `delete-card:cascade-thread` + `delete-card:cascade-comments` in propagation/cards.ts.",
+      "Deleting a recurrence cascades to every instance card in the series, tearing down each card's linked thread(s) + comments as part of the same delete. This rule describes only the recurrence → cards fan-out; the thread/comment teardown is modeled by `delete-card:cascade-thread` + `delete-card:cascade-comments` in propagation/cards.ts.",
     transaction: "delete-recurrence",
     trigger: "onDelete:recurrences",
     fields: [
@@ -148,7 +148,7 @@ export const deleteRecurrenceRules: CollectionRule[] = [
 export const deleteRecurrenceTransaction: TransactionDefinition = {
   id: "delete-recurrence",
   description:
-    "Deletes a recurrence and every instance card it produced. Each card delete triggers its own thread + comments cascade.",
+    "Deletes a recurrence and every instance card it produced, tearing down each card's thread + comments as part of the delete.",
   steps: ["delete-recurrence:fan-out-cards"],
 };
 
@@ -248,7 +248,7 @@ export const deleteCardScopeFollowingRules: CollectionRule[] = [
     target: "cards",
     mode: "fan-out",
     invariant:
-      "`DELETE /cards/{uid}?recurrence_scope=following` deletes the target card plus every sibling with `dates.start >= target.dates.start` (instant-level comparison). Each card's own thread + comments cascade fires per-card.",
+      "`DELETE /cards/{uid}?recurrence_scope=following` deletes the target card plus every sibling with `dates.start >= target.dates.start` (instant-level comparison). Each deleted card's thread + comments are torn down as part of the delete.",
     transaction: "delete-card-scope-following",
     fields: [
       { source: ["uid"], target: [], transform: "delete cards where recurrence_parent_uid == source.recurrence_parent_uid AND dates.start >= source.dates.start" },
@@ -287,7 +287,7 @@ export const deleteCardScopeAllRules: CollectionRule[] = [
     target: "cards",
     mode: "fan-out",
     invariant:
-      "`DELETE /cards/{uid}?recurrence_scope=all` deletes every instance card in the series. Each card's thread + comments cascade fires per-card.",
+      "`DELETE /cards/{uid}?recurrence_scope=all` deletes every instance card in the series. Each deleted card's thread + comments are torn down as part of the delete.",
     transaction: "delete-card-scope-all",
     fields: [
       { source: ["uid"], target: [], transform: "delete all cards where recurrence_parent_uid == source.recurrence_parent_uid" },
