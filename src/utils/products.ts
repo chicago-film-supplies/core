@@ -15,6 +15,14 @@
 import type { ProductComponent } from "../schemas/mod.ts";
 
 /**
+ * Re-exported from `schemas/product.ts`, where it must live so `ProductSchema`'s
+ * denormalization refinement can call it without inverting the strict
+ * utils → schemas import direction. Import it from here — this is the writers'
+ * entry point. (Same arrangement as `deriveName` in `utils/contact-name.ts`.)
+ */
+export { deriveProductImageUuids } from "../schemas/mod.ts";
+
+/**
  * Remove a component and all its descendants from a flat components array.
  * An entry is removed if its `path` starts with the given path prefix —
  * this covers the component itself and every entry nested beneath it.

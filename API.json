@@ -2229,7 +2229,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -2249,6 +2249,12 @@
           "name": "ProductCreated",
           "declaration": "type ProductCreated = EventEnvelope<Product> & typeLiteral;",
           "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "ProductImage",
+          "declaration": "interface ProductImage {\n  uuid: string;\n  uuid_cutout: string | null;\n  alt: string | null;\n  width: number | null;\n  height: number | null;\n}",
+          "doc": "One product photo. Array order is display order and `images[0]` is the\nprimary image — there is deliberately no `sort` or `is_primary` field, so\nthere is only one thing to disagree with.\n\nRow identity is `uuid`, the original upload. It never changes (background\nremoval is additive: it fills `uuid_cutout` and leaves the original intact),\nso it is the value `DELETE|PATCH /products/{uid}/images/{image_id}` carries.\nThat is why this array member has no `crypto.randomUUID()` `uid` — the\nconvention exists for members with no natural key, and this one has one.\n\nDisplay rule everywhere: `img.uuid_cutout ?? img.uuid`."
         },
         {
           "kind": "interface",
@@ -3844,6 +3850,14 @@
           "name": "deriveName",
           "signature": "deriveName(parts: PartialNameParts): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveProductImageUuids",
+          "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
+          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\nin array order, cutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer and by the\n`ProductSchema` refinement that rejects a drifted write. Defined here rather\nthan in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\nOrder is fixed and total so the refinement can compare element-wise — a set\ncomparison would let a writer emit the right uuids in a drifting order.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6206,7 +6220,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -6220,6 +6234,12 @@
           "name": "ProductComponent",
           "declaration": "interface ProductComponent {\n  uid: string;\n  path: string[];\n  name: string;\n  active?: boolean;\n  type: ComponentTypeType;\n  stock_method: StockMethodType;\n  crms_id: number | null;\n  crms_accessory_id?: number | null;\n  description?: string;\n  inclusion_type?: InclusionTypeType;\n  quantity: number;\n  zero_priced?: boolean;\n  price: typeLiteral;\n}",
           "doc": "A component product within a parent product."
+        },
+        {
+          "kind": "interface",
+          "name": "ProductImage",
+          "declaration": "interface ProductImage {\n  uuid: string;\n  uuid_cutout: string | null;\n  alt: string | null;\n  width: number | null;\n  height: number | null;\n}",
+          "doc": "One product photo. Array order is display order and `images[0]` is the\nprimary image — there is deliberately no `sort` or `is_primary` field, so\nthere is only one thing to disagree with.\n\nRow identity is `uuid`, the original upload. It never changes (background\nremoval is additive: it fills `uuid_cutout` and leaves the original intact),\nso it is the value `DELETE|PATCH /products/{uid}/images/{image_id}` carries.\nThat is why this array member has no `crypto.randomUUID()` `uid` — the\nconvention exists for members with no natural key, and this one has one.\n\nDisplay rule everywhere: `img.uuid_cutout ?? img.uuid`."
         },
         {
           "kind": "interface",
@@ -6256,6 +6276,14 @@
           "name": "UpdateProductInputType",
           "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
           "doc": "Input type for updating a product."
+        },
+        {
+          "kind": "function",
+          "name": "deriveProductImageUuids",
+          "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
+          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\nin array order, cutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer and by the\n`ProductSchema` refinement that rejects a drifted write. Defined here rather\nthan in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\nOrder is fixed and total so the refinement can compare element-wise — a set\ncomparison would let a writer emit the right uuids in a drifting order.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },
@@ -9704,6 +9732,14 @@
             }
           ],
           "returnsTag": "New `ProductComponent[]` entries with adjusted paths"
+        },
+        {
+          "kind": "function",
+          "name": "deriveProductImageUuids",
+          "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
+          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\nin array order, cutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer and by the\n`ProductSchema` refinement that rejects a drifted write. Defined here rather\nthan in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\nOrder is fixed and total so the refinement can compare element-wise — a set\ncomparison would let a writer emit the right uuids in a drifting order.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",

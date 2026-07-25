@@ -27,16 +27,28 @@ export const MEDIA_CONTAINER_RE =
   /^(attachments?|images?|files?|photos?|media|thumbnails?|documents?|pdfs?|assets?|uploads?)$/i;
 
 /**
- * Strip `collectLeafPaths`' container markers from one path segment, so an
- * anchored name match can see the bare noun.
+ * Strip `collectLeafPaths`' container markers — and the `query_by_` denorm
+ * prefix — from one path segment, so an anchored name match can see the bare
+ * noun.
  *
- * Load-bearing: the raw leaf segment of `products::images[]` is the literal
- * `images[]`, which `/^images?$/i` does not match. Without the strip, neither
- * `products::images[]` nor `cards::attachments[].uid` is a candidate and the
- * lint silently passes on the two fields it most needs to see.
+ * Load-bearing: the raw leaf segment of `products::images[].uuid` is the
+ * literal `images[]`, which `/^images?$/i` does not match. Without the strip,
+ * neither it nor `cards::attachments[].uid` is a candidate and the lint
+ * silently passes on the two fields it most needs to see.
+ *
+ * `query_by_` gets the same treatment because a `query_by_X` field is by
+ * convention a flat mirror of `X` and holds exactly the same values — so
+ * `products::query_by_images[]` must be as visible to the dictionary as
+ * `images[]` is, or assertion 3 fails the moment the mirror is annotated. This
+ * is not a widening of `MEDIA_CONTAINER_RE`: it only maps `query_by_*` onto the
+ * noun list that already exists. Of the 15 `query_by_*` fields in core today,
+ * none of the other 14 strips to a media noun, so none becomes a candidate.
  */
 function bareSegment(segment: string): string {
-  return segment.replace(/\[\]$/, "").replace(/^<key>$/, "");
+  return segment
+    .replace(/\[\]$/, "")
+    .replace(/^<key>$/, "")
+    .replace(/^query_by_/, "");
 }
 
 /**
@@ -72,6 +84,12 @@ export function isUploadcareCandidate(leaf: LeafPath): boolean {
  * fails the build.
  */
 export const UPLOADCARE_CANDIDATE_EXEMPTIONS: ReadonlyMap<string, string> = new Map([
+  // `images` is the one field name in the repo where the PARENT segment makes
+  // every string leaf under it a candidate. `alt` is the only such leaf that
+  // isn't a CDN id; `width`/`height` are exempt automatically via the
+  // `type === "string"` gate. Any future string field under `images[]` pays the
+  // same one-line price.
+  ["products::images[].alt", "operator-authored alt text, not a CDN file id"],
   ["cards::attachments[].filename", "attachment display name, not a CDN id"],
   ["cards::attachments[].mime_type", "attachment MIME type, not a CDN id"],
   [

@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { CreateProductInput, ProductSchema } from "../src/schemas/product.ts";
+import { CreateProductInput, deriveProductImageUuids, ProductSchema } from "../src/schemas/product.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -222,4 +222,107 @@ Deno.test("ProductSchema xero_code: optional, nullable, non-empty", () => {
   assertEquals(ProductSchema.safeParse({ ...validProduct, xero_code: "" }).success, false);
   // Codes are strings; a number is a type error, not a coercion.
   assertEquals(ProductSchema.safeParse({ ...validProduct, xero_code: 406 }).success, false);
+});
+
+// ── images[] + the query_by_images denormalization invariant ─────────
+
+const IMG_A = "11111111-1111-4111-8111-111111111111";
+const IMG_A_CUT = "aaaaaaaa-1111-4111-8111-111111111111";
+const IMG_B = "22222222-2222-4222-8222-222222222222";
+
+const imageRow = (uuid: string, uuid_cutout: string | null = null) => ({
+  uuid,
+  uuid_cutout,
+  alt: null,
+  width: null,
+  height: null,
+});
+
+Deno.test("ProductSchema images: back-compat — neither field is required", () => {
+  // The ~531 existing product docs carry no images at all.
+  assertEquals(ProductSchema.safeParse(validProduct).success, true);
+});
+
+Deno.test("ProductSchema images: an image row requires every field, nullable but present", () => {
+  const withImages = {
+    ...validProduct,
+    images: [imageRow(IMG_A)],
+    query_by_images: [IMG_A],
+  };
+  assertEquals(ProductSchema.safeParse(withImages).success, true);
+
+  // `validateBeforeWrite` writes the RAW doc, so a schema `.default()` never
+  // materializes — an omitted field would persist as absent. Reject it here.
+  for (const drop of ["uuid_cutout", "alt", "width", "height"]) {
+    const row: Record<string, unknown> = { ...imageRow(IMG_A) };
+    delete row[drop];
+    assertEquals(
+      ProductSchema.safeParse({ ...withImages, images: [row] }).success,
+      false,
+      `omitting images[].${drop} must be rejected`,
+    );
+  }
+});
+
+Deno.test("ProductSchema query_by_images: must be exactly the derived set", () => {
+  const images = [imageRow(IMG_A, IMG_A_CUT), imageRow(IMG_B)];
+  // originals in array order, then every non-null cutout
+  const derived = [IMG_A, IMG_B, IMG_A_CUT];
+
+  assertEquals(
+    ProductSchema.safeParse({ ...validProduct, images, query_by_images: derived }).success,
+    true,
+  );
+
+  // The case the invariant exists for: a bg-remove write that sets uuid_cutout
+  // and forgets to re-derive the mirror. The cutout would then be invisible to
+  // the orphan sweep's reference map.
+  assertEquals(
+    ProductSchema.safeParse({ ...validProduct, images, query_by_images: [IMG_A, IMG_B] }).success,
+    false,
+    "a mirror missing a cutout uuid must be rejected",
+  );
+
+  // Extra uuid — a delete that dropped the row but not the mirror entry.
+  assertEquals(
+    ProductSchema.safeParse({
+      ...validProduct,
+      images: [imageRow(IMG_A)],
+      query_by_images: [IMG_A, IMG_B],
+    }).success,
+    false,
+    "a mirror holding a uuid no image row carries must be rejected",
+  );
+
+  // Right uuids, wrong order — compared element-wise on purpose, so a writer
+  // can't drift into its own ordering.
+  assertEquals(
+    ProductSchema.safeParse({ ...validProduct, images, query_by_images: [IMG_B, IMG_A, IMG_A_CUT] })
+      .success,
+    false,
+    "a mirror in a different order must be rejected",
+  );
+
+  // One side without the other is drift, not a half-doc: `validateBeforeWrite`
+  // validates the MERGED document, so a legitimate write always carries both.
+  assertEquals(
+    ProductSchema.safeParse({ ...validProduct, images }).success,
+    false,
+    "images without a mirror must be rejected",
+  );
+  assertEquals(
+    ProductSchema.safeParse({ ...validProduct, query_by_images: [IMG_A] }).success,
+    false,
+    "a mirror without images must be rejected",
+  );
+});
+
+Deno.test("deriveProductImageUuids: originals first, then non-null cutouts", () => {
+  assertEquals(deriveProductImageUuids(undefined), []);
+  assertEquals(deriveProductImageUuids([]), []);
+  assertEquals(deriveProductImageUuids([imageRow(IMG_A)]), [IMG_A]);
+  assertEquals(
+    deriveProductImageUuids([imageRow(IMG_A, IMG_A_CUT), imageRow(IMG_B)]),
+    [IMG_A, IMG_B, IMG_A_CUT],
+  );
 });

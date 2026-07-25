@@ -84,6 +84,55 @@ export interface ProductWebshop {
   description?: string | null;
 }
 
+/**
+ * One product photo. Array order is display order and `images[0]` is the
+ * primary image — there is deliberately no `sort` or `is_primary` field, so
+ * there is only one thing to disagree with.
+ *
+ * Row identity is `uuid`, the original upload. It never changes (background
+ * removal is additive: it fills `uuid_cutout` and leaves the original intact),
+ * so it is the value `DELETE|PATCH /products/{uid}/images/{image_id}` carries.
+ * That is why this array member has no `crypto.randomUUID()` `uid` — the
+ * convention exists for members with no natural key, and this one has one.
+ *
+ * Display rule everywhere: `img.uuid_cutout ?? img.uuid`.
+ */
+export interface ProductImage {
+  /** The original upload — immutable row identity, never deleted while the row lives. */
+  uuid: string;
+  /** The transparent-PNG cutout. `null` until background removal has run. */
+  uuid_cutout: string | null;
+  /** Alt text for SEO + WCAG. Per-image by nature ("front view" vs "rear I/O panel"). */
+  alt: string | null;
+  /** Intrinsic width in px, captured client-side at upload — prevents layout shift (CLS). */
+  width: number | null;
+  /** Intrinsic height in px. A cutout has the same dimensions as its original. */
+  height: number | null;
+}
+
+/**
+ * Derive `query_by_images` from `images` — every uuid, originals then cutouts,
+ * in array order, cutouts skipped while `null`.
+ *
+ * The single source of the denormalization, called by every writer and by the
+ * `ProductSchema` refinement that rejects a drifted write. Defined here rather
+ * than in `utils/products.ts` because the schema needs it and the import
+ * direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
+ * it, which is where writers should import from (same shape as `deriveName`).
+ *
+ * Order is fixed and total so the refinement can compare element-wise — a set
+ * comparison would let a writer emit the right uuids in a drifting order.
+ */
+export function deriveProductImageUuids(
+  images: readonly { uuid: string; uuid_cutout: string | null }[] | undefined,
+): string[] {
+  if (!images) return [];
+  const uuids: string[] = [];
+  for (const img of images) uuids.push(img.uuid);
+  for (const img of images) if (img.uuid_cutout) uuids.push(img.uuid_cutout);
+  return uuids;
+}
+
 /** A product document in the products Firestore collection. */
 export interface Product {
   uid: string;
@@ -118,7 +167,9 @@ export interface Product {
   uid_linked_replacement?: string | null;
   uid_tracking_category?: string | null;
   webshop: ProductWebshop;
-  images?: string[];
+  images?: ProductImage[];
+  /** Flat mirror of every uuid in `images` — originals and cutouts — for `array-contains`. */
+  query_by_images?: string[];
   xero_id: string | null;
   /**
    * The Xero Item `Code` of the Item that `xero_id` points at — i.e. the
@@ -221,7 +272,24 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     available: z.boolean().default(false),
     description: z.string().nullable().optional(),
   }),
-  images: z.array(uploadcareRef(z.string())).optional(),
+  // Ordered display list; `images[0]` is the primary image. Every member field
+  // is required-but-nullable on purpose: `validateBeforeWrite` writes the RAW
+  // doc, so a schema `.default()` never materializes and a writer that omits a
+  // field would persist it as absent. Making them required forces the writer to
+  // be explicit. The annotation wraps the `.nullable()` (invoice.ts:315's form)
+  // — a tag on the outside of a `.nullable()` has silently gone unseen here.
+  images: z.array(z.strictObject({
+    uuid: uploadcareRef(z.string()),
+    uuid_cutout: uploadcareRef(z.string().nullable()),
+    alt: z.string().max(300).nullable(),
+    width: z.number().int().positive().nullable(),
+    height: z.number().int().positive().nullable(),
+  })).optional(),
+  // No `.default([])`, unlike its `query_by_*` siblings above. A default is
+  // applied during parse, so it would turn "writer omitted the mirror" into
+  // "writer sent an empty mirror" and the refinement below could no longer tell
+  // an untouched legacy doc from a drifted write.
+  query_by_images: z.array(uploadcareRef(z.string())).optional(),
   xero_id: z.uuid().nullable(),
   // Optional (not `.nullable()`-required) so the ~531 existing product docs
   // validate unchanged before the backfill lands.
@@ -235,6 +303,32 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
 }).refine(
   (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement != null,
   { message: "price.replacement is required for rental products", path: ["price", "replacement"] },
+).refine(
+  (p) => {
+    // Skip only when BOTH are absent — that is the ~531 pre-images product
+    // docs, which must keep validating unchanged. One side present without the
+    // other is precisely the drift this exists to reject, so it is compared
+    // (against `[]`), not waved through. `validateBeforeWrite` validates the
+    // merged doc, so a legitimate patch always presents both.
+    if (p.images === undefined && p.query_by_images === undefined) return true;
+    const derived = deriveProductImageUuids(p.images);
+    const mirror = p.query_by_images ?? [];
+    return mirror.length === derived.length && derived.every((uuid, i) => mirror[i] === uuid);
+  },
+  {
+    // `query_by_images` is a derived mirror, and a stale denorm has cost this
+    // codebase before (142 prod ledger denorms went stale because a cascade
+    // walked the forward array). This makes drift unrepresentable at the write
+    // boundary rather than auditable after the fact.
+    //
+    // Known gap, by construction: `validateBeforeWrite` strips FieldValue
+    // sentinels before parsing, so an `arrayUnion` write of `images` would slip
+    // past this. Every writer must build the full array — do not reintroduce a
+    // sentinel writer for `images` or `query_by_images`.
+    message:
+      "query_by_images must be exactly deriveProductImageUuids(images) — every image uuid, then every non-null cutout uuid, in array order",
+    path: ["query_by_images"],
+  },
 ).meta({
   title: "Product",
   collection: "products",

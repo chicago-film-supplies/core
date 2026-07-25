@@ -68,11 +68,11 @@ function collectCorpus(): { leaves: CorpusLeaf[]; unhandled: string[] } {
 
 const isAnnotated = (leaf: LeafPath) => leaf.meta[UPLOADCARE_REF_META] === true;
 
-/** The nine CDN reference leaves, as of 2026-07-12. */
+/** The ten CDN reference leaves, as of 2026-07-25. */
 const EXPECTED_REF_PATHS: Record<string, string[]> = {
   "quotes": ["uploadcare_uuid"],
   "invoices": ["pdf_versions[].uploadcare_uuid", "uploadcare_uuid"],
-  "products": ["images[]"],
+  "products": ["images[].uuid", "images[].uuid_cutout", "query_by_images[]"],
   "cards": ["attachments[].uid"],
   "recurrences": ["prototype.attachments[].uid"],
   "templates-versions": [

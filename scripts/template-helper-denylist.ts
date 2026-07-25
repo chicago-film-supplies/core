@@ -86,6 +86,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "resyncInvoiceLines", // operator-triggered resync (write-path)
     "computeInvoiceSyncStatus", // manager line-badging, not rendering
   ],
+  products: [
+    // Denormalization machinery for `products.query_by_images`, re-exported here
+    // from `schemas/product.ts` so writers have one import. Write-path only, and
+    // a template could never call it usefully: no render context holds a product
+    // (`template-context.ts` has no `product` — templates render orders,
+    // invoices and quotes).
+    "deriveProductImageUuids",
+  ],
   // No `it.dates.*` exports are hidden today.
   dates: [],
 };

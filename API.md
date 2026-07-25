@@ -4281,7 +4281,8 @@ interface Product {
   uid_linked_replacement?: string | null;
   uid_tracking_category?: string | null;
   webshop: ProductWebshop;
-  images?: string[];
+  images?: ProductImage[];
+  query_by_images?: string[];
   xero_id: string | null;
   xero_code?: string | null;
   xero_tracking_option_id: string | null;
@@ -4331,6 +4332,30 @@ interface ProductComponent {
 
 ```ts
 type ProductCreated = EventEnvelope<Product> & typeLiteral;
+```
+
+### `ProductImage`
+
+One product photo. Array order is display order and `images[0]` is the
+primary image — there is deliberately no `sort` or `is_primary` field, so
+there is only one thing to disagree with.
+
+Row identity is `uuid`, the original upload. It never changes (background
+removal is additive: it fills `uuid_cutout` and leaves the original intact),
+so it is the value `DELETE|PATCH /products/{uid}/images/{image_id}` carries.
+That is why this array member has no `crypto.randomUUID()` `uid` — the
+convention exists for members with no natural key, and this one has one.
+
+Display rule everywhere: `img.uuid_cutout ?? img.uuid`.
+
+```ts
+interface ProductImage {
+  uuid: string;
+  uuid_cutout: string | null;
+  alt: string | null;
+  width: number | null;
+  height: number | null;
+}
 ```
 
 ### `ProductPrice`
@@ -7186,6 +7211,20 @@ Joins `[first_name, middle_name, last_name]` with single spaces (missing
 parts are dropped, never produce empty padding) and appends ` (pronunciation)`
 when set. This is the single source of truth — every `name` field on a
 stored document and `ActorRef.name` is computed by passing through here.
+
+### `deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]`
+
+Derive `query_by_images` from `images` — every uuid, originals then cutouts,
+in array order, cutouts skipped while `null`.
+
+The single source of the denormalization, called by every writer and by the
+`ProductSchema` refinement that rejects a drifted write. Defined here rather
+than in `utils/products.ts` because the schema needs it and the import
+direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
+it, which is where writers should import from (same shape as `deriveName`).
+
+Order is fixed and total so the refinement can compare element-wise — a set
+comparison would let a writer emit the right uuids in a drifting order.
 
 ### `enumValues(schema: z.ZodType<T>): T[]`
 
@@ -11224,7 +11263,8 @@ interface Product {
   uid_linked_replacement?: string | null;
   uid_tracking_category?: string | null;
   webshop: ProductWebshop;
-  images?: string[];
+  images?: ProductImage[];
+  query_by_images?: string[];
   xero_id: string | null;
   xero_code?: string | null;
   xero_tracking_option_id: string | null;
@@ -11267,6 +11307,30 @@ interface ProductComponent {
   quantity: number;
   zero_priced?: boolean;
   price: typeLiteral;
+}
+```
+
+### `ProductImage`
+
+One product photo. Array order is display order and `images[0]` is the
+primary image — there is deliberately no `sort` or `is_primary` field, so
+there is only one thing to disagree with.
+
+Row identity is `uuid`, the original upload. It never changes (background
+removal is additive: it fills `uuid_cutout` and leaves the original intact),
+so it is the value `DELETE|PATCH /products/{uid}/images/{image_id}` carries.
+That is why this array member has no `crypto.randomUUID()` `uid` — the
+convention exists for members with no natural key, and this one has one.
+
+Display rule everywhere: `img.uuid_cutout ?? img.uuid`.
+
+```ts
+interface ProductImage {
+  uuid: string;
+  uuid_cutout: string | null;
+  alt: string | null;
+  width: number | null;
+  height: number | null;
 }
 ```
 
@@ -11357,6 +11421,20 @@ interface UpdateProductInputType {
   version: number;
 }
 ```
+
+### `deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]`
+
+Derive `query_by_images` from `images` — every uuid, originals then cutouts,
+in array order, cutouts skipped while `null`.
+
+The single source of the denormalization, called by every writer and by the
+`ProductSchema` refinement that rejects a drifted write. Defined here rather
+than in `utils/products.ts` because the schema needs it and the import
+direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
+it, which is where writers should import from (same shape as `deriveName`).
+
+Order is fixed and total so the refinement can compare element-wise — a set
+comparison would let a writer emit the right uuids in a drifting order.
 
 ## `@cfs/core/schemas/public-stock-summary`
 
@@ -17352,6 +17430,20 @@ its full descendant tree as a flat array.
 - `maxDepth` — If set, exclude entries whose depth in the parent exceeds this
 
 **Returns** — New `ProductComponent[]` entries with adjusted paths
+
+### `deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]`
+
+Derive `query_by_images` from `images` — every uuid, originals then cutouts,
+in array order, cutouts skipped while `null`.
+
+The single source of the denormalization, called by every writer and by the
+`ProductSchema` refinement that rejects a drifted write. Defined here rather
+than in `utils/products.ts` because the schema needs it and the import
+direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
+it, which is where writers should import from (same shape as `deriveName`).
+
+Order is fixed and total so the refinement can compare element-wise — a set
+comparison would let a writer emit the right uuids in a drifting order.
 
 ### `removeComponentEntries(components: ProductComponent[], path: string[]): ProductComponent[]`
 

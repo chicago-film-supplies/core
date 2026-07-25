@@ -111,7 +111,13 @@ export const products: TypesenseCollectionConfig = {
       { name: "crms_stock_level_ids", type: "int64[]", optional: true },
       { name: "query_by_components", type: "string[]", facet: true, optional: true },
       { name: "query_by_component_of", type: "string[]", facet: true, optional: true },
-      { name: "images", type: "string[]", optional: true },
+      // Flat uuid mirror, matching the two `query_by_*` fields above. Replaces
+      // the old `images: string[]` — `images` is now an object array, Typesense
+      // cannot retype a field in place, and nothing read the old field (the one
+      // Firestore reader, manager's ProductImages.tsx, is unreachable —
+      // manager#263). `computeSchemaHash` sees this edit and forces a full
+      // reindex under a new collection version; the #352 fan-out cap applies.
+      { name: "query_by_images", type: "string[]", optional: true },
       { name: "created_by", type: "object", optional: true },
       { name: "created_by.uid", type: "string", facet: true, optional: true },
       { name: "created_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },

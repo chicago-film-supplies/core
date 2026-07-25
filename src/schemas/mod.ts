@@ -498,6 +498,8 @@ export {
   type ProductPrice,
   type ProductShipping,
   type ProductWebshop,
+  type ProductImage,
+  deriveProductImageUuids,
 } from "./product.ts";
 
 export {
