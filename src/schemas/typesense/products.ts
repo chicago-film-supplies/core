@@ -111,28 +111,40 @@ export const products: TypesenseCollectionConfig = {
       { name: "crms_stock_level_ids", type: "int64[]", optional: true },
       { name: "query_by_components", type: "string[]", facet: true, optional: true },
       { name: "query_by_component_of", type: "string[]", facet: true, optional: true },
-      // Product images are deliberately NOT indexed here.
+      // `images` is declared as a nested object array, NOT as the flat
+      // `query_by_images` mirror that Firestore needs.
       //
-      // The old `images: string[]` is gone: `products.images` is now an object
-      // array, Typesense cannot retype a field in place, and nothing read the
-      // field — its only Firestore reader, manager's ProductImages.tsx, is
-      // unreachable (manager#263).
+      // That asymmetry is the whole reason `deleteQueryByFields` strips every
+      // `query_by_*` key on the way out: Firestore cannot query inside an object
+      // array, so it needs the denormalized mirror; Typesense CAN, so the mirror
+      // would be redundant duplication here. Declare the sub-fields and query
+      // them directly — same shape as `contacts.organizations.*`,
+      // `cards.sources.*`, `bookings.stores.*`.
       //
-      // Do not "fix" this by declaring `query_by_images` instead:
-      // `deleteQueryByFields` in `api-cloudrun/src/lib/typesenseTranslate.ts`
-      // strips EVERY `query_by_*` key from the outgoing doc unconditionally, so
-      // such a field would be declared, indexed as empty, and never populated.
-      // (That is also why `query_by_components` / `query_by_component_of` above
-      // are inert — pre-existing, not touched here.)
+      // Every sub-field must be `optional`, and for the same reason as the note
+      // on `cards.sources.*`: a product with no images, or a fresh image row
+      // whose cutout/alt/dimensions are still null, would otherwise 400 the
+      // upsert. Verified against dev Typesense 2026-07-25 — a null sub-value in
+      // an optional field is dropped by Typesense rather than rejected, so a
+      // brand-new row indexes cleanly.
       //
-      // If search results ever need a thumbnail, add a derived
-      // `thumbnail_uuid: string` populated in `postProcess` — a flat set cannot
-      // express "the display uuid of the FIRST image", and widening `images`
-      // into declared sub-fields would let `stripUndeclaredFields` silently
-      // empty each entry to `{}`.
+      // Sub-field types are ARRAY types because the parent is `object[]`:
+      // Typesense flattens `images[].uuid` to `images.uuid = [...]`.
       //
-      // `computeSchemaHash` sees this removal and forces a full reindex under a
-      // new collection version; the #352 fan-out cap applies.
+      // Verified queryable: `filter_by=images.uuid:=<id>` and
+      // `images.uuid_cutout:=<id>` both resolve (the `array-contains`
+      // equivalent), and `query_by=images.alt` makes alt text full-text
+      // searchable — which the flat mirror could never have offered.
+      //
+      // `computeSchemaHash` sees the retype from the old `images: string[]` and
+      // forces a full reindex under a new collection version; Typesense cannot
+      // retype a field in place. The #352 fan-out cap applies.
+      { name: "images", type: "object[]", optional: true },
+      { name: "images.uuid", type: "string[]", facet: false, optional: true },
+      { name: "images.uuid_cutout", type: "string[]", facet: false, optional: true },
+      { name: "images.alt", type: "string[]", stem: true, optional: true },
+      { name: "images.width", type: "int32[]", optional: true },
+      { name: "images.height", type: "int32[]", optional: true },
       { name: "created_by", type: "object", optional: true },
       { name: "created_by.uid", type: "string", facet: true, optional: true },
       { name: "created_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },
