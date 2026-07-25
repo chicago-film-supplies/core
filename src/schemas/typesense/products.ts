@@ -111,13 +111,28 @@ export const products: TypesenseCollectionConfig = {
       { name: "crms_stock_level_ids", type: "int64[]", optional: true },
       { name: "query_by_components", type: "string[]", facet: true, optional: true },
       { name: "query_by_component_of", type: "string[]", facet: true, optional: true },
-      // Flat uuid mirror, matching the two `query_by_*` fields above. Replaces
-      // the old `images: string[]` — `images` is now an object array, Typesense
-      // cannot retype a field in place, and nothing read the old field (the one
-      // Firestore reader, manager's ProductImages.tsx, is unreachable —
-      // manager#263). `computeSchemaHash` sees this edit and forces a full
-      // reindex under a new collection version; the #352 fan-out cap applies.
-      { name: "query_by_images", type: "string[]", optional: true },
+      // Product images are deliberately NOT indexed here.
+      //
+      // The old `images: string[]` is gone: `products.images` is now an object
+      // array, Typesense cannot retype a field in place, and nothing read the
+      // field — its only Firestore reader, manager's ProductImages.tsx, is
+      // unreachable (manager#263).
+      //
+      // Do not "fix" this by declaring `query_by_images` instead:
+      // `deleteQueryByFields` in `api-cloudrun/src/lib/typesenseTranslate.ts`
+      // strips EVERY `query_by_*` key from the outgoing doc unconditionally, so
+      // such a field would be declared, indexed as empty, and never populated.
+      // (That is also why `query_by_components` / `query_by_component_of` above
+      // are inert — pre-existing, not touched here.)
+      //
+      // If search results ever need a thumbnail, add a derived
+      // `thumbnail_uuid: string` populated in `postProcess` — a flat set cannot
+      // express "the display uuid of the FIRST image", and widening `images`
+      // into declared sub-fields would let `stripUndeclaredFields` silently
+      // empty each entry to `{}`.
+      //
+      // `computeSchemaHash` sees this removal and forces a full reindex under a
+      // new collection version; the #352 fan-out cap applies.
       { name: "created_by", type: "object", optional: true },
       { name: "created_by.uid", type: "string", facet: true, optional: true },
       { name: "created_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },
