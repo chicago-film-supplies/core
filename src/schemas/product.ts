@@ -112,16 +112,18 @@ export interface ProductImage {
 
 /**
  * Derive `query_by_images` from `images` — every uuid, originals then cutouts,
- * in array order, cutouts skipped while `null`.
+ * cutouts skipped while `null`.
  *
- * The single source of the denormalization, called by every writer and by the
- * `ProductSchema` refinement that rejects a drifted write. Defined here rather
- * than in `utils/products.ts` because the schema needs it and the import
+ * The single source of the denormalization, called by every writer. Defined here
+ * rather than in `utils/products.ts` because the schema needs it and the import
  * direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
  * it, which is where writers should import from (same shape as `deriveName`).
  *
- * Order is fixed and total so the refinement can compare element-wise — a set
- * comparison would let a writer emit the right uuids in a drifting order.
+ * **`query_by_images` carries no ordering meaning.** It exists for Firestore
+ * `array-contains`, and `images` is the sole authority on display order. This
+ * function emits a deterministic order only so writers produce byte-identical
+ * arrays and avoid no-op writes; the refinement below compares it as a multiset,
+ * so a differently-ordered mirror holding the same uuids is equally valid.
  */
 export function deriveProductImageUuids(
   images: readonly { uuid: string; uuid_cutout: string | null }[] | undefined,
@@ -168,7 +170,11 @@ export interface Product {
   uid_tracking_category?: string | null;
   webshop: ProductWebshop;
   images?: ProductImage[];
-  /** Flat mirror of every uuid in `images` — originals and cutouts — for `array-contains`. */
+  /**
+   * Flat mirror of every uuid in `images` — originals and cutouts — existing
+   * solely to make Firestore `array-contains` possible. Carries no ordering
+   * meaning: `images` is the authority on display order.
+   */
   query_by_images?: string[];
   xero_id: string | null;
   /**
@@ -311,8 +317,14 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     // (against `[]`), not waved through. `validateBeforeWrite` validates the
     // merged doc, so a legitimate patch always presents both.
     if (p.images === undefined && p.query_by_images === undefined) return true;
-    const derived = deriveProductImageUuids(p.images);
-    const mirror = p.query_by_images ?? [];
+    // Multiset comparison, NOT element-wise: `query_by_images` is an
+    // `array-contains` index and carries no ordering meaning — `images` is the
+    // sole authority on display order. Requiring a specific order here would
+    // reject a writer that emitted the same uuids in a different but equally
+    // correct arrangement, and would quietly imply the mirror ordered something.
+    // Length is compared too, so a duplicate cannot hide behind a matching set.
+    const derived = deriveProductImageUuids(p.images).sort();
+    const mirror = [...(p.query_by_images ?? [])].sort();
     return mirror.length === derived.length && derived.every((uuid, i) => mirror[i] === uuid);
   },
   {
@@ -326,7 +338,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     // past this. Every writer must build the full array — do not reintroduce a
     // sentinel writer for `images` or `query_by_images`.
     message:
-      "query_by_images must be exactly deriveProductImageUuids(images) — every image uuid, then every non-null cutout uuid, in array order",
+      "query_by_images must hold exactly the uuids in images — every image uuid plus every non-null cutout uuid, no more and no fewer. Order is not compared; images is the authority on display order",
     path: ["query_by_images"],
   },
 ).meta({

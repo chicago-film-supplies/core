@@ -3857,7 +3857,7 @@
           "kind": "function",
           "name": "deriveProductImageUuids",
           "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
-          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\nin array order, cutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer and by the\n`ProductSchema` refinement that rejects a drifted write. Defined here rather\nthan in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\nOrder is fixed and total so the refinement can compare element-wise — a set\ncomparison would let a writer emit the right uuids in a drifting order.",
+          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\ncutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer. Defined here\nrather than in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\n**`query_by_images` carries no ordering meaning.** It exists for Firestore\n`array-contains`, and `images` is the sole authority on display order. This\nfunction emits a deterministic order only so writers produce byte-identical\narrays and avoid no-op writes; the refinement below compares it as a multiset,\nso a differently-ordered mirror holding the same uuids is equally valid.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6281,7 +6281,7 @@
           "kind": "function",
           "name": "deriveProductImageUuids",
           "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
-          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\nin array order, cutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer and by the\n`ProductSchema` refinement that rejects a drifted write. Defined here rather\nthan in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\nOrder is fixed and total so the refinement can compare element-wise — a set\ncomparison would let a writer emit the right uuids in a drifting order.",
+          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\ncutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer. Defined here\nrather than in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\n**`query_by_images` carries no ordering meaning.** It exists for Firestore\n`array-contains`, and `images` is the sole authority on display order. This\nfunction emits a deterministic order only so writers produce byte-identical\narrays and avoid no-op writes; the refinement below compares it as a multiset,\nso a differently-ordered mirror holding the same uuids is equally valid.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -9737,7 +9737,7 @@
           "kind": "function",
           "name": "deriveProductImageUuids",
           "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
-          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\nin array order, cutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer and by the\n`ProductSchema` refinement that rejects a drifted write. Defined here rather\nthan in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\nOrder is fixed and total so the refinement can compare element-wise — a set\ncomparison would let a writer emit the right uuids in a drifting order.",
+          "doc": "Derive `query_by_images` from `images` — every uuid, originals then cutouts,\ncutouts skipped while `null`.\n\nThe single source of the denormalization, called by every writer. Defined here\nrather than in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\n**`query_by_images` carries no ordering meaning.** It exists for Firestore\n`array-contains`, and `images` is the sole authority on display order. This\nfunction emits a deterministic order only so writers produce byte-identical\narrays and avoid no-op writes; the refinement below compares it as a multiset,\nso a differently-ordered mirror holding the same uuids is equally valid.",
           "paramTags": [],
           "returnsTag": null
         },

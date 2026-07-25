@@ -294,13 +294,27 @@ Deno.test("ProductSchema query_by_images: must be exactly the derived set", () =
     "a mirror holding a uuid no image row carries must be rejected",
   );
 
-  // Right uuids, wrong order — compared element-wise on purpose, so a writer
-  // can't drift into its own ordering.
+  // Same uuids, different order — ACCEPTED. The mirror is an `array-contains`
+  // index and orders nothing; `images` is the sole authority on display order.
+  // Constraining the order here would reject an equally correct writer and
+  // imply the mirror meant something it doesn't.
   assertEquals(
-    ProductSchema.safeParse({ ...validProduct, images, query_by_images: [IMG_B, IMG_A, IMG_A_CUT] })
+    ProductSchema.safeParse({ ...validProduct, images, query_by_images: [IMG_B, IMG_A_CUT, IMG_A] })
       .success,
+    true,
+    "the mirror's order is not meaningful and must not be constrained",
+  );
+
+  // A duplicate is still rejected — length is compared, so it cannot hide
+  // behind a matching set.
+  assertEquals(
+    ProductSchema.safeParse({
+      ...validProduct,
+      images,
+      query_by_images: [IMG_A, IMG_A, IMG_B, IMG_A_CUT],
+    }).success,
     false,
-    "a mirror in a different order must be rejected",
+    "a duplicated uuid must be rejected",
   );
 
   // One side without the other is drift, not a half-doc: `validateBeforeWrite`

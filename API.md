@@ -7215,16 +7215,18 @@ stored document and `ActorRef.name` is computed by passing through here.
 ### `deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]`
 
 Derive `query_by_images` from `images` — every uuid, originals then cutouts,
-in array order, cutouts skipped while `null`.
+cutouts skipped while `null`.
 
-The single source of the denormalization, called by every writer and by the
-`ProductSchema` refinement that rejects a drifted write. Defined here rather
-than in `utils/products.ts` because the schema needs it and the import
+The single source of the denormalization, called by every writer. Defined here
+rather than in `utils/products.ts` because the schema needs it and the import
 direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
 it, which is where writers should import from (same shape as `deriveName`).
 
-Order is fixed and total so the refinement can compare element-wise — a set
-comparison would let a writer emit the right uuids in a drifting order.
+**`query_by_images` carries no ordering meaning.** It exists for Firestore
+`array-contains`, and `images` is the sole authority on display order. This
+function emits a deterministic order only so writers produce byte-identical
+arrays and avoid no-op writes; the refinement below compares it as a multiset,
+so a differently-ordered mirror holding the same uuids is equally valid.
 
 ### `enumValues(schema: z.ZodType<T>): T[]`
 
@@ -11425,16 +11427,18 @@ interface UpdateProductInputType {
 ### `deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]`
 
 Derive `query_by_images` from `images` — every uuid, originals then cutouts,
-in array order, cutouts skipped while `null`.
+cutouts skipped while `null`.
 
-The single source of the denormalization, called by every writer and by the
-`ProductSchema` refinement that rejects a drifted write. Defined here rather
-than in `utils/products.ts` because the schema needs it and the import
+The single source of the denormalization, called by every writer. Defined here
+rather than in `utils/products.ts` because the schema needs it and the import
 direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
 it, which is where writers should import from (same shape as `deriveName`).
 
-Order is fixed and total so the refinement can compare element-wise — a set
-comparison would let a writer emit the right uuids in a drifting order.
+**`query_by_images` carries no ordering meaning.** It exists for Firestore
+`array-contains`, and `images` is the sole authority on display order. This
+function emits a deterministic order only so writers produce byte-identical
+arrays and avoid no-op writes; the refinement below compares it as a multiset,
+so a differently-ordered mirror holding the same uuids is equally valid.
 
 ## `@cfs/core/schemas/public-stock-summary`
 
@@ -17434,16 +17438,18 @@ its full descendant tree as a flat array.
 ### `deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]`
 
 Derive `query_by_images` from `images` — every uuid, originals then cutouts,
-in array order, cutouts skipped while `null`.
+cutouts skipped while `null`.
 
-The single source of the denormalization, called by every writer and by the
-`ProductSchema` refinement that rejects a drifted write. Defined here rather
-than in `utils/products.ts` because the schema needs it and the import
+The single source of the denormalization, called by every writer. Defined here
+rather than in `utils/products.ts` because the schema needs it and the import
 direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
 it, which is where writers should import from (same shape as `deriveName`).
 
-Order is fixed and total so the refinement can compare element-wise — a set
-comparison would let a writer emit the right uuids in a drifting order.
+**`query_by_images` carries no ordering meaning.** It exists for Firestore
+`array-contains`, and `images` is the sole authority on display order. This
+function emits a deterministic order only so writers produce byte-identical
+arrays and avoid no-op writes; the refinement below compares it as a multiset,
+so a differently-ordered mirror holding the same uuids is equally valid.
 
 ### `removeComponentEntries(components: ProductComponent[], path: string[]): ProductComponent[]`
 
