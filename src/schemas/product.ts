@@ -111,27 +111,31 @@ export interface ProductImage {
 }
 
 /**
- * Derive `query_by_images` from `images` — every uuid, originals then cutouts,
- * cutouts skipped while `null`.
+ * Derive `query_by_images` from `images` — each row's `uuid` followed by its
+ * `uuid_cutout` when set, walking `images` in order.
  *
  * The single source of the denormalization, called by every writer. Defined here
  * rather than in `utils/products.ts` because the schema needs it and the import
  * direction is strictly utils → schemas; `@cfs/core/utils/products` re-exports
  * it, which is where writers should import from (same shape as `deriveName`).
  *
- * **`query_by_images` carries no ordering meaning.** It exists for Firestore
- * `array-contains`, and `images` is the sole authority on display order. This
- * function emits a deterministic order only so writers produce byte-identical
- * arrays and avoid no-op writes; the refinement below compares it as a multiset,
- * so a differently-ordered mirror holding the same uuids is equally valid.
+ * **Ordered, but not an ordering source.** The emitted array follows `images`
+ * row order — it costs nothing (one pass either way) and a mirror that tracks
+ * the display array is easier to eyeball in the console than an arbitrary one.
+ * But `images` remains the sole authority on display order: this field exists
+ * for Firestore `array-contains`, and the refinement below compares it as a
+ * multiset, so a differently-ordered mirror holding the same uuids is still
+ * valid. Nothing may read order back out of it.
  */
 export function deriveProductImageUuids(
   images: readonly { uuid: string; uuid_cutout: string | null }[] | undefined,
 ): string[] {
   if (!images) return [];
   const uuids: string[] = [];
-  for (const img of images) uuids.push(img.uuid);
-  for (const img of images) if (img.uuid_cutout) uuids.push(img.uuid_cutout);
+  for (const img of images) {
+    uuids.push(img.uuid);
+    if (img.uuid_cutout) uuids.push(img.uuid_cutout);
+  }
   return uuids;
 }
 

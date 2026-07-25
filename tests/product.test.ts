@@ -266,8 +266,8 @@ Deno.test("ProductSchema images: an image row requires every field, nullable but
 
 Deno.test("ProductSchema query_by_images: must be exactly the derived set", () => {
   const images = [imageRow(IMG_A, IMG_A_CUT), imageRow(IMG_B)];
-  // originals in array order, then every non-null cutout
-  const derived = [IMG_A, IMG_B, IMG_A_CUT];
+  // walks `images` in order: each row's uuid, then its cutout when set
+  const derived = [IMG_A, IMG_A_CUT, IMG_B];
 
   assertEquals(
     ProductSchema.safeParse({ ...validProduct, images, query_by_images: derived }).success,
@@ -299,7 +299,7 @@ Deno.test("ProductSchema query_by_images: must be exactly the derived set", () =
   // Constraining the order here would reject an equally correct writer and
   // imply the mirror meant something it doesn't.
   assertEquals(
-    ProductSchema.safeParse({ ...validProduct, images, query_by_images: [IMG_B, IMG_A_CUT, IMG_A] })
+    ProductSchema.safeParse({ ...validProduct, images, query_by_images: [IMG_B, IMG_A, IMG_A_CUT] })
       .success,
     true,
     "the mirror's order is not meaningful and must not be constrained",
@@ -331,12 +331,15 @@ Deno.test("ProductSchema query_by_images: must be exactly the derived set", () =
   );
 });
 
-Deno.test("deriveProductImageUuids: originals first, then non-null cutouts", () => {
+Deno.test("deriveProductImageUuids: follows images order, cutout beside its original", () => {
   assertEquals(deriveProductImageUuids(undefined), []);
   assertEquals(deriveProductImageUuids([]), []);
   assertEquals(deriveProductImageUuids([imageRow(IMG_A)]), [IMG_A]);
+  // Row order preserved, and each cutout sits next to the original it came from
+  // — so the mirror reads as the display array, even though nothing may rely on
+  // that (the refinement compares it as a multiset).
   assertEquals(
     deriveProductImageUuids([imageRow(IMG_A, IMG_A_CUT), imageRow(IMG_B)]),
-    [IMG_A, IMG_B, IMG_A_CUT],
+    [IMG_A, IMG_A_CUT, IMG_B],
   );
 });
