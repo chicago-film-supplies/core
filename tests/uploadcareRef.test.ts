@@ -68,7 +68,17 @@ function collectCorpus(): { leaves: CorpusLeaf[]; unhandled: string[] } {
 
 const isAnnotated = (leaf: LeafPath) => leaf.meta[UPLOADCARE_REF_META] === true;
 
-/** The ten CDN reference leaves, as of 2026-07-25. */
+/**
+ * The eleven CDN reference leaves, as of 2026-07-26.
+ *
+ * Deliberately does NOT include `invoices::uploadcare_files[].uuid` or its
+ * `quotes` twin. Those are real CDN ids, but they are a transient producer work
+ * list: annotating them would pull them into the hand-written extractors, the
+ * `.select()` projections and api-cloudrun's `EXPECTED_REF_PATHS` snapshot, and
+ * so into the `refCounts` scan-anomaly canary — which must count only stable
+ * references. They are exempted by name in `UPLOADCARE_CANDIDATE_EXEMPTIONS`
+ * instead, and the sweep's value harvest protects them regardless.
+ */
 const EXPECTED_REF_PATHS: Record<string, string[]> = {
   "quotes": ["uploadcare_uuid"],
   "invoices": ["pdf_versions[].uploadcare_uuid", "uploadcare_uuid"],

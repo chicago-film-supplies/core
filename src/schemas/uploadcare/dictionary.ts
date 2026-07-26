@@ -9,7 +9,7 @@
  * exemption entry; under-matching costs nothing at all, because the harvest
  * protects the file either way.
  *
- * Against core today it yields exactly 13 candidates: the 9 refs plus the 4
+ * Against core today it yields exactly 18 candidates: the 11 refs plus the 7
  * exemptions below, and zero Xero false positives.
  */
 import type { LeafPath } from "../zod-walk.ts";
@@ -76,7 +76,15 @@ export function isUploadcareCandidate(leaf: LeafPath): boolean {
 }
 
 /**
- * Candidate leaves that are NOT CDN file ids. Keyed `<collection>::<leaf path>`.
+ * Candidate leaves the lint should not flag. Keyed `<collection>::<leaf path>`.
+ *
+ * Two kinds live here. Most are leaves that simply are **not** CDN file ids
+ * (`alt`, `filename`, `mime_type`). A few — the `uploadcare_files[].uuid` work
+ * lists — genuinely **are** CDN ids and are exempted anyway, because annotating
+ * them would enlist a transient producer work list into the hand-written
+ * extractors, the `.select()` projections and the `EXPECTED_REF_PATHS` snapshot,
+ * and so into the `refCounts` scan-anomaly canary. Their protection comes from
+ * the value harvest, which does not consult this map at all.
  *
  * A stale entry here is an ergonomics bug, never a data-loss bug — the harvest
  * protects files regardless of what this map says. `uploadcareRef.test.ts`
@@ -99,5 +107,13 @@ export const UPLOADCARE_CANDIDATE_EXEMPTIONS: ReadonlyMap<string, string> = new 
   [
     "recurrences::prototype.attachments[].mime_type",
     "same CardAttachment node as cards",
+  ],
+  [
+    "invoices::uploadcare_files[].uuid",
+    "CDN id held as a producer work-list entry; protection comes from the value harvest, attribution deliberately excluded from the refCounts canary — decision 5",
+  ],
+  [
+    "quotes::uploadcare_files[].uuid",
+    "CDN id held as a producer work-list entry; protection comes from the value harvest, attribution deliberately excluded from the refCounts canary — decision 5",
   ],
 ]);

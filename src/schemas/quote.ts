@@ -17,6 +17,26 @@ export interface Quote {
   version: number | null;
   is_draft: boolean;
   uploadcare_uuid: string | null;
+  /**
+   * CDN uploads this doc owns pending reconcile — the producer work list that
+   * makes a displaced draft render collectable in-band instead of by the weekly
+   * sweep.
+   *
+   * ABSENT on every doc written before this field existed and on any writer that
+   * doesn't construct it — always read as `(doc.uploadcare_files ?? [])`.
+   * `.default([])` does not materialize: `validateBeforeWrite` discards
+   * `result.data` and callers write the RAW doc.
+   *
+   * `version_source` is the writer's snapshot of the SOURCE doc's version — for
+   * a quote that is `order.version`, not this doc's `version` (which means the
+   * v{N} snapshot number, and is null on a draft). Both producers writing
+   * `version_source` is what makes one array coherent across them.
+   */
+  uploadcare_files?: Array<{
+    uuid: string;
+    version_source: number;
+    created_at: FirestoreTimestampType;
+  }>;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -31,6 +51,13 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   version: z.int().min(0).nullable(),
   is_draft: z.boolean(),
   uploadcare_uuid: uploadcareRef(z.string().nullable()),
+  // `uuid` is a plain string, deliberately NOT `uploadcareRef()` — see the
+  // matching note on `Invoice.uploadcare_files`.
+  uploadcare_files: z.array(z.strictObject({
+    uuid: z.string(),
+    version_source: z.int().min(0),
+    created_at: FirestoreTimestamp,
+  })).optional(),
   deleted_at: FirestoreTimestamp.nullable(),
   expires_at: FirestoreTimestamp.nullable(),
   created_at: FirestoreTimestamp,

@@ -2694,7 +2694,8 @@ interface Invoice {
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
-  pdf_versions: Array<typeLiteral>;
+  pdf_versions?: Array<typeLiteral>;
+  uploadcare_files?: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
   defaultThreadId?: string;
@@ -4552,6 +4553,7 @@ interface Quote {
   version: number | null;
   is_draft: boolean;
   uploadcare_uuid: string | null;
+  uploadcare_files?: Array<typeLiteral>;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -9450,7 +9452,8 @@ interface Invoice {
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
-  pdf_versions: Array<typeLiteral>;
+  pdf_versions?: Array<typeLiteral>;
+  uploadcare_files?: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
   defaultThreadId?: string;
@@ -13464,6 +13467,7 @@ interface Quote {
   version: number | null;
   is_draft: boolean;
   uploadcare_uuid: string | null;
+  uploadcare_files?: Array<typeLiteral>;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -15233,7 +15237,15 @@ const MEDIA_CONTAINER_RE: RegExp;
 
 ### `UPLOADCARE_CANDIDATE_EXEMPTIONS`
 
-Candidate leaves that are NOT CDN file ids. Keyed `<collection>::<leaf path>`.
+Candidate leaves the lint should not flag. Keyed `<collection>::<leaf path>`.
+
+Two kinds live here. Most are leaves that simply are **not** CDN file ids
+(`alt`, `filename`, `mime_type`). A few — the `uploadcare_files[].uuid` work
+lists — genuinely **are** CDN ids and are exempted anyway, because annotating
+them would enlist a transient producer work list into the hand-written
+extractors, the `.select()` projections and the `EXPECTED_REF_PATHS` snapshot,
+and so into the `refCounts` scan-anomaly canary. Their protection comes from
+the value harvest, which does not consult this map at all.
 
 A stale entry here is an ergonomics bug, never a data-loss bug — the harvest
 protects files regardless of what this map says. `uploadcareRef.test.ts`
