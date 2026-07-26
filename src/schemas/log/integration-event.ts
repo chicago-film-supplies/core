@@ -32,7 +32,6 @@ export const INTEGRATION_EVENT_MSGS = [
   "uploadcare_draft_cleanup_failed",
   "uploadcare_file_not_found",
   "uploadcare_invoice_cleanup_failed",
-  "uploadcare_metadata_failed",
   "uploadcare_orphan_batch_failed",
   "uploadcare_orphan_cleanup_failed",
   "uploadcare_orphan_sweep_completed",
@@ -41,10 +40,6 @@ export const INTEGRATION_EVENT_MSGS = [
   // deliberately do NOT delete it — the write may have landed. Left for the
   // orphan sweep to reap; deleting here risks a live order with dead PDF links.
   "uploadcare_upload_abandoned",
-  "processUpload_delete_original_failed",
-  "processUpload_no_file_id",
-  "processUpload_skipped",
-  "process_upload_failed",
   "dmarc_report_ingest_failed",
   "dmarc_report_processor_run",
   "eventarc_duplicate_event",
