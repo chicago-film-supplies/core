@@ -198,6 +198,50 @@ export interface AddressType {
 }
 
 /**
+ * Collections that may legitimately appear as a {@link DocSourceType} `collection`.
+ *
+ * This was `z.string().min(1)` — free text that reached a Firestore collection
+ * name. `CreateCardInput.sources` comes straight off the POST body and
+ * `createCard` copies it into the THREAD's `sources`, so
+ * `POST /cards {sources:[{collection:"cards", uid:X}]}` wrote a thread claiming
+ * a card as its own source, which `deleteCard` then unpicks by
+ * `s.collection === "cards"`. Every consumer was re-deriving the same implicit
+ * "it's one of the known CFS collections" contract; it is encoded once here.
+ *
+ * Membership is the union of a read-only survey of every stored `DocSource` in
+ * BOTH envs (threads, comments, cards, recurrences.prototype, out-of-service
+ * `sources[]` + `transactions[].source` — dev and prod agreed on the same 12
+ * values, no malformed entries) plus `template-components`, which has no stored
+ * instance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.
+ *
+ * `transactions` has no live writer — its 898 instances (identical count in both
+ * envs) are historical. It stays in: dropping it would fail those docs on their
+ * next update through `validateBeforeWrite`. Never narrow this past stored data;
+ * survey first.
+ */
+export const CFS_SOURCE_COLLECTIONS = [
+  "bookings",
+  "cards",
+  "contacts",
+  "invoices",
+  "orders",
+  "organizations",
+  "out-of-service",
+  "products",
+  "roles",
+  "template-components",
+  "templates",
+  "templates-versions",
+  "transactions",
+] as const;
+/** A collection name valid in a {@link DocSourceType}. */
+export type CfsSourceCollectionType = typeof CFS_SOURCE_COLLECTIONS[number];
+/** Zod schema for CfsSourceCollectionType. */
+export const CfsSourceCollectionEnum: z.ZodType<CfsSourceCollectionType> = z.enum(
+  CFS_SOURCE_COLLECTIONS,
+);
+
+/**
  * A `{collection, uid}` pointer to any Firestore document. Used polymorphically
  * by Thread, Comment, and Card to reference the source docs they belong to.
  *
@@ -206,14 +250,14 @@ export interface AddressType {
  * thread-specific.
  */
 export interface DocSourceType {
-  collection: string;
+  collection: CfsSourceCollectionType;
   uid: string;
   label?: string | null;
 }
 
 /** Zod schema for a polymorphic doc reference. */
 export const DocSource: z.ZodType<DocSourceType> = z.strictObject({
-  collection: z.string().min(1),
+  collection: CfsSourceCollectionEnum,
   // Polymorphic — points at any collection, including composite-keyed docs
   // (bookings, stock-summaries). AnyUid is the union of every known id shape.
   uid: AnyUid,
