@@ -28,8 +28,8 @@ export interface LocationType {
   dimensions?: LocationTypeDimensions | null;
   version: number;
   active: boolean;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for LocationType. */

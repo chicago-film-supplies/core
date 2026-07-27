@@ -50,9 +50,15 @@ Deno.test("UserSchema rejects empty password_hash", () => {
   assertEquals(result.success, false);
 });
 
-Deno.test("UserSchema defaults email_verified to false", () => {
+Deno.test("UserSchema requires email_verified", () => {
+  // Was `.default(false)`. A default makes the parse pass without putting the
+  // field in the stored doc (`validateBeforeWrite` writes the RAW object), and
+  // the `users` Typesense config declares it required — so the doc could never
+  // index. See `tests/typesense-parity.test.ts`.
   const { email_verified: _, ...rest } = base;
-  const result = UserSchema.safeParse(rest);
+  assertEquals(UserSchema.safeParse(rest).success, false);
+
+  const result = UserSchema.safeParse({ ...rest, email_verified: false });
   assertEquals(result.success, true);
   if (result.success) {
     assertEquals(result.data.email_verified, false);

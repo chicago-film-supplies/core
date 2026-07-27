@@ -49,6 +49,11 @@ Deno.test("OrganizationSchema accepts null billing_address", () => {
     name: "Acme",
     crms_id: 1,
     xero_id: null,
+    // `tax_profile` and `contacts` lost their `.default()` — the Typesense
+    // config declares both required and a default never reaches the stored
+    // doc. See `tests/typesense-parity.test.ts`.
+    tax_profile: "tax_applied",
+    contacts: [],
     billing_address: null,
     created_by: actor,
     updated_by: actor,

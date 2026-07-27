@@ -8,10 +8,12 @@ import {
   ProductSchema,
   TagSchema,
   TaxSchema,
+  StoreSchema,
   TemplateSchema,
   TrackingCategorySchema,
   TransactionSchema,
   UserSchema,
+  WebshopProductSchema,
   DestinationEndpoint,
   OrderItem,
   OrderDocDestinationItem,
@@ -138,4 +140,75 @@ Deno.test("getInitialValues — throws for non-object schema", async () => {
 Deno.test("getInitialValues — literal fields use the literal value", () => {
   const result = getInitialValues(OrderDocDestinationItem);
   assertEquals(result.type, "destination");
+});
+
+Deno.test("getInitialValues — .meta({ initial }) wins over the type-derived zero", async () => {
+  const { z } = await import("zod");
+  const result = getInitialValues(z.object({
+    annotated: z.boolean().meta({ initial: true }),
+    bare: z.boolean(),
+    str: z.string().meta({ initial: "hello" }),
+    num: z.number().meta({ initial: 42 }),
+    arr: z.array(z.string()).meta({ initial: ["a"] }),
+  }));
+  assertEquals(result.annotated, true);
+  assertEquals(result.bare, false);
+  assertEquals(result.str, "hello");
+  assertEquals(result.num, 42);
+  assertEquals(result.arr, ["a"]);
+});
+
+Deno.test("getInitialValues — .meta({ initial }) is found through wrappers", async () => {
+  const { z } = await import("zod");
+  const result = getInitialValues(z.object({
+    // Annotation on the leaf, wrapper above it — resolveField recurses into
+    // `.optional()`'s innerType, so the leaf tag is still reached.
+    opt: z.boolean().meta({ initial: true }).optional(),
+    // Annotation on the wrapper itself.
+    onWrapper: z.boolean().optional().meta({ initial: true }),
+  }));
+  assertEquals(result.opt, true);
+  assertEquals(result.onWrapper, true);
+});
+
+Deno.test("getInitialValues — .meta() without `initial` leaves resolution unchanged", async () => {
+  const { z } = await import("zod");
+  const result = getInitialValues(z.object({
+    tagged: z.string().meta({ pii: "mask" }),
+    both: z.boolean().meta({ pii: "none", initial: true }),
+  }));
+  assertEquals(result.tagged, "");
+  assertEquals(result.both, true);
+});
+
+Deno.test("getInitialValues — the five boolean fields that lost .default(true) still seed true", () => {
+  // The regression this annotation exists to prevent: dropping `.default(true)`
+  // for Typesense parity must not flip a create form to `false`.
+  const product = getInitialValues(ProductSchema);
+  assertEquals(product.active, true);
+  assertEquals(product.eligible_delivery, true);
+  assertEquals(product.eligible_in_store_pickup, true);
+
+  const store = getInitialValues(StoreSchema);
+  assertEquals(store.active, true);
+
+  const webshop = getInitialValues(WebshopProductSchema);
+  assertEquals(webshop.active, true);
+});
+
+Deno.test("getInitialValues — fields whose dropped default equalled the type-zero are unchanged", () => {
+  const product = getInitialValues(ProductSchema);
+  assertEquals(product.component_only, false);
+  assertEquals(product.eligible_shipping_ground, false);
+  assertEquals(product.eligible_shipping_air, false);
+
+  const contact = getInitialValues(ContactSchema);
+  assertEquals(contact.emails, []);
+  assertEquals(contact.phones, []);
+
+  // Enum: TAX_PROFILES[0] is "tax_applied", the value the dropped default held.
+  const org = getInitialValues(OrganizationSchema);
+  assertEquals(org.tax_profile, "tax_applied");
+  const order = getInitialValues(OrderSchema);
+  assertEquals(order.tax_profile, "tax_applied");
 });

@@ -39,8 +39,8 @@ export interface Thread {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for a thread Firestore document. */
@@ -50,7 +50,12 @@ export const ThreadSchema: z.ZodType<Thread> = z.strictObject({
   title: z.string().max(200).meta({ pii: "mask" }).nullable(),
   last_message_at: FirestoreTimestamp.nullable(),
   last_message_preview: z.string().max(280).meta({ pii: "mask" }).default(""),
-  comment_count: z.int().min(0).default(0),
+  // Required (no `.default(0)`): the `threads` Typesense config declares it so.
+  // That config is `enabled: false` today — the parity gate deliberately walks
+  // disabled collections too, so provisioning `threads` later cannot silently
+  // reintroduce the bug. All three create paths (`threadsCoWrite`, `cards`,
+  // `publishFromMerge`) already supply it; the increments go through `patch`.
+  comment_count: z.int().min(0),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,

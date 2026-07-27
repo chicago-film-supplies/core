@@ -10,11 +10,11 @@ export interface HolidayDates {
   uid: string;
   uid_holiday: string;
   date: string;
-  date_fs?: FirestoreTimestampType;
+  date_fs: FirestoreTimestampType;
   name: string;
   type: "fixed" | "variable";
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for HolidayDates. */

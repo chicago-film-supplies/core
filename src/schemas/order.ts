@@ -763,8 +763,8 @@ export interface Order {
   xero_id?: string | null;
   defaultThreadId?: string;
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for the full order Firestore document. */
@@ -775,7 +775,11 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   organization: OrderDocOrganization,
   destinations: z.array(DocDestination).min(1),
   items: z.array(OrderDocItem).default([]),
-  tax_profile: TaxProfileEnum.default("tax_applied"),
+  // Required (no `.default("tax_applied")`): the Typesense config declares it
+  // so, and a `.default()` never materializes on a write — see the note in
+  // `product.ts`. No `initial` needed: TAX_PROFILES[0] is "tax_applied", so
+  // the enum's type-derived seed already equals the dropped default.
+  tax_profile: TaxProfileEnum,
   totals: OrderDocTotals,
   invoices: z.array(z.strictObject({ uid: FirestoreId, number: z.number(), status: InvoiceStatusEnum })).default([]),
   query_by_invoices: z.array(z.string()).default([]),

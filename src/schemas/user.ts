@@ -74,8 +74,8 @@ export interface User extends NameParts {
   prefs_firestore: Record<string, FirestoreDisplayPrefs>;
   prefs_typesense: Record<string, TypesenseDisplayPrefs>;
   deleted_at?: FirestoreTimestampType | null;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for a full user Firestore document. */
@@ -85,7 +85,9 @@ export const UserSchema: z.ZodType<User> = z.strictObject({
   ...NamePartsFields,
   name: NameField,
   password_hash: z.string().min(1).meta({ pii: "redact" }),
-  email_verified: z.boolean().default(false),
+  // Required (no `.default(false)`): the Typesense config declares it so, and a
+  // `.default()` never materializes on a write — see the note in `product.ts`.
+  email_verified: z.boolean(),
   uid_contact: FirestoreId.nullable().optional(),
   roles: z.array(z.string()).optional(),
   token_version: z.int().min(0).optional(),

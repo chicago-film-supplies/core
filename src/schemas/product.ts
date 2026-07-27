@@ -201,8 +201,8 @@ export interface Product {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 export const ComponentSchema: z.ZodType<ProductComponent> = z.strictObject({
@@ -235,10 +235,17 @@ export const ComponentSchema: z.ZodType<ProductComponent> = z.strictObject({
 export const ProductSchema: z.ZodType<Product> = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1).max(200),
-  active: z.boolean().default(true),
+  // `.meta({ initial })` rather than `.default()`, here and on the two
+  // `eligible_*` booleans below: the Typesense config declares these required,
+  // and a `.default()` never materializes on a write (`validateBeforeWrite`
+  // persists the RAW doc), so a writer that omitted one produced a document
+  // that could never index. Required forces the writer to be explicit; the
+  // annotation keeps `getInitialValues` seeding the create form `true`, which
+  // the type-derived zero (`false`) would not.
+  active: z.boolean().meta({ initial: true }),
   type: ProductTypeEnum,
   stock_method: StockMethodEnum,
-  component_only: z.boolean().default(false),
+  component_only: z.boolean(),
   crms_id: z.number().nullable(),
   crms_rate_id: z.number().nullable().optional(),
   crms_stock_level_ids: z.record(z.string(), z.number()).optional(),
@@ -246,10 +253,10 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   crms_linked_replacement_id: z.number().nullable().optional(),
   crms_linked_replacement_rate_id: z.number().nullable().optional(),
   description: z.string().optional(),
-  eligible_delivery: z.boolean().default(true),
-  eligible_in_store_pickup: z.boolean().default(true),
-  eligible_shipping_ground: z.boolean().default(false),
-  eligible_shipping_air: z.boolean().default(false),
+  eligible_delivery: z.boolean().meta({ initial: true }),
+  eligible_in_store_pickup: z.boolean().meta({ initial: true }),
+  eligible_shipping_ground: z.boolean(),
+  eligible_shipping_air: z.boolean(),
   price: z.strictObject({
     base: z.number(),
     replacement: z.number().nullable().optional(),

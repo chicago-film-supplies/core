@@ -161,8 +161,8 @@ export interface Fulfillment {
    * 409s on mismatch. Mirrors `Order.version`.
    */
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({

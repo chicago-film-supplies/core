@@ -47,8 +47,8 @@ export interface Contact extends NameParts {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for a full contact Firestore document. */
@@ -57,8 +57,10 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   ...NamePartsFields,
   name: NameField,
   crms_id: z.number().optional(),
-  emails: z.array(Email).default([]),
-  phones: z.array(Phone).default([]),
+  // Required (no `.default([])`): the Typesense config declares them so, and a
+  // `.default()` never materializes on a write — see the note in `product.ts`.
+  emails: z.array(Email),
+  phones: z.array(Phone),
   organizations: z.array(ContactOrganization).default([]),
   query_by_organizations: z.array(z.string()).default([]),
   uid_user: FirestoreId.optional(),

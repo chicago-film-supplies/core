@@ -231,7 +231,7 @@
         {
           "kind": "interface",
           "name": "CacheGeocodes",
-          "declaration": "interface CacheGeocodes {\n  query: string;\n  coordinates: CoordinatesType | null;\n  mapbox_id: string;\n  address: CacheGeocodesAddress;\n  created_at?: FirestoreTimestampType;\n  expiresAt?: FirestoreTimestampType;\n}",
+          "declaration": "interface CacheGeocodes {\n  query: string;\n  coordinates: CoordinatesType | null;\n  mapbox_id: string;\n  address: CacheGeocodesAddress;\n  created_at: FirestoreTimestampType;\n  expiresAt: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a cached geocode result."
         },
         {
@@ -249,7 +249,7 @@
         {
           "kind": "interface",
           "name": "Card",
-          "declaration": "interface Card {\n  uid: string;\n  uid_list: string;\n  uid_thread: string;\n  status: CardStatus;\n  action: CardAction | null;\n  position: number;\n  subject: string;\n  body: CommentBodyJson | null;\n  body_text: string;\n  dates: CardDatesType;\n  all_day: boolean;\n  date_fs: FirestoreTimestampType | null;\n  destination: DocDestinationEndpointType | null;\n  organization: CardOrganizationType | null;\n  sources: DocSourceType[];\n  attachments: CardAttachmentType[];\n  uid_assignees: string[];\n  locked: CardLockKey[];\n  recurrence_parent_uid: string | null;\n  recurrence_index: number | null;\n  recurrence_overrides: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Card {\n  uid: string;\n  uid_list: string;\n  uid_thread: string;\n  status: CardStatus;\n  action: CardAction | null;\n  position: number;\n  subject: string;\n  body: CommentBodyJson | null;\n  body_text: string;\n  dates: CardDatesType;\n  all_day: boolean;\n  date_fs: FirestoreTimestampType | null;\n  destination: DocDestinationEndpointType | null;\n  organization: CardOrganizationType | null;\n  sources: DocSourceType[];\n  attachments: CardAttachmentType[];\n  uid_assignees: string[];\n  locked: CardLockKey[];\n  recurrence_parent_uid: string | null;\n  recurrence_index: number | null;\n  recurrence_overrides: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Card Firestore document shape."
         },
         {
@@ -381,7 +381,7 @@
         {
           "kind": "interface",
           "name": "ChartOfAccounts",
-          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A chart of accounts document in Firestore."
         },
         {
@@ -435,7 +435,7 @@
         {
           "kind": "interface",
           "name": "Comment",
-          "declaration": "interface Comment {\n  uid: string;\n  uid_thread: string;\n  sources: DocSourceType[];\n  body: CommentBodyJson;\n  body_text: string;\n  reactions: Record<string, Record<string, ActorRefType>>;\n  git?: CommentGitMirror;\n  version: number;\n  created_by: ActorRefType;\n  deleted_at: FirestoreTimestampType | null;\n  deleted_by: ActorRefType | null;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Comment {\n  uid: string;\n  uid_thread: string;\n  sources: DocSourceType[];\n  body: CommentBodyJson;\n  body_text: string;\n  reactions: Record<string, Record<string, ActorRefType>>;\n  git?: CommentGitMirror;\n  version: number;\n  created_by: ActorRefType;\n  deleted_at: FirestoreTimestampType | null;\n  deleted_by: ActorRefType | null;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Comment Firestore document shape."
         },
         {
@@ -525,7 +525,7 @@
         {
           "kind": "interface",
           "name": "Contact",
-          "declaration": "interface Contact {\n  uid: string;\n  name: string;\n  crms_id?: number;\n  emails: string[];\n  phones: string[];\n  organizations: ContactOrganizationType[];\n  query_by_organizations: string[];\n  uid_user?: string;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Contact {\n  uid: string;\n  name: string;\n  crms_id?: number;\n  emails: string[];\n  phones: string[];\n  organizations: ContactOrganizationType[];\n  query_by_organizations: string[];\n  uid_user?: string;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full contact document schema (Firestore document shape)."
         },
         {
@@ -573,7 +573,7 @@
         {
           "kind": "interface",
           "name": "Counter",
-          "declaration": "interface Counter {\n  count: number;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Counter {\n  count: number;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A counter document in the counters Firestore collection."
         },
         {
@@ -897,7 +897,7 @@
         {
           "kind": "interface",
           "name": "DestinationDoc",
-          "declaration": "interface DestinationDoc {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface DestinationDoc {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a destination (a physical address used in orders)."
         },
         {
@@ -1173,7 +1173,7 @@
         {
           "kind": "interface",
           "name": "Fulfillment",
-          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Sanitized order document for the fulfillment client view.\nMirrors the order by uid — one fulfillment doc per order."
         },
         {
@@ -1281,7 +1281,7 @@
         {
           "kind": "interface",
           "name": "HolidayDates",
-          "declaration": "interface HolidayDates {\n  uid: string;\n  uid_holiday: string;\n  date: string;\n  date_fs?: FirestoreTimestampType;\n  name: string;\n  type: \"fixed\" | \"variable\";\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface HolidayDates {\n  uid: string;\n  uid_holiday: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  name: string;\n  type: \"fixed\" | \"variable\";\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a single holiday date entry."
         },
         {
@@ -1305,7 +1305,7 @@
         {
           "kind": "interface",
           "name": "HolidayDefinition",
-          "declaration": "interface HolidayDefinition {\n  uid: string;\n  type: HolidayType;\n  name: string;\n  display_month: number;\n  js_month: number;\n  date?: number;\n  day?: string;\n  display_day?: string;\n  week?: string;\n  display_suffix?: string;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface HolidayDefinition {\n  uid: string;\n  type: HolidayType;\n  name: string;\n  display_month: number;\n  js_month: number;\n  date?: number;\n  day?: string;\n  display_day?: string;\n  week?: string;\n  display_suffix?: string;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A holiday definition document in Firestore (collection: holiday-definitions).\n\n`type: \"fixed\"` rules carry `date` (day-of-month); `type: \"variable\"` rules\ncarry `day`/`display_day`/`week`/`display_suffix` (e.g. \"3rd Monday\"). The\nvariant fields are optional on the document because both shapes share one\ncollection; the input schemas guarantee the correct set per type."
         },
         {
@@ -1317,7 +1317,7 @@
         {
           "kind": "interface",
           "name": "HolidaySnapshot",
-          "declaration": "interface HolidaySnapshot {\n  uid: \"current\";\n  materialized_dates: string[];\n  materialized_count: number;\n  materialized_year_range: HolidaySnapshotYearRange;\n  materialized_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface HolidaySnapshot {\n  uid: \"current\";\n  materialized_dates: string[];\n  materialized_count: number;\n  materialized_year_range: HolidaySnapshotYearRange;\n  materialized_at: FirestoreTimestampType;\n}",
           "doc": "The materialized holiday snapshot singleton (`holiday-snapshot/current`)."
         },
         {
@@ -1389,7 +1389,7 @@
         {
           "kind": "interface",
           "name": "Invite",
-          "declaration": "interface Invite {\n  uid: string;\n  email: string;\n  name: string;\n  roles: string[];\n  invited_by: string;\n  used: boolean;\n  expires_at: FirestoreTimestampType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Invite {\n  uid: string;\n  email: string;\n  name: string;\n  roles: string[];\n  invited_by: string;\n  used: boolean;\n  expires_at: FirestoreTimestampType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a single-use invite."
         },
         {
@@ -1401,7 +1401,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs?: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  payments: InvoicePayment[];\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  payments: InvoicePayment[];\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -1563,7 +1563,7 @@
         {
           "kind": "interface",
           "name": "List",
-          "declaration": "interface List {\n  uid: string;\n  name: string;\n  description: string;\n  icon: string | null;\n  color: string | null;\n  position: number;\n  locked: ListLockKey[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface List {\n  uid: string;\n  name: string;\n  description: string;\n  icon: string | null;\n  color: string | null;\n  position: number;\n  locked: ListLockKey[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "List Firestore document shape."
         },
         {
@@ -1641,7 +1641,7 @@
         {
           "kind": "interface",
           "name": "LocationType",
-          "declaration": "interface LocationType {\n  uid: string;\n  name: string;\n  product_capacities: LocationTypeProductCapacity[];\n  query_by_product_capacities?: string[];\n  dimensions?: LocationTypeDimensions | null;\n  version: number;\n  active: boolean;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface LocationType {\n  uid: string;\n  name: string;\n  product_capacities: LocationTypeProductCapacity[];\n  query_by_product_capacities?: string[];\n  dimensions?: LocationTypeDimensions | null;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location type document in Firestore."
         },
         {
@@ -1911,7 +1911,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -2091,7 +2091,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -2127,7 +2127,7 @@
         {
           "kind": "interface",
           "name": "OutOfService",
-          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  transactions?: OOSTransaction[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  transactions?: OOSTransaction[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An out-of-service record tracking inventory removed from active service."
         },
         {
@@ -2229,7 +2229,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -2421,7 +2421,7 @@
         {
           "kind": "interface",
           "name": "Recurrence",
-          "declaration": "interface Recurrence {\n  uid: string;\n  uid_list: string;\n  status: RecurrenceStatus;\n  rule: RecurrenceRuleType;\n  active_from: string;\n  active_until: string | null;\n  horizon_through: string | null;\n  horizon_days: number | null;\n  exception_dates: string[];\n  prototype: RecurrencePrototypeType;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Recurrence {\n  uid: string;\n  uid_list: string;\n  status: RecurrenceStatus;\n  rule: RecurrenceRuleType;\n  active_from: string;\n  active_until: string | null;\n  horizon_through: string | null;\n  horizon_days: number | null;\n  exception_dates: string[];\n  prototype: RecurrencePrototypeType;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Recurrence Firestore document shape."
         },
         {
@@ -2559,7 +2559,7 @@
         {
           "kind": "interface",
           "name": "Role",
-          "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  defaultThreadId?: string;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  defaultThreadId?: string;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A role document in Firestore."
         },
         {
@@ -2667,7 +2667,7 @@
         {
           "kind": "interface",
           "name": "Store",
-          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A store document in Firestore."
         },
         {
@@ -2781,7 +2781,7 @@
         {
           "kind": "interface",
           "name": "Tag",
-          "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tag document in Firestore."
         },
         {
@@ -2847,7 +2847,7 @@
         {
           "kind": "interface",
           "name": "Template",
-          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A thin template *family* document — identity + rollups, no content/status."
         },
         {
@@ -2859,7 +2859,7 @@
         {
           "kind": "interface",
           "name": "TemplateComponent",
-          "declaration": "interface TemplateComponent {\n  uid: string;\n  git_path: string;\n  name: string;\n  uid_active: string | null;\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface TemplateComponent {\n  uid: string;\n  git_path: string;\n  name: string;\n  uid_active: string | null;\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A thin template-component *family* document."
         },
         {
@@ -2967,7 +2967,7 @@
         {
           "kind": "interface",
           "name": "TemplateVersion",
-          "declaration": "interface TemplateVersion {\n  uid: string;\n  uid_template: string;\n  status: TemplateVersionStatusType;\n  content: Record<string, string>;\n  params: TemplateParam[];\n  consumed_components: string[];\n  git_branch?: string;\n  base_sha?: string;\n  base_seq?: number;\n  display_name?: string;\n  uid_thread?: string;\n  committed_content_hash?: string;\n  sha?: string;\n  semver?: string;\n  seq?: number;\n  commit_meta?: CommitMeta;\n  blob_refs?: BlobRef[];\n  pr_number?: number | null;\n  golden_results?: GoldenDiff[];\n  reconciled?: boolean;\n  written_by: ActorRefType;\n  version: number;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface TemplateVersion {\n  uid: string;\n  uid_template: string;\n  status: TemplateVersionStatusType;\n  content: Record<string, string>;\n  params: TemplateParam[];\n  consumed_components: string[];\n  git_branch?: string;\n  base_sha?: string;\n  base_seq?: number;\n  display_name?: string;\n  uid_thread?: string;\n  committed_content_hash?: string;\n  sha?: string;\n  semver?: string;\n  seq?: number;\n  commit_meta?: CommitMeta;\n  blob_refs?: BlobRef[];\n  pr_number?: number | null;\n  golden_results?: GoldenDiff[];\n  reconciled?: boolean;\n  written_by: ActorRefType;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A status-discriminated template version (draft | published | archived)."
         },
         {
@@ -2985,7 +2985,7 @@
         {
           "kind": "interface",
           "name": "Thread",
-          "declaration": "interface Thread {\n  uid: string;\n  sources: DocSourceType[];\n  title: string | null;\n  last_message_at: FirestoreTimestampType | null;\n  last_message_preview: string;\n  comment_count: number;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Thread {\n  uid: string;\n  sources: DocSourceType[];\n  title: string | null;\n  last_message_at: FirestoreTimestampType | null;\n  last_message_preview: string;\n  comment_count: number;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Thread Firestore document shape."
         },
         {
@@ -3021,7 +3021,7 @@
         {
           "kind": "interface",
           "name": "TrackingCategory",
-          "declaration": "interface TrackingCategory {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  crms_product_group_id?: number;\n  crms_service_group_id?: number;\n  crms_product_group_name: string;\n  products: Record<string, UidNameRefType>;\n  xero_tracking_option_id: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface TrackingCategory {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  crms_product_group_id?: number;\n  crms_service_group_id?: number;\n  crms_product_group_name: string;\n  products: Record<string, UidNameRefType>;\n  xero_tracking_option_id: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tracking category document in Firestore."
         },
         {
@@ -3483,7 +3483,7 @@
         {
           "kind": "interface",
           "name": "User",
-          "declaration": "interface User {\n  uid: string;\n  email: string;\n  name: string;\n  password_hash: string;\n  email_verified: boolean;\n  uid_contact?: string | null;\n  roles?: string[];\n  token_version?: number;\n  version: number;\n  prefs_firestore: Record<string, FirestoreDisplayPrefs>;\n  prefs_typesense: Record<string, TypesenseDisplayPrefs>;\n  deleted_at?: FirestoreTimestampType | null;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface User {\n  uid: string;\n  email: string;\n  name: string;\n  password_hash: string;\n  email_verified: boolean;\n  uid_contact?: string | null;\n  roles?: string[];\n  token_version?: number;\n  version: number;\n  prefs_firestore: Record<string, FirestoreDisplayPrefs>;\n  prefs_typesense: Record<string, TypesenseDisplayPrefs>;\n  deleted_at?: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full user document schema (Firestore document shape)."
         },
         {
@@ -3525,7 +3525,7 @@
         {
           "kind": "interface",
           "name": "WebshopProduct",
-          "declaration": "interface WebshopProduct {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: WebshopProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: WebshopProductShipping;\n  alternates: UidNameRefType[];\n  components: WebshopProductComponent[];\n  component_of: WebshopProductComponent[];\n  tags?: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  webshop: typeLiteral;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface WebshopProduct {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: WebshopProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: WebshopProductShipping;\n  alternates: UidNameRefType[];\n  components: WebshopProductComponent[];\n  component_of: WebshopProductComponent[];\n  tags?: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  webshop: typeLiteral;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A webshop product document in the webshop-products Firestore collection."
         },
         {
@@ -3887,7 +3887,7 @@
           "kind": "function",
           "name": "getInitialValues",
           "signature": "getInitialValues(schema: z.ZodType): Record<string, unknown>",
-          "doc": "Walk a Zod schema and produce an initial/blank object for form binding.\n\nDerives values from schema structure: `\"\"` for strings, `0` for numbers,\n`false` for booleans, `[]` for arrays, `{}` for records, `null` for\nnullables, first value for enums, and recursion for objects.\nFields with `.default()` use the default value.\nCustom types (e.g. FirestoreTimestamp) are omitted.",
+          "doc": "Walk a Zod schema and produce an initial/blank object for form binding.\n\nDerives values from schema structure: `\"\"` for strings, `0` for numbers,\n`false` for booleans, `[]` for arrays, `{}` for records, `null` for\nnullables, first value for enums, and recursion for objects.\nFields with `.default()` use the default value.\nCustom types (e.g. FirestoreTimestamp) are omitted.\n\nA field annotated `.meta({ initial: <value> })` uses that value instead, at\nany level — it is checked before the type switch, and because wrapper nodes\nrecurse, an annotation on the leaf is found through `.optional()` and\n`.transform()` pipes too. Use it when the form seed and the parse-time\ndefault must differ (see the note in `resolveField`).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -4790,7 +4790,7 @@
         {
           "kind": "interface",
           "name": "CacheGeocodes",
-          "declaration": "interface CacheGeocodes {\n  query: string;\n  coordinates: CoordinatesType | null;\n  mapbox_id: string;\n  address: CacheGeocodesAddress;\n  created_at?: FirestoreTimestampType;\n  expiresAt?: FirestoreTimestampType;\n}",
+          "declaration": "interface CacheGeocodes {\n  query: string;\n  coordinates: CoordinatesType | null;\n  mapbox_id: string;\n  address: CacheGeocodesAddress;\n  created_at: FirestoreTimestampType;\n  expiresAt: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a cached geocode result."
         },
         {
@@ -4814,7 +4814,7 @@
         {
           "kind": "interface",
           "name": "Card",
-          "declaration": "interface Card {\n  uid: string;\n  uid_list: string;\n  uid_thread: string;\n  status: CardStatus;\n  action: CardAction | null;\n  position: number;\n  subject: string;\n  body: CommentBodyJson | null;\n  body_text: string;\n  dates: CardDatesType;\n  all_day: boolean;\n  date_fs: FirestoreTimestampType | null;\n  destination: DocDestinationEndpointType | null;\n  organization: CardOrganizationType | null;\n  sources: DocSourceType[];\n  attachments: CardAttachmentType[];\n  uid_assignees: string[];\n  locked: CardLockKey[];\n  recurrence_parent_uid: string | null;\n  recurrence_index: number | null;\n  recurrence_overrides: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Card {\n  uid: string;\n  uid_list: string;\n  uid_thread: string;\n  status: CardStatus;\n  action: CardAction | null;\n  position: number;\n  subject: string;\n  body: CommentBodyJson | null;\n  body_text: string;\n  dates: CardDatesType;\n  all_day: boolean;\n  date_fs: FirestoreTimestampType | null;\n  destination: DocDestinationEndpointType | null;\n  organization: CardOrganizationType | null;\n  sources: DocSourceType[];\n  attachments: CardAttachmentType[];\n  uid_assignees: string[];\n  locked: CardLockKey[];\n  recurrence_parent_uid: string | null;\n  recurrence_index: number | null;\n  recurrence_overrides: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Card Firestore document shape."
         },
         {
@@ -4976,7 +4976,7 @@
         {
           "kind": "interface",
           "name": "ChartOfAccounts",
-          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A chart of accounts document in Firestore."
         },
         {
@@ -4994,7 +4994,7 @@
         {
           "kind": "interface",
           "name": "Contact",
-          "declaration": "interface Contact {\n  uid: string;\n  name: string;\n  crms_id?: number;\n  emails: string[];\n  phones: string[];\n  organizations: ContactOrganizationType[];\n  query_by_organizations: string[];\n  uid_user?: string;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Contact {\n  uid: string;\n  name: string;\n  crms_id?: number;\n  emails: string[];\n  phones: string[];\n  organizations: ContactOrganizationType[];\n  query_by_organizations: string[];\n  uid_user?: string;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full contact document schema (Firestore document shape)."
         },
         {
@@ -5048,7 +5048,7 @@
         {
           "kind": "interface",
           "name": "Destination",
-          "declaration": "interface Destination {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Destination {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a destination (a physical address used in orders)."
         },
         {
@@ -5096,7 +5096,7 @@
         {
           "kind": "interface",
           "name": "HolidayDates",
-          "declaration": "interface HolidayDates {\n  uid: string;\n  uid_holiday: string;\n  date: string;\n  date_fs?: FirestoreTimestampType;\n  name: string;\n  type: \"fixed\" | \"variable\";\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface HolidayDates {\n  uid: string;\n  uid_holiday: string;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  name: string;\n  type: \"fixed\" | \"variable\";\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a single holiday date entry."
         },
         {
@@ -5138,7 +5138,7 @@
         {
           "kind": "interface",
           "name": "HolidayDefinition",
-          "declaration": "interface HolidayDefinition {\n  uid: string;\n  type: HolidayType;\n  name: string;\n  display_month: number;\n  js_month: number;\n  date?: number;\n  day?: string;\n  display_day?: string;\n  week?: string;\n  display_suffix?: string;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface HolidayDefinition {\n  uid: string;\n  type: HolidayType;\n  name: string;\n  display_month: number;\n  js_month: number;\n  date?: number;\n  day?: string;\n  display_day?: string;\n  week?: string;\n  display_suffix?: string;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A holiday definition document in Firestore (collection: holiday-definitions).\n\n`type: \"fixed\"` rules carry `date` (day-of-month); `type: \"variable\"` rules\ncarry `day`/`display_day`/`week`/`display_suffix` (e.g. \"3rd Monday\"). The\nvariant fields are optional on the document because both shapes share one\ncollection; the input schemas guarantee the correct set per type."
         },
         {
@@ -5192,7 +5192,7 @@
         {
           "kind": "interface",
           "name": "HolidaySnapshot",
-          "declaration": "interface HolidaySnapshot {\n  uid: \"current\";\n  materialized_dates: string[];\n  materialized_count: number;\n  materialized_year_range: HolidaySnapshotYearRange;\n  materialized_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface HolidaySnapshot {\n  uid: \"current\";\n  materialized_dates: string[];\n  materialized_count: number;\n  materialized_year_range: HolidaySnapshotYearRange;\n  materialized_at: FirestoreTimestampType;\n}",
           "doc": "The materialized holiday snapshot singleton (`holiday-snapshot/current`)."
         },
         {
@@ -5258,7 +5258,7 @@
         {
           "kind": "interface",
           "name": "Invite",
-          "declaration": "interface Invite {\n  uid: string;\n  email: string;\n  name: string;\n  roles: string[];\n  invited_by: string;\n  used: boolean;\n  expires_at: FirestoreTimestampType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Invite {\n  uid: string;\n  email: string;\n  name: string;\n  roles: string[];\n  invited_by: string;\n  used: boolean;\n  expires_at: FirestoreTimestampType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a single-use invite."
         },
         {
@@ -5288,7 +5288,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs?: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  payments: InvoicePayment[];\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  payments: InvoicePayment[];\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -5440,7 +5440,7 @@
         {
           "kind": "interface",
           "name": "List",
-          "declaration": "interface List {\n  uid: string;\n  name: string;\n  description: string;\n  icon: string | null;\n  color: string | null;\n  position: number;\n  locked: ListLockKey[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface List {\n  uid: string;\n  name: string;\n  description: string;\n  icon: string | null;\n  color: string | null;\n  position: number;\n  locked: ListLockKey[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "List Firestore document shape."
         },
         {
@@ -5548,7 +5548,7 @@
         {
           "kind": "interface",
           "name": "LocationType",
-          "declaration": "interface LocationType {\n  uid: string;\n  name: string;\n  product_capacities: LocationTypeProductCapacity[];\n  query_by_product_capacities?: string[];\n  dimensions?: LocationTypeDimensions | null;\n  version: number;\n  active: boolean;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface LocationType {\n  uid: string;\n  name: string;\n  product_capacities: LocationTypeProductCapacity[];\n  query_by_product_capacities?: string[];\n  dimensions?: LocationTypeDimensions | null;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location type document in Firestore."
         },
         {
@@ -5740,7 +5740,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -5950,7 +5950,7 @@
         {
           "kind": "interface",
           "name": "Fulfillment",
-          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Sanitized order document for the fulfillment client view.\nMirrors the order by uid — one fulfillment doc per order."
         },
         {
@@ -6040,7 +6040,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -6154,7 +6154,7 @@
         {
           "kind": "interface",
           "name": "OutOfService",
-          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  transactions?: OOSTransaction[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  transactions?: OOSTransaction[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An out-of-service record tracking inventory removed from active service."
         },
         {
@@ -6220,7 +6220,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -6330,7 +6330,7 @@
         {
           "kind": "interface",
           "name": "Recurrence",
-          "declaration": "interface Recurrence {\n  uid: string;\n  uid_list: string;\n  status: RecurrenceStatus;\n  rule: RecurrenceRuleType;\n  active_from: string;\n  active_until: string | null;\n  horizon_through: string | null;\n  horizon_days: number | null;\n  exception_dates: string[];\n  prototype: RecurrencePrototypeType;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Recurrence {\n  uid: string;\n  uid_list: string;\n  status: RecurrenceStatus;\n  rule: RecurrenceRuleType;\n  active_from: string;\n  active_until: string | null;\n  horizon_through: string | null;\n  horizon_days: number | null;\n  exception_dates: string[];\n  prototype: RecurrencePrototypeType;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Recurrence Firestore document shape."
         },
         {
@@ -6480,7 +6480,7 @@
         {
           "kind": "interface",
           "name": "Store",
-          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A store document in Firestore."
         },
         {
@@ -6534,7 +6534,7 @@
         {
           "kind": "interface",
           "name": "Tag",
-          "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tag document in Firestore."
         },
         {
@@ -6576,7 +6576,7 @@
         {
           "kind": "interface",
           "name": "TrackingCategory",
-          "declaration": "interface TrackingCategory {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  crms_product_group_id?: number;\n  crms_service_group_id?: number;\n  crms_product_group_name: string;\n  products: Record<string, UidNameRefType>;\n  xero_tracking_option_id: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface TrackingCategory {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  crms_product_group_id?: number;\n  crms_service_group_id?: number;\n  crms_product_group_name: string;\n  products: Record<string, UidNameRefType>;\n  xero_tracking_option_id: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tracking category document in Firestore."
         },
         {
@@ -6780,7 +6780,7 @@
         {
           "kind": "interface",
           "name": "User",
-          "declaration": "interface User {\n  uid: string;\n  email: string;\n  name: string;\n  password_hash: string;\n  email_verified: boolean;\n  uid_contact?: string | null;\n  roles?: string[];\n  token_version?: number;\n  version: number;\n  prefs_firestore: Record<string, FirestoreDisplayPrefs>;\n  prefs_typesense: Record<string, TypesenseDisplayPrefs>;\n  deleted_at?: FirestoreTimestampType | null;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface User {\n  uid: string;\n  email: string;\n  name: string;\n  password_hash: string;\n  email_verified: boolean;\n  uid_contact?: string | null;\n  roles?: string[];\n  token_version?: number;\n  version: number;\n  prefs_firestore: Record<string, FirestoreDisplayPrefs>;\n  prefs_typesense: Record<string, TypesenseDisplayPrefs>;\n  deleted_at?: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full user document schema (Firestore document shape)."
         },
         {
@@ -6798,7 +6798,7 @@
         {
           "kind": "interface",
           "name": "WebshopProduct",
-          "declaration": "interface WebshopProduct {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: WebshopProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: WebshopProductShipping;\n  alternates: UidNameRefType[];\n  components: WebshopProductComponent[];\n  component_of: WebshopProductComponent[];\n  tags?: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  webshop: typeLiteral;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface WebshopProduct {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: WebshopProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: WebshopProductShipping;\n  alternates: UidNameRefType[];\n  components: WebshopProductComponent[];\n  component_of: WebshopProductComponent[];\n  tags?: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  webshop: typeLiteral;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A webshop product document in the webshop-products Firestore collection."
         },
         {
@@ -7352,7 +7352,7 @@
         {
           "kind": "interface",
           "name": "Template",
-          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A thin template *family* document — identity + rollups, no content/status."
         },
         {
@@ -8201,7 +8201,7 @@
         {
           "kind": "interface",
           "name": "Role",
-          "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  defaultThreadId?: string;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  defaultThreadId?: string;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A role document in Firestore."
         },
         {
@@ -8255,7 +8255,7 @@
         {
           "kind": "interface",
           "name": "Thread",
-          "declaration": "interface Thread {\n  uid: string;\n  sources: DocSourceType[];\n  title: string | null;\n  last_message_at: FirestoreTimestampType | null;\n  last_message_preview: string;\n  comment_count: number;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Thread {\n  uid: string;\n  sources: DocSourceType[];\n  title: string | null;\n  last_message_at: FirestoreTimestampType | null;\n  last_message_preview: string;\n  comment_count: number;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Thread Firestore document shape."
         },
         {
@@ -8285,7 +8285,7 @@
         {
           "kind": "interface",
           "name": "Comment",
-          "declaration": "interface Comment {\n  uid: string;\n  uid_thread: string;\n  sources: DocSourceType[];\n  body: CommentBodyJson;\n  body_text: string;\n  reactions: Record<string, Record<string, ActorRefType>>;\n  git?: CommentGitMirror;\n  version: number;\n  created_by: ActorRefType;\n  deleted_at: FirestoreTimestampType | null;\n  deleted_by: ActorRefType | null;\n  updated_by: ActorRefType;\n  created_at?: FirestoreTimestampType;\n  updated_at?: FirestoreTimestampType;\n}",
+          "declaration": "interface Comment {\n  uid: string;\n  uid_thread: string;\n  sources: DocSourceType[];\n  body: CommentBodyJson;\n  body_text: string;\n  reactions: Record<string, Record<string, ActorRefType>>;\n  git?: CommentGitMirror;\n  version: number;\n  created_by: ActorRefType;\n  deleted_at: FirestoreTimestampType | null;\n  deleted_by: ActorRefType | null;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Comment Firestore document shape."
         },
         {

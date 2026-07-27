@@ -27,8 +27,8 @@ export interface Invite extends NameParts {
   invited_by: string;
   used: boolean;
   expires_at: FirestoreTimestampType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for an Invite document. */

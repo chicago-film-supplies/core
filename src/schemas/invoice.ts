@@ -242,7 +242,7 @@ export interface Invoice {
   number_orders: number[];
   tax_profile: TaxProfileType;
   date: string;
-  date_fs?: FirestoreTimestampType;
+  date_fs: FirestoreTimestampType;
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
   subject?: string | null;
@@ -299,8 +299,8 @@ export interface Invoice {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for an Invoice document. */

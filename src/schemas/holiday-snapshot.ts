@@ -23,7 +23,7 @@ export interface HolidaySnapshot {
   materialized_dates: string[];
   materialized_count: number;
   materialized_year_range: HolidaySnapshotYearRange;
-  materialized_at?: FirestoreTimestampType;
+  materialized_at: FirestoreTimestampType;
 }
 
 /** Zod schema for HolidaySnapshot. */

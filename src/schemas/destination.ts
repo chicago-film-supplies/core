@@ -47,15 +47,17 @@ export interface Destination {
   contacts?: DestinationContactRefType[];
   query_by_contacts?: string[];
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for Destination. */
 export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   uid: FirestoreId,
   address: Address,
-  mapbox_ids: z.array(z.string()).default([]),
+  // Required (no `.default([])`): the Typesense config declares it so, and a
+  // `.default()` never materializes on a write — see the note in `product.ts`.
+  mapbox_ids: z.array(z.string()),
   organizations: z.array(UidNameRef).default([]).optional(),
   query_by_organizations: z.array(z.string()).default([]).optional(),
   products: z.array(UidNameRef).default([]).optional(),

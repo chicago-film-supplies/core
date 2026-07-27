@@ -229,8 +229,8 @@ export interface Card {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for the card dates sub-object. */
@@ -247,7 +247,9 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   status: CardStatusEnum,
   action: CardActionSchema.nullable().default(null),
   position: z.number(),
-  subject: z.string().max(200).meta({ pii: "mask" }).default(""),
+  // Required (no `.default("")`): the Typesense config declares it so, and a
+  // `.default()` never materializes on a write — see the note in `product.ts`.
+  subject: z.string().max(200).meta({ pii: "mask" }),
   body: CommentBody.nullable(),
   body_text: z.string().max(20000).meta({ pii: "mask" }).default(""),
   dates: CardDates,
@@ -255,7 +257,7 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   date_fs: FirestoreTimestamp.nullable(),
   destination: DocDestinationEndpoint.nullable(),
   organization: CardOrganization.nullable().default(null),
-  sources: z.array(DocSource).default([]),
+  sources: z.array(DocSource),
   attachments: z.array(CardAttachment).default([]),
   uid_assignees: z.array(FirestoreId).default([]),
   locked: z.array(CardLockKeyEnum).default([]),

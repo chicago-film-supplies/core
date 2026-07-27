@@ -429,8 +429,8 @@ interface CacheGeocodes {
   coordinates: CoordinatesType | null;
   mapbox_id: string;
   address: CacheGeocodesAddress;
-  created_at?: FirestoreTimestampType;
-  expiresAt?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
 }
 ```
 
@@ -503,8 +503,8 @@ interface Card {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -736,8 +736,8 @@ interface ChartOfAccounts {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -845,8 +845,8 @@ interface Comment {
   deleted_at: FirestoreTimestampType | null;
   deleted_by: ActorRefType | null;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -991,8 +991,8 @@ interface Contact {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -1061,7 +1061,7 @@ A counter document in the counters Firestore collection.
 ```ts
 interface Counter {
   count: number;
-  updated_at?: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -1695,8 +1695,8 @@ interface DestinationDoc {
   contacts?: DestinationContactRefType[];
   query_by_contacts?: string[];
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -2243,8 +2243,8 @@ interface Fulfillment {
   query_by_contacts: string[];
   query_by_dates: string[];
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -2449,11 +2449,11 @@ interface HolidayDates {
   uid: string;
   uid_holiday: string;
   date: string;
-  date_fs?: FirestoreTimestampType;
+  date_fs: FirestoreTimestampType;
   name: string;
   type: "fixed" | "variable";
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -2502,8 +2502,8 @@ interface HolidayDefinition {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -2525,7 +2525,7 @@ interface HolidaySnapshot {
   materialized_dates: string[];
   materialized_count: number;
   materialized_year_range: HolidaySnapshotYearRange;
-  materialized_at?: FirestoreTimestampType;
+  materialized_at: FirestoreTimestampType;
 }
 ```
 
@@ -2653,8 +2653,8 @@ interface Invite {
   invited_by: string;
   used: boolean;
   expires_at: FirestoreTimestampType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -2679,7 +2679,7 @@ interface Invoice {
   number_orders: number[];
   tax_profile: TaxProfileType;
   date: string;
-  date_fs?: FirestoreTimestampType;
+  date_fs: FirestoreTimestampType;
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
   subject?: string | null;
@@ -2702,8 +2702,8 @@ interface Invoice {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -2992,8 +2992,8 @@ interface List {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -3135,8 +3135,8 @@ interface LocationType {
   dimensions?: LocationTypeDimensions | null;
   version: number;
   active: boolean;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -3661,8 +3661,8 @@ interface Order {
   xero_id?: string | null;
   defaultThreadId?: string;
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -4007,8 +4007,8 @@ interface Organization {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -4081,8 +4081,8 @@ interface OutOfService {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -4291,8 +4291,8 @@ interface Product {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -4656,8 +4656,8 @@ interface Recurrence {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -4894,8 +4894,8 @@ interface Role {
   permissions: string[];
   description?: string;
   defaultThreadId?: string;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -5097,8 +5097,8 @@ interface Store {
   crms_store_id: number;
   version: number;
   active: boolean;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -5302,8 +5302,8 @@ interface Tag {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -5426,8 +5426,8 @@ interface Template {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -5455,8 +5455,8 @@ interface TemplateComponent {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -5648,8 +5648,8 @@ interface TemplateVersion {
   reconciled?: boolean;
   written_by: ActorRefType;
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -5684,8 +5684,8 @@ interface Thread {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -5749,8 +5749,8 @@ interface TrackingCategory {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -6696,8 +6696,8 @@ interface User {
   prefs_firestore: Record<string, FirestoreDisplayPrefs>;
   prefs_typesense: Record<string, TypesenseDisplayPrefs>;
   deleted_at?: FirestoreTimestampType | null;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -6802,8 +6802,8 @@ interface WebshopProduct {
   query_by_component_of?: string[];
   query_by_alternates?: string[];
   webshop: typeLiteral;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -7262,6 +7262,12 @@ Derives values from schema structure: `""` for strings, `0` for numbers,
 nullables, first value for enums, and recursion for objects.
 Fields with `.default()` use the default value.
 Custom types (e.g. FirestoreTimestamp) are omitted.
+
+A field annotated `.meta({ initial: <value> })` uses that value instead, at
+any level — it is checked before the type switch, and because wrapper nodes
+recurse, an annotation on the leaf is found through `.optional()` and
+`.transform()` pipes too. Use it when the form seed and the parse-time
+default must differ (see the note in `resolveField`).
 
 ### `getNodeMeta(node: z.ZodType): Record<string, unknown> | null`
 
@@ -8516,8 +8522,8 @@ interface CacheGeocodes {
   coordinates: CoordinatesType | null;
   mapbox_id: string;
   address: CacheGeocodesAddress;
-  created_at?: FirestoreTimestampType;
-  expiresAt?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
 }
 ```
 
@@ -8592,8 +8598,8 @@ interface Card {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -8896,8 +8902,8 @@ interface ChartOfAccounts {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -8929,8 +8935,8 @@ interface Contact {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -9022,8 +9028,8 @@ interface Destination {
   contacts?: DestinationContactRefType[];
   query_by_contacts?: string[];
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -9093,11 +9099,11 @@ interface HolidayDates {
   uid: string;
   uid_holiday: string;
   date: string;
-  date_fs?: FirestoreTimestampType;
+  date_fs: FirestoreTimestampType;
   name: string;
   type: "fixed" | "variable";
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -9181,8 +9187,8 @@ interface HolidayDefinition {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -9269,7 +9275,7 @@ interface HolidaySnapshot {
   materialized_dates: string[];
   materialized_count: number;
   materialized_year_range: HolidaySnapshotYearRange;
-  materialized_at?: FirestoreTimestampType;
+  materialized_at: FirestoreTimestampType;
 }
 ```
 
@@ -9380,8 +9386,8 @@ interface Invite {
   invited_by: string;
   used: boolean;
   expires_at: FirestoreTimestampType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -9437,7 +9443,7 @@ interface Invoice {
   number_orders: number[];
   tax_profile: TaxProfileType;
   date: string;
-  date_fs?: FirestoreTimestampType;
+  date_fs: FirestoreTimestampType;
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
   subject?: string | null;
@@ -9460,8 +9466,8 @@ interface Invoice {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -9754,8 +9760,8 @@ interface List {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -9954,8 +9960,8 @@ interface LocationType {
   dimensions?: LocationTypeDimensions | null;
   version: number;
   active: boolean;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -10324,8 +10330,8 @@ interface Order {
   xero_id?: string | null;
   defaultThreadId?: string;
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -10712,8 +10718,8 @@ interface Fulfillment {
   query_by_contacts: string[];
   query_by_dates: string[];
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -10877,8 +10883,8 @@ interface Organization {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -11114,8 +11120,8 @@ interface OutOfService {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -11279,8 +11285,8 @@ interface Product {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -11532,8 +11538,8 @@ interface Recurrence {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -11807,8 +11813,8 @@ interface Store {
   crms_store_id: number;
   version: number;
   active: boolean;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -11896,8 +11902,8 @@ interface Tag {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -11969,8 +11975,8 @@ interface TrackingCategory {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -12335,8 +12341,8 @@ interface User {
   prefs_firestore: Record<string, FirestoreDisplayPrefs>;
   prefs_typesense: Record<string, TypesenseDisplayPrefs>;
   deleted_at?: FirestoreTimestampType | null;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -12378,8 +12384,8 @@ interface WebshopProduct {
   query_by_component_of?: string[];
   query_by_alternates?: string[];
   webshop: typeLiteral;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -13595,8 +13601,8 @@ interface Template {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -15365,8 +15371,8 @@ interface Role {
   permissions: string[];
   description?: string;
   defaultThreadId?: string;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -15446,8 +15452,8 @@ interface Thread {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 
@@ -15498,8 +15504,8 @@ interface Comment {
   deleted_at: FirestoreTimestampType | null;
   deleted_by: ActorRefType | null;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 ```
 

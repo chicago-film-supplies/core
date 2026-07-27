@@ -109,8 +109,8 @@ export interface Template {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for a Template family document. */
@@ -128,10 +128,13 @@ export const TemplateSchema: z.ZodType<Template> = z.strictObject({
   }),
   fixtures: z.array(FixtureMetaSchema).default([]),
   draft_uids: z.array(FirestoreId).default([]),
-  version_count: z.int().min(0).default(0),
+  // `version_count` and `version` are required (no `.default(0)`): the
+  // Typesense config declares both so, and a `.default()` never materializes
+  // on a write — see the note in `product.ts`.
+  version_count: z.int().min(0),
   last_published_at: FirestoreTimestamp.nullable(),
   uid_thread: FirestoreId,
-  version: z.int().min(0).default(0),
+  version: z.int().min(0),
   created_by: ActorRef,
   updated_by: ActorRef,
   ...TimestampFields,

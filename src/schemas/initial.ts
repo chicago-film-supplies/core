@@ -3,11 +3,25 @@
  * Replaces hand-authored .meta({ initial }) blobs with schema-driven generation.
  */
 import type { z } from "zod";
+import { getNodeMeta } from "./zod-walk.ts";
 
 const SKIP: unique symbol = Symbol("skip");
 
 // deno-lint-ignore no-explicit-any
 function resolveField(schema: any): unknown {
+  // `.meta({ initial })` wins over everything below. It exists because the
+  // storage schemas deliberately dropped their `.default()`s: a `.default()`
+  // never materializes on a write (`validateBeforeWrite` discards `result.data`
+  // so FieldValue sentinels survive), which let a doc reach Typesense missing a
+  // field the index declares required. Dropping it makes the writer explicit —
+  // but `.default()` was ALSO the form seed read here, and for the five
+  // `z.boolean().default(true)` fields the type-derived zero is `false`, which
+  // would have shipped new products inactive, undeliverable and not
+  // pickup-eligible with nothing failing. `initial` carries the form intent
+  // without carrying the parse-time behaviour.
+  const meta = getNodeMeta(schema);
+  if (meta && meta.initial !== undefined) return meta.initial;
+
   const def = schema._zod.def;
 
   switch (def.type) {
@@ -73,6 +87,12 @@ function resolveField(schema: any): unknown {
  * nullables, first value for enums, and recursion for objects.
  * Fields with `.default()` use the default value.
  * Custom types (e.g. FirestoreTimestamp) are omitted.
+ *
+ * A field annotated `.meta({ initial: <value> })` uses that value instead, at
+ * any level — it is checked before the type switch, and because wrapper nodes
+ * recurse, an annotation on the leaf is found through `.optional()` and
+ * `.transform()` pipes too. Use it when the form seed and the parse-time
+ * default must differ (see the note in `resolveField`).
  */
 export function getInitialValues(schema: z.ZodType): Record<string, unknown> {
   const result = resolveField(schema);

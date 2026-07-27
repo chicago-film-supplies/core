@@ -58,8 +58,8 @@ export interface Organization {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for a full organization Firestore document. */
@@ -68,12 +68,16 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
   crms_id: z.number(),
   xero_id: z.uuid().nullable(),
-  tax_profile: TaxProfileEnum.default("tax_applied"),
+  // Required (no `.default("tax_applied")`): the Typesense config declares it
+  // so, and a `.default()` never materializes on a write — see the note in
+  // `product.ts`. TAX_PROFILES[0] is "tax_applied", so the enum's
+  // type-derived seed already equals the dropped default.
+  tax_profile: TaxProfileEnum,
   description: z.string().default("").optional(),
   emails: z.array(Email).default([]),
   phones: z.array(Phone).default([]),
   billing_address: Address,
-  contacts: z.array(OrganizationContact).default([]),
+  contacts: z.array(OrganizationContact),
   query_by_contacts: z.array(z.string()).default([]),
   last_order: FirestoreTimestamp.nullable().optional(),
   defaultThreadId: z.string().optional(),

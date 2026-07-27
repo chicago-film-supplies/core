@@ -184,8 +184,8 @@ export interface TemplateVersion {
   written_by: ActorRefType;
   /** Optimistic-concurrency token. */
   version: number;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for a TemplateVersion document. */

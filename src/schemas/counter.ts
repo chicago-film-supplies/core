@@ -10,7 +10,7 @@ import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 /** A counter document in the counters Firestore collection. */
 export interface Counter {
   count: number;
-  updated_at?: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for a Counter document. */

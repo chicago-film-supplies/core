@@ -21,8 +21,8 @@ export interface CacheGeocodes {
   coordinates: CoordinatesType | null;
   mapbox_id: string;
   address: CacheGeocodesAddress;
-  created_at?: FirestoreTimestampType;
-  expiresAt?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  expiresAt: FirestoreTimestampType;
 }
 
 /**

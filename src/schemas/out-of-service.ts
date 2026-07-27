@@ -157,8 +157,8 @@ export interface OutOfService {
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({

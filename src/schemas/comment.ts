@@ -76,8 +76,8 @@ export interface Comment {
   deleted_at: FirestoreTimestampType | null;
   deleted_by: ActorRefType | null;
   updated_by: ActorRefType;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 /** Zod schema for a comment Firestore document. */
@@ -86,7 +86,9 @@ export const CommentSchema: z.ZodType<Comment> = z.strictObject({
   uid_thread: ThreadId,
   sources: z.array(DocSource).min(1),
   body: CommentBody,
-  body_text: z.string().meta({ pii: "mask" }).default(""),
+  // Required (no `.default("")`): the Typesense config declares it so, and a
+  // `.default()` never materializes on a write — see the note in `product.ts`.
+  body_text: z.string().meta({ pii: "mask" }),
   reactions: z.record(z.string(), z.record(z.string(), ActorRef)).default({}),
   git: CommentGitMirrorSchema.optional(),
   version: z.int().min(0).default(0),

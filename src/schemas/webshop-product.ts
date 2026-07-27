@@ -86,8 +86,8 @@ export interface WebshopProduct {
     available: boolean;
     description?: string | null;
   };
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObject({
@@ -114,15 +114,16 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
 export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1).max(200),
-  active: z.boolean().default(true),
+  // Required, with the form seed carried by `initial` — see `product.ts`.
+  active: z.boolean().meta({ initial: true }),
   type: z.enum(WEBSHOP_PRODUCT_TYPES),
   stock_method: StockMethodEnum.optional(),
   component_only: z.boolean().optional(),
   description: z.string().optional(),
-  eligible_delivery: z.boolean().default(false),
-  eligible_in_store_pickup: z.boolean().default(false),
-  eligible_shipping_ground: z.boolean().default(false),
-  eligible_shipping_air: z.boolean().default(false),
+  eligible_delivery: z.boolean(),
+  eligible_in_store_pickup: z.boolean(),
+  eligible_shipping_ground: z.boolean(),
+  eligible_shipping_air: z.boolean(),
   price: z.strictObject({
     base: z.number(),
     replacement: z.number().nullable().optional(),

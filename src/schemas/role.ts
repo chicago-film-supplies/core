@@ -15,8 +15,8 @@ export interface Role {
   permissions: string[];
   description?: string;
   defaultThreadId?: string;
-  created_at?: FirestoreTimestampType;
-  updated_at?: FirestoreTimestampType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
 }
 
 // The 64-char name cap keeps customClaims.roles[] under Firebase's 1000-byte
