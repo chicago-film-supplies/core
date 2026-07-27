@@ -331,7 +331,7 @@ Deno.test("walker: masks destination instructions on OrderSchema", async () => {
   assertNotEquals(out.organization.name, "Acme Inc");
 });
 
-Deno.test("walker: masks line-item + divider description/name on OrderSchema", async () => {
+Deno.test("walker: masks divider NAME but passes every item description on OrderSchema", async () => {
   const { OrderSchema } = await import("../src/schemas/order.ts");
   const strategy = createLoggerStrategy(undefined);
   const doc = {
@@ -370,15 +370,24 @@ Deno.test("walker: masks line-item + divider description/name on OrderSchema", a
   };
   // deno-lint-ignore no-explicit-any
   const out = applyPii(doc as any, OrderSchema as any, strategy) as any;
-  // Divider name + description masked.
+  // Divider NAME is still masked — an operator types a contact or project name
+  // into it ("John Smith — primary studio", "Smith family shoot").
   assertNotEquals(out.items[0].name, "John Smith — primary studio");
-  assertNotEquals(out.items[0].description, "deliver before 8am");
   assertNotEquals(out.items[1].name, "Smith family shoot");
-  assertNotEquals(out.items[1].description, "no-flash gear only");
-  // Custom line item description masked.
-  assertNotEquals(out.items[2].description, "for John's birthday wedding video");
-  // ...but the catalog product NAME is not PII and must survive verbatim — it is
-  // what makes a fixture drawn from a real order worth drawing.
+
+  // Every `description`, on the other hand, passes through verbatim: line-item
+  // text is equipment/service/logistics wording, classified with `name` on a
+  // catalog line rather than with the divider labels (#35).
+  //
+  // The third sample is deliberately the worst case for that call — this is the
+  // text that now reaches logs and committed fixtures unmasked. Kept in the
+  // fixture so the consequence is visible rather than theoretical.
+  assertEquals(out.items[0].description, "deliver before 8am");
+  assertEquals(out.items[1].description, "no-flash gear only");
+  assertEquals(out.items[2].description, "for John's birthday wedding video");
+
+  // The catalog product NAME is not PII and must survive verbatim — it is what
+  // makes a fixture drawn from a real order worth drawing.
   assertEquals(out.items[2].name, "Custom item");
 });
 

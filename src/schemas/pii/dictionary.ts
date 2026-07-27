@@ -51,6 +51,25 @@ export const SENSITIVE_EXACT: ReadonlySet<string> = new Set([
   "title",
   "instructions",
   "filename",
+  // DELIBERATELY ABSENT: `description`, `reference`, `label`, `subject` (#35).
+  //
+  // All four were measured as dictionary candidates and rejected on the domain
+  // call, not on churn cost. They carry business identifiers and catalog text —
+  // PO numbers, destination names, product and equipment wording — not customer
+  // data. Adding them would flag ~63 leaves that would all be annotated
+  // `pii: "none"`, which buys enforcement of a rule that has nothing to enforce.
+  //
+  // The one thing that reading DID surface is now fixed: every
+  // `items[].description` in the package (order, invoice, fulfillment and their
+  // input schemas) had drifted into three different answers — `mask` on the
+  // order/invoice docs, untagged on fulfillment and the invoice inputs. They all
+  // say `pii: "none"` now. See `OrderDocLineItem.description`.
+  //
+  // `subject` is worth one caveat if this is ever revisited: it is bimodal.
+  // `card::subject`, `recurrence::prototype.subject` and the two log arms are
+  // email subject lines and card titles that stay `mask`; the order / invoice /
+  // booking / fulfillment `subject` fields are business labels. A dictionary
+  // entry cannot tell those apart, which is a second reason it is not one.
 ]);
 
 /** Field name treated as sensitive only inside contact / org / user-adjacent schemas. */

@@ -67,7 +67,10 @@ export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = z.strictO
   uid: ItemUid,
   type: FulfillmentLineItemTypeEnum,
   name: z.string().min(1).max(100),
-  description: z.string().default(""),
+  // Line-item text — not customer data. See `OrderDocLineItem.description`.
+  // Fulfillment items are a projection of order items, so this is the same
+  // string; it must carry the same classification.
+  description: z.string().meta({ pii: "none" }).default(""),
   quantity: z.number().int().min(0).default(0),
   stock_method: StockMethodEnum.optional(),
   path: z.array(ItemUid).default([]),
@@ -97,7 +100,7 @@ export const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemTyp
   path: z.array(ItemUid).default([]),
   uid_delivery: FirestoreId.nullable().default(null),
   uid_collection: FirestoreId.nullable().default(null),
-  description: z.string().default(""),
+  description: z.string().meta({ pii: "none" }).default(""),
 });
 
 /** Group divider in the fulfillment items array. */
@@ -114,7 +117,7 @@ export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> = z.stric
   type: z.literal("group"),
   name: z.string().min(1).max(100),
   path: z.array(ItemUid).default([]),
-  description: z.string().default(""),
+  description: z.string().meta({ pii: "none" }).default(""),
 });
 
 /** Union of all item types in the fulfillment order view. */

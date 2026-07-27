@@ -130,9 +130,8 @@ export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = z.strictO
   uid: ItemUid,
   type: DocLineItemTypeEnum,
   name: z.string(),
-  // Free-text — custom items routinely paraphrase the customer's request;
-  // mask in fixtures + logs.
-  description: z.string().meta({ pii: "mask" }).default(""),
+  // Line-item text — not customer data. See `OrderDocLineItem.description`.
+  description: z.string().meta({ pii: "none" }).default(""),
   quantity: z.number().default(0),
   price: InvoiceDocItemPriceSchema,
   path: z.array(ItemUid).default([]),
@@ -164,7 +163,7 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = z.strictO
   // Operator-typed divider label — often references the source order/customer.
   name: z.string().max(200).meta({ pii: "mask" }).default(""),
   path: z.array(ItemUid).default([]),
-  description: z.string().meta({ pii: "mask" }).default(""),
+  description: z.string().meta({ pii: "none" }).default(""),
 });
 
 // ── Item union ──────────────────────────────────────────────────
@@ -415,7 +414,8 @@ const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z.object({
   uid: ItemUid,
   type: InvoiceItemTypeEnum.optional(),
   name: z.string().optional(),
-  description: z.string().optional(),
+  // Line-item text — not customer data. See `OrderDocLineItem.description`.
+  description: z.string().meta({ pii: "none" }).optional(),
   quantity: z.number().optional(),
   price: InvoiceItemInputPriceSchema.optional(),
   path: z.array(ItemUid).optional(),

@@ -427,9 +427,10 @@ export const OrderItem: z.ZodType<OrderItemType> = z.object({
   uid: ItemUid,
   type: DocItemTypeEnum,
   name: z.string().optional(),
-  // Custom/divider items hold free-text description that often references the
-  // customer ("for John's birthday shoot") — mask in fixtures + logs.
-  description: z.string().meta({ pii: "mask" }).optional(),
+  // Line-item text — equipment, service and destination wording, of a piece with
+  // a PO number or a product name. Not customer data. See the note on
+  // `OrderDocLineItem.description` for why this is tagged rather than left bare.
+  description: z.string().meta({ pii: "none" }).optional(),
   quantity: z.int().optional(),
   price: ItemPrice.optional(),
   stock_method: StockMethodEnum.optional(),
@@ -579,9 +580,17 @@ export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject(
   // convention; the free-text `description` below is where a customer's words
   // actually land, and that one masks.
   name: z.string().min(1).max(100).meta({ pii: "none" }),
-  // Free-text — for custom items the operator routinely paraphrases the
-  // customer's request; mask in fixtures + logs.
-  description: z.string().meta({ pii: "mask" }).default(""),
+  // Line-item text, classified the same as `name` above: it carries equipment,
+  // service and destination wording — a PO number, a product name — not customer
+  // data. It previously masked on the theory that a custom item's description
+  // paraphrases the customer; that is not what the field is used for in practice.
+  //
+  // Tagged explicitly rather than left untagged so the decision is visible and
+  // the drift gate can see it, and so every `items[].description` in the package
+  // (order, invoice, fulfillment, and their input schemas) states one answer.
+  // Consequence: it survives fixture sanitization verbatim and appears raw in
+  // logs — the same posture `name` has always had.
+  description: z.string().meta({ pii: "none" }).default(""),
   quantity: z.number().int().min(0).default(0),
   price: OrderDocItemPrice.optional(),
   stock_method: StockMethodEnum.optional(),
@@ -619,7 +628,7 @@ export const OrderDocDestinationItem: z.ZodType<OrderDocDestinationItemType> = z
   path: z.array(ItemUid).default([]),
   uid_delivery: FirestoreId.nullable().default(null),
   uid_collection: FirestoreId.nullable().default(null),
-  description: z.string().meta({ pii: "mask" }).default(""),
+  description: z.string().meta({ pii: "none" }).default(""),
 });
 
 /** Group divider in items array. */
@@ -637,7 +646,7 @@ export const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType> = z.strictObjec
   // Operator-typed divider label — often a customer/project name; mask.
   name: z.string().min(1).max(100).meta({ pii: "mask" }),
   path: z.array(ItemUid).default([]),
-  description: z.string().meta({ pii: "mask" }).default(""),
+  description: z.string().meta({ pii: "none" }).default(""),
 });
 
 /** Transaction fee line item in the full order document. */
@@ -659,7 +668,7 @@ export const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemTyp
   type: z.literal("transaction_fee"),
   name: z.string().min(1).max(100),
   path: z.array(ItemUid).default([]),
-  description: z.string().default(""),
+  description: z.string().meta({ pii: "none" }).default(""),
   quantity: z.number().int().min(0).default(0),
   price: PriceModifier,
   order_number: z.number().optional(),
