@@ -69,7 +69,7 @@
         {
           "kind": "interface",
           "name": "BaseLogFields",
-          "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n}",
+          "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  subject?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n}",
           "doc": "TypeScript shape of {@link baseLogFields} — for use in archetype\ninterfaces that want to declare the envelope explicitly."
         },
         {
@@ -3081,7 +3081,7 @@
         {
           "kind": "interface",
           "name": "TransactionLogRecord",
-          "declaration": "interface TransactionLogRecord {\n  level: LogLevelType;\n  msg: \"transaction\";\n  ts: string;\n  tx_name: string;\n  status: TransactionStatusType;\n  duration_ms: number;\n  write_count: number;\n  target_counts: Record<string, number>;\n  estimated_json_bytes: number;\n  sample_doc_paths: string[];\n  read_paths?: string[];\n  error_name?: string;\n  error_message?: string;\n  error_stack?: string;\n  aborted?: boolean;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  dry_run?: boolean;\n}",
+          "declaration": "interface TransactionLogRecord {\n  level: LogLevelType;\n  msg: \"transaction\";\n  ts: string;\n  tx_name: string;\n  status: TransactionStatusType;\n  duration_ms: number;\n  write_count: number;\n  target_counts: Record<string, number>;\n  estimated_json_bytes: number;\n  sample_doc_paths: string[];\n  read_paths?: string[];\n  read_count?: number;\n  read_counts?: Record<string, number>;\n  error_name?: string;\n  error_message?: string;\n  error_stack?: string;\n  aborted?: boolean;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  dry_run?: boolean;\n}",
           "doc": "Structured log entry for a single Firestore transaction commit (success or failure)."
         },
         {
@@ -7543,7 +7543,7 @@
         {
           "kind": "interface",
           "name": "BaseLogFields",
-          "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n}",
+          "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  subject?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n}",
           "doc": "TypeScript shape of {@link baseLogFields} — for use in archetype\ninterfaces that want to declare the envelope explicitly."
         },
         {
@@ -7921,7 +7921,7 @@
         {
           "kind": "interface",
           "name": "TransactionLogRecord",
-          "declaration": "interface TransactionLogRecord {\n  level: LogLevelType;\n  msg: \"transaction\";\n  ts: string;\n  tx_name: string;\n  status: TransactionStatusType;\n  duration_ms: number;\n  write_count: number;\n  target_counts: Record<string, number>;\n  estimated_json_bytes: number;\n  sample_doc_paths: string[];\n  read_paths?: string[];\n  error_name?: string;\n  error_message?: string;\n  error_stack?: string;\n  aborted?: boolean;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  dry_run?: boolean;\n}",
+          "declaration": "interface TransactionLogRecord {\n  level: LogLevelType;\n  msg: \"transaction\";\n  ts: string;\n  tx_name: string;\n  status: TransactionStatusType;\n  duration_ms: number;\n  write_count: number;\n  target_counts: Record<string, number>;\n  estimated_json_bytes: number;\n  sample_doc_paths: string[];\n  read_paths?: string[];\n  read_count?: number;\n  read_counts?: Record<string, number>;\n  error_name?: string;\n  error_message?: string;\n  error_stack?: string;\n  aborted?: boolean;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  dry_run?: boolean;\n}",
           "doc": "Structured log entry for a single Firestore transaction commit (success or failure)."
         },
         {

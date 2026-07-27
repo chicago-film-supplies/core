@@ -20,6 +20,15 @@
  *   documented in api-cloudrun CLAUDE.md.
  *
  * If compliance posture changes, retag here once and every arm inherits.
+ *
+ * `subject` is the namespaced id of the *thing a request is about* — the
+ * external or domain identifier that no read/write trail can ever carry because
+ * it is not a Firestore document (`crms_opportunity:1234`, `xero_invoice:…`).
+ * It lives on the envelope precisely so it rides EVERY record a request emits —
+ * `transaction`, `sync_error`, `retry_attempt`, the request summary — from one
+ * adoption point rather than 91 call sites. Also `pii: "none"`: these are
+ * opaque third-party record ids, not personal data, and the whole value is that
+ * `subject:"…"` is directly queryable in LogsQL.
  */
 
 import { z } from "zod";
@@ -47,6 +56,10 @@ export const baseLogFields = {
     pii: "none",
     note: "opaque internal id; retention-bounded; redactable on DSAR",
   }).optional(),
+  subject: z.string().meta({
+    pii: "none",
+    note: "namespaced id of the thing a request is about, e.g. crms_opportunity:1234",
+  }).optional(),
   trace_id: z.string().optional(),
   span_id: z.string().optional(),
   duration_ms: z.number().optional(),
@@ -65,6 +78,7 @@ export interface BaseLogFields {
   path?: string;
   route?: string;
   user_id?: string;
+  subject?: string;
   trace_id?: string;
   span_id?: string;
   duration_ms?: number;

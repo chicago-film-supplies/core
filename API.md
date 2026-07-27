@@ -139,6 +139,7 @@ interface BaseLogFields {
   path?: string;
   route?: string;
   user_id?: string;
+  subject?: string;
   trace_id?: string;
   span_id?: string;
   duration_ms?: number;
@@ -5880,6 +5881,8 @@ interface TransactionLogRecord {
   estimated_json_bytes: number;
   sample_doc_paths: string[];
   read_paths?: string[];
+  read_count?: number;
+  read_counts?: Record<string, number>;
   error_name?: string;
   error_message?: string;
   error_stack?: string;
@@ -13949,6 +13952,7 @@ interface BaseLogFields {
   path?: string;
   route?: string;
   user_id?: string;
+  subject?: string;
   trace_id?: string;
   span_id?: string;
   duration_ms?: number;
@@ -14779,6 +14783,8 @@ interface TransactionLogRecord {
   estimated_json_bytes: number;
   sample_doc_paths: string[];
   read_paths?: string[];
+  read_count?: number;
+  read_counts?: Record<string, number>;
   error_name?: string;
   error_message?: string;
   error_stack?: string;
