@@ -15084,6 +15084,14 @@ listed — an unlisted schema's `name` is treated as a label.
 A parent-segment heuristic is not a substitute: a root-level `name` has no
 parent segment, so it would silently drop `contact::name` itself.
 
+`order` / `invoice` / `fulfillment` and their input schemas are listed for the
+OPPOSITE reason (#40): every `name` under them is a label — catalog text, a
+section header, a venue, a tax name, `Order #NNN` — and every one is annotated
+`pii: "none"`. Listing them buys nothing at runtime; it makes the enforcement
+test refuse a NEW untagged `name` on those three documents, which is what let
+`items[].name` drift into three different answers twice. Being listed here is
+what forces a `name` to state its answer rather than default into one.
+
 ```ts
 const NAME_SENSITIVE: ReadonlySet<string>;
 ```

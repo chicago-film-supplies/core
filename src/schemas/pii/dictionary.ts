@@ -125,6 +125,14 @@ export const AMBIGUOUS: ReadonlySet<string> = new Set([
  *
  * A parent-segment heuristic is not a substitute: a root-level `name` has no
  * parent segment, so it would silently drop `contact::name` itself.
+ *
+ * `order` / `invoice` / `fulfillment` and their input schemas are listed for the
+ * OPPOSITE reason (#40): every `name` under them is a label — catalog text, a
+ * section header, a venue, a tax name, `Order #NNN` — and every one is annotated
+ * `pii: "none"`. Listing them buys nothing at runtime; it makes the enforcement
+ * test refuse a NEW untagged `name` on those three documents, which is what let
+ * `items[].name` drift into three different answers twice. Being listed here is
+ * what forces a `name` to state its answer rather than default into one.
  */
 export const NAME_SENSITIVE: ReadonlySet<string> = new Set([
   "contact",
@@ -138,4 +146,17 @@ export const NAME_SENSITIVE: ReadonlySet<string> = new Set([
   "NewContactInput",
   "CreateOrganizationInput",
   "UpdateOrganizationInput",
+  // Listed to force an explicit call, not because `name` is a person here —
+  // see the paragraph above. Both singular and plural: `coverageSources()`
+  // dedupes by node identity and takes whichever key it reaches first.
+  "order",
+  "orders",
+  "invoice",
+  "invoices",
+  "fulfillment",
+  "fulfillments",
+  "CreateOrderInput",
+  "UpdateOrderInput",
+  "CreateInvoiceInput",
+  "UpdateInvoiceInput",
 ]);

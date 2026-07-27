@@ -66,7 +66,10 @@ export interface FulfillmentLineItemType {
 export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = z.strictObject({
   uid: ItemUid,
   type: FulfillmentLineItemTypeEnum,
-  name: z.string().min(1).max(100),
+  // Catalog product name — not customer data. See `OrderDocLineItem.name`.
+  // Fulfillment items are a projection of order items, so this is the same
+  // string; it must carry the same classification.
+  name: z.string().min(1).max(100).meta({ pii: "none" }),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   // Fulfillment items are a projection of order items, so this is the same
   // string; it must carry the same classification.
@@ -96,7 +99,9 @@ export interface FulfillmentDestinationItemType {
 export const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("destination"),
-  name: z.string().max(200).default(""),
+  // Venue label, projected from `OrderDocDestinationItem.name` — same string,
+  // same classification. See `OrderDocLineItem.name`.
+  name: z.string().max(200).meta({ pii: "none" }).default(""),
   path: z.array(ItemUid).default([]),
   uid_delivery: FirestoreId.nullable().default(null),
   uid_collection: FirestoreId.nullable().default(null),
@@ -115,7 +120,9 @@ export interface FulfillmentGroupItemType {
 export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("group"),
-  name: z.string().min(1).max(100),
+  // Section header, projected from `OrderDocGroupItem.name` — same string, same
+  // classification. See `OrderDocLineItem.name`.
+  name: z.string().min(1).max(100).meta({ pii: "none" }),
   path: z.array(ItemUid).default([]),
   description: z.string().meta({ pii: "none" }).default(""),
 });

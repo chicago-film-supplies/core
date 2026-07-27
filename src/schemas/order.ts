@@ -286,7 +286,8 @@ export interface PriceModifierType {
 /** Zod schema for a rate-based price modifier (tax or transaction fee). */
 export const PriceModifier: z.ZodType<PriceModifierType> = z.strictObject({
   uid: FirestoreId,
-  name: z.string(),
+  // Tax or fee label ("IL Sales Tax") — see `OrderDocLineItem.name`.
+  name: z.string().meta({ pii: "none" }),
   rate: z.number(),
   type: RateTypeEnum,
   amount: z.number(),
@@ -306,7 +307,8 @@ export interface TaxRefType {
 /** Zod schema for a denormalized tax snapshot without computed amount. */
 export const TaxRef: z.ZodType<TaxRefType> = z.strictObject({
   uid: FirestoreId,
-  name: z.string(),
+  // Tax label ("IL Sales Tax") — see `OrderDocLineItem.name`.
+  name: z.string().meta({ pii: "none" }),
   rate: z.number(),
   type: RateTypeEnum,
 });
@@ -426,7 +428,9 @@ export interface OrderItemType {
 export const OrderItem: z.ZodType<OrderItemType> = z.object({
   uid: ItemUid,
   type: DocItemTypeEnum,
-  name: z.string().optional(),
+  // Catalog product name, section header or venue label depending on `type` —
+  // not customer data in any of them. See `OrderDocLineItem.name`.
+  name: z.string().meta({ pii: "none" }).optional(),
   // Line-item text — equipment, service and destination wording, of a piece with
   // a PO number or a product name. Not customer data. See the note on
   // `OrderDocLineItem.description` for why this is tagged rather than left bare.
@@ -572,13 +576,21 @@ export interface OrderDocLineItemType {
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject({
   uid: ItemUid,
   type: DocLineItemTypeEnum,
+  // CANONICAL RATIONALE for every item `name` in the package — the divider,
+  // transaction-fee, invoice and fulfillment leaves all point back here (#40).
+  //
   // Catalog product name ("Dewalt Work Light") — NOT customer data, so it
   // survives fixture sanitization verbatim, which is the whole point of drawing
   // fixture line items from real orders. Tagged explicitly rather than left
   // untagged so the decision is visible and the drift gate can see it. Custom
   // items put operator-typed text here, but it is equipment/service text by
-  // convention; the free-text `description` below is where a customer's words
-  // actually land, and that one masks.
+  // convention.
+  //
+  // An item `name` is a LABEL — catalog text, a section header, a venue, a tax
+  // name, `Order #NNN`. It is not a person or an organization, which is why
+  // `order` / `invoice` / `fulfillment` are now listed in `NAME_SENSITIVE`
+  // (`src/schemas/pii/dictionary.ts`) — being listed there forces every `name`
+  // under them to state an answer instead of defaulting into one.
   name: z.string().min(1).max(100).meta({ pii: "none" }),
   // Line-item text, classified the same as `name` above: it carries equipment,
   // service and destination wording — a PO number, a product name — not customer
@@ -622,9 +634,19 @@ export interface OrderDocDestinationItemType {
 export const OrderDocDestinationItem: z.ZodType<OrderDocDestinationItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("destination"),
-  // Operator-typed divider label — often the contact's name or address;
-  // mask in fixtures + logs.
-  name: z.string().max(200).meta({ pii: "mask" }).default(""),
+  // Operator-typed divider label — a VENUE, not a person: `Fillmore` (CFS's own
+  // counter, 117/203 orders in the dev replica), `Cinespace`, `Museum of Science
+  // & Industry`. 0 of 1,220 destination-divider names across orders and
+  // fulfillments match a contacts-doc name. A label, so `none` — see
+  // `OrderDocLineItem.name`.
+  //
+  // GIVE-BACK, stated plainly: ~10-13% of these are a street address an operator
+  // typed as the label, and those now reach logs and newly captured fixtures
+  // verbatim. The delivery address proper lives in `destinations[].address`,
+  // which stays `mask`. The mask being removed here was also producing wrong
+  // output — `fixturePiiStrategy.fakeForMask` shape-detects 2-3 alphabetic
+  // tokens as a person, so `Oak Brook Mall` was captured as `Jordan B Holloway`.
+  name: z.string().max(200).meta({ pii: "none" }).default(""),
   path: z.array(ItemUid).default([]),
   uid_delivery: FirestoreId.nullable().default(null),
   uid_collection: FirestoreId.nullable().default(null),
@@ -643,8 +665,11 @@ export interface OrderDocGroupItemType {
 export const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType> = z.strictObject({
   uid: z.uuid(),
   type: z.literal("group"),
-  // Operator-typed divider label — often a customer/project name; mask.
-  name: z.string().min(1).max(100).meta({ pii: "mask" }),
+  // Operator-typed section header, drawn from the catalog rather than the
+  // customer: `Delivery` (68), `Hair & Makeup` (57), `Tables & Chairs` (50) in
+  // the dev replica. 0 occurrences match a contact or organization name. A
+  // label, so `none` — see `OrderDocLineItem.name`.
+  name: z.string().min(1).max(100).meta({ pii: "none" }),
   path: z.array(ItemUid).default([]),
   description: z.string().meta({ pii: "none" }).default(""),
 });
@@ -666,7 +691,8 @@ export interface OrderDocTransactionFeeItemType {
 export const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType> = z.strictObject({
   uid: ItemUid,
   type: z.literal("transaction_fee"),
-  name: z.string().min(1).max(100),
+  // Fee label ("Credit Card Processing Fee") — see `OrderDocLineItem.name`.
+  name: z.string().min(1).max(100).meta({ pii: "none" }),
   path: z.array(ItemUid).default([]),
   description: z.string().meta({ pii: "none" }).default(""),
   quantity: z.number().int().min(0).default(0),

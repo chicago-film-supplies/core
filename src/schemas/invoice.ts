@@ -129,7 +129,8 @@ export interface InvoiceDocLineItem {
 export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = z.strictObject({
   uid: ItemUid,
   type: DocLineItemTypeEnum,
-  name: z.string(),
+  // Catalog product name — not customer data. See `OrderDocLineItem.name`.
+  name: z.string().meta({ pii: "none" }),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   description: z.string().meta({ pii: "none" }).default(""),
   quantity: z.number().default(0),
@@ -160,8 +161,9 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = z.strictO
   // (order.uid), not a synthesized UUID — so this is z.string(), not z.uuid().
   uid: ItemUid,
   type: z.literal("order"),
-  // Operator-typed divider label — often references the source order/customer.
-  name: z.string().max(200).meta({ pii: "mask" }).default(""),
+  // Machine-generated, not operator-typed: 218/218 order dividers in the dev
+  // replica are literally `Order #NNN`. See `OrderDocLineItem.name`.
+  name: z.string().max(200).meta({ pii: "none" }).default(""),
   path: z.array(ItemUid).default([]),
   description: z.string().meta({ pii: "none" }).default(""),
 });
@@ -413,7 +415,9 @@ export interface InvoiceItemInputType {
 const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z.object({
   uid: ItemUid,
   type: InvoiceItemTypeEnum.optional(),
-  name: z.string().optional(),
+  // Catalog product name or divider label — not customer data. See
+  // `OrderDocLineItem.name`.
+  name: z.string().meta({ pii: "none" }).optional(),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   description: z.string().meta({ pii: "none" }).optional(),
   quantity: z.number().optional(),
