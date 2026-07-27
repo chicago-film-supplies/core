@@ -371,6 +371,33 @@ interface BulkBookingUpdateResponseType {
 }
 ```
 
+### `CFS_SOURCE_COLLECTIONS`
+
+Collections that may legitimately appear as a {@link DocSourceType} `collection`.
+
+This was `z.string().min(1)` — free text that reached a Firestore collection
+name. `CreateCardInput.sources` comes straight off the POST body and
+`createCard` copies it into the THREAD's `sources`, so
+`POST /cards {sources:[{collection:"cards", uid:X}]}` wrote a thread claiming
+a card as its own source, which `deleteCard` then unpicks by
+`s.collection === "cards"`. Every consumer was re-deriving the same implicit
+"it's one of the known CFS collections" contract; it is encoded once here.
+
+Membership is the union of a read-only survey of every stored `DocSource` in
+BOTH envs (threads, comments, cards, recurrences.prototype, out-of-service
+`sources[]` + `transactions[].source` — dev and prod agreed on the same 12
+values, no malformed entries) plus `template-components`, which has no stored
+instance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.
+
+`transactions` has no live writer — its 898 instances (identical count in both
+envs) are historical. It stays in: dropping it would fail those docs on their
+next update through `validateBeforeWrite`. Never narrow this past stored data;
+survey first.
+
+```ts
+const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "invoices" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+```
+
 ### `COACode`
 
 Zod schema for COACode.
@@ -719,6 +746,22 @@ const CardStatusEnum: z.ZodType<CardStatus>;
 
 ```ts
 type CardUpdated = EventEnvelope<Card> & typeLiteral;
+```
+
+### `CfsSourceCollectionEnum`
+
+Zod schema for CfsSourceCollectionType.
+
+```ts
+const CfsSourceCollectionEnum: z.ZodType<CfsSourceCollectionType>;
+```
+
+### `CfsSourceCollectionType`
+
+A collection name valid in a {@link DocSourceType}.
+
+```ts
+type CfsSourceCollectionType = indexedAccess;
 ```
 
 ### `ChartOfAccounts`
@@ -1954,7 +1997,7 @@ thread-specific.
 
 ```ts
 interface DocSourceType {
-  collection: string;
+  collection: CfsSourceCollectionType;
   uid: string;
   label?: string | null;
 }
@@ -7753,6 +7796,33 @@ item's uid, which for a custom product is `custom-{uuid}`).
 const BookingId: z.ZodType<string>;
 ```
 
+### `CFS_SOURCE_COLLECTIONS`
+
+Collections that may legitimately appear as a {@link DocSourceType} `collection`.
+
+This was `z.string().min(1)` — free text that reached a Firestore collection
+name. `CreateCardInput.sources` comes straight off the POST body and
+`createCard` copies it into the THREAD's `sources`, so
+`POST /cards {sources:[{collection:"cards", uid:X}]}` wrote a thread claiming
+a card as its own source, which `deleteCard` then unpicks by
+`s.collection === "cards"`. Every consumer was re-deriving the same implicit
+"it's one of the known CFS collections" contract; it is encoded once here.
+
+Membership is the union of a read-only survey of every stored `DocSource` in
+BOTH envs (threads, comments, cards, recurrences.prototype, out-of-service
+`sources[]` + `transactions[].source` — dev and prod agreed on the same 12
+values, no malformed entries) plus `template-components`, which has no stored
+instance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.
+
+`transactions` has no live writer — its 898 instances (identical count in both
+envs) are historical. It stays in: dropping it would fail those docs on their
+next update through `validateBeforeWrite`. Never narrow this past stored data;
+survey first.
+
+```ts
+const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "invoices" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+```
+
 ### `COARevenueEnum`
 
 Zod schema for COARevenueType.
@@ -7776,6 +7846,22 @@ type COARevenueType = indexedAccess;
 
 ```ts
 const CardId: z.ZodType<string>;
+```
+
+### `CfsSourceCollectionEnum`
+
+Zod schema for CfsSourceCollectionType.
+
+```ts
+const CfsSourceCollectionEnum: z.ZodType<CfsSourceCollectionType>;
+```
+
+### `CfsSourceCollectionType`
+
+A collection name valid in a {@link DocSourceType}.
+
+```ts
+type CfsSourceCollectionType = indexedAccess;
 ```
 
 ### `ComponentTypeEnum`
@@ -7872,7 +7958,7 @@ thread-specific.
 
 ```ts
 interface DocSourceType {
-  collection: string;
+  collection: CfsSourceCollectionType;
   uid: string;
   label?: string | null;
 }

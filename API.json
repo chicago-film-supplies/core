@@ -194,6 +194,12 @@
         },
         {
           "kind": "variable",
+          "name": "CFS_SOURCE_COLLECTIONS",
+          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"invoices\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"roles\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
+          "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` has no live writer — its 898 instances (identical count in both\nenvs) are historical. It stays in: dropping it would fail those docs on their\nnext update through `validateBeforeWrite`. Never narrow this past stored data;\nsurvey first."
+        },
+        {
+          "kind": "variable",
           "name": "COACode",
           "declaration": "const COACode: z.ZodType<COACodeType>;",
           "doc": "Zod schema for COACode."
@@ -377,6 +383,18 @@
           "name": "CardUpdated",
           "declaration": "type CardUpdated = EventEnvelope<Card> & typeLiteral;",
           "doc": ""
+        },
+        {
+          "kind": "variable",
+          "name": "CfsSourceCollectionEnum",
+          "declaration": "const CfsSourceCollectionEnum: z.ZodType<CfsSourceCollectionType>;",
+          "doc": "Zod schema for CfsSourceCollectionType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CfsSourceCollectionType",
+          "declaration": "type CfsSourceCollectionType = indexedAccess;",
+          "doc": "A collection name valid in a {@link DocSourceType}."
         },
         {
           "kind": "interface",
@@ -1035,7 +1053,7 @@
         {
           "kind": "interface",
           "name": "DocSourceType",
-          "declaration": "interface DocSourceType {\n  collection: string;\n  uid: string;\n  label?: string | null;\n}",
+          "declaration": "interface DocSourceType {\n  collection: CfsSourceCollectionType;\n  uid: string;\n  label?: string | null;\n}",
           "doc": "A `{collection, uid}` pointer to any Firestore document. Used polymorphically\nby Thread, Comment, and Card to reference the source docs they belong to.\n\nLives here (not in thread.ts where it originated) because it's a shared\nprimitive — the \"thread\" prefix misled readers into thinking it was\nthread-specific."
         },
         {
@@ -4331,6 +4349,12 @@
         },
         {
           "kind": "variable",
+          "name": "CFS_SOURCE_COLLECTIONS",
+          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"invoices\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"roles\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
+          "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` has no live writer — its 898 instances (identical count in both\nenvs) are historical. It stays in: dropping it would fail those docs on their\nnext update through `validateBeforeWrite`. Never narrow this past stored data;\nsurvey first."
+        },
+        {
+          "kind": "variable",
           "name": "COARevenueEnum",
           "declaration": "const COARevenueEnum: z.ZodType<COARevenueType>;",
           "doc": "Zod schema for COARevenueType."
@@ -4346,6 +4370,18 @@
           "name": "CardId",
           "declaration": "const CardId: z.ZodType<string>;",
           "doc": "`cards.uid` — either a Firestore auto-id (kanban/to-do cards) or an\n`EventCardId` composite (auto-generated order event cards)."
+        },
+        {
+          "kind": "variable",
+          "name": "CfsSourceCollectionEnum",
+          "declaration": "const CfsSourceCollectionEnum: z.ZodType<CfsSourceCollectionType>;",
+          "doc": "Zod schema for CfsSourceCollectionType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CfsSourceCollectionType",
+          "declaration": "type CfsSourceCollectionType = indexedAccess;",
+          "doc": "A collection name valid in a {@link DocSourceType}."
         },
         {
           "kind": "variable",
@@ -4410,7 +4446,7 @@
         {
           "kind": "interface",
           "name": "DocSourceType",
-          "declaration": "interface DocSourceType {\n  collection: string;\n  uid: string;\n  label?: string | null;\n}",
+          "declaration": "interface DocSourceType {\n  collection: CfsSourceCollectionType;\n  uid: string;\n  label?: string | null;\n}",
           "doc": "A `{collection, uid}` pointer to any Firestore document. Used polymorphically\nby Thread, Comment, and Card to reference the source docs they belong to.\n\nLives here (not in thread.ts where it originated) because it's a shared\nprimitive — the \"thread\" prefix misled readers into thinking it was\nthread-specific."
         },
         {
