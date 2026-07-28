@@ -161,5 +161,10 @@ export const AnyUid: z.ZodType<string> = z.union([
   ItemUid,
   BookingId,
   EventCardId,
+  // A movement's id is a composite too, and movements reference each other: a
+  // reversal names the event it negates in `sources[]`. Without this arm that
+  // reference falls through to the slug pattern and the reversal — the journal's
+  // only correction path — fails validation on write.
+  MovementId,
   z.string().regex(/^[a-z][a-z0-9-]*$/, "Must be a slug"),
 ]);

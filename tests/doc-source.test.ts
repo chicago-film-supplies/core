@@ -37,6 +37,25 @@ Deno.test("DocSource accepts every surveyed collection", () => {
   }
 });
 
+Deno.test("DocSource accepts a composite uid, including a movement's", () => {
+  // A reversal names the event it negates: {collection:"transactions", uid:<MovementId>}.
+  // Without a MovementId arm on AnyUid that uid falls through to the slug
+  // pattern and the write is rejected — which took out the journal's only
+  // correction path.
+  const composites = [
+    "0199a1f2-3b4c-7d8e-9f01-234567890abc|sale|testprod100000000000",
+    "0199a1f2-3b4c-7d8e-9f01-234567890abc|check_out|testordr100000000000:testitem10000000000x:testdest100000000000",
+    "testordr100000000000:testitem10000000000x:testdest100000000000",
+  ];
+  for (const uid of composites) {
+    assertEquals(
+      DocSource.safeParse({ collection: "transactions", uid }).success,
+      true,
+      uid,
+    );
+  }
+});
+
 Deno.test("DocSource rejects a collection outside the known set", () => {
   // The core#38 shape: an arbitrary string off a POST body reaching a Firestore
   // collection name.
