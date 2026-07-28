@@ -47,6 +47,41 @@ export const BookingBreakdownSchema: z.ZodType<BookingBreakdown> = z.strictObjec
   returned: z.number(),
 });
 
+/**
+ * All seven keys of the booking lifecycle breakdown, in lifecycle order (which
+ * is NOT the schema's alphabetical field order — the UI reads left to right).
+ *
+ * These live beside the schema rather than in `utils/bookings.ts` because
+ * schema modules cannot import utils (the dependency runs strictly one way) and
+ * the movement journal needs the key union to type a custody transition.
+ * `utils/bookings.ts` re-exports all three, so existing importers are unaffected.
+ */
+export const BOOKING_BREAKDOWN_KEYS = [
+  "quoted", "reserved", "prepped", "out", "returned", "lost", "damaged",
+] as const;
+
+/** Keys representing items that are still in flight (pre-terminal). */
+export const BOOKING_BREAKDOWN_OPEN_KEYS = ["quoted", "reserved", "prepped", "out"] as const;
+
+/** Keys representing items that have reached a terminal state. */
+export const BOOKING_BREAKDOWN_TERMINAL_KEYS = ["returned", "lost", "damaged"] as const;
+
+/** One key of the booking lifecycle breakdown. */
+export type BookingBreakdownKeyType = typeof BOOKING_BREAKDOWN_KEYS[number];
+
+/** Zod enum over the seven breakdown keys — the custody axis of a movement. */
+export const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType> = z.enum(
+  BOOKING_BREAKDOWN_KEYS,
+);
+
+// Compile-time guard: the key list and the breakdown shape cannot drift apart.
+// Either direction failing is a type error, so adding a key to one without the
+// other does not compile.
+type _KeysCoverBreakdown = BookingBreakdownKeyType extends keyof BookingBreakdown ? true : never;
+type _BreakdownCoversKeys = keyof BookingBreakdown extends BookingBreakdownKeyType ? true : never;
+const _keyParity: [_KeysCoverBreakdown, _BreakdownCoversKeys] = [true, true];
+void _keyParity;
+
 /** A specific location within a store allocated for a booking. */
 export interface BookingStoreLocation {
   uid_location: string;

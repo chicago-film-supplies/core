@@ -62,6 +62,24 @@
         },
         {
           "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_KEYS",
+          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
+          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports all three, so existing importers are unaffected."
+        },
+        {
+          "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_OPEN_KEYS",
+          "declaration": "const BOOKING_BREAKDOWN_OPEN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\"[];",
+          "doc": "Keys representing items that are still in flight (pre-terminal)."
+        },
+        {
+          "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_TERMINAL_KEYS",
+          "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\"[];",
+          "doc": "Keys representing items that have reached a terminal state."
+        },
+        {
+          "kind": "variable",
           "name": "BOOKING_STATUSES",
           "declaration": "const BOOKING_STATUSES: \"draft\" | \"quoted\" | \"reserved\" | \"part-prepped\" | \"prepped\" | \"active\" | \"complete\"[];",
           "doc": ""
@@ -95,6 +113,18 @@
           "name": "BookingBreakdown",
           "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n}",
           "doc": "Per-status quantity breakdown for a booking — also embedded in stock-summary entries."
+        },
+        {
+          "kind": "variable",
+          "name": "BookingBreakdownKeyEnum",
+          "declaration": "const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;",
+          "doc": "Zod enum over the seven breakdown keys — the custody axis of a movement."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BookingBreakdownKeyType",
+          "declaration": "type BookingBreakdownKeyType = indexedAccess;",
+          "doc": "One key of the booking lifecycle breakdown."
         },
         {
           "kind": "variable",
@@ -4717,6 +4747,24 @@
       "symbols": [
         {
           "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_KEYS",
+          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
+          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports all three, so existing importers are unaffected."
+        },
+        {
+          "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_OPEN_KEYS",
+          "declaration": "const BOOKING_BREAKDOWN_OPEN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\"[];",
+          "doc": "Keys representing items that are still in flight (pre-terminal)."
+        },
+        {
+          "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_TERMINAL_KEYS",
+          "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\"[];",
+          "doc": "Keys representing items that have reached a terminal state."
+        },
+        {
+          "kind": "variable",
           "name": "BOOKING_STATUSES",
           "declaration": "const BOOKING_STATUSES: \"draft\" | \"quoted\" | \"reserved\" | \"part-prepped\" | \"prepped\" | \"active\" | \"complete\"[];",
           "doc": ""
@@ -4732,6 +4780,18 @@
           "name": "BookingBreakdown",
           "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n}",
           "doc": "Per-status quantity breakdown for a booking — also embedded in stock-summary entries."
+        },
+        {
+          "kind": "variable",
+          "name": "BookingBreakdownKeyEnum",
+          "declaration": "const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;",
+          "doc": "Zod enum over the seven breakdown keys — the custody axis of a movement."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BookingBreakdownKeyType",
+          "declaration": "type BookingBreakdownKeyType = indexedAccess;",
+          "doc": "One key of the booking lifecycle breakdown."
         },
         {
           "kind": "variable",
@@ -8460,7 +8520,7 @@
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "All seven keys of the booking lifecycle breakdown. Order matches the schema."
+          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports all three, so existing importers are unaffected."
         },
         {
           "kind": "variable",
@@ -8473,6 +8533,18 @@
           "name": "BOOKING_BREAKDOWN_TERMINAL_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\"[];",
           "doc": "Keys representing items that have reached a terminal state."
+        },
+        {
+          "kind": "variable",
+          "name": "BookingBreakdownKeyEnum",
+          "declaration": "const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;",
+          "doc": "Zod enum over the seven breakdown keys — the custody axis of a movement."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BookingBreakdownKeyType",
+          "declaration": "type BookingBreakdownKeyType = indexedAccess;",
+          "doc": "One key of the booking lifecycle breakdown."
         },
         {
           "kind": "function",

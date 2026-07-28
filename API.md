@@ -119,6 +119,36 @@ references (`DocSource`, `UidNameRef`) that may point at any collection.
 const AnyUid: z.ZodType<string>;
 ```
 
+### `BOOKING_BREAKDOWN_KEYS`
+
+All seven keys of the booking lifecycle breakdown, in lifecycle order (which
+is NOT the schema's alphabetical field order — the UI reads left to right).
+
+These live beside the schema rather than in `utils/bookings.ts` because
+schema modules cannot import utils (the dependency runs strictly one way) and
+the movement journal needs the key union to type a custody transition.
+`utils/bookings.ts` re-exports all three, so existing importers are unaffected.
+
+```ts
+const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
+```
+
+### `BOOKING_BREAKDOWN_OPEN_KEYS`
+
+Keys representing items that are still in flight (pre-terminal).
+
+```ts
+const BOOKING_BREAKDOWN_OPEN_KEYS: "quoted" | "reserved" | "prepped" | "out"[];
+```
+
+### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
+
+Keys representing items that have reached a terminal state.
+
+```ts
+const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged"[];
+```
+
 ### `BOOKING_STATUSES`
 
 ```ts
@@ -215,6 +245,22 @@ interface BookingBreakdown {
   reserved: number;
   returned: number;
 }
+```
+
+### `BookingBreakdownKeyEnum`
+
+Zod enum over the seven breakdown keys — the custody axis of a movement.
+
+```ts
+const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;
+```
+
+### `BookingBreakdownKeyType`
+
+One key of the booking lifecycle breakdown.
+
+```ts
+type BookingBreakdownKeyType = indexedAccess;
 ```
 
 ### `BookingBreakdownSchema`
@@ -8389,6 +8435,36 @@ stored document and `ActorRef.name` is computed by passing through here.
 
 ## `@cfs/core/schemas/booking`
 
+### `BOOKING_BREAKDOWN_KEYS`
+
+All seven keys of the booking lifecycle breakdown, in lifecycle order (which
+is NOT the schema's alphabetical field order — the UI reads left to right).
+
+These live beside the schema rather than in `utils/bookings.ts` because
+schema modules cannot import utils (the dependency runs strictly one way) and
+the movement journal needs the key union to type a custody transition.
+`utils/bookings.ts` re-exports all three, so existing importers are unaffected.
+
+```ts
+const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
+```
+
+### `BOOKING_BREAKDOWN_OPEN_KEYS`
+
+Keys representing items that are still in flight (pre-terminal).
+
+```ts
+const BOOKING_BREAKDOWN_OPEN_KEYS: "quoted" | "reserved" | "prepped" | "out"[];
+```
+
+### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
+
+Keys representing items that have reached a terminal state.
+
+```ts
+const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged"[];
+```
+
 ### `BOOKING_STATUSES`
 
 ```ts
@@ -8444,6 +8520,22 @@ interface BookingBreakdown {
   reserved: number;
   returned: number;
 }
+```
+
+### `BookingBreakdownKeyEnum`
+
+Zod enum over the seven breakdown keys — the custody axis of a movement.
+
+```ts
+const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;
+```
+
+### `BookingBreakdownKeyType`
+
+One key of the booking lifecycle breakdown.
+
+```ts
+type BookingBreakdownKeyType = indexedAccess;
 ```
 
 ### `BookingBreakdownSchema`
@@ -15862,7 +15954,13 @@ import {
 
 ### `BOOKING_BREAKDOWN_KEYS`
 
-All seven keys of the booking lifecycle breakdown. Order matches the schema.
+All seven keys of the booking lifecycle breakdown, in lifecycle order (which
+is NOT the schema's alphabetical field order — the UI reads left to right).
+
+These live beside the schema rather than in `utils/bookings.ts` because
+schema modules cannot import utils (the dependency runs strictly one way) and
+the movement journal needs the key union to type a custody transition.
+`utils/bookings.ts` re-exports all three, so existing importers are unaffected.
 
 ```ts
 const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
@@ -15882,6 +15980,22 @@ Keys representing items that have reached a terminal state.
 
 ```ts
 const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged"[];
+```
+
+### `BookingBreakdownKeyEnum`
+
+Zod enum over the seven breakdown keys — the custody axis of a movement.
+
+```ts
+const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;
+```
+
+### `BookingBreakdownKeyType`
+
+One key of the booking lifecycle breakdown.
+
+```ts
+type BookingBreakdownKeyType = indexedAccess;
 ```
 
 ### `applyBookingBreakdownDelta(orderBreakdown: indexedAccess, prev: indexedAccess, next: indexedAccess): void`

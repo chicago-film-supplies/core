@@ -16,16 +16,20 @@
  */
 import type { Booking, Order } from "../schemas/mod.ts";
 
-/** All seven keys of the booking lifecycle breakdown. Order matches the schema. */
-export const BOOKING_BREAKDOWN_KEYS = [
-  "quoted", "reserved", "prepped", "out", "returned", "lost", "damaged",
-] as const;
-
-/** Keys representing items that are still in flight (pre-terminal). */
-export const BOOKING_BREAKDOWN_OPEN_KEYS = ["quoted", "reserved", "prepped", "out"] as const;
-
-/** Keys representing items that have reached a terminal state. */
-export const BOOKING_BREAKDOWN_TERMINAL_KEYS = ["returned", "lost", "damaged"] as const;
+/**
+ * The breakdown key constants now live beside `BookingBreakdownSchema` in
+ * `schemas/booking.ts`, because the movement journal's custody axis is typed on
+ * them and schema modules cannot import utils (the dependency runs strictly one
+ * way). Re-exported here so `@cfs/core/utils/bookings` stays their address for
+ * every existing importer.
+ */
+export {
+  BOOKING_BREAKDOWN_KEYS,
+  BOOKING_BREAKDOWN_OPEN_KEYS,
+  BOOKING_BREAKDOWN_TERMINAL_KEYS,
+  BookingBreakdownKeyEnum,
+  type BookingBreakdownKeyType,
+} from "../schemas/mod.ts";
 
 /**
  * The empty breakdown shape — all seven keys at zero.
