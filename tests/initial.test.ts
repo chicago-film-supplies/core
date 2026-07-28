@@ -69,8 +69,11 @@ Deno.test("getInitialValues — enum fields use first value", () => {
   const result = getInitialValues(OrganizationSchema);
   assertEquals(result.tax_profile, "tax_applied");
 
+  // First member of MOVEMENT_TYPES, which now leads with the custody-bearing
+  // fulfillment events. Forms pick their options from
+  // getDisplayTransactionTypes(), not from this synthesized default.
   const txResult = getInitialValues(TransactionSchema);
-  assertEquals(txResult.type, "opening_balance");
+  assertEquals(txResult.type, "prep");
 
   const taxResult = getInitialValues(TaxSchema);
   assertEquals(taxResult.type, "percent");

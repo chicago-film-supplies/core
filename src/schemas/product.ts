@@ -5,7 +5,7 @@ import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
-import { type TransactionStore, TransactionStoreSchema } from "./transaction.ts";
+import { MovementAllocationInput, type MovementAllocationInputType } from "./transaction.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -404,13 +404,13 @@ export interface CreateProductInputType {
     description?: string | null;
   };
   transaction?: {
-    uid: string;
     type: "purchase" | "make" | "find";
     quantity: number;
     total_cost: number;
     date: string;
     reference: string;
-    stores: TransactionStore[];
+    uid_session: string;
+    allocations: MovementAllocationInputType[];
   };
 }
 
@@ -455,31 +455,33 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     available: z.boolean(),
     description: z.string().nullable().optional(),
   }),
+  // The opening-balance movement. No `uid`: a movement's document id is derived
+  // (`{uid_session}|{type}|{subject}`), which is what makes a retried create
+  // idempotent rather than appending a second event.
   transaction: z.object({
-    uid: FirestoreId,
     type: z.enum(["purchase", "make", "find"]),
     quantity: z.number().int().nonnegative(),
     total_cost: z.number(),
     date: chicagoInstant(),
     reference: z.string(),
-    stores: z.array(TransactionStoreSchema),
+    uid_session: z.uuid(),
+    allocations: z.array(MovementAllocationInput).min(1),
   }).optional(),
 }).refine(
   (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement != null,
   { message: "price.replacement is required for rental products", path: ["price", "replacement"] },
 ).refine(
-  // Opening-balance scalar quantity must equal Σ per-location transactionQuantity,
-  // or the ledger is born desynced (quantity_held != Σ store_breakdown). Backstop
-  // behind the server-side assertQuantityMatchesLocations guard (#168).
+  // Opening-balance scalar quantity must equal Σ per-location allocation, or the
+  // ledger is born desynced (quantity_held != Σ store_breakdown). Backstop behind
+  // the server-side assertQuantityMatchesLocations guard (#168). Same rule the
+  // movement schema enforces as balance rule 1, applied at the input boundary so
+  // the caller gets a 400 rather than a 500 from validateBeforeWrite.
   (p) =>
     !p.transaction ||
     p.transaction.quantity ===
-      p.transaction.stores.reduce(
-        (sum, s) => sum + s.locations.reduce((acc, l) => acc + (l.transactionQuantity || 0), 0),
-        0,
-      ),
+      p.transaction.allocations.reduce((sum, a) => sum + a.quantity, 0),
   {
-    message: "transaction.quantity must equal the sum of per-location transactionQuantity",
+    message: "transaction.quantity must equal the sum of per-location allocation quantities",
     path: ["transaction", "quantity"],
   },
 );

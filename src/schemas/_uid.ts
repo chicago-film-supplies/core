@@ -13,6 +13,7 @@
  * | `BookingId`      | `{id}:{itemUid}:{id}`                   | `bookings.uid` = `{uid_order}:{item uid}:{uid_destination}` |
  * | `ItemUid`        | `FirestoreId | uuid | custom-{uuid}`    | order/invoice/fulfillment `items[].uid` + `path[]` segments |
  * | `QuoteId`        | `{id}:v{N}` / `{id}:draft`              | `quotes.uid` (saved versions + working draft) |
+ * | `MovementId`     | `{uuid}|{type}|{FirestoreId\|BookingId}` | `transactions.uid` for journal events (see below) |
  *
  * Carve-outs that intentionally stay looser: `ActorRef.uid` (free-form
  * historical actors — see `common.ts`), `DocSource.uid` / `UidNameRef.uid`
@@ -52,17 +53,50 @@ const customItemUid = z.union([
  */
 export const ItemUid: z.ZodType<string> = z.union([firestoreId, z.uuid(), customItemUid]);
 
-/**
- * `bookings.uid` — deterministic composite
- * `{uid_order}:{item uid}:{uid_destination}` (the middle segment is the order
- * item's uid, which for a custom product is `custom-{uuid}`).
- */
-export const BookingId: z.ZodType<string> = z.templateLiteral([
+/** Internal, un-annotated so `MovementId` can embed its pattern. */
+const bookingId = z.templateLiteral([
   firestoreId,
   ":",
   z.union([firestoreId, customItemUid]),
   ":",
   firestoreId,
+]);
+
+/**
+ * `bookings.uid` — deterministic composite
+ * `{uid_order}:{item uid}:{uid_destination}` (the middle segment is the order
+ * item's uid, which for a custom product is `custom-{uuid}`).
+ */
+export const BookingId: z.ZodType<string> = bookingId;
+
+/**
+ * `transactions.uid` for a movement-journal event — the deterministic composite
+ * `{uid_session}|{type}|{subject}`, where the subject is a product id (ownership
+ * events) or a `BookingId` (custody events).
+ *
+ * **The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is
+ * itself `a:b:c`, so a colon-joined id would carry 2 colons for a product
+ * subject and 4 for a booking one — variable arity that no `split(":")` can
+ * disambiguate.
+ *
+ * **The `type` segment is load-bearing too:** one operator action legitimately
+ * produces several event types against one subject ("return 2, mark 1 damaged"
+ * is two picker actions on one booking), so session+subject alone would collide.
+ * It is matched loosely here (`[a-z][a-z_]*`) rather than against
+ * `MOVEMENT_TYPES` — `transaction.ts` imports this module, so the reverse
+ * dependency would be a cycle, and the `type` **field** is the authority
+ * anyway. The id only has to be well-formed and stable.
+ *
+ * This is the sanctioned use of a derived id: it is what makes an append-only
+ * event idempotent under the manager's retry-on-409, exactly as the derived
+ * `bookings` id makes a booking upsert idempotent.
+ */
+export const MovementId: z.ZodType<string> = z.templateLiteral([
+  z.uuid(),
+  "|",
+  z.string().regex(/^[a-z][a-z_]*$/, "Must be a movement type segment"),
+  "|",
+  z.union([firestoreId, bookingId]),
 ]);
 
 /**

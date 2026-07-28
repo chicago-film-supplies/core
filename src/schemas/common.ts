@@ -214,16 +214,24 @@ export interface AddressType {
  * values, no malformed entries) plus `template-components`, which has no stored
  * instance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.
  *
- * `transactions` has no live writer — its 898 instances (identical count in both
- * envs) are historical. It stays in: dropping it would fail those docs on their
- * next update through `validateBeforeWrite`. Never narrow this past stored data;
- * survey first.
+ * `transactions` is now a live-written source: the movement journal links a
+ * reversal to the event it negates, and a component event to its parent, both
+ * through `sources[]`. (It was historical-only when this list was surveyed —
+ * 898 instances, identical count in both envs.) Never narrow this past stored
+ * data; survey first.
+ *
+ * `locations` carries no `sources[]` of its own — it is here because a movement
+ * line's `location.from` / `location.to` is a `DocSource` pointing at wherever
+ * the units physically are: a `locations` doc (on a shelf), a `bookings` doc
+ * (out on a job), or an `out-of-service` record. Widening is safe; the
+ * `DocSource` shape is unchanged.
  */
 export const CFS_SOURCE_COLLECTIONS = [
   "bookings",
   "cards",
   "contacts",
   "invoices",
+  "locations",
   "orders",
   "organizations",
   "out-of-service",

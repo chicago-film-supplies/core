@@ -225,8 +225,8 @@
         {
           "kind": "variable",
           "name": "CFS_SOURCE_COLLECTIONS",
-          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"invoices\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"roles\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
-          "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` has no live writer — its 898 instances (identical count in both\nenvs) are historical. It stays in: dropping it would fail those docs on their\nnext update through `validateBeforeWrite`. Never narrow this past stored data;\nsurvey first."
+          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"roles\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
+          "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` is now a live-written source: the movement journal links a\nreversal to the event it negates, and a component event to its parent, both\nthrough `sources[]`. (It was historical-only when this list was surveyed —\n898 instances, identical count in both envs.) Never narrow this past stored\ndata; survey first.\n\n`locations` carries no `sources[]` of its own — it is here because a movement\nline's `location.from` / `location.to` is a `DocSource` pointing at wherever\nthe units physically are: a `locations` doc (on a shelf), a `bookings` doc\n(out on a job), or an `out-of-service` record. Widening is safe; the\n`DocSource` shape is unchanged."
         },
         {
           "kind": "variable",
@@ -263,6 +263,12 @@
           "name": "COATypeType",
           "declaration": "type COATypeType = indexedAccess;",
           "doc": "Valid chart of accounts type values."
+        },
+        {
+          "kind": "variable",
+          "name": "CUSTODY_PLACE_KINDS",
+          "declaration": "const CUSTODY_PLACE_KINDS: Readonly<Record<BookingBreakdownKeyType, readonly PlaceKindType[]>>;",
+          "doc": "**Location is a total function**: every owned unit is in exactly one kind of\nplace, determined by its custody key. Consumed by the balance checker (rule 2)\nand by every writer, so the mapping exists once.\n\n`out` is the one key whose place depends on the booking: a rental's units sit\nat the booking until they come back, a sale's units left ownership at the\npoint of sale and are nowhere."
         },
         {
           "kind": "interface",
@@ -820,13 +826,13 @@
           "kind": "variable",
           "name": "CreateStoreTransferInput",
           "declaration": "const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType>;",
-          "doc": "Input schema for creating a store-to-store transfer."
+          "doc": "Input schema for a store-to-store transfer.\n\nOne event, not the old `transfer_increase` + `transfer_decrease` pair:\n`location: {from, to}` says what two documents used to. `total_cost` is gone —\na transfer nets to zero on ownership, so it has no cost object to mis-gate,\nwhich is what made #286 possible."
         },
         {
           "kind": "interface",
           "name": "CreateStoreTransferInputType",
-          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  quantity: number;\n  date: string;\n  reference: string;\n  stores_from: InputTransactionStore[];\n  stores_to: InputTransactionStore[];\n  total_cost?: number;\n  serialized_details?: typeLiteral | null;\n}",
-          "doc": "Input type for creating a store-to-store transfer."
+          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  quantity: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  from: MovementAllocationInputType[];\n  to: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "doc": "Input for creating a store-to-store transfer."
         },
         {
           "kind": "variable",
@@ -868,13 +874,13 @@
           "kind": "variable",
           "name": "CreateTransactionInput",
           "declaration": "const CreateTransactionInput: z.ZodType<CreateTransactionInputType>;",
-          "doc": "Input schema for creating a manual transaction."
+          "doc": "Input schema for creating a manual movement.\n\n`uid` is gone: the document id is derived (`{uid_session}|{type}|{subject}`),\nwhich is what makes a retried create idempotent instead of appending a second\nevent. `allocations` is optional — absent means the server allocates."
         },
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid: string;\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost: number;\n  date: string;\n  reference: string;\n  stores: InputTransactionStore[];\n  serialized_details?: typeLiteral | null;\n}",
-          "doc": "Input type for creating a manual transaction."
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "doc": "Input for creating a manual movement."
         },
         {
           "kind": "variable",
@@ -1766,6 +1772,18 @@
         },
         {
           "kind": "variable",
+          "name": "MOVEMENT_CONTRACTS",
+          "declaration": "const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>>;",
+          "doc": "The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member."
+        },
+        {
+          "kind": "variable",
+          "name": "MOVEMENT_TYPES",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"sale\" | \"sale_return\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"transfer\"[];",
+          "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    The movement shape already exists: `lines: []` + a negative `cost`, the\n    same shape a late landed-cost adjustment uses.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
+        },
+        {
+          "kind": "variable",
           "name": "MSG_SCHEMA_REGISTRY",
           "declaration": "const MSG_SCHEMA_REGISTRY: ReadonlyMap<string, z.ZodType>;",
           "doc": "Runtime msg → schema lookup. The structured logger's `emit()` reads\n`record.msg`, looks up the matching schema here, and (if present)\npasses the record through the schema-driven PII walker in\n`@cfs/core/schemas/pii` before stringification.\n\nRecords whose `msg` is NOT in this registry fall through to the\nruntime key-name denylist tier (forward defense). The coverage test\nin api-cloudrun keeps the registry exhaustive over what the source\ntree emits."
@@ -1817,6 +1835,84 @@
           "name": "McpOAuthTokenSchema",
           "declaration": "const McpOAuthTokenSchema: z.ZodType<McpOAuthToken>;",
           "doc": "Zod schema for McpOAuthToken."
+        },
+        {
+          "kind": "interface",
+          "name": "Movement",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  crms_sync: Record<string, typeLiteral>;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A movement-journal event."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementAllocationInput",
+          "declaration": "const MovementAllocationInput: z.ZodType<MovementAllocationInputType>;",
+          "doc": "Zod schema for one requested placement."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementAllocationInputType",
+          "declaration": "interface MovementAllocationInputType {\n  uid_location: string;\n  quantity: number;\n}",
+          "doc": "One requested placement of `quantity` units. Direction-agnostic on purpose:\n{@link MOVEMENT_CONTRACTS} decides whether it lands on `location.from` or\n`location.to`, so the client never has to know which way a type moves."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementContract",
+          "declaration": "interface MovementContract {\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n}",
+          "doc": "How the three axes may be filled for one movement type.\n\nFixing this per type is what makes a missing axis a validation error rather\nthan a silent zero, a stray axis a validation error, and reversal a pure\nnegate-every-line transform. It is `hasCosts(type)` generalized to all three\naxes.\n\n`custody: \"with_booking\"` — required exactly when `uid_booking` is set. Sales\nare the only types that legitimately happen both ways: 247 stored rows are\norder-sourced (a booking's units being sold), and the manual transaction form\nlets an operator key an off-the-shelf sale with no order at all."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementCost",
+          "declaration": "const MovementCost: z.ZodType<MovementCostType>;",
+          "doc": "Zod schema for a cost change."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementCostType",
+          "declaration": "interface MovementCostType {\n  amount: number;\n  unit_cost: number;\n  unit_costs: number[];\n}",
+          "doc": "The carrying-value change this event records. `amount` is signed: negative\nremoves basis, positive adds it. `unit_costs[]` carries the per-unit basis\nactually consumed or added, which the weighted-average cost fold reads."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementCustody",
+          "declaration": "const MovementCustody: z.ZodType<MovementCustodyType>;",
+          "doc": "Zod schema for a custody transition."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementCustodyType",
+          "declaration": "interface MovementCustodyType {\n  from: BookingBreakdownKeyType | null;\n  to: BookingBreakdownKeyType | null;\n}",
+          "doc": "The custody transition this event records, as a pair of breakdown keys.\n\nNamed `custody` and deliberately NOT `status` or `state`: `Booking` already\nhas a `status` field (`draft/quoted/reserved/part-prepped/prepped/active/\ncomplete`) that is a different thing from a breakdown key, and the two enums\nshare several words — `status: {from: \"prepped\"}` would misread as\n`booking.status`.\n\nA side may be `null` for a one-sided transition: an order edit that changes\nthe booking's own quantity moves units into or out of the breakdown without a\nmatching opposite key."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementLine",
+          "declaration": "const MovementLine: z.ZodType<MovementLineType>;",
+          "doc": "Zod schema for one movement line."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementLineType",
+          "declaration": "interface MovementLineType {\n  quantity: number;\n  location: typeLiteral;\n}",
+          "doc": "One physical movement of `quantity` units between two places.\n\nA `null` side means \"outside CFS ownership\". Both sides non-null is a move\nthat leaves `quantity_held` untouched.\n\nNote `lines[]` is NOT directly queryable — Firestore `array-contains` works on\nscalar arrays, not nested object fields. Query paths come from the flat\n`query_by_*` denorms."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementSchema",
+          "declaration": "const MovementSchema: z.ZodType<Movement>;",
+          "doc": "Zod schema for a Movement."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementTypeEnum",
+          "declaration": "const MovementTypeEnum: z.ZodType<MovementTypeType>;",
+          "doc": "Zod schema for MovementTypeType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "MovementTypeType",
+          "declaration": "type MovementTypeType = indexedAccess;",
+          "doc": "Union of all movement type string literals."
         },
         {
           "kind": "variable",
@@ -2203,6 +2299,12 @@
           "doc": "The full catalog of permissions. Adding a new route? Add its permission here first."
         },
         {
+          "kind": "variable",
+          "name": "PLACE_KINDS",
+          "declaration": "const PLACE_KINDS: \"locations\" | \"bookings\" | \"out-of-service\" | \"outside\"[];",
+          "doc": "The kinds of place a unit can be in. `\"outside\"` is the absence of a place —\na `null` side of `location`, meaning outside CFS ownership entirely."
+        },
+        {
           "kind": "interface",
           "name": "PartialNameParts",
           "declaration": "interface PartialNameParts {\n  first_name?: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
@@ -2237,6 +2339,12 @@
           "name": "PiiClassification",
           "declaration": "type PiiClassification = \"none\" | \"mask\" | \"hash\" | \"redact\";",
           "doc": "PII classification vocabulary.\n\nApplied via `.meta({ pii: \"...\" })` on any Zod field; the schema-driven\nwalker in `./walker.ts` reads these tags and dispatches to the matching\nleaf transform.\n\n- `\"none\"`   — safe field, no processing\n- `\"mask\"`   — partial reveal (`alice@x.com` → `a****@x.com`, last-4 for opaque strings)\n- `\"hash\"`   — deterministic HMAC-SHA256 prefix (server-side only; needs a key)\n- `\"redact\"` — full removal → `\"[REDACTED]\"`"
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PlaceKindType",
+          "declaration": "type PlaceKindType = indexedAccess;",
+          "doc": "One kind of place a unit can occupy."
         },
         {
           "kind": "interface",
@@ -2605,6 +2713,18 @@
           "doc": "Input for restoring a soft-deleted quote."
         },
         {
+          "kind": "variable",
+          "name": "ReverseTransactionInput",
+          "declaration": "const ReverseTransactionInput: z.ZodType<ReverseTransactionInputType>;",
+          "doc": "Input schema for reversing a movement. The reversal negates every line of the\nevent it names; nothing else is client-supplied, so a reversal cannot silently\ndisagree with what it reverses."
+        },
+        {
+          "kind": "interface",
+          "name": "ReverseTransactionInputType",
+          "declaration": "interface ReverseTransactionInputType {\n  uid_session: string;\n  reference: string;\n  date?: string;\n}",
+          "doc": "Input for reversing a movement."
+        },
+        {
           "kind": "interface",
           "name": "Role",
           "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  defaultThreadId?: string;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -2823,8 +2943,8 @@
         {
           "kind": "variable",
           "name": "TRANSACTION_TYPES",
-          "declaration": "const TRANSACTION_TYPES: \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"sale\" | \"write_off\" | \"trade_in\" | \"adjustment_decrease\" | \"transfer_increase\" | \"transfer_decrease\" | \"acquisition\" | \"disposal\" | \"partial_disposal\" | \"depreciation_tax\" | \"depreciation_gaap\"[];",
-          "doc": "All possible transaction type identifiers."
+          "declaration": "const TRANSACTION_TYPES: unknown;",
+          "doc": ""
         },
         {
           "kind": "interface",
@@ -3091,10 +3211,10 @@
           "doc": ""
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "Transaction",
-          "declaration": "interface Transaction {\n  uid: string;\n  uid_product: string;\n  type: TransactionTypeType;\n  quantity: number;\n  total_cost: number;\n  unit_cost: number;\n  unit_costs: number[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  source: TransactionSource;\n  stores: TransactionStore[];\n  query_by_uid_store: string[];\n  serialized_details: typeLiteral | null;\n  crms_sync: Record<string, typeLiteral>;\n  defaultThreadId?: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
-          "doc": "A transaction document representing an inventory movement or financial event."
+          "declaration": "type Transaction = Movement;",
+          "doc": ""
         },
         {
           "kind": "typeAlias",
@@ -3123,14 +3243,8 @@
         {
           "kind": "variable",
           "name": "TransactionSchema",
-          "declaration": "const TransactionSchema: z.ZodType<Transaction>;",
-          "doc": "Zod schema for Transaction."
-        },
-        {
-          "kind": "interface",
-          "name": "TransactionSource",
-          "declaration": "interface TransactionSource {\n  type: TransactionSourceTypeType;\n  number: string | number | null;\n  uid: string | null;\n}",
-          "doc": "The origin source of a transaction (manual, order, or internal)."
+          "declaration": "const TransactionSchema: z.ZodType<Movement>;",
+          "doc": ""
         },
         {
           "kind": "typeAlias",
@@ -3139,34 +3253,10 @@
           "doc": "Status outcome of a Firestore transaction commit."
         },
         {
-          "kind": "interface",
-          "name": "TransactionStore",
-          "declaration": "interface TransactionStore {\n  uid_store: string;\n  name: string;\n  default: boolean;\n  quantity: number;\n  locations: TransactionStoreLocation[];\n}",
-          "doc": "A store affected by a transaction, including its locations."
-        },
-        {
-          "kind": "interface",
-          "name": "TransactionStoreLocation",
-          "declaration": "interface TransactionStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  transactionQuantity: number;\n  default: boolean;\n  max: number | null;\n}",
-          "doc": "A location within a store affected by a transaction."
-        },
-        {
-          "kind": "variable",
-          "name": "TransactionStoreLocationSchema",
-          "declaration": "const TransactionStoreLocationSchema: z.ZodType<TransactionStoreLocation>;",
-          "doc": "Zod schema for TransactionStoreLocation."
-        },
-        {
-          "kind": "variable",
-          "name": "TransactionStoreSchema",
-          "declaration": "const TransactionStoreSchema: z.ZodType<TransactionStore>;",
-          "doc": "Zod schema for TransactionStore."
-        },
-        {
           "kind": "typeAlias",
           "name": "TransactionTypeType",
-          "declaration": "type TransactionTypeType = indexedAccess;",
-          "doc": "Union of all transaction type string literals."
+          "declaration": "type TransactionTypeType = MovementTypeType;",
+          "doc": ""
         },
         {
           "kind": "typeAlias",
@@ -3416,18 +3506,6 @@
         },
         {
           "kind": "variable",
-          "name": "UpdateStoreTransferInput",
-          "declaration": "const UpdateStoreTransferInput: z.ZodType<UpdateStoreTransferInputType>;",
-          "doc": "Input schema for updating a store-to-store transfer."
-        },
-        {
-          "kind": "interface",
-          "name": "UpdateStoreTransferInputType",
-          "declaration": "interface UpdateStoreTransferInputType {\n  uid_product: string;\n  transfer_number: number;\n  quantity: number;\n  date: string;\n  reference: string;\n  stores_from: InputTransactionStore[];\n  stores_to: InputTransactionStore[];\n  total_cost?: number;\n  serialized_details?: typeLiteral | null;\n  version: number;\n}",
-          "doc": "Input type for updating a store-to-store transfer."
-        },
-        {
-          "kind": "variable",
           "name": "UpdateTagInput",
           "declaration": "const UpdateTagInput: z.ZodType<UpdateTagInputType>;",
           "doc": "Input schema for updating a tag."
@@ -3490,13 +3568,13 @@
           "kind": "variable",
           "name": "UpdateTransactionInput",
           "declaration": "const UpdateTransactionInput: z.ZodType<UpdateTransactionInputType>;",
-          "doc": "Input schema for updating a manual transaction."
+          "doc": "Input schema for editing a movement's descriptive fields."
         },
         {
           "kind": "interface",
           "name": "UpdateTransactionInputType",
-          "declaration": "interface UpdateTransactionInputType {\n  uid: string;\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost: number;\n  date: string;\n  reference: string;\n  stores: InputTransactionStore[];\n  serialized_details?: typeLiteral | null;\n  version: number;\n}",
-          "doc": "Input type for updating a manual transaction."
+          "declaration": "interface UpdateTransactionInputType {\n  reference: string;\n  version: number;\n}",
+          "doc": "Input for editing a movement's descriptive fields.\n\n**Balance-affecting fields are absent by design.** Quantity, type, cost,\nplacement and date change through a reversal plus a corrected event, not an\nin-place edit — that is what makes the collection a journal rather than a\nmutable table. Only `reference` still edits in place."
         },
         {
           "kind": "variable",
@@ -3926,8 +4004,8 @@
         {
           "kind": "function",
           "name": "getDisplayTransactionTypes",
-          "signature": "getDisplayTransactionTypes(increaseOnly?: boolean): TransactionTypeType[]",
-          "doc": "Returns transaction types suitable for UI display in manual transaction forms.\nExcludes financial-only types (acquisition, disposal, depreciation) and transfers.\nWhen `increaseOnly` is true, returns only types that increase inventory\n(for first transactions / opening balance scenarios).",
+          "signature": "getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[]",
+          "doc": "Movement types suitable for the manual transaction form. Excludes the\nbooking-scoped fulfillment events (the picker writes those, never a form) and\n`transfer` (which has its own transfer UI). When `increaseOnly` is true,\nreturns only types that add stock — for the first transaction on a product.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -3966,8 +4044,8 @@
         {
           "kind": "function",
           "name": "getTransactionMultiplier",
-          "signature": "getTransactionMultiplier(type: TransactionTypeType): 1 | -1",
-          "doc": "Returns +1 for increase types, -1 for decrease types.\nThrows for financial-only types (acquisition, disposal, depreciation).",
+          "signature": "getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0",
+          "doc": "Returns +1 for movements that increase owned quantity, -1 for those that\ndecrease it, and 0 for those that leave it untouched (a `transfer`, a\ncustody-only fulfillment step, a cost-only adjustment).\n\n**Total** — it cannot throw. The financial-only types that used to make it\npartial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it\ncannot drift from it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -3982,8 +4060,8 @@
         {
           "kind": "function",
           "name": "hasCosts",
-          "signature": "hasCosts(type: TransactionTypeType): boolean",
-          "doc": "Determines if a transaction type should track costs (total_cost / unit_cost).\nReturns false for transfers and financial-only types.",
+          "signature": "hasCosts(type: MovementTypeType): boolean",
+          "doc": "Whether a movement type carries a cost object. Derived from the contract.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -4380,8 +4458,8 @@
         {
           "kind": "variable",
           "name": "CFS_SOURCE_COLLECTIONS",
-          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"invoices\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"roles\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
-          "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` has no live writer — its 898 instances (identical count in both\nenvs) are historical. It stays in: dropping it would fail those docs on their\nnext update through `validateBeforeWrite`. Never narrow this past stored data;\nsurvey first."
+          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"roles\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
+          "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` is now a live-written source: the movement journal links a\nreversal to the event it negates, and a component event to its parent, both\nthrough `sources[]`. (It was historical-only when this list was surveyed —\n898 instances, identical count in both envs.) Never narrow this past stored\ndata; survey first.\n\n`locations` carries no `sources[]` of its own — it is here because a movement\nline's `location.from` / `location.to` is a `DocSource` pointing at wherever\nthe units physically are: a `locations` doc (on a shelf), a `bookings` doc\n(out on a job), or an `out-of-service` record. Widening is safe; the\n`DocSource` shape is unchanged."
         },
         {
           "kind": "variable",
@@ -6697,131 +6775,209 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/transaction",
-      "moduleDoc": "",
+      "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Three axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — the seven keys      |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — a `prep`, where reserved and\nprepped units sit on the same shelf, or a cost-only adjustment.",
       "symbols": [
+        {
+          "kind": "variable",
+          "name": "CUSTODY_PLACE_KINDS",
+          "declaration": "const CUSTODY_PLACE_KINDS: Readonly<Record<BookingBreakdownKeyType, readonly PlaceKindType[]>>;",
+          "doc": "**Location is a total function**: every owned unit is in exactly one kind of\nplace, determined by its custody key. Consumed by the balance checker (rule 2)\nand by every writer, so the mapping exists once.\n\n`out` is the one key whose place depends on the booking: a rental's units sit\nat the booking until they come back, a sale's units left ownership at the\npoint of sale and are nowhere."
+        },
         {
           "kind": "variable",
           "name": "CreateStoreTransferInput",
           "declaration": "const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType>;",
-          "doc": "Input schema for creating a store-to-store transfer."
+          "doc": "Input schema for a store-to-store transfer.\n\nOne event, not the old `transfer_increase` + `transfer_decrease` pair:\n`location: {from, to}` says what two documents used to. `total_cost` is gone —\na transfer nets to zero on ownership, so it has no cost object to mis-gate,\nwhich is what made #286 possible."
         },
         {
           "kind": "interface",
           "name": "CreateStoreTransferInputType",
-          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  quantity: number;\n  date: string;\n  reference: string;\n  stores_from: InputTransactionStore[];\n  stores_to: InputTransactionStore[];\n  total_cost?: number;\n  serialized_details?: typeLiteral | null;\n}",
-          "doc": "Input type for creating a store-to-store transfer."
+          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  quantity: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  from: MovementAllocationInputType[];\n  to: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "doc": "Input for creating a store-to-store transfer."
         },
         {
           "kind": "variable",
           "name": "CreateTransactionInput",
           "declaration": "const CreateTransactionInput: z.ZodType<CreateTransactionInputType>;",
-          "doc": "Input schema for creating a manual transaction."
+          "doc": "Input schema for creating a manual movement.\n\n`uid` is gone: the document id is derived (`{uid_session}|{type}|{subject}`),\nwhich is what makes a retried create idempotent instead of appending a second\nevent. `allocations` is optional — absent means the server allocates."
         },
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid: string;\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost: number;\n  date: string;\n  reference: string;\n  stores: InputTransactionStore[];\n  serialized_details?: typeLiteral | null;\n}",
-          "doc": "Input type for creating a manual transaction."
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "doc": "Input for creating a manual movement."
+        },
+        {
+          "kind": "variable",
+          "name": "MOVEMENT_CONTRACTS",
+          "declaration": "const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>>;",
+          "doc": "The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member."
+        },
+        {
+          "kind": "variable",
+          "name": "MOVEMENT_TYPES",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"sale\" | \"sale_return\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"transfer\"[];",
+          "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    The movement shape already exists: `lines: []` + a negative `cost`, the\n    same shape a late landed-cost adjustment uses.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
+        },
+        {
+          "kind": "interface",
+          "name": "Movement",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  crms_sync: Record<string, typeLiteral>;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A movement-journal event."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementAllocationInput",
+          "declaration": "const MovementAllocationInput: z.ZodType<MovementAllocationInputType>;",
+          "doc": "Zod schema for one requested placement."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementAllocationInputType",
+          "declaration": "interface MovementAllocationInputType {\n  uid_location: string;\n  quantity: number;\n}",
+          "doc": "One requested placement of `quantity` units. Direction-agnostic on purpose:\n{@link MOVEMENT_CONTRACTS} decides whether it lands on `location.from` or\n`location.to`, so the client never has to know which way a type moves."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementContract",
+          "declaration": "interface MovementContract {\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n}",
+          "doc": "How the three axes may be filled for one movement type.\n\nFixing this per type is what makes a missing axis a validation error rather\nthan a silent zero, a stray axis a validation error, and reversal a pure\nnegate-every-line transform. It is `hasCosts(type)` generalized to all three\naxes.\n\n`custody: \"with_booking\"` — required exactly when `uid_booking` is set. Sales\nare the only types that legitimately happen both ways: 247 stored rows are\norder-sourced (a booking's units being sold), and the manual transaction form\nlets an operator key an off-the-shelf sale with no order at all."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementCost",
+          "declaration": "const MovementCost: z.ZodType<MovementCostType>;",
+          "doc": "Zod schema for a cost change."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementCostType",
+          "declaration": "interface MovementCostType {\n  amount: number;\n  unit_cost: number;\n  unit_costs: number[];\n}",
+          "doc": "The carrying-value change this event records. `amount` is signed: negative\nremoves basis, positive adds it. `unit_costs[]` carries the per-unit basis\nactually consumed or added, which the weighted-average cost fold reads."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementCustody",
+          "declaration": "const MovementCustody: z.ZodType<MovementCustodyType>;",
+          "doc": "Zod schema for a custody transition."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementCustodyType",
+          "declaration": "interface MovementCustodyType {\n  from: BookingBreakdownKeyType | null;\n  to: BookingBreakdownKeyType | null;\n}",
+          "doc": "The custody transition this event records, as a pair of breakdown keys.\n\nNamed `custody` and deliberately NOT `status` or `state`: `Booking` already\nhas a `status` field (`draft/quoted/reserved/part-prepped/prepped/active/\ncomplete`) that is a different thing from a breakdown key, and the two enums\nshare several words — `status: {from: \"prepped\"}` would misread as\n`booking.status`.\n\nA side may be `null` for a one-sided transition: an order edit that changes\nthe booking's own quantity moves units into or out of the breakdown without a\nmatching opposite key."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementLine",
+          "declaration": "const MovementLine: z.ZodType<MovementLineType>;",
+          "doc": "Zod schema for one movement line."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementLineType",
+          "declaration": "interface MovementLineType {\n  quantity: number;\n  location: typeLiteral;\n}",
+          "doc": "One physical movement of `quantity` units between two places.\n\nA `null` side means \"outside CFS ownership\". Both sides non-null is a move\nthat leaves `quantity_held` untouched.\n\nNote `lines[]` is NOT directly queryable — Firestore `array-contains` works on\nscalar arrays, not nested object fields. Query paths come from the flat\n`query_by_*` denorms."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementSchema",
+          "declaration": "const MovementSchema: z.ZodType<Movement>;",
+          "doc": "Zod schema for a Movement."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementTypeEnum",
+          "declaration": "const MovementTypeEnum: z.ZodType<MovementTypeType>;",
+          "doc": "Zod schema for MovementTypeType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "MovementTypeType",
+          "declaration": "type MovementTypeType = indexedAccess;",
+          "doc": "Union of all movement type string literals."
+        },
+        {
+          "kind": "variable",
+          "name": "PLACE_KINDS",
+          "declaration": "const PLACE_KINDS: \"locations\" | \"bookings\" | \"out-of-service\" | \"outside\"[];",
+          "doc": "The kinds of place a unit can be in. `\"outside\"` is the absence of a place —\na `null` side of `location`, meaning outside CFS ownership entirely."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PlaceKindType",
+          "declaration": "type PlaceKindType = indexedAccess;",
+          "doc": "One kind of place a unit can occupy."
+        },
+        {
+          "kind": "variable",
+          "name": "ReverseTransactionInput",
+          "declaration": "const ReverseTransactionInput: z.ZodType<ReverseTransactionInputType>;",
+          "doc": "Input schema for reversing a movement. The reversal negates every line of the\nevent it names; nothing else is client-supplied, so a reversal cannot silently\ndisagree with what it reverses."
+        },
+        {
+          "kind": "interface",
+          "name": "ReverseTransactionInputType",
+          "declaration": "interface ReverseTransactionInputType {\n  uid_session: string;\n  reference: string;\n  date?: string;\n}",
+          "doc": "Input for reversing a movement."
         },
         {
           "kind": "variable",
           "name": "TRANSACTION_TYPES",
-          "declaration": "const TRANSACTION_TYPES: \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"sale\" | \"write_off\" | \"trade_in\" | \"adjustment_decrease\" | \"transfer_increase\" | \"transfer_decrease\" | \"acquisition\" | \"disposal\" | \"partial_disposal\" | \"depreciation_tax\" | \"depreciation_gaap\"[];",
-          "doc": "All possible transaction type identifiers."
+          "declaration": "const TRANSACTION_TYPES: unknown;",
+          "doc": ""
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "Transaction",
-          "declaration": "interface Transaction {\n  uid: string;\n  uid_product: string;\n  type: TransactionTypeType;\n  quantity: number;\n  total_cost: number;\n  unit_cost: number;\n  unit_costs: number[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  source: TransactionSource;\n  stores: TransactionStore[];\n  query_by_uid_store: string[];\n  serialized_details: typeLiteral | null;\n  crms_sync: Record<string, typeLiteral>;\n  defaultThreadId?: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
-          "doc": "A transaction document representing an inventory movement or financial event."
+          "declaration": "type Transaction = Movement;",
+          "doc": ""
         },
         {
           "kind": "variable",
           "name": "TransactionSchema",
-          "declaration": "const TransactionSchema: z.ZodType<Transaction>;",
-          "doc": "Zod schema for Transaction."
-        },
-        {
-          "kind": "interface",
-          "name": "TransactionSource",
-          "declaration": "interface TransactionSource {\n  type: TransactionSourceTypeType;\n  number: string | number | null;\n  uid: string | null;\n}",
-          "doc": "The origin source of a transaction (manual, order, or internal)."
-        },
-        {
-          "kind": "interface",
-          "name": "TransactionStore",
-          "declaration": "interface TransactionStore {\n  uid_store: string;\n  name: string;\n  default: boolean;\n  quantity: number;\n  locations: TransactionStoreLocation[];\n}",
-          "doc": "A store affected by a transaction, including its locations."
-        },
-        {
-          "kind": "interface",
-          "name": "TransactionStoreLocation",
-          "declaration": "interface TransactionStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  transactionQuantity: number;\n  default: boolean;\n  max: number | null;\n}",
-          "doc": "A location within a store affected by a transaction."
-        },
-        {
-          "kind": "variable",
-          "name": "TransactionStoreLocationSchema",
-          "declaration": "const TransactionStoreLocationSchema: z.ZodType<TransactionStoreLocation>;",
-          "doc": "Zod schema for TransactionStoreLocation."
-        },
-        {
-          "kind": "variable",
-          "name": "TransactionStoreSchema",
-          "declaration": "const TransactionStoreSchema: z.ZodType<TransactionStore>;",
-          "doc": "Zod schema for TransactionStore."
+          "declaration": "const TransactionSchema: z.ZodType<Movement>;",
+          "doc": ""
         },
         {
           "kind": "typeAlias",
           "name": "TransactionTypeType",
-          "declaration": "type TransactionTypeType = indexedAccess;",
-          "doc": "Union of all transaction type string literals."
-        },
-        {
-          "kind": "variable",
-          "name": "UpdateStoreTransferInput",
-          "declaration": "const UpdateStoreTransferInput: z.ZodType<UpdateStoreTransferInputType>;",
-          "doc": "Input schema for updating a store-to-store transfer."
-        },
-        {
-          "kind": "interface",
-          "name": "UpdateStoreTransferInputType",
-          "declaration": "interface UpdateStoreTransferInputType {\n  uid_product: string;\n  transfer_number: number;\n  quantity: number;\n  date: string;\n  reference: string;\n  stores_from: InputTransactionStore[];\n  stores_to: InputTransactionStore[];\n  total_cost?: number;\n  serialized_details?: typeLiteral | null;\n  version: number;\n}",
-          "doc": "Input type for updating a store-to-store transfer."
+          "declaration": "type TransactionTypeType = MovementTypeType;",
+          "doc": ""
         },
         {
           "kind": "variable",
           "name": "UpdateTransactionInput",
           "declaration": "const UpdateTransactionInput: z.ZodType<UpdateTransactionInputType>;",
-          "doc": "Input schema for updating a manual transaction."
+          "doc": "Input schema for editing a movement's descriptive fields."
         },
         {
           "kind": "interface",
           "name": "UpdateTransactionInputType",
-          "declaration": "interface UpdateTransactionInputType {\n  uid: string;\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost: number;\n  date: string;\n  reference: string;\n  stores: InputTransactionStore[];\n  serialized_details?: typeLiteral | null;\n  version: number;\n}",
-          "doc": "Input type for updating a manual transaction."
+          "declaration": "interface UpdateTransactionInputType {\n  reference: string;\n  version: number;\n}",
+          "doc": "Input for editing a movement's descriptive fields.\n\n**Balance-affecting fields are absent by design.** Quantity, type, cost,\nplacement and date change through a reversal plus a corrected event, not an\nin-place edit — that is what makes the collection a journal rather than a\nmutable table. Only `reference` still edits in place."
         },
         {
           "kind": "function",
           "name": "getDisplayTransactionTypes",
-          "signature": "getDisplayTransactionTypes(increaseOnly?: boolean): TransactionTypeType[]",
-          "doc": "Returns transaction types suitable for UI display in manual transaction forms.\nExcludes financial-only types (acquisition, disposal, depreciation) and transfers.\nWhen `increaseOnly` is true, returns only types that increase inventory\n(for first transactions / opening balance scenarios).",
+          "signature": "getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[]",
+          "doc": "Movement types suitable for the manual transaction form. Excludes the\nbooking-scoped fulfillment events (the picker writes those, never a form) and\n`transfer` (which has its own transfer UI). When `increaseOnly` is true,\nreturns only types that add stock — for the first transaction on a product.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "getTransactionMultiplier",
-          "signature": "getTransactionMultiplier(type: TransactionTypeType): 1 | -1",
-          "doc": "Returns +1 for increase types, -1 for decrease types.\nThrows for financial-only types (acquisition, disposal, depreciation).",
+          "signature": "getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0",
+          "doc": "Returns +1 for movements that increase owned quantity, -1 for those that\ndecrease it, and 0 for those that leave it untouched (a `transfer`, a\ncustody-only fulfillment step, a cost-only adjustment).\n\n**Total** — it cannot throw. The financial-only types that used to make it\npartial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it\ncannot drift from it.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "hasCosts",
-          "signature": "hasCosts(type: TransactionTypeType): boolean",
-          "doc": "Determines if a transaction type should track costs (total_cost / unit_cost).\nReturns false for transfers and financial-only types.",
+          "signature": "hasCosts(type: MovementTypeType): boolean",
+          "doc": "Whether a movement type carries a cost object. Derived from the contract.",
           "paramTags": [],
           "returnsTag": null
         }
