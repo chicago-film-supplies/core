@@ -25,6 +25,8 @@ import { BOOKING_BREAKDOWN_KEYS } from "../src/schemas/booking.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const SESSION = "0199a1f2-3b4c-7d8e-9f01-234567890abc";
+/** A reversal is a NEW session against the SAME subject — that is the whole id difference. */
+const REVERSAL_SESSION = "0199a1f2-3b4c-7d8e-9f01-234567890abd";
 const PRODUCT = "testprod100000000000";
 const BOOKING = "testordr100000000000:testitem10000000000x:testdest100000000000";
 const LOC_A = "testloc1000000000000";
@@ -112,6 +114,45 @@ Deno.test("MovementSchema accepts a well-formed event of every type", () => {
       `${type} should parse: ${result.success ? "" : JSON.stringify(result.error.issues)}`,
     );
   }
+});
+
+Deno.test("the reversal of every type is writable — its contract is mirrored", () => {
+  // A reversal keeps the original's type and negates its lines, so a reversed
+  // `sale` runs outside→locations against a table that says locations→outside.
+  // Without the mirror, EVERY reversal of a one-directional type is unwritable
+  // and the journal has no correction path at all.
+  for (const type of MOVEMENT_TYPES) {
+    const forward = movement(type);
+    const reversal = movement(type, {
+      uid: `${REVERSAL_SESSION}|${type}|${forward.uid_booking ?? PRODUCT}`,
+      uid_session: REVERSAL_SESSION,
+      reverses: forward.uid,
+      lines: (forward.lines as Array<{ quantity: number; location: { from: unknown; to: unknown } }>)
+        .map((l) => ({ quantity: l.quantity, location: { from: l.location.to, to: l.location.from } })),
+      custody: forward.custody
+        ? { from: (forward.custody as { to: unknown }).to, to: (forward.custody as { from: unknown }).from }
+        : null,
+    });
+    const result = MovementSchema.safeParse(reversal);
+    assertEquals(
+      result.success,
+      true,
+      `reversing ${type} should parse: ${result.success ? "" : JSON.stringify(result.error.issues)}`,
+    );
+  }
+});
+
+Deno.test("a reversal still may not name the WRONG KIND of place", () => {
+  // Mirroring is not an exemption. A reversed purchase moves locations→outside;
+  // a line claiming it moves out of a BOOKING is still a contract violation.
+  const forward = movement("purchase");
+  const bogus = movement("purchase", {
+    uid: `${REVERSAL_SESSION}|purchase|${PRODUCT}`,
+    uid_session: REVERSAL_SESSION,
+    reverses: forward.uid,
+    lines: [{ quantity: 2, location: { from: atBooking, to: null } }],
+  });
+  assertEquals(MovementSchema.safeParse(bogus).success, false);
 });
 
 Deno.test("MovementSchema rejects an unknown type", () => {

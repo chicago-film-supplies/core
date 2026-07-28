@@ -499,10 +499,23 @@ function isPlace(source: DocSourceType | null): boolean {
  *
  * The old "custody lines sum to Δquantity" and "Σ placement == Σ held" rules are
  * gone: with `from`/`to` on one line, an unbalanced move cannot be written.
+ *
+ * **A reversal's placement contract is its type's, MIRRORED.** A reversal keeps
+ * the original's type and negates its lines, so a reversed `sale` runs
+ * `outside → locations` against a table that says `locations → outside`. Without
+ * the mirror the contract rejects it, and every reversal of a one-directional
+ * type — sale, purchase, write_off, check_out, … — is unwritable. Mirroring here
+ * rather than exempting reversals keeps the check real: a reversal must still
+ * name places of the RIGHT KIND, just in the opposite order. (`custody` needs no
+ * mirror: the writer swaps its two ends, so rule 3 lines up side-for-side.)
  */
 function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
-  const contract = MOVEMENT_CONTRACTS[m.type];
-  if (!contract) return;
+  const base = MOVEMENT_CONTRACTS[m.type];
+  if (!base) return;
+  const contract: MovementContract = m.reverses === null || base.places === null ? base : {
+    ...base,
+    places: { from: base.places.to, to: base.places.from },
+  };
 
   // ── booking subject ──
   if (contract.booking === "required" && m.uid_booking === null) {
