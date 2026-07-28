@@ -60,6 +60,8 @@
     "./utils/dates": "./src/utils/dates.ts",
     "./utils/invoices": "./src/utils/invoices.ts",
     "./utils/locations": "./src/utils/locations.ts",
+    "./utils/allocation": "./src/utils/allocation.ts",
+    "./utils/movements": "./src/utils/movements.ts",
     "./utils/orders": "./src/utils/orders.ts",
     "./utils/products": "./src/utils/products.ts",
     "./utils/taxes": "./src/utils/taxes.ts",

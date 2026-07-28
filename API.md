@@ -17455,6 +17455,199 @@ Firestore console and in "name already exists" error messages.
 
 Persisted on `Location.name_key`.
 
+## `@cfs/core/utils/allocation`
+
+### `ReservedByLocation`
+
+Per-location reserved quantity (uid_location → units already claimed).
+
+```ts
+type ReservedByLocation = Map<string, number>;
+```
+
+### `ReservingBooking`
+
+A stock-holding booking with its window, for in-memory overlap netting.
+
+```ts
+interface ReservingBooking {
+  breakdown: BookingBreakdown;
+  stores: BookingStore[];
+  startMs: number | null;
+  endMs: number | null;
+}
+```
+
+### `addAllocationToReserved(reserved: ReservedByLocation, stores: BookingStore[]): void`
+
+Fold a freshly-computed allocation into a running reserved map (in-batch netting).
+
+### `allocateBookingNetted(storeBreakdown: StoreBreakdownEntry[], quantity: number, reserved: ReservedByLocation): ReturnType<allocateBookingToStores>`
+
+Booking allocation that first nets out units already reserved by other open
+bookings, so two overlapping bookings of a 5-stock product don't both point
+pickers at the same physical unit (#171). When free stock runs out,
+`shortage > 0` and the summary's `quantity_available` goes negative —
+overbooking is allowed, it's just no longer silent. Falls back to the gross
+allocation when `reserved` is empty.
+
+### `allocateBookingToStores(ledgerStoreBreakdown: StoreBreakdownEntry[], bookingQuantity: number): typeLiteral`
+
+Allocates booking quantity across all available stores.
+Follows priority: default store first, then others alphabetically.
+Draws from default locations first within each store.
+
+**Parameters**
+
+- `ledgerStoreBreakdown` — Store breakdown array from inventory ledger
+- `bookingQuantity` — Total quantity to allocate
+
+**Returns** — stores array, query_by_uid_store array, query_by_uid_location array, and shortage count
+
+### `allocateBookingWithNetting(storeBreakdown: StoreBreakdownEntry[], quantity: number, reserving: ReservingBooking[], windowStartMs: number | null, windowEndMs: number | null, inBatchReserved: ReservedByLocation): ReturnType<allocateBookingToStores>`
+
+Allocate one booking's stores, netting against (a) pre-fetched bookings of the
+same product that overlap this booking's window and (b) `inBatchReserved` —
+allocations already made earlier in THIS transaction for the same product. The
+allocation is folded back into `inBatchReserved` so the next booking for the
+same product nets against it too. Pure (no I/O).
+
+### `buildReservedByLocation(bookings: ReadonlyArray<typeLiteral>): ReservedByLocation`
+
+Sum the physical units held by a set of bookings, per location. Only bookings
+that currently hold stock (`reserved + prepped + out > 0`, the same definition
+as `quantity_booked`) contribute — a returned/quoted booking reserves nothing
+even if a stale `stores` array lingers.
+
+## `@cfs/core/utils/movements`
+
+Pure helpers over the movement journal — the fold from an event's lines onto
+an inventory ledger, the reversal transform, and the placement helpers that
+turn a contract plus an allocation into lines.
+
+```ts
+import { applyMovementToLedger, negateLines } from "@cfs/core/utils/movements";
+```
+
+Db-free and side-effect-free, so the same fold runs server-side inside a
+Firestore transaction and in a test over a plain object. Document refs,
+throws and logging stay in api-cloudrun; this module only computes.
+
+The contract tables themselves (`MOVEMENT_CONTRACTS`, `CUSTODY_PLACE_KINDS`)
+live in `schemas/transaction.ts`, not here — the document schema validates
+against them, and schema modules cannot import utils.
+
+### `LedgerFoldResult`
+
+What a movement did to a ledger, and the cost it actually consumed.
+
+```ts
+interface LedgerFoldResult {
+  ledger: InventoryLedger;
+  costApplied: number;
+  unitCost: number;
+}
+```
+
+### `LocationPlacement`
+
+Where a `locations`-kind DocSource sits, resolved by the caller.
+
+```ts
+interface LocationPlacement {
+  uid_store: string;
+  store_name: string;
+  name: string;
+  default: boolean;
+  max: number | null;
+}
+```
+
+### `allocationSide(type: MovementTypeType): "from" | "to" | "both" | null`
+
+Which side of a line an operator-supplied allocation lands on, per the type's
+contract. `check_out` is location→booking so an allocation names the source;
+`check_in` is booking→location so it names the destination.
+
+Returning the side rather than letting callers decide is the point: the client
+sends a direction-agnostic `[{uid_location, quantity}]` and never has to know
+which way a type moves.
+
+### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess): LedgerFoldResult`
+
+Fold one movement onto a ledger, returning a NEW ledger.
+
+Purely a function of `(ledger, movement, placements)`: no Firestore, no clock,
+no mutation of either input. `now` is injected rather than read so the same
+write instant can be shared across a multi-document transaction.
+
+`placements` resolves each `locations`-kind line endpoint to the store that
+owns it. The caller must have already asserted that ownership (#307) — this
+fold trusts the map, because the read that proves it is what stops a future
+writer from skipping the check.
+
+## Cost
+
+Increases add the caller-supplied acquisition cost. Cost-bearing decreases
+remove the weighted-average share of the basis captured BEFORE the quantity
+changes — never the caller's number, which is revenue or an estimate and let
+the basis drift from quantity and even go negative.
+
+A type whose contract forbids cost never touches the basis at all. That is
+what makes #286 (a costed transfer corrupting the basis) structurally
+impossible rather than gated: a transfer has no cost object to mis-gate.
+
+### `applyOutOfServiceReason(breakdown: indexedAccess, reason: keyof indexedAccess, delta: number): indexedAccess`
+
+Apply an OOS record's reason to the per-reason breakdown. Split from
+`deriveServiceQuantities` because the reason lives on the OOS document, which
+only the caller can read.
+
+### `costOfUnits(basisCents: bigint, heldUnits: number, quantity: number): bigint`
+
+The carrying value of `quantity` units drawn from a basis of `basisCents`
+spread over `heldUnits`, rounded once at the end.
+
+**`× quantity ÷ held`, never `× (basis / held)`.** Deriving a per-unit average
+first and multiplying by it quantizes the average before it is scaled, so the
+error rides into the money — the operation-order trap, not a precision one.
+The previous ledger fold did exactly that: it read the stored
+`average_unit_cost` (already quantized) and multiplied. Here the division
+happens last, on exact integer cents.
+
+### `deriveServiceQuantities(ledger: InventoryLedger, lines: readonly MovementLineType[]): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service">`
+
+`quantity_in_service` and `quantity_out_of_service` from placement kind.
+
+These moved in exact lockstep with `quantity_held` before the journal — so
+`in_service` always equalled `held` — while `out_of_service` was written once
+as zero at ledger creation and never moved again, meaning the ledger reported
+every product as 100% in service. Under the line model they are derived:
+units at a `locations` doc or a `booking` are in service, units at an
+`out-of-service` record are not.
+
+`out_of_service_breakdown` needs the OOS record's `reason`, which this module
+cannot read, so the caller supplies it — see `applyOutOfServiceReason`.
+
+### `heldDelta(line: MovementLineType): number`
+
+A line's contribution to `quantity_held`: `+q` if it lands somewhere, `−q` if
+it leaves from somewhere, and `0` when it does both.
+
+Conservation is structural — no cross-line summation, and a half-move is
+inexpressible because a line with two nulls does not validate.
+
+### `movementHeldDelta(lines: readonly MovementLineType[]): number`
+
+A movement's total effect on `quantity_held`.
+
+### `negateLines(lines: readonly MovementLineType[]): MovementLineType[]`
+
+Swap every line's `from` and `to`. This is the whole of a reversal: because a
+line carries both sides, negating it needs no knowledge of the movement type,
+and the per-kind contract makes the result either valid or rejected rather
+than silently lopsided.
+
 ## `@cfs/core/utils/orders`
 
 Shared order utility functions for CFS applications.

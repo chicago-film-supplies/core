@@ -21,6 +21,9 @@ export interface TemplateHelperEntry {
  * in `./template-context.ts`.
  */
 export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
+  "allocation": [
+
+  ],
   "availability": [
 
   ],
@@ -71,6 +74,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "locations": [
     { name: "normalizeLocationName", expr: "it.locations.normalizeLocationName(name)", desc: "Canonical uniqueness key for a location name, scoped within its store.", returns: "string" },
+  ],
+  "movements": [
+
   ],
   "orders": [
     { name: "buildPackingList", expr: "it.orders.buildPackingList(items, consolidated, destinationUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },

@@ -47,6 +47,38 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "computePublicAvailability", // needs a PublicStockSummary — likewise
     "toPublicStockSummary", // write-path projection, not a render helper
   ],
+  // The movement-journal fold, denylisted whole for the same reason as
+  // `availability`: every one of these takes an InventoryLedger or a Movement,
+  // and a render context holds neither — templates render orders, invoices and
+  // quotes. Surfacing them would be pure dead surface in the helper panel.
+  movements: [
+    "applyMovementToLedger", // the ledger fold — write-path only
+    "deriveServiceQuantities", // ledger derivation — write-path only
+    "applyOutOfServiceReason", // ledger derivation — write-path only
+    "negateLines", // reversal transform — write-path only
+    "heldDelta", // conservation arithmetic over a line
+    "movementHeldDelta", // ditto, over a movement
+    "costOfUnits", // basis arithmetic — money math, not presentation
+    "allocationSide", // maps a type to the side an allocation lands on
+  ],
+  // Allocation answers "which shelf do I pick these off?" from a ledger's
+  // store_breakdown. Same story: never in a render context.
+  //
+  // **A packing list is the tempting exception, and it is a trap.** A packing
+  // list must show what WAS picked, not what WOULD be picked — the allocation is
+  // stored data (a movement's `lines[]`, or `booking.stores[]` before the
+  // journal), and recomputing it at render time answers a different question
+  // against a ledger that has since moved. Two operators picking the same
+  // product would get a document disagreeing with the shelf they actually
+  // emptied. When that template lands it needs the movement or booking added as
+  // a render **source**, not these functions un-denylisted.
+  allocation: [
+    "allocateBookingToStores", // needs a ledger store_breakdown
+    "allocateBookingNetted", // ditto, plus a reserved map
+    "allocateBookingWithNetting", // ditto, plus overlapping bookings
+    "buildReservedByLocation", // netting building block
+    "addAllocationToReserved", // netting building block
+  ],
   orders: [
     "computeItemPaths", // canonical path computation — write-path only
     "validateItemPaths", // invariant assertion — write-path only
