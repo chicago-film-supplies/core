@@ -342,6 +342,54 @@ export const updateBookingRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-booking:booking-to-transactions",
+    source: "bookings",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "A breakdown change appends movement events. The picker sends an ABSOLUTE breakdown; `deriveCustodyTransitions` translates the delta into at most one movement PER TYPE per booking — `prep`, then `check_out` (rental) or `sale`, or `check_in` / `sale_return` / `mark_damaged` / `mark_lost` on the way back. Each event's document id is the derived `{uid_session}|{type}|{booking uid}`, which is what makes the append idempotent under the client's retry: a replay resolves onto the same documents and is accepted when its content hash matches, rejected 409 when it does not. An un-prepped check-out is normalized as an implicit `prep` followed by a `check_out` so neither type occurs twice in one session. A sale's units lost or damaged in transit emit NOTHING — ownership dropped at the sale, so placing them at an out-of-service record would drive quantity_in_service negative. Only the fulfillment ladder emits: `orders`/`opportunity` writers project a breakdown from order STATUS, and quoted→reserved→prepped all sit at a locations doc, so nothing moves.",
+    transaction: "update-booking",
+    fields: [
+      { source: ["uid_product"], target: ["uid_product"] },
+      { source: ["uid"], target: ["uid_booking"] },
+      { source: ["breakdown"], target: ["custody"], transform: "{from, to} breakdown keys of the transition" },
+      { source: ["breakdown"], target: ["quantity"], transform: "units the transition moved" },
+      { source: ["stores"], target: ["lines"], transform: "the booking's own allocation where it still holds, else allocateBookingToStores over the live ledger; placed on `from` or `to` per the type's MOVEMENT_CONTRACTS entry" },
+      { source: [], target: ["number"], transform: "one contiguous allocateNumbers('transactions') range per chunk" },
+      { source: [], target: ["sources"], transform: "[{collection:'orders', …}, {collection:'bookings', …}] plus the OOS record for a mark_lost/mark_damaged" },
+    ],
+  },
+  {
+    id: "update-booking:transactions-to-ledger",
+    source: "transactions",
+    target: "inventory-ledgers",
+    mode: "co-write",
+    invariant:
+      "Each emitted movement is folded onto its product's ledger by the ONE applier, threading the ledger across rows so a second booking of the same product allocates against the shelf the first already drew from (which is why chunks are grouped by product). A rental check-out moves units locations→bookings and leaves `quantity_held` untouched; a `sale` is one-sided (locations→outside) and drops it, removing the weighted-average share of the basis rather than the operator's number; `mark_lost`/`mark_damaged` move bookings→out-of-service, which is what finally makes `quantity_out_of_service` and `out_of_service_breakdown` non-zero. The ledger is written only for products a movement actually moved. `assertLedgerNonNegative` runs on the FINAL state, so an intermediate leg may dip.",
+    transaction: "update-booking",
+    fields: [
+      { source: ["lines"], target: ["quantity_held"], transform: "Σ (to ? +q : 0) + (from ? −q : 0) — conservation is structural" },
+      { source: ["lines"], target: ["quantity_in_service"], transform: "quantity_held − quantity_out_of_service" },
+      { source: ["lines"], target: ["quantity_out_of_service"], transform: "units at an out-of-service record" },
+      { source: ["lines"], target: ["store_breakdown"], transform: "per-location quantity, with store name/default refreshed from the store document" },
+      { source: ["cost"], target: ["total_cost_basis"], transform: "sale only: −costOfUnits(basis, held, units), computed in integer cents before the quantity moves" },
+      { source: ["cost"], target: ["average_unit_cost"], transform: "total_cost_basis ÷ quantity_held, rounded once" },
+    ],
+  },
+  {
+    id: "update-booking:transactions-to-locations",
+    source: "transactions",
+    target: "locations",
+    mode: "co-write",
+    invariant:
+      "The same fold stages the location documents, so a shelf count finally means units physically present rather than units owned — the defect that made `locations` overstate by whatever was out on jobs. Touches `products[].quantity`, `query_by_products` and `updated_at` only; name, active, default, type and capacities belong to createLocation/updateLocation. A line names only a location and its store is READ from the location document, so a cross-store placement is inexpressible rather than guarded (#307). A negative row is logged, never clamped and never thrown on — the authoritative guard is the ledger assertion, and throwing here would wedge future edits shut on exactly the drifted docs a resync must repair.",
+    transaction: "update-booking",
+    fields: [
+      { source: ["lines"], target: ["products"], transform: "quantity += (to ? +q : 0) + (from ? −q : 0) for the movement's product" },
+      { source: ["uid_product"], target: ["query_by_products"], transform: "appended when the shelf has not held this product before" },
+    ],
+  },
+  {
     id: "update-booking:booking-to-order",
     source: "bookings",
     target: "orders",
@@ -370,11 +418,14 @@ export const updateBookingRules: CollectionRule[] = [
 
 export const updateBookingTransaction: TransactionDefinition = {
   id: "update-booking",
-  description: "Update a single booking's status or breakdown. Recalculates stock summaries; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of stock summaries and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings.",
+  description: "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates stock summaries FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of stock summaries and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings.",
   steps: [
     "update-booking:booking-to-self",
     ...stockSummarySteps("update-booking"),
     "update-booking:booking-to-out-of-service",
+    "update-booking:booking-to-transactions",
+    "update-booking:transactions-to-ledger",
+    "update-booking:transactions-to-locations",
     "update-booking:booking-to-order",
     "update-booking:booking-to-cards",
     // OOS cowrites pull these in when a new OOS record is created:
@@ -399,6 +450,9 @@ export const bulkCheckoutOrderTransaction: TransactionDefinition = {
   steps: [
     "update-booking:booking-to-self",
     ...stockSummarySteps("update-booking"),
+    "update-booking:booking-to-transactions",
+    "update-booking:transactions-to-ledger",
+    "update-booking:transactions-to-locations",
     "update-booking:booking-to-order",
     "update-booking:booking-to-cards",
   ],
@@ -411,6 +465,9 @@ export const bulkReturnOrderTransaction: TransactionDefinition = {
     "update-booking:booking-to-self",
     ...stockSummarySteps("update-booking"),
     "update-booking:booking-to-out-of-service",
+    "update-booking:booking-to-transactions",
+    "update-booking:transactions-to-ledger",
+    "update-booking:transactions-to-locations",
     "update-booking:booking-to-order",
     "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
@@ -434,6 +491,9 @@ export const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
     "update-booking:booking-to-self",
     ...stockSummarySteps("update-booking"),
     "update-booking:booking-to-out-of-service",
+    "update-booking:booking-to-transactions",
+    "update-booking:transactions-to-ledger",
+    "update-booking:transactions-to-locations",
     "update-booking:booking-to-order",
     "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
