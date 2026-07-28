@@ -37,8 +37,8 @@ const line = (
 ): MovementLineType => ({ quantity, location: { from, to } });
 
 const placements = new Map([
-  [LOC_A, { uid_store: "teststore10000000000", store_name: "Main", name: "Shelf A", default: true, max: null }],
-  [LOC_B, { uid_store: "teststore10000000000", store_name: "Main", name: "Shelf B", default: false, max: null }],
+  [LOC_A, { uid_store: "teststore10000000000", store_name: "Main", store_default: true, name: "Shelf A", default: true, max: null }],
+  [LOC_B, { uid_store: "teststore10000000000", store_name: "Main", store_default: true, name: "Shelf B", default: false, max: null }],
 ]);
 
 function ledger(over: Partial<InventoryLedger> = {}): InventoryLedger {
@@ -182,6 +182,48 @@ Deno.test("a purchase adds basis and units, and lands them on the shelf", () => 
   assertEquals(next.store_breakdown[0].locations[0].quantity, 10);
   assertEquals(next.store_breakdown[0].quantity, 10);
   assertEquals(next.query_by_uid_location, [LOC_A]);
+});
+
+Deno.test("a placement stamps the store's and the location's identity, on create AND on refresh", () => {
+  // `allocateBookingToStores` sorts on store.default, store.name and
+  // location.default, so a fold that left them at ""/false would silently cost
+  // the allocator its default-store-first and default-location-first ordering —
+  // and the ledger is the only place those flags are denormalized.
+  const { ledger: created } = applyMovementToLedger(
+    ledger(),
+    { type: "purchase", quantity: 4, lines: [line(4, null, at(LOC_A))], cost: { amount: 0, unit_cost: 0, unit_costs: [] } },
+    placements,
+    mockTimestamp,
+  );
+  const store = created.store_breakdown[0];
+  assertEquals(store.name, "Main", "a store new to the ledger carries its real name");
+  assertEquals(store.default, true, "…and its real default flag");
+  assertEquals(store.locations[0].name, "Shelf A");
+  assertEquals(store.locations[0].default, true);
+
+  // A ledger carrying a stale store name and a cleared default self-heals on the
+  // next movement rather than needing a rename cascade of its own.
+  const stale = ledger({
+    quantity_held: 4,
+    store_breakdown: [{
+      uid_store: "teststore10000000000",
+      name: "",
+      default: false,
+      crms_stock_level_id: null,
+      quantity: 4,
+      locations: [{ uid_location: LOC_A, name: "", default: false, max: null, quantity: 4 }],
+    }],
+  });
+  const { ledger: healed } = applyMovementToLedger(
+    stale,
+    { type: "transfer", quantity: 1, lines: [line(1, at(LOC_A), at(LOC_B))], cost: null },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(healed.store_breakdown[0].name, "Main");
+  assertEquals(healed.store_breakdown[0].default, true);
+  assertEquals(healed.store_breakdown[0].locations[0].name, "Shelf A");
+  assertEquals(healed.store_breakdown[0].locations[0].default, true);
 });
 
 Deno.test("a sale removes the weighted-average share, not the caller's number", () => {

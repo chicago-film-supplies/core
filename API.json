@@ -9574,8 +9574,8 @@
         {
           "kind": "interface",
           "name": "LocationPlacement",
-          "declaration": "interface LocationPlacement {\n  uid_store: string;\n  store_name: string;\n  name: string;\n  default: boolean;\n  max: number | null;\n}",
-          "doc": "Where a `locations`-kind DocSource sits, resolved by the caller."
+          "declaration": "interface LocationPlacement {\n  uid_store: string;\n  store_name: string;\n  store_default: boolean;\n  name: string;\n  default: boolean;\n  max: number | null;\n}",
+          "doc": "Where a `locations`-kind DocSource sits, resolved by the caller.\n\nEvery field is read from the `locations` / `stores` documents, never from\nclient input — that is what makes a cross-store placement inexpressible\n(#307). It carries the store's identity as well as the location's because the\nledger's `store_breakdown` denormalizes both, and `allocateBookingToStores`\nsorts on `store.default`, `store.name` and `location.default`: a placement\nthat left them at `\"\"`/`false` would silently cost the allocator its\ndefault-store-first and default-location-first ordering."
         },
         {
           "kind": "function",

@@ -50,8 +50,8 @@ export {
 export {
   createTransactionRules,
   createTransactionTransaction,
-  updateTransactionRules,
-  updateTransactionTransaction,
+  reverseTransactionRules,
+  reverseTransactionTransaction,
 } from "./transactions.ts";
 
 // ── Product rules ────────────────────────────────────────────────────
@@ -145,8 +145,6 @@ export { createStoreRules, updateStoreRules } from "./stores.ts";
 export {
   createStoreTransferRules,
   createStoreTransferTransaction,
-  updateStoreTransferRules,
-  updateStoreTransferTransaction,
 } from "./store-transfers.ts";
 
 // ── Stock-summary rule factories ─────────────────────────────────────
@@ -239,7 +237,7 @@ import {
   updateOutOfServiceRules,
   updateOutOfServiceTransaction,
 } from "./out-of-service.ts";
-import { createTransactionRules, createTransactionTransaction, updateTransactionRules, updateTransactionTransaction } from "./transactions.ts";
+import { createTransactionRules, createTransactionTransaction, reverseTransactionRules, reverseTransactionTransaction } from "./transactions.ts";
 import { createProductRules, createProductTransaction, updateProductRules, updateProductOrderRules, updateProductTransaction } from "./products.ts";
 import { createOrganizationRules, createOrganizationTransaction, updateOrganizationRules, updateOrganizationTransaction } from "./organizations.ts";
 import { createContactRules, createContactTransaction, updateContactRules, updateContactTransaction } from "./contacts.ts";
@@ -253,8 +251,6 @@ import { createStoreRules, updateStoreRules } from "./stores.ts";
 import {
   createStoreTransferRules,
   createStoreTransferTransaction,
-  updateStoreTransferRules,
-  updateStoreTransferTransaction,
 } from "./store-transfers.ts";
 import {
   threadCowriteRules,
@@ -297,9 +293,8 @@ export const transactions: TransactionDefinition[] = [
   createOutOfServiceTransaction,
   updateOutOfServiceTransaction,
   createTransactionTransaction,
-  updateTransactionTransaction,
+  reverseTransactionTransaction,
   createStoreTransferTransaction,
-  updateStoreTransferTransaction,
   createProductTransaction,
   updateProductTransaction,
   createOrganizationTransaction,
@@ -341,9 +336,8 @@ export const rules: CollectionRule[] = [
   ...createOutOfServiceRules,
   ...updateOutOfServiceRules,
   ...createTransactionRules,
-  ...updateTransactionRules,
+  ...reverseTransactionRules,
   ...createStoreTransferRules,
-  ...updateStoreTransferRules,
   ...createProductRules,
   ...updateProductRules,
   ...updateProductOrderRules,

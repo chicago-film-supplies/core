@@ -128,6 +128,12 @@ export function stockSummaryRules(
       fields: [
         { source: ["uid"], target: ["bookings", "uid"] },
         { source: ["number"], target: ["bookings", "number"] },
+        {
+          source: ["type"],
+          target: ["bookings", "type"],
+          transform:
+            "REQUIRED, not optional-with-a-fallback: heldByBooking excludes a sale booking's `out` units (they left ownership at the sale, so quantity_held already dropped and counting them again would double-subtract), and an optional field would mean two availability behaviours coexisting in one corpus — the exact thing this document exists to prevent. A summary is a pure projection, so it costs a rebuild rather than a backfill.",
+        },
         { source: ["dates", "start"], target: ["bookings", "start"] },
         { source: ["dates", "start_fs"], target: ["bookings", "start_fs"] },
         { source: ["dates", "end"], target: ["bookings", "end"] },

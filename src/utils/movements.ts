@@ -160,13 +160,14 @@ function cloneStoreBreakdown(entries: readonly StoreBreakdownEntry[]): StoreBrea
 function upsertStore(
   ledger: InventoryLedger,
   uidStore: string,
-  name: string,
 ): StoreBreakdownEntry {
   const found = ledger.store_breakdown.find((s) => s.uid_store === uidStore);
   if (found) return found;
   const created: StoreBreakdownEntry = {
     uid_store: uidStore,
-    name,
+    // `name` and `default` are stamped by the caller from the resolved
+    // placement, on create AND on every later touch — see the fold below.
+    name: "",
     default: false,
     crms_stock_level_id: null,
     quantity: 0,
@@ -191,10 +192,22 @@ function upsertLocation(store: StoreBreakdownEntry, uidLocation: string): StoreB
   return created;
 }
 
-/** Where a `locations`-kind DocSource sits, resolved by the caller. */
+/**
+ * Where a `locations`-kind DocSource sits, resolved by the caller.
+ *
+ * Every field is read from the `locations` / `stores` documents, never from
+ * client input — that is what makes a cross-store placement inexpressible
+ * (#307). It carries the store's identity as well as the location's because the
+ * ledger's `store_breakdown` denormalizes both, and `allocateBookingToStores`
+ * sorts on `store.default`, `store.name` and `location.default`: a placement
+ * that left them at `""`/`false` would silently cost the allocator its
+ * default-store-first and default-location-first ordering.
+ */
 export interface LocationPlacement {
   uid_store: string;
   store_name: string;
+  /** The owning store's own `default` flag — NOT the location's. */
+  store_default: boolean;
   name: string;
   default: boolean;
   max: number | null;
@@ -282,8 +295,13 @@ export function applyMovementToLedger(
       const placement = placements.get(source.uid);
       if (!placement) continue;
       const sign = side === "to" ? 1 : -1;
-      const store = upsertStore(next, placement.uid_store, placement.store_name);
+      const store = upsertStore(next, placement.uid_store);
       const location = upsertLocation(store, source.uid);
+      // Refreshed on every touch, not only on create, so a renamed store or a
+      // re-flagged default self-heals on the next movement instead of needing a
+      // cascade of its own.
+      store.name = placement.store_name;
+      store.default = placement.store_default;
       location.name = placement.name;
       location.default = placement.default;
       location.max = placement.max;

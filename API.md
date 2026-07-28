@@ -17553,10 +17553,19 @@ interface LedgerFoldResult {
 
 Where a `locations`-kind DocSource sits, resolved by the caller.
 
+Every field is read from the `locations` / `stores` documents, never from
+client input — that is what makes a cross-store placement inexpressible
+(#307). It carries the store's identity as well as the location's because the
+ledger's `store_breakdown` denormalizes both, and `allocateBookingToStores`
+sorts on `store.default`, `store.name` and `location.default`: a placement
+that left them at `""`/`false` would silently cost the allocator its
+default-store-first and default-location-first ordering.
+
 ```ts
 interface LocationPlacement {
   uid_store: string;
   store_name: string;
+  store_default: boolean;
   name: string;
   default: boolean;
   max: number | null;
