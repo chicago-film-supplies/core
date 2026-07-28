@@ -922,6 +922,17 @@ legitimate ceiling.
 const ClientLogEntrySchema: z.ZodType<ClientLogEntry>;
 ```
 
+### `CollectLeafPathsResult`
+
+Result of {@link collectLeafPaths}. `unhandled` MUST be empty — see below.
+
+```ts
+interface CollectLeafPathsResult {
+  leaves: LeafPath[];
+  unhandled: Array<typeLiteral>;
+}
+```
+
 ### `CollectionRule`
 
 One edge in the propagation graph — describes data flow between two collections.
@@ -3095,6 +3106,20 @@ documents: a product's Firestore id, a divider UUID, or a custom-product id.
 
 ```ts
 const ItemUid: z.ZodType<string>;
+```
+
+### `LeafPath`
+
+A scalar leaf reached by {@link collectLeafPaths}.
+
+```ts
+interface LeafPath {
+  path: string;
+  node: z.ZodType;
+  type: string;
+  format?: string;
+  meta: Record<string, unknown>;
+}
 ```
 
 ### `List`
@@ -7229,6 +7254,53 @@ All card-related propagation rules.
 ```ts
 const cardRules: CollectionRule[];
 ```
+
+### `collectLeafPaths(schema: z.ZodType, opts?: typeLiteral): CollectLeafPathsResult`
+
+Walk a schema and collect every scalar leaf with its dotted path and merged
+meta. Backs the Uploadcare authoring lint (`schemas/uploadcare/`) — a third
+meta-collecting walker alongside `applyPii` and `getServerSortableColumns`,
+neither of which is reusable here (the latter is depth-capped at 1 and skips
+arrays entirely).
+
+**It fails CLOSED.** A walker that emits unrecognised nodes as leaves would
+silently swallow their subtree — a field named `attachments` typed
+`z.tuple([...])` would vanish from the walk and be invisible to every
+assertion built on it. So the type allowlist is two-sided: descend the known
+containers, emit the known scalars, and push everything else into
+`unhandled`, which callers are expected to assert is empty.
+
+Traversal:
+- **transparent wrappers** (`optional`, `default`, `nullable`, `prefault`,
+  `catch`, `readonly`, `nonoptional`) and **pipes** (`def.in` — the input side
+  of `chicagoInstant()` et al) are walked through, merging meta at each level;
+- **object** → each field, `path.key`;
+- **array** → the element, `path[]`;
+- **record** → the value type, `path.<key>` (dynamic keys aren't enumerable);
+- **union / discriminatedUnion** → every member at the *same* path, deduped by
+  (path, node identity) so shared nodes are visited once.
+
+Meta does **not** cross a container boundary by default: an object's
+schema-level `.meta({ title, collection })` must not leak onto its fields, and
+by symmetry an annotation on an array node does not reach its element.
+Annotate the leaf.
+
+`opts.inherit` names the meta keys that DO cross, for annotations whose whole
+point is to cover a subtree. `pii` is the motivating case: `Address` is tagged
+`.nullable().meta({ pii: "mask" })` on the object, and the runtime walker
+(`pii/walker.ts` `applyTagged`) pushes that tag down to every leaf, with a
+child's own tag winning and `pii: "none"` opting back out — exactly the
+`{...inherited, ...own}` merge this function already performs through
+wrappers. Without it, the PII lint would report every leaf under a correctly
+tagged `Address` as a violation (measured: 213 of them).
+
+Default `[]` — no key crosses, so every existing caller is bit-identical.
+
+`maxDepth` defaults to **24**. Wrappers are nodes, so depth counts them: the
+deepest chain in core today measures 11, and an obvious-looking 12 would have
+been one `.optional().nullable()` away from silently truncating. Hitting the
+cap pushes a `__depth_cap__` entry into `unhandled` rather than returning
+quietly.
 
 ### `createCardRules`
 

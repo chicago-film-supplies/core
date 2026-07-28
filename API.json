@@ -482,6 +482,12 @@
         },
         {
           "kind": "interface",
+          "name": "CollectLeafPathsResult",
+          "declaration": "interface CollectLeafPathsResult {\n  leaves: LeafPath[];\n  unhandled: Array<typeLiteral>;\n}",
+          "doc": "Result of {@link collectLeafPaths}. `unhandled` MUST be empty — see below."
+        },
+        {
+          "kind": "interface",
           "name": "CollectionRule",
           "declaration": "interface CollectionRule {\n  id: string;\n  source: string;\n  target: string;\n  mode: PropagationMode;\n  invariant?: string;\n  transaction?: string;\n  trigger?: string;\n  fields: FieldMapping[];\n}",
           "doc": "One edge in the propagation graph — describes data flow between two collections."
@@ -1613,6 +1619,12 @@
           "name": "ItemUid",
           "declaration": "const ItemUid: z.ZodType<string>;",
           "doc": "Polymorphic `items[].uid` + `path[]` segment in order/invoice/fulfillment\ndocuments: a product's Firestore id, a divider UUID, or a custom-product id."
+        },
+        {
+          "kind": "interface",
+          "name": "LeafPath",
+          "declaration": "interface LeafPath {\n  path: string;\n  node: z.ZodType;\n  type: string;\n  format?: string;\n  meta: Record<string, unknown>;\n}",
+          "doc": "A scalar leaf reached by {@link collectLeafPaths}."
         },
         {
           "kind": "interface",
@@ -3718,6 +3730,14 @@
           "name": "cardRules",
           "declaration": "const cardRules: CollectionRule[];",
           "doc": "All card-related propagation rules."
+        },
+        {
+          "kind": "function",
+          "name": "collectLeafPaths",
+          "signature": "collectLeafPaths(schema: z.ZodType, opts?: typeLiteral): CollectLeafPathsResult",
+          "doc": "Walk a schema and collect every scalar leaf with its dotted path and merged\nmeta. Backs the Uploadcare authoring lint (`schemas/uploadcare/`) — a third\nmeta-collecting walker alongside `applyPii` and `getServerSortableColumns`,\nneither of which is reusable here (the latter is depth-capped at 1 and skips\narrays entirely).\n\n**It fails CLOSED.** A walker that emits unrecognised nodes as leaves would\nsilently swallow their subtree — a field named `attachments` typed\n`z.tuple([...])` would vanish from the walk and be invisible to every\nassertion built on it. So the type allowlist is two-sided: descend the known\ncontainers, emit the known scalars, and push everything else into\n`unhandled`, which callers are expected to assert is empty.\n\nTraversal:\n- **transparent wrappers** (`optional`, `default`, `nullable`, `prefault`,\n  `catch`, `readonly`, `nonoptional`) and **pipes** (`def.in` — the input side\n  of `chicagoInstant()` et al) are walked through, merging meta at each level;\n- **object** → each field, `path.key`;\n- **array** → the element, `path[]`;\n- **record** → the value type, `path.<key>` (dynamic keys aren't enumerable);\n- **union / discriminatedUnion** → every member at the *same* path, deduped by\n  (path, node identity) so shared nodes are visited once.\n\nMeta does **not** cross a container boundary by default: an object's\nschema-level `.meta({ title, collection })` must not leak onto its fields, and\nby symmetry an annotation on an array node does not reach its element.\nAnnotate the leaf.\n\n`opts.inherit` names the meta keys that DO cross, for annotations whose whole\npoint is to cover a subtree. `pii` is the motivating case: `Address` is tagged\n`.nullable().meta({ pii: \"mask\" })` on the object, and the runtime walker\n(`pii/walker.ts` `applyTagged`) pushes that tag down to every leaf, with a\nchild's own tag winning and `pii: \"none\"` opting back out — exactly the\n`{...inherited, ...own}` merge this function already performs through\nwrappers. Without it, the PII lint would report every leaf under a correctly\ntagged `Address` as a violation (measured: 213 of them).\n\nDefault `[]` — no key crosses, so every existing caller is bit-identical.\n\n`maxDepth` defaults to **24**. Wrappers are nodes, so depth counts them: the\ndeepest chain in core today measures 11, and an obvious-looking 12 would have\nbeen one `.optional().nullable()` away from silently truncating. Hitting the\ncap pushes a `__depth_cap__` entry into `unhandled` rather than returning\nquietly.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "variable",

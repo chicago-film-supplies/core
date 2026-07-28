@@ -69,7 +69,10 @@ export {
   isDateLikeNode,
   enumValues,
   getServerSortableColumns,
+  collectLeafPaths,
 } from "./zod-walk.ts";
+
+export type { CollectLeafPathsResult, LeafPath } from "./zod-walk.ts";
 
 export {
   SessionSchema,
