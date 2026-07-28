@@ -207,7 +207,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateInputType",
-          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n}",
+          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uid_session: string;\n}",
           "doc": "Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions\nfor one order in a single Firestore transaction.\n\nTop-level `version` is the fulfillment doc version at read time. Currently\nadvisory: a stale value 409s. Per-row `version` carries each booking's\ncurrent version for optimistic concurrency.\n\nNo fixed cap on `updates.length`. Bound only by the real Firestore limits\n(270s tx duration, 10 MiB request size). The bulk service rejects empty\narrays with 400."
         },
         {
@@ -3291,8 +3291,8 @@
         {
           "kind": "interface",
           "name": "UpdateBookingInputType",
-          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n}",
-          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency."
+          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uid_session: string;\n}",
+          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
         },
         {
           "kind": "variable",
@@ -4898,7 +4898,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateInputType",
-          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n}",
+          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uid_session: string;\n}",
           "doc": "Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions\nfor one order in a single Firestore transaction.\n\nTop-level `version` is the fulfillment doc version at read time. Currently\nadvisory: a stale value 409s. Per-row `version` carries each booking's\ncurrent version for optimistic concurrency.\n\nNo fixed cap on `updates.length`. Bound only by the real Firestore limits\n(270s tx duration, 10 MiB request size). The bulk service rejects empty\narrays with 400."
         },
         {
@@ -4922,8 +4922,8 @@
         {
           "kind": "interface",
           "name": "UpdateBookingInputType",
-          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n}",
-          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency."
+          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uid_session: string;\n}",
+          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
         }
       ]
     },

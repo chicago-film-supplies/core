@@ -175,11 +175,32 @@ const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
  * next state (all 7 keys); the service requires `sum(breakdown) === quantity`
  * and treats the value as an absolute write, not a partial patch. Version is
  * required for optimistic concurrency.
+ *
+ * {@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to
+ * retry once a breakdown change also appends to the movement journal — see the
+ * field's own note.
  */
 export interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: Booking["breakdown"];
   version: number;
+  /**
+   * The client-minted uuid identifying ONE operator action, required.
+   *
+   * A breakdown change now appends movement events, and appending is not
+   * idempotent the way an absolute-set write was: a lost response plus the
+   * manager's retry would say the operator returned the units twice. Every
+   * movement's document id is `{uid_session}|{type}|{subject}`, so a retry
+   * carrying the same session resolves to the same documents and collapses to
+   * one event by construction.
+   *
+   * **Required, with no server-side fallback.** A server-minted session would be
+   * fresh on every attempt, which is precisely the retry the id exists to
+   * absorb — an optional field would therefore be silently wrong exactly when it
+   * mattered. Mint it per operator action (not per request, and not per
+   * keystroke) and reuse it across retries of that action.
+   */
+  uid_session: string;
 }
 
 /** Zod schema for UpdateBookingInput. */
@@ -195,6 +216,7 @@ export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
     returned: z.number().min(0),
   }).optional(),
   version: z.int().min(0),
+  uid_session: z.uuid(),
 });
 
 // ── Bulk update input (PUT /fulfillments/{uid}/bookings) ───────
@@ -233,11 +255,22 @@ export const BookingUpdate: z.ZodType<BookingUpdateType> = z.object({
 export interface BulkBookingUpdateInputType {
   version: number;
   updates: BookingUpdateType[];
+  /**
+   * ONE session for the whole request, not one per row.
+   *
+   * A bulk apply IS one operator action — "check out these five rows", or a
+   * picker action cascading onto a kit's component bookings — so the rows share
+   * a session. They cannot collide on it: a movement's id carries the subject,
+   * and every row addresses a different booking. See
+   * {@link UpdateBookingInputType.uid_session}.
+   */
+  uid_session: string;
 }
 
 export const BulkBookingUpdateInput: z.ZodType<BulkBookingUpdateInputType> = z.object({
   version: z.int().min(0),
   updates: z.array(BookingUpdate).min(1),
+  uid_session: z.uuid(),
 });
 
 /**

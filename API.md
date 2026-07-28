@@ -395,6 +395,7 @@ arrays with 400.
 interface BulkBookingUpdateInputType {
   version: number;
   updates: BookingUpdateType[];
+  uid_session: string;
 }
 ```
 
@@ -6332,11 +6333,16 @@ next state (all 7 keys); the service requires `sum(breakdown) === quantity`
 and treats the value as an absolute write, not a partial patch. Version is
 required for optimistic concurrency.
 
+{@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to
+retry once a breakdown change also appends to the movement journal — see the
+field's own note.
+
 ```ts
 interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
   version: number;
+  uid_session: string;
 }
 ```
 
@@ -8805,6 +8811,7 @@ arrays with 400.
 interface BulkBookingUpdateInputType {
   version: number;
   updates: BookingUpdateType[];
+  uid_session: string;
 }
 ```
 
@@ -8846,11 +8853,16 @@ next state (all 7 keys); the service requires `sum(breakdown) === quantity`
 and treats the value as an absolute write, not a partial patch. Version is
 required for optimistic concurrency.
 
+{@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to
+retry once a breakdown change also appends to the movement journal — see the
+field's own note.
+
 ```ts
 interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
   version: number;
+  uid_session: string;
 }
 ```
 
