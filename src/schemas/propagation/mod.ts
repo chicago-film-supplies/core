@@ -160,7 +160,6 @@ export {
   threadContactRules,
   threadOrganizationRules,
   threadProductRules,
-  threadTransactionRules,
   threadRoleRules,
   threadOutOfServiceRules,
   createRoleTransaction,

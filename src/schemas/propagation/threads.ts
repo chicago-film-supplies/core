@@ -85,10 +85,15 @@ export const threadProductRules: CollectionRule[] = cowriteRulesFor({
   transaction: "create-product",
 });
 
-export const threadTransactionRules: CollectionRule[] = cowriteRulesFor({
-  collection: "transactions",
-  transaction: "create-transaction",
-});
+// No `threadTransactionRules`, deliberately. Movements do NOT cowrite a thread.
+// Measured before removing it: 900 of 917 stored transactions carried an
+// auto-cowritten thread and ZERO of those threads held a comment (there are no
+// comments in prod at all), so it was minting an artifact rather than a
+// capability — and a 135-line checkout would have minted 135 extra thread docs
+// against the per-commit write budget that is already the binding constraint
+// (api-cloudrun#391). A movement is an event: its narrative belongs on the order
+// or the OOS record it references through `sources[]`, both of which do have a
+// thread.
 
 export const threadOutOfServiceRules: CollectionRule[] = cowriteRulesFor({
   collection: "out-of-service",
@@ -125,7 +130,6 @@ export const threadCowriteRules: CollectionRule[] = [
   ...threadContactRules,
   ...threadOrganizationRules,
   ...threadProductRules,
-  ...threadTransactionRules,
   ...threadRoleRules,
   ...threadOutOfServiceRules,
 ];

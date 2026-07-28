@@ -800,7 +800,6 @@ export {
   threadContactRules,
   threadOrganizationRules,
   threadProductRules,
-  threadTransactionRules,
   threadRoleRules,
   createRoleTransaction,
   createCommentRules,

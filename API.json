@@ -4213,12 +4213,6 @@
         },
         {
           "kind": "variable",
-          "name": "threadTransactionRules",
-          "declaration": "const threadTransactionRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
           "name": "transactions",
           "declaration": "const transactions: TransactionDefinition[];",
           "doc": ""

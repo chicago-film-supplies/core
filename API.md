@@ -7745,12 +7745,6 @@ const threadProductRules: CollectionRule[];
 const threadRoleRules: CollectionRule[];
 ```
 
-### `threadTransactionRules`
-
-```ts
-const threadTransactionRules: CollectionRule[];
-```
-
 ### `transactions`
 
 ```ts
