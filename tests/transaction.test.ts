@@ -371,10 +371,13 @@ Deno.test("an ownership-only type forbids uid_booking", () => {
 
 // ── identity ────────────────────────────────────────────────────────
 
-Deno.test("uid accepts both a derived movement id and a legacy auto-id", () => {
+Deno.test("uid is the derived composite — there is no auto-id alternative", () => {
   assertEquals(MovementSchema.safeParse(movement("check_out")).success, true);
-  const legacy = movement("purchase", { uid: "legacytxn00000000000" });
-  assertEquals(MovementSchema.safeParse(legacy).success, true, "the 917 stored docs must survive");
+  // The corpus is re-keyed by the migration rather than carried: uid_session is
+  // required on every movement anyway, so a historical row gets a session and
+  // therefore a derived id too.
+  const autoId = movement("purchase", { uid: "legacytxn00000000000" });
+  assertEquals(MovementSchema.safeParse(autoId).success, false);
 });
 
 Deno.test("uid rejects a malformed derived id", () => {

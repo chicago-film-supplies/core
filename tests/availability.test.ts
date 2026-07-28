@@ -19,10 +19,12 @@ function booking(
   end: string | null,
   held: number,
   extra: Partial<StockSummaryBookingEntry["breakdown"]> = {},
+  type: StockSummaryBookingEntry["type"] = "rental",
 ): StockSummaryBookingEntry {
   return {
     uid: bid(n),
     number: n,
+    type,
     start,
     start_fs: start ? tsAt(start) : null,
     end,
@@ -334,4 +336,64 @@ Deno.test("computePublicAvailability agrees with computeAvailability exactly", (
     );
     assertEquals(pub.quantity_unavailable, priv.quantity_booked + priv.quantity_out_of_service);
   }
+});
+
+// ── Sale bookings: `out` has already left ownership ───────────────
+
+Deno.test("a sale booking's `out` units do not consume stock a second time", () => {
+  // At sale_out the movement drops quantity_held. Counting the booking's `out`
+  // as well would subtract the same units twice.
+  const rental = summary(10, [booking(1, day("2026-06-01"), null, 0, { out: 4 }, "rental")]);
+  const sale = summary(10, [booking(1, day("2026-06-01"), null, 0, { out: 4 }, "sale")]);
+  const w = { start: day("2026-06-10"), end: day("2026-06-12") };
+
+  assertEquals(computeAvailability(rental, w).quantity_booked, 4, "a rental's out still consumes");
+  assertEquals(computeAvailability(sale, w).quantity_booked, 0, "a sale's out does not");
+  // held already dropped by 4 for the sale, so 6 remain — not 10.
+  assertEquals(computeAvailability(sale, w).quantity_available, 10, "held is the caller's input");
+});
+
+Deno.test("a partially checked-out sale booking still consumes for the rest", () => {
+  // The load-bearing case: excluding the whole ENTRY (rather than `out` alone)
+  // would stop counting the 3 still reserved and oversell the remainder.
+  const s = summary(10, [
+    booking(1, day("2026-06-01"), null, 0, { reserved: 3, out: 2 }, "sale"),
+  ]);
+  const w = computeAvailability(s, { start: day("2026-06-10"), end: day("2026-06-12") });
+  assertEquals(w.quantity_booked, 3, "reserved 3 still held; out 2 already sold");
+  assertEquals(w.quantity_available, 7);
+});
+
+Deno.test("a sale booking's units are not handed back before the sale lands", () => {
+  // Before check-out the units sit in reserved/prepped and must consume in full.
+  const s = summary(5, [
+    booking(1, day("2026-06-01"), null, 0, { reserved: 2, prepped: 3 }, "sale"),
+  ]);
+  const w = computeAvailability(s, { start: day("2026-06-10"), end: day("2026-06-12") });
+  assertEquals(w.quantity_booked, 5);
+  assertEquals(w.quantity_available, 0, "nothing free until the sale actually moves them");
+});
+
+Deno.test("the full breakdown is still reported for a sale booking", () => {
+  // Only quantity_booked changes — the entry stays in the summary and its
+  // breakdown is reported verbatim, so the picker still sees the `out` units.
+  const s = summary(10, [booking(1, day("2026-06-01"), null, 0, { reserved: 1, out: 4 }, "sale")]);
+  const w = computeAvailability(s, { start: day("2026-06-10"), end: day("2026-06-12") });
+  assertEquals(w.bookings_breakdown.out, 4);
+  assertEquals(w.bookings.length, 1);
+});
+
+Deno.test("toPublicStockSummary applies the same sale rule as computeAvailability", () => {
+  // Two engines, one rule — the storefront and the manager cannot disagree.
+  const s = summary(10, [
+    booking(1, day("2026-06-01"), null, 0, { reserved: 3, out: 2 }, "sale"),
+  ]);
+  const pub = toPublicStockSummary(s);
+  assertEquals(pub.unavailable.length, 1);
+  assertEquals(pub.unavailable[0].quantity, 3, "the same 3 computeAvailability counts");
+});
+
+Deno.test("a fully checked-out sale booking leaks nothing to the storefront", () => {
+  const s = summary(10, [booking(1, day("2026-06-01"), null, 0, { out: 4 }, "sale")]);
+  assertEquals(toPublicStockSummary(s).unavailable.length, 0, "zero-quantity entries are dropped");
 });

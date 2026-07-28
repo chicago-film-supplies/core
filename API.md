@@ -3557,8 +3557,6 @@ interface Movement {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   serialized_details: typeLiteral | null;
-  crms_sync: Record<string, typeLiteral>;
-  defaultThreadId?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -5351,7 +5349,7 @@ interface SaveQuoteVersionInputType {
 Union of all Firestore document types. Use with validateBeforeWrite.
 
 ```ts
-type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 ```
 
 ### `SchemaField`
@@ -5438,6 +5436,7 @@ interface StockSummaryBookingEntry {
   end: string | null;
   end_fs: FirestoreTimestampType | null;
   breakdown: BookingBreakdown;
+  type: ComponentTypeType;
 }
 ```
 
@@ -5666,12 +5665,6 @@ Lifecycle status of a template version (mirrors the git lifecycle).
 
 ```ts
 const TEMPLATE_VERSION_STATUSES: "draft" | "published" | "archived"[];
-```
-
-### `TRANSACTION_TYPES`
-
-```ts
-const TRANSACTION_TYPES: unknown;
 ```
 
 ### `Tag`
@@ -6160,16 +6153,10 @@ const TrackingCategorySchema: z.ZodType<TrackingCategory>;
 type TrackingCategoryUpdated = EventEnvelope<TrackingCategory> & typeLiteral;
 ```
 
-### `Transaction`
-
-```ts
-type Transaction = Movement;
-```
-
 ### `TransactionCreated`
 
 ```ts
-type TransactionCreated = EventEnvelope<Transaction> & typeLiteral;
+type TransactionCreated = EventEnvelope<Movement> & typeLiteral;
 ```
 
 ### `TransactionDefinition`
@@ -6226,12 +6213,6 @@ Zod schema for {@link TransactionLogRecord}.
 const TransactionLogRecordSchema: z.ZodType<TransactionLogRecord>;
 ```
 
-### `TransactionSchema`
-
-```ts
-const TransactionSchema: z.ZodType<Movement>;
-```
-
 ### `TransactionStatusType`
 
 Status outcome of a Firestore transaction commit.
@@ -6240,16 +6221,10 @@ Status outcome of a Firestore transaction commit.
 type TransactionStatusType = indexedAccess;
 ```
 
-### `TransactionTypeType`
-
-```ts
-type TransactionTypeType = MovementTypeType;
-```
-
 ### `TransactionUpdated`
 
 ```ts
-type TransactionUpdated = EventEnvelope<Transaction> & typeLiteral;
+type TransactionUpdated = EventEnvelope<Movement> & typeLiteral;
 ```
 
 ### `TypedLogRecord`
@@ -12124,6 +12099,7 @@ interface StockSummaryBookingEntry {
   end: string | null;
   end_fs: FirestoreTimestampType | null;
   breakdown: BookingBreakdown;
+  type: ComponentTypeType;
 }
 ```
 
@@ -12571,8 +12547,6 @@ interface Movement {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   serialized_details: typeLiteral | null;
-  crms_sync: Record<string, typeLiteral>;
-  defaultThreadId?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -12763,30 +12737,6 @@ interface ReverseTransactionInputType {
   reference: string;
   date?: string;
 }
-```
-
-### `TRANSACTION_TYPES`
-
-```ts
-const TRANSACTION_TYPES: unknown;
-```
-
-### `Transaction`
-
-```ts
-type Transaction = Movement;
-```
-
-### `TransactionSchema`
-
-```ts
-const TransactionSchema: z.ZodType<Movement>;
-```
-
-### `TransactionTypeType`
-
-```ts
-type TransactionTypeType = MovementTypeType;
 ```
 
 ### `UpdateTransactionInput`

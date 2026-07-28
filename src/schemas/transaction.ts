@@ -124,11 +124,6 @@ export type MovementTypeType = typeof MOVEMENT_TYPES[number];
 /** Zod schema for MovementTypeType. */
 export const MovementTypeEnum: z.ZodType<MovementTypeType> = z.enum(MOVEMENT_TYPES);
 
-/** @deprecated Name kept for importers; use {@link MOVEMENT_TYPES}. */
-export const TRANSACTION_TYPES = MOVEMENT_TYPES;
-/** @deprecated Name kept for importers; use {@link MovementTypeType}. */
-export type TransactionTypeType = MovementTypeType;
-
 // ── Placement kinds ─────────────────────────────────────────────────
 
 /**
@@ -215,8 +210,13 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
   },
   // A one-sided line: the units leave both the shelf and ownership, and that is
-  // what drops `quantity_held`. `bookings` is allowed on the `from` side for the
-  // live sale bookings that already had units at `out` when the journal cut over.
+  // what drops `quantity_held`.
+  //
+  // Both `locations` and `bookings` are legitimate origins, and this is not a
+  // compatibility carve-out: an off-the-shelf sale takes units straight off a
+  // shelf, while an order-scoped sale whose units were already checked out takes
+  // them from the booking they are sitting at. Constraining to one would make the
+  // other unwritable.
   sale: {
     custody: "with_booking",
     cost: "required",
@@ -275,8 +275,12 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
   },
   // No custody: the booking keeps `damaged: N` forever — a terminal key and part
   // of its history — so removing it would break `sum(breakdown) === quantity`.
-  // A write-off removes ownership, not history. `locations` stays allowed on the
-  // `from` side for the 40 stored write-offs that predate OOS records.
+  // A write-off removes ownership, not history.
+  //
+  // `locations` is allowed alongside `out-of-service` because requiring a unit to
+  // pass through an OOS record before it can be written off is a workflow rule,
+  // not a physical one — an operator finding a broken unit on a shelf can write
+  // it off from there.
   write_off: {
     custody: "forbidden",
     cost: "required",
@@ -409,8 +413,14 @@ export const MovementCost: z.ZodType<MovementCostType> = z.strictObject({
 /** A movement-journal event. */
 export interface Movement {
   /**
-   * `{uid_session}|{type}|{subject}` for journal events, or a 20-char auto-id
-   * for the historical corpus. Equals the document id.
+   * `{uid_session}|{type}|{subject}`. Equals the document id.
+   *
+   * One shape, no auto-id alternative: `uid_session` is required on every
+   * movement, so the migration has to mint one for each historical row
+   * regardless — and once it has, deriving the id costs nothing and spares every
+   * reader a "which shape is this" branch. The corpus is re-keyed rather than
+   * carried, which is safe because the only things referencing a transaction by
+   * id were 900 auto-cowritten threads, none of which holds a comment.
    */
   uid: string;
   /**
@@ -444,7 +454,7 @@ export interface Movement {
   // ── grouping, idempotency, correction ─────────────────────────────
   /** One per operator action. Client-minted, so a retry storm collapses. */
   uid_session: string;
-  /** The uid of the event this one negates. */
+  /** The uid of the movement this one negates. */
   reverses: string | null;
 
   // ── provenance ────────────────────────────────────────────────────
@@ -457,14 +467,6 @@ export interface Movement {
 
   // ── carried over unchanged ────────────────────────────────────────
   serialized_details: { asset_tags: string[]; serial_numbers: string[] } | null;
-  /**
-   * Legacy-only. Movements do NOT sync to CRMS: nothing pushed to CRMS off a
-   * transaction write even before the journal, and the journal raises transaction
-   * writes from ~4/month to per-checkout-line against a live single-tenant API
-   * capped at 60 req/min that is already scheduled for retirement.
-   */
-  crms_sync: Record<string, { stock_level_id: number | null; transaction_id: number | null }>;
-  defaultThreadId?: string;
 
   // ── standard ──────────────────────────────────────────────────────
   version: number;
@@ -623,7 +625,7 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
 
 /** Zod schema for a Movement. */
 export const MovementSchema: z.ZodType<Movement> = z.strictObject({
-  uid: z.union([FirestoreId, MovementId]),
+  uid: MovementId,
   number: z.int().min(0).meta({ serverSortVia: "number" }),
   uid_product: FirestoreId,
   // Safe to constrain: the historical corpus has no uid_booking at all (it is
@@ -638,7 +640,7 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   date_fs: FirestoreTimestamp,
   reference: z.string(),
   uid_session: z.uuid(),
-  reverses: z.union([FirestoreId, MovementId]).nullable(),
+  reverses: MovementId.nullable(),
   sources: z.array(DocSource).default([]),
   query_by_sources: z.array(z.string()).default([]),
   query_by_uid_store: z.array(FirestoreId).default([]),
@@ -647,11 +649,6 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
   }).nullable(),
-  crms_sync: z.record(z.string(), z.strictObject({
-    stock_level_id: z.number().nullable(),
-    transaction_id: z.number().nullable(),
-  })).default({}),
-  defaultThreadId: z.string().optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,
@@ -671,11 +668,6 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
     ],
   },
 });
-
-/** @deprecated Name kept for importers; use {@link MovementSchema}. */
-export const TransactionSchema: z.ZodType<Movement> = MovementSchema;
-/** @deprecated Name kept for importers; use {@link Movement}. */
-export type Transaction = Movement;
 
 // ── Input schemas ───────────────────────────────────────────────────
 

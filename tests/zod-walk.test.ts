@@ -12,7 +12,7 @@ import { FirestoreTimestamp } from "../src/schemas/common.ts";
 import { chicagoInstant, chicagoStartOfDay } from "../src/schemas/_datetime.ts";
 import { InvoiceSchema } from "../src/schemas/invoice.ts";
 import { DocDestination } from "../src/schemas/order.ts";
-import { TransactionSchema } from "../src/schemas/transaction.ts";
+import { MovementSchema } from "../src/schemas/transaction.ts";
 
 // ── isDateField on production schemas using the Chicago datetime factories ──
 
@@ -29,7 +29,7 @@ Deno.test("isDateField detects chicagoInstant on destination dates.delivery_star
 });
 
 Deno.test("isDateField detects chicagoInstant on transaction.date (with pipe-level meta)", () => {
-  assertEquals(isDateField(TransactionSchema, "date"), true);
+  assertEquals(isDateField(MovementSchema, "date"), true);
 });
 
 // ── Regression guards for pre-existing date shapes ──
@@ -95,12 +95,12 @@ Deno.test("isDateLikeNode false for z.number()", () => {
 // `getServerSortableColumns` continues to work.
 
 Deno.test("resolveFieldMeta still reads pipe-level meta on transaction.date", () => {
-  const meta = resolveFieldMeta(TransactionSchema, "date");
+  const meta = resolveFieldMeta(MovementSchema, "date");
   assertEquals(meta?.serverSortVia, "date_fs");
 });
 
 Deno.test("getServerSortableColumns still includes transaction.date → date_fs", () => {
-  const map = getServerSortableColumns(TransactionSchema);
+  const map = getServerSortableColumns(MovementSchema);
   assertEquals(map.date, "date_fs");
 });
 

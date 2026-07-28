@@ -1839,7 +1839,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  crms_sync: Record<string, typeLiteral>;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -2769,7 +2769,7 @@
         {
           "kind": "typeAlias",
           "name": "SchemaDocType",
-          "declaration": "type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;",
+          "declaration": "type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;",
           "doc": "Union of all Firestore document types. Use with validateBeforeWrite."
         },
         {
@@ -2811,7 +2811,7 @@
         {
           "kind": "interface",
           "name": "StockSummaryBookingEntry",
-          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  breakdown: BookingBreakdown;\n}",
+          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  breakdown: BookingBreakdown;\n  type: ComponentTypeType;\n}",
           "doc": "A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`\nnull = open-ended (see the module note — this is the sale case)."
         },
         {
@@ -2939,12 +2939,6 @@
           "name": "TEMPLATE_VERSION_STATUSES",
           "declaration": "const TEMPLATE_VERSION_STATUSES: \"draft\" | \"published\" | \"archived\"[];",
           "doc": "Lifecycle status of a template version (mirrors the git lifecycle)."
-        },
-        {
-          "kind": "variable",
-          "name": "TRANSACTION_TYPES",
-          "declaration": "const TRANSACTION_TYPES: unknown;",
-          "doc": ""
         },
         {
           "kind": "interface",
@@ -3212,14 +3206,8 @@
         },
         {
           "kind": "typeAlias",
-          "name": "Transaction",
-          "declaration": "type Transaction = Movement;",
-          "doc": ""
-        },
-        {
-          "kind": "typeAlias",
           "name": "TransactionCreated",
-          "declaration": "type TransactionCreated = EventEnvelope<Transaction> & typeLiteral;",
+          "declaration": "type TransactionCreated = EventEnvelope<Movement> & typeLiteral;",
           "doc": ""
         },
         {
@@ -3241,12 +3229,6 @@
           "doc": "Zod schema for {@link TransactionLogRecord}."
         },
         {
-          "kind": "variable",
-          "name": "TransactionSchema",
-          "declaration": "const TransactionSchema: z.ZodType<Movement>;",
-          "doc": ""
-        },
-        {
           "kind": "typeAlias",
           "name": "TransactionStatusType",
           "declaration": "type TransactionStatusType = indexedAccess;",
@@ -3254,14 +3236,8 @@
         },
         {
           "kind": "typeAlias",
-          "name": "TransactionTypeType",
-          "declaration": "type TransactionTypeType = MovementTypeType;",
-          "doc": ""
-        },
-        {
-          "kind": "typeAlias",
           "name": "TransactionUpdated",
-          "declaration": "type TransactionUpdated = EventEnvelope<Transaction> & typeLiteral;",
+          "declaration": "type TransactionUpdated = EventEnvelope<Movement> & typeLiteral;",
           "doc": ""
         },
         {
@@ -6618,7 +6594,7 @@
         {
           "kind": "interface",
           "name": "StockSummaryBookingEntry",
-          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  breakdown: BookingBreakdown;\n}",
+          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  breakdown: BookingBreakdown;\n  type: ComponentTypeType;\n}",
           "doc": "A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`\nnull = open-ended (see the module note — this is the sale case)."
         },
         {
@@ -6822,7 +6798,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  crms_sync: Record<string, typeLiteral>;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -6920,30 +6896,6 @@
           "name": "ReverseTransactionInputType",
           "declaration": "interface ReverseTransactionInputType {\n  uid_session: string;\n  reference: string;\n  date?: string;\n}",
           "doc": "Input for reversing a movement."
-        },
-        {
-          "kind": "variable",
-          "name": "TRANSACTION_TYPES",
-          "declaration": "const TRANSACTION_TYPES: unknown;",
-          "doc": ""
-        },
-        {
-          "kind": "typeAlias",
-          "name": "Transaction",
-          "declaration": "type Transaction = Movement;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "TransactionSchema",
-          "declaration": "const TransactionSchema: z.ZodType<Movement>;",
-          "doc": ""
-        },
-        {
-          "kind": "typeAlias",
-          "name": "TransactionTypeType",
-          "declaration": "type TransactionTypeType = MovementTypeType;",
-          "doc": ""
         },
         {
           "kind": "variable",

@@ -14,6 +14,9 @@ const validSummary = {
   bookings: [{
     uid: BOOKING,
     number: 42,
+    // Required: `heldByBooking` keys the sale rule on it, and an optional field
+    // here would mean two availability behaviours coexisting.
+    type: "rental",
     start: "2026-03-01T00:00:00.000-06:00",
     start_fs: tsAt("2026-03-01T00:00:00.000-06:00"),
     end: "2026-03-05T23:59:59.999-06:00",

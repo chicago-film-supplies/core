@@ -30,6 +30,8 @@ import { z } from "zod";
 import { BookingId, FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
+  ComponentTypeEnum,
+  type ComponentTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
   OOSReasonEnum,
@@ -52,6 +54,17 @@ export interface StockSummaryBookingEntry {
   end: string | null;
   end_fs: FirestoreTimestampType | null;
   breakdown: BookingBreakdown;
+  /**
+   * The booking's `Booking.type`. Drives the sale rule in `heldByBooking`
+   * (`@cfs/core/utils/availability`): a sale's `out` units have already left
+   * ownership, so counting them again would subtract them twice.
+   *
+   * Required. A summary is a pure projection of its product's bookings and OOS
+   * records, so making this required costs a rebuild, not a backfill — and an
+   * optional field here would mean two availability behaviours coexisting, which
+   * is the one thing this document exists to prevent.
+   */
+  type: ComponentTypeType;
 }
 
 /** A non-terminal out-of-service record as an interval + its quantity. */
@@ -89,6 +102,7 @@ const StockSummaryBookingEntrySchema: z.ZodType<StockSummaryBookingEntry> = z.st
   end: chicagoInstant().nullable(),
   end_fs: FirestoreTimestamp.nullable(),
   breakdown: BookingBreakdownSchema,
+  type: ComponentTypeEnum,
 });
 
 const StockSummaryOOSEntrySchema: z.ZodType<StockSummaryOOSEntry> = z.strictObject({

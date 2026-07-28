@@ -38,6 +38,7 @@
  */
 import type {
   BookingBreakdown,
+  ComponentTypeType,
   FirestoreTimestampType,
   FirestoreTimestampValue,
   OOSReasonType,
@@ -143,14 +144,27 @@ function windowMs(window: AvailabilityWindow): { startMs: number; endMs: number 
 }
 
 /**
- * The units a booking physically holds: `reserved + prepped + out`. A `quoted`
- * booking has claimed nothing yet, and the terminal buckets (`returned`, `lost`,
- * `damaged`) have already given the units back or written them off — this is the
- * definition of `quantity_booked`, and it is deliberately narrower than
- * `sumBookingBreakdown`.
+ * The units a booking still consumes from stock: `reserved + prepped + out`. A
+ * `quoted` booking has claimed nothing yet, and the terminal buckets
+ * (`returned`, `lost`, `damaged`) have already given the units back or written
+ * them off — this is the definition of `quantity_booked`, and it is deliberately
+ * narrower than `sumBookingBreakdown`.
+ *
+ * **A sale's `out` units are excluded**, because for a sale the checkout is also
+ * the moment ownership ends: the movement drops `quantity_held`, so counting the
+ * booking's `out` as well would subtract the same units twice.
+ *
+ * Note this excludes `out` **only** — not the whole entry. A 5-unit sale booking
+ * with 2 checked out must keep consuming for the other 3, or the remainder is
+ * handed back as available and oversells. That is why the entry stays in the
+ * summary rather than being filtered out of it.
+ *
+ * Both call sites — `computeAvailability` and `toPublicStockSummary` — go through
+ * here, so the manager and the public storefront cannot disagree about it.
  */
-function heldByBooking(b: BookingBreakdown): number {
-  return b.reserved + b.prepped + b.out;
+function heldByBooking(b: { breakdown: BookingBreakdown; type: ComponentTypeType }): number {
+  const base = b.breakdown.reserved + b.breakdown.prepped;
+  return b.type === "sale" ? base : base + b.breakdown.out;
 }
 
 /**
@@ -178,7 +192,7 @@ export function computeAvailability(
       continue;
     }
     bookings.push(b);
-    quantity_booked += heldByBooking(b.breakdown);
+    quantity_booked += heldByBooking(b);
     bookings_breakdown.quoted += b.breakdown.quoted;
     bookings_breakdown.reserved += b.breakdown.reserved;
     bookings_breakdown.prepped += b.breakdown.prepped;
@@ -252,7 +266,7 @@ export function toPublicStockSummary(summary: StockSummary): PublicStockSummary 
   const unavailable: PublicStockSummary["unavailable"] = [];
 
   for (const b of summary.bookings) {
-    const quantity = heldByBooking(b.breakdown);
+    const quantity = heldByBooking(b);
     if (quantity <= 0) continue;
     unavailable.push({
       start: b.start,

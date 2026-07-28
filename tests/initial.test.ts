@@ -11,7 +11,7 @@ import {
   StoreSchema,
   TemplateSchema,
   TrackingCategorySchema,
-  TransactionSchema,
+  MovementSchema,
   UserSchema,
   WebshopProductSchema,
   DestinationEndpoint,
@@ -24,7 +24,7 @@ Deno.test("getInitialValues — produces object for every collection schema", ()
   const schemas = [
     ContactSchema, OrganizationSchema, DestinationSchema, LocationSchema,
     OrderSchema, ProductSchema, TagSchema, TaxSchema, TemplateSchema,
-    TrackingCategorySchema, TransactionSchema, UserSchema,
+    TrackingCategorySchema, MovementSchema, UserSchema,
   ];
   for (const schema of schemas) {
     const result = getInitialValues(schema);
@@ -72,7 +72,7 @@ Deno.test("getInitialValues — enum fields use first value", () => {
   // First member of MOVEMENT_TYPES, which now leads with the custody-bearing
   // fulfillment events. Forms pick their options from
   // getDisplayTransactionTypes(), not from this synthesized default.
-  const txResult = getInitialValues(TransactionSchema);
+  const txResult = getInitialValues(MovementSchema);
   assertEquals(txResult.type, "prep");
 
   const taxResult = getInitialValues(TaxSchema);

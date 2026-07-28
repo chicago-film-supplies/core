@@ -607,11 +607,6 @@ export {
   type UpdateTransactionInputType,
   type ReverseTransactionInputType,
   type CreateStoreTransferInputType,
-  // Legacy names, kept so importers migrate on their own schedule.
-  TransactionSchema,
-  TRANSACTION_TYPES,
-  type Transaction,
-  type TransactionTypeType,
 } from "./transaction.ts";
 
 export {
@@ -960,7 +955,7 @@ import type { Thread } from "./thread.ts";
 import type { Tag } from "./tag.ts";
 import type { Tax } from "./tax.ts";
 import type { TrackingCategory } from "./tracking-category.ts";
-import type { Transaction } from "./transaction.ts";
+import type { Movement } from "./transaction.ts";
 import type { TypesenseConfig } from "./typesense-config.ts";
 import type { UploadcareSweepRun } from "./uploadcare-sweep.ts";
 import type { User } from "./user.ts";
@@ -983,7 +978,7 @@ export type SchemaDocType =
   | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
   | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
-  | Store | Tag | Thread | TrackingCategory | Transaction | TypesenseConfig | UploadcareSweepRun | User
+  | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User
   | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState
   | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 
@@ -1030,7 +1025,7 @@ import { TagSchema } from "./tag.ts";
 import { TaxSchema as TaxSchema_ } from "./tax.ts";
 import { ThreadSchema } from "./thread.ts";
 import { TrackingCategorySchema } from "./tracking-category.ts";
-import { TransactionSchema } from "./transaction.ts";
+import { MovementSchema } from "./transaction.ts";
 import { UserSchema } from "./user.ts";
 import { TypesenseConfigSchema } from "./typesense-config.ts";
 import { UploadcareSweepRunSchema } from "./uploadcare-sweep.ts";
@@ -1093,7 +1088,7 @@ export const schemas: Record<string, z.ZodType> = {
   "tax": TaxSchema_, "taxes": TaxSchema_,
   "thread": ThreadSchema, "threads": ThreadSchema,
   "tracking-category": TrackingCategorySchema, "tracking-categories": TrackingCategorySchema,
-  "transaction": TransactionSchema, "transactions": TransactionSchema,
+  "transaction": MovementSchema, "transactions": MovementSchema,
   "user": UserSchema, "users": UserSchema,
   "webhook-event": WebhookEventSchema_, "webhook-events": WebhookEventSchema_,
   // `events` is the inbound-webhook idempotency subcollection webhooks/{service}/events.
