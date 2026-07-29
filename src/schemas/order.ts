@@ -660,23 +660,39 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   total: z.number().default(0),
 });
 
-/** Line item in the full order document. */
+/**
+ * Line item in the full order document.
+ *
+ * `price` and `stock_method` are REQUIRED, and that is a statement about the
+ * writers rather than a convenience: every one of the 9,303 line items in prod
+ * (and in dev) carries both, because `buildOrderLineItem` resolves them off the
+ * backing product doc — or off the `custom-` line's own payload — before it can
+ * build anything at all. While they were optional, three call sites downstream
+ * had to compensate for a shape no writer has ever produced: two `item.price!`
+ * assertions, and a `"stock_method" in item` duck-type that answered "not a line
+ * item" for a line item that merely omitted the field.
+ *
+ * `uid_delivery` / `uid_collection` are absent, matching the input arm. They
+ * belong to the destination divider — 0 of 9,303 stored lines carry either key,
+ * no writer has ever set one on a line, and both readers in
+ * `@cfs/core/utils/orders` gate on `type === "destination"` before looking. The
+ * FULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit
+ * `null` there, so removing it would be a backfill, not a tightening.
+ */
 export interface OrderDocLineItemType {
   uid: string;
   type: DocLineItemTypeType;
   name: string;
   description: string;
   quantity: number;
-  price?: OrderDocItemPriceType;
-  stock_method?: StockMethodType;
+  price: OrderDocItemPriceType;
+  stock_method: StockMethodType;
   order_number?: number;
   uid_order?: string;
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced?: boolean | null;
   crms_id?: number | null;
-  uid_delivery?: string | null;
-  uid_collection?: string | null;
 }
 
 // Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;
@@ -715,16 +731,22 @@ const OrderDocLineItemInner = z.strictObject({
   // logs — the same posture `name` has always had.
   description: z.string().meta({ pii: "none" }).default(""),
   quantity: z.number().int().min(0).default(0),
-  price: OrderDocItemPrice.optional(),
-  stock_method: StockMethodEnum.optional(),
+  // Required, not `.optional()` — see the interface docblock. A `.default()`
+  // would be worse than useless here: `validateBeforeWrite` persists the RAW
+  // doc, so a default never materializes, and an omitted `price` would reach
+  // Firestore absent while the published type promised one.
+  price: OrderDocItemPrice,
+  // Required for every line type, `transaction_fee` included — a fee holds no
+  // stock, which `"none"` says exactly (1,533 prod lines already use it). That
+  // keeps the fee an ordinary line item, which is the whole point of W1's
+  // collapse of the separate fee arm, rather than earning it a contract axis.
+  stock_method: StockMethodEnum,
   order_number: z.number().optional(),
   uid_order: FirestoreId.optional(),
   path: z.array(ItemUid).default([]),
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
   crms_id: z.number().nullable().optional(),
-  uid_delivery: FirestoreId.nullable().optional(),
-  uid_collection: FirestoreId.nullable().optional(),
 }).superRefine(checkItemContract);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;

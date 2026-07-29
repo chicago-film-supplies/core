@@ -9,6 +9,28 @@ const datesBase = getInitialValues(OrderDocDates) as Record<string, unknown>;
 const destBase = getInitialValues(DocDestination) as Record<string, unknown>;
 const priceBase = getInitialValues(OrderDocItemPrice) as Record<string, unknown>;
 
+/**
+ * A minimal VALID stored line item, for the `OrderSchema` / `OrderDocItem` cases
+ * below. Each case overrides exactly the field it is about, so the ONLY invalid
+ * thing in the payload is the thing under test.
+ *
+ * That property used to be implicit and W5 broke it: making `price` and
+ * `stock_method` required turned every negative fixture that omitted them into a
+ * test passing for the wrong reason — "rejects a float `chargeable_days`" would
+ * have gone green on a missing `stock_method` and never reached the price at all.
+ *
+ * `stock_method: "none"` is the default because it is the one value that needs no
+ * `price.replacement`, which keeps a case about anything else minimal.
+ */
+const docLine = (over: Record<string, unknown> = {}) => ({
+  uid: "testprod100000000000",
+  type: "rental",
+  name: "Camera",
+  stock_method: "none",
+  price: priceBase,
+  ...over,
+});
+
 const validDates = {
   delivery_start: "2026-03-01T00:00:00Z",
   delivery_end: "2026-03-01T00:00:00Z",
@@ -585,50 +607,39 @@ Deno.test("OrderSchema rejects line item with invalid type", () => {
 
 Deno.test("OrderSchema accepts all doc line item types", () => {
   for (const type of ["rental", "replacement", "sale", "service", "surcharge"]) {
-    const doc = {
-      ...minimalDoc,
-      items: [{
-        uid: "testprod100000000000",
-        type,
-        name: "Thing",
-        ...(type === "rental" ? { price: { ...priceBase, replacement: 100 } } : {}),
-      }],
-    };
+    const doc = { ...minimalDoc, items: [docLine({ type, name: "Thing" })] };
     assertEquals(OrderSchema.safeParse(doc).success, true, `type "${type}" should be valid`);
   }
 });
 
+Deno.test("OrderSchema requires price and stock_method on a stored line item", () => {
+  // W5. Both were `.optional()` while no writer had ever omitted either —
+  // 0 of 9,303 prod line items were missing one — so three call sites
+  // downstream were compensating for a shape that does not exist.
+  for (const field of ["price", "stock_method"]) {
+    const item = docLine();
+    delete (item as Record<string, unknown>)[field];
+    const r = OrderSchema.safeParse({ ...minimalDoc, items: [item] });
+    assertEquals(r.success, false, `omitting "${field}" should be rejected`);
+    assertEquals(r.error?.issues[0].path, ["items", 0, field]);
+  }
+});
+
 Deno.test("OrderSchema rejects rental without price.replacement", () => {
-  const doc = {
-    ...minimalDoc,
-    items: [{ uid: "testprod100000000000", type: "rental", name: "Camera" }],
-  };
+  const doc = { ...minimalDoc, items: [docLine({ stock_method: "bulk" })] };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
 Deno.test("OrderSchema rejects rental with null price.replacement", () => {
   const doc = {
     ...minimalDoc,
-    items: [{
-      uid: "testprod100000000000",
-      type: "rental",
-      name: "Camera",
-      price: { ...priceBase, replacement: null },
-    }],
+    items: [docLine({ stock_method: "bulk", price: { ...priceBase, replacement: null } })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
 Deno.test("OrderSchema accepts rental with stock_method none and no price.replacement", () => {
-  const doc = {
-    ...minimalDoc,
-    items: [{
-      uid: "testprod100000000000",
-      type: "rental",
-      name: "Service Fee",
-      stock_method: "none",
-    }],
-  };
+  const doc = { ...minimalDoc, items: [docLine({ name: "Service Fee" })] };
   assertEquals(OrderSchema.safeParse(doc).success, true);
 });
 
@@ -643,10 +654,7 @@ Deno.test("OrderSchema rejects custom line item type", () => {
 Deno.test("OrderSchema rejects float chargeable_days in price", () => {
   const doc = {
     ...minimalDoc,
-    items: [{
-      uid: "testprod100000000000",
-      type: "rental",
-      name: "Camera",
+    items: [docLine({
       price: {
         ...priceBase,
         base: 100,
@@ -655,7 +663,7 @@ Deno.test("OrderSchema rejects float chargeable_days in price", () => {
         subtotal_discounted: 100,
         total: 100,
       },
-    }],
+    })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -663,10 +671,7 @@ Deno.test("OrderSchema rejects float chargeable_days in price", () => {
 Deno.test("OrderSchema rejects invalid price formula", () => {
   const doc = {
     ...minimalDoc,
-    items: [{
-      uid: "testprod100000000000",
-      type: "rental",
-      name: "Camera",
+    items: [docLine({
       price: {
         ...priceBase,
         base: 100,
@@ -675,7 +680,7 @@ Deno.test("OrderSchema rejects invalid price formula", () => {
         subtotal_discounted: 100,
         total: 100,
       },
-    }],
+    })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -683,10 +688,7 @@ Deno.test("OrderSchema rejects invalid price formula", () => {
 Deno.test("OrderSchema rejects invalid discount type", () => {
   const doc = {
     ...minimalDoc,
-    items: [{
-      uid: "testprod100000000000",
-      type: "rental",
-      name: "Camera",
+    items: [docLine({
       price: {
         ...priceBase,
         base: 100,
@@ -696,7 +698,7 @@ Deno.test("OrderSchema rejects invalid discount type", () => {
         discount: { rate: 10, type: "invalid", amount: 10 },
         total: 90,
       },
-    }],
+    })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -798,10 +800,7 @@ Deno.test("OrderSchema rejects empty destinations array", () => {
 Deno.test("OrderSchema rejects extra properties on line item price", () => {
   const doc = {
     ...minimalDoc,
-    items: [{
-      uid: "testprod100000000000",
-      type: "rental",
-      name: "Camera",
+    items: [docLine({
       price: {
         ...priceBase,
         base: 100,
@@ -811,7 +810,7 @@ Deno.test("OrderSchema rejects extra properties on line item price", () => {
         total: 100,
         extra: true,
       },
-    }],
+    })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -819,7 +818,7 @@ Deno.test("OrderSchema rejects extra properties on line item price", () => {
 Deno.test("OrderSchema rejects float quantity on line items", () => {
   const doc = {
     ...minimalDoc,
-    items: [{ uid: "testprod100000000000", type: "rental", name: "Camera", quantity: 1.5 }],
+    items: [docLine({ quantity: 1.5 })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -827,7 +826,7 @@ Deno.test("OrderSchema rejects float quantity on line items", () => {
 Deno.test("OrderSchema rejects negative quantity on line items", () => {
   const doc = {
     ...minimalDoc,
-    items: [{ uid: "testprod100000000000", type: "rental", name: "Camera", quantity: -1 }],
+    items: [docLine({ quantity: -1 })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -836,13 +835,7 @@ Deno.test("OrderSchema accepts valid inclusion_type values", () => {
   for (const val of ["default", "mandatory", "optional", null]) {
     const doc = {
       ...minimalDoc,
-      items: [{
-        uid: "testprod100000000000",
-        type: "rental",
-        name: "Camera",
-        price: { ...priceBase, replacement: 100 },
-        inclusion_type: val,
-      }],
+      items: [docLine({ inclusion_type: val })],
     };
     assertEquals(OrderSchema.safeParse(doc).success, true, `inclusion_type "${val}" should be valid`);
   }
@@ -951,6 +944,9 @@ const feeLine = {
   description: "",
   quantity: 1,
   path: ["77LKBYcC09u1PZFhxmDJ"],
+  // A fee holds no stock, and W5 requires every line type to say so rather than
+  // exempting the fee with a contract axis. `"none"` is the honest value.
+  stock_method: "none",
   price: { ...priceBase, base: 3, formula: "percent_of_total" },
 };
 
@@ -1025,44 +1021,41 @@ Deno.test("isLineItem narrows a transaction_fee to the one line-item shape", () 
 Deno.test("percent_of_total is inexpressible on a non-fee line", () => {
   // It used to be merely THROWN ON, at runtime, inside `perUnitSubtotal` —
   // reachable only once the totals pass ran. The contract makes it unwritable.
-  const bad = OrderDocItem.safeParse({
-    uid: "testprod100000000000",
-    type: "sale",
-    name: "Gel Pack",
-    price: { ...priceBase, formula: "percent_of_total" },
-  });
+  const bad = OrderDocItem.safeParse(
+    docLine({ type: "sale", name: "Gel Pack", price: { ...priceBase, formula: "percent_of_total" } }),
+  );
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["price", "formula"]);
 
   // The fee is the one type priced from the document total.
   assertEquals(
-    OrderDocItem.safeParse({
+    OrderDocItem.safeParse(docLine({
       uid: "testfee1000000000000",
       type: "transaction_fee",
       name: "Card Fee",
       price: { ...priceBase, formula: "percent_of_total" },
-    }).success,
+    })).success,
     true,
   );
   // ...and a flat-amount fee stays legal: the converse is deliberately not asserted.
   assertEquals(
-    OrderDocItem.safeParse({
+    OrderDocItem.safeParse(docLine({
       uid: "testfee1000000000000",
       type: "transaction_fee",
       name: "Card Fee",
       price: { ...priceBase, formula: "fixed" },
-    }).success,
+    })).success,
     true,
   );
 });
 
 Deno.test("a transaction_fee cannot carry price.replacement", () => {
-  const bad = OrderDocItem.safeParse({
+  const bad = OrderDocItem.safeParse(docLine({
     uid: "testfee1000000000000",
     type: "transaction_fee",
     name: "Card Fee",
     price: { ...priceBase, replacement: 100 },
-  });
+  }));
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["price", "replacement"]);
 });

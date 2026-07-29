@@ -549,12 +549,17 @@ export function checkItemPriceFormula(
  * the one item shape whose price carries a `replacement` channel. The direct
  * analogue of `checkMovementContract` in `transaction.ts`.
  *
- * `required_when_stocked` treats a MISSING `stock_method` as stocked, which is
- * the conservative reading and the one the hand-written refine this replaced has
- * always enforced. That is also why the axis does not run on the invoice arm:
- * an invoice line drops `stock_method` and `price.replacement` together, so an
- * absent `stock_method` there means "this shape has no answer", not "unknown" —
- * and running it would reject all 7,076 invoice rentals in prod.
+ * `required_when_stocked` treats a MISSING `stock_method` as stocked — the
+ * conservative reading, and the one the hand-written refine this replaced always
+ * enforced. **Both callers now make the field required** (`OrderDocLineItemInner`
+ * as of W5, `ComponentObject` from the start), so that branch is unreachable
+ * through either one; it is kept because a refinement is not a parse and this
+ * function takes a structural bound, not a schema.
+ *
+ * The `stock_method` requirement is also why the axis does not run on the
+ * invoice arm: an invoice line drops `stock_method` and `price.replacement`
+ * together, so an absent `stock_method` there means "this shape has no answer",
+ * not "unknown" — and running it would reject all 7,076 invoice rentals in prod.
  */
 export function checkItemContract(
   item: {
@@ -571,7 +576,8 @@ export function checkItemContract(
   // Deliberately NOT gated on `price` being present: a rental with no price at
   // all cannot state a replacement value either, and the hand-written refine
   // this replaced rejected that case too (`item.price?.replacement != null`).
-  // Prod agrees — 0 of 9,302 order line items are missing `price`.
+  // Both callers require `price` outright now, so — as with `stock_method`
+  // above — this is defence on a structural bound, not a reachable branch.
   if (
     contract.replacement === "required_when_stocked" &&
     item.stock_method !== "none" && item.price?.replacement == null

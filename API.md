@@ -4462,6 +4462,22 @@ const OrderDocLineItem: z.ZodType<OrderDocLineItemType>;
 
 Line item in the full order document.
 
+`price` and `stock_method` are REQUIRED, and that is a statement about the
+writers rather than a convenience: every one of the 9,303 line items in prod
+(and in dev) carries both, because `buildOrderLineItem` resolves them off the
+backing product doc — or off the `custom-` line's own payload — before it can
+build anything at all. While they were optional, three call sites downstream
+had to compensate for a shape no writer has ever produced: two `item.price!`
+assertions, and a `"stock_method" in item` duck-type that answered "not a line
+item" for a line item that merely omitted the field.
+
+`uid_delivery` / `uid_collection` are absent, matching the input arm. They
+belong to the destination divider — 0 of 9,303 stored lines carry either key,
+no writer has ever set one on a line, and both readers in
+`@cfs/core/utils/orders` gate on `type === "destination"` before looking. The
+FULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit
+`null` there, so removing it would be a backfill, not a tightening.
+
 ```ts
 interface OrderDocLineItemType {
   uid: string;
@@ -4469,16 +4485,14 @@ interface OrderDocLineItemType {
   name: string;
   description: string;
   quantity: number;
-  price?: OrderDocItemPriceType;
-  stock_method?: StockMethodType;
+  price: OrderDocItemPriceType;
+  stock_method: StockMethodType;
   order_number?: number;
   uid_order?: string;
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced?: boolean | null;
   crms_id?: number | null;
-  uid_delivery?: string | null;
-  uid_collection?: string | null;
 }
 ```
 
@@ -7603,12 +7617,17 @@ The full per-item contract check — {@link checkItemPriceFormula} plus the
 the one item shape whose price carries a `replacement` channel. The direct
 analogue of `checkMovementContract` in `transaction.ts`.
 
-`required_when_stocked` treats a MISSING `stock_method` as stocked, which is
-the conservative reading and the one the hand-written refine this replaced has
-always enforced. That is also why the axis does not run on the invoice arm:
-an invoice line drops `stock_method` and `price.replacement` together, so an
-absent `stock_method` there means "this shape has no answer", not "unknown" —
-and running it would reject all 7,076 invoice rentals in prod.
+`required_when_stocked` treats a MISSING `stock_method` as stocked — the
+conservative reading, and the one the hand-written refine this replaced always
+enforced. **Both callers now make the field required** (`OrderDocLineItemInner`
+as of W5, `ComponentObject` from the start), so that branch is unreachable
+through either one; it is kept because a refinement is not a parse and this
+function takes a structural bound, not a schema.
+
+The `stock_method` requirement is also why the axis does not run on the
+invoice arm: an invoice line drops `stock_method` and `price.replacement`
+together, so an absent `stock_method` there means "this shape has no answer",
+not "unknown" — and running it would reject all 7,076 invoice rentals in prod.
 
 ### `checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -9219,12 +9238,17 @@ The full per-item contract check — {@link checkItemPriceFormula} plus the
 the one item shape whose price carries a `replacement` channel. The direct
 analogue of `checkMovementContract` in `transaction.ts`.
 
-`required_when_stocked` treats a MISSING `stock_method` as stocked, which is
-the conservative reading and the one the hand-written refine this replaced has
-always enforced. That is also why the axis does not run on the invoice arm:
-an invoice line drops `stock_method` and `price.replacement` together, so an
-absent `stock_method` there means "this shape has no answer", not "unknown" —
-and running it would reject all 7,076 invoice rentals in prod.
+`required_when_stocked` treats a MISSING `stock_method` as stocked — the
+conservative reading, and the one the hand-written refine this replaced always
+enforced. **Both callers now make the field required** (`OrderDocLineItemInner`
+as of W5, `ComponentObject` from the start), so that branch is unreachable
+through either one; it is kept because a refinement is not a parse and this
+function takes a structural bound, not a schema.
+
+The `stock_method` requirement is also why the axis does not run on the
+invoice arm: an invoice line drops `stock_method` and `price.replacement`
+together, so an absent `stock_method` there means "this shape has no answer",
+not "unknown" — and running it would reject all 7,076 invoice rentals in prod.
 
 ### `checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -11634,6 +11658,22 @@ const OrderDocLineItem: z.ZodType<OrderDocLineItemType>;
 
 Line item in the full order document.
 
+`price` and `stock_method` are REQUIRED, and that is a statement about the
+writers rather than a convenience: every one of the 9,303 line items in prod
+(and in dev) carries both, because `buildOrderLineItem` resolves them off the
+backing product doc — or off the `custom-` line's own payload — before it can
+build anything at all. While they were optional, three call sites downstream
+had to compensate for a shape no writer has ever produced: two `item.price!`
+assertions, and a `"stock_method" in item` duck-type that answered "not a line
+item" for a line item that merely omitted the field.
+
+`uid_delivery` / `uid_collection` are absent, matching the input arm. They
+belong to the destination divider — 0 of 9,303 stored lines carry either key,
+no writer has ever set one on a line, and both readers in
+`@cfs/core/utils/orders` gate on `type === "destination"` before looking. The
+FULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit
+`null` there, so removing it would be a backfill, not a tightening.
+
 ```ts
 interface OrderDocLineItemType {
   uid: string;
@@ -11641,16 +11681,14 @@ interface OrderDocLineItemType {
   name: string;
   description: string;
   quantity: number;
-  price?: OrderDocItemPriceType;
-  stock_method?: StockMethodType;
+  price: OrderDocItemPriceType;
+  stock_method: StockMethodType;
   order_number?: number;
   uid_order?: string;
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced?: boolean | null;
   crms_id?: number | null;
-  uid_delivery?: string | null;
-  uid_collection?: string | null;
 }
 ```
 
