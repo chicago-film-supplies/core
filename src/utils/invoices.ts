@@ -634,7 +634,7 @@ export function validateInvoiceItemUniqueness<T extends InvoiceItem>(items: T[])
  * @param orderDividerUid - The uid of the order divider item
  * @returns Items scoped to that order (divider + children)
  */
-export function getOrderScopedItems(items: InvoiceItem[], orderDividerUid: string): InvoiceItem[] {
+export function getOrderScopedItems<T extends InvoiceItem>(items: T[], orderDividerUid: string): T[] {
   return items.filter((item) =>
     (item.type === "order" && item.uid === orderDividerUid) ||
     item.path[0] === orderDividerUid
@@ -650,7 +650,7 @@ export function getOrderScopedItems(items: InvoiceItem[], orderDividerUid: strin
  * @param orderDividerUid - The uid of the order divider item to remove
  * @returns Items with the order scope removed
  */
-export function removeOrderScopedItems(items: InvoiceItem[], orderDividerUid: string): InvoiceItem[] {
+export function removeOrderScopedItems<T extends InvoiceItem>(items: T[], orderDividerUid: string): T[] {
   return items.filter((item) =>
     !(item.type === "order" && item.uid === orderDividerUid) &&
     item.path[0] !== orderDividerUid

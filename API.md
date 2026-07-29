@@ -17249,7 +17249,7 @@ Generic over any `{ path: string[] }` so it works on order line items, invoice
 line items (whose paths are scoped by an order divider uid), and any other
 path-keyed flat array.
 
-### `getOrderScopedItems(items: InvoiceItem[], orderDividerUid: string): InvoiceItem[]`
+### `getOrderScopedItems(items: T[], orderDividerUid: string): T[]`
 
 Get all invoice items scoped to a specific order divider.
 Returns the order divider itself plus all items whose path starts
@@ -17346,7 +17346,7 @@ Pure function — returns values instead of mutating.
 Remove all destination pairs scoped to a specific order.
 Mirrors `removeOrderScopedItems` for the items array.
 
-### `removeOrderScopedItems(items: InvoiceItem[], orderDividerUid: string): InvoiceItem[]`
+### `removeOrderScopedItems(items: T[], orderDividerUid: string): T[]`
 
 Remove all invoice items scoped to a specific order divider.
 Returns a new array with the order divider and all items whose path

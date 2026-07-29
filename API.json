@@ -9210,7 +9210,7 @@
         {
           "kind": "function",
           "name": "getOrderScopedItems",
-          "signature": "getOrderScopedItems(items: InvoiceItem[], orderDividerUid: string): InvoiceItem[]",
+          "signature": "getOrderScopedItems(items: T[], orderDividerUid: string): T[]",
           "doc": "Get all invoice items scoped to a specific order divider.\nReturns the order divider itself plus all items whose path starts\nwith the order divider's uid.",
           "paramTags": [
             {
@@ -9351,7 +9351,7 @@
         {
           "kind": "function",
           "name": "removeOrderScopedItems",
-          "signature": "removeOrderScopedItems(items: InvoiceItem[], orderDividerUid: string): InvoiceItem[]",
+          "signature": "removeOrderScopedItems(items: T[], orderDividerUid: string): T[]",
           "doc": "Remove all invoice items scoped to a specific order divider.\nReturns a new array with the order divider and all items whose path\nstarts with the order divider's uid removed.",
           "paramTags": [
             {
