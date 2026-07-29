@@ -813,7 +813,7 @@
         {
           "kind": "interface",
           "name": "CreateProductInputType",
-          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  tracking_category_name?: string;\n  uid_tracking_category?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
+          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: AuthoredProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  tracking_category_name?: string;\n  uid_tracking_category?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
           "doc": "Input type for creating a product."
         },
         {
@@ -3501,7 +3501,7 @@
         {
           "kind": "interface",
           "name": "UpdateProductInputType",
-          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
+          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: AuthoredProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
           "doc": "Input type for updating a product."
         },
         {
@@ -6498,7 +6498,7 @@
         {
           "kind": "interface",
           "name": "CreateProductInputType",
-          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  tracking_category_name?: string;\n  uid_tracking_category?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
+          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: AuthoredProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  tracking_category_name?: string;\n  uid_tracking_category?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
           "doc": "Input type for creating a product."
         },
         {
@@ -6558,7 +6558,7 @@
         {
           "kind": "interface",
           "name": "UpdateProductInputType",
-          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
+          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: AuthoredProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
           "doc": "Input type for updating a product."
         },
         {

@@ -1560,7 +1560,7 @@ interface CreateProductInputType {
   price: typeLiteral;
   shipping?: typeLiteral;
   alternates?: UidNameRefType[];
-  components?: ProductComponent[];
+  components?: AuthoredProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   tracking_category_name?: string;
@@ -6836,7 +6836,7 @@ interface UpdateProductInputType {
   price?: typeLiteral;
   shipping?: typeLiteral;
   alternates?: UidNameRefType[];
-  components?: ProductComponent[];
+  components?: AuthoredProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string;
@@ -11978,7 +11978,7 @@ interface CreateProductInputType {
   price: typeLiteral;
   shipping?: typeLiteral;
   alternates?: UidNameRefType[];
-  components?: ProductComponent[];
+  components?: AuthoredProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   tracking_category_name?: string;
@@ -12184,7 +12184,7 @@ interface UpdateProductInputType {
   price?: typeLiteral;
   shipping?: typeLiteral;
   alternates?: UidNameRefType[];
-  components?: ProductComponent[];
+  components?: AuthoredProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string;

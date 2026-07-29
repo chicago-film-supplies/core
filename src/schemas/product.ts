@@ -448,7 +448,7 @@ export interface CreateProductInputType {
     air_un: number | null;
   };
   alternates?: UidNameRefType[];
-  components?: ProductComponent[];
+  components?: AuthoredProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   tracking_category_name?: string;
@@ -571,7 +571,7 @@ export interface UpdateProductInputType {
     air_un: number | null;
   };
   alternates?: UidNameRefType[];
-  components?: ProductComponent[];
+  components?: AuthoredProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string;
