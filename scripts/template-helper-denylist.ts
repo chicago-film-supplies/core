@@ -92,6 +92,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "deriveOrderDateEnvelope", // superseded by per-destination dates; not for rendering
     "buildQueryByDates", // Typesense projection helper
     "computeItemTaxAmount", // single-tax building block used by calculateItemTax — not a render helper
+    // The transaction-fee pass of calculateOrderTotals/calculateInvoiceTotals.
+    // Both need the DOCUMENT's subtotal_discounted as a basis, and both answer a
+    // question the render context already has an answer to: the fee's amount is
+    // stored on the line (`price.total`) and rolled up in
+    // `totals.transaction_fees`. Recomputing at render time would let a document
+    // disagree with the doc it renders — the same trap as `allocation` above.
+    "calculateTransactionFeeAmount", // fee arithmetic — totals pass only
+    "costTransactionFees", // fee arithmetic over an array — totals pass only
   ],
   invoices: [
     // ── Xero integration ──

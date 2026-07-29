@@ -41,15 +41,15 @@ export {
 } from "./orders.ts";
 
 import currency from "currency.js";
-import type { COARevenueType, DocDestinationType, DocLineItemTypeType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocTotals, PriceFormulaType, PriceModifierType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, DocLineItemTypeType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocTotals, PriceFormulaType } from "../schemas/mod.ts";
 import {
   calculateItemSubtotal,
   computeItemPaths,
+  costTransactionFees,
   getTotalDiscount,
   getTaxTotals,
   getTransactionFeeTotals,
   isPreTaxItem,
-  isTransactionFeeItem,
   type ItemPathIssue,
   type ItemUniquenessIssue,
   type LineItem,
@@ -84,7 +84,7 @@ export function flattenForXero(items: LineItem[]): LineItem[] {
 export interface InvoiceItem extends LineItem {
   uid_order?: string | null;
   description?: string;
-  price?: PriceObject | PriceModifierType | InvoiceDocItemPrice;
+  price?: PriceObject | InvoiceDocItemPrice;
   coa_revenue?: COARevenueType | null;
   tracking_category?: string | null;
   xero_id?: string | null;
@@ -136,21 +136,9 @@ export function calculateInvoiceTotals(
   }
 
   // Pass 2: transaction fees — computed from subtotal_discounted
-  const feeItems: LineItem[] = [];
-  for (const item of billable) {
-    if (!isTransactionFeeItem(item)) continue;
-
-    let amount: number;
-    if (item.price.type === "percent") {
-      amount = currency(subtotal_discounted).multiply(item.price.rate / 100).value;
-    } else {
-      amount = currency(item.price.rate).multiply(item.quantity).value;
-    }
-
-    feeItems.push({ ...item, price: { ...item.price, amount } });
-  }
-
-  const transaction_fees = getTransactionFeeTotals(feeItems);
+  const transaction_fees = getTransactionFeeTotals(
+    costTransactionFees(billable, subtotal_discounted.value),
+  );
 
   let feeSum = currency(0);
   for (const entry of transaction_fees) {

@@ -30,10 +30,12 @@ const FULFILLMENT_ORDER_STATUSES = [
 type FulfillmentOrderStatusType = typeof FULFILLMENT_ORDER_STATUSES[number];
 const FulfillmentOrderStatus: z.ZodType<FulfillmentOrderStatusType> = z.enum(FULFILLMENT_ORDER_STATUSES);
 
-// Fulfillment line items exclude transaction_fee — that type is purely financial.
+// Fulfillment line items exclude transaction_fee — a fee has no stock and is
+// never picked off a shelf, so it is not a narrower spelling of
+// `DOC_LINE_ITEM_TYPES` waiting to be collapsed into it: the exclusion is the
+// contract.
 const FULFILLMENT_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
 type FulfillmentLineItemTypeType = typeof FULFILLMENT_LINE_ITEM_TYPES[number];
-const FulfillmentLineItemTypeEnum: z.ZodType<FulfillmentLineItemTypeType> = z.enum(FULFILLMENT_LINE_ITEM_TYPES);
 
 /** Line item in the fulfillment order view — no price, no financial flags. */
 export interface FulfillmentLineItemType {
@@ -63,9 +65,11 @@ export interface FulfillmentLineItemType {
   path_substituted_for?: string[];
 }
 
-export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = z.strictObject({
+// Un-annotated so `_zod.propValues` survives for the discriminated union below
+// — see `_dividers.ts`.
+const FulfillmentLineItemInner = z.strictObject({
   uid: ItemUid,
-  type: FulfillmentLineItemTypeEnum,
+  type: z.enum(FULFILLMENT_LINE_ITEM_TYPES),
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
   // Fulfillment items are a projection of order items, so this is the same
   // string; it must carry the same classification.
@@ -85,6 +89,8 @@ export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = z.strictO
   path_substituted_for: z.array(ItemUid).optional(),
 });
 
+export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = FulfillmentLineItemInner;
+
 /** Destination divider in the fulfillment items array. */
 export interface FulfillmentDestinationItemType {
   uid: string;
@@ -96,7 +102,7 @@ export interface FulfillmentDestinationItemType {
   description: string;
 }
 
-export const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemType> = z.strictObject({
+const FulfillmentDestinationItemInner = z.strictObject({
   uid: z.uuid(),
   type: z.literal("destination"),
   // Venue label, projected from `OrderDocDestinationItem.name` — same string,
@@ -108,6 +114,8 @@ export const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemTyp
   description: z.string().meta({ pii: "none" }).default(""),
 });
 
+export const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemType> = FulfillmentDestinationItemInner;
+
 /** Group divider in the fulfillment items array. */
 export interface FulfillmentGroupItemType {
   uid: string;
@@ -117,7 +125,7 @@ export interface FulfillmentGroupItemType {
   description: string;
 }
 
-export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> = z.strictObject({
+const FulfillmentGroupItemInner = z.strictObject({
   uid: z.uuid(),
   type: z.literal("group"),
   // Section header, projected from `OrderDocGroupItem.name` — same string, same
@@ -127,16 +135,18 @@ export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> = z.stric
   description: z.string().meta({ pii: "none" }).default(""),
 });
 
+export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> = FulfillmentGroupItemInner;
+
 /** Union of all item types in the fulfillment order view. */
 export type FulfillmentItemType =
   | FulfillmentLineItemType
   | FulfillmentDestinationItemType
   | FulfillmentGroupItemType;
 
-export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.union([
-  FulfillmentLineItem,
-  FulfillmentDestinationItem,
-  FulfillmentGroupItem,
+export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.discriminatedUnion("type", [
+  FulfillmentLineItemInner,
+  FulfillmentDestinationItemInner,
+  FulfillmentGroupItemInner,
 ]);
 
 /** Sanitized organization snapshot — uid and name only. */

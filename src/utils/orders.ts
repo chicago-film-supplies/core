@@ -77,7 +77,7 @@ export interface LineItem {
   name: string;
   type: string;
   quantity?: number;
-  price?: PriceObject | PriceModifierType;
+  price?: PriceObject;
   stock_method?: string;
   path: string[];
   uid_delivery?: string | null;
@@ -95,11 +95,19 @@ export interface PreTaxLineItem extends LineItem {
   price: PriceObject;
 }
 
-/** A transaction fee line item with a PriceModifier price. */
+/**
+ * A transaction fee line item.
+ *
+ * Carries the same `PriceObject` every other line carries — a fee is an
+ * ordinary line whose `price.formula` is `percent_of_total`, not a second price
+ * shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
+ * document total rather than into it, which is why it has its own predicate and
+ * its own pass in `calculateOrderTotals`.
+ */
 export interface TransactionFeeLineItem extends LineItem {
   type: "transaction_fee";
   quantity: number;
-  price: PriceModifierType;
+  price: PriceObject;
 }
 
 /** Any item that has pricing — pre-tax or transaction fee. */
@@ -460,13 +468,33 @@ export function calculateItemSubtotal(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
   }
+  return perUnitSubtotal(item.price, item.quantity);
+}
 
-  const { base = 0, formula, chargeable_days = null, discount } = item.price;
+/**
+ * The per-unit half of `calculateItemSubtotal`, split out so the fee path can
+ * reach it without spoofing a discriminator. Takes the price and quantity
+ * directly, because "which item type is this" is the caller's question.
+ */
+function perUnitSubtotal(
+  price: PriceObject,
+  itemQuantity: number,
+): { subtotal: number; subtotal_discounted: number } {
+  const { base = 0, formula, chargeable_days = null, discount } = price;
+  if (formula === "percent_of_total") {
+    // Not a per-unit price: `base` is a percentage of the DOCUMENT's
+    // subtotal_discounted, which this function cannot see. Only a
+    // `transaction_fee` may be priced this way, and it is costed by
+    // `calculateTransactionFeeAmount` in the totals pass instead.
+    throw new Error(
+      "percent_of_total prices from the document total, not the line: use calculateTransactionFeeAmount",
+    );
+  }
   if (formula !== "five_day_week" && formula !== "fixed") {
     throw new Error("Unknown formula: " + formula);
   }
 
-  const quantity = BigInt(Math.round(item.quantity * Number(QTY_SCALE)));
+  const quantity = BigInt(Math.round(itemQuantity * Number(QTY_SCALE)));
   const days = Math.round(chargeable_days ?? 0);
   // `pricingFactor = Math.max(chargeable_days / 5, 1)` — so the day factor bites
   // only above the one-week floor. At exactly 5 days it is 1, as is `fixed`.
@@ -508,6 +536,39 @@ export function calculateItemSubtotal(
     subtotal: Number(subtotalCents) / 100,
     subtotal_discounted: Number(discountedCents) / 100,
   };
+}
+
+/**
+ * The dollar amount a `transaction_fee` line contributes to a document.
+ *
+ * A fee is priced from the document, not from itself, so it needs the one input
+ * `calculateItemSubtotal` cannot see: `basis`, the document's
+ * `subtotal_discounted` (pre-tax, post-discount — the same base the fee has
+ * always been computed against).
+ *
+ * - `percent_of_total` → `basis × base / 100`.
+ * - anything else → the ordinary per-unit subtotal, `base × quantity`, so a
+ *   flat processing charge stays expressible without a second formula.
+ *
+ * Exact: the percentage is applied as `× rate ÷ 100` over integer cents rather
+ * than as a pre-divided float factor, and rounds half-up exactly once. The form
+ * this replaced was `currency(basis).multiply(rate / 100)`, which quantizes the
+ * ratio at currency.js's precision before it ever reaches the money.
+ */
+export function calculateTransactionFeeAmount(item: LineItem, basis: number): number {
+  if (!isTransactionFeeItem(item)) {
+    throw new Error("Item is not a transaction fee: missing price object or wrong type");
+  }
+  if (item.price.formula !== "percent_of_total") {
+    return perUnitSubtotal(item.price, item.quantity).subtotal_discounted;
+  }
+  // Non-negative on both sides — `roundDivHalfUp` truncates toward zero, so a
+  // negative numerator would round the wrong way. A negative fee rate or a
+  // negative document total is not a thing either side of this expresses.
+  const rate = BigInt(Math.round(Math.max(item.price.base ?? 0, 0) * Number(RATE_SCALE)));
+  const scale = 100n * RATE_SCALE;
+  const cents = roundDivHalfUp(toCents(Math.max(basis, 0)) * rate, scale);
+  return Number(cents) / 100;
 }
 
 /**
@@ -614,7 +675,10 @@ export function calculateItemPrice(
 
 /**
  * Calculate the total (subtotal_discounted + taxes) for a single line item.
- * Handles both PriceObject (regular items) and PriceModifier (transaction fee items).
+ *
+ * A `transaction_fee` reports its stored `price.total`: it is priced from the
+ * document, so the only correct value is the one the totals pass already wrote.
+ * Recomputing it here would need a basis this function does not have.
  */
 export function calculateItemTotal(
   item: LineItem,
@@ -627,7 +691,7 @@ export function calculateItemTotal(
   }
 
   if (isTransactionFeeItem(item)) {
-    return item.price.amount;
+    return item.price.total;
   }
 
   const { total } = calculateItemPrice(item, taxes);
@@ -686,7 +750,15 @@ export function getTaxTotals(
 }
 
 /**
- * Aggregate transaction fee PriceModifiers across all fee items.
+ * Aggregate priced fee lines into the document-level `transaction_fees` rollup.
+ *
+ * Input is fee ITEMS carrying a costed `price` (as produced by the second pass
+ * of `calculateOrderTotals` / `calculateInvoiceTotals`); output is a
+ * `PriceModifier[]` — a rate-and-amount summary, which is a genuinely different
+ * shape from a line and stays one. The fee's identity comes from the item
+ * itself now that the price no longer carries a nested `{uid, name}`: a line
+ * item's `uid` IS its product uid, which is exactly what the old
+ * `price.uid` held.
  */
 export function getTransactionFeeTotals(items: LineItem[]): PriceModifier[] {
   const totals: Record<string, { uid: string; rate: number; type: "percent" | "flat"; amount: currency }> = {};
@@ -694,17 +766,44 @@ export function getTransactionFeeTotals(items: LineItem[]): PriceModifier[] {
   for (const item of items) {
     if (!isTransactionFeeItem(item)) continue;
 
-    if (item.price.amount === 0) continue;
+    const amount = item.price.total;
+    if (amount === 0) continue;
 
-    if (!totals[item.price.name]) {
-      totals[item.price.name] = { uid: item.price.uid, rate: item.price.rate, type: item.price.type, amount: currency(0) };
+    if (!totals[item.name]) {
+      totals[item.name] = {
+        uid: item.uid,
+        rate: item.price.base,
+        type: item.price.formula === "percent_of_total" ? "percent" : "flat",
+        amount: currency(0),
+      };
     }
-    totals[item.price.name].amount = totals[item.price.name].amount.add(item.price.amount);
+    totals[item.name].amount = totals[item.name].amount.add(amount);
   }
 
   return Object.entries(totals).map(([name, { uid, rate, type, amount }]) => ({
     uid, name, rate, type, amount: amount.value,
   }));
+}
+
+/**
+ * Cost every `transaction_fee` line against a document subtotal, returning
+ * copies with the computed amount written into `price`.
+ *
+ * Shared by the order and invoice totals so the two cannot drift — they were
+ * two byte-identical loops, and the invoice copy was reading `price.rate` /
+ * `price.type` off a shape invoice line items have never had.
+ */
+export function costTransactionFees(items: LineItem[], basis: number): LineItem[] {
+  const costed: LineItem[] = [];
+  for (const item of items) {
+    if (!isTransactionFeeItem(item)) continue;
+    const amount = calculateTransactionFeeAmount(item, basis);
+    costed.push({
+      ...item,
+      price: { ...item.price, subtotal: amount, subtotal_discounted: amount, total: amount },
+    });
+  }
+  return costed;
 }
 
 /**
@@ -738,25 +837,10 @@ export function calculateOrderTotals(
     taxSum = taxSum.add(entry.amount);
   }
 
-  // Pass 2: compute transaction fee amounts
-  const feeItems: LineItem[] = [];
-  for (const item of items) {
-    if (!isTransactionFeeItem(item)) continue;
-
-    let amount: number;
-    if (item.price.type === "percent") {
-      amount = currency(subtotal_discounted).multiply(item.price.rate / 100).value;
-    } else {
-      amount = currency(item.price.rate).multiply(item.quantity).value;
-    }
-
-    feeItems.push({
-      ...item,
-      price: { ...item.price, amount },
-    });
-  }
-
-  const transaction_fees = getTransactionFeeTotals(feeItems);
+  // Pass 2: compute transaction fee amounts from the pre-tax subtotal
+  const transaction_fees = getTransactionFeeTotals(
+    costTransactionFees(items, subtotal_discounted.value),
+  );
 
   let feeSum = currency(0);
   for (const entry of transaction_fees) {

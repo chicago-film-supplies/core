@@ -49,6 +49,7 @@ interface JsonNode {
   required?: string[];
   items?: JsonNode;
   anyOf?: JsonNode[];
+  oneOf?: JsonNode[];
   enum?: unknown[];
   const?: unknown;
   default?: unknown;
@@ -109,6 +110,19 @@ function deref(node: JsonNode, defs: Defs, depth = 0): JsonNode {
   return deref({ ...target, ...siblings }, defs, depth + 1);
 }
 
+/**
+ * The branches of a union node, whichever keyword JSON Schema spelled it with.
+ *
+ * **`z.union()` emits `anyOf`; `z.discriminatedUnion()` emits `oneOf`.** Reading
+ * only `anyOf` is therefore not a style question — it silently drops the whole
+ * union. Converting `OrderDocItem` to a discriminated union collapsed every
+ * `items[]` path in the generated field catalog to a bare `items: unknown[]`,
+ * because the four readers below all keyed on `anyOf` alone.
+ */
+function unionBranches(node: JsonNode): JsonNode[] | undefined {
+  return node.anyOf ?? node.oneOf;
+}
+
 /** Is this the `{ type: "null" }` branch a `.nullable()` contributes? */
 function isNullNode(node: JsonNode): boolean {
   return node.type === "null";
@@ -119,9 +133,10 @@ function isNullNode(node: JsonNode): boolean {
  * A genuine union keeps its remaining branches (labelled `union` downstream).
  */
 function stripNull(node: JsonNode): { inner: JsonNode; nullable: boolean } {
-  if (!node.anyOf) return { inner: node, nullable: false };
-  const nonNull = node.anyOf.filter((b) => !isNullNode(b));
-  if (nonNull.length === node.anyOf.length) return { inner: node, nullable: false };
+  const branches = unionBranches(node);
+  if (!branches) return { inner: node, nullable: false };
+  const nonNull = branches.filter((b) => !isNullNode(b));
+  if (nonNull.length === branches.length) return { inner: node, nullable: false };
   if (nonNull.length === 1) return { inner: nonNull[0], nullable: true };
   return { inner: { anyOf: nonNull }, nullable: true };
 }
@@ -129,7 +144,8 @@ function stripNull(node: JsonNode): { inner: JsonNode; nullable: boolean } {
 /**
  * Does this property carry a `pii: "redact"` leaf anywhere under its wrapper
  * chain? Covers the wrappers the leaf can hide behind: optional/default (marker
- * on the node), nullable (marker inside `anyOf`), array (marker on `items`).
+ * on the node), nullable (marker inside the union branches), array (marker on
+ * `items`).
  *
  * Stops at object boundaries — a nested object's own properties are each checked
  * on their own, so one redact leaf does not omit its whole parent.
@@ -138,7 +154,7 @@ function hasPiiRedact(node: JsonNode, defs: Defs, depth = 0): boolean {
   if (depth > 6) return false;
   const n = deref(node, defs);
   if (n[OMIT]) return true;
-  if (n.anyOf?.some((b) => hasPiiRedact(b, defs, depth + 1))) return true;
+  if (unionBranches(n)?.some((b) => hasPiiRedact(b, defs, depth + 1))) return true;
   if (n.items && hasPiiRedact(n.items, defs, depth + 1)) return true;
   return false;
 }
@@ -185,7 +201,7 @@ function typeLabel(node: JsonNode, defs: Defs): string {
       return "object";
   }
 
-  if (n.anyOf) return "union";
+  if (unionBranches(n)) return "union";
   return t ?? "unknown";
 }
 
@@ -259,8 +275,9 @@ function walkShape(
       }
 
       // Union arrays — walk each variant separately
-      if (el.anyOf) {
-        for (const option of el.anyOf) {
+      const elBranches = unionBranches(el);
+      if (elBranches) {
+        for (const option of elBranches) {
           const label = getUnionDiscriminantLabel(option, defs);
           const variantPrefix = label ? `${path}[] (type: ${label})` : `${path}[]`;
           walkShape(option, defs, variantPrefix, depth + 1, results);

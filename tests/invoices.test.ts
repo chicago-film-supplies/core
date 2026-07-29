@@ -608,10 +608,11 @@ Deno.test("calculateInvoiceTotals with transaction fee", () => {
       { uid: "item-1", type: "rental", name: "Light" },
       { base: 100, formula: "fixed", subtotal: 100, subtotal_discounted: 100, total: 100 },
     ),
-    {
-      uid: "fee-1", type: "transaction_fee", name: "Credit Card Fee", path: [],
-      price: { uid: "cc-fee", name: "Credit Card Fee", rate: 3, type: "percent", amount: 0 },
-    },
+    // An ordinary line item — `percent_of_total` is what makes it a fee.
+    makeItem(
+      { uid: "fee-1", type: "transaction_fee", name: "Credit Card Fee" },
+      { base: 3, formula: "percent_of_total" },
+    ),
   ];
   const result = calculateInvoiceTotals(items, []);
   assertEquals(result.subtotal, 100);

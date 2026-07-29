@@ -4,12 +4,13 @@
 import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
+import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import {
   Address,
   type AddressType,
   DocItemTypeEnum,
   type DocItemTypeType,
-  DocLineItemTypeEnum,
+  DOC_LINE_ITEM_TYPES,
   type DocLineItemTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
@@ -573,9 +574,14 @@ export interface OrderDocLineItemType {
   uid_collection?: string | null;
 }
 
-export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject({
+// Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;
+// the annotated public alias is exported immediately after. `z.enum(...)` is
+// inlined rather than reusing `DocLineItemTypeEnum` for the same reason — the
+// shared const carries a `z.ZodType<…>` annotation that erases the literals.
+// See `_dividers.ts` for the full rationale.
+const OrderDocLineItemInner = z.strictObject({
   uid: ItemUid,
-  type: DocLineItemTypeEnum,
+  type: z.enum(DOC_LINE_ITEM_TYPES),
   // CANONICAL RATIONALE for every item `name` in the package — the divider,
   // transaction-fee, invoice and fulfillment leaves all point back here (#40).
   //
@@ -619,6 +625,8 @@ export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = z.strictObject(
   { message: "price.replacement is required for rental items", path: ["price", "replacement"] },
 );
 
+export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
+
 /** Destination divider item in the order document items array. */
 export interface OrderDocDestinationItemType {
   uid: string;
@@ -631,27 +639,7 @@ export interface OrderDocDestinationItemType {
 }
 
 /** Destination divider in items array. */
-export const OrderDocDestinationItem: z.ZodType<OrderDocDestinationItemType> = z.strictObject({
-  uid: z.uuid(),
-  type: z.literal("destination"),
-  // Operator-typed divider label — a VENUE, not a person: `Fillmore` (CFS's own
-  // counter, 117/203 orders in the dev replica), `Cinespace`, `Museum of Science
-  // & Industry`. 0 of 1,220 destination-divider names across orders and
-  // fulfillments match a contacts-doc name. A label, so `none` — see
-  // `OrderDocLineItem.name`.
-  //
-  // GIVE-BACK, stated plainly: ~10-13% of these are a street address an operator
-  // typed as the label, and those now reach logs and newly captured fixtures
-  // verbatim. The delivery address proper lives in `destinations[].address`,
-  // which stays `mask`. The mask being removed here was also producing wrong
-  // output — `fixturePiiStrategy.fakeForMask` shape-detects 2-3 alphabetic
-  // tokens as a person, so `Oak Brook Mall` was captured as `Jordan B Holloway`.
-  name: z.string().max(200).meta({ pii: "none" }).default(""),
-  path: z.array(ItemUid).default([]),
-  uid_delivery: FirestoreId.nullable().default(null),
-  uid_collection: FirestoreId.nullable().default(null),
-  description: z.string().meta({ pii: "none" }).default(""),
-});
+export const OrderDocDestinationItem: z.ZodType<OrderDocDestinationItemType> = DestinationDividerArm;
 
 /** Group divider in items array. */
 export interface OrderDocGroupItemType {
@@ -662,57 +650,36 @@ export interface OrderDocGroupItemType {
   description: string;
 }
 
-export const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType> = z.strictObject({
-  uid: z.uuid(),
-  type: z.literal("group"),
-  // Operator-typed section header, drawn from the catalog rather than the
-  // customer: `Delivery` (68), `Hair & Makeup` (57), `Tables & Chairs` (50) in
-  // the dev replica. 0 occurrences match a contact or organization name. A
-  // label, so `none` — see `OrderDocLineItem.name`.
-  name: z.string().min(1).max(100).meta({ pii: "none" }),
-  path: z.array(ItemUid).default([]),
-  description: z.string().meta({ pii: "none" }).default(""),
-});
+export const OrderDocGroupItem: z.ZodType<OrderDocGroupItemType> = GroupDividerArm;
 
-/** Transaction fee line item in the full order document. */
-export interface OrderDocTransactionFeeItemType {
-  uid: string;
-  type: "transaction_fee";
-  name: string;
-  path: string[];
-  description: string;
-  quantity: number;
-  price: PriceModifierType;
-  order_number?: number;
-  uid_order?: string;
-}
-
-/** Zod schema for a transaction fee line item in the order document. */
-export const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType> = z.strictObject({
-  uid: ItemUid,
-  type: z.literal("transaction_fee"),
-  // Fee label ("Credit Card Processing Fee") — see `OrderDocLineItem.name`.
-  name: z.string().min(1).max(100).meta({ pii: "none" }),
-  path: z.array(ItemUid).default([]),
-  description: z.string().meta({ pii: "none" }).default(""),
-  quantity: z.number().int().min(0).default(0),
-  price: PriceModifier,
-  order_number: z.number().optional(),
-  uid_order: FirestoreId.optional(),
-});
-
-/** Union of all item types in the document. */
-export const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType> = z.union([
-  OrderDocLineItem,
-  OrderDocDestinationItem,
-  OrderDocGroupItem,
-  OrderDocTransactionFeeItem,
+/**
+ * Union of all item types in the document — discriminated on `type`.
+ *
+ * There is exactly ONE claimant per discriminator value, which is what makes
+ * the discrimination possible at all. `transaction_fee` used to be claimed
+ * twice — once by `DOC_LINE_ITEM_TYPES` here and once by a separate
+ * `OrderDocTransactionFeeItem` arm carrying a `PriceModifier` instead of an
+ * `OrderDocItemPrice` — and Zod answers a duplicate discriminator with a bare
+ * `Error`, not a `ZodError`, so `safeParse` could not trap it. A fee is now an
+ * ordinary line item whose `price.formula` says `percent_of_total`; the
+ * per-document rollup (`totals.transaction_fees`) keeps the `PriceModifier`
+ * shape, because that IS a rate-and-amount summary rather than a line.
+ */
+export const OrderDocItem: z.ZodType<OrderDocItemType> = z.discriminatedUnion("type", [
+  OrderDocLineItemInner,
+  DestinationDividerArm,
+  GroupDividerArm,
 ]);
 
 /** Union of all item types stored in the order document. */
-export type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType;
+export type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType;
 
-/** Type guard that narrows an order doc item to a line item (excludes destination/group dividers). */
+/**
+ * Type guard that narrows an order doc item to a line item (excludes
+ * destination/group dividers). Sound: every non-divider `type` is now backed by
+ * exactly one shape, so the narrowing cannot hand a caller a `price` of the
+ * wrong kind.
+ */
 export function isLineItem(item: OrderDocItemType): item is OrderDocLineItemType {
   return item.type !== "destination" && item.type !== "group";
 }

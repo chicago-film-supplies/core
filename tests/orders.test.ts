@@ -1,11 +1,12 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { getInitialValues, OrderDocLineItem, OrderDocTransactionFeeItem } from "../src/schemas/mod.ts";
+import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
   calculateItemDiscount,
   calculateItemPrice,
   calculateItemSubtotal,
   calculateItemTax,
   calculateItemTotal,
+  calculateTransactionFeeAmount,
   calculateOrderTotals,
   calculateReplacementTotals,
   buildPackingList,
@@ -47,8 +48,9 @@ import type { OrderDatesType, DestinationType, OrderDocDatesType, FirestoreTimes
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 const priceBase = lineItemBase.price as Record<string, unknown>;
-const feeItemBase = getInitialValues(OrderDocTransactionFeeItem) as Record<string, unknown>;
-const feePriceBase = feeItemBase.price as Record<string, unknown>;
+// A fee is an ORDINARY line item — same base, same price shape. It differs only
+// in `type` and in `price.formula`, which is the whole point of the collapse.
+const feeItemBase = { ...lineItemBase, type: "transaction_fee" } as Record<string, unknown>;
 
 const TAXES: Tax[] = [
   { uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" },
@@ -81,15 +83,15 @@ function makeFeeItem(
   feeOverrides: Record<string, unknown> = {},
 ): LineItem {
   return {
+    uid: "cc-fee-product",
     ...feeItemBase,
-    name: "CC Processing Fee",
+    name: "Credit Card Processing Fee",
     quantity: 1,
     ...overrides,
     price: {
-      ...feePriceBase,
-      uid: "cc-fee-product",
-      name: "Credit Card Processing Fee",
-      rate: 3,
+      ...priceBase,
+      formula: "percent_of_total",
+      base: 3,
       ...feeOverrides,
     },
   } as LineItem;
@@ -386,8 +388,10 @@ Deno.test("calculateItemTotal with tax", () => {
   );
 });
 
-Deno.test("calculateItemTotal for transaction fee item", () => {
-  const fee = makeFeeItem({}, { amount: 42.50 });
+Deno.test("calculateItemTotal for transaction fee item reports the stored total", () => {
+  // A fee is priced from the DOCUMENT, so the only correct value here is the one
+  // the totals pass already wrote — there is no basis to recompute from.
+  const fee = makeFeeItem({}, { total: 42.50 });
   assertEquals(calculateItemTotal(fee, TAXES), 42.50);
 });
 
@@ -468,8 +472,8 @@ Deno.test("getTaxTotals groups by tax name", () => {
 
 Deno.test("getTransactionFeeTotals aggregates fee items", () => {
   const items = [
-    makeFeeItem({}, { amount: 10 }),
-    makeFeeItem({}, { amount: 5 }),
+    makeFeeItem({}, { total: 10 }),
+    makeFeeItem({}, { total: 5 }),
   ];
   const result = getTransactionFeeTotals(items);
   assertEquals(result.length, 1);
@@ -495,7 +499,7 @@ Deno.test("calculateOrderTotals computes all totals", () => {
 Deno.test("calculateOrderTotals two-pass with transaction fee", () => {
   const items = [
     makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
-    makeFeeItem({}, { rate: 3, type: "percent" }),
+    makeFeeItem({}, { base: 3, formula: "percent_of_total" }),
   ];
   const result = calculateOrderTotals(items, TAXES);
   // subtotal = 100, subtotal_discounted = 100
@@ -514,7 +518,7 @@ Deno.test("calculateOrderTotals fee based on subtotal_discounted", () => {
       discount: { rate: 20, type: "percent", amount: 0 },
       taxes: [{ uid: "chi-rental-tax" }],
     }),
-    makeFeeItem({}, { rate: 3, type: "percent" }),
+    makeFeeItem({}, { base: 3, formula: "percent_of_total" }),
   ];
   const result = calculateOrderTotals(items, TAXES);
   // subtotal = 100, subtotal_discounted = 80
@@ -531,7 +535,7 @@ Deno.test("calculateOrderTotals fee based on subtotal_discounted", () => {
 Deno.test("calculateOrderTotals flat transaction fee", () => {
   const items = [
     makeItem(),
-    makeFeeItem({ quantity: 2 }, { rate: 5, type: "flat" }),
+    makeFeeItem({ quantity: 2 }, { base: 5, formula: "fixed" }),
   ];
   const result = calculateOrderTotals(items, TAXES);
   // fee = 5 * 2 = 10
@@ -2004,4 +2008,79 @@ Deno.test("buildQueryByDates: keys on the Chicago calendar day across the UTC mi
   // 03:00Z on Mar 2 is still Mar 1 in Chicago (-06:00).
   const d = docDates({ delivery_start: "2026-03-02T03:00:00.000Z" });
   assertEquals(buildQueryByDates([{ dates: d }]), ["2026-03-01"]);
+});
+
+// ── calculateTransactionFeeAmount ────────────────────────────────
+
+Deno.test("calculateTransactionFeeAmount: percent_of_total reads base as a percentage", () => {
+  assertEquals(calculateTransactionFeeAmount(makeFeeItem({}, { base: 3 }), 100), 3);
+  assertEquals(calculateTransactionFeeAmount(makeFeeItem({}, { base: 2.9 }), 1234.56), 35.80);
+});
+
+Deno.test("calculateTransactionFeeAmount: any other formula is per-unit", () => {
+  const flat = makeFeeItem({ quantity: 3 }, { base: 5, formula: "fixed" });
+  // The basis is irrelevant to a flat fee — 5 × 3, whatever the document totals.
+  assertEquals(calculateTransactionFeeAmount(flat, 100), 15);
+  assertEquals(calculateTransactionFeeAmount(flat, 999_999), 15);
+});
+
+Deno.test("calculateTransactionFeeAmount rejects a non-fee item", () => {
+  assertThrows(() => calculateTransactionFeeAmount(makeItem(), 100));
+});
+
+Deno.test("calculateItemSubtotal refuses percent_of_total — it cannot see the basis", () => {
+  // A fee is priced from the DOCUMENT. Reaching here means a caller tried to
+  // cost one in isolation, which silently produced base × quantity before.
+  assertThrows(
+    () => calculateItemSubtotal(makeItem({ type: "sale" }, { formula: "percent_of_total", base: 3 })),
+    Error,
+    "percent_of_total",
+  );
+});
+
+Deno.test("calculateTransactionFeeAmount is exact — matches a BigInt rational reference", () => {
+  // The form this replaced was `currency(basis).multiply(rate / 100)`, which
+  // pre-divides into a float and lets currency.js quantize the RATIO. Sweep
+  // basis × rate pairs against an exact integer-cents reference; 0 disagreements.
+  // Independent of the implementation's `(2n·num + den) / (2n·den)` trick:
+  // take the exact quotient and remainder, then round half-up by hand.
+  const referenceCents = (basisCents: bigint, rateMillipercent: bigint) => {
+    const num = basisCents * rateMillipercent;
+    const den = 100n * 1_000_000n;
+    const q = num / den;
+    const r = num % den;
+    return 2n * r >= den ? q + 1n : q;
+  };
+
+  let checked = 0;
+  for (let basisCents = 1n; basisCents <= 200_000n; basisCents += 991n) {
+    for (const rate of [2.9, 3, 3.5, 0.05, 1.75, 12.345]) {
+      const rateMilli = BigInt(Math.round(rate * 1_000_000));
+      const expected = Number(referenceCents(basisCents, rateMilli)) / 100;
+      const actual = calculateTransactionFeeAmount(
+        makeFeeItem({}, { base: rate }),
+        Number(basisCents) / 100,
+      );
+      assertEquals(actual, expected, `basis=${basisCents}c rate=${rate}`);
+      checked++;
+    }
+  }
+  assertEquals(checked > 1000, true, "sweep did not run");
+});
+
+Deno.test("getTransactionFeeTotals derives rate/type from the price, identity from the item", () => {
+  const totals = getTransactionFeeTotals([
+    makeFeeItem({ uid: "cc-fee-product", name: "Card Fee" }, { base: 3, total: 30 }),
+    makeFeeItem({ uid: "flat-fee-product", name: "Handling" }, { base: 5, formula: "fixed", total: 5 }),
+  ]);
+  assertEquals(totals.length, 2);
+  const card = totals.find((t) => t.name === "Card Fee");
+  assertEquals(card?.uid, "cc-fee-product");
+  assertEquals(card?.rate, 3);
+  assertEquals(card?.type, "percent");
+  assertEquals(card?.amount, 30);
+
+  const handling = totals.find((t) => t.name === "Handling");
+  assertEquals(handling?.type, "flat");
+  assertEquals(handling?.rate, 5);
 });

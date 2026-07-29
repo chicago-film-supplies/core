@@ -1,4 +1,9 @@
 #!/bin/sh
+# Fail closed. Without `set -e` this hook ran lint and the whole suite, printed
+# every failure, and committed anyway — the hook's exit status was just the last
+# command's (`git add`), so a red suite was indistinguishable from a green one.
+set -e
+
 echo "Running lint..."
 deno task lint
 

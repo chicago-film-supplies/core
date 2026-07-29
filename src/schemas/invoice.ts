@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
+import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
   ActorRef,
@@ -12,7 +13,7 @@ import {
   type AddressType,
   COARevenueEnum,
   type COARevenueType,
-  DocLineItemTypeEnum,
+  DOC_LINE_ITEM_TYPES,
   type DocLineItemTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
@@ -32,9 +33,7 @@ import {
   DocDestinationEndpoint,
   type DocDestinationType,
   OrderDocDates,
-  OrderDocDestinationItem,
   type OrderDocDestinationItemType,
-  OrderDocGroupItem,
   type OrderDocGroupItemType,
   PriceModifier,
   type PriceModifierType,
@@ -126,9 +125,11 @@ export interface InvoiceDocLineItem {
   crms_id?: number | string | null;
 }
 
-export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = z.strictObject({
+// Un-annotated so `_zod.propValues` survives for the discriminated union below
+// — see `_dividers.ts`.
+const InvoiceDocLineItemInner = z.strictObject({
   uid: ItemUid,
-  type: DocLineItemTypeEnum,
+  type: z.enum(DOC_LINE_ITEM_TYPES),
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
   name: z.string().meta({ pii: "none" }),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
@@ -144,6 +145,8 @@ export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = z.strictO
   crms_id: z.union([z.number(), z.string()]).nullable().optional(),
 });
 
+export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner;
+
 // ── Order divider ───────────────────────────────────────────────
 
 /** Order divider item — scopes invoice items to a source order for multi-order invoices. */
@@ -155,8 +158,7 @@ export interface InvoiceDocOrderItemType {
   description: string;
 }
 
-/** Zod schema for an order divider item. */
-export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = z.strictObject({
+const InvoiceDocOrderItemInner = z.strictObject({
   // Option B: the order divider's identity IS the source order's Firestore doc-id
   // (order.uid), not a synthesized UUID — so this is z.string(), not z.uuid().
   uid: ItemUid,
@@ -168,17 +170,26 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = z.strictO
   description: z.string().meta({ pii: "none" }).default(""),
 });
 
+/** Zod schema for an order divider item. */
+export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = InvoiceDocOrderItemInner;
+
 // ── Item union ──────────────────────────────────────────────────
 
 /** Union of all item types stored in an invoice document. */
 export type InvoiceDocItemType = InvoiceDocLineItem | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
 
-/** Zod schema for any invoice document item (line item, group, destination, or order divider). */
-export const InvoiceDocItem: z.ZodType<InvoiceDocItemType> = z.union([
-  InvoiceDocLineItemSchema,
-  OrderDocGroupItem,
-  OrderDocDestinationItem,
-  InvoiceDocOrderItem,
+/**
+ * Zod schema for any invoice document item — discriminated on `type`.
+ *
+ * The invoice side never carried a second `transaction_fee` claimant, so it was
+ * always discriminable; it stayed a plain union only because the order side
+ * wasn't. See `OrderDocItem`.
+ */
+export const InvoiceDocItem: z.ZodType<InvoiceDocItemType> = z.discriminatedUnion("type", [
+  InvoiceDocLineItemInner,
+  GroupDividerArm,
+  DestinationDividerArm,
+  InvoiceDocOrderItemInner,
 ]);
 
 /** Type guard that narrows an invoice doc item to a billable line item (excludes structural dividers). */

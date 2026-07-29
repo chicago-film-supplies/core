@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { CreateOrderInput, Discount, DiscountInput, DocDestination, OrderDocDates, OrderDocItemPrice, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
+import { CreateOrderInput, Discount, DiscountInput, DocDestination, isLineItem, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const orderBase = getInitialValues(OrderSchema) as Record<string, unknown>;
@@ -940,4 +940,82 @@ Deno.test("Discount: the rate error names the field, not the object", () => {
   const r = Discount.safeParse({ type: "percent", rate: 120, amount: 10 });
   assertEquals(r.success, false);
   if (!r.success) assertEquals(r.error.issues[0].path, ["rate"]);
+});
+
+// ── transaction_fee: one claimant, one price shape ───────────────────
+
+const feeLine = {
+  uid: "77LKBYcC09u1PZFhxmDJ",
+  type: "transaction_fee",
+  name: "Credit Card Processing Fee",
+  description: "",
+  quantity: 1,
+  path: ["77LKBYcC09u1PZFhxmDJ"],
+  price: { ...priceBase, base: 3, formula: "percent_of_total" },
+};
+
+Deno.test("OrderDocItem: a transaction_fee is an ordinary line item", () => {
+  const r = OrderDocItem.safeParse(feeLine);
+  assertEquals(r.success, true, JSON.stringify(r.error?.issues));
+});
+
+Deno.test("OrderDocItem: the old PriceModifier fee price is now unrepresentable", () => {
+  // The shape `OrderDocTransactionFeeItem` used to accept. It parsed before
+  // because a second arm claimed the same discriminator; `isLineItem` then
+  // handed callers a `price` with no `taxes`, and `xeroQuotes` read
+  // `price.taxes[0]` off it. There is one claimant now, so this is a 400.
+  const r = OrderDocItem.safeParse({
+    ...feeLine,
+    price: { uid: "77LKBYcC09u1PZFhxmDJ", name: "Card Fee", rate: 3, type: "percent", amount: 0 },
+  });
+  assertEquals(r.success, false);
+});
+
+Deno.test("OrderDocItem: a wrong field lands on the field, not the whole item", () => {
+  // The reason to discriminate at all: an undiscriminated union reports
+  // `items.N: Invalid input` because every arm failed. A DU picks the arm off
+  // `type` first, so the issue names the field the author actually got wrong.
+  const r = OrderDocItem.safeParse({ ...feeLine, price: { ...priceBase, base: "three" } });
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues[0].path, ["price", "base"]);
+});
+
+Deno.test("OrderDocItem: a divider carrying a price is rejected on the divider arm", () => {
+  const r = OrderDocItem.safeParse({
+    uid: "3f1e2d4c-5b6a-4789-8c9d-0e1f2a3b4c5d",
+    type: "group",
+    name: "Lighting",
+    description: "",
+    path: ["3f1e2d4c-5b6a-4789-8c9d-0e1f2a3b4c5d"],
+    price: priceBase,
+  });
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues[0].code, "unrecognized_keys");
+});
+
+Deno.test("OrderDocItem: an unknown type reports at `type`, not as a whole-item failure", () => {
+  const r = OrderDocItem.safeParse({ ...feeLine, type: "gratuity" });
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues[0].path, ["type"]);
+});
+
+Deno.test("OrderDocLineItem: the rental replacement refine still fires inside the union", () => {
+  // `.refine()` on a DU arm survives — and reports at its declared path rather
+  // than collapsing to the union root.
+  const r = OrderDocItem.safeParse({
+    ...feeLine,
+    type: "rental",
+    stock_method: "bulk",
+    price: { ...priceBase, base: 10, formula: "fixed" },
+  });
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues[0].path, ["price", "replacement"]);
+});
+
+Deno.test("isLineItem narrows a transaction_fee to the one line-item shape", () => {
+  const item = OrderDocItem.parse(feeLine) as OrderDocItemType;
+  assertEquals(isLineItem(item), true);
+  // Sound now: the narrowed type really does carry an OrderDocItemPrice, so
+  // reading `price.taxes` cannot hit a PriceModifier that never had one.
+  if (isLineItem(item)) assertEquals(item.price?.taxes, []);
 });

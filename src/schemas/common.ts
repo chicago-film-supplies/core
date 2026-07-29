@@ -337,7 +337,20 @@ export type TaxProfileType = typeof TAX_PROFILES[number];
 /** Zod schema for TaxProfileType. */
 export const TaxProfileEnum: z.ZodType<TaxProfileType> = z.enum(TAX_PROFILES);
 
-const PRICE_FORMULAS = ["five_day_week", "fixed"] as const;
+/**
+ * How a line's `price.base` becomes money.
+ *
+ * - `five_day_week` — `base × quantity × max(chargeable_days / 5, 1)`.
+ * - `fixed` — `base × quantity`, no day factor.
+ * - `percent_of_total` — `base` is a **percentage of the document's
+ *   `subtotal_discounted`**, not a per-unit dollar amount. A line priced this
+ *   way cannot be costed from itself, so `calculateItemSubtotal` rejects it;
+ *   the amount is computed once per document by `calculateTransactionFeeAmount`
+ *   during the totals pass. Only a `transaction_fee` line is priced this way —
+ *   a credit-card fee is a percentage of what is being charged, which is the
+ *   whole reason the fee type exists.
+ */
+const PRICE_FORMULAS = ["five_day_week", "fixed", "percent_of_total"] as const;
 /** Allowed values for pricing formula. */
 export type PriceFormulaType = typeof PRICE_FORMULAS[number];
 /** Zod schema for PriceFormulaType. */

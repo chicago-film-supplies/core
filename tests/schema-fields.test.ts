@@ -193,6 +193,50 @@ Deno.test("synthetic: pii:\"redact\" leaves are omitted under every wrapper", ()
   assert(paths.has("nested.kept"), "a clean sibling of a redact leaf was omitted");
 });
 
+/**
+ * **The synthetic union guard.**
+ *
+ * `z.union()` serializes to `anyOf`; `z.discriminatedUnion()` serializes to
+ * `oneOf`. A walker reading only `anyOf` does not fail on a discriminated union
+ * — it silently reports the whole array as `unknown[]` and drops every field
+ * beneath it. That is exactly what happened when `OrderDocItem` became a
+ * discriminated union: the entire `items[]` catalog vanished from the generated
+ * file in one commit.
+ *
+ * The staleness check below cannot catch this. It regenerates and compares, so
+ * it certifies whatever the walker currently produces — a fixed-point check
+ * agreeing with its own oracle. This asserts the property independently: both
+ * union spellings must be descended into, and their variants labelled.
+ */
+Deno.test("synthetic: both union spellings are walked (anyOf AND oneOf)", () => {
+  const lineArm = z.object({ type: z.enum(["rental", "sale"]), base: z.number() });
+  const dividerArm = z.object({ type: z.literal("group"), label: z.string() });
+
+  const plain = z.object({ items: z.array(z.union([lineArm, dividerArm])) });
+  const discriminated = z.object({
+    items: z.array(z.discriminatedUnion("type", [lineArm, dividerArm])),
+  });
+
+  for (const [spelling, schema] of [["anyOf/union", plain], ["oneOf/discriminatedUnion", discriminated]] as const) {
+    const fields = walkSchema(schema);
+    const paths = new Set(fields.map((f) => f.path));
+
+    assertEquals(
+      fields.find((f) => f.path === "items")?.type,
+      "union[]",
+      `${spelling}: items was not labelled as a union — the walker did not see the branches`,
+    );
+    assert(
+      paths.has("items[] (type: rental | sale).base"),
+      `${spelling}: the line-item variant's fields are missing`,
+    );
+    assert(
+      paths.has("items[] (type: group).label"),
+      `${spelling}: the divider variant's fields are missing`,
+    );
+  }
+});
+
 // ── Staleness check ─────────────────────────────────────────────────
 
 Deno.test("generated file is up to date", async () => {

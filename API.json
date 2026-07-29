@@ -1486,7 +1486,7 @@
           "kind": "variable",
           "name": "InvoiceDocItem",
           "declaration": "const InvoiceDocItem: z.ZodType<InvoiceDocItemType>;",
-          "doc": "Zod schema for any invoice document item (line item, group, destination, or order divider)."
+          "doc": "Zod schema for any invoice document item — discriminated on `type`.\n\nThe invoice side never carried a second `transaction_fee` claimant, so it was\nalways discriminable; it stayed a plain union only because the order side\nwasn't. See `OrderDocItem`."
         },
         {
           "kind": "interface",
@@ -2139,8 +2139,8 @@
         {
           "kind": "variable",
           "name": "OrderDocItem",
-          "declaration": "const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType>;",
-          "doc": "Union of all item types in the document."
+          "declaration": "const OrderDocItem: z.ZodType<OrderDocItemType>;",
+          "doc": "Union of all item types in the document — discriminated on `type`.\n\nThere is exactly ONE claimant per discriminator value, which is what makes\nthe discrimination possible at all. `transaction_fee` used to be claimed\ntwice — once by `DOC_LINE_ITEM_TYPES` here and once by a separate\n`OrderDocTransactionFeeItem` arm carrying a `PriceModifier` instead of an\n`OrderDocItemPrice` — and Zod answers a duplicate discriminator with a bare\n`Error`, not a `ZodError`, so `safeParse` could not trap it. A fee is now an\nordinary line item whose `price.formula` says `percent_of_total`; the\nper-document rollup (`totals.transaction_fees`) keeps the `PriceModifier`\nshape, because that IS a rate-and-amount summary rather than a line."
         },
         {
           "kind": "variable",
@@ -2157,7 +2157,7 @@
         {
           "kind": "typeAlias",
           "name": "OrderDocItemType",
-          "declaration": "type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType;",
+          "declaration": "type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType;",
           "doc": "Union of all item types stored in the order document."
         },
         {
@@ -2177,18 +2177,6 @@
           "name": "OrderDocTotalsType",
           "declaration": "interface OrderDocTotalsType {\n  discount_amount: number;\n  subtotal: number;\n  subtotal_discounted: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total: number;\n  replacement_total: number;\n}",
           "doc": "Order totals."
-        },
-        {
-          "kind": "variable",
-          "name": "OrderDocTransactionFeeItem",
-          "declaration": "const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType>;",
-          "doc": "Zod schema for a transaction fee line item in the order document."
-        },
-        {
-          "kind": "interface",
-          "name": "OrderDocTransactionFeeItemType",
-          "declaration": "interface OrderDocTransactionFeeItemType {\n  uid: string;\n  type: \"transaction_fee\";\n  name: string;\n  path: string[];\n  description: string;\n  quantity: number;\n  price: PriceModifierType;\n  order_number?: number;\n  uid_order?: string;\n}",
-          "doc": "Transaction fee line item in the full order document."
         },
         {
           "kind": "interface",
@@ -4089,7 +4077,7 @@
           "kind": "function",
           "name": "isLineItem",
           "signature": "isLineItem(item: OrderDocItemType): item is OrderDocLineItemType",
-          "doc": "Type guard that narrows an order doc item to a line item (excludes destination/group dividers).",
+          "doc": "Type guard that narrows an order doc item to a line item (excludes\ndestination/group dividers). Sound: every non-divider `type` is now backed by\nexactly one shape, so the narrowing cannot hand a caller a `price` of the\nwrong kind.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5471,7 +5459,7 @@
           "kind": "variable",
           "name": "InvoiceDocItem",
           "declaration": "const InvoiceDocItem: z.ZodType<InvoiceDocItemType>;",
-          "doc": "Zod schema for any invoice document item (line item, group, destination, or order divider)."
+          "doc": "Zod schema for any invoice document item — discriminated on `type`.\n\nThe invoice side never carried a second `transaction_fee` claimant, so it was\nalways discriminable; it stayed a plain union only because the order side\nwasn't. See `OrderDocItem`."
         },
         {
           "kind": "interface",
@@ -5964,8 +5952,8 @@
         {
           "kind": "variable",
           "name": "OrderDocItem",
-          "declaration": "const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType>;",
-          "doc": "Union of all item types in the document."
+          "declaration": "const OrderDocItem: z.ZodType<OrderDocItemType>;",
+          "doc": "Union of all item types in the document — discriminated on `type`.\n\nThere is exactly ONE claimant per discriminator value, which is what makes\nthe discrimination possible at all. `transaction_fee` used to be claimed\ntwice — once by `DOC_LINE_ITEM_TYPES` here and once by a separate\n`OrderDocTransactionFeeItem` arm carrying a `PriceModifier` instead of an\n`OrderDocItemPrice` — and Zod answers a duplicate discriminator with a bare\n`Error`, not a `ZodError`, so `safeParse` could not trap it. A fee is now an\nordinary line item whose `price.formula` says `percent_of_total`; the\nper-document rollup (`totals.transaction_fees`) keeps the `PriceModifier`\nshape, because that IS a rate-and-amount summary rather than a line."
         },
         {
           "kind": "variable",
@@ -5982,7 +5970,7 @@
         {
           "kind": "typeAlias",
           "name": "OrderDocItemType",
-          "declaration": "type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType;",
+          "declaration": "type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType;",
           "doc": "Union of all item types stored in the order document."
         },
         {
@@ -6002,18 +5990,6 @@
           "name": "OrderDocTotalsType",
           "declaration": "interface OrderDocTotalsType {\n  discount_amount: number;\n  subtotal: number;\n  subtotal_discounted: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total: number;\n  replacement_total: number;\n}",
           "doc": "Order totals."
-        },
-        {
-          "kind": "variable",
-          "name": "OrderDocTransactionFeeItem",
-          "declaration": "const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType>;",
-          "doc": "Zod schema for a transaction fee line item in the order document."
-        },
-        {
-          "kind": "interface",
-          "name": "OrderDocTransactionFeeItemType",
-          "declaration": "interface OrderDocTransactionFeeItemType {\n  uid: string;\n  type: \"transaction_fee\";\n  name: string;\n  path: string[];\n  description: string;\n  quantity: number;\n  price: PriceModifierType;\n  order_number?: number;\n  uid_order?: string;\n}",
-          "doc": "Transaction fee line item in the full order document."
         },
         {
           "kind": "variable",
@@ -6093,7 +6069,7 @@
           "kind": "function",
           "name": "isLineItem",
           "signature": "isLineItem(item: OrderDocItemType): item is OrderDocLineItemType",
-          "doc": "Type guard that narrows an order doc item to a line item (excludes destination/group dividers).",
+          "doc": "Type guard that narrows an order doc item to a line item (excludes\ndestination/group dividers). Sound: every non-divider `type` is now backed by\nexactly one shape, so the narrowing cannot hand a caller a `price` of the\nwrong kind.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8986,7 +8962,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | PriceModifierType | InvoiceDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPrice from schemas to avoid type drift."
         },
         {
@@ -9010,7 +8986,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: string;\n  quantity?: number;\n  price?: PriceObject | PriceModifierType;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: string;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n}",
           "doc": "A single line item in an order (product, destination, group, surcharge, or fee).\nLoose interface compatible with all OrderDocItemType members — utility functions\nuse type guards (isPriceableItem, isTransactionFeeItem) before accessing\nmember-specific fields."
         },
         {
@@ -9046,8 +9022,8 @@
         {
           "kind": "interface",
           "name": "TransactionFeeLineItem",
-          "declaration": "interface TransactionFeeLineItem {\n  type: \"transaction_fee\";\n  quantity: number;\n  price: PriceModifierType;\n}",
-          "doc": "A transaction fee line item with a PriceModifier price."
+          "declaration": "interface TransactionFeeLineItem {\n  type: \"transaction_fee\";\n  quantity: number;\n  price: PriceObject;\n}",
+          "doc": "A transaction fee line item.\n\nCarries the same `PriceObject` every other line carries — a fee is an\nordinary line whose `price.formula` is `percent_of_total`, not a second price\nshape. It differs from a `PreTaxLineItem` only in that it is priced FROM the\ndocument total rather than into it, which is why it has its own predicate and\nits own pass in `calculateOrderTotals`."
         },
         {
           "kind": "function",
@@ -9131,7 +9107,7 @@
           "kind": "function",
           "name": "calculateItemTotal",
           "signature": "calculateItemTotal(item: LineItem, taxes: Tax[]): number",
-          "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\nHandles both PriceObject (regular items) and PriceModifier (transaction fee items).",
+          "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\n\nA `transaction_fee` reports its stored `price.total`: it is priced from the\ndocument, so the only correct value is the one the totals pass already wrote.\nRecomputing it here would need a basis this function does not have.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9712,7 +9688,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: string;\n  quantity?: number;\n  price?: PriceObject | PriceModifierType;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: string;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n}",
           "doc": "A single line item in an order (product, destination, group, surcharge, or fee).\nLoose interface compatible with all OrderDocItemType members — utility functions\nuse type guards (isPriceableItem, isTransactionFeeItem) before accessing\nmember-specific fields."
         },
         {
@@ -9778,8 +9754,8 @@
         {
           "kind": "interface",
           "name": "TransactionFeeLineItem",
-          "declaration": "interface TransactionFeeLineItem {\n  type: \"transaction_fee\";\n  quantity: number;\n  price: PriceModifierType;\n}",
-          "doc": "A transaction fee line item with a PriceModifier price."
+          "declaration": "interface TransactionFeeLineItem {\n  type: \"transaction_fee\";\n  quantity: number;\n  price: PriceObject;\n}",
+          "doc": "A transaction fee line item.\n\nCarries the same `PriceObject` every other line carries — a fee is an\nordinary line whose `price.formula` is `percent_of_total`, not a second price\nshape. It differs from a `PreTaxLineItem` only in that it is priced FROM the\ndocument total rather than into it, which is why it has its own predicate and\nits own pass in `calculateOrderTotals`."
         },
         {
           "kind": "function",
@@ -9833,7 +9809,7 @@
           "kind": "function",
           "name": "calculateItemTotal",
           "signature": "calculateItemTotal(item: LineItem, taxes: Tax[]): number",
-          "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\nHandles both PriceObject (regular items) and PriceModifier (transaction fee items).",
+          "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\n\nA `transaction_fee` reports its stored `price.total`: it is priced from the\ndocument, so the only correct value is the one the totals pass already wrote.\nRecomputing it here would need a basis this function does not have.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9850,6 +9826,14 @@
           "name": "calculateReplacementTotals",
           "signature": "calculateReplacementTotals(items: LineItem[], taxes: Tax[]): ReplacementTotals",
           "doc": "Calculate the total replacement cost across all pre-tax items that have\na replacement value on their price object.\n\nReturns `subtotal` (sum of replacement × quantity), `tax` (taxes applied\nto that subtotal), and `total` (subtotal + tax).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "calculateTransactionFeeAmount",
+          "signature": "calculateTransactionFeeAmount(item: LineItem, basis: number): number",
+          "doc": "The dollar amount a `transaction_fee` line contributes to a document.\n\nA fee is priced from the document, not from itself, so it needs the one input\n`calculateItemSubtotal` cannot see: `basis`, the document's\n`subtotal_discounted` (pre-tax, post-discount — the same base the fee has\nalways been computed against).\n\n- `percent_of_total` → `basis × base / 100`.\n- anything else → the ordinary per-unit subtotal, `base × quantity`, so a\n  flat processing charge stays expressible without a second formula.\n\nExact: the percentage is applied as `× rate ÷ 100` over integer cents rather\nthan as a pre-divided float factor, and rounds half-up exactly once. The form\nthis replaced was `currency(basis).multiply(rate / 100)`, which quantizes the\nratio at currency.js's precision before it ever reaches the money.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9874,6 +9858,14 @@
           "name": "consolidateItems",
           "signature": "consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]",
           "doc": "Deduplicate line items by product UID and sum quantities.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "costTransactionFees",
+          "signature": "costTransactionFees(items: LineItem[], basis: number): LineItem[]",
+          "doc": "Cost every `transaction_fee` line against a document subtotal, returning\ncopies with the computed amount written into `price`.\n\nShared by the order and invoice totals so the two cannot drift — they were\ntwo byte-identical loops, and the invoice copy was reading `price.rate` /\n`price.type` off a shape invoice line items have never had.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9985,7 +9977,7 @@
           "kind": "function",
           "name": "getTransactionFeeTotals",
           "signature": "getTransactionFeeTotals(items: LineItem[]): PriceModifier[]",
-          "doc": "Aggregate transaction fee PriceModifiers across all fee items.",
+          "doc": "Aggregate priced fee lines into the document-level `transaction_fees` rollup.\n\nInput is fee ITEMS carrying a costed `price` (as produced by the second pass\nof `calculateOrderTotals` / `calculateInvoiceTotals`); output is a\n`PriceModifier[]` — a rate-and-amount summary, which is a genuinely different\nshape from a line and stays one. The fee's identity comes from the item\nitself now that the price no longer carries a nested `{uid, name}`: a line\nitem's `uid` IS its product uid, which is exactly what the old\n`price.uid` held.",
           "paramTags": [],
           "returnsTag": null
         },

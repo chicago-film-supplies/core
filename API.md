@@ -2866,7 +2866,11 @@ interface InvoiceDocDestinationType {
 
 ### `InvoiceDocItem`
 
-Zod schema for any invoice document item (line item, group, destination, or order divider).
+Zod schema for any invoice document item — discriminated on `type`.
+
+The invoice side never carried a second `transaction_fee` claimant, so it was
+always discriminable; it stayed a plain union only because the order side
+wasn't. See `OrderDocItem`.
 
 ```ts
 const InvoiceDocItem: z.ZodType<InvoiceDocItemType>;
@@ -4160,10 +4164,20 @@ interface OrderDocGroupItemType {
 
 ### `OrderDocItem`
 
-Union of all item types in the document.
+Union of all item types in the document — discriminated on `type`.
+
+There is exactly ONE claimant per discriminator value, which is what makes
+the discrimination possible at all. `transaction_fee` used to be claimed
+twice — once by `DOC_LINE_ITEM_TYPES` here and once by a separate
+`OrderDocTransactionFeeItem` arm carrying a `PriceModifier` instead of an
+`OrderDocItemPrice` — and Zod answers a duplicate discriminator with a bare
+`Error`, not a `ZodError`, so `safeParse` could not trap it. A fee is now an
+ordinary line item whose `price.formula` says `percent_of_total`; the
+per-document rollup (`totals.transaction_fees`) keeps the `PriceModifier`
+shape, because that IS a rate-and-amount summary rather than a line.
 
 ```ts
-const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType>;
+const OrderDocItem: z.ZodType<OrderDocItemType>;
 ```
 
 ### `OrderDocItemPrice`
@@ -4199,7 +4213,7 @@ interface OrderDocItemPriceType {
 Union of all item types stored in the order document.
 
 ```ts
-type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType;
+type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType;
 ```
 
 ### `OrderDocLineItem`
@@ -4245,32 +4259,6 @@ interface OrderDocTotalsType {
   transaction_fees: PriceModifierType[];
   total: number;
   replacement_total: number;
-}
-```
-
-### `OrderDocTransactionFeeItem`
-
-Zod schema for a transaction fee line item in the order document.
-
-```ts
-const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType>;
-```
-
-### `OrderDocTransactionFeeItemType`
-
-Transaction fee line item in the full order document.
-
-```ts
-interface OrderDocTransactionFeeItemType {
-  uid: string;
-  type: "transaction_fee";
-  name: string;
-  path: string[];
-  description: string;
-  quantity: number;
-  price: PriceModifierType;
-  order_number?: number;
-  uid_order?: string;
 }
 ```
 
@@ -7659,7 +7647,10 @@ Type guard that narrows an invoice doc item to a billable line item (excludes st
 
 ### `isLineItem(item: OrderDocItemType): item is OrderDocLineItemType`
 
-Type guard that narrows an order doc item to a line item (excludes destination/group dividers).
+Type guard that narrows an order doc item to a line item (excludes
+destination/group dividers). Sound: every non-divider `type` is now backed by
+exactly one shape, so the narrowing cannot hand a caller a `price` of the
+wrong kind.
 
 ### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
 
@@ -9920,7 +9911,11 @@ interface InvoiceDocDestinationType {
 
 ### `InvoiceDocItem`
 
-Zod schema for any invoice document item (line item, group, destination, or order divider).
+Zod schema for any invoice document item — discriminated on `type`.
+
+The invoice side never carried a second `transaction_fee` claimant, so it was
+always discriminable; it stayed a plain union only because the order side
+wasn't. See `OrderDocItem`.
 
 ```ts
 const InvoiceDocItem: z.ZodType<InvoiceDocItemType>;
@@ -10872,10 +10867,20 @@ interface OrderDocGroupItemType {
 
 ### `OrderDocItem`
 
-Union of all item types in the document.
+Union of all item types in the document — discriminated on `type`.
+
+There is exactly ONE claimant per discriminator value, which is what makes
+the discrimination possible at all. `transaction_fee` used to be claimed
+twice — once by `DOC_LINE_ITEM_TYPES` here and once by a separate
+`OrderDocTransactionFeeItem` arm carrying a `PriceModifier` instead of an
+`OrderDocItemPrice` — and Zod answers a duplicate discriminator with a bare
+`Error`, not a `ZodError`, so `safeParse` could not trap it. A fee is now an
+ordinary line item whose `price.formula` says `percent_of_total`; the
+per-document rollup (`totals.transaction_fees`) keeps the `PriceModifier`
+shape, because that IS a rate-and-amount summary rather than a line.
 
 ```ts
-const OrderDocItem: z.ZodType<OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType>;
+const OrderDocItem: z.ZodType<OrderDocItemType>;
 ```
 
 ### `OrderDocItemPrice`
@@ -10911,7 +10916,7 @@ interface OrderDocItemPriceType {
 Union of all item types stored in the order document.
 
 ```ts
-type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType | OrderDocTransactionFeeItemType;
+type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemType | OrderDocGroupItemType;
 ```
 
 ### `OrderDocLineItem`
@@ -10957,32 +10962,6 @@ interface OrderDocTotalsType {
   transaction_fees: PriceModifierType[];
   total: number;
   replacement_total: number;
-}
-```
-
-### `OrderDocTransactionFeeItem`
-
-Zod schema for a transaction fee line item in the order document.
-
-```ts
-const OrderDocTransactionFeeItem: z.ZodType<OrderDocTransactionFeeItemType>;
-```
-
-### `OrderDocTransactionFeeItemType`
-
-Transaction fee line item in the full order document.
-
-```ts
-interface OrderDocTransactionFeeItemType {
-  uid: string;
-  type: "transaction_fee";
-  name: string;
-  path: string[];
-  description: string;
-  quantity: number;
-  price: PriceModifierType;
-  order_number?: number;
-  uid_order?: string;
 }
 ```
 
@@ -11116,7 +11095,10 @@ filters the current status out of the user-settable set.
 
 ### `isLineItem(item: OrderDocItemType): item is OrderDocLineItemType`
 
-Type guard that narrows an order doc item to a line item (excludes destination/group dividers).
+Type guard that narrows an order doc item to a line item (excludes
+destination/group dividers). Sound: every non-divider `type` is now backed by
+exactly one shape, so the narrowing cannot hand a caller a `price` of the
+wrong kind.
 
 ### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
 
@@ -16935,7 +16917,7 @@ InvoiceDocItemPrice from schemas to avoid type drift.
 interface InvoiceItem {
   uid_order?: string | null;
   description?: string;
-  price?: PriceObject | PriceModifierType | InvoiceDocItemPrice;
+  price?: PriceObject | InvoiceDocItemPrice;
   coa_revenue?: COARevenueType | null;
   tracking_category?: string | null;
   xero_id?: string | null;
@@ -16991,7 +16973,7 @@ interface LineItem {
   name: string;
   type: string;
   quantity?: number;
-  price?: PriceObject | PriceModifierType;
+  price?: PriceObject;
   stock_method?: string;
   path: string[];
   uid_delivery?: string | null;
@@ -17048,13 +17030,19 @@ type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<Sche
 
 ### `TransactionFeeLineItem`
 
-A transaction fee line item with a PriceModifier price.
+A transaction fee line item.
+
+Carries the same `PriceObject` every other line carries — a fee is an
+ordinary line whose `price.formula` is `percent_of_total`, not a second price
+shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
+document total rather than into it, which is why it has its own predicate and
+its own pass in `calculateOrderTotals`.
 
 ```ts
 interface TransactionFeeLineItem {
   type: "transaction_fee";
   quantity: number;
-  price: PriceModifierType;
+  price: PriceObject;
 }
 ```
 
@@ -17122,7 +17110,10 @@ Returns a PriceModifier[] with computed amounts.
 ### `calculateItemTotal(item: LineItem, taxes: Tax[]): number`
 
 Calculate the total (subtotal_discounted + taxes) for a single line item.
-Handles both PriceObject (regular items) and PriceModifier (transaction fee items).
+
+A `transaction_fee` reports its stored `price.total`: it is priced from the
+document, so the only correct value is the one the totals pass already wrote.
+Recomputing it here would need a basis this function does not have.
 
 ### `carryForwardOverrides(rebuiltItems: InvoiceItem[], existingItems: InvoiceItem[]): InvoiceItem[]`
 
@@ -17897,7 +17888,7 @@ interface LineItem {
   name: string;
   type: string;
   quantity?: number;
-  price?: PriceObject | PriceModifierType;
+  price?: PriceObject;
   stock_method?: string;
   path: string[];
   uid_delivery?: string | null;
@@ -18030,13 +18021,19 @@ type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<Sche
 
 ### `TransactionFeeLineItem`
 
-A transaction fee line item with a PriceModifier price.
+A transaction fee line item.
+
+Carries the same `PriceObject` every other line carries — a fee is an
+ordinary line whose `price.formula` is `percent_of_total`, not a second price
+shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
+document total rather than into it, which is why it has its own predicate and
+its own pass in `calculateOrderTotals`.
 
 ```ts
 interface TransactionFeeLineItem {
   type: "transaction_fee";
   quantity: number;
-  price: PriceModifierType;
+  price: PriceObject;
 }
 ```
 
@@ -18084,7 +18081,10 @@ Returns a PriceModifier[] with computed amounts.
 ### `calculateItemTotal(item: LineItem, taxes: Tax[]): number`
 
 Calculate the total (subtotal_discounted + taxes) for a single line item.
-Handles both PriceObject (regular items) and PriceModifier (transaction fee items).
+
+A `transaction_fee` reports its stored `price.total`: it is priced from the
+document, so the only correct value is the one the totals pass already wrote.
+Recomputing it here would need a basis this function does not have.
 
 ### `calculateOrderTotals(items: LineItem[], taxes: Tax[]): OrderTotals`
 
@@ -18098,6 +18098,24 @@ a replacement value on their price object.
 
 Returns `subtotal` (sum of replacement × quantity), `tax` (taxes applied
 to that subtotal), and `total` (subtotal + tax).
+
+### `calculateTransactionFeeAmount(item: LineItem, basis: number): number`
+
+The dollar amount a `transaction_fee` line contributes to a document.
+
+A fee is priced from the document, not from itself, so it needs the one input
+`calculateItemSubtotal` cannot see: `basis`, the document's
+`subtotal_discounted` (pre-tax, post-discount — the same base the fee has
+always been computed against).
+
+- `percent_of_total` → `basis × base / 100`.
+- anything else → the ordinary per-unit subtotal, `base × quantity`, so a
+  flat processing charge stays expressible without a second formula.
+
+Exact: the percentage is applied as `× rate ÷ 100` over integer cents rather
+than as a pre-divided float factor, and rounds half-up exactly once. The form
+this replaced was `currency(basis).multiply(rate / 100)`, which quantizes the
+ratio at currency.js's precision before it ever reaches the money.
 
 ### `computeItemPaths(items: T[], _: unknown): T[]`
 
@@ -18158,6 +18176,15 @@ one formula. Lives here (base module) and is re-exported from
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
 Deduplicate line items by product UID and sum quantities.
+
+### `costTransactionFees(items: LineItem[], basis: number): LineItem[]`
+
+Cost every `transaction_fee` line against a document subtotal, returning
+copies with the computed amount written into `price`.
+
+Shared by the order and invoice totals so the two cannot drift — they were
+two byte-identical loops, and the invoice copy was reading `price.rate` /
+`price.type` off a shape invoice line items have never had.
 
 ### `deriveOrderDateEnvelope(destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>): OrderDateEnvelope`
 
@@ -18267,7 +18294,15 @@ Calculate the total discount amount across all pre-tax items.
 
 ### `getTransactionFeeTotals(items: LineItem[]): PriceModifier[]`
 
-Aggregate transaction fee PriceModifiers across all fee items.
+Aggregate priced fee lines into the document-level `transaction_fees` rollup.
+
+Input is fee ITEMS carrying a costed `price` (as produced by the second pass
+of `calculateOrderTotals` / `calculateInvoiceTotals`); output is a
+`PriceModifier[]` — a rate-and-amount summary, which is a genuinely different
+shape from a line and stays one. The fee's identity comes from the item
+itself now that the price no longer carries a nested `{uid, name}`: a line
+item's `uid` IS its product uid, which is exactly what the old
+`price.uid` held.
 
 ### `groupByDestination(items: LineItem[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]`
 

@@ -161,6 +161,8 @@ interface ZodInternalDef {
   /** Value schema of a `z.record(keyType, valueType)`. */
   valueType?: z.ZodType;
   options?: z.ZodType[];
+  /** `discriminatedUnion` only — the key Zod itself discriminates on. */
+  discriminator?: string;
   /** `literal` def values (Zod 4 stores the literal set as an array). */
   values?: unknown[];
   /** Older / non-Zod-4 literal def shape. */
@@ -187,18 +189,33 @@ function getShape(node: z.ZodType): Record<string, z.ZodType> | null {
   return getDef(unwrapZod(node)).shape ?? null;
 }
 
+/**
+ * The value set a discriminated-union member accepts at each of its
+ * literal/enum-valued keys — the map Zod builds to discriminate with.
+ */
+function getPropValues(node: z.ZodType): Record<string, Set<unknown>> | undefined {
+  return (node as unknown as { _zod?: { propValues?: Record<string, Set<unknown>> } })._zod?.propValues;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
- * Resolve a union schema down to the single member that matches `record`'s
- * shape, using `literal` and `enum` fields as discriminators (e.g.
- * `type: "rental"` against an `OrderItemType` enum in one member and
- * `type: "destination"` against a `z.literal("destination")` in another).
+ * Resolve a union schema down to the single member matching `record`'s shape.
  * Returns the matched member, or `null` if `node` isn't a union or no member
- * discriminates. Members without any discriminator field are skipped — we
- * never guess.
+ * discriminates. We never guess: a member with no discriminator is skipped, and
+ * an unresolved union fails closed at the call site.
+ *
+ * Two paths, and the first is the one that should fire:
+ *
+ * 1. **`z.discriminatedUnion()`** — `def.discriminator` names the key and each
+ *    member's `propValues` holds the values it claims. That is Zod's own
+ *    dispatch table, so the answer is exact rather than inferred. Every item
+ *    union (order, invoice, fulfillment) takes this path.
+ * 2. **`z.union()` of objects** — no dispatch table exists, so fall back to
+ *    scanning members for literal/enum-valued keys. Still reached by real
+ *    schemas (`TypesenseSynonymSchema`), so it stays.
  */
 function resolveUnionMember(
   node: z.ZodType,
@@ -206,6 +223,15 @@ function resolveUnionMember(
 ): z.ZodType | null {
   const def = getDef(unwrapZod(node));
   if (def.type !== "union" || !def.options) return null;
+
+  if (def.discriminator !== undefined) {
+    const key = def.discriminator;
+    const value = record[key];
+    for (const member of def.options) {
+      if (getPropValues(member)?.[key]?.has(value)) return member;
+    }
+    return null;
+  }
   // Pass 1 — prefer a member whose literal discriminator(s) match exactly.
   // Pass 2 — fall back to a member whose enum discriminator includes the value.
   for (const passRequiresLiteral of [true, false]) {
