@@ -518,9 +518,19 @@ export function syncOrderToInvoiceSelective(
  * Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
  * safe to pass items that originate from a Solid store proxy. Callers should
  * replace their working array with the return value.
+ *
+ * Generic in `T`, like every sibling here (`computeItemPaths`,
+ * `validateItemPaths`, `validateInvoiceItemPaths`, `getItemSubtreeRange`). This
+ * one used to be the sole exception — declared `(items: InvoiceItem[]):
+ * InvoiceItem[]` — and because `InvoiceItem.type` is `string` while the schema
+ * union's is a literal union, a caller holding the real `Invoice["items"]` got
+ * the loose type BACK and had to `as unknown as` it home. That is not a typing
+ * limitation, just a missing type parameter: `T` carries the caller's own item
+ * type straight through, so a strict caller stays strict and a manager caller
+ * can still pass staged, mid-edit rows.
  */
-export function computeInvoiceItemPaths(items: InvoiceItem[]): InvoiceItem[] {
-  const out: InvoiceItem[] = new Array(items.length);
+export function computeInvoiceItemPaths<T extends InvoiceItem>(items: T[]): T[] {
+  const out: T[] = new Array(items.length);
   let currentDividerUid: string | null = null;
   // Starts at 0, not -1: the region before the first divider is a scope too.
   let scopeStart = 0;
@@ -532,7 +542,7 @@ export function computeInvoiceItemPaths(items: InvoiceItem[]): InvoiceItem[] {
       ...si,
       path: dividerUid ? stripOrderPrefix(si.path ?? [], dividerUid) : [...(si.path ?? [])],
     }));
-    const computed = computeItemPaths(stripped as unknown as LineItem[]) as unknown as InvoiceItem[];
+    const computed = computeItemPaths(stripped);
     for (let j = 0; j < computed.length; j++) {
       const si = computed[j];
       out[scopeStart + j] = dividerUid ? { ...si, path: [dividerUid, ...si.path] } : si;
@@ -575,7 +585,7 @@ export function computeInvoiceItemPaths(items: InvoiceItem[]): InvoiceItem[] {
  * Returns `[]` when every path is clean and order is canonical.
  */
 export function validateInvoiceItemPaths<T extends InvoiceItem>(items: T[]): ItemPathIssue[] {
-  const recomputed = computeInvoiceItemPaths(items as unknown as InvoiceItem[]);
+  const recomputed = computeInvoiceItemPaths(items);
   const issues: ItemPathIssue[] = [];
   for (let i = 0; i < items.length; i++) {
     const original = items[i].path ?? [];
@@ -610,7 +620,7 @@ export function validateInvoiceItemPaths<T extends InvoiceItem>(items: T[]): Ite
  * Returns `[]` when uniqueness holds.
  */
 export function validateInvoiceItemUniqueness<T extends InvoiceItem>(items: T[]): ItemUniquenessIssue[] {
-  return validateItemUniqueness(items as unknown as LineItem[]);
+  return validateItemUniqueness(items);
 }
 
 // ── Order-scoped item sync ──────────────────────────────────────

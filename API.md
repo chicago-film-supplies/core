@@ -17128,7 +17128,7 @@ xero_tracking_option_id) are preserved from the existing item.
 
 **Returns** — Rebuilt items with invoice-specific overrides applied
 
-### `computeInvoiceItemPaths(items: InvoiceItem[]): InvoiceItem[]`
+### `computeInvoiceItemPaths(items: T[]): T[]`
 
 Compute paths for all invoice items, respecting order divider scoping.
 Wraps computeItemPaths — strips divider prefix per scope, delegates
@@ -17146,6 +17146,16 @@ hole in its normalizer.
 Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
 safe to pass items that originate from a Solid store proxy. Callers should
 replace their working array with the return value.
+
+Generic in `T`, like every sibling here (`computeItemPaths`,
+`validateItemPaths`, `validateInvoiceItemPaths`, `getItemSubtreeRange`). This
+one used to be the sole exception — declared `(items: InvoiceItem[]):
+InvoiceItem[]` — and because `InvoiceItem.type` is `string` while the schema
+union's is a literal union, a caller holding the real `Invoice["items"]` got
+the loose type BACK and had to `as unknown as` it home. That is not a typing
+limitation, just a missing type parameter: `T` carries the caller's own item
+type straight through, so a strict caller stays strict and a manager caller
+can still pass staged, mid-edit rows.
 
 ### `computeInvoiceSyncStatus(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): Map<string, "in_sync" | "out_of_sync">`
 
