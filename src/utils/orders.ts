@@ -1061,19 +1061,29 @@ export function validateComponentUniqueness<T extends LineItem>(items: T[]): Ite
  * Client-sent paths carry component ancestry (from ProductComponent.path).
  * This function prepends structural context (dest/group) and appends self uid.
  *
- * Three transforms in order:
- *  1. Recompute every item's `path`. Strip ALL structural uids (every dest +
- *     group currently in the array) and the item's own uid from the
- *     client-supplied path; also strip orphan ancestor uids — segments that
- *     don't resolve to any item in the array (e.g. catalog-only intermediate
- *     kit uids that were never materialized). Then prepend the structural
- *     prefix and append the item's own uid.
- *  2. Linearize line items inside each (destination, group) block as a tree:
- *     each parent product is followed by its full subtree before the next
- *     sibling. Destination and group dividers stay where they are; only the
- *     line items between them are reordered.
- *  3. Within each parent's direct-children, stable-sort `zero_priced === true`
- *     before others. Drag-drop reorders preserve intra-band order.
+ * `path` has exactly ONE author: the resolved parent. Per (destination, group)
+ * block, in order:
+ *  1. Resolve each line item's parent — the last segment of the client-supplied
+ *     path that names another line item IN THE SAME BLOCK (structural uids and
+ *     the item's own uid are skipped, as are orphan segments that resolve to no
+ *     item in the block, e.g. catalog-only intermediate kit uids). No parent
+ *     resolves to a block root. Parent cycles are broken deterministically.
+ *  2. Derive `path` as `[...parent.path, self uid]`, or `[...structural prefix,
+ *     self uid]` at a block root. Deriving from the parent's own path rather
+ *     than from the client's chain is what makes ancestry transitively
+ *     consistent: a client chain that skips or misnames an intermediate cannot
+ *     survive, and `path.at(-2)` is the resolved parent BY CONSTRUCTION.
+ *  3. Emit depth-first from that same parent relation — each parent followed by
+ *     its full subtree before the next sibling — stable-sorting `zero_priced
+ *     === true` before priced within each parent's direct children. Drag-drop
+ *     reorders preserve intra-band order. Destination and group dividers keep
+ *     their source positions; only the line items between them are reordered.
+ *
+ * Steps 2 and 3 read the SAME resolved parent, so the written path and the
+ * emitted position cannot disagree. (They used to be decided independently —
+ * the path from a globally-filtered client chain, the position from a
+ * block-scoped bucketing — and a parent living in a different block was a
+ * stable fixed point of the pair: 26 such order items in prod.)
  *
  * Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
  * safe to pass items that originate from a Solid store proxy (the manager app
@@ -1082,120 +1092,149 @@ export function validateComponentUniqueness<T extends LineItem>(items: T[]): Ite
  *
  * Post-condition (under the within-parent uniqueness invariant): a parent and
  * its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
- * and `getGroupItems` can rely on path-prefix matching alone.
+ * and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
+ * every returned `path` is non-empty and ends in the item's own uid.
  */
 export function computeItemPaths<T extends LineItem>(items: T[]): T[] {
   const structuralUids = getStructuralUids(items);
-  const allItemUids = new Set(items.map((i) => i.uid));
 
-  // Pass 1: recompute paths.
+  const result: T[] = [];
   let currentDestUid: string | null = null;
   let currentGroupUid: string | null = null;
-  const withPaths: T[] = items.map((item) => {
+
+  let i = 0;
+  while (i < items.length) {
+    const item = items[i];
     if (item.type === "destination") {
       currentDestUid = item.uid;
       currentGroupUid = null;
-      return { ...item, path: [item.uid] };
+      result.push({ ...item, path: [item.uid] });
+      i++;
+      continue;
     }
     if (item.type === "group") {
       currentGroupUid = item.uid;
-      return { ...item, path: currentDestUid ? [currentDestUid, item.uid] : [item.uid] };
-    }
-    const prefix: string[] = [];
-    if (currentDestUid) prefix.push(currentDestUid);
-    if (currentGroupUid) prefix.push(currentGroupUid);
-    const clientPath = (item.path ?? []).filter(
-      (seg) => !structuralUids.has(seg) && seg !== item.uid && allItemUids.has(seg),
-    );
-    return { ...item, path: [...prefix, ...clientPath, item.uid] };
-  });
-
-  // Pass 2 + 3: linearize each contiguous line-item block as a tree, with
-  // zero-priced-first sorting per parent.
-  const result: T[] = [];
-  let i = 0;
-  while (i < withPaths.length) {
-    const item = withPaths[i];
-    if (item.type === "destination" || item.type === "group") {
-      result.push(item);
+      result.push({ ...item, path: currentDestUid ? [currentDestUid, item.uid] : [item.uid] });
       i++;
       continue;
     }
     let j = i;
-    while (j < withPaths.length && withPaths[j].type !== "destination" && withPaths[j].type !== "group") {
+    while (j < items.length && items[j].type !== "destination" && items[j].type !== "group") {
       j++;
     }
-    const block = withPaths.slice(i, j);
-    result.push(...linearizeBlockDepthFirst(block, structuralUids));
+    const prefix: string[] = [];
+    if (currentDestUid) prefix.push(currentDestUid);
+    if (currentGroupUid) prefix.push(currentGroupUid);
+    result.push(...resolveBlock(items.slice(i, j), prefix, structuralUids));
     i = j;
   }
   return result;
 }
 
 /**
- * Tree-linearize a contiguous run of line items inside a single
- * (destination, group) block. Items whose direct parent (the second-to-last
- * path segment after structural stripping) is another line item in the same
- * block are emitted immediately after that parent's emission; otherwise they
- * are emitted at the top level of the block. Each parent's direct-children
- * block is stable-sorted with `zero_priced === true` first.
+ * Resolve parents, derive paths, and depth-first linearize one contiguous run
+ * of line items inside a single (destination, group) block.
  *
- * Robust to duplicates: each input item appears in the output exactly once.
- * If two parents share a uid (a same-product duplicate that should have been
- * consolidated), all children attach to the first parent in the input order;
- * the second parent emits as a leaf. This is a graceful-degradation path —
- * the within-parent uniqueness invariant rules out the case in steady state.
+ * Parent references are by uid, so when two items in the block share a uid the
+ * reference is ambiguous; the FIRST occurrence in input order wins, for both
+ * the derived path and the emission position (they read the same map, so they
+ * agree). This is a graceful-degradation path — the within-parent uniqueness
+ * invariant rules the case out in steady state. Every input item appears in the
+ * output exactly once regardless.
  */
-function linearizeBlockDepthFirst<T extends LineItem>(block: T[], structuralUids: Set<string>): T[] {
-  if (block.length <= 1) return block.slice();
+function resolveBlock<T extends LineItem>(block: T[], prefix: string[], structuralUids: Set<string>): T[] {
+  if (block.length === 0) return [];
 
-  const blockUids = new Set(block.map((i) => i.uid));
-  const ROOT = "\0root";
-
-  const childrenByParent = new Map<string, T[]>();
-  for (const item of block) {
-    const parentUid = item.path.at(-2);
-    const key = parentUid && blockUids.has(parentUid) && !structuralUids.has(parentUid)
-      ? parentUid
-      : ROOT;
-    let bucket = childrenByParent.get(key);
-    if (!bucket) {
-      bucket = [];
-      childrenByParent.set(key, bucket);
-    }
-    bucket.push(item);
+  const blockUids = new Set(block.map((it) => it.uid));
+  // A parent uid resolves to its FIRST occurrence in the block.
+  const indexByUid = new Map<string, number>();
+  for (let idx = 0; idx < block.length; idx++) {
+    if (!indexByUid.has(block[idx].uid)) indexByUid.set(block[idx].uid, idx);
   }
 
-  // Stable sort each parent's children: zero-priced first.
-  for (const bucket of childrenByParent.values()) {
+  // Step 1: resolve each item's parent index (-1 = block root).
+  const parentIdx: number[] = block.map((item, idx) => {
+    const segs = item.path ?? [];
+    for (let k = segs.length - 1; k >= 0; k--) {
+      const seg = segs[k];
+      if (seg === item.uid || structuralUids.has(seg) || !blockUids.has(seg)) continue;
+      const resolved = indexByUid.get(seg);
+      return resolved === undefined || resolved === idx ? -1 : resolved;
+    }
+    return -1;
+  });
+
+  // Break parent cycles (only reachable via duplicate uids): the first member
+  // of each cycle encountered becomes a block root, which severs it for the
+  // rest. Deterministic, and guarantees every walk terminates at -1.
+  for (let idx = 0; idx < block.length; idx++) {
+    const seen = new Set<number>([idx]);
+    let cur = parentIdx[idx];
+    while (cur !== -1) {
+      if (seen.has(cur)) {
+        parentIdx[idx] = -1;
+        break;
+      }
+      seen.add(cur);
+      cur = parentIdx[cur];
+    }
+  }
+
+  // Step 2: derive paths from the resolved parent, root-downwards.
+  const pathByIdx: (string[] | null)[] = new Array(block.length).fill(null);
+  for (let idx = 0; idx < block.length; idx++) {
+    if (pathByIdx[idx]) continue;
+    const chain: number[] = [];
+    let cur = idx;
+    while (cur !== -1 && !pathByIdx[cur]) {
+      chain.push(cur);
+      cur = parentIdx[cur];
+    }
+    let base = cur === -1 ? prefix : pathByIdx[cur]!;
+    for (let k = chain.length - 1; k >= 0; k--) {
+      base = [...base, block[chain[k]].uid];
+      pathByIdx[chain[k]] = base;
+    }
+  }
+
+  // Step 3: emit depth-first off the same parent relation, zero-priced first
+  // within each parent's direct children.
+  const childrenOf = new Map<number, number[]>();
+  for (let idx = 0; idx < block.length; idx++) {
+    const key = parentIdx[idx];
+    const bucket = childrenOf.get(key);
+    if (bucket) bucket.push(idx);
+    else childrenOf.set(key, [idx]);
+  }
+  for (const bucket of childrenOf.values()) {
     bucket.sort((a, b) => {
-      const az = a.zero_priced === true ? 0 : 1;
-      const bz = b.zero_priced === true ? 0 : 1;
+      const az = block[a].zero_priced === true ? 0 : 1;
+      const bz = block[b].zero_priced === true ? 0 : 1;
       return az - bz;
     });
   }
 
   const result: T[] = [];
-  const emitted = new Set<T>();
-  function emitChildren(parentKey: string) {
-    const bucket = childrenByParent.get(parentKey);
+  const emitted = new Set<number>();
+  function emitChildren(parentKey: number) {
+    const bucket = childrenOf.get(parentKey);
     if (!bucket) return;
-    for (const child of bucket) {
-      if (emitted.has(child)) continue;
-      emitted.add(child);
-      result.push(child);
-      emitChildren(child.uid);
+    for (const childIdx of bucket) {
+      if (emitted.has(childIdx)) continue;
+      emitted.add(childIdx);
+      result.push({ ...block[childIdx], path: pathByIdx[childIdx]! });
+      emitChildren(childIdx);
     }
   }
-  emitChildren(ROOT);
+  emitChildren(-1);
 
-  // Catch any items whose parent uid resolved to a non-emitted bucket —
-  // append them at the end so no item is dropped.
+  // Belt-and-braces: nothing can escape the walk once cycles are broken, but
+  // never drop an item if it somehow does.
   if (emitted.size < block.length) {
-    for (const item of block) {
-      if (!emitted.has(item)) {
-        emitted.add(item);
-        result.push(item);
+    for (let idx = 0; idx < block.length; idx++) {
+      if (!emitted.has(idx)) {
+        emitted.add(idx);
+        result.push({ ...block[idx], path: pathByIdx[idx]! });
       }
     }
   }

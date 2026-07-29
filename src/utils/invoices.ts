@@ -506,6 +506,15 @@ export function syncOrderToInvoiceSelective(
  * Wraps computeItemPaths — strips divider prefix per scope, delegates
  * to the shared order path logic, then re-adds the prefix.
  *
+ * TOTAL: every item is normalized. An invoice with no `order` divider (a CRMS
+ * invoice with no matching CFS order — `services/webhooks/invoice.ts` reaches
+ * this branch by design) is one unprefixed scope, not a passthrough. It used to
+ * be the identity function on that branch, copying the input objects by
+ * reference: 28 prod invoices / 79 items were left with `path: []`, and the
+ * write-time guard — defined as "path equals what this function would
+ * produce" — reported them clean, because a fixed-point check inherits every
+ * hole in its normalizer.
+ *
  * Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
  * safe to pass items that originate from a Solid store proxy. Callers should
  * replace their working array with the return value.
@@ -513,18 +522,20 @@ export function syncOrderToInvoiceSelective(
 export function computeInvoiceItemPaths(items: InvoiceItem[]): InvoiceItem[] {
   const out: InvoiceItem[] = new Array(items.length);
   let currentDividerUid: string | null = null;
-  let scopeStart = -1;
+  // Starts at 0, not -1: the region before the first divider is a scope too.
+  let scopeStart = 0;
 
   function flushScope(endExclusive: number) {
-    if (!currentDividerUid || scopeStart < 0) return;
+    if (endExclusive <= scopeStart) return;
+    const dividerUid = currentDividerUid;
     const stripped = items.slice(scopeStart, endExclusive).map((si) => ({
       ...si,
-      path: stripOrderPrefix(si.path, currentDividerUid as string),
+      path: dividerUid ? stripOrderPrefix(si.path ?? [], dividerUid) : [...(si.path ?? [])],
     }));
     const computed = computeItemPaths(stripped as unknown as LineItem[]) as unknown as InvoiceItem[];
     for (let j = 0; j < computed.length; j++) {
       const si = computed[j];
-      out[scopeStart + j] = { ...si, path: [currentDividerUid as string, ...si.path] };
+      out[scopeStart + j] = dividerUid ? { ...si, path: [dividerUid, ...si.path] } : si;
     }
   }
 
@@ -541,10 +552,10 @@ export function computeInvoiceItemPaths(items: InvoiceItem[]): InvoiceItem[] {
     }
   }
 
-  // Items outside any order scope (before the first divider) carry through
-  // unchanged — preserves prior semantics for invoices without dividers.
+  // Unreachable once every index belongs to a scope — kept so a future edit
+  // that reintroduces a gap writes the input item rather than `undefined`.
   for (let i = 0; i < items.length; i++) {
-    if (out[i] === undefined) out[i] = items[i];
+    if (out[i] === undefined) out[i] = { ...items[i], path: [...(items[i].path ?? [])] };
   }
 
   return out;

@@ -753,6 +753,82 @@ Deno.test("computeInvoiceItemPaths does not mutate input items", () => {
   assertEquals(result[2].path, ["od-1", "dest-1", "p1"]);
 });
 
+// ── computeInvoiceItemPaths: the no-divider branch (D1) ────────
+// A CRMS invoice with no matching CFS order carries no `order` divider.
+// This branch used to be the identity function — it returned the INPUT objects
+// by reference with whatever path they arrived with (`[]` in practice), and the
+// write guard, defined as "path equals what this function produces", called
+// that clean. 28 prod invoices / 79 items sat in that hole.
+
+Deno.test("computeInvoiceItemPaths normalizes an invoice with no order divider", () => {
+  const items: InvoiceItem[] = [
+    makeItem({ uid: "p1", path: [] }),
+    makeItem({ uid: "p2", path: [] }),
+  ];
+  const result = computeInvoiceItemPaths(items);
+  assertEquals(result[0].path, ["p1"]);
+  assertEquals(result[1].path, ["p2"]);
+  // And the guard now agrees, rather than agreeing with the hole.
+  assertEquals(validateInvoiceItemPaths(result), []);
+});
+
+Deno.test("computeInvoiceItemPaths flags a no-divider invoice whose paths are empty", () => {
+  // The 78 prod items of the 79: path [] on a divider-less invoice.
+  const items: InvoiceItem[] = [makeItem({ uid: "p1", path: [] })];
+  assertEquals(validateInvoiceItemPaths(items), [
+    { index: 0, uid: "p1", path: [], expected: ["p1"] },
+  ]);
+});
+
+Deno.test("computeInvoiceItemPaths appends self on a no-divider invoice carrying an ancestor", () => {
+  // Prod invoice 2117's shape: the 1 item of the 79 whose path was non-empty
+  // but did not end in its own uid.
+  const items: InvoiceItem[] = [
+    makeItem({ uid: "parent", path: [] }),
+    makeItem({ uid: "child", path: ["parent"] }),
+  ];
+  const result = computeInvoiceItemPaths(items);
+  assertEquals(result[0].path, ["parent"]);
+  assertEquals(result[1].path, ["parent", "child"]);
+});
+
+Deno.test("computeInvoiceItemPaths normalizes items before the first order divider", () => {
+  const items: InvoiceItem[] = [
+    makeItem({ uid: "loose", path: [] }),
+    { ...orderDividerBase, uid: "od-1", name: "Order #1", type: "order", uid_order: "o1" } as InvoiceItem,
+    { uid: "dest-1", type: "destination", name: "Venue", path: [] },
+    makeItem({ uid: "p1", path: [] }),
+  ];
+  const result = computeInvoiceItemPaths(items);
+  assertEquals(result[0].path, ["loose"]);
+  assertEquals(result[1].path, ["od-1"]);
+  assertEquals(result[2].path, ["od-1", "dest-1"]);
+  assertEquals(result[3].path, ["od-1", "dest-1", "p1"]);
+});
+
+Deno.test("computeInvoiceItemPaths returns fresh items on the no-divider branch", () => {
+  // The docblock promised "a fresh array of fresh items… safe to pass a Solid
+  // store proxy"; on this branch it used to return the inputs themselves.
+  const items: InvoiceItem[] = [makeItem({ uid: "p1", path: [] })];
+  const original = items[0];
+  const result = computeInvoiceItemPaths(items);
+  assertEquals(result[0] === original, false);
+  assertEquals(original.path, []);
+  assertEquals(result[0].path, ["p1"]);
+});
+
+Deno.test("computeInvoiceItemPaths is idempotent on a no-divider invoice", () => {
+  const items: InvoiceItem[] = [
+    makeItem({ uid: "parent", path: [] }),
+    makeItem({ uid: "child", path: ["parent"] }),
+    makeItem({ uid: "other", path: [] }),
+  ];
+  const once = computeInvoiceItemPaths(items);
+  const twice = computeInvoiceItemPaths(once);
+  assertEquals(twice.map((it) => it.path), once.map((it) => it.path));
+  assertEquals(twice.map((it) => it.uid), once.map((it) => it.uid));
+});
+
 // ── Top-level field sync helpers ────────────────────────────────
 
 function makePair(

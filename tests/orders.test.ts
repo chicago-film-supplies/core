@@ -1526,6 +1526,105 @@ Deno.test("computeItemPaths is robust to duplicate parent uids", () => {
   assertEquals(uids.filter((u) => u === "C2").length, 1);
 });
 
+// ── computeItemPaths: one author for `path` (D3) ────────────────
+
+Deno.test("computeItemPaths drops a parent that lives in a different block", () => {
+  // D3: the client names a parent that exists in the array but sits in another
+  // structural block. The path used to keep the segment (it resolved globally)
+  // while the linearizer emitted the item at block top level (it resolves
+  // per-block) — a disagreement that re-running reproduced, so the fixed-point
+  // guard called it clean. 26 prod order items sat in that hole.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: [] },
+    makeItem({ uid: "parentInD1", path: [] }),
+    { type: "destination", uid: "d2", name: "", path: [] },
+    makeItem({ uid: "orphan", path: ["parentInD1"] }),
+  ];
+  const result = computeItemPaths(items);
+  assertEquals(result[3].path, ["d2", "orphan"]);
+  // Position and path now say the same thing: a block root under d2.
+  assertEquals(result.map((i) => i.uid), ["d1", "parentInD1", "d2", "orphan"]);
+  assertEquals(validateItemPaths(result), []);
+});
+
+Deno.test("validateItemPaths flags a cross-block parent instead of accepting it", () => {
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    makeItem({ uid: "parentInD1", path: ["d1", "parentInD1"] }),
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
+    makeItem({ uid: "orphan", path: ["d2", "parentInD1", "orphan"] }),
+  ];
+  assertEquals(validateItemPaths(items), [
+    {
+      index: 3,
+      uid: "orphan",
+      path: ["d2", "parentInD1", "orphan"],
+      expected: ["d2", "orphan"],
+    },
+  ]);
+});
+
+Deno.test("computeItemPaths derives ancestry from the parent, not the client chain", () => {
+  // The client names only the immediate parent and skips the grandparent. The
+  // old filter kept the chain verbatim, producing a path whose prefix did not
+  // match the parent's — which breaks `getItemSubtreeRange`'s prefix matching
+  // even though `path.at(-2)` looked right.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: [] },
+    makeItem({ uid: "grandparent", path: [] }),
+    makeItem({ uid: "parent", path: ["grandparent"] }),
+    makeItem({ uid: "child", path: ["parent"] }),
+  ];
+  const result = computeItemPaths(items);
+  assertEquals(result[3].path, ["d1", "grandparent", "parent", "child"]);
+  // The subtree of `grandparent` is contiguous and covers both descendants.
+  assertEquals(getItemSubtreeRange(result, 1), { startIndex: 1, endIndex: 3 });
+});
+
+Deno.test("computeItemPaths overrides a client chain that misnames the grandparent", () => {
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: [] },
+    makeItem({ uid: "realGrandparent", path: [] }),
+    makeItem({ uid: "decoy", path: [] }),
+    makeItem({ uid: "parent", path: ["realGrandparent"] }),
+    // Client claims decoy → parent. The parent's own path wins.
+    makeItem({ uid: "child", path: ["decoy", "parent"] }),
+  ];
+  const result = computeItemPaths(items);
+  const child = result.find((i) => i.uid === "child")!;
+  assertEquals(child.path, ["d1", "realGrandparent", "parent", "child"]);
+});
+
+Deno.test("computeItemPaths always writes a non-empty path ending in self", () => {
+  // The two properties W0c asserts directly in api-cloudrun's write guard —
+  // they hold regardless of what the client sends, including with no
+  // structural dividers at all.
+  const items: LineItem[] = [
+    makeItem({ uid: "loose", path: [] }),
+    makeItem({ uid: "weird", path: ["nope", "loose"] }),
+    { type: "destination", uid: "d1", name: "", path: [] },
+    makeItem({ uid: "under", path: ["d1", "d1"] }),
+  ];
+  for (const item of computeItemPaths(items)) {
+    assertEquals(item.path.length >= 1, true);
+    assertEquals(item.path.at(-1), item.uid);
+  }
+});
+
+Deno.test("computeItemPaths terminates on a client-sent parent cycle", () => {
+  // Only reachable via duplicate uids, but a client can send it, and an
+  // unguarded parent walk would spin forever.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: [] },
+    makeItem({ uid: "A", path: ["B"] }),
+    makeItem({ uid: "B", path: ["A"] }),
+  ];
+  const result = computeItemPaths(items);
+  assertEquals(result.length, 3);
+  assertEquals(new Set(result.map((i) => i.uid)).size, 3);
+  for (const item of result) assertEquals(item.path.at(-1), item.uid);
+});
+
 // ── validateItemUniqueness ─────────────────────────────────────
 
 Deno.test("validateItemUniqueness returns [] for unique items", () => {

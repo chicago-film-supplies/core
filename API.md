@@ -17134,6 +17134,15 @@ Compute paths for all invoice items, respecting order divider scoping.
 Wraps computeItemPaths — strips divider prefix per scope, delegates
 to the shared order path logic, then re-adds the prefix.
 
+TOTAL: every item is normalized. An invoice with no `order` divider (a CRMS
+invoice with no matching CFS order — `services/webhooks/invoice.ts` reaches
+this branch by design) is one unprefixed scope, not a passthrough. It used to
+be the identity function on that branch, copying the input objects by
+reference: 28 prod invoices / 79 items were left with `path: []`, and the
+write-time guard — defined as "path equals what this function would
+produce" — reported them clean, because a fixed-point check inherits every
+hole in its normalizer.
+
 Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
 safe to pass items that originate from a Solid store proxy. Callers should
 replace their working array with the return value.
@@ -17165,19 +17174,29 @@ Each item's path = [structural context...] + [component ancestry...] + [self uid
 Client-sent paths carry component ancestry (from ProductComponent.path).
 This function prepends structural context (dest/group) and appends self uid.
 
-Three transforms in order:
- 1. Recompute every item's `path`. Strip ALL structural uids (every dest +
-    group currently in the array) and the item's own uid from the
-    client-supplied path; also strip orphan ancestor uids — segments that
-    don't resolve to any item in the array (e.g. catalog-only intermediate
-    kit uids that were never materialized). Then prepend the structural
-    prefix and append the item's own uid.
- 2. Linearize line items inside each (destination, group) block as a tree:
-    each parent product is followed by its full subtree before the next
-    sibling. Destination and group dividers stay where they are; only the
-    line items between them are reordered.
- 3. Within each parent's direct-children, stable-sort `zero_priced === true`
-    before others. Drag-drop reorders preserve intra-band order.
+`path` has exactly ONE author: the resolved parent. Per (destination, group)
+block, in order:
+ 1. Resolve each line item's parent — the last segment of the client-supplied
+    path that names another line item IN THE SAME BLOCK (structural uids and
+    the item's own uid are skipped, as are orphan segments that resolve to no
+    item in the block, e.g. catalog-only intermediate kit uids). No parent
+    resolves to a block root. Parent cycles are broken deterministically.
+ 2. Derive `path` as `[...parent.path, self uid]`, or `[...structural prefix,
+    self uid]` at a block root. Deriving from the parent's own path rather
+    than from the client's chain is what makes ancestry transitively
+    consistent: a client chain that skips or misnames an intermediate cannot
+    survive, and `path.at(-2)` is the resolved parent BY CONSTRUCTION.
+ 3. Emit depth-first from that same parent relation — each parent followed by
+    its full subtree before the next sibling — stable-sorting `zero_priced
+    === true` before priced within each parent's direct children. Drag-drop
+    reorders preserve intra-band order. Destination and group dividers keep
+    their source positions; only the line items between them are reordered.
+
+Steps 2 and 3 read the SAME resolved parent, so the written path and the
+emitted position cannot disagree. (They used to be decided independently —
+the path from a globally-filtered client chain, the position from a
+block-scoped bucketing — and a parent living in a different block was a
+stable fixed point of the pair: 26 such order items in prod.)
 
 Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
 safe to pass items that originate from a Solid store proxy (the manager app
@@ -17186,7 +17205,8 @@ Callers should replace their working array with the return value.
 
 Post-condition (under the within-parent uniqueness invariant): a parent and
 its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
-and `getGroupItems` can rely on path-prefix matching alone.
+and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
+every returned `path` is non-empty and ends in the item's own uid.
 
 ### `derivePaymentStatus(currentStatus: string, amountPaid: number, amountDue: number): string`
 
@@ -18047,19 +18067,29 @@ Each item's path = [structural context...] + [component ancestry...] + [self uid
 Client-sent paths carry component ancestry (from ProductComponent.path).
 This function prepends structural context (dest/group) and appends self uid.
 
-Three transforms in order:
- 1. Recompute every item's `path`. Strip ALL structural uids (every dest +
-    group currently in the array) and the item's own uid from the
-    client-supplied path; also strip orphan ancestor uids — segments that
-    don't resolve to any item in the array (e.g. catalog-only intermediate
-    kit uids that were never materialized). Then prepend the structural
-    prefix and append the item's own uid.
- 2. Linearize line items inside each (destination, group) block as a tree:
-    each parent product is followed by its full subtree before the next
-    sibling. Destination and group dividers stay where they are; only the
-    line items between them are reordered.
- 3. Within each parent's direct-children, stable-sort `zero_priced === true`
-    before others. Drag-drop reorders preserve intra-band order.
+`path` has exactly ONE author: the resolved parent. Per (destination, group)
+block, in order:
+ 1. Resolve each line item's parent — the last segment of the client-supplied
+    path that names another line item IN THE SAME BLOCK (structural uids and
+    the item's own uid are skipped, as are orphan segments that resolve to no
+    item in the block, e.g. catalog-only intermediate kit uids). No parent
+    resolves to a block root. Parent cycles are broken deterministically.
+ 2. Derive `path` as `[...parent.path, self uid]`, or `[...structural prefix,
+    self uid]` at a block root. Deriving from the parent's own path rather
+    than from the client's chain is what makes ancestry transitively
+    consistent: a client chain that skips or misnames an intermediate cannot
+    survive, and `path.at(-2)` is the resolved parent BY CONSTRUCTION.
+ 3. Emit depth-first from that same parent relation — each parent followed by
+    its full subtree before the next sibling — stable-sorting `zero_priced
+    === true` before priced within each parent's direct children. Drag-drop
+    reorders preserve intra-band order. Destination and group dividers keep
+    their source positions; only the line items between them are reordered.
+
+Steps 2 and 3 read the SAME resolved parent, so the written path and the
+emitted position cannot disagree. (They used to be decided independently —
+the path from a globally-filtered client chain, the position from a
+block-scoped bucketing — and a parent living in a different block was a
+stable fixed point of the pair: 26 such order items in prod.)
 
 Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
 safe to pass items that originate from a Solid store proxy (the manager app
@@ -18068,7 +18098,8 @@ Callers should replace their working array with the return value.
 
 Post-condition (under the within-parent uniqueness invariant): a parent and
 its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
-and `getGroupItems` can rely on path-prefix matching alone.
+and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
+every returned `path` is non-empty and ends in the item's own uid.
 
 ### `computeItemTaxAmount(tax: Pick<Tax, "rate" | "type">, subtotalDiscounted: number, quantity: number): number`
 
