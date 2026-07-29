@@ -42,6 +42,7 @@ export {
 
 import currency from "currency.js";
 import type { COARevenueType, DocDestinationType, DocLineItemTypeType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocTotals, PriceFormulaType } from "../schemas/mod.ts";
+import { itemContract } from "../schemas/mod.ts";
 import {
   calculateItemSubtotal,
   computeItemPaths,
@@ -265,22 +266,6 @@ function stripOrderPrefix(path: string[], orderDividerUid: string): string[] {
 }
 
 /**
- * Project an order item to its invoice-item shape, scoped under an order divider.
- *
- * Order items carry fields (`stock_method`, `order_number`, `uid_order`,
- * `inclusion_type`, `zero_priced`, `uid_delivery`/`uid_collection` on line items,
- * `price.replacement`) that `InvoiceDocLineItemSchema` (strict) rejects. Spreading
- * `...orderItem` into an invoice item leaks them. Call this helper at every
- * order → invoice boundary instead.
- *
- * `destination` and `group` items share their shape with the order doc, so they
- * pass through. Line items (and `transaction_fee`, which is stored as a
- * line-item-shaped invoice item) are narrowed to the invoice-line-item keys.
- *
- * Mirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`
- * (`createInvoice`) so sync output is shape-consistent with create output.
- */
-/**
  * Build an invoice destination divider from a source order's destination item.
  * Single source of truth for the divider shape — reused by
  * `projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice
@@ -305,17 +290,40 @@ export function buildInvoiceDestinationDivider(
   } as InvoiceItem;
 }
 
+/**
+ * Project an order item to its invoice-item shape, scoped under an order divider.
+ *
+ * Order items carry fields (`stock_method`, `order_number`, `uid_order`,
+ * `inclusion_type`, `zero_priced`, `uid_delivery`/`uid_collection` on line items,
+ * `price.replacement`) that `InvoiceDocLineItemSchema` (strict) rejects. Spreading
+ * `...orderItem` into an invoice item leaks them. Call this helper at every
+ * order → invoice boundary instead.
+ *
+ * `destination` and `group` items share their shape with the order doc, so they
+ * pass through. Line items (and `transaction_fee`, which is stored as a
+ * line-item-shaped invoice item) are narrowed to the invoice-line-item keys.
+ *
+ * The divider/line split is `ITEM_CONTRACTS[type].kind`, not a list of type
+ * literals — so a new line type projects correctly the day it is added to the
+ * table, instead of silently falling through to whichever branch happened to be
+ * last. The per-branch KEY sets stay hand-written on purpose: they mirror
+ * `InvoiceDocLineItemSchema`'s strict shape, and deriving them from the contract
+ * would make the table a second source of truth for the schema.
+ *
+ * Mirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`
+ * (`createInvoice`) so sync output is shape-consistent with create output.
+ */
 function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceItem {
   const basePath = item.path ?? [];
   const path = [orderDividerUid, ...basePath];
 
-  if (item.type === "destination") {
-    return buildInvoiceDestinationDivider(item, path);
-  }
-  if (item.type === "group") {
+  if (itemContract(item.type)?.kind === "divider") {
+    if (item.type === "destination") {
+      return buildInvoiceDestinationDivider(item, path);
+    }
     return {
       uid: item.uid,
-      type: "group",
+      type: item.type,
       name: item.name,
       description: item.description ?? "",
       path,

@@ -119,6 +119,43 @@ references (`DocSource`, `UidNameRef`) that may point at any collection.
 const AnyUid: z.ZodType<string>;
 ```
 
+### `AuthoredComponentSchema`
+
+Schema for an authored `components` entry — {@link ComponentSchema} with
+`inclusion_type` required. @see {@link AuthoredProductComponent}
+
+```ts
+const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;
+```
+
+### `AuthoredProductComponent`
+
+A component product within a parent product — the entry in `components`.
+
+Identical to {@link ProductComponent} except that `inclusion_type` is
+**required**, and that difference is the point. Both expanders
+(`buildOrderComponentLines` in manager, and the staged-add path) filter
+`=== "mandatory" || === "default"`, so an `undefined` here is a silent fourth
+bucket whose component is dropped from every order it should have joined.
+
+The optionality it replaces existed to accommodate `component_of`, where the
+field genuinely is not authored — and it leaked onto the authored side, where
+it is a bug. Splitting the two is what lets this side be required. Prod
+carries 0 undefined rows across 165 `components` entries on 63 products, so
+this is hardening with a zero-row backfill; writers with no answer pass
+`"default"`, the reading `crmsProduct.ts` and manager's new-component form
+already take.
+
+NOT expressed as `.default("default")`: `validateBeforeWrite` validates but
+writes the RAW doc, so a schema default never materializes and the field would
+still be written absent.
+
+```ts
+interface AuthoredProductComponent {
+  inclusion_type: InclusionTypeType;
+}
+```
+
 ### `BOOKING_BREAKDOWN_KEYS`
 
 All seven keys of the booking lifecycle breakdown, in lifecycle order (which
@@ -1058,6 +1095,15 @@ const CommitMetaSchema: z.ZodType<CommitMeta>;
 ```
 
 ### `ComponentSchema`
+
+Schema for a `component_of` back-reference. `inclusion_type` is optional here
+because the parent authors it — see {@link ProductComponent}.
+
+A catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset
+of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),
+and every component that survives expansion becomes an order line of the same
+`type`. So it answers to the same contract, and the rental ⇒
+`price.replacement` rule is stated once rather than a third time here.
 
 ```ts
 const ComponentSchema: z.ZodType<ProductComponent>;
@@ -2227,6 +2273,20 @@ interface EventEnvelope {
 }
 ```
 
+### `FULFILLMENT_LINE_ITEM_TYPES`
+
+Line item types a fulfillment carries — the `fulfillable: true` members.
+`transaction_fee` is excluded because a fee has no stock and is never picked
+off a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}
+waiting to be collapsed into it; the exclusion IS the contract.
+
+Lives here rather than in `fulfillment.ts` so the list, the table it must
+agree with, and the assertion below are one thing to read.
+
+```ts
+const FULFILLMENT_LINE_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surcharge"[];
+```
+
 ### `FieldMapping`
 
 Describes how a single field moves from source to target.
@@ -2354,6 +2414,12 @@ Zod schema for a fixture manifest entry.
 
 ```ts
 const FixtureMetaSchema: z.ZodType<FixtureMeta>;
+```
+
+### `FulfillableItemType`
+
+```ts
+type FulfillableItemType = indexedAccess;
 ```
 
 ### `Fulfillment`
@@ -2718,6 +2784,14 @@ interface HorizonMaterializedData {
 }
 ```
 
+### `ITEM_CONTRACTS`
+
+The per-type item contract table. @see {@link ItemContract}
+
+```ts
+const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;
+```
+
 ### `InclusionTypeEnum`
 
 Zod schema for InclusionTypeType.
@@ -3001,7 +3075,7 @@ interface InvoiceItemInputType {
 Possible invoice item types (input — includes structural dividers + order divider).
 
 ```ts
-type InvoiceItemTypeType = indexedAccess;
+type InvoiceItemTypeType = ItemTypeType;
 ```
 
 ### `InvoicePayment`
@@ -3062,6 +3136,46 @@ type InvoiceUpdated = EventEnvelope<Invoice> & typeLiteral;
 type InvoiceVoided = EventEnvelope<Invoice> & typeLiteral;
 ```
 
+### `ItemContract`
+
+The per-type rules an `items[]` entry must satisfy, one entry per
+{@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in
+`transaction.ts`: a table the schema reads, so a contradiction is reported by
+the schema instead of restated in every consumer.
+
+**The table carries only the axes that vary by TYPE.** The axes that vary by
+COLLECTION are already the three documents' shapes and are not repeated here —
+an invoice line has no `stock_method` key and its price has no `replacement`
+key, a fulfillment line has no `price` at all, and every one of those objects
+is a `z.strictObject`. Restating "forbidden" for them would be a second source
+of truth for something the shape already makes inexpressible.
+
+Measured against prod `cfs-3100` (951 orders / 958 invoices / 952
+fulfillments, 2026-07-29) before each axis was written — three axes an earlier
+draft proposed are absent because the corpus refutes them:
+
+- **no `taxable` axis.** Every line type carries taxes on some rows and not
+  others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is
+  taxed is the product's `tax_class` and the document's `tax_profile`, i.e.
+  configuration, not a type invariant.
+- **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows
+  are `fixed` while their invoice projections are `five_day_week` (617 sale,
+  643 service, 137 surcharge). A whitelist keyed on type would reject the
+  invoice side of the same line.
+- **`replacement` is `optional`, not `forbidden`, off the rental arm.** All
+  1,480 non-rental order line items carry a `price.replacement`; the builder
+  writes it for every type.
+
+```ts
+interface ItemContract {
+  kind: "divider" | "line";
+  pricing: "pre_tax" | "from_total" | "none";
+  replacement: "required_when_stocked" | "optional" | "forbidden";
+  fulfillable: boolean;
+  parentable_by: readonly ItemTypeType[];
+}
+```
+
 ### `ItemPrice`
 
 Zod schema for item price breakdown (input).
@@ -3101,6 +3215,22 @@ Allowed values for item-level tax profile.
 
 ```ts
 type ItemTaxProfileType = indexedAccess;
+```
+
+### `ItemTypeEnum`
+
+Zod schema for {@link ItemTypeType}.
+
+```ts
+const ItemTypeEnum: z.ZodType<ItemTypeType>;
+```
+
+### `ItemTypeType`
+
+Union of every order/invoice/fulfillment item type.
+
+```ts
+type ItemTypeType = indexedAccess;
 ```
 
 ### `ItemUid`
@@ -4648,7 +4778,7 @@ interface Product {
   price: ProductPrice;
   shipping?: ProductShipping;
   alternates: ProductAlternate[];
-  components: ProductComponent[];
+  components: AuthoredProductComponent[];
   component_of: ProductComponent[];
   tags: UidNameRefType[];
   query_by_tags?: string[];
@@ -4687,7 +4817,15 @@ interface ProductAlternate {
 
 ### `ProductComponent`
 
-A component product within a parent product.
+A product reference in `component_of` — the RECIPROCAL back-reference naming a
+parent this product is a component of.
+
+Deliberately the reduced shape: the relationship attributes
+(`inclusion_type`, `zero_priced`, `active`, `description`) describe how the
+PARENT includes this product and are authored on the parent's own
+`components` entry, which is the authoritative side. Prod agrees — across 141
+`component_of` rows on 91 products, exactly one carries any of them
+(measured 2026-07-29), against 165/165 on `components`.
 
 ```ts
 interface ProductComponent {
@@ -7243,6 +7381,36 @@ All card-related propagation rules.
 const cardRules: CollectionRule[];
 ```
 
+### `checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void`
+
+The full per-item contract check — {@link checkItemPriceFormula} plus the
+`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,
+the one item shape whose price carries a `replacement` channel. The direct
+analogue of `checkMovementContract` in `transaction.ts`.
+
+`required_when_stocked` treats a MISSING `stock_method` as stocked, which is
+the conservative reading and the one the hand-written refine this replaced has
+always enforced. That is also why the axis does not run on the invoice arm:
+an invoice line drops `stock_method` and `price.replacement` together, so an
+absent `stock_method` there means "this shape has no answer", not "unknown" —
+and running it would reject all 7,076 invoice rentals in prod.
+
+### `checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void`
+
+The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is
+legal only where the contract says the line is priced FROM the document total.
+
+Applies to every price shape in the package, so it is the check the invoice
+arm attaches on its own — an invoice line has no `stock_method` and its price
+has no `replacement` key, which leaves this as the only axis it can express.
+
+`percent_of_total` prices a line from the DOCUMENT total, which only
+`calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`
+throws on it. Before this axis the combination was merely thrown on at
+runtime, deep in `perUnitSubtotal`; here it is unwritable. The converse is
+deliberately NOT asserted: a flat-amount fee is legitimate, and
+`calculateTransactionFeeAmount` prices one.
+
 ### `collectLeafPaths(schema: z.ZodType, opts?: typeLiteral): CollectLeafPathsResult`
 
 Walk a schema and collect every scalar leaf with its dotted path and merged
@@ -7658,6 +7826,13 @@ Server-side gate for an order status write. `source: "manual"` rejects
 writes that move into a computed status or out of a computed status into
 anything other than the same value (no-op). `source: "propagation"`
 trusts the booking write path that sets `active` or `complete`.
+
+### `itemContract(type: string): ItemContract | undefined`
+
+The contract for an item `type`, or `undefined` for a value outside
+{@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in
+`@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
+contract and every derived predicate answers `false` for it.
 
 ### `manageDraftRules`
 
@@ -8263,6 +8438,20 @@ src/lib/eventCards.ts` (`EventPosition = "start" | "end"`).
 const EventCardId: z.ZodType<string>;
 ```
 
+### `FULFILLMENT_LINE_ITEM_TYPES`
+
+Line item types a fulfillment carries — the `fulfillable: true` members.
+`transaction_fee` is excluded because a fee has no stock and is never picked
+off a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}
+waiting to be collapsed into it; the exclusion IS the contract.
+
+Lives here rather than in `fulfillment.ts` so the list, the table it must
+agree with, and the assertion below are one thing to read.
+
+```ts
+const FULFILLMENT_LINE_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surcharge"[];
+```
+
 ### `FirestoreFieldValue`
 
 Structural interface for Firestore FieldValue (write-time sentinel).
@@ -8323,6 +8512,20 @@ interface FirestoreTimestampValue {
 }
 ```
 
+### `FulfillableItemType`
+
+```ts
+type FulfillableItemType = indexedAccess;
+```
+
+### `ITEM_CONTRACTS`
+
+The per-type item contract table. @see {@link ItemContract}
+
+```ts
+const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;
+```
+
 ### `InclusionTypeEnum`
 
 Zod schema for InclusionTypeType.
@@ -8355,6 +8558,46 @@ Possible invoice statuses.
 type InvoiceStatusType = indexedAccess;
 ```
 
+### `ItemContract`
+
+The per-type rules an `items[]` entry must satisfy, one entry per
+{@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in
+`transaction.ts`: a table the schema reads, so a contradiction is reported by
+the schema instead of restated in every consumer.
+
+**The table carries only the axes that vary by TYPE.** The axes that vary by
+COLLECTION are already the three documents' shapes and are not repeated here —
+an invoice line has no `stock_method` key and its price has no `replacement`
+key, a fulfillment line has no `price` at all, and every one of those objects
+is a `z.strictObject`. Restating "forbidden" for them would be a second source
+of truth for something the shape already makes inexpressible.
+
+Measured against prod `cfs-3100` (951 orders / 958 invoices / 952
+fulfillments, 2026-07-29) before each axis was written — three axes an earlier
+draft proposed are absent because the corpus refutes them:
+
+- **no `taxable` axis.** Every line type carries taxes on some rows and not
+  others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is
+  taxed is the product's `tax_class` and the document's `tax_profile`, i.e.
+  configuration, not a type invariant.
+- **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows
+  are `fixed` while their invoice projections are `five_day_week` (617 sale,
+  643 service, 137 surcharge). A whitelist keyed on type would reject the
+  invoice side of the same line.
+- **`replacement` is `optional`, not `forbidden`, off the rental arm.** All
+  1,480 non-rental order line items carry a `price.replacement`; the builder
+  writes it for every type.
+
+```ts
+interface ItemContract {
+  kind: "divider" | "line";
+  pricing: "pre_tax" | "from_total" | "none";
+  replacement: "required_when_stocked" | "optional" | "forbidden";
+  fulfillable: boolean;
+  parentable_by: readonly ItemTypeType[];
+}
+```
+
 ### `ItemTaxProfileEnum`
 
 Zod schema for ItemTaxProfileType.
@@ -8369,6 +8612,22 @@ Allowed values for item-level tax profile.
 
 ```ts
 type ItemTaxProfileType = indexedAccess;
+```
+
+### `ItemTypeEnum`
+
+Zod schema for {@link ItemTypeType}.
+
+```ts
+const ItemTypeEnum: z.ZodType<ItemTypeType>;
+```
+
+### `ItemTypeType`
+
+Union of every order/invoice/fulfillment item type.
+
+```ts
+type ItemTypeType = indexedAccess;
 ```
 
 ### `ItemUid`
@@ -8657,6 +8916,36 @@ interface UidNameRefType {
 }
 ```
 
+### `checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void`
+
+The full per-item contract check — {@link checkItemPriceFormula} plus the
+`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,
+the one item shape whose price carries a `replacement` channel. The direct
+analogue of `checkMovementContract` in `transaction.ts`.
+
+`required_when_stocked` treats a MISSING `stock_method` as stocked, which is
+the conservative reading and the one the hand-written refine this replaced has
+always enforced. That is also why the axis does not run on the invoice arm:
+an invoice line drops `stock_method` and `price.replacement` together, so an
+absent `stock_method` there means "this shape has no answer", not "unknown" —
+and running it would reject all 7,076 invoice rentals in prod.
+
+### `checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void`
+
+The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is
+legal only where the contract says the line is priced FROM the document total.
+
+Applies to every price shape in the package, so it is the check the invoice
+arm attaches on its own — an invoice line has no `stock_method` and its price
+has no `replacement` key, which leaves this as the only axis it can express.
+
+`percent_of_total` prices a line from the DOCUMENT total, which only
+`calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`
+throws on it. Before this axis the combination was merely thrown on at
+runtime, deep in `perUnitSubtotal`; here it is unwritable. The converse is
+deliberately NOT asserted: a flat-amount fee is legitimate, and
+`calculateTransactionFeeAmount` prices one.
+
 ### `deriveName(parts: PartialNameParts): string`
 
 Canonical join rule for deriving a single display string from name parts.
@@ -8664,6 +8953,13 @@ Joins `[first_name, middle_name, last_name]` with single spaces (missing
 parts are dropped, never produce empty padding) and appends ` (pronunciation)`
 when set. This is the single source of truth — every `name` field on a
 stored document and `ActorRef.name` is computed by passing through here.
+
+### `itemContract(type: string): ItemContract | undefined`
+
+The contract for an item `type`, or `undefined` for a value outside
+{@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in
+`@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
+contract and every derived predicate answers `false` for it.
 
 ## `@cfs/core/schemas/booking`
 
@@ -10054,7 +10350,7 @@ interface InvoiceItemInputType {
 Possible invoice item types (input — includes structural dividers + order divider).
 
 ```ts
-type InvoiceItemTypeType = indexedAccess;
+type InvoiceItemTypeType = ItemTypeType;
 ```
 
 ### `InvoicePayment`
@@ -11602,7 +11898,53 @@ const PasswordResetSchema: z.ZodType<PasswordReset>;
 
 ## `@cfs/core/schemas/product`
 
+### `AuthoredComponentSchema`
+
+Schema for an authored `components` entry — {@link ComponentSchema} with
+`inclusion_type` required. @see {@link AuthoredProductComponent}
+
+```ts
+const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;
+```
+
+### `AuthoredProductComponent`
+
+A component product within a parent product — the entry in `components`.
+
+Identical to {@link ProductComponent} except that `inclusion_type` is
+**required**, and that difference is the point. Both expanders
+(`buildOrderComponentLines` in manager, and the staged-add path) filter
+`=== "mandatory" || === "default"`, so an `undefined` here is a silent fourth
+bucket whose component is dropped from every order it should have joined.
+
+The optionality it replaces existed to accommodate `component_of`, where the
+field genuinely is not authored — and it leaked onto the authored side, where
+it is a bug. Splitting the two is what lets this side be required. Prod
+carries 0 undefined rows across 165 `components` entries on 63 products, so
+this is hardening with a zero-row backfill; writers with no answer pass
+`"default"`, the reading `crmsProduct.ts` and manager's new-component form
+already take.
+
+NOT expressed as `.default("default")`: `validateBeforeWrite` validates but
+writes the RAW doc, so a schema default never materializes and the field would
+still be written absent.
+
+```ts
+interface AuthoredProductComponent {
+  inclusion_type: InclusionTypeType;
+}
+```
+
 ### `ComponentSchema`
+
+Schema for a `component_of` back-reference. `inclusion_type` is optional here
+because the parent authors it — see {@link ProductComponent}.
+
+A catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset
+of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),
+and every component that survives expansion becomes an order line of the same
+`type`. So it answers to the same contract, and the rental ⇒
+`price.replacement` rule is stated once rather than a third time here.
 
 ```ts
 const ComponentSchema: z.ZodType<ProductComponent>;
@@ -11674,7 +12016,7 @@ interface Product {
   price: ProductPrice;
   shipping?: ProductShipping;
   alternates: ProductAlternate[];
-  components: ProductComponent[];
+  components: AuthoredProductComponent[];
   component_of: ProductComponent[];
   tags: UidNameRefType[];
   query_by_tags?: string[];
@@ -11713,7 +12055,15 @@ interface ProductAlternate {
 
 ### `ProductComponent`
 
-A component product within a parent product.
+A product reference in `component_of` — the RECIPROCAL back-reference naming a
+parent this product is a component of.
+
+Deliberately the reduced shape: the relationship attributes
+(`inclusion_type`, `zero_priced`, `active`, `description`) describe how the
+PARENT includes this product and are authored on the parent's own
+`components` entry, which is the authoritative side. Prod agrees — across 141
+`component_of` rows on 91 products, exactly one carries any of them
+(measured 2026-07-29), against 165/165 on `components`.
 
 ```ts
 interface ProductComponent {
@@ -17847,6 +18197,20 @@ interface GroupTotalsResult {
 }
 ```
 
+### `ItemParentageIssue`
+
+A single parentage violation reported by {@link validateItemParentage}.
+
+```ts
+interface ItemParentageIssue {
+  index: number;
+  uid: string;
+  type: string;
+  parentUid: string;
+  parentType: string;
+}
+```
+
 ### `ItemPathIssue`
 
 A single path mismatch reported by {@link validateItemPaths} or
@@ -18362,6 +18726,35 @@ still rejected.
 
 Returns `[]` when uniqueness holds.
 
+### `validateItemParentage(items: T[]): ItemParentageIssue[]`
+
+Assert every item's structural parent is a type its contract admits —
+`ITEM_CONTRACTS[item.type].parentable_by`, resolved through `path.at(-2)`.
+
+**This is an INDEPENDENT property, and that is the whole point.**
+`validateItemPaths` is a fixed-point check — "`path` equals what the
+recompute produces" — so it can only ever agree with `computeItemPaths` and
+inherits every hole in it. That is not hypothetical: when
+`computeInvoiceItemPaths` returned its input unchanged on a divider-less
+invoice, the fixed-point guard certified 79 provably-wrong items as clean,
+corpus-wide, for as long as the hole existed. This check consults the contract
+table instead of the normalizer, so a future hole cannot hide behind its own
+oracle — the same reason `path.length >= 1` and `path.at(-1) === uid` are
+asserted directly in `api-cloudrun/src/lib/validate.ts`.
+
+The rule it enforces is the asymmetry the corpus supports: **a divider is
+never parented by a line item.** A `group` nested under a rental would make
+the structural prefix `computeItemPaths` derives meaningless. Line items are
+deliberately permissive — they are parented by dividers AND by other line
+items (kit components).
+
+The document root is always legal, so an item whose `path` is just `[self]`
+is never reported; the "must sit under a divider" rule is NOT asserted here,
+because 78 legacy flat invoice items live at the root in prod and rejecting
+them would make those invoices unwritable.
+
+Returns `[]` when every parent is admissible.
+
 ### `validateItemPaths(items: T[]): ItemPathIssue[]`
 
 Assert every line item's `path` matches what {@link computeItemPaths} would
@@ -18408,7 +18801,7 @@ import { buildComponentEntries } from "@cfs/core/utils/products";
 const nested = buildComponentEntries("A", productB.components, 1);
 ```
 
-### `buildComponentEntries(parentUid: string, sourceComponents: ProductComponent[], baseDepth: number, maxDepth?: number): ProductComponent[]`
+### `buildComponentEntries(parentUid: string, sourceComponents: T[], baseDepth: number, maxDepth?: number): T[]`
 
 Build component entries for a parent product from a component product's
 own `components` array. Each entry's `path` is prepended with `parentUid`
@@ -18444,7 +18837,7 @@ for Firestore `array-contains`, and the refinement below compares it as a
 multiset, so a differently-ordered mirror holding the same uuids is still
 valid. Nothing may read order back out of it.
 
-### `removeComponentEntries(components: ProductComponent[], path: string[]): ProductComponent[]`
+### `removeComponentEntries(components: T[], path: string[]): T[]`
 
 Remove a component and all its descendants from a flat components array.
 An entry is removed if its `path` starts with the given path prefix —

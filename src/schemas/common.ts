@@ -403,6 +403,245 @@ export type DocLineItemTypeType = typeof DOC_LINE_ITEM_TYPES[number];
 /** Zod schema for DocLineItemTypeType. */
 export const DocLineItemTypeEnum: z.ZodType<DocLineItemTypeType> = z.enum(DOC_LINE_ITEM_TYPES);
 
+/**
+ * Every item type that can appear in a `items[]` array, across all three
+ * path-bearing collections. Derived from {@link DOC_ITEM_TYPES} rather than
+ * re-typed: an invoice is exactly the order vocabulary plus the `order` divider
+ * it needs to bill several orders at once.
+ */
+const ITEM_TYPES = [...DOC_ITEM_TYPES, "order"] as const;
+/** Union of every order/invoice/fulfillment item type. */
+export type ItemTypeType = typeof ITEM_TYPES[number];
+/** Zod schema for {@link ItemTypeType}. */
+export const ItemTypeEnum: z.ZodType<ItemTypeType> = z.enum(ITEM_TYPES);
+
+// ── Item contracts ───────────────────────────────────────────────
+
+/**
+ * The per-type rules an `items[]` entry must satisfy, one entry per
+ * {@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in
+ * `transaction.ts`: a table the schema reads, so a contradiction is reported by
+ * the schema instead of restated in every consumer.
+ *
+ * **The table carries only the axes that vary by TYPE.** The axes that vary by
+ * COLLECTION are already the three documents' shapes and are not repeated here —
+ * an invoice line has no `stock_method` key and its price has no `replacement`
+ * key, a fulfillment line has no `price` at all, and every one of those objects
+ * is a `z.strictObject`. Restating "forbidden" for them would be a second source
+ * of truth for something the shape already makes inexpressible.
+ *
+ * Measured against prod `cfs-3100` (951 orders / 958 invoices / 952
+ * fulfillments, 2026-07-29) before each axis was written — three axes an earlier
+ * draft proposed are absent because the corpus refutes them:
+ *
+ * - **no `taxable` axis.** Every line type carries taxes on some rows and not
+ *   others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is
+ *   taxed is the product's `tax_class` and the document's `tax_profile`, i.e.
+ *   configuration, not a type invariant.
+ * - **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows
+ *   are `fixed` while their invoice projections are `five_day_week` (617 sale,
+ *   643 service, 137 surcharge). A whitelist keyed on type would reject the
+ *   invoice side of the same line.
+ * - **`replacement` is `optional`, not `forbidden`, off the rental arm.** All
+ *   1,480 non-rental order line items carry a `price.replacement`; the builder
+ *   writes it for every type.
+ */
+export interface ItemContract {
+  /** Structural divider (organizes the array) or billable line (is charged for). */
+  kind: "divider" | "line";
+  /**
+   * How the line meets the document total: `pre_tax` counts INTO the subtotal,
+   * `from_total` is priced FROM it (a transaction fee), `none` is not priced at
+   * all. This is the single fact behind `isPreTaxItem` / `isTransactionFeeItem`
+   * / `isPriceableItem`, and it is what makes `percent_of_total` legal.
+   */
+  pricing: "pre_tax" | "from_total" | "none";
+  /** Whether `price.replacement` must appear. Rentals need one once stocked. */
+  replacement: "required_when_stocked" | "optional" | "forbidden";
+  /** Whether the type can be picked off a shelf — the source of `FULFILLMENT_LINE_ITEM_TYPES`. */
+  fulfillable: boolean;
+  /**
+   * Types that may be this item's immediate structural parent (`path.at(-2)`).
+   * The document root is always legal and is not listed.
+   *
+   * This is the one asymmetry the corpus supports and the array-level check in
+   * `validateItemParentage` enforces: **a divider is never parented by a line.**
+   * Across all three collections a `group` sits only under a `destination`, a
+   * `destination` only under an `order` divider or the root, and an `order`
+   * divider only at the root — while line items are parented by dividers AND by
+   * other line items (kit components; 4,453 such rows in orders alone).
+   */
+  parentable_by: readonly ItemTypeType[];
+}
+
+// Everything a component line may hang from: the three dividers plus every line
+// type that can be a kit parent. `transaction_fee` is excluded on both sides — a
+// fee is a document-level charge, so it neither nests under a product nor
+// carries components of its own.
+const LINE_PARENTS = [
+  "order", "destination", "group", "rental", "replacement", "sale", "service", "surcharge",
+] as const;
+const DIVIDER_PARENTS = ["order", "destination", "group"] as const;
+
+const ITEM_CONTRACTS_INNER = {
+  // ── dividers ──
+  order: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, parentable_by: [] },
+  destination: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, parentable_by: ["order"] },
+  group: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, parentable_by: ["destination"] },
+  // ── lines ──
+  rental: { kind: "line", pricing: "pre_tax", replacement: "required_when_stocked", fulfillable: true, parentable_by: LINE_PARENTS },
+  replacement: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, parentable_by: LINE_PARENTS },
+  sale: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, parentable_by: LINE_PARENTS },
+  service: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, parentable_by: LINE_PARENTS },
+  surcharge: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, parentable_by: LINE_PARENTS },
+  // A fee is priced FROM the document total, has no replacement value, and is
+  // never picked off a shelf — which is why `FULFILLMENT_LINE_ITEM_TYPES`
+  // excludes it rather than collapsing to `DOC_LINE_ITEM_TYPES`.
+  transaction_fee: { kind: "line", pricing: "from_total", replacement: "forbidden", fulfillable: false, parentable_by: DIVIDER_PARENTS },
+} as const;
+
+/** The per-type item contract table. @see {@link ItemContract} */
+export const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>> = ITEM_CONTRACTS_INNER;
+
+/**
+ * The contract for an item `type`, or `undefined` for a value outside
+ * {@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in
+ * `@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
+ * contract and every derived predicate answers `false` for it.
+ */
+export function itemContract(type: string): ItemContract | undefined {
+  return (ITEM_CONTRACTS as Record<string, ItemContract | undefined>)[type];
+}
+
+/**
+ * The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is
+ * legal only where the contract says the line is priced FROM the document total.
+ *
+ * Applies to every price shape in the package, so it is the check the invoice
+ * arm attaches on its own — an invoice line has no `stock_method` and its price
+ * has no `replacement` key, which leaves this as the only axis it can express.
+ *
+ * `percent_of_total` prices a line from the DOCUMENT total, which only
+ * `calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`
+ * throws on it. Before this axis the combination was merely thrown on at
+ * runtime, deep in `perUnitSubtotal`; here it is unwritable. The converse is
+ * deliberately NOT asserted: a flat-amount fee is legitimate, and
+ * `calculateTransactionFeeAmount` prices one.
+ */
+export function checkItemPriceFormula(
+  item: { type: string; price?: { formula?: string } | null },
+  ctx: z.RefinementCtx,
+): void {
+  const contract = itemContract(item.type);
+  if (!contract || item.price == null) return;
+  if (contract.pricing !== "from_total" && item.price.formula === "percent_of_total") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["price", "formula"],
+      message: `"percent_of_total" prices from the document total and is only valid on a transaction_fee`,
+    });
+  }
+}
+
+/**
+ * The full per-item contract check — {@link checkItemPriceFormula} plus the
+ * `replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,
+ * the one item shape whose price carries a `replacement` channel. The direct
+ * analogue of `checkMovementContract` in `transaction.ts`.
+ *
+ * `required_when_stocked` treats a MISSING `stock_method` as stocked, which is
+ * the conservative reading and the one the hand-written refine this replaced has
+ * always enforced. That is also why the axis does not run on the invoice arm:
+ * an invoice line drops `stock_method` and `price.replacement` together, so an
+ * absent `stock_method` there means "this shape has no answer", not "unknown" —
+ * and running it would reject all 7,076 invoice rentals in prod.
+ */
+export function checkItemContract(
+  item: {
+    type: string;
+    stock_method?: string | null;
+    price?: { formula?: string; replacement?: number | null } | null;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  checkItemPriceFormula(item, ctx);
+  const contract = itemContract(item.type);
+  if (!contract) return;
+
+  // Deliberately NOT gated on `price` being present: a rental with no price at
+  // all cannot state a replacement value either, and the hand-written refine
+  // this replaced rejected that case too (`item.price?.replacement != null`).
+  // Prod agrees — 0 of 9,302 order line items are missing `price`.
+  if (
+    contract.replacement === "required_when_stocked" &&
+    item.stock_method !== "none" && item.price?.replacement == null
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["price", "replacement"],
+      message: `price.replacement is required for ${item.type} items`,
+    });
+  }
+  if (contract.replacement === "forbidden" && item.price?.replacement != null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["price", "replacement"],
+      message: `"${item.type}" has no replacement value; price.replacement must be absent`,
+    });
+  }
+}
+
+// A type list and a contract table are two hand-written lists of the same names;
+// these make a gap between them a compile error. `MANUAL_MOVEMENT_TYPES` in
+// `transaction.ts` is the one such list in this package WITHOUT an assertion,
+// and core#41 is exactly the resulting drift.
+type _ContractsCoverTypes = ItemTypeType extends keyof typeof ITEM_CONTRACTS ? true : never;
+const _contractParity: _ContractsCoverTypes = true;
+void _contractParity;
+
+// `DOC_LINE_ITEM_TYPES` must be exactly the `kind: "line"` members — checked in
+// BOTH directions, so neither adding a line type nor dropping one can drift.
+type _LineTypes = {
+  [K in ItemTypeType]: typeof ITEM_CONTRACTS_INNER[K]["kind"] extends "line" ? K : never;
+}[ItemTypeType];
+type _LineParity = [DocLineItemTypeType] extends [_LineTypes]
+  ? [_LineTypes] extends [DocLineItemTypeType] ? true : never
+  : never;
+const _lineParity: _LineParity = true;
+void _lineParity;
+
+/**
+ * Line item types a fulfillment carries — the `fulfillable: true` members.
+ * `transaction_fee` is excluded because a fee has no stock and is never picked
+ * off a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}
+ * waiting to be collapsed into it; the exclusion IS the contract.
+ *
+ * Lives here rather than in `fulfillment.ts` so the list, the table it must
+ * agree with, and the assertion below are one thing to read.
+ */
+export const FULFILLMENT_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
+/** @see {@link FULFILLMENT_LINE_ITEM_TYPES} */
+export type FulfillableItemType = typeof FULFILLMENT_LINE_ITEM_TYPES[number];
+
+// Same bidirectional parity for the fulfillable axis: adding a fulfillable type
+// without listing it, or listing one the table calls unfulfillable, is a compile
+// error rather than a divergence discovered in the picker.
+type _FulfillableTypes = {
+  [K in ItemTypeType]: typeof ITEM_CONTRACTS_INNER[K]["fulfillable"] extends true ? K : never;
+}[ItemTypeType];
+type _FulfillableParity = [FulfillableItemType] extends [_FulfillableTypes]
+  ? [_FulfillableTypes] extends [FulfillableItemType] ? true : never
+  : never;
+const _fulfillableParity: _FulfillableParity = true;
+void _fulfillableParity;
+
+// `ComponentSchema` reuses `checkItemContract`, which is only sound while every
+// catalog component type is also an item type — a component that expanded into
+// a line with no contract would silently skip the check rather than fail it.
+type _ComponentsAreLines = ComponentTypeType extends DocLineItemTypeType ? true : never;
+const _componentParity: _ComponentsAreLines = true;
+void _componentParity;
+
 const INVOICE_STATUSES = ["draft", "issued", "part_paid", "paid", "void"] as const;
 /** Possible invoice statuses. */
 export type InvoiceStatusType = typeof INVOICE_STATUSES[number];

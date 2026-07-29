@@ -15,6 +15,8 @@ import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import {
   type FirestoreTimestampType,
+  FULFILLMENT_LINE_ITEM_TYPES,
+  type FulfillableItemType,
   StockMethodEnum,
   type StockMethodType,
   TimestampFields,
@@ -30,12 +32,9 @@ const FULFILLMENT_ORDER_STATUSES = [
 type FulfillmentOrderStatusType = typeof FULFILLMENT_ORDER_STATUSES[number];
 const FulfillmentOrderStatus: z.ZodType<FulfillmentOrderStatusType> = z.enum(FULFILLMENT_ORDER_STATUSES);
 
-// Fulfillment line items exclude transaction_fee — a fee has no stock and is
-// never picked off a shelf, so it is not a narrower spelling of
-// `DOC_LINE_ITEM_TYPES` waiting to be collapsed into it: the exclusion is the
-// contract.
-const FULFILLMENT_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
-type FulfillmentLineItemTypeType = typeof FULFILLMENT_LINE_ITEM_TYPES[number];
+// The list and its "why" live in `common.ts`, beside `ITEM_CONTRACTS` and the
+// compile-time assertion tying it to `fulfillable`.
+type FulfillmentLineItemTypeType = FulfillableItemType;
 
 /** Line item in the fulfillment order view — no price, no financial flags. */
 export interface FulfillmentLineItemType {

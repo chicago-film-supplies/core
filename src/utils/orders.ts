@@ -43,6 +43,7 @@ import type {
   GroupPathType,
   Tax as SchemaTax,
 } from "../schemas/mod.ts";
+import { itemContract } from "../schemas/mod.ts";
 import { getDuration, toChicagoYmd } from "./dates.ts";
 
 // ── Types ────────────────────────────────────────────────────────
@@ -382,12 +383,23 @@ export function buildQueryByDates(
 
 // ── Type guards ──────────────────────────────────────────────────
 
+// All three predicates below read the SAME fact — `ITEM_CONTRACTS[type].pricing`
+// — instead of each restating type membership. They used to be three
+// independent lists of type literals, and a fourth type would have had to be
+// added to all three (and to the 11 rival billability predicates across the
+// three repos) to be priced correctly. `pricing` is the one place that decides.
+//
+// An unrecognized `type` has no contract and every predicate answers `false`.
+// The loose `LineItem` shadow types `type` as `string` (see W3), so that case is
+// reachable; it was previously TRUE for `isPriceableItem`.
+
 /**
  * Determine whether a line item is priceable (has a price object, not a structural item).
  */
 export function isPriceableItem(item: LineItem): item is PriceableLineItem {
   if (!item || typeof item !== "object") return false;
-  if (item.type === "destination" || item.type === "group") return false;
+  const pricing = itemContract(item.type)?.pricing;
+  if (pricing !== "pre_tax" && pricing !== "from_total") return false;
   if (!item.price || typeof item.price !== "object") return false;
   return true;
 }
@@ -397,7 +409,7 @@ export function isPriceableItem(item: LineItem): item is PriceableLineItem {
  */
 export function isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem {
   if (!item || typeof item !== "object") return false;
-  if (item.type !== "transaction_fee") return false;
+  if (itemContract(item.type)?.pricing !== "from_total") return false;
   if (!item.price || typeof item.price !== "object") return false;
   return true;
 }
@@ -408,7 +420,7 @@ export function isTransactionFeeItem(item: LineItem): item is TransactionFeeLine
  */
 export function isPreTaxItem(item: LineItem): item is PreTaxLineItem {
   if (!item || typeof item !== "object") return false;
-  if (item.type === "destination" || item.type === "group" || item.type === "transaction_fee") return false;
+  if (itemContract(item.type)?.pricing !== "pre_tax") return false;
   if (!item.price || typeof item.price !== "object") return false;
   return true;
 }
@@ -1057,6 +1069,75 @@ export function validateItemPaths<T extends LineItem>(items: T[]): ItemPathIssue
     ) {
       issues.push({ index: i, uid: items[i].uid, path: original, expected });
     }
+  }
+  return issues;
+}
+
+/** A single parentage violation reported by {@link validateItemParentage}. */
+export interface ItemParentageIssue {
+  /** Index of the offending item in the input array. */
+  index: number;
+  /** The item's `uid`. */
+  uid: string;
+  /** The item's own `type`. */
+  type: string;
+  /** Uid of the item's immediate structural parent (`path.at(-2)`). */
+  parentUid: string;
+  /** The parent's `type`, or `"<unresolved>"` when no item in the array carries that uid. */
+  parentType: string;
+}
+
+/**
+ * Assert every item's structural parent is a type its contract admits —
+ * `ITEM_CONTRACTS[item.type].parentable_by`, resolved through `path.at(-2)`.
+ *
+ * **This is an INDEPENDENT property, and that is the whole point.**
+ * `validateItemPaths` is a fixed-point check — "`path` equals what the
+ * recompute produces" — so it can only ever agree with `computeItemPaths` and
+ * inherits every hole in it. That is not hypothetical: when
+ * `computeInvoiceItemPaths` returned its input unchanged on a divider-less
+ * invoice, the fixed-point guard certified 79 provably-wrong items as clean,
+ * corpus-wide, for as long as the hole existed. This check consults the contract
+ * table instead of the normalizer, so a future hole cannot hide behind its own
+ * oracle — the same reason `path.length >= 1` and `path.at(-1) === uid` are
+ * asserted directly in `api-cloudrun/src/lib/validate.ts`.
+ *
+ * The rule it enforces is the asymmetry the corpus supports: **a divider is
+ * never parented by a line item.** A `group` nested under a rental would make
+ * the structural prefix `computeItemPaths` derives meaningless. Line items are
+ * deliberately permissive — they are parented by dividers AND by other line
+ * items (kit components).
+ *
+ * The document root is always legal, so an item whose `path` is just `[self]`
+ * is never reported; the "must sit under a divider" rule is NOT asserted here,
+ * because 78 legacy flat invoice items live at the root in prod and rejecting
+ * them would make those invoices unwritable.
+ *
+ * Returns `[]` when every parent is admissible.
+ */
+export function validateItemParentage<T extends LineItem>(items: T[]): ItemParentageIssue[] {
+  const typeByUid = new Map<string, string>();
+  for (const item of items) typeByUid.set(item.uid, item.type);
+
+  const issues: ItemParentageIssue[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const path = item.path ?? [];
+    if (path.length < 2) continue; // root-parented — always legal
+    const parentUid = path[path.length - 2];
+    const contract = itemContract(item.type);
+    if (!contract) continue; // unknown type — the schema union rejects it first
+    const parentType = typeByUid.get(parentUid);
+    if (parentType !== undefined && (contract.parentable_by as readonly string[]).includes(parentType)) {
+      continue;
+    }
+    issues.push({
+      index: i,
+      uid: item.uid,
+      type: item.type,
+      parentUid,
+      parentType: parentType ?? "<unresolved>",
+    });
   }
   return issues;
 }

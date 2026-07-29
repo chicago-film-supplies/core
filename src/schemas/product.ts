@@ -14,6 +14,7 @@ import {
   ComponentTypeEnum,
   type ComponentTypeType,
   type FirestoreTimestampType,
+  checkItemContract,
   InclusionTypeEnum,
   type InclusionTypeType,
   PriceFormulaEnum,
@@ -34,7 +35,19 @@ export interface ProductAlternate {
   name: string;
 }
 
-/** A component product within a parent product. */
+/**
+ * A product reference in `component_of` — the RECIPROCAL back-reference naming a
+ * parent this product is a component of.
+ *
+ * Deliberately the reduced shape: the relationship attributes
+ * (`inclusion_type`, `zero_priced`, `active`, `description`) describe how the
+ * PARENT includes this product and are authored on the parent's own
+ * `components` entry, which is the authoritative side. Prod agrees — across 141
+ * `component_of` rows on 91 products, exactly one carries any of them
+ * (measured 2026-07-29), against 165/165 on `components`.
+ *
+ * @see {@link AuthoredProductComponent} for the authored side.
+ */
 export interface ProductComponent {
   uid: string;
   path: string[];
@@ -56,6 +69,31 @@ export interface ProductComponent {
     formula: PriceFormulaType;
     discountable: boolean;
   };
+}
+
+/**
+ * A component product within a parent product — the entry in `components`.
+ *
+ * Identical to {@link ProductComponent} except that `inclusion_type` is
+ * **required**, and that difference is the point. Both expanders
+ * (`buildOrderComponentLines` in manager, and the staged-add path) filter
+ * `=== "mandatory" || === "default"`, so an `undefined` here is a silent fourth
+ * bucket whose component is dropped from every order it should have joined.
+ *
+ * The optionality it replaces existed to accommodate `component_of`, where the
+ * field genuinely is not authored — and it leaked onto the authored side, where
+ * it is a bug. Splitting the two is what lets this side be required. Prod
+ * carries 0 undefined rows across 165 `components` entries on 63 products, so
+ * this is hardening with a zero-row backfill; writers with no answer pass
+ * `"default"`, the reading `crmsProduct.ts` and manager's new-component form
+ * already take.
+ *
+ * NOT expressed as `.default("default")`: `validateBeforeWrite` validates but
+ * writes the RAW doc, so a schema default never materializes and the field would
+ * still be written absent.
+ */
+export interface AuthoredProductComponent extends ProductComponent {
+  inclusion_type: InclusionTypeType;
 }
 
 /** Pricing details for a product. */
@@ -161,7 +199,7 @@ export interface Product {
   price: ProductPrice;
   shipping?: ProductShipping;
   alternates: ProductAlternate[];
-  components: ProductComponent[];
+  components: AuthoredProductComponent[];
   component_of: ProductComponent[];
   tags: UidNameRefType[];
   query_by_tags?: string[];
@@ -205,7 +243,7 @@ export interface Product {
   updated_at: FirestoreTimestampType;
 }
 
-export const ComponentSchema: z.ZodType<ProductComponent> = z.strictObject({
+const ComponentObject = z.strictObject({
   uid: FirestoreId,
   path: z.array(z.string()),
   name: z.string(),
@@ -226,10 +264,28 @@ export const ComponentSchema: z.ZodType<ProductComponent> = z.strictObject({
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }),
-}).refine(
-  (c) => c.type !== "rental" || c.stock_method === "none" || c.price.replacement != null,
-  { message: "price.replacement is required for rental components", path: ["price", "replacement"] },
-);
+});
+
+/**
+ * Schema for a `component_of` back-reference. `inclusion_type` is optional here
+ * because the parent authors it — see {@link ProductComponent}.
+ *
+ * A catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset
+ * of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),
+ * and every component that survives expansion becomes an order line of the same
+ * `type`. So it answers to the same contract, and the rental ⇒
+ * `price.replacement` rule is stated once rather than a third time here.
+ */
+export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
+  .superRefine(checkItemContract);
+
+/**
+ * Schema for an authored `components` entry — {@link ComponentSchema} with
+ * `inclusion_type` required. @see {@link AuthoredProductComponent}
+ */
+export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = ComponentObject
+  .extend({ inclusion_type: InclusionTypeEnum })
+  .superRefine(checkItemContract);
 
 /** Zod schema for a Product document. */
 export const ProductSchema: z.ZodType<Product> = z.strictObject({
@@ -274,7 +330,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     air_un: z.number().nullable(),
   }).optional(),
   alternates: z.array(UidNameRef).default([]),
-  components: z.array(ComponentSchema).default([]),
+  components: z.array(AuthoredComponentSchema).default([]),
   component_of: z.array(ComponentSchema).default([]),
   tags: z.array(UidNameRef).default([]),
   query_by_tags: z.array(z.string()).default([]).optional(),
@@ -444,7 +500,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     air_un: z.number().nullable(),
   }).optional(),
   alternates: z.array(UidNameRef).default([]),
-  components: z.array(ComponentSchema).default([]),
+  components: z.array(AuthoredComponentSchema).default([]),
   component_of: z.array(ComponentSchema).default([]),
   tags: z.array(UidNameRef).default([]),
   tracking_category_name: z.string().optional(),
@@ -558,7 +614,7 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
     air_un: z.number().nullable(),
   }).optional(),
   alternates: z.array(UidNameRef).optional(),
-  components: z.array(ComponentSchema).optional(),
+  components: z.array(AuthoredComponentSchema).optional(),
   component_of: z.array(ComponentSchema).optional(),
   tags: z.array(UidNameRef).optional(),
   uid_tracking_category: FirestoreId.optional(),

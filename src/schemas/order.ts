@@ -8,6 +8,7 @@ import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import {
   Address,
   type AddressType,
+  checkItemContract,
   DocItemTypeEnum,
   type DocItemTypeType,
   DOC_LINE_ITEM_TYPES,
@@ -620,10 +621,7 @@ const OrderDocLineItemInner = z.strictObject({
   crms_id: z.number().nullable().optional(),
   uid_delivery: FirestoreId.nullable().optional(),
   uid_collection: FirestoreId.nullable().optional(),
-}).refine(
-  (item) => item.type !== "rental" || item.stock_method === "none" || item.price?.replacement != null,
-  { message: "price.replacement is required for rental items", path: ["price", "replacement"] },
-);
+}).superRefine(checkItemContract);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
 

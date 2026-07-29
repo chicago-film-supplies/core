@@ -11,12 +11,15 @@ import {
   type ActorRefType,
   Address,
   type AddressType,
+  checkItemPriceFormula,
   COARevenueEnum,
   type COARevenueType,
   DOC_LINE_ITEM_TYPES,
   type DocLineItemTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  ItemTypeEnum,
+  type ItemTypeType,
   PriceFormulaEnum,
   type PriceFormulaType,
   TaxProfileEnum,
@@ -42,14 +45,13 @@ import {
 export { type InvoiceStatusType } from "./common.ts";
 const InvoiceStatus: z.ZodType<InvoiceStatusType> = InvoiceStatusEnum;
 
-// Invoice item types are a superset of order item types — adds "order" divider.
-// Billable types (DOC_LINE_ITEM_TYPES) are shared and unchanged.
-const INVOICE_ITEM_TYPES = [
-  "rental", "destination", "group", "order", "replacement", "sale", "service", "surcharge", "transaction_fee",
-] as const;
+// Invoice item types are a superset of order item types — adds the "order"
+// divider. That superset is `ITEM_TYPES`, derived in `common.ts` from
+// `DOC_ITEM_TYPES`, so this is an alias rather than a fourth hand-written copy
+// of the vocabulary. Billable types (DOC_LINE_ITEM_TYPES) are shared, unchanged.
 /** Possible invoice item types (input — includes structural dividers + order divider). */
-export type InvoiceItemTypeType = typeof INVOICE_ITEM_TYPES[number];
-const InvoiceItemTypeEnum: z.ZodType<InvoiceItemTypeType> = z.enum(INVOICE_ITEM_TYPES);
+export type InvoiceItemTypeType = ItemTypeType;
+const InvoiceItemTypeEnum: z.ZodType<InvoiceItemTypeType> = ItemTypeEnum;
 
 const PAYMENT_STATUSES = ["active", "deleted"] as const;
 
@@ -143,7 +145,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   xero_tracking_option_id: z.uuid().nullable().optional(),
   crms_opportunity_id: z.number().nullable().optional(),
   crms_id: z.union([z.number(), z.string()]).nullable().optional(),
-});
+}).superRefine(checkItemPriceFormula);
 
 export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner;
 

@@ -1,5 +1,12 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
+import {
+  DOC_LINE_ITEM_TYPES,
+  FULFILLMENT_LINE_ITEM_TYPES,
+  getInitialValues,
+  ITEM_CONTRACTS,
+  type ItemTypeType,
+  OrderDocLineItem,
+} from "../src/schemas/mod.ts";
 import {
   calculateItemDiscount,
   calculateItemPrice,
@@ -15,6 +22,7 @@ import {
   computeItemPaths,
   consolidateItems,
   validateItemPaths,
+  validateItemParentage,
   validateItemUniqueness,
   validateComponentUniqueness,
   getGroupItems,
@@ -2083,4 +2091,111 @@ Deno.test("getTransactionFeeTotals derives rate/type from the price, identity fr
   const handling = totals.find((t) => t.name === "Handling");
   assertEquals(handling?.type, "flat");
   assertEquals(handling?.rate, 5);
+});
+
+// ── ITEM_CONTRACTS ───────────────────────────────────────────────
+
+Deno.test("ITEM_CONTRACTS covers every item type, and the derived lists agree", () => {
+  // The compile-time assertions in `common.ts` already pin these; this is the
+  // runtime companion, so a table edit that somehow type-checks still fails.
+  const contractKeys = Object.keys(ITEM_CONTRACTS).sort();
+  assertEquals(contractKeys.length, 9);
+
+  const lines = contractKeys.filter((t) => ITEM_CONTRACTS[t as ItemTypeType].kind === "line").sort();
+  assertEquals(lines, [...DOC_LINE_ITEM_TYPES].sort());
+
+  const fulfillable = contractKeys.filter((t) => ITEM_CONTRACTS[t as ItemTypeType].fulfillable).sort();
+  assertEquals(fulfillable, [...FULFILLMENT_LINE_ITEM_TYPES].sort());
+
+  // transaction_fee is a line, but not a fulfillable one — the whole reason
+  // FULFILLMENT_LINE_ITEM_TYPES is not a spelling of DOC_LINE_ITEM_TYPES.
+  assertEquals(ITEM_CONTRACTS.transaction_fee.kind, "line");
+  assertEquals(ITEM_CONTRACTS.transaction_fee.fulfillable, false);
+});
+
+Deno.test("the three pricing predicates read the contract, not their own type lists", () => {
+  const price = { base: 10, formula: "fixed", chargeable_days: null, subtotal: 10, subtotal_discounted: 10, discount: null, taxes: [], total: 10 } as unknown as PriceObject;
+  const at = (type: string): LineItem => ({ uid: "u", name: "n", type, path: ["u"], quantity: 1, price });
+
+  for (const type of ["rental", "replacement", "sale", "service", "surcharge"]) {
+    assertEquals(isPreTaxItem(at(type)), true, `${type} is pre-tax`);
+    assertEquals(isTransactionFeeItem(at(type)), false, `${type} is not a fee`);
+    assertEquals(isPriceableItem(at(type)), true, `${type} is priceable`);
+  }
+
+  assertEquals(isPreTaxItem(at("transaction_fee")), false);
+  assertEquals(isTransactionFeeItem(at("transaction_fee")), true);
+  assertEquals(isPriceableItem(at("transaction_fee")), true);
+
+  for (const type of ["destination", "group", "order"]) {
+    assertEquals(isPriceableItem(at(type)), false, `${type} is a divider`);
+    assertEquals(isPreTaxItem(at(type)), false, `${type} is a divider`);
+  }
+
+  // A type with no contract answers false everywhere. `LineItem.type` is
+  // `string`, so this is reachable; `isPriceableItem` used to answer true.
+  assertEquals(isPriceableItem(at("not_a_type")), false);
+  assertEquals(isPreTaxItem(at("not_a_type")), false);
+  assertEquals(isTransactionFeeItem(at("not_a_type")), false);
+});
+
+// ── validateItemParentage ────────────────────────────────────────
+
+const parentageItem = (uid: string, type: string, path: string[]): LineItem => ({ uid, name: uid, type, path });
+
+Deno.test("validateItemParentage accepts the shapes prod actually holds", () => {
+  // Order: destination -> group -> rental -> component. 4,453 line-parents-line
+  // rows exist in prod, so a component under a product must stay legal.
+  assertEquals(
+    validateItemParentage([
+      parentageItem("d1", "destination", ["d1"]),
+      parentageItem("g1", "group", ["d1", "g1"]),
+      parentageItem("p1", "rental", ["d1", "g1", "p1"]),
+      parentageItem("c1", "sale", ["d1", "g1", "p1", "c1"]),
+    ]),
+    [],
+  );
+
+  // Invoice: order -> destination -> line.
+  assertEquals(
+    validateItemParentage([
+      parentageItem("o1", "order", ["o1"]),
+      parentageItem("d1", "destination", ["o1", "d1"]),
+      parentageItem("p1", "rental", ["o1", "d1", "p1"]),
+    ]),
+    [],
+  );
+
+  // 78 legacy flat invoice items sit at the root in prod. Root is always legal,
+  // so rejecting them here would make those invoices unwritable.
+  assertEquals(validateItemParentage([parentageItem("p1", "rental", ["p1"])]), []);
+});
+
+Deno.test("validateItemParentage rejects a divider parented by a line item", () => {
+  // The one asymmetry the corpus supports, and the state `computeItemPaths`
+  // cannot currently produce — which is exactly why a fixed-point check against
+  // it can never see this, and why the property is asserted independently.
+  const issues = validateItemParentage([
+    parentageItem("d1", "destination", ["d1"]),
+    parentageItem("p1", "rental", ["d1", "p1"]),
+    parentageItem("g1", "group", ["d1", "p1", "g1"]),
+  ]);
+  assertEquals(issues.length, 1);
+  assertEquals(issues[0].uid, "g1");
+  assertEquals(issues[0].type, "group");
+  assertEquals(issues[0].parentType, "rental");
+});
+
+Deno.test("validateItemParentage rejects a fee nested under a product, and an unresolvable parent", () => {
+  const nested = validateItemParentage([
+    parentageItem("d1", "destination", ["d1"]),
+    parentageItem("p1", "rental", ["d1", "p1"]),
+    parentageItem("f1", "transaction_fee", ["d1", "p1", "f1"]),
+  ]);
+  assertEquals(nested.length, 1);
+  assertEquals(nested[0].type, "transaction_fee");
+
+  const dangling = validateItemParentage([parentageItem("c1", "sale", ["gone", "c1"])]);
+  assertEquals(dangling.length, 1);
+  assertEquals(dangling[0].parentType, "<unresolved>");
 });

@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { CreateProductInput, deriveProductImageUuids, ProductSchema } from "../src/schemas/product.ts";
+import { AuthoredComponentSchema, ComponentSchema, CreateProductInput, deriveProductImageUuids, ProductSchema } from "../src/schemas/product.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -48,6 +48,7 @@ Deno.test("ProductSchema validates with components", () => {
         path: ["testproduct100000000"],
         name: "Battery",
         type: "rental",
+        inclusion_type: "default",
         stock_method: "bulk",
         crms_id: 200,
         quantity: 2,
@@ -90,6 +91,7 @@ Deno.test("ProductSchema rejects rental component without price.replacement", ()
         path: ["testproduct100000000"],
         name: "Battery",
         type: "rental",
+        inclusion_type: "default",
         stock_method: "bulk",
         crms_id: 200,
         quantity: 2,
@@ -109,6 +111,7 @@ Deno.test("ProductSchema accepts rental component with stock_method none and no 
         path: ["testproduct100000000"],
         name: "Service Fee",
         type: "rental",
+        inclusion_type: "default",
         stock_method: "none",
         crms_id: 200,
         quantity: 1,
@@ -174,6 +177,7 @@ Deno.test("CreateProductInput requires price.replacement for rental components",
     path: ["testproduct100000000"],
     name: "Battery",
     type: "rental" as const,
+    inclusion_type: "default" as const,
     stock_method: "bulk" as const,
     crms_id: 200,
     quantity: 2,
@@ -342,4 +346,34 @@ Deno.test("deriveProductImageUuids: follows images order, cutout beside its orig
     deriveProductImageUuids([imageRow(IMG_A, IMG_A_CUT), imageRow(IMG_B)]),
     [IMG_A, IMG_A_CUT, IMG_B],
   );
+});
+
+Deno.test("components require inclusion_type; component_of does not", () => {
+  // The asymmetry is the point. `components` is the AUTHORED side — an
+  // `undefined` inclusion_type there is a silent fourth bucket both expanders
+  // drop, so the component never reaches an order. `component_of` is the
+  // reciprocal back-reference: the parent authors the relationship attributes,
+  // and 140 of 141 prod rows carry none of them, so requiring it there would
+  // make 90 live products unwritable.
+  const backRef = {
+    uid: "testcomp100000000000",
+    path: ["testproduct100000000"],
+    name: "Battery",
+    type: "rental",
+    stock_method: "bulk",
+    crms_id: 200,
+    quantity: 2,
+    price: { base: 0, replacement: 100, taxes: [], formula: "fixed", discountable: false },
+  };
+
+  assertEquals(ComponentSchema.safeParse(backRef).success, true);
+  assertEquals(AuthoredComponentSchema.safeParse(backRef).success, false);
+  assertEquals(
+    AuthoredComponentSchema.safeParse({ ...backRef, inclusion_type: "default" }).success,
+    true,
+  );
+
+  // And through the document: component_of takes the back-ref, components does not.
+  assertEquals(ProductSchema.safeParse({ ...validProduct, component_of: [backRef] }).success, true);
+  assertEquals(ProductSchema.safeParse({ ...validProduct, components: [backRef] }).success, false);
 });

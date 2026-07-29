@@ -62,6 +62,18 @@
         },
         {
           "kind": "variable",
+          "name": "AuthoredComponentSchema",
+          "declaration": "const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;",
+          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required. @see {@link AuthoredProductComponent}"
+        },
+        {
+          "kind": "interface",
+          "name": "AuthoredProductComponent",
+          "declaration": "interface AuthoredProductComponent {\n  inclusion_type: InclusionTypeType;\n}",
+          "doc": "A component product within a parent product — the entry in `components`.\n\nIdentical to {@link ProductComponent} except that `inclusion_type` is\n**required**, and that difference is the point. Both expanders\n(`buildOrderComponentLines` in manager, and the staged-add path) filter\n`=== \"mandatory\" || === \"default\"`, so an `undefined` here is a silent fourth\nbucket whose component is dropped from every order it should have joined.\n\nThe optionality it replaces existed to accommodate `component_of`, where the\nfield genuinely is not authored — and it leaked onto the authored side, where\nit is a bug. Splitting the two is what lets this side be required. Prod\ncarries 0 undefined rows across 165 `components` entries on 63 products, so\nthis is hardening with a zero-row backfill; writers with no answer pass\n`\"default\"`, the reading `crmsProduct.ts` and manager's new-component form\nalready take.\n\nNOT expressed as `.default(\"default\")`: `validateBeforeWrite` validates but\nwrites the RAW doc, so a schema default never materializes and the field would\nstill be written absent."
+        },
+        {
+          "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
           "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports all three, so existing importers are unaffected."
@@ -562,7 +574,7 @@
           "kind": "variable",
           "name": "ComponentSchema",
           "declaration": "const ComponentSchema: z.ZodType<ProductComponent>;",
-          "doc": ""
+          "doc": "Schema for a `component_of` back-reference. `inclusion_type` is optional here\nbecause the parent authors it — see {@link ProductComponent}.\n\nA catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset\nof `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),\nand every component that survives expansion becomes an order line of the same\n`type`. So it answers to the same contract, and the rental ⇒\n`price.replacement` rule is stated once rather than a third time here."
         },
         {
           "kind": "variable",
@@ -1165,6 +1177,12 @@
           "doc": "Common envelope wrapping every domain event.\n\n`data` is the full Firestore document after all server sentinels\n(serverTimestamp, increment, etc.) have been resolved by Firestore."
         },
         {
+          "kind": "variable",
+          "name": "FULFILLMENT_LINE_ITEM_TYPES",
+          "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\"[];",
+          "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee` is excluded because a fee has no stock and is never picked\noff a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}\nwaiting to be collapsed into it; the exclusion IS the contract.\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
+        },
+        {
           "kind": "interface",
           "name": "FieldMapping",
           "declaration": "interface FieldMapping {\n  source: FieldPath;\n  target: FieldPath;\n  transform?: string;\n}",
@@ -1229,6 +1247,12 @@
           "name": "FixtureMetaSchema",
           "declaration": "const FixtureMetaSchema: z.ZodType<FixtureMeta>;",
           "doc": "Zod schema for a fixture manifest entry."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "FulfillableItemType",
+          "declaration": "type FulfillableItemType = indexedAccess;",
+          "doc": ""
         },
         {
           "kind": "interface",
@@ -1418,6 +1442,12 @@
         },
         {
           "kind": "variable",
+          "name": "ITEM_CONTRACTS",
+          "declaration": "const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;",
+          "doc": "The per-type item contract table. @see {@link ItemContract}"
+        },
+        {
+          "kind": "variable",
           "name": "InclusionTypeEnum",
           "declaration": "const InclusionTypeEnum: z.ZodType<InclusionTypeType>;",
           "doc": "Zod schema for InclusionTypeType."
@@ -1545,7 +1575,7 @@
         {
           "kind": "typeAlias",
           "name": "InvoiceItemTypeType",
-          "declaration": "type InvoiceItemTypeType = indexedAccess;",
+          "declaration": "type InvoiceItemTypeType = ItemTypeType;",
           "doc": "Possible invoice item types (input — includes structural dividers + order divider)."
         },
         {
@@ -1591,6 +1621,12 @@
           "doc": ""
         },
         {
+          "kind": "interface",
+          "name": "ItemContract",
+          "declaration": "interface ItemContract {\n  kind: \"divider\" | \"line\";\n  pricing: \"pre_tax\" | \"from_total\" | \"none\";\n  replacement: \"required_when_stocked\" | \"optional\" | \"forbidden\";\n  fulfillable: boolean;\n  parentable_by: readonly ItemTypeType[];\n}",
+          "doc": "The per-type rules an `items[]` entry must satisfy, one entry per\n{@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in\n`transaction.ts`: a table the schema reads, so a contradiction is reported by\nthe schema instead of restated in every consumer.\n\n**The table carries only the axes that vary by TYPE.** The axes that vary by\nCOLLECTION are already the three documents' shapes and are not repeated here —\nan invoice line has no `stock_method` key and its price has no `replacement`\nkey, a fulfillment line has no `price` at all, and every one of those objects\nis a `z.strictObject`. Restating \"forbidden\" for them would be a second source\nof truth for something the shape already makes inexpressible.\n\nMeasured against prod `cfs-3100` (951 orders / 958 invoices / 952\nfulfillments, 2026-07-29) before each axis was written — three axes an earlier\ndraft proposed are absent because the corpus refutes them:\n\n- **no `taxable` axis.** Every line type carries taxes on some rows and not\n  others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is\n  taxed is the product's `tax_class` and the document's `tax_profile`, i.e.\n  configuration, not a type invariant.\n- **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows\n  are `fixed` while their invoice projections are `five_day_week` (617 sale,\n  643 service, 137 surcharge). A whitelist keyed on type would reject the\n  invoice side of the same line.\n- **`replacement` is `optional`, not `forbidden`, off the rental arm.** All\n  1,480 non-rental order line items carry a `price.replacement`; the builder\n  writes it for every type."
+        },
+        {
           "kind": "variable",
           "name": "ItemPrice",
           "declaration": "const ItemPrice: z.ZodType<ItemPriceType>;",
@@ -1613,6 +1649,18 @@
           "name": "ItemTaxProfileType",
           "declaration": "type ItemTaxProfileType = indexedAccess;",
           "doc": "Allowed values for item-level tax profile."
+        },
+        {
+          "kind": "variable",
+          "name": "ItemTypeEnum",
+          "declaration": "const ItemTypeEnum: z.ZodType<ItemTypeType>;",
+          "doc": "Zod schema for {@link ItemTypeType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ItemTypeType",
+          "declaration": "type ItemTypeType = indexedAccess;",
+          "doc": "Union of every order/invoice/fulfillment item type."
         },
         {
           "kind": "variable",
@@ -2385,7 +2433,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -2398,7 +2446,7 @@
           "kind": "interface",
           "name": "ProductComponent",
           "declaration": "interface ProductComponent {\n  uid: string;\n  path: string[];\n  name: string;\n  active?: boolean;\n  type: ComponentTypeType;\n  stock_method: StockMethodType;\n  crms_id: number | null;\n  crms_accessory_id?: number | null;\n  description?: string;\n  inclusion_type?: InclusionTypeType;\n  quantity: number;\n  zero_priced?: boolean;\n  price: typeLiteral;\n}",
-          "doc": "A component product within a parent product."
+          "doc": "A product reference in `component_of` — the RECIPROCAL back-reference naming a\nparent this product is a component of.\n\nDeliberately the reduced shape: the relationship attributes\n(`inclusion_type`, `zero_priced`, `active`, `description`) describe how the\nPARENT includes this product and are authored on the parent's own\n`components` entry, which is the authoritative side. Prod agrees — across 141\n`component_of` rows on 91 products, exactly one carries any of them\n(measured 2026-07-29), against 165/165 on `components`."
         },
         {
           "kind": "typeAlias",
@@ -3721,6 +3769,22 @@
         },
         {
           "kind": "function",
+          "name": "checkItemContract",
+          "signature": "checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "The full per-item contract check — {@link checkItemPriceFormula} plus the\n`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,\nthe one item shape whose price carries a `replacement` channel. The direct\nanalogue of `checkMovementContract` in `transaction.ts`.\n\n`required_when_stocked` treats a MISSING `stock_method` as stocked, which is\nthe conservative reading and the one the hand-written refine this replaced has\nalways enforced. That is also why the axis does not run on the invoice arm:\nan invoice line drops `stock_method` and `price.replacement` together, so an\nabsent `stock_method` there means \"this shape has no answer\", not \"unknown\" —\nand running it would reject all 7,076 invoice rentals in prod.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkItemPriceFormula",
+          "signature": "checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is\nlegal only where the contract says the line is priced FROM the document total.\n\nApplies to every price shape in the package, so it is the check the invoice\narm attaches on its own — an invoice line has no `stock_method` and its price\nhas no `replacement` key, which leaves this as the only axis it can express.\n\n`percent_of_total` prices a line from the DOCUMENT total, which only\n`calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`\nthrows on it. Before this axis the combination was merely thrown on at\nruntime, deep in `perUnitSubtotal`; here it is unwritable. The converse is\ndeliberately NOT asserted: a flat-amount fee is legitimate, and\n`calculateTransactionFeeAmount` prices one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "collectLeafPaths",
           "signature": "collectLeafPaths(schema: z.ZodType, opts?: typeLiteral): CollectLeafPathsResult",
           "doc": "Walk a schema and collect every scalar leaf with its dotted path and merged\nmeta. Backs the Uploadcare authoring lint (`schemas/uploadcare/`) — a third\nmeta-collecting walker alongside `applyPii` and `getServerSortableColumns`,\nneither of which is reusable here (the latter is depth-capped at 1 and skips\narrays entirely).\n\n**It fails CLOSED.** A walker that emits unrecognised nodes as leaves would\nsilently swallow their subtree — a field named `attachments` typed\n`z.tuple([...])` would vanish from the walk and be invisible to every\nassertion built on it. So the type allowlist is two-sided: descend the known\ncontainers, emit the known scalars, and push everything else into\n`unhandled`, which callers are expected to assert is empty.\n\nTraversal:\n- **transparent wrappers** (`optional`, `default`, `nullable`, `prefault`,\n  `catch`, `readonly`, `nonoptional`) and **pipes** (`def.in` — the input side\n  of `chicagoInstant()` et al) are walked through, merging meta at each level;\n- **object** → each field, `path.key`;\n- **array** → the element, `path[]`;\n- **record** → the value type, `path.<key>` (dynamic keys aren't enumerable);\n- **union / discriminatedUnion** → every member at the *same* path, deduped by\n  (path, node identity) so shared nodes are visited once.\n\nMeta does **not** cross a container boundary by default: an object's\nschema-level `.meta({ title, collection })` must not leak onto its fields, and\nby symmetry an annotation on an array node does not reach its element.\nAnnotate the leaf.\n\n`opts.inherit` names the meta keys that DO cross, for annotations whose whole\npoint is to cover a subtree. `pii` is the motivating case: `Address` is tagged\n`.nullable().meta({ pii: \"mask\" })` on the object, and the runtime walker\n(`pii/walker.ts` `applyTagged`) pushes that tag down to every leaf, with a\nchild's own tag winning and `pii: \"none\"` opting back out — exactly the\n`{...inherited, ...own}` merge this function already performs through\nwrappers. Without it, the PII lint would report every leaf under a correctly\ntagged `Address` as a violation (measured: 213 of them).\n\nDefault `[]` — no key crosses, so every existing caller is bit-identical.\n\n`maxDepth` defaults to **24**. Wrappers are nodes, so depth counts them: the\ndeepest chain in core today measures 11, and an obvious-looking 12 would have\nbeen one `.optional().nullable()` away from silently truncating. Hitting the\ncap pushes a `__depth_cap__` entry into `unhandled` rather than returning\nquietly.",
@@ -4086,6 +4150,14 @@
           "name": "isValidOrderStatusTransition",
           "signature": "isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: \"manual\" | \"propagation\"): boolean",
           "doc": "Server-side gate for an order status write. `source: \"manual\"` rejects\nwrites that move into a computed status or out of a computed status into\nanything other than the same value (no-op). `source: \"propagation\"`\ntrusts the booking write path that sets `active` or `complete`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "itemContract",
+          "signature": "itemContract(type: string): ItemContract | undefined",
+          "doc": "The contract for an item `type`, or `undefined` for a value outside\n{@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in\n`@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no\ncontract and every derived predicate answers `false` for it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -4548,6 +4620,12 @@
           "doc": "`cards` event-card composite id — `{uid_order}:{uid_destination}:start|end`\n(one per order delivery/collection endpoint). See `api-cloudrun\nsrc/lib/eventCards.ts` (`EventPosition = \"start\" | \"end\"`)."
         },
         {
+          "kind": "variable",
+          "name": "FULFILLMENT_LINE_ITEM_TYPES",
+          "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\"[];",
+          "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee` is excluded because a fee has no stock and is never picked\noff a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}\nwaiting to be collapsed into it; the exclusion IS the contract.\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
+        },
+        {
           "kind": "interface",
           "name": "FirestoreFieldValue",
           "declaration": "interface FirestoreFieldValue {\n  isEqual(other: FirestoreFieldValue): boolean;\n}",
@@ -4578,6 +4656,18 @@
           "doc": "Structural interfaces for Firestore Timestamp and FieldValue.\nExpressed structurally so the schemas package has no firebase-admin dependency."
         },
         {
+          "kind": "typeAlias",
+          "name": "FulfillableItemType",
+          "declaration": "type FulfillableItemType = indexedAccess;",
+          "doc": ""
+        },
+        {
+          "kind": "variable",
+          "name": "ITEM_CONTRACTS",
+          "declaration": "const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;",
+          "doc": "The per-type item contract table. @see {@link ItemContract}"
+        },
+        {
           "kind": "variable",
           "name": "InclusionTypeEnum",
           "declaration": "const InclusionTypeEnum: z.ZodType<InclusionTypeType>;",
@@ -4602,6 +4692,12 @@
           "doc": "Possible invoice statuses."
         },
         {
+          "kind": "interface",
+          "name": "ItemContract",
+          "declaration": "interface ItemContract {\n  kind: \"divider\" | \"line\";\n  pricing: \"pre_tax\" | \"from_total\" | \"none\";\n  replacement: \"required_when_stocked\" | \"optional\" | \"forbidden\";\n  fulfillable: boolean;\n  parentable_by: readonly ItemTypeType[];\n}",
+          "doc": "The per-type rules an `items[]` entry must satisfy, one entry per\n{@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in\n`transaction.ts`: a table the schema reads, so a contradiction is reported by\nthe schema instead of restated in every consumer.\n\n**The table carries only the axes that vary by TYPE.** The axes that vary by\nCOLLECTION are already the three documents' shapes and are not repeated here —\nan invoice line has no `stock_method` key and its price has no `replacement`\nkey, a fulfillment line has no `price` at all, and every one of those objects\nis a `z.strictObject`. Restating \"forbidden\" for them would be a second source\nof truth for something the shape already makes inexpressible.\n\nMeasured against prod `cfs-3100` (951 orders / 958 invoices / 952\nfulfillments, 2026-07-29) before each axis was written — three axes an earlier\ndraft proposed are absent because the corpus refutes them:\n\n- **no `taxable` axis.** Every line type carries taxes on some rows and not\n  others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is\n  taxed is the product's `tax_class` and the document's `tax_profile`, i.e.\n  configuration, not a type invariant.\n- **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows\n  are `fixed` while their invoice projections are `five_day_week` (617 sale,\n  643 service, 137 surcharge). A whitelist keyed on type would reject the\n  invoice side of the same line.\n- **`replacement` is `optional`, not `forbidden`, off the rental arm.** All\n  1,480 non-rental order line items carry a `price.replacement`; the builder\n  writes it for every type."
+        },
+        {
           "kind": "variable",
           "name": "ItemTaxProfileEnum",
           "declaration": "const ItemTaxProfileEnum: z.ZodType<ItemTaxProfileType>;",
@@ -4612,6 +4708,18 @@
           "name": "ItemTaxProfileType",
           "declaration": "type ItemTaxProfileType = indexedAccess;",
           "doc": "Allowed values for item-level tax profile."
+        },
+        {
+          "kind": "variable",
+          "name": "ItemTypeEnum",
+          "declaration": "const ItemTypeEnum: z.ZodType<ItemTypeType>;",
+          "doc": "Zod schema for {@link ItemTypeType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ItemTypeType",
+          "declaration": "type ItemTypeType = indexedAccess;",
+          "doc": "Union of every order/invoice/fulfillment item type."
         },
         {
           "kind": "variable",
@@ -4789,9 +4897,33 @@
         },
         {
           "kind": "function",
+          "name": "checkItemContract",
+          "signature": "checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "The full per-item contract check — {@link checkItemPriceFormula} plus the\n`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,\nthe one item shape whose price carries a `replacement` channel. The direct\nanalogue of `checkMovementContract` in `transaction.ts`.\n\n`required_when_stocked` treats a MISSING `stock_method` as stocked, which is\nthe conservative reading and the one the hand-written refine this replaced has\nalways enforced. That is also why the axis does not run on the invoice arm:\nan invoice line drops `stock_method` and `price.replacement` together, so an\nabsent `stock_method` there means \"this shape has no answer\", not \"unknown\" —\nand running it would reject all 7,076 invoice rentals in prod.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkItemPriceFormula",
+          "signature": "checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is\nlegal only where the contract says the line is priced FROM the document total.\n\nApplies to every price shape in the package, so it is the check the invoice\narm attaches on its own — an invoice line has no `stock_method` and its price\nhas no `replacement` key, which leaves this as the only axis it can express.\n\n`percent_of_total` prices a line from the DOCUMENT total, which only\n`calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`\nthrows on it. Before this axis the combination was merely thrown on at\nruntime, deep in `perUnitSubtotal`; here it is unwritable. The converse is\ndeliberately NOT asserted: a flat-amount fee is legitimate, and\n`calculateTransactionFeeAmount` prices one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "deriveName",
           "signature": "deriveName(parts: PartialNameParts): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "itemContract",
+          "signature": "itemContract(type: string): ItemContract | undefined",
+          "doc": "The contract for an item `type`, or `undefined` for a value outside\n{@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in\n`@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no\ncontract and every derived predicate answers `false` for it.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -5518,7 +5650,7 @@
         {
           "kind": "typeAlias",
           "name": "InvoiceItemTypeType",
-          "declaration": "type InvoiceItemTypeType = indexedAccess;",
+          "declaration": "type InvoiceItemTypeType = ItemTypeType;",
           "doc": "Possible invoice item types (input — includes structural dividers + order divider)."
         },
         {
@@ -6341,9 +6473,21 @@
       "symbols": [
         {
           "kind": "variable",
+          "name": "AuthoredComponentSchema",
+          "declaration": "const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;",
+          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required. @see {@link AuthoredProductComponent}"
+        },
+        {
+          "kind": "interface",
+          "name": "AuthoredProductComponent",
+          "declaration": "interface AuthoredProductComponent {\n  inclusion_type: InclusionTypeType;\n}",
+          "doc": "A component product within a parent product — the entry in `components`.\n\nIdentical to {@link ProductComponent} except that `inclusion_type` is\n**required**, and that difference is the point. Both expanders\n(`buildOrderComponentLines` in manager, and the staged-add path) filter\n`=== \"mandatory\" || === \"default\"`, so an `undefined` here is a silent fourth\nbucket whose component is dropped from every order it should have joined.\n\nThe optionality it replaces existed to accommodate `component_of`, where the\nfield genuinely is not authored — and it leaked onto the authored side, where\nit is a bug. Splitting the two is what lets this side be required. Prod\ncarries 0 undefined rows across 165 `components` entries on 63 products, so\nthis is hardening with a zero-row backfill; writers with no answer pass\n`\"default\"`, the reading `crmsProduct.ts` and manager's new-component form\nalready take.\n\nNOT expressed as `.default(\"default\")`: `validateBeforeWrite` validates but\nwrites the RAW doc, so a schema default never materializes and the field would\nstill be written absent."
+        },
+        {
+          "kind": "variable",
           "name": "ComponentSchema",
           "declaration": "const ComponentSchema: z.ZodType<ProductComponent>;",
-          "doc": ""
+          "doc": "Schema for a `component_of` back-reference. `inclusion_type` is optional here\nbecause the parent authors it — see {@link ProductComponent}.\n\nA catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset\nof `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),\nand every component that survives expansion becomes an order line of the same\n`type`. So it answers to the same contract, and the rental ⇒\n`price.replacement` rule is stated once rather than a third time here."
         },
         {
           "kind": "variable",
@@ -6360,7 +6504,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: ProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -6373,7 +6517,7 @@
           "kind": "interface",
           "name": "ProductComponent",
           "declaration": "interface ProductComponent {\n  uid: string;\n  path: string[];\n  name: string;\n  active?: boolean;\n  type: ComponentTypeType;\n  stock_method: StockMethodType;\n  crms_id: number | null;\n  crms_accessory_id?: number | null;\n  description?: string;\n  inclusion_type?: InclusionTypeType;\n  quantity: number;\n  zero_priced?: boolean;\n  price: typeLiteral;\n}",
-          "doc": "A component product within a parent product."
+          "doc": "A product reference in `component_of` — the RECIPROCAL back-reference naming a\nparent this product is a component of.\n\nDeliberately the reduced shape: the relationship attributes\n(`inclusion_type`, `zero_priced`, `active`, `description`) describe how the\nPARENT includes this product and are authored on the parent's own\n`components` entry, which is the authoritative side. Prod agrees — across 141\n`component_of` rows on 91 products, exactly one carries any of them\n(measured 2026-07-29), against 165/165 on `components`."
         },
         {
           "kind": "interface",
@@ -9675,6 +9819,12 @@
         },
         {
           "kind": "interface",
+          "name": "ItemParentageIssue",
+          "declaration": "interface ItemParentageIssue {\n  index: number;\n  uid: string;\n  type: string;\n  parentUid: string;\n  parentType: string;\n}",
+          "doc": "A single parentage violation reported by {@link validateItemParentage}."
+        },
+        {
+          "kind": "interface",
           "name": "ItemPathIssue",
           "declaration": "interface ItemPathIssue {\n  index: number;\n  uid: string | undefined;\n  path: string[];\n  expected: string[];\n}",
           "doc": "A single path mismatch reported by {@link validateItemPaths} or\n{@link validateInvoiceItemPaths} (re-exported from `@cfs/core/utils/invoices`)."
@@ -10071,6 +10221,14 @@
         },
         {
           "kind": "function",
+          "name": "validateItemParentage",
+          "signature": "validateItemParentage(items: T[]): ItemParentageIssue[]",
+          "doc": "Assert every item's structural parent is a type its contract admits —\n`ITEM_CONTRACTS[item.type].parentable_by`, resolved through `path.at(-2)`.\n\n**This is an INDEPENDENT property, and that is the whole point.**\n`validateItemPaths` is a fixed-point check — \"`path` equals what the\nrecompute produces\" — so it can only ever agree with `computeItemPaths` and\ninherits every hole in it. That is not hypothetical: when\n`computeInvoiceItemPaths` returned its input unchanged on a divider-less\ninvoice, the fixed-point guard certified 79 provably-wrong items as clean,\ncorpus-wide, for as long as the hole existed. This check consults the contract\ntable instead of the normalizer, so a future hole cannot hide behind its own\noracle — the same reason `path.length >= 1` and `path.at(-1) === uid` are\nasserted directly in `api-cloudrun/src/lib/validate.ts`.\n\nThe rule it enforces is the asymmetry the corpus supports: **a divider is\nnever parented by a line item.** A `group` nested under a rental would make\nthe structural prefix `computeItemPaths` derives meaningless. Line items are\ndeliberately permissive — they are parented by dividers AND by other line\nitems (kit components).\n\nThe document root is always legal, so an item whose `path` is just `[self]`\nis never reported; the \"must sit under a divider\" rule is NOT asserted here,\nbecause 78 legacy flat invoice items live at the root in prod and rejecting\nthem would make those invoices unwritable.\n\nReturns `[]` when every parent is admissible.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "validateItemPaths",
           "signature": "validateItemPaths(items: T[]): ItemPathIssue[]",
           "doc": "Assert every line item's `path` matches what {@link computeItemPaths} would\nproduce — i.e. structural prefix + component ancestry + self uid, with no\nstale dest/group uids from prior drag positions.\n\nUse as a defensive write-time invariant: any client (manager, webhook\nhandlers, manual firestore_admin pokes) that writes orders should pipe\n`items` through `computeItemPaths` first, so a non-empty result here means\nthe client skipped the recompute step.\n\nReports per-index mismatches; under the depth-first contiguity invariant,\nan index whose `uid` doesn't match the recomputed array's uid at the same\nindex is also a violation (the array needs re-linearization). The original\npath is reported so the caller can diff against `expected`.\n\nReturns `[]` when every path is clean and order is canonical.",
@@ -10094,7 +10252,7 @@
         {
           "kind": "function",
           "name": "buildComponentEntries",
-          "signature": "buildComponentEntries(parentUid: string, sourceComponents: ProductComponent[], baseDepth: number, maxDepth?: number): ProductComponent[]",
+          "signature": "buildComponentEntries(parentUid: string, sourceComponents: T[], baseDepth: number, maxDepth?: number): T[]",
           "doc": "Build component entries for a parent product from a component product's\nown `components` array. Each entry's `path` is prepended with `parentUid`\nso it reflects its position in the parent's tree.\n\nNo recursion needed — the source product's `components` already contains\nits full descendant tree as a flat array.",
           "paramTags": [
             {
@@ -10127,7 +10285,7 @@
         {
           "kind": "function",
           "name": "removeComponentEntries",
-          "signature": "removeComponentEntries(components: ProductComponent[], path: string[]): ProductComponent[]",
+          "signature": "removeComponentEntries(components: T[], path: string[]): T[]",
           "doc": "Remove a component and all its descendants from a flat components array.\nAn entry is removed if its `path` starts with the given path prefix —\nthis covers the component itself and every entry nested beneath it.",
           "paramTags": [
             {

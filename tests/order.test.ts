@@ -1019,3 +1019,76 @@ Deno.test("isLineItem narrows a transaction_fee to the one line-item shape", () 
   // reading `price.taxes` cannot hit a PriceModifier that never had one.
   if (isLineItem(item)) assertEquals(item.price?.taxes, []);
 });
+
+// ── ITEM_CONTRACTS at the schema boundary ────────────────────────
+
+Deno.test("percent_of_total is inexpressible on a non-fee line", () => {
+  // It used to be merely THROWN ON, at runtime, inside `perUnitSubtotal` —
+  // reachable only once the totals pass ran. The contract makes it unwritable.
+  const bad = OrderDocItem.safeParse({
+    uid: "testprod100000000000",
+    type: "sale",
+    name: "Gel Pack",
+    price: { ...priceBase, formula: "percent_of_total" },
+  });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].path, ["price", "formula"]);
+
+  // The fee is the one type priced from the document total.
+  assertEquals(
+    OrderDocItem.safeParse({
+      uid: "testfee1000000000000",
+      type: "transaction_fee",
+      name: "Card Fee",
+      price: { ...priceBase, formula: "percent_of_total" },
+    }).success,
+    true,
+  );
+  // ...and a flat-amount fee stays legal: the converse is deliberately not asserted.
+  assertEquals(
+    OrderDocItem.safeParse({
+      uid: "testfee1000000000000",
+      type: "transaction_fee",
+      name: "Card Fee",
+      price: { ...priceBase, formula: "fixed" },
+    }).success,
+    true,
+  );
+});
+
+Deno.test("a transaction_fee cannot carry price.replacement", () => {
+  const bad = OrderDocItem.safeParse({
+    uid: "testfee1000000000000",
+    type: "transaction_fee",
+    name: "Card Fee",
+    price: { ...priceBase, replacement: 100 },
+  });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].path, ["price", "replacement"]);
+});
+
+Deno.test("the contract check still reports at its declared path inside the union", () => {
+  // `.superRefine` replaced a hand-written `.refine`; a DU arm's check must
+  // still emit at ["price","replacement"] rather than at the union root.
+  const bad = OrderDocItem.safeParse({
+    uid: "testprod100000000000",
+    type: "rental",
+    name: "Camera",
+    stock_method: "bulk",
+    price: { ...priceBase, replacement: null },
+  });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].path, ["price", "replacement"]);
+
+  // Unchanged escape hatch: a rental holding no stock needs no replacement value.
+  assertEquals(
+    OrderDocItem.safeParse({
+      uid: "testprod100000000000",
+      type: "rental",
+      name: "Camera",
+      stock_method: "none",
+      price: { ...priceBase, replacement: null },
+    }).success,
+    true,
+  );
+});

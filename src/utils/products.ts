@@ -31,10 +31,10 @@ export { deriveProductImageUuids } from "../schemas/mod.ts";
  * @param path - Full path of the component to remove (e.g. `["A", "B"]`)
  * @returns New array with the component and its descendants removed
  */
-export function removeComponentEntries(
-  components: ProductComponent[],
+export function removeComponentEntries<T extends ProductComponent>(
+  components: T[],
   path: string[],
-): ProductComponent[] {
+): T[] {
   return components.filter((comp) => {
     if (comp.path.length < path.length) return true;
     return !path.every((uid, i) => comp.path[i] === uid);
@@ -55,13 +55,13 @@ export function removeComponentEntries(
  * @param maxDepth - If set, exclude entries whose depth in the parent exceeds this
  * @returns New `ProductComponent[]` entries with adjusted paths
  */
-export function buildComponentEntries(
+export function buildComponentEntries<T extends ProductComponent>(
   parentUid: string,
-  sourceComponents: ProductComponent[],
+  sourceComponents: T[],
   baseDepth: number,
   maxDepth?: number,
-): ProductComponent[] {
-  const entries: ProductComponent[] = [];
+): T[] {
+  const entries: T[] = [];
 
   for (const comp of sourceComponents) {
     const depth = baseDepth + comp.path.length;
