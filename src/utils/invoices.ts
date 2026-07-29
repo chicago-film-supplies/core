@@ -24,12 +24,17 @@ export {
   type Discount,
   isPriceableItem,
   isPreTaxItem,
+  isPreTaxPricingItem,
   isTransactionFeeItem,
+  type StructuralItem,
   type ItemPathIssue,
   type ItemUniquenessIssue,
   type LineItem,
   type PriceModifier,
   type PriceObject,
+  type PricingItem,
+  type PricingPrice,
+  type PreTaxPricingItem,
   type Tax,
   type ConsolidatedItem,
   type GroupPath,
@@ -41,8 +46,8 @@ export {
 } from "./orders.ts";
 
 import currency from "currency.js";
-import type { COARevenueType, DocDestinationType, DocLineItemTypeType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocTotals, PriceFormulaType } from "../schemas/mod.ts";
-import { itemContract } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, OrderDocDestinationItemType, PriceFormulaType } from "../schemas/mod.ts";
+import { isDividerItemType, isLineItemType } from "../schemas/mod.ts";
 import {
   calculateItemSubtotal,
   computeItemPaths,
@@ -61,15 +66,16 @@ import {
 
 // ── Structural helpers ──────────────────────────────────────────
 
-/** Structural item types that are not billable. */
-const STRUCTURAL_TYPES = new Set(["destination", "group", "order"]);
-
 /**
  * Filter out structural items (group/destination/order dividers) and return only
  * billable line items suitable for Xero sync or totals calculation.
+ *
+ * The membership test is `ITEM_CONTRACTS[type].kind`. It used to be a local
+ * `STRUCTURAL_TYPES` set — a thirteenth hand-written copy of the divider list,
+ * and the only one that answered "billable" for a type it had never heard of.
  */
 export function flattenForXero(items: LineItem[]): LineItem[] {
-  return items.filter((item) => !STRUCTURAL_TYPES.has(item.type));
+  return items.filter((item) => isLineItemType(item.type));
 }
 
 // ── Invoice item type ──────────────────────────────────────────
@@ -278,7 +284,7 @@ function stripOrderPrefix(path: string[], orderDividerUid: string): string[] {
 export function buildInvoiceDestinationDivider(
   source: { uid: string; name: string; description?: string | null; uid_delivery?: string | null; uid_collection?: string | null },
   path: string[] = [],
-): InvoiceItem {
+): OrderDocDestinationItemType {
   return {
     uid: source.uid,
     type: "destination",
@@ -287,7 +293,7 @@ export function buildInvoiceDestinationDivider(
     uid_delivery: source.uid_delivery ?? null,
     uid_collection: source.uid_collection ?? null,
     path,
-  } as InvoiceItem;
+  };
 }
 
 /**
@@ -313,11 +319,17 @@ export function buildInvoiceDestinationDivider(
  * Mirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`
  * (`createInvoice`) so sync output is shape-consistent with create output.
  */
-function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceItem {
+function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType {
   const basePath = item.path ?? [];
   const path = [orderDividerUid, ...basePath];
 
-  if (itemContract(item.type)?.kind === "divider") {
+  // `isDividerItemType` is a type PREDICATE, so it narrows `item.type` as well
+  // as answering the question. That is what lets both branches below return a
+  // real `InvoiceDocItemType` arm: after the `destination` check the divider
+  // branch is exactly `"order" | "group"`, and the line branch is exactly
+  // `DocLineItemTypeType`. The `as InvoiceItem` casts this function used to end
+  // each branch with were the loose shadow's, not the data's.
+  if (isDividerItemType(item.type)) {
     if (item.type === "destination") {
       return buildInvoiceDestinationDivider(item, path);
     }
@@ -327,13 +339,13 @@ function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string):
       name: item.name,
       description: item.description ?? "",
       path,
-    } as InvoiceItem;
+    };
   }
 
   const p = (item.price ?? {}) as Partial<InvoiceDocItemPrice>;
   return {
     uid: item.uid,
-    type: item.type as DocLineItemTypeType,
+    type: item.type,
     name: item.name,
     description: item.description ?? "",
     quantity: item.quantity ?? 0,
@@ -348,7 +360,7 @@ function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string):
       total: p.total ?? 0,
     },
     path,
-  } as InvoiceItem;
+  };
 }
 
 /**

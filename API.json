@@ -1027,6 +1027,12 @@
           "doc": "Sort configuration for a display preference (column + direction)."
         },
         {
+          "kind": "typeAlias",
+          "name": "DividerItemType",
+          "declaration": "type DividerItemType = indexedAccess;",
+          "doc": "The `kind: \"divider\"` members — the structural types that organize an array."
+        },
+        {
           "kind": "interface",
           "name": "DmarcAggregateLogRecord",
           "declaration": "interface DmarcAggregateLogRecord {\n  level: LogLevelType;\n  msg: \"dmarc_aggregate_record\";\n  ts: string;\n  source_ip: string;\n  count: number;\n  disposition: string;\n  dkim_result: string;\n  spf_result: string;\n  dkim_aligned: boolean;\n  spf_aligned: boolean;\n  header_from: string;\n  org_name: string;\n  report_id: string;\n  domain: string;\n  date_range_begin: number;\n  date_range_end: number;\n  dmarc_pass: \"true\" | \"false\";\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
@@ -1247,6 +1253,12 @@
           "name": "FixtureMetaSchema",
           "declaration": "const FixtureMetaSchema: z.ZodType<FixtureMeta>;",
           "doc": "Zod schema for a fixture manifest entry."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "FromTotalItemType",
+          "declaration": "type FromTotalItemType = indexedAccess;",
+          "doc": "The `pricing: \"from_total\"` members — priced FROM the document total rather\nthan into it, which is what makes a `percent_of_total` formula legal on them."
         },
         {
           "kind": "typeAlias",
@@ -2393,6 +2405,12 @@
           "name": "PlaceKindType",
           "declaration": "type PlaceKindType = indexedAccess;",
           "doc": "One kind of place a unit can occupy."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PreTaxItemType",
+          "declaration": "type PreTaxItemType = indexedAccess;",
+          "doc": "The `pricing: \"pre_tax\"` members — every type that counts INTO the document\nsubtotal.\n\nDerived from {@link ITEM_CONTRACTS} rather than listed. A hand-written copy of\nthis union is exactly the drift the parity assertions above exist to prevent,\nand `@cfs/core/utils/orders` carried one — `PreTaxLineItem[\"type\"]` was the\nliteral list `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\na sixth place to remember when a type is added."
         },
         {
           "kind": "interface",
@@ -4131,9 +4149,33 @@
         },
         {
           "kind": "function",
+          "name": "isDividerItemType",
+          "signature": "isDividerItemType(type: string): type is DividerItemType",
+          "doc": "Whether an item type is a structural divider — the complement of {@link isLineItemType}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isFulfillableItem",
+          "signature": "isFulfillableItem(item: OrderDocItemType): item is OrderDocLineItemType",
+          "doc": "Narrows an order doc item to one that can be PICKED — the `fulfillable` axis,\nwhich additionally excludes `transaction_fee`.\n\nLives beside {@link isLineItem} because the two are constantly confused: a fee\nis a line (it is billed) and is not fulfillable (there is nothing on a shelf).\n`isFulfillableItemType` alone cannot do this job — a type predicate on\n`item.type` narrows the property, not the union — which is why both\n`services/fulfillment.ts` and `services/fulfillmentEdits.ts` had grown their\nown item-level copy.\n\nThe narrowing is deliberately imprecise in the same way `isLineItem` is: it\nreports `OrderDocLineItemType`, whose `type` still nominally includes\n`transaction_fee`. Every field a caller reads after this guard is shared\nacross all line types, so the imprecision costs nothing.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isFulfillableItemType",
+          "signature": "isFulfillableItemType(type: string): type is FulfillableItemType",
+          "doc": "Whether an item type can be picked off a shelf — the `fulfillable` axis.\n\nNOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is\nnot fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`\ndrew exactly that distinction by hand and read as if they disagreed.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isInvoiceLineItem",
           "signature": "isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem",
-          "doc": "Type guard that narrows an invoice doc item to a billable line item (excludes structural dividers).",
+          "doc": "Type guard that narrows an invoice doc item to a billable line item (excludes\nstructural dividers).\n\nThe narrowing target is invoice-specific, but the DECISION is not: it is\n`ITEM_CONTRACTS[type].kind`, shared with `isLineItem` in `order.ts`. Written\nout by hand this read `!== \"destination\" && !== \"group\" && !== \"order\"` — one\nclause longer than the order guard, which is exactly the kind of difference\nthat looks like a bug and is not.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -4142,6 +4184,14 @@
           "name": "isLineItem",
           "signature": "isLineItem(item: OrderDocItemType): item is OrderDocLineItemType",
           "doc": "Type guard that narrows an order doc item to a line item (excludes\ndestination/group dividers). Sound: every non-divider `type` is now backed by\nexactly one shape, so the narrowing cannot hand a caller a `price` of the\nwrong kind.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isLineItemType",
+          "signature": "isLineItemType(type: string): type is DocLineItemTypeType",
+          "doc": "Whether an item type is a billable line rather than a structural divider.\n\nThe ONE answer to a question that was previously answered by hand in five\nmodules as `type !== \"destination\" && type !== \"group\"` — sometimes with\n`&& type !== \"order\"` (correct for invoices, where an `order` divider exists)\nand sometimes with `&& type !== \"transaction_fee\"`, which is a **different\nquestion**: see {@link isFulfillableItemType}.\n\nTakes a `string` because callers hold item types from loosely-typed sources.\nA value outside {@link ITEM_TYPES} has no contract and answers `false`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -4572,6 +4622,12 @@
           "doc": "Billable line item types stored in order/invoice documents (excludes destination/group dividers)."
         },
         {
+          "kind": "typeAlias",
+          "name": "DividerItemType",
+          "declaration": "type DividerItemType = indexedAccess;",
+          "doc": "The `kind: \"divider\"` members — the structural types that organize an array."
+        },
+        {
           "kind": "variable",
           "name": "DocItemTypeEnum",
           "declaration": "const DocItemTypeEnum: z.ZodType<DocItemTypeType>;",
@@ -4654,6 +4710,12 @@
           "name": "FirestoreTimestampValue",
           "declaration": "interface FirestoreTimestampValue {\n  seconds: number;\n  nanoseconds: number;\n  toMillis(): number;\n  toDate(): Date;\n}",
           "doc": "Structural interfaces for Firestore Timestamp and FieldValue.\nExpressed structurally so the schemas package has no firebase-admin dependency."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "FromTotalItemType",
+          "declaration": "type FromTotalItemType = indexedAccess;",
+          "doc": "The `pricing: \"from_total\"` members — priced FROM the document total rather\nthan into it, which is what makes a `percent_of_total` formula legal on them."
         },
         {
           "kind": "typeAlias",
@@ -4780,6 +4842,12 @@
           "name": "Phone",
           "declaration": "const Phone: z.ZodType<string>;",
           "doc": "Phone string with length constraints."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PreTaxItemType",
+          "declaration": "type PreTaxItemType = indexedAccess;",
+          "doc": "The `pricing: \"pre_tax\"` members — every type that counts INTO the document\nsubtotal.\n\nDerived from {@link ITEM_CONTRACTS} rather than listed. A hand-written copy of\nthis union is exactly the drift the parity assertions above exist to prevent,\nand `@cfs/core/utils/orders` carried one — `PreTaxLineItem[\"type\"]` was the\nliteral list `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\na sixth place to remember when a type is added."
         },
         {
           "kind": "variable",
@@ -4916,6 +4984,30 @@
           "name": "deriveName",
           "signature": "deriveName(parts: PartialNameParts): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isDividerItemType",
+          "signature": "isDividerItemType(type: string): type is DividerItemType",
+          "doc": "Whether an item type is a structural divider — the complement of {@link isLineItemType}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isFulfillableItemType",
+          "signature": "isFulfillableItemType(type: string): type is FulfillableItemType",
+          "doc": "Whether an item type can be picked off a shelf — the `fulfillable` axis.\n\nNOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is\nnot fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`\ndrew exactly that distinction by hand and read as if they disagreed.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isLineItemType",
+          "signature": "isLineItemType(type: string): type is DocLineItemTypeType",
+          "doc": "Whether an item type is a billable line rather than a structural divider.\n\nThe ONE answer to a question that was previously answered by hand in five\nmodules as `type !== \"destination\" && type !== \"group\"` — sometimes with\n`&& type !== \"order\"` (correct for invoices, where an `order` divider exists)\nand sometimes with `&& type !== \"transaction_fee\"`, which is a **different\nquestion**: see {@link isFulfillableItemType}.\n\nTakes a `string` because callers hold item types from loosely-typed sources.\nA value outside {@link ITEM_TYPES} has no contract and answers `false`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5699,7 +5791,7 @@
           "kind": "function",
           "name": "isInvoiceLineItem",
           "signature": "isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem",
-          "doc": "Type guard that narrows an invoice doc item to a billable line item (excludes structural dividers).",
+          "doc": "Type guard that narrows an invoice doc item to a billable line item (excludes\nstructural dividers).\n\nThe narrowing target is invoice-specific, but the DECISION is not: it is\n`ITEM_CONTRACTS[type].kind`, shared with `isLineItem` in `order.ts`. Written\nout by hand this read `!== \"destination\" && !== \"group\" && !== \"order\"` — one\nclause longer than the order guard, which is exactly the kind of difference\nthat looks like a bug and is not.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -6194,6 +6286,14 @@
           "name": "getOrderStatusTransitions",
           "signature": "getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]",
           "doc": "The statuses an operator can move to from the given current status.\nReturns an empty list for computed statuses (`active`, `complete`) and\nfilters the current status out of the user-settable set.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isFulfillableItem",
+          "signature": "isFulfillableItem(item: OrderDocItemType): item is OrderDocLineItemType",
+          "doc": "Narrows an order doc item to one that can be PICKED — the `fulfillable` axis,\nwhich additionally excludes `transaction_fee`.\n\nLives beside {@link isLineItem} because the two are constantly confused: a fee\nis a line (it is billed) and is not fulfillable (there is nothing on a shelf).\n`isFulfillableItemType` alone cannot do this job — a type predicate on\n`item.type` narrows the property, not the union — which is why both\n`services/fulfillment.ts` and `services/fulfillmentEdits.ts` had grown their\nown item-level copy.\n\nThe narrowing is deliberately imprecise in the same way `isLineItem` is: it\nreports `OrderDocLineItemType`, whose `type` still nominally includes\n`transaction_fee`. Every field a caller reads after this guard is shared\nacross all line types, so the imprecision costs nothing.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9130,14 +9230,20 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: string;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n}",
-          "doc": "A single line item in an order (product, destination, group, surcharge, or fee).\nLoose interface compatible with all OrderDocItemType members — utility functions\nuse type guards (isPriceableItem, isTransactionFeeItem) before accessing\nmember-specific fields."
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n}",
+          "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
           "kind": "interface",
           "name": "PreTaxLineItem",
-          "declaration": "interface PreTaxLineItem {\n  type: \"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\";\n  quantity: number;\n  price: PriceObject;\n}",
-          "doc": "A pre-tax line item with a full price object (rental, sale, service, surcharge, replacement)."
+          "declaration": "interface PreTaxLineItem {\n  type: PreTaxItemType;\n  quantity: number;\n  price: PriceObject;\n}",
+          "doc": "A pre-tax line item with a full price object — every type the contract table\nmarks `pricing: \"pre_tax\"`.\n\nThe member list is DERIVED from `ITEM_CONTRACTS`, not written out. It used to\nbe the literal `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\nwhich made this a sixth place to remember when an item type was added."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PreTaxPricingItem",
+          "declaration": "type PreTaxPricingItem = PricingItem & typeLiteral;",
+          "doc": "A {@link PricingItem} that has passed {@link isPreTaxPricingItem}."
         },
         {
           "kind": "typeAlias",
@@ -9158,6 +9264,24 @@
           "doc": "Any item that has pricing — pre-tax or transaction fee."
         },
         {
+          "kind": "interface",
+          "name": "PricingItem",
+          "declaration": "interface PricingItem {\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PricingPrice | null;\n}",
+          "doc": "The item surface the pricing pipeline reads: a type (to look up the contract),\na quantity, and a {@link PricingPrice}. Both a stored {@link LineItem} and an\norder-input item satisfy it."
+        },
+        {
+          "kind": "interface",
+          "name": "PricingPrice",
+          "declaration": "interface PricingPrice {\n  base?: number;\n  formula?: PriceFormulaType;\n  chargeable_days?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n}",
+          "doc": "The price fields the pricing pipeline actually READS — deliberately narrower\nthan the stored {@link PriceObject}.\n\n`taxes` needs only a `uid`, because the name/rate/type/amount are what\n`calculateItemTax` resolves and computes; `subtotal`, `subtotal_discounted`,\n`total` and `taxes_base` are pricing's OUTPUT and are never read as input.\n\nThat is not a convenience: it is the shape an order-input item genuinely\narrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is\n`{ uid }[]`). Typing the pricing entry points here is what lets a writer price\nan item it has not built yet, instead of casting the input through\n`as unknown as LineItem` and claiming a stored price it does not have —\nwhich is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path."
+        },
+        {
+          "kind": "interface",
+          "name": "StructuralItem",
+          "declaration": "interface StructuralItem {\n  uid: string;\n  type: ItemTypeType;\n  path?: string[];\n}",
+          "doc": "The item surface the structural/path helpers read: identity, type, and path.\n\nNarrower than {@link LineItem} deliberately — these helpers never look at\n`name`, `price` or `quantity`, and callers legitimately hold items that have\nnone of them yet (api-cloudrun's CRMS `ItemLike` is exactly this shape). Typing\nthem at `LineItem` is what forced `as unknown as LineItem[]` at those sites."
+        },
+        {
           "kind": "typeAlias",
           "name": "Tax",
           "declaration": "type Tax = Pick<SchemaTax, \"uid\" | \"name\" | \"rate\" | \"type\"> & Partial<Pick<SchemaTax, \"valid_from\" | \"valid_to\">>;",
@@ -9166,13 +9290,13 @@
         {
           "kind": "interface",
           "name": "TransactionFeeLineItem",
-          "declaration": "interface TransactionFeeLineItem {\n  type: \"transaction_fee\";\n  quantity: number;\n  price: PriceObject;\n}",
+          "declaration": "interface TransactionFeeLineItem {\n  type: FromTotalItemType;\n  quantity: number;\n  price: PriceObject;\n}",
           "doc": "A transaction fee line item.\n\nCarries the same `PriceObject` every other line carries — a fee is an\nordinary line whose `price.formula` is `percent_of_total`, not a second price\nshape. It differs from a `PreTaxLineItem` only in that it is priced FROM the\ndocument total rather than into it, which is why it has its own predicate and\nits own pass in `calculateOrderTotals`."
         },
         {
           "kind": "function",
           "name": "buildInvoiceDestinationDivider",
-          "signature": "buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): InvoiceItem",
+          "signature": "buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): OrderDocDestinationItemType",
           "doc": "Build an invoice destination divider from a source order's destination item.\nSingle source of truth for the divider shape — reused by\n`projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice\nwebhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.\n\n`path` defaults to `[]` so callers that run `computeInvoiceItemPaths`\nafterward (the webhook + backfill) get positional path assignment; the\norder-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.",
           "paramTags": [],
           "returnsTag": null
@@ -9226,7 +9350,7 @@
         {
           "kind": "function",
           "name": "calculateItemPrice",
-          "signature": "calculateItemPrice(item: LineItem, taxes: Tax[]): typeLiteral",
+          "signature": "calculateItemPrice(item: PricingItem, taxes: Tax[]): typeLiteral",
           "doc": "Calculate the complete price for a single line item.\nRuns the full pipeline: subtotal → discount → taxes → total.",
           "paramTags": [],
           "returnsTag": null
@@ -9234,7 +9358,7 @@
         {
           "kind": "function",
           "name": "calculateItemSubtotal",
-          "signature": "calculateItemSubtotal(item: LineItem): typeLiteral",
+          "signature": "calculateItemSubtotal(item: PricingItem): typeLiteral",
           "doc": "Calculate the pre-discount and post-discount subtotals for a single line item.\n\n`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,\nor `base × quantity` for `fixed`. The one-week floor means the day factor only\napplies above 5 chargeable days.",
           "paramTags": [],
           "returnsTag": null
@@ -9242,7 +9366,7 @@
         {
           "kind": "function",
           "name": "calculateItemTax",
-          "signature": "calculateItemTax(item: LineItem, taxes: Tax[]): PriceModifier[]",
+          "signature": "calculateItemTax(item: PricingItem, taxes: Tax[]): PriceModifier[]",
           "doc": "Calculate tax amounts for a single line item from the Tax[] parameter.\nReturns a PriceModifier[] with computed amounts.",
           "paramTags": [],
           "returnsTag": null
@@ -9321,7 +9445,7 @@
           "kind": "function",
           "name": "flattenForXero",
           "signature": "flattenForXero(items: LineItem[]): LineItem[]",
-          "doc": "Filter out structural items (group/destination/order dividers) and return only\nbillable line items suitable for Xero sync or totals calculation.",
+          "doc": "Filter out structural items (group/destination/order dividers) and return only\nbillable line items suitable for Xero sync or totals calculation.\n\nThe membership test is `ITEM_CONTRACTS[type].kind`. It used to be a local\n`STRUCTURAL_TYPES` set — a thirteenth hand-written copy of the divider list,\nand the only one that answered \"billable\" for a type it had never heard of.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9353,7 +9477,7 @@
         {
           "kind": "function",
           "name": "getParentProductUid",
-          "signature": "getParentProductUid(item: LineItem, structuralUids: Set<string>): string | null",
+          "signature": "getParentProductUid(item: StructuralItem, structuralUids: Set<string>): string | null",
           "doc": "Get the parent product uid from an item's path.\nReturns null for non-components (where path.at(-2) is a structural uid or absent).",
           "paramTags": [],
           "returnsTag": null
@@ -9382,8 +9506,8 @@
         {
           "kind": "function",
           "name": "getStructuralUids",
-          "signature": "getStructuralUids(items: LineItem[]): Set<string>",
-          "doc": "Build a set of structural item uids (dest/group) from items array.\nUsed to distinguish structural path elements from product parent refs.\n\nOrder-shaped by default. `computeItemPaths` does NOT call this — it derives\nthe set from whichever `levels` it was handed, so an invoice's `order`\ndividers count as structural there too.",
+          "signature": "getStructuralUids(items: StructuralItem[]): Set<string>",
+          "doc": "Build a set of structural item uids (dest/group) from items array.\nUsed to distinguish structural path elements from product parent refs.\n\nOrder-shaped by default. `computeItemPaths` does NOT call this — it derives\nthe set from whichever `levels` it was handed, so an invoice's `order`\ndividers count as structural there too. That asymmetry is why this keeps its\nown two-type test rather than reading `ITEM_CONTRACTS[type].kind`: switching\nto the contract would silently make `order` dividers structural here, for\nevery invoice caller.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9430,6 +9554,14 @@
           "name": "isPreTaxItem",
           "signature": "isPreTaxItem(item: LineItem): item is PreTaxLineItem",
           "doc": "Determine whether a line item participates in subtotal/discount/tax calculations.\nStandalone predicate (not composed) because TS doesn't support negated predicates.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isPreTaxPricingItem",
+          "signature": "isPreTaxPricingItem(item: PricingItem): item is PreTaxPricingItem",
+          "doc": "{@link isPreTaxItem} at the {@link PricingItem} surface — the same three\nchecks, narrowing to a shape the pricing pipeline can read rather than to a\nstored line item. Used by the three pricing entry points so they accept an\norder-input item without being handed a stored price that does not exist yet.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9838,8 +9970,8 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: string;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n}",
-          "doc": "A single line item in an order (product, destination, group, surcharge, or fee).\nLoose interface compatible with all OrderDocItemType members — utility functions\nuse type guards (isPriceableItem, isTransactionFeeItem) before accessing\nmember-specific fields."
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n}",
+          "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
           "kind": "variable",
@@ -9868,8 +10000,14 @@
         {
           "kind": "interface",
           "name": "PreTaxLineItem",
-          "declaration": "interface PreTaxLineItem {\n  type: \"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\";\n  quantity: number;\n  price: PriceObject;\n}",
-          "doc": "A pre-tax line item with a full price object (rental, sale, service, surcharge, replacement)."
+          "declaration": "interface PreTaxLineItem {\n  type: PreTaxItemType;\n  quantity: number;\n  price: PriceObject;\n}",
+          "doc": "A pre-tax line item with a full price object — every type the contract table\nmarks `pricing: \"pre_tax\"`.\n\nThe member list is DERIVED from `ITEM_CONTRACTS`, not written out. It used to\nbe the literal `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\nwhich made this a sixth place to remember when an item type was added."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PreTaxPricingItem",
+          "declaration": "type PreTaxPricingItem = PricingItem & typeLiteral;",
+          "doc": "A {@link PricingItem} that has passed {@link isPreTaxPricingItem}."
         },
         {
           "kind": "typeAlias",
@@ -9891,9 +10029,27 @@
         },
         {
           "kind": "interface",
+          "name": "PricingItem",
+          "declaration": "interface PricingItem {\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PricingPrice | null;\n}",
+          "doc": "The item surface the pricing pipeline reads: a type (to look up the contract),\na quantity, and a {@link PricingPrice}. Both a stored {@link LineItem} and an\norder-input item satisfy it."
+        },
+        {
+          "kind": "interface",
+          "name": "PricingPrice",
+          "declaration": "interface PricingPrice {\n  base?: number;\n  formula?: PriceFormulaType;\n  chargeable_days?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n}",
+          "doc": "The price fields the pricing pipeline actually READS — deliberately narrower\nthan the stored {@link PriceObject}.\n\n`taxes` needs only a `uid`, because the name/rate/type/amount are what\n`calculateItemTax` resolves and computes; `subtotal`, `subtotal_discounted`,\n`total` and `taxes_base` are pricing's OUTPUT and are never read as input.\n\nThat is not a convenience: it is the shape an order-input item genuinely\narrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is\n`{ uid }[]`). Typing the pricing entry points here is what lets a writer price\nan item it has not built yet, instead of casting the input through\n`as unknown as LineItem` and claiming a stored price it does not have —\nwhich is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path."
+        },
+        {
+          "kind": "interface",
           "name": "ReplacementTotals",
           "declaration": "interface ReplacementTotals {\n  subtotal: number;\n  tax: number;\n  total: number;\n}",
           "doc": "Replacement cost totals for an order, with and without tax."
+        },
+        {
+          "kind": "interface",
+          "name": "StructuralItem",
+          "declaration": "interface StructuralItem {\n  uid: string;\n  type: ItemTypeType;\n  path?: string[];\n}",
+          "doc": "The item surface the structural/path helpers read: identity, type, and path.\n\nNarrower than {@link LineItem} deliberately — these helpers never look at\n`name`, `price` or `quantity`, and callers legitimately hold items that have\nnone of them yet (api-cloudrun's CRMS `ItemLike` is exactly this shape). Typing\nthem at `LineItem` is what forced `as unknown as LineItem[]` at those sites."
         },
         {
           "kind": "typeAlias",
@@ -9904,7 +10060,7 @@
         {
           "kind": "interface",
           "name": "TransactionFeeLineItem",
-          "declaration": "interface TransactionFeeLineItem {\n  type: \"transaction_fee\";\n  quantity: number;\n  price: PriceObject;\n}",
+          "declaration": "interface TransactionFeeLineItem {\n  type: FromTotalItemType;\n  quantity: number;\n  price: PriceObject;\n}",
           "doc": "A transaction fee line item.\n\nCarries the same `PriceObject` every other line carries — a fee is an\nordinary line whose `price.formula` is `percent_of_total`, not a second price\nshape. It differs from a `PreTaxLineItem` only in that it is priced FROM the\ndocument total rather than into it, which is why it has its own predicate and\nits own pass in `calculateOrderTotals`."
         },
         {
@@ -9934,7 +10090,7 @@
         {
           "kind": "function",
           "name": "calculateItemPrice",
-          "signature": "calculateItemPrice(item: LineItem, taxes: Tax[]): typeLiteral",
+          "signature": "calculateItemPrice(item: PricingItem, taxes: Tax[]): typeLiteral",
           "doc": "Calculate the complete price for a single line item.\nRuns the full pipeline: subtotal → discount → taxes → total.",
           "paramTags": [],
           "returnsTag": null
@@ -9942,7 +10098,7 @@
         {
           "kind": "function",
           "name": "calculateItemSubtotal",
-          "signature": "calculateItemSubtotal(item: LineItem): typeLiteral",
+          "signature": "calculateItemSubtotal(item: PricingItem): typeLiteral",
           "doc": "Calculate the pre-discount and post-discount subtotals for a single line item.\n\n`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,\nor `base × quantity` for `fixed`. The one-week floor means the day factor only\napplies above 5 chargeable days.",
           "paramTags": [],
           "returnsTag": null
@@ -9950,7 +10106,7 @@
         {
           "kind": "function",
           "name": "calculateItemTax",
-          "signature": "calculateItemTax(item: LineItem, taxes: Tax[]): PriceModifier[]",
+          "signature": "calculateItemTax(item: PricingItem, taxes: Tax[]): PriceModifier[]",
           "doc": "Calculate tax amounts for a single line item from the Tax[] parameter.\nReturns a PriceModifier[] with computed amounts.",
           "paramTags": [],
           "returnsTag": null
@@ -10086,7 +10242,7 @@
         {
           "kind": "function",
           "name": "getParentProductUid",
-          "signature": "getParentProductUid(item: LineItem, structuralUids: Set<string>): string | null",
+          "signature": "getParentProductUid(item: StructuralItem, structuralUids: Set<string>): string | null",
           "doc": "Get the parent product uid from an item's path.\nReturns null for non-components (where path.at(-2) is a structural uid or absent).",
           "paramTags": [],
           "returnsTag": null
@@ -10102,8 +10258,8 @@
         {
           "kind": "function",
           "name": "getStructuralUids",
-          "signature": "getStructuralUids(items: LineItem[]): Set<string>",
-          "doc": "Build a set of structural item uids (dest/group) from items array.\nUsed to distinguish structural path elements from product parent refs.\n\nOrder-shaped by default. `computeItemPaths` does NOT call this — it derives\nthe set from whichever `levels` it was handed, so an invoice's `order`\ndividers count as structural there too.",
+          "signature": "getStructuralUids(items: StructuralItem[]): Set<string>",
+          "doc": "Build a set of structural item uids (dest/group) from items array.\nUsed to distinguish structural path elements from product parent refs.\n\nOrder-shaped by default. `computeItemPaths` does NOT call this — it derives\nthe set from whichever `levels` it was handed, so an invoice's `order`\ndividers count as structural there too. That asymmetry is why this keeps its\nown two-type test rather than reading `ITEM_CONTRACTS[type].kind`: switching\nto the contract would silently make `order` dividers structural here, for\nevery invoice caller.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10144,6 +10300,14 @@
           "name": "isPreTaxItem",
           "signature": "isPreTaxItem(item: LineItem): item is PreTaxLineItem",
           "doc": "Determine whether a line item participates in subtotal/discount/tax calculations.\nStandalone predicate (not composed) because TS doesn't support negated predicates.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isPreTaxPricingItem",
+          "signature": "isPreTaxPricingItem(item: PricingItem): item is PreTaxPricingItem",
+          "doc": "{@link isPreTaxItem} at the {@link PricingItem} surface — the same three\nchecks, narrowing to a shape the pricing pipeline can read rather than to a\nstored line item. Used by the three pricing entry points so they accept an\norder-input item without being handed a stored price that does not exist yet.",
           "paramTags": [],
           "returnsTag": null
         },

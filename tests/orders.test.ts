@@ -3,8 +3,13 @@ import {
   DOC_LINE_ITEM_TYPES,
   FULFILLMENT_LINE_ITEM_TYPES,
   getInitialValues,
+  isDividerItemType,
+  isFulfillableItemType,
+  isLineItemType,
   ITEM_CONTRACTS,
   type ItemTypeType,
+  type PreTaxItemType,
+  type FromTotalItemType,
   OrderDocLineItem,
 } from "../src/schemas/mod.ts";
 import {
@@ -46,6 +51,7 @@ import {
   getDefaultChargeDays,
   syncChargeDaysToItems,
   type LineItem,
+  type PricingItem,
   type PriceObject,
   type Tax,
   orderHasDiscount,
@@ -2113,11 +2119,101 @@ Deno.test("ITEM_CONTRACTS covers every item type, and the derived lists agree", 
   assertEquals(ITEM_CONTRACTS.transaction_fee.fulfillable, false);
 });
 
+Deno.test("the type predicates answer from the contract, and the three axes stay distinct", () => {
+  // These replace eleven hand-written copies across three repos, which disagreed
+  // in two ways that mattered: some added `!== "order"` (correct for invoices)
+  // and some added `!== "transaction_fee"` (a DIFFERENT axis — fulfillable).
+  for (const t of ["destination", "group", "order"] as const) {
+    assertEquals(isDividerItemType(t), true, `${t} is a divider`);
+    assertEquals(isLineItemType(t), false, `${t} is not a line`);
+    assertEquals(isFulfillableItemType(t), false, `${t} is not fulfillable`);
+  }
+  for (const t of ["rental", "replacement", "sale", "service", "surcharge"] as const) {
+    assertEquals(isLineItemType(t), true, `${t} is a line`);
+    assertEquals(isDividerItemType(t), false, `${t} is not a divider`);
+    assertEquals(isFulfillableItemType(t), true, `${t} is fulfillable`);
+  }
+
+  // The one row where "is a line" and "can be picked off a shelf" disagree.
+  // Collapsing FULFILLMENT_LINE_ITEM_TYPES into DOC_LINE_ITEM_TYPES would put a
+  // document-level charge on a picker's shelf list.
+  assertEquals(isLineItemType("transaction_fee"), true);
+  assertEquals(isFulfillableItemType("transaction_fee"), false);
+
+  // A type with no contract is neither, so a stored document carrying a type
+  // this build has never heard of cannot be silently treated as billable.
+  assertEquals(isLineItemType("not_a_type"), false);
+  assertEquals(isDividerItemType("not_a_type"), false);
+  assertEquals(isFulfillableItemType("not_a_type"), false);
+
+  // Every type is exactly one of line/divider — the two predicates partition
+  // ITEM_TYPES rather than merely overlapping it.
+  for (const t of Object.keys(ITEM_CONTRACTS)) {
+    assertEquals(isLineItemType(t) !== isDividerItemType(t), true, `${t} is exactly one of line/divider`);
+  }
+});
+
+Deno.test("the pricing entry points take an order-INPUT price, not only a stored one", () => {
+  // The reason PricingPrice exists. An order-input item carries `taxes: {uid}[]`
+  // and no subtotal/total — pricing's OUTPUT is not pricing's input. api-cloudrun
+  // used to bridge the gap with `as unknown as LineItem`, on the money path, in
+  // two writers; this is the shape that makes the cast unnecessary.
+  const taxes: Tax[] = [{ uid: "t1", name: "Chicago Rental", rate: 9, type: "percent" }];
+  const input: PricingItem = {
+    type: "rental",
+    quantity: 2,
+    price: { base: 100, formula: "fixed", chargeable_days: null, discount: null, taxes: [{ uid: "t1" }] },
+  };
+
+  const computed = calculateItemPrice(input, taxes);
+  assertEquals(computed.subtotal, 200);
+  assertEquals(computed.subtotal_discounted, 200);
+  assertEquals(computed.taxes.length, 1);
+  assertEquals(computed.taxes[0].amount, 18);
+  assertEquals(computed.total, 218);
+
+  // A stored line item still prices identically through the same entry point —
+  // the surface was widened, not swapped.
+  const stored: LineItem = {
+    uid: "u",
+    name: "n",
+    type: "rental",
+    path: ["u"],
+    quantity: 2,
+    price: {
+      base: 100,
+      formula: "fixed",
+      chargeable_days: null,
+      discount: null,
+      taxes: [{ uid: "t1", name: "Chicago Rental", rate: 9, type: "percent", amount: 18 }],
+      subtotal: 200,
+      subtotal_discounted: 200,
+      total: 218,
+    },
+  };
+  assertEquals(calculateItemPrice(stored, taxes), computed);
+});
+
+Deno.test("PreTaxItemType and FromTotalItemType are the contract's pricing axis, not a copy of it", () => {
+  // Compile-time: the derived unions must still be assignable both ways against
+  // the literals the table declares. If a type's `pricing` changes, one of these
+  // stops compiling — which is the point of deriving them.
+  const preTax: PreTaxItemType[] = ["rental", "replacement", "sale", "service", "surcharge"];
+  const fromTotal: FromTotalItemType[] = ["transaction_fee"];
+
+  // Runtime companion, same shape as the ITEM_CONTRACTS test above.
+  const byPricing = (p: string) =>
+    Object.keys(ITEM_CONTRACTS).filter((t) => ITEM_CONTRACTS[t as ItemTypeType].pricing === p).sort();
+  assertEquals(byPricing("pre_tax"), [...preTax].sort());
+  assertEquals(byPricing("from_total"), [...fromTotal].sort());
+  assertEquals(byPricing("none"), ["destination", "group", "order"]);
+});
+
 Deno.test("the three pricing predicates read the contract, not their own type lists", () => {
   const price = { base: 10, formula: "fixed", chargeable_days: null, subtotal: 10, subtotal_discounted: 10, discount: null, taxes: [], total: 10 } as unknown as PriceObject;
-  const at = (type: string): LineItem => ({ uid: "u", name: "n", type, path: ["u"], quantity: 1, price });
+  const at = (type: ItemTypeType): LineItem => ({ uid: "u", name: "n", type, path: ["u"], quantity: 1, price });
 
-  for (const type of ["rental", "replacement", "sale", "service", "surcharge"]) {
+  for (const type of ["rental", "replacement", "sale", "service", "surcharge"] as const) {
     assertEquals(isPreTaxItem(at(type)), true, `${type} is pre-tax`);
     assertEquals(isTransactionFeeItem(at(type)), false, `${type} is not a fee`);
     assertEquals(isPriceableItem(at(type)), true, `${type} is priceable`);
@@ -2127,21 +2223,26 @@ Deno.test("the three pricing predicates read the contract, not their own type li
   assertEquals(isTransactionFeeItem(at("transaction_fee")), true);
   assertEquals(isPriceableItem(at("transaction_fee")), true);
 
-  for (const type of ["destination", "group", "order"]) {
+  for (const type of ["destination", "group", "order"] as const) {
     assertEquals(isPriceableItem(at(type)), false, `${type} is a divider`);
     assertEquals(isPreTaxItem(at(type)), false, `${type} is a divider`);
   }
 
-  // A type with no contract answers false everywhere. `LineItem.type` is
-  // `string`, so this is reachable; `isPriceableItem` used to answer true.
-  assertEquals(isPriceableItem(at("not_a_type")), false);
-  assertEquals(isPreTaxItem(at("not_a_type")), false);
-  assertEquals(isTransactionFeeItem(at("not_a_type")), false);
+  // A type with no contract answers false everywhere; `isPriceableItem` used to
+  // answer true. `LineItem.type` is now `ItemTypeType`, so a CALLER can no
+  // longer reach this — hence the cast, which is the test saying out loud that
+  // the value comes from outside the type system. It still arrives that way in
+  // practice: these items are read off Firestore documents, and a stored doc can
+  // hold a type this build has never heard of.
+  const unknownType = (t: string) => at(t as ItemTypeType);
+  assertEquals(isPriceableItem(unknownType("not_a_type")), false);
+  assertEquals(isPreTaxItem(unknownType("not_a_type")), false);
+  assertEquals(isTransactionFeeItem(unknownType("not_a_type")), false);
 });
 
 // ── validateItemParentage ────────────────────────────────────────
 
-const parentageItem = (uid: string, type: string, path: string[]): LineItem => ({ uid, name: uid, type, path });
+const parentageItem = (uid: string, type: ItemTypeType, path: string[]): LineItem => ({ uid, name: uid, type, path });
 
 Deno.test("validateItemParentage accepts the shapes prod actually holds", () => {
   // Order: destination -> group -> rental -> component. 4,453 line-parents-line

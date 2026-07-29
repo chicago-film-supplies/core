@@ -41,6 +41,11 @@ import type {
   FirestoreTimestampType,
   ConsolidatedItemType,
   GroupPathType,
+  ItemTypeType,
+  PriceFormulaType,
+  PreTaxItemType,
+  FromTotalItemType,
+  RateType,
   Tax as SchemaTax,
 } from "../schemas/mod.ts";
 import { itemContract } from "../schemas/mod.ts";
@@ -68,15 +73,30 @@ export type Tax =
   & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
 
 /**
- * A single line item in an order (product, destination, group, surcharge, or fee).
- * Loose interface compatible with all OrderDocItemType members — utility functions
- * use type guards (isPriceableItem, isTransactionFeeItem) before accessing
- * member-specific fields.
+ * A single item in an order/invoice/fulfillment array — product, divider,
+ * surcharge or fee.
+ *
+ * A structural supertype, not a shadow of the real unions. Every member of
+ * `OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is
+ * assignable to it, so a caller holding real doc items passes them straight in
+ * and the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand
+ * back the caller's own type. It exists because the manager also calls these
+ * helpers on STAGED, mid-edit items that are not yet valid doc items — narrowing
+ * the helpers to the doc unions would force those callers back into casts.
+ *
+ * `type` is `ItemTypeType`, NOT `string`. That is the difference between a
+ * supertype and a hole: the pricing and billability predicates all resolve
+ * through `ITEM_CONTRACTS`, and a `string` here made "a type with no contract" a
+ * reachable state for every one of them. The runtime guards still handle it —
+ * these items come off Firestore documents — but no caller can construct it.
+ *
+ * Member-specific fields are still reached through the type guards
+ * (`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`).
  */
 export interface LineItem {
   uid: string;
   name: string;
-  type: string;
+  type: ItemTypeType;
   quantity?: number;
   price?: PriceObject;
   stock_method?: string;
@@ -89,9 +109,16 @@ export interface LineItem {
   uid_order?: string | null;
 }
 
-/** A pre-tax line item with a full price object (rental, sale, service, surcharge, replacement). */
+/**
+ * A pre-tax line item with a full price object — every type the contract table
+ * marks `pricing: "pre_tax"`.
+ *
+ * The member list is DERIVED from `ITEM_CONTRACTS`, not written out. It used to
+ * be the literal `"rental" | "sale" | "service" | "surcharge" | "replacement"`,
+ * which made this a sixth place to remember when an item type was added.
+ */
 export interface PreTaxLineItem extends LineItem {
-  type: "rental" | "sale" | "service" | "surcharge" | "replacement";
+  type: PreTaxItemType;
   quantity: number;
   price: PriceObject;
 }
@@ -106,13 +133,50 @@ export interface PreTaxLineItem extends LineItem {
  * its own pass in `calculateOrderTotals`.
  */
 export interface TransactionFeeLineItem extends LineItem {
-  type: "transaction_fee";
+  type: FromTotalItemType;
   quantity: number;
   price: PriceObject;
 }
 
 /** Any item that has pricing — pre-tax or transaction fee. */
 export type PriceableLineItem = PreTaxLineItem | TransactionFeeLineItem;
+
+/**
+ * The price fields the pricing pipeline actually READS — deliberately narrower
+ * than the stored {@link PriceObject}.
+ *
+ * `taxes` needs only a `uid`, because the name/rate/type/amount are what
+ * `calculateItemTax` resolves and computes; `subtotal`, `subtotal_discounted`,
+ * `total` and `taxes_base` are pricing's OUTPUT and are never read as input.
+ *
+ * That is not a convenience: it is the shape an order-input item genuinely
+ * arrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is
+ * `{ uid }[]`). Typing the pricing entry points here is what lets a writer price
+ * an item it has not built yet, instead of casting the input through
+ * `as unknown as LineItem` and claiming a stored price it does not have —
+ * which is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path.
+ */
+export interface PricingPrice {
+  base?: number;
+  formula?: PriceFormulaType;
+  chargeable_days?: number | null;
+  discount?: { rate: number; type: RateType } | null;
+  taxes?: readonly { uid: string }[];
+}
+
+/**
+ * The item surface the pricing pipeline reads: a type (to look up the contract),
+ * a quantity, and a {@link PricingPrice}. Both a stored {@link LineItem} and an
+ * order-input item satisfy it.
+ */
+export interface PricingItem {
+  type: ItemTypeType;
+  quantity?: number;
+  price?: PricingPrice | null;
+}
+
+/** A {@link PricingItem} that has passed {@link isPreTaxPricingItem}. */
+export type PreTaxPricingItem = PricingItem & { quantity: number; price: PricingPrice };
 
 /** @see {@link OrderDocTotalsType} from `@cfs/core/schemas` */
 export type OrderTotals = OrderDocTotalsType;
@@ -389,9 +453,11 @@ export function buildQueryByDates(
 // added to all three (and to the 11 rival billability predicates across the
 // three repos) to be priced correctly. `pricing` is the one place that decides.
 //
-// An unrecognized `type` has no contract and every predicate answers `false`.
-// The loose `LineItem` shadow types `type` as `string` (see W3), so that case is
-// reachable; it was previously TRUE for `isPriceableItem`.
+// An unrecognized `type` has no contract and every predicate answers `false`
+// (it was previously TRUE for `isPriceableItem`). `LineItem.type` is now
+// `ItemTypeType` rather than `string`, so a caller cannot reach that branch
+// through the type system — but the runtime check stays, because these items
+// come off Firestore documents and a type predicate is not a parse.
 
 /**
  * Determine whether a line item is priceable (has a price object, not a structural item).
@@ -419,6 +485,19 @@ export function isTransactionFeeItem(item: LineItem): item is TransactionFeeLine
  * Standalone predicate (not composed) because TS doesn't support negated predicates.
  */
 export function isPreTaxItem(item: LineItem): item is PreTaxLineItem {
+  if (!item || typeof item !== "object") return false;
+  if (itemContract(item.type)?.pricing !== "pre_tax") return false;
+  if (!item.price || typeof item.price !== "object") return false;
+  return true;
+}
+
+/**
+ * {@link isPreTaxItem} at the {@link PricingItem} surface — the same three
+ * checks, narrowing to a shape the pricing pipeline can read rather than to a
+ * stored line item. Used by the three pricing entry points so they accept an
+ * order-input item without being handed a stored price that does not exist yet.
+ */
+export function isPreTaxPricingItem(item: PricingItem): item is PreTaxPricingItem {
   if (!item || typeof item !== "object") return false;
   if (itemContract(item.type)?.pricing !== "pre_tax") return false;
   if (!item.price || typeof item.price !== "object") return false;
@@ -473,9 +552,9 @@ const toCents = (money: number) => BigInt(Math.round(money * 100));
  * applies above 5 chargeable days.
  */
 export function calculateItemSubtotal(
-  item: LineItem,
+  item: PricingItem,
 ): { subtotal: number; subtotal_discounted: number } {
-  if (!isPreTaxItem(item)) {
+  if (!isPreTaxPricingItem(item)) {
     throw new Error(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
@@ -489,7 +568,7 @@ export function calculateItemSubtotal(
  * directly, because "which item type is this" is the caller's question.
  */
 function perUnitSubtotal(
-  price: PriceObject,
+  price: PricingPrice,
   itemQuantity: number,
 ): { subtotal: number; subtotal_discounted: number } {
   const { base = 0, formula, chargeable_days = null, discount } = price;
@@ -617,10 +696,10 @@ export function computeItemTaxAmount(
  * Returns a PriceModifier[] with computed amounts.
  */
 export function calculateItemTax(
-  item: LineItem,
+  item: PricingItem,
   taxes: Tax[],
 ): PriceModifier[] {
-  if (!isPreTaxItem(item)) {
+  if (!isPreTaxPricingItem(item)) {
     throw new Error(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
@@ -629,7 +708,7 @@ export function calculateItemTax(
   const { subtotal_discounted } = calculateItemSubtotal(item);
   const quantity = item.quantity;
 
-  return item.price.taxes.map((itemTax) => {
+  return (item.price.taxes ?? []).map((itemTax) => {
     const taxDoc = taxes.find((t) => t.uid === itemTax.uid);
     if (!taxDoc) {
       throw new Error("Unknown tax uid: " + itemTax.uid);
@@ -650,10 +729,10 @@ export function calculateItemTax(
  * Runs the full pipeline: subtotal → discount → taxes → total.
  */
 export function calculateItemPrice(
-  item: LineItem,
+  item: PricingItem,
   taxes: Tax[],
 ): { subtotal: number; subtotal_discounted: number; discount: Discount | null; taxes: PriceModifier[]; total: number } {
-  if (!isPreTaxItem(item)) {
+  if (!isPreTaxPricingItem(item)) {
     throw new Error(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
@@ -968,14 +1047,31 @@ export function calculateReplacementTotals(
 export const ORDER_ITEM_LEVELS = ["destination", "group"] as const;
 
 /**
+ * The item surface the structural/path helpers read: identity, type, and path.
+ *
+ * Narrower than {@link LineItem} deliberately — these helpers never look at
+ * `name`, `price` or `quantity`, and callers legitimately hold items that have
+ * none of them yet (api-cloudrun's CRMS `ItemLike` is exactly this shape). Typing
+ * them at `LineItem` is what forced `as unknown as LineItem[]` at those sites.
+ */
+export interface StructuralItem {
+  uid: string;
+  type: ItemTypeType;
+  path?: string[];
+}
+
+/**
  * Build a set of structural item uids (dest/group) from items array.
  * Used to distinguish structural path elements from product parent refs.
  *
  * Order-shaped by default. `computeItemPaths` does NOT call this — it derives
  * the set from whichever `levels` it was handed, so an invoice's `order`
- * dividers count as structural there too.
+ * dividers count as structural there too. That asymmetry is why this keeps its
+ * own two-type test rather than reading `ITEM_CONTRACTS[type].kind`: switching
+ * to the contract would silently make `order` dividers structural here, for
+ * every invoice caller.
  */
-export function getStructuralUids(items: LineItem[]): Set<string> {
+export function getStructuralUids(items: StructuralItem[]): Set<string> {
   return new Set(
     items.filter((i) => i.type === "destination" || i.type === "group").map((i) => i.uid),
   );
@@ -985,7 +1081,7 @@ export function getStructuralUids(items: LineItem[]): Set<string> {
  * Get the parent product uid from an item's path.
  * Returns null for non-components (where path.at(-2) is a structural uid or absent).
  */
-export function getParentProductUid(item: LineItem, structuralUids: Set<string>): string | null {
+export function getParentProductUid(item: StructuralItem, structuralUids: Set<string>): string | null {
   const secondToLast = item.path?.at(-2);
   if (!secondToLast) return null;
   if (structuralUids.has(secondToLast)) return null;

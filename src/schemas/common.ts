@@ -611,6 +611,65 @@ const _lineParity: _LineParity = true;
 void _lineParity;
 
 /**
+ * The `pricing: "pre_tax"` members — every type that counts INTO the document
+ * subtotal.
+ *
+ * Derived from {@link ITEM_CONTRACTS} rather than listed. A hand-written copy of
+ * this union is exactly the drift the parity assertions above exist to prevent,
+ * and `@cfs/core/utils/orders` carried one — `PreTaxLineItem["type"]` was the
+ * literal list `"rental" | "sale" | "service" | "surcharge" | "replacement"`,
+ * a sixth place to remember when a type is added.
+ */
+export type PreTaxItemType = {
+  [K in ItemTypeType]: typeof ITEM_CONTRACTS_INNER[K]["pricing"] extends "pre_tax" ? K : never;
+}[ItemTypeType];
+
+/**
+ * The `pricing: "from_total"` members — priced FROM the document total rather
+ * than into it, which is what makes a `percent_of_total` formula legal on them.
+ */
+export type FromTotalItemType = {
+  [K in ItemTypeType]: typeof ITEM_CONTRACTS_INNER[K]["pricing"] extends "from_total" ? K : never;
+}[ItemTypeType];
+
+/** The `kind: "divider"` members — the structural types that organize an array. */
+export type DividerItemType = {
+  [K in ItemTypeType]: typeof ITEM_CONTRACTS_INNER[K]["kind"] extends "divider" ? K : never;
+}[ItemTypeType];
+
+/**
+ * Whether an item type is a billable line rather than a structural divider.
+ *
+ * The ONE answer to a question that was previously answered by hand in five
+ * modules as `type !== "destination" && type !== "group"` — sometimes with
+ * `&& type !== "order"` (correct for invoices, where an `order` divider exists)
+ * and sometimes with `&& type !== "transaction_fee"`, which is a **different
+ * question**: see {@link isFulfillableItemType}.
+ *
+ * Takes a `string` because callers hold item types from loosely-typed sources.
+ * A value outside {@link ITEM_TYPES} has no contract and answers `false`.
+ */
+export function isLineItemType(type: string): type is DocLineItemTypeType {
+  return itemContract(type)?.kind === "line";
+}
+
+/** Whether an item type is a structural divider — the complement of {@link isLineItemType}. */
+export function isDividerItemType(type: string): type is DividerItemType {
+  return itemContract(type)?.kind === "divider";
+}
+
+/**
+ * Whether an item type can be picked off a shelf — the `fulfillable` axis.
+ *
+ * NOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is
+ * not fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`
+ * drew exactly that distinction by hand and read as if they disagreed.
+ */
+export function isFulfillableItemType(type: string): type is FulfillableItemType {
+  return itemContract(type)?.fulfillable === true;
+}
+
+/**
  * Line item types a fulfillment carries — the `fulfillable: true` members.
  * `transaction_fee` is excluded because a fee has no stock and is never picked
  * off a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}

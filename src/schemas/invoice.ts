@@ -27,6 +27,7 @@ import {
   InvoiceStatusEnum,
   type TaxProfileType,
   TimestampFields,
+  isLineItemType,
 } from "./common.ts";
 import {
   Discount,
@@ -194,9 +195,18 @@ export const InvoiceDocItem: z.ZodType<InvoiceDocItemType> = z.discriminatedUnio
   InvoiceDocOrderItemInner,
 ]);
 
-/** Type guard that narrows an invoice doc item to a billable line item (excludes structural dividers). */
+/**
+ * Type guard that narrows an invoice doc item to a billable line item (excludes
+ * structural dividers).
+ *
+ * The narrowing target is invoice-specific, but the DECISION is not: it is
+ * `ITEM_CONTRACTS[type].kind`, shared with `isLineItem` in `order.ts`. Written
+ * out by hand this read `!== "destination" && !== "group" && !== "order"` — one
+ * clause longer than the order guard, which is exactly the kind of difference
+ * that looks like a bug and is not.
+ */
 export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem {
-  return item.type !== "destination" && item.type !== "group" && item.type !== "order";
+  return isLineItemType(item.type);
 }
 
 // ── Totals ───────────────────────────────────────────────────────

@@ -32,6 +32,8 @@ import {
   type TaxProfileType,
   NameField,
   TimestampFields,
+  isFulfillableItemType,
+  isLineItemType,
 } from "./common.ts";
 
 export const ORDER_STATUSES = [
@@ -679,7 +681,27 @@ export type OrderDocItemType = OrderDocLineItemType | OrderDocDestinationItemTyp
  * wrong kind.
  */
 export function isLineItem(item: OrderDocItemType): item is OrderDocLineItemType {
-  return item.type !== "destination" && item.type !== "group";
+  return isLineItemType(item.type);
+}
+
+/**
+ * Narrows an order doc item to one that can be PICKED — the `fulfillable` axis,
+ * which additionally excludes `transaction_fee`.
+ *
+ * Lives beside {@link isLineItem} because the two are constantly confused: a fee
+ * is a line (it is billed) and is not fulfillable (there is nothing on a shelf).
+ * `isFulfillableItemType` alone cannot do this job — a type predicate on
+ * `item.type` narrows the property, not the union — which is why both
+ * `services/fulfillment.ts` and `services/fulfillmentEdits.ts` had grown their
+ * own item-level copy.
+ *
+ * The narrowing is deliberately imprecise in the same way `isLineItem` is: it
+ * reports `OrderDocLineItemType`, whose `type` still nominally includes
+ * `transaction_fee`. Every field a caller reads after this guard is shared
+ * across all line types, so the imprecision costs nothing.
+ */
+export function isFulfillableItem(item: OrderDocItemType): item is OrderDocLineItemType {
+  return isFulfillableItemType(item.type);
 }
 
 /** Denormalized organization snapshot on the order document. */

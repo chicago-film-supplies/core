@@ -101,6 +101,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // disagree with the doc it renders — the same trap as `allocation` above.
     "calculateTransactionFeeAmount", // fee arithmetic — totals pass only
     "costTransactionFees", // fee arithmetic over an array — totals pass only
+    // `isPreTaxItem` at the PricingItem surface — the guard the three pricing
+    // entry points use so a writer can price an order-INPUT item. A template
+    // renders stored items and has `isPreTaxItem` for them; this one exists for
+    // the write path and would only invite a template to narrow the wrong shape.
+    "isPreTaxPricingItem",
   ],
   invoices: [
     // ── Xero integration ──
