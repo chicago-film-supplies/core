@@ -18,8 +18,6 @@ import {
   type DocLineItemTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  ItemTypeEnum,
-  type ItemTypeType,
   PriceFormulaEnum,
   type PriceFormulaType,
   TaxProfileEnum,
@@ -46,13 +44,12 @@ import {
 export { type InvoiceStatusType } from "./common.ts";
 const InvoiceStatus: z.ZodType<InvoiceStatusType> = InvoiceStatusEnum;
 
-// Invoice item types are a superset of order item types — adds the "order"
-// divider. That superset is `ITEM_TYPES`, derived in `common.ts` from
-// `DOC_ITEM_TYPES`, so this is an alias rather than a fourth hand-written copy
-// of the vocabulary. Billable types (DOC_LINE_ITEM_TYPES) are shared, unchanged.
-/** Possible invoice item types (input — includes structural dividers + order divider). */
-export type InvoiceItemTypeType = ItemTypeType;
-const InvoiceItemTypeEnum: z.ZodType<InvoiceItemTypeType> = ItemTypeEnum;
+// Invoice item types are a superset of order item types — they add the "order"
+// divider. That superset had a name here (`InvoiceItemTypeType`, an alias of
+// `ITEM_TYPES`) for exactly one purpose: typing the flat input schema's
+// `type` field. Both input unions are discriminated now, so each arm names its
+// own literal and the combined enum has no consumer left. The vocabulary itself
+// still lives in `common.ts` (`ITEM_TYPES` / `ITEM_CONTRACTS`).
 
 const PAYMENT_STATUSES = ["active", "deleted"] as const;
 
@@ -419,39 +416,157 @@ const InvoiceItemInputPriceSchema: z.ZodType<InvoiceItemInputPrice> = z.object({
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),
 });
 
-/** Input version of an invoice item (covers line items, groups, destinations, and order dividers). */
-export interface InvoiceItemInputType {
+/**
+ * A billable invoice line as a client sends it — the input mirror of
+ * `InvoiceDocLineItemSchema`.
+ *
+ * `uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The
+ * flat schema this replaces accepted all three on any item; `buildInvoiceItems`
+ * reads the destination pair only on a destination divider and reads `uid_order`
+ * nowhere at all (the order divider's identity IS the source order's uid — the
+ * transitional field was retired in Phase D, and the manager stopped sending
+ * it). Prod agrees: 0 of 8,744 invoice line items carry any of the three.
+ */
+export interface InvoiceItemInputLineType {
   uid: string;
-  type?: InvoiceItemTypeType;
+  type: DocLineItemTypeType;
   name?: string;
   description?: string;
   quantity?: number;
   price?: InvoiceItemInputPrice;
   path?: string[];
-  uid_order?: string;
-  uid_delivery?: string;
-  uid_collection?: string;
   coa_revenue?: COARevenueType | null;
   tracking_category?: string | null;
 }
 
-const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z.object({
+// Un-annotated for `_zod.propValues`, `z.object` so unknown keys are stripped
+// rather than rejected — see the note on `OrderItemLineInner`.
+const InvoiceItemInputLineInner = z.object({
   uid: ItemUid,
-  type: InvoiceItemTypeEnum.optional(),
-  // Catalog product name or divider label — not customer data. See
-  // `OrderDocLineItem.name`.
+  type: z.enum(DOC_LINE_ITEM_TYPES),
+  // Catalog product name — not customer data. See `OrderDocLineItem.name`.
   name: z.string().meta({ pii: "none" }).optional(),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   description: z.string().meta({ pii: "none" }).optional(),
   quantity: z.number().optional(),
   price: InvoiceItemInputPriceSchema.optional(),
   path: z.array(ItemUid).optional(),
-  uid_order: FirestoreId.optional(),
-  uid_delivery: FirestoreId.optional(),
-  uid_collection: FirestoreId.optional(),
   coa_revenue: COARevenueEnum.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
+}).superRefine(checkItemPriceFormula);
+
+/** Zod schema for a billable invoice line (input). */
+export const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType> = InvoiceItemInputLineInner;
+
+/** A destination divider as a client sends it. */
+export interface InvoiceItemInputDestinationType {
+  uid: string;
+  type: "destination";
+  name?: string;
+  description?: string;
+  path?: string[];
+  uid_delivery?: string;
+  uid_collection?: string;
+}
+
+// `z.strictObject`, unlike the line arm above — see the note on
+// `OrderItemDestinationInner`: a divider has no extra stored fields for a client
+// to ship back, so strictness turns "a divider carrying a price" into a 400 that
+// names the key rather than a silent strip.
+const InvoiceItemInputDestinationInner = z.strictObject({
+  uid: ItemUid,
+  type: z.literal("destination"),
+  // Venue label, not a person. See `DestinationDividerArm.name`.
+  name: z.string().meta({ pii: "none" }).optional(),
+  description: z.string().meta({ pii: "none" }).optional(),
+  path: z.array(ItemUid).optional(),
+  uid_delivery: FirestoreId.optional(),
+  uid_collection: FirestoreId.optional(),
 });
+
+/** Zod schema for a destination divider (invoice input). */
+export const InvoiceItemInputDestination: z.ZodType<InvoiceItemInputDestinationType> =
+  InvoiceItemInputDestinationInner;
+
+/** A group divider as a client sends it. */
+export interface InvoiceItemInputGroupType {
+  uid: string;
+  type: "group";
+  name?: string;
+  description?: string;
+  path?: string[];
+}
+
+// Strict for the same reason as the destination arm above.
+const InvoiceItemInputGroupInner = z.strictObject({
+  uid: ItemUid,
+  type: z.literal("group"),
+  // Section header drawn from the catalog. See `GroupDividerArm.name`.
+  name: z.string().meta({ pii: "none" }).optional(),
+  description: z.string().meta({ pii: "none" }).optional(),
+  path: z.array(ItemUid).optional(),
+});
+
+/** Zod schema for a group divider (invoice input). */
+export const InvoiceItemInputGroup: z.ZodType<InvoiceItemInputGroupType> = InvoiceItemInputGroupInner;
+
+/** An order divider as a client sends it — invoice-only, scopes items to a source order. */
+export interface InvoiceItemInputOrderType {
+  uid: string;
+  type: "order";
+  name?: string;
+  description?: string;
+  path?: string[];
+}
+
+// Strict for the same reason as the destination arm above.
+const InvoiceItemInputOrderInner = z.strictObject({
+  // The divider's identity IS the source order's doc id — see
+  // `InvoiceDocOrderItem`.
+  uid: ItemUid,
+  type: z.literal("order"),
+  name: z.string().meta({ pii: "none" }).optional(),
+  description: z.string().meta({ pii: "none" }).optional(),
+  path: z.array(ItemUid).optional(),
+});
+
+/** Zod schema for an order divider (invoice input). */
+export const InvoiceItemInputOrder: z.ZodType<InvoiceItemInputOrderType> = InvoiceItemInputOrderInner;
+
+/** Input version of an invoice item — a line, or one of the three dividers. */
+export type InvoiceItemInputType =
+  | InvoiceItemInputLineType
+  | InvoiceItemInputDestinationType
+  | InvoiceItemInputGroupType
+  | InvoiceItemInputOrderType;
+
+/**
+ * Zod schema for an invoice item (input) — discriminated on `type`, mirroring
+ * the stored {@link InvoiceDocItem} union.
+ *
+ * `type` was itself `.optional()` here, which is why `buildInvoiceItems`
+ * carried two `item.type ?? "rental"` defaults — and `rental` is the one type
+ * whose stored contract demands a `price.replacement` that path never supplies,
+ * so an item that omitted `type` was defaulted into the single most restrictive
+ * shape. It is required now; the manager has always sent it (0 of 10,603 stored
+ * invoice items lack one).
+ *
+ * The line arm comes first for the same `getInitialValues` reason as
+ * {@link OrderItem}, and carries `checkItemPriceFormula` for the same reason —
+ * it is the one contract axis an invoice price shape can answer (no
+ * `stock_method`, no `price.replacement`; running the full check would reject
+ * all 7,076 prod invoice rentals).
+ *
+ * NOTE there is deliberately no "first item must be a destination" refine on the
+ * invoice side, unlike `CreateOrderInput`: 28 prod invoices legitimately start
+ * with a line item — the flat CRMS invoices with no order divider at all.
+ */
+const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z.discriminatedUnion("type", [
+  InvoiceItemInputLineInner,
+  InvoiceItemInputDestinationInner,
+  InvoiceItemInputGroupInner,
+  InvoiceItemInputOrderInner,
+]);
 
 /** Input schema for POST /invoices — create an invoice from orders. */
 export interface CreateInvoiceInputType {

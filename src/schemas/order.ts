@@ -9,8 +9,7 @@ import {
   Address,
   type AddressType,
   checkItemContract,
-  DocItemTypeEnum,
-  type DocItemTypeType,
+  checkItemPriceFormula,
   DOC_LINE_ITEM_TYPES,
   type DocLineItemTypeType,
   FirestoreTimestamp,
@@ -85,8 +84,10 @@ export function isValidOrderStatusTransition(
 }
 
 // Item type constants imported from common.ts:
-// DocItemTypeType / DocItemTypeEnum — all types including structural dividers (input schemas)
-// DocLineItemTypeType / DocLineItemTypeEnum — billable types only (doc schemas)
+// DOC_LINE_ITEM_TYPES / DocLineItemTypeType — the billable types, the line arm of
+// both the input union (`OrderItem`) and the stored one (`OrderDocItem`). The
+// divider types are literals on their own arms rather than members of a
+// combined enum, which is what discriminates the unions.
 
 const INCLUSION_TYPES_NULLABLE = ["default", "mandatory", "optional"] as const;
 
@@ -409,11 +410,23 @@ export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
 });
 
 /**
- * An individual order item (rental, replacement, sale, service, surcharge, group header, or destination).
+ * A billable order line as a client sends it — the input mirror of
+ * `OrderDocLineItem`.
+ *
+ * Deliberately permissive about what may be OMITTED: the server fills `name`,
+ * `stock_method` and the whole price from the backing product doc, and a custom
+ * line supplies them itself. What it is no longer permissive about is what a
+ * line may CLAIM — see {@link OrderItem} for why the arms exist.
+ *
+ * `uid_delivery` / `uid_collection` are absent here on purpose. The flat schema
+ * this replaces accepted both on any item, and `buildOrderLineItem` has never
+ * propagated them to a line — prod agrees: 0 of 9,303 order line items carry
+ * either key. They belong to the destination divider, which is where they now
+ * live exclusively.
  */
-export interface OrderItemType {
+export interface OrderItemLineType {
   uid: string;
-  type: DocItemTypeType;
+  type: DocLineItemTypeType;
   name?: string;
   description?: string;
   quantity?: number;
@@ -422,21 +435,22 @@ export interface OrderItemType {
   path: string[];
   inclusion_type?: InclusionTypeType | null;
   zero_priced?: boolean | null;
-  uid_delivery?: string;
-  uid_collection?: string;
   order_number?: number;
   uid_order?: string;
 }
 
-/** Zod schema for an individual order item (input). */
-export const OrderItem: z.ZodType<OrderItemType> = z.object({
+// Un-annotated for `_zod.propValues` — see `_dividers.ts`. `z.object`, not
+// `z.strictObject`: an input has always stripped unknown keys and tightening
+// that would 400 every client that ships a stored item back verbatim (the
+// manager ships `items` whole, so a line arrives carrying `crms_id`,
+// `taxes_base` and computed price fields).
+const OrderItemLineInner = z.object({
   uid: ItemUid,
-  type: DocItemTypeEnum,
-  // Catalog product name, section header or venue label depending on `type` —
-  // not customer data in any of them. See `OrderDocLineItem.name`.
+  type: z.enum(DOC_LINE_ITEM_TYPES),
+  // Catalog product name — not customer data. See `OrderDocLineItem.name`.
   name: z.string().meta({ pii: "none" }).optional(),
-  // Line-item text — equipment, service and destination wording, of a piece with
-  // a PO number or a product name. Not customer data. See the note on
+  // Line-item text — equipment and service wording, of a piece with a PO number
+  // or a product name. Not customer data. See the note on
   // `OrderDocLineItem.description` for why this is tagged rather than left bare.
   description: z.string().meta({ pii: "none" }).optional(),
   quantity: z.int().optional(),
@@ -445,11 +459,99 @@ export const OrderItem: z.ZodType<OrderItemType> = z.object({
   path: z.array(ItemUid),
   inclusion_type: InclusionTypeEnum.nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
-  uid_delivery: FirestoreId.optional(),
-  uid_collection: FirestoreId.optional(),
   order_number: z.number().optional(),
   uid_order: FirestoreId.optional(),
+}).superRefine(checkItemPriceFormula);
+
+/** Zod schema for a billable order line (input). */
+export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner;
+
+/** A destination divider as a client sends it. */
+export interface OrderItemDestinationType {
+  uid: string;
+  type: "destination";
+  name?: string;
+  description?: string;
+  path: string[];
+  uid_delivery?: string;
+  uid_collection?: string;
+}
+
+// `z.strictObject`, unlike the line arm above — the asymmetry is the point.
+// A divider's stored shape has no extra fields for a client to ship back, so
+// strictness here costs nothing and turns "a divider carrying a price" into a
+// 400 naming the offending key instead of a silent strip. The line arm cannot
+// afford the same: a client that PUTs a stored line back verbatim brings
+// `crms_id`, `taxes_base` and the computed price fields with it.
+const OrderItemDestinationInner = z.strictObject({
+  uid: ItemUid,
+  type: z.literal("destination"),
+  // Venue label, not a person. See `DestinationDividerArm.name`.
+  name: z.string().meta({ pii: "none" }).optional(),
+  description: z.string().meta({ pii: "none" }).optional(),
+  path: z.array(ItemUid),
+  uid_delivery: FirestoreId.optional(),
+  uid_collection: FirestoreId.optional(),
 });
+
+/** Zod schema for a destination divider (input). */
+export const OrderItemDestination: z.ZodType<OrderItemDestinationType> = OrderItemDestinationInner;
+
+/** A group divider as a client sends it. */
+export interface OrderItemGroupType {
+  uid: string;
+  type: "group";
+  name?: string;
+  description?: string;
+  path: string[];
+}
+
+// Strict for the same reason as the destination arm above.
+const OrderItemGroupInner = z.strictObject({
+  uid: ItemUid,
+  type: z.literal("group"),
+  // Section header drawn from the catalog. See `GroupDividerArm.name`.
+  name: z.string().meta({ pii: "none" }).optional(),
+  description: z.string().meta({ pii: "none" }).optional(),
+  path: z.array(ItemUid),
+});
+
+/** Zod schema for a group divider (input). */
+export const OrderItemGroup: z.ZodType<OrderItemGroupType> = OrderItemGroupInner;
+
+/** An individual order item (input) — a line, or one of the two dividers. */
+export type OrderItemType = OrderItemLineType | OrderItemDestinationType | OrderItemGroupType;
+
+/**
+ * Zod schema for an individual order item (input) — discriminated on `type`,
+ * mirroring the stored {@link OrderDocItem} union.
+ *
+ * This was one flat `z.object` where every field but `uid`/`type`/`path` was
+ * optional, so `PUT /orders` accepted a `destination` divider carrying a
+ * `quantity` and a `price`. Nothing stripped them: `buildOrderLineItem` passes a
+ * divider through verbatim, so the payload reached `validateBeforeWrite` and
+ * failed there as `unrecognized_keys` against the stored strict arm — a layer
+ * too late, and phrased as a storage complaint rather than "a divider has no
+ * price". Now it is unwritable at the boundary. Prod says nothing relied on it:
+ * 0 of 3,635 order dividers carry any line-only key.
+ *
+ * **The line arm comes first, and the order is load-bearing.**
+ * `getInitialValues` resolves a union by taking its first arm, and the manager
+ * seeds a new order line with `getInitialValues(OrderItem)`. Putting a divider
+ * first would silently reshape every staged line.
+ *
+ * Only `checkItemPriceFormula` is attached, not the full `checkItemContract`.
+ * The `replacement` axis keys on `stock_method`, which an order INPUT does not
+ * own — the product does, and the server reads it there — so enforcing it here
+ * would reject a legal payload for an unstocked product. Storage already
+ * enforces it against the resolved `stock_method`. Tighten storage, not the
+ * input.
+ */
+export const OrderItem: z.ZodType<OrderItemType> = z.discriminatedUnion("type", [
+  OrderItemLineInner,
+  OrderItemDestinationInner,
+  OrderItemGroupInner,
+]);
 
 /**
  * Input schema for POST /orders — what the endpoint accepts.

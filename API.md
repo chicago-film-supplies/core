@@ -3074,33 +3074,114 @@ interface InvoiceDocTotals {
 type InvoiceIssued = EventEnvelope<Invoice> & typeLiteral;
 ```
 
-### `InvoiceItemInputType`
+### `InvoiceItemInputDestination`
 
-Input version of an invoice item (covers line items, groups, destinations, and order dividers).
+Zod schema for a destination divider (invoice input).
 
 ```ts
-interface InvoiceItemInputType {
+const InvoiceItemInputDestination: z.ZodType<InvoiceItemInputDestinationType>;
+```
+
+### `InvoiceItemInputDestinationType`
+
+A destination divider as a client sends it.
+
+```ts
+interface InvoiceItemInputDestinationType {
   uid: string;
-  type?: InvoiceItemTypeType;
+  type: "destination";
+  name?: string;
+  description?: string;
+  path?: string[];
+  uid_delivery?: string;
+  uid_collection?: string;
+}
+```
+
+### `InvoiceItemInputGroup`
+
+Zod schema for a group divider (invoice input).
+
+```ts
+const InvoiceItemInputGroup: z.ZodType<InvoiceItemInputGroupType>;
+```
+
+### `InvoiceItemInputGroupType`
+
+A group divider as a client sends it.
+
+```ts
+interface InvoiceItemInputGroupType {
+  uid: string;
+  type: "group";
+  name?: string;
+  description?: string;
+  path?: string[];
+}
+```
+
+### `InvoiceItemInputLine`
+
+Zod schema for a billable invoice line (input).
+
+```ts
+const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType>;
+```
+
+### `InvoiceItemInputLineType`
+
+A billable invoice line as a client sends it — the input mirror of
+`InvoiceDocLineItemSchema`.
+
+`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The
+flat schema this replaces accepted all three on any item; `buildInvoiceItems`
+reads the destination pair only on a destination divider and reads `uid_order`
+nowhere at all (the order divider's identity IS the source order's uid — the
+transitional field was retired in Phase D, and the manager stopped sending
+it). Prod agrees: 0 of 8,744 invoice line items carry any of the three.
+
+```ts
+interface InvoiceItemInputLineType {
+  uid: string;
+  type: DocLineItemTypeType;
   name?: string;
   description?: string;
   quantity?: number;
   price?: InvoiceItemInputPrice;
   path?: string[];
-  uid_order?: string;
-  uid_delivery?: string;
-  uid_collection?: string;
   coa_revenue?: COARevenueType | null;
   tracking_category?: string | null;
 }
 ```
 
-### `InvoiceItemTypeType`
+### `InvoiceItemInputOrder`
 
-Possible invoice item types (input — includes structural dividers + order divider).
+Zod schema for an order divider (invoice input).
 
 ```ts
-type InvoiceItemTypeType = ItemTypeType;
+const InvoiceItemInputOrder: z.ZodType<InvoiceItemInputOrderType>;
+```
+
+### `InvoiceItemInputOrderType`
+
+An order divider as a client sends it — invoice-only, scopes items to a source order.
+
+```ts
+interface InvoiceItemInputOrderType {
+  uid: string;
+  type: "order";
+  name?: string;
+  description?: string;
+  path?: string[];
+}
+```
+
+### `InvoiceItemInputType`
+
+Input version of an invoice item — a line, or one of the three dividers.
+
+```ts
+type InvoiceItemInputType = InvoiceItemInputLineType | InvoiceItemInputDestinationType | InvoiceItemInputGroupType | InvoiceItemInputOrderType;
 ```
 
 ### `InvoicePayment`
@@ -4440,20 +4521,108 @@ const OrderDocumentSchema: z.ZodType<OrderDocument>;
 
 ### `OrderItem`
 
-Zod schema for an individual order item (input).
+Zod schema for an individual order item (input) — discriminated on `type`,
+mirroring the stored {@link OrderDocItem} union.
+
+This was one flat `z.object` where every field but `uid`/`type`/`path` was
+optional, so `PUT /orders` accepted a `destination` divider carrying a
+`quantity` and a `price`. Nothing stripped them: `buildOrderLineItem` passes a
+divider through verbatim, so the payload reached `validateBeforeWrite` and
+failed there as `unrecognized_keys` against the stored strict arm — a layer
+too late, and phrased as a storage complaint rather than "a divider has no
+price". Now it is unwritable at the boundary. Prod says nothing relied on it:
+0 of 3,635 order dividers carry any line-only key.
+
+**The line arm comes first, and the order is load-bearing.**
+`getInitialValues` resolves a union by taking its first arm, and the manager
+seeds a new order line with `getInitialValues(OrderItem)`. Putting a divider
+first would silently reshape every staged line.
+
+Only `checkItemPriceFormula` is attached, not the full `checkItemContract`.
+The `replacement` axis keys on `stock_method`, which an order INPUT does not
+own — the product does, and the server reads it there — so enforcing it here
+would reject a legal payload for an unstocked product. Storage already
+enforces it against the resolved `stock_method`. Tighten storage, not the
+input.
 
 ```ts
 const OrderItem: z.ZodType<OrderItemType>;
 ```
 
-### `OrderItemType`
+### `OrderItemDestination`
 
-An individual order item (rental, replacement, sale, service, surcharge, group header, or destination).
+Zod schema for a destination divider (input).
 
 ```ts
-interface OrderItemType {
+const OrderItemDestination: z.ZodType<OrderItemDestinationType>;
+```
+
+### `OrderItemDestinationType`
+
+A destination divider as a client sends it.
+
+```ts
+interface OrderItemDestinationType {
   uid: string;
-  type: DocItemTypeType;
+  type: "destination";
+  name?: string;
+  description?: string;
+  path: string[];
+  uid_delivery?: string;
+  uid_collection?: string;
+}
+```
+
+### `OrderItemGroup`
+
+Zod schema for a group divider (input).
+
+```ts
+const OrderItemGroup: z.ZodType<OrderItemGroupType>;
+```
+
+### `OrderItemGroupType`
+
+A group divider as a client sends it.
+
+```ts
+interface OrderItemGroupType {
+  uid: string;
+  type: "group";
+  name?: string;
+  description?: string;
+  path: string[];
+}
+```
+
+### `OrderItemLine`
+
+Zod schema for a billable order line (input).
+
+```ts
+const OrderItemLine: z.ZodType<OrderItemLineType>;
+```
+
+### `OrderItemLineType`
+
+A billable order line as a client sends it — the input mirror of
+`OrderDocLineItem`.
+
+Deliberately permissive about what may be OMITTED: the server fills `name`,
+`stock_method` and the whole price from the backing product doc, and a custom
+line supplies them itself. What it is no longer permissive about is what a
+line may CLAIM — see {@link OrderItem} for why the arms exist.
+
+`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema
+this replaces accepted both on any item, and `buildOrderLineItem` has never
+propagated them to a line — prod agrees: 0 of 9,303 order line items carry
+either key. They belong to the destination divider, which is where they now
+live exclusively.
+
+```ts
+interface OrderItemLineType {
+  uid: string;
+  type: DocLineItemTypeType;
   name?: string;
   description?: string;
   quantity?: number;
@@ -4462,11 +4631,17 @@ interface OrderItemType {
   path: string[];
   inclusion_type?: InclusionTypeType | null;
   zero_priced?: boolean | null;
-  uid_delivery?: string;
-  uid_collection?: string;
   order_number?: number;
   uid_order?: string;
 }
+```
+
+### `OrderItemType`
+
+An individual order item (input) — a line, or one of the two dividers.
+
+```ts
+type OrderItemType = OrderItemLineType | OrderItemDestinationType | OrderItemGroupType;
 ```
 
 ### `OrderSchema`
@@ -10456,6 +10631,108 @@ interface InvoiceDocTotals {
 }
 ```
 
+### `InvoiceItemInputDestination`
+
+Zod schema for a destination divider (invoice input).
+
+```ts
+const InvoiceItemInputDestination: z.ZodType<InvoiceItemInputDestinationType>;
+```
+
+### `InvoiceItemInputDestinationType`
+
+A destination divider as a client sends it.
+
+```ts
+interface InvoiceItemInputDestinationType {
+  uid: string;
+  type: "destination";
+  name?: string;
+  description?: string;
+  path?: string[];
+  uid_delivery?: string;
+  uid_collection?: string;
+}
+```
+
+### `InvoiceItemInputGroup`
+
+Zod schema for a group divider (invoice input).
+
+```ts
+const InvoiceItemInputGroup: z.ZodType<InvoiceItemInputGroupType>;
+```
+
+### `InvoiceItemInputGroupType`
+
+A group divider as a client sends it.
+
+```ts
+interface InvoiceItemInputGroupType {
+  uid: string;
+  type: "group";
+  name?: string;
+  description?: string;
+  path?: string[];
+}
+```
+
+### `InvoiceItemInputLine`
+
+Zod schema for a billable invoice line (input).
+
+```ts
+const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType>;
+```
+
+### `InvoiceItemInputLineType`
+
+A billable invoice line as a client sends it — the input mirror of
+`InvoiceDocLineItemSchema`.
+
+`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The
+flat schema this replaces accepted all three on any item; `buildInvoiceItems`
+reads the destination pair only on a destination divider and reads `uid_order`
+nowhere at all (the order divider's identity IS the source order's uid — the
+transitional field was retired in Phase D, and the manager stopped sending
+it). Prod agrees: 0 of 8,744 invoice line items carry any of the three.
+
+```ts
+interface InvoiceItemInputLineType {
+  uid: string;
+  type: DocLineItemTypeType;
+  name?: string;
+  description?: string;
+  quantity?: number;
+  price?: InvoiceItemInputPrice;
+  path?: string[];
+  coa_revenue?: COARevenueType | null;
+  tracking_category?: string | null;
+}
+```
+
+### `InvoiceItemInputOrder`
+
+Zod schema for an order divider (invoice input).
+
+```ts
+const InvoiceItemInputOrder: z.ZodType<InvoiceItemInputOrderType>;
+```
+
+### `InvoiceItemInputOrderType`
+
+An order divider as a client sends it — invoice-only, scopes items to a source order.
+
+```ts
+interface InvoiceItemInputOrderType {
+  uid: string;
+  type: "order";
+  name?: string;
+  description?: string;
+  path?: string[];
+}
+```
+
 ### `InvoiceItemInputPrice`
 
 Item price input — partial, server computes the rest.
@@ -10472,31 +10749,10 @@ interface InvoiceItemInputPrice {
 
 ### `InvoiceItemInputType`
 
-Input version of an invoice item (covers line items, groups, destinations, and order dividers).
+Input version of an invoice item — a line, or one of the three dividers.
 
 ```ts
-interface InvoiceItemInputType {
-  uid: string;
-  type?: InvoiceItemTypeType;
-  name?: string;
-  description?: string;
-  quantity?: number;
-  price?: InvoiceItemInputPrice;
-  path?: string[];
-  uid_order?: string;
-  uid_delivery?: string;
-  uid_collection?: string;
-  coa_revenue?: COARevenueType | null;
-  tracking_category?: string | null;
-}
-```
-
-### `InvoiceItemTypeType`
-
-Possible invoice item types (input — includes structural dividers + order divider).
-
-```ts
-type InvoiceItemTypeType = ItemTypeType;
+type InvoiceItemInputType = InvoiceItemInputLineType | InvoiceItemInputDestinationType | InvoiceItemInputGroupType | InvoiceItemInputOrderType;
 ```
 
 ### `InvoicePayment`
@@ -11416,20 +11672,108 @@ interface OrderDocTotalsType {
 
 ### `OrderItem`
 
-Zod schema for an individual order item (input).
+Zod schema for an individual order item (input) — discriminated on `type`,
+mirroring the stored {@link OrderDocItem} union.
+
+This was one flat `z.object` where every field but `uid`/`type`/`path` was
+optional, so `PUT /orders` accepted a `destination` divider carrying a
+`quantity` and a `price`. Nothing stripped them: `buildOrderLineItem` passes a
+divider through verbatim, so the payload reached `validateBeforeWrite` and
+failed there as `unrecognized_keys` against the stored strict arm — a layer
+too late, and phrased as a storage complaint rather than "a divider has no
+price". Now it is unwritable at the boundary. Prod says nothing relied on it:
+0 of 3,635 order dividers carry any line-only key.
+
+**The line arm comes first, and the order is load-bearing.**
+`getInitialValues` resolves a union by taking its first arm, and the manager
+seeds a new order line with `getInitialValues(OrderItem)`. Putting a divider
+first would silently reshape every staged line.
+
+Only `checkItemPriceFormula` is attached, not the full `checkItemContract`.
+The `replacement` axis keys on `stock_method`, which an order INPUT does not
+own — the product does, and the server reads it there — so enforcing it here
+would reject a legal payload for an unstocked product. Storage already
+enforces it against the resolved `stock_method`. Tighten storage, not the
+input.
 
 ```ts
 const OrderItem: z.ZodType<OrderItemType>;
 ```
 
-### `OrderItemType`
+### `OrderItemDestination`
 
-An individual order item (rental, replacement, sale, service, surcharge, group header, or destination).
+Zod schema for a destination divider (input).
 
 ```ts
-interface OrderItemType {
+const OrderItemDestination: z.ZodType<OrderItemDestinationType>;
+```
+
+### `OrderItemDestinationType`
+
+A destination divider as a client sends it.
+
+```ts
+interface OrderItemDestinationType {
   uid: string;
-  type: DocItemTypeType;
+  type: "destination";
+  name?: string;
+  description?: string;
+  path: string[];
+  uid_delivery?: string;
+  uid_collection?: string;
+}
+```
+
+### `OrderItemGroup`
+
+Zod schema for a group divider (input).
+
+```ts
+const OrderItemGroup: z.ZodType<OrderItemGroupType>;
+```
+
+### `OrderItemGroupType`
+
+A group divider as a client sends it.
+
+```ts
+interface OrderItemGroupType {
+  uid: string;
+  type: "group";
+  name?: string;
+  description?: string;
+  path: string[];
+}
+```
+
+### `OrderItemLine`
+
+Zod schema for a billable order line (input).
+
+```ts
+const OrderItemLine: z.ZodType<OrderItemLineType>;
+```
+
+### `OrderItemLineType`
+
+A billable order line as a client sends it — the input mirror of
+`OrderDocLineItem`.
+
+Deliberately permissive about what may be OMITTED: the server fills `name`,
+`stock_method` and the whole price from the backing product doc, and a custom
+line supplies them itself. What it is no longer permissive about is what a
+line may CLAIM — see {@link OrderItem} for why the arms exist.
+
+`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema
+this replaces accepted both on any item, and `buildOrderLineItem` has never
+propagated them to a line — prod agrees: 0 of 9,303 order line items carry
+either key. They belong to the destination divider, which is where they now
+live exclusively.
+
+```ts
+interface OrderItemLineType {
+  uid: string;
+  type: DocLineItemTypeType;
   name?: string;
   description?: string;
   quantity?: number;
@@ -11438,11 +11782,17 @@ interface OrderItemType {
   path: string[];
   inclusion_type?: InclusionTypeType | null;
   zero_priced?: boolean | null;
-  uid_delivery?: string;
-  uid_collection?: string;
   order_number?: number;
   uid_order?: string;
 }
+```
+
+### `OrderItemType`
+
+An individual order item (input) — a line, or one of the two dividers.
+
+```ts
+type OrderItemType = OrderItemLineType | OrderItemDestinationType | OrderItemGroupType;
 ```
 
 ### `OrderSchema`

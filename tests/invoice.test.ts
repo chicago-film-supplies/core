@@ -425,12 +425,21 @@ Deno.test("CreateInvoiceInput accepts order divider items", () => {
     organization: { uid: "org10000000000000000" },
     tax_profile: "tax_applied",
     items: [
-      { uid: "orderdiv100000000000", type: "order", name: "Order #1001", uid_order: "order100000000000000" },
+      { uid: "orderdiv100000000000", type: "order", name: "Order #1001" },
       { uid: "dest1000000000000000", type: "destination", name: "Venue", uid_delivery: "del10000000000000000", path: ["orderdiv100000000000"] },
       { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["orderdiv100000000000", "dest1000000000000000"] },
     ],
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, true);
+
+  // The transitional `uid_order` this test used to carry is now rejected rather
+  // than ignored. Phase D made the divider's identity the source order's uid;
+  // the field has had no reader since, and the manager stopped sending it.
+  const withRetiredField = {
+    ...input,
+    items: [{ ...input.items[0], uid_order: "order100000000000000" }],
+  };
+  assertEquals(CreateInvoiceInput.safeParse(withRetiredField).success, false);
 });
 
 Deno.test("UpdateInvoiceInput requires version", () => {
@@ -494,4 +503,82 @@ Deno.test("UpdatePaymentInput restricts status to active/deleted", () => {
   assertEquals(UpdatePaymentInput.safeParse({ status: "active", version: 0 }).success, true);
   assertEquals(UpdatePaymentInput.safeParse({ status: "deleted", version: 0 }).success, true);
   assertEquals(UpdatePaymentInput.safeParse({ status: "pending", version: 0 }).success, false);
+});
+
+// ── Invoice item input — the discriminated boundary ───────────────
+
+Deno.test("CreateInvoiceInput: an item must declare its type", () => {
+  // `type` was `.optional()`, which is why `buildInvoiceItems` carried two
+  // `item.type ?? "rental"` defaults — defaulting an under-specified item into
+  // the ONE type whose stored contract demands a `price.replacement`.
+  const bad = CreateInvoiceInput.safeParse({
+    uid: "newinv10000000000000",
+    query_by_orders: ["order100000000000000"],
+    organization: { uid: "org10000000000000000" },
+    tax_profile: "tax_applied",
+    items: [{ uid: "item1000000000000000", name: "Spot Light", quantity: 1 }],
+  });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].path, ["items", 0, "type"]);
+});
+
+Deno.test("CreateInvoiceInput: a divider cannot carry a price or a quantity", () => {
+  const bad = CreateInvoiceInput.safeParse({
+    uid: "newinv10000000000000",
+    query_by_orders: ["order100000000000000"],
+    organization: { uid: "org10000000000000000" },
+    tax_profile: "tax_applied",
+    items: [{ uid: "order100000000000000", type: "order", name: "Order #1", quantity: 2, price: { base: 10 } }],
+  });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].code, "unrecognized_keys");
+});
+
+Deno.test("UpdateInvoiceInput: a line ships back with its stored extras", () => {
+  // Same asymmetry as the order side: the line arm strips, the divider arms
+  // reject. A stored invoice line carries xero_id/crms_id/computed price fields.
+  const ok = UpdateInvoiceInput.safeParse({
+    version: 1,
+    items: [{
+      uid: "item1000000000000000",
+      type: "rental",
+      name: "Spot Light",
+      quantity: 1,
+      path: ["order100000000000000"],
+      price: { base: 100, subtotal: 100, total: 109 },
+      xero_id: "550e8400-e29b-41d4-a716-446655440099",
+      crms_id: 4021,
+    }],
+  });
+  assertEquals(ok.success, true);
+  const item = (ok.data as unknown as { items: Array<Record<string, unknown>> }).items[0];
+  assertEquals(item.xero_id, undefined);
+  assertEquals(item.crms_id, undefined);
+  // The computed half of the price is stripped too — this path recomputes.
+  assertEquals((item.price as Record<string, unknown>).subtotal, undefined);
+});
+
+Deno.test("UpdateInvoiceInput: percent_of_total is inexpressible on an input line", () => {
+  const bad = UpdateInvoiceInput.safeParse({
+    version: 1,
+    items: [{ uid: "item1000000000000000", type: "rental", price: { base: 10, formula: "percent_of_total" } }],
+  });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].path, ["items", 0, "price", "formula"]);
+});
+
+Deno.test("CreateInvoiceInput: an invoice may still start with a line item", () => {
+  // Unlike CreateOrderInput there is NO "first item must be a destination"
+  // refine here, and there must not be: 28 prod invoices are flat CRMS invoices
+  // that start with a line.
+  assertEquals(
+    CreateInvoiceInput.safeParse({
+      uid: "newinv10000000000000",
+      query_by_orders: ["order100000000000000"],
+      organization: { uid: "org10000000000000000" },
+      tax_profile: "tax_applied",
+      items: [{ uid: "item1000000000000000", type: "service", name: "Delivery" }],
+    }).success,
+    true,
+  );
 });

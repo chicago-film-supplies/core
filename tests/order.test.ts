@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { CreateOrderInput, Discount, DiscountInput, DocDestination, isLineItem, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
+import { CreateOrderInput, Discount, DiscountInput, DocDestination, isLineItem, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderItem, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const orderBase = getInitialValues(OrderSchema) as Record<string, unknown>;
@@ -1091,4 +1091,97 @@ Deno.test("the contract check still reports at its declared path inside the unio
     }).success,
     true,
   );
+});
+
+// ── OrderItem (input) — the discriminated boundary ────────────────
+
+Deno.test("OrderItem: a divider cannot carry a price or a quantity", () => {
+  // The flat input schema accepted every line field on every type, so this
+  // payload parsed and only failed at `validateBeforeWrite`, as an
+  // `unrecognized_keys` complaint about the STORED shape.
+  const bad = OrderItem.safeParse({
+    uid: "dest1000000000000000",
+    type: "destination",
+    name: "Chicago",
+    path: [],
+    quantity: 3,
+    price: { base: 100 },
+  });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].code, "unrecognized_keys");
+
+  const badGroup = OrderItem.safeParse({
+    uid: "group100000000000000",
+    type: "group",
+    name: "Lighting",
+    path: ["dest1000000000000000"],
+    stock_method: "bulk",
+  });
+  assertEquals(badGroup.success, false);
+});
+
+Deno.test("OrderItem: a line item still ships back with its stored extras", () => {
+  // The line arm is deliberately NOT strict — the manager PUTs `items` whole
+  // from a store holding stored doc items, so a line arrives carrying computed
+  // price fields, `crms_id` and `taxes_base`. Those are stripped, as they always
+  // were; tightening this arm would 400 every such client.
+  const ok = OrderItem.safeParse({
+    uid: "testitem100000000000",
+    type: "rental",
+    name: "Camera",
+    quantity: 2,
+    path: ["dest1000000000000000"],
+    price: { base: 100, subtotal: 200, total: 220, taxes: [{ uid: "tax10000000000000000" }] },
+    crms_id: 4021,
+    taxes_base: [{ uid: "tax10000000000000000", name: "Chicago", rate: 9, type: "percent" }],
+  });
+  assertEquals(ok.success, true);
+  const parsed = ok.data as { crms_id?: unknown; taxes_base?: unknown };
+  assertEquals(parsed.crms_id, undefined);
+  assertEquals(parsed.taxes_base, undefined);
+});
+
+Deno.test("OrderItem: percent_of_total is inexpressible on an input line too", () => {
+  const bad = OrderItem.safeParse({
+    uid: "testitem100000000000",
+    type: "rental",
+    name: "Camera",
+    path: [],
+    price: { base: 100, formula: "percent_of_total" },
+  });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].path, ["price", "formula"]);
+
+  assertEquals(
+    OrderItem.safeParse({
+      uid: "testfee1000000000000",
+      type: "transaction_fee",
+      name: "Card Fee",
+      path: [],
+      price: { base: 0, formula: "percent_of_total" },
+    }).success,
+    true,
+  );
+});
+
+Deno.test("OrderItem: the input does NOT enforce the replacement axis", () => {
+  // Deliberate: `required_when_stocked` keys on `stock_method`, which the server
+  // reads off the product, not off the payload. Enforcing it here would reject a
+  // legal rental line for an unstocked product. Storage still enforces it.
+  assertEquals(
+    OrderItem.safeParse({
+      uid: "testitem100000000000",
+      type: "rental",
+      name: "Camera",
+      path: [],
+      price: { base: 100 },
+    }).success,
+    true,
+  );
+});
+
+Deno.test("OrderItem: a bad discriminator reports at ['type']", () => {
+  const bad = OrderItem.safeParse({ uid: "testitem100000000000", type: "nonsense", path: [] });
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].path, ["type"]);
 });
