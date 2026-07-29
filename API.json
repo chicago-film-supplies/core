@@ -64,7 +64,7 @@
           "kind": "variable",
           "name": "AuthoredComponentSchema",
           "declaration": "const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;",
-          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required. @see {@link AuthoredProductComponent}"
+          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required.\n\n**Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep\n`ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills\n`\"default\"` — the reading `crmsProduct.ts` and manager's new-component form\nalready take. Requiring it at the boundary instead would 400 any client that\nhas not been rebuilt, and manager is pinned several betas back on purpose\n(manager#265). Normalize at the writer, guard at storage: no undefined can\nreach a stored document either way, which is what the expanders need."
         },
         {
           "kind": "interface",
@@ -813,7 +813,7 @@
         {
           "kind": "interface",
           "name": "CreateProductInputType",
-          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: AuthoredProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  tracking_category_name?: string;\n  uid_tracking_category?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
+          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  tracking_category_name?: string;\n  uid_tracking_category?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
           "doc": "Input type for creating a product."
         },
         {
@@ -3501,7 +3501,7 @@
         {
           "kind": "interface",
           "name": "UpdateProductInputType",
-          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: AuthoredProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
+          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
           "doc": "Input type for updating a product."
         },
         {
@@ -6475,7 +6475,7 @@
           "kind": "variable",
           "name": "AuthoredComponentSchema",
           "declaration": "const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;",
-          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required. @see {@link AuthoredProductComponent}"
+          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required.\n\n**Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep\n`ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills\n`\"default\"` — the reading `crmsProduct.ts` and manager's new-component form\nalready take. Requiring it at the boundary instead would 400 any client that\nhas not been rebuilt, and manager is pinned several betas back on purpose\n(manager#265). Normalize at the writer, guard at storage: no undefined can\nreach a stored document either way, which is what the expanders need."
         },
         {
           "kind": "interface",
@@ -6498,7 +6498,7 @@
         {
           "kind": "interface",
           "name": "CreateProductInputType",
-          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: AuthoredProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  tracking_category_name?: string;\n  uid_tracking_category?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
+          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  tracking_category_name?: string;\n  uid_tracking_category?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
           "doc": "Input type for creating a product."
         },
         {
@@ -6558,7 +6558,7 @@
         {
           "kind": "interface",
           "name": "UpdateProductInputType",
-          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: AuthoredProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
+          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
           "doc": "Input type for updating a product."
         },
         {

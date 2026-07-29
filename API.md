@@ -122,7 +122,15 @@ const AnyUid: z.ZodType<string>;
 ### `AuthoredComponentSchema`
 
 Schema for an authored `components` entry — {@link ComponentSchema} with
-`inclusion_type` required. @see {@link AuthoredProductComponent}
+`inclusion_type` required.
+
+**Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep
+`ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills
+`"default"` — the reading `crmsProduct.ts` and manager's new-component form
+already take. Requiring it at the boundary instead would 400 any client that
+has not been rebuilt, and manager is pinned several betas back on purpose
+(manager#265). Normalize at the writer, guard at storage: no undefined can
+reach a stored document either way, which is what the expanders need.
 
 ```ts
 const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;
@@ -1560,7 +1568,7 @@ interface CreateProductInputType {
   price: typeLiteral;
   shipping?: typeLiteral;
   alternates?: UidNameRefType[];
-  components?: AuthoredProductComponent[];
+  components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   tracking_category_name?: string;
@@ -6836,7 +6844,7 @@ interface UpdateProductInputType {
   price?: typeLiteral;
   shipping?: typeLiteral;
   alternates?: UidNameRefType[];
-  components?: AuthoredProductComponent[];
+  components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string;
@@ -11901,7 +11909,15 @@ const PasswordResetSchema: z.ZodType<PasswordReset>;
 ### `AuthoredComponentSchema`
 
 Schema for an authored `components` entry — {@link ComponentSchema} with
-`inclusion_type` required. @see {@link AuthoredProductComponent}
+`inclusion_type` required.
+
+**Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep
+`ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills
+`"default"` — the reading `crmsProduct.ts` and manager's new-component form
+already take. Requiring it at the boundary instead would 400 any client that
+has not been rebuilt, and manager is pinned several betas back on purpose
+(manager#265). Normalize at the writer, guard at storage: no undefined can
+reach a stored document either way, which is what the expanders need.
 
 ```ts
 const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;
@@ -11978,7 +11994,7 @@ interface CreateProductInputType {
   price: typeLiteral;
   shipping?: typeLiteral;
   alternates?: UidNameRefType[];
-  components?: AuthoredProductComponent[];
+  components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   tracking_category_name?: string;
@@ -12184,7 +12200,7 @@ interface UpdateProductInputType {
   price?: typeLiteral;
   shipping?: typeLiteral;
   alternates?: UidNameRefType[];
-  components?: AuthoredProductComponent[];
+  components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string;

@@ -281,7 +281,17 @@ export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
 
 /**
  * Schema for an authored `components` entry — {@link ComponentSchema} with
- * `inclusion_type` required. @see {@link AuthoredProductComponent}
+ * `inclusion_type` required.
+ *
+ * **Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep
+ * `ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills
+ * `"default"` — the reading `crmsProduct.ts` and manager's new-component form
+ * already take. Requiring it at the boundary instead would 400 any client that
+ * has not been rebuilt, and manager is pinned several betas back on purpose
+ * (manager#265). Normalize at the writer, guard at storage: no undefined can
+ * reach a stored document either way, which is what the expanders need.
+ *
+ * @see {@link AuthoredProductComponent}
  */
 export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = ComponentObject
   .extend({ inclusion_type: InclusionTypeEnum })
@@ -448,7 +458,7 @@ export interface CreateProductInputType {
     air_un: number | null;
   };
   alternates?: UidNameRefType[];
-  components?: AuthoredProductComponent[];
+  components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   tracking_category_name?: string;
@@ -500,7 +510,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     air_un: z.number().nullable(),
   }).optional(),
   alternates: z.array(UidNameRef).default([]),
-  components: z.array(AuthoredComponentSchema).default([]),
+  components: z.array(ComponentSchema).default([]),
   component_of: z.array(ComponentSchema).default([]),
   tags: z.array(UidNameRef).default([]),
   tracking_category_name: z.string().optional(),
@@ -571,7 +581,7 @@ export interface UpdateProductInputType {
     air_un: number | null;
   };
   alternates?: UidNameRefType[];
-  components?: AuthoredProductComponent[];
+  components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string;
@@ -614,7 +624,7 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
     air_un: z.number().nullable(),
   }).optional(),
   alternates: z.array(UidNameRef).optional(),
-  components: z.array(AuthoredComponentSchema).optional(),
+  components: z.array(ComponentSchema).optional(),
   component_of: z.array(ComponentSchema).optional(),
   tags: z.array(UidNameRef).optional(),
   uid_tracking_category: FirestoreId.optional(),

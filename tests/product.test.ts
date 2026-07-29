@@ -376,4 +376,10 @@ Deno.test("components require inclusion_type; component_of does not", () => {
   // And through the document: component_of takes the back-ref, components does not.
   assertEquals(ProductSchema.safeParse({ ...validProduct, component_of: [backRef] }).success, true);
   assertEquals(ProductSchema.safeParse({ ...validProduct, components: [backRef] }).success, false);
+
+  // But the INPUT stays permissive: a client may omit inclusion_type and the
+  // writer fills "default". Requiring it at the boundary would 400 any client
+  // not rebuilt against this beta — manager is pinned several betas back on
+  // purpose. Normalize at the writer, guard at storage.
+  assertEquals(CreateProductInput.safeParse({ ...validCreateInput, components: [backRef] }).success, true);
 });
