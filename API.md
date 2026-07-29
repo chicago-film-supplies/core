@@ -16901,6 +16901,16 @@ type Discount = DiscountType;
 type GroupPath = GroupPathType;
 ```
 
+### `INVOICE_ITEM_LEVELS`
+
+The structural divider hierarchy of an INVOICE's items array, outermost
+first — one level deeper than an order's, because an invoice can bill
+several orders and separates them with an `order` divider.
+
+```ts
+const INVOICE_ITEM_LEVELS: "order" | "destination" | "group"[];
+```
+
 ### `InvoiceDestinationPair`
 
 Invoice-side destination pair: a {@link DocDestinationType} plus a `uid_order`
@@ -17131,31 +17141,35 @@ xero_tracking_option_id) are preserved from the existing item.
 ### `computeInvoiceItemPaths(items: T[]): T[]`
 
 Compute paths for all invoice items, respecting order divider scoping.
-Wraps computeItemPaths — strips divider prefix per scope, delegates
-to the shared order path logic, then re-adds the prefix.
 
-TOTAL: every item is normalized. An invoice with no `order` divider (a CRMS
-invoice with no matching CFS order — `services/webhooks/invoice.ts` reaches
-this branch by design) is one unprefixed scope, not a passthrough. It used to
-be the identity function on that branch, copying the input objects by
-reference: 28 prod invoices / 79 items were left with `path: []`, and the
-write-time guard — defined as "path equals what this function would
-produce" — reported them clean, because a fixed-point check inherits every
-hole in its normalizer.
+This is `computeItemPaths` at invoice depth, and nothing else — the invoice
+hierarchy IS the order hierarchy with `order` prepended, and "a divider
+closes every level at or below its own" already expresses order-divider
+scoping. It is kept as a named function rather than asking callers to pass
+`INVOICE_ITEM_LEVELS` themselves because the level list is the one thing a
+caller must not get wrong: handing invoice items the order hierarchy would
+silently treat every `order` divider as an ordinary line item and drop it out
+of every path.
+
+It used to be a real wrapper — slice into per-divider scopes, strip the
+prefix, delegate, re-add the prefix — and that scope loop is where D1 lived:
+it returned early when no `order` divider had been seen, so any invoice
+without one fell through to a tail loop that copied the INPUT objects by
+reference. No prefix, no self-append, no linearization, and the documented
+purity guarantee false on that branch. 28 prod invoices / 79 items sat at
+`path: []`, and the write guard — "path equals what this function
+produces" — called them clean, because a fixed-point check inherits every
+hole in its normalizer. With the levels generalized there is no scope loop to
+return early from, so that shape is now unwriteable rather than merely fixed.
 
 Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
 safe to pass items that originate from a Solid store proxy. Callers should
 replace their working array with the return value.
 
 Generic in `T`, like every sibling here (`computeItemPaths`,
-`validateItemPaths`, `validateInvoiceItemPaths`, `getItemSubtreeRange`). This
-one used to be the sole exception — declared `(items: InvoiceItem[]):
-InvoiceItem[]` — and because `InvoiceItem.type` is `string` while the schema
-union's is a literal union, a caller holding the real `Invoice["items"]` got
-the loose type BACK and had to `as unknown as` it home. That is not a typing
-limitation, just a missing type parameter: `T` carries the caller's own item
-type straight through, so a strict caller stays strict and a manager caller
-can still pass staged, mid-edit rows.
+`validateItemPaths`, `validateInvoiceItemPaths`, `getItemSubtreeRange`), so a
+caller holding the real `Invoice["items"]` gets it back rather than the loose
+`InvoiceItem[]`.
 
 ### `computeInvoiceSyncStatus(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): Map<string, "in_sync" | "out_of_sync">`
 
@@ -17173,7 +17187,7 @@ per-divider maps. Reports as `out_of_sync`:
 - an order line the invoice is missing (keyed by its projected path), and
 - an order-scoped invoice line with no matching order line (removed upstream).
 
-### `computeItemPaths(items: T[]): T[]`
+### `computeItemPaths(items: T[], _: unknown): T[]`
 
 Compute full structural paths for a flat items array AND linearize it
 depth-first with `zero_priced` items sorted before priced ones inside each
@@ -17284,6 +17298,10 @@ Used to derive comparable fields from two schema shapes without hardcoding.
 
 Build a set of structural item uids (dest/group) from items array.
 Used to distinguish structural path elements from product parent refs.
+
+Order-shaped by default. `computeItemPaths` does NOT call this — it derives
+the set from whichever `levels` it was handed, so an invoice's `order`
+dividers count as structural there too.
 
 ### `getXeroUnitAmount(subtotal: number, quantity: number): number`
 
@@ -17891,6 +17909,21 @@ interface LineItem {
 }
 ```
 
+### `ORDER_ITEM_LEVELS`
+
+The structural divider hierarchy of an ORDER's items array, outermost first.
+
+A divider's index here is its level: encountering one closes every level at
+or below it and opens its own. So a `destination` (level 0) ends the group
+that preceded it, while a `group` (level 1) only ends a sibling group.
+
+Invoices nest one level deeper — see `INVOICE_ITEM_LEVELS` in
+`@cfs/core/utils/invoices`. Fulfillments share the order hierarchy.
+
+```ts
+const ORDER_ITEM_LEVELS: "destination" | "group"[];
+```
+
 ### `OrderDateEnvelope`
 
 Order-level date envelope derived on demand from per-destination dates.
@@ -18066,7 +18099,7 @@ a replacement value on their price object.
 Returns `subtotal` (sum of replacement × quantity), `tax` (taxes applied
 to that subtotal), and `total` (subtotal + tax).
 
-### `computeItemPaths(items: T[]): T[]`
+### `computeItemPaths(items: T[], _: unknown): T[]`
 
 Compute full structural paths for a flat items array AND linearize it
 depth-first with `zero_priced` items sorted before priced ones inside each
@@ -18219,6 +18252,10 @@ Returns indices sorted ascending.
 
 Build a set of structural item uids (dest/group) from items array.
 Used to distinguish structural path elements from product parent refs.
+
+Order-shaped by default. `computeItemPaths` does NOT call this — it derives
+the set from whichever `levels` it was handed, so an invoice's `order`
+dividers count as structural there too.
 
 ### `getTaxTotals(items: LineItem[], taxes: Tax[]): PriceModifier[]`
 

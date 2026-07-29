@@ -860,8 +860,24 @@ export function calculateReplacementTotals(
 // ── Path computation ──────────────────────────────────────────────
 
 /**
+ * The structural divider hierarchy of an ORDER's items array, outermost first.
+ *
+ * A divider's index here is its level: encountering one closes every level at
+ * or below it and opens its own. So a `destination` (level 0) ends the group
+ * that preceded it, while a `group` (level 1) only ends a sibling group.
+ *
+ * Invoices nest one level deeper — see `INVOICE_ITEM_LEVELS` in
+ * `@cfs/core/utils/invoices`. Fulfillments share the order hierarchy.
+ */
+export const ORDER_ITEM_LEVELS = ["destination", "group"] as const;
+
+/**
  * Build a set of structural item uids (dest/group) from items array.
  * Used to distinguish structural path elements from product parent refs.
+ *
+ * Order-shaped by default. `computeItemPaths` does NOT call this — it derives
+ * the set from whichever `levels` it was handed, so an invoice's `order`
+ * dividers count as structural there too.
  */
 export function getStructuralUids(items: LineItem[]): Set<string> {
   return new Set(
@@ -1095,37 +1111,36 @@ export function validateComponentUniqueness<T extends LineItem>(items: T[]): Ite
  * and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
  * every returned `path` is non-empty and ends in the item's own uid.
  */
-export function computeItemPaths<T extends LineItem>(items: T[]): T[] {
-  const structuralUids = getStructuralUids(items);
+export function computeItemPaths<T extends LineItem>(
+  items: T[],
+  levels: readonly string[] = ORDER_ITEM_LEVELS,
+): T[] {
+  const levelOf = new Map(levels.map((type, index) => [type, index]));
+  const structuralUids = new Set(
+    items.filter((it) => levelOf.has(it.type)).map((it) => it.uid),
+  );
 
   const result: T[] = [];
-  let currentDestUid: string | null = null;
-  let currentGroupUid: string | null = null;
+  // The uids of the structural dividers currently in scope, outermost first.
+  const stack: string[] = [];
 
   let i = 0;
   while (i < items.length) {
-    const item = items[i];
-    if (item.type === "destination") {
-      currentDestUid = item.uid;
-      currentGroupUid = null;
-      result.push({ ...item, path: [item.uid] });
-      i++;
-      continue;
-    }
-    if (item.type === "group") {
-      currentGroupUid = item.uid;
-      result.push({ ...item, path: currentDestUid ? [currentDestUid, item.uid] : [item.uid] });
+    const level = levelOf.get(items[i].type);
+    if (level !== undefined) {
+      // A divider closes every level at or below its own, then opens itself.
+      // That one rule is what used to be `currentGroupUid = null` on a new
+      // destination, and separately the order-divider scoping in
+      // `computeInvoiceItemPaths`.
+      stack.length = Math.min(stack.length, level);
+      stack.push(items[i].uid);
+      result.push({ ...items[i], path: [...stack] });
       i++;
       continue;
     }
     let j = i;
-    while (j < items.length && items[j].type !== "destination" && items[j].type !== "group") {
-      j++;
-    }
-    const prefix: string[] = [];
-    if (currentDestUid) prefix.push(currentDestUid);
-    if (currentGroupUid) prefix.push(currentGroupUid);
-    result.push(...resolveBlock(items.slice(i, j), prefix, structuralUids));
+    while (j < items.length && !levelOf.has(items[j].type)) j++;
+    result.push(...resolveBlock(items.slice(i, j), [...stack], structuralUids));
     i = j;
   }
   return result;

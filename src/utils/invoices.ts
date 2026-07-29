@@ -502,73 +502,48 @@ export function syncOrderToInvoiceSelective(
 // ── Invoice path computation ─────────────────────────────────────
 
 /**
- * Compute paths for all invoice items, respecting order divider scoping.
- * Wraps computeItemPaths — strips divider prefix per scope, delegates
- * to the shared order path logic, then re-adds the prefix.
+ * The structural divider hierarchy of an INVOICE's items array, outermost
+ * first — one level deeper than an order's, because an invoice can bill
+ * several orders and separates them with an `order` divider.
  *
- * TOTAL: every item is normalized. An invoice with no `order` divider (a CRMS
- * invoice with no matching CFS order — `services/webhooks/invoice.ts` reaches
- * this branch by design) is one unprefixed scope, not a passthrough. It used to
- * be the identity function on that branch, copying the input objects by
- * reference: 28 prod invoices / 79 items were left with `path: []`, and the
- * write-time guard — defined as "path equals what this function would
- * produce" — reported them clean, because a fixed-point check inherits every
- * hole in its normalizer.
+ * @see {@link ORDER_ITEM_LEVELS}
+ */
+export const INVOICE_ITEM_LEVELS = ["order", "destination", "group"] as const;
+
+/**
+ * Compute paths for all invoice items, respecting order divider scoping.
+ *
+ * This is `computeItemPaths` at invoice depth, and nothing else — the invoice
+ * hierarchy IS the order hierarchy with `order` prepended, and "a divider
+ * closes every level at or below its own" already expresses order-divider
+ * scoping. It is kept as a named function rather than asking callers to pass
+ * `INVOICE_ITEM_LEVELS` themselves because the level list is the one thing a
+ * caller must not get wrong: handing invoice items the order hierarchy would
+ * silently treat every `order` divider as an ordinary line item and drop it out
+ * of every path.
+ *
+ * It used to be a real wrapper — slice into per-divider scopes, strip the
+ * prefix, delegate, re-add the prefix — and that scope loop is where D1 lived:
+ * it returned early when no `order` divider had been seen, so any invoice
+ * without one fell through to a tail loop that copied the INPUT objects by
+ * reference. No prefix, no self-append, no linearization, and the documented
+ * purity guarantee false on that branch. 28 prod invoices / 79 items sat at
+ * `path: []`, and the write guard — "path equals what this function
+ * produces" — called them clean, because a fixed-point check inherits every
+ * hole in its normalizer. With the levels generalized there is no scope loop to
+ * return early from, so that shape is now unwriteable rather than merely fixed.
  *
  * Pure: returns a fresh array of fresh items. Inputs are not mutated, so it is
  * safe to pass items that originate from a Solid store proxy. Callers should
  * replace their working array with the return value.
  *
  * Generic in `T`, like every sibling here (`computeItemPaths`,
- * `validateItemPaths`, `validateInvoiceItemPaths`, `getItemSubtreeRange`). This
- * one used to be the sole exception — declared `(items: InvoiceItem[]):
- * InvoiceItem[]` — and because `InvoiceItem.type` is `string` while the schema
- * union's is a literal union, a caller holding the real `Invoice["items"]` got
- * the loose type BACK and had to `as unknown as` it home. That is not a typing
- * limitation, just a missing type parameter: `T` carries the caller's own item
- * type straight through, so a strict caller stays strict and a manager caller
- * can still pass staged, mid-edit rows.
+ * `validateItemPaths`, `validateInvoiceItemPaths`, `getItemSubtreeRange`), so a
+ * caller holding the real `Invoice["items"]` gets it back rather than the loose
+ * `InvoiceItem[]`.
  */
 export function computeInvoiceItemPaths<T extends InvoiceItem>(items: T[]): T[] {
-  const out: T[] = new Array(items.length);
-  let currentDividerUid: string | null = null;
-  // Starts at 0, not -1: the region before the first divider is a scope too.
-  let scopeStart = 0;
-
-  function flushScope(endExclusive: number) {
-    if (endExclusive <= scopeStart) return;
-    const dividerUid = currentDividerUid;
-    const stripped = items.slice(scopeStart, endExclusive).map((si) => ({
-      ...si,
-      path: dividerUid ? stripOrderPrefix(si.path ?? [], dividerUid) : [...(si.path ?? [])],
-    }));
-    const computed = computeItemPaths(stripped);
-    for (let j = 0; j < computed.length; j++) {
-      const si = computed[j];
-      out[scopeStart + j] = dividerUid ? { ...si, path: [dividerUid, ...si.path] } : si;
-    }
-  }
-
-  for (let i = 0; i <= items.length; i++) {
-    const item = i < items.length ? items[i] : null;
-    const isNewScope = !item || item.type === "order";
-
-    if (isNewScope) flushScope(i);
-
-    if (item?.type === "order") {
-      currentDividerUid = item.uid;
-      out[i] = { ...item, path: [item.uid] };
-      scopeStart = i + 1;
-    }
-  }
-
-  // Unreachable once every index belongs to a scope — kept so a future edit
-  // that reintroduces a gap writes the input item rather than `undefined`.
-  for (let i = 0; i < items.length; i++) {
-    if (out[i] === undefined) out[i] = { ...items[i], path: [...(items[i].path ?? [])] };
-  }
-
-  return out;
+  return computeItemPaths(items, INVOICE_ITEM_LEVELS);
 }
 
 /**

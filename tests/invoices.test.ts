@@ -829,6 +829,71 @@ Deno.test("computeInvoiceItemPaths is idempotent on a no-divider invoice", () =>
   assertEquals(twice.map((it) => it.uid), once.map((it) => it.uid));
 });
 
+// ── computeInvoiceItemPaths: the divider hierarchy ─────────────
+// `computeInvoiceItemPaths` is `computeItemPaths` at invoice depth — the
+// invoice hierarchy is the order hierarchy with `order` prepended. These pin
+// the level rule ("a divider closes every level at or below its own") that
+// used to be split between a hardcoded `currentGroupUid = null` and a separate
+// scope-slicing wrapper.
+
+Deno.test("an order divider closes the destination and group above it", () => {
+  const items: InvoiceItem[] = [
+    { ...orderDividerBase, uid: "od-1", name: "Order #1", type: "order", uid_order: "o1" } as InvoiceItem,
+    { uid: "dest-1", type: "destination", name: "Venue A", path: [] },
+    { uid: "grp-1", type: "group", name: "G1", path: [] },
+    makeItem({ uid: "p1", path: [] }),
+    // A new order divider must reset BOTH deeper levels, not just the group.
+    { ...orderDividerBase, uid: "od-2", name: "Order #2", type: "order", uid_order: "o2" } as InvoiceItem,
+    makeItem({ uid: "p2", path: [] }),
+  ];
+  const result = computeInvoiceItemPaths(items);
+  assertEquals(result[3].path, ["od-1", "dest-1", "grp-1", "p1"]);
+  assertEquals(result[4].path, ["od-2"]);
+  assertEquals(result[5].path, ["od-2", "p2"]);
+});
+
+Deno.test("a destination closes the group but not the order divider", () => {
+  const items: InvoiceItem[] = [
+    { ...orderDividerBase, uid: "od-1", name: "Order #1", type: "order", uid_order: "o1" } as InvoiceItem,
+    { uid: "dest-1", type: "destination", name: "Venue A", path: [] },
+    { uid: "grp-1", type: "group", name: "G1", path: [] },
+    { uid: "dest-2", type: "destination", name: "Venue B", path: [] },
+    makeItem({ uid: "p1", path: [] }),
+  ];
+  const result = computeInvoiceItemPaths(items);
+  assertEquals(result[3].path, ["od-1", "dest-2"]);
+  // grp-1 is gone from the prefix; od-1 survives.
+  assertEquals(result[4].path, ["od-1", "dest-2", "p1"]);
+});
+
+Deno.test("a destination before the first order divider carries no order prefix", () => {
+  const items: InvoiceItem[] = [
+    { uid: "dest-1", type: "destination", name: "Loose", path: [] },
+    makeItem({ uid: "p1", path: [] }),
+    { ...orderDividerBase, uid: "od-1", name: "Order #1", type: "order", uid_order: "o1" } as InvoiceItem,
+    makeItem({ uid: "p2", path: [] }),
+  ];
+  const result = computeInvoiceItemPaths(items);
+  assertEquals(result[0].path, ["dest-1"]);
+  assertEquals(result[1].path, ["dest-1", "p1"]);
+  assertEquals(result[2].path, ["od-1"]);
+  assertEquals(result[3].path, ["od-1", "p2"]);
+});
+
+Deno.test("component ancestry nests under the full invoice divider prefix", () => {
+  const items: InvoiceItem[] = [
+    { ...orderDividerBase, uid: "od-1", name: "Order #1", type: "order", uid_order: "o1" } as InvoiceItem,
+    { uid: "dest-1", type: "destination", name: "Venue", path: [] },
+    { uid: "grp-1", type: "group", name: "G1", path: [] },
+    makeItem({ uid: "kit", path: [] }),
+    makeItem({ uid: "part", path: ["kit"] }),
+  ];
+  const result = computeInvoiceItemPaths(items);
+  assertEquals(result[3].path, ["od-1", "dest-1", "grp-1", "kit"]);
+  assertEquals(result[4].path, ["od-1", "dest-1", "grp-1", "kit", "part"]);
+  assertEquals(validateInvoiceItemPaths(result), []);
+});
+
 // ── Top-level field sync helpers ────────────────────────────────
 
 function makePair(
