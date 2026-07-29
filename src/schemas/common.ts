@@ -405,15 +405,50 @@ export const DocLineItemTypeEnum: z.ZodType<DocLineItemTypeType> = z.enum(DOC_LI
 
 /**
  * Every item type that can appear in a `items[]` array, across all three
- * path-bearing collections. Derived from {@link DOC_ITEM_TYPES} rather than
- * re-typed: an invoice is exactly the order vocabulary plus the `order` divider
- * it needs to bill several orders at once.
+ * path-bearing collections: the order vocabulary ({@link DOC_ITEM_TYPES}) plus
+ * the `order` divider an invoice needs to bill several orders at once.
+ *
+ * **Written out rather than spread, and that is load-bearing — see core#43.**
+ * This was `[...DOC_ITEM_TYPES, "order"] as const`, which is the honest way to
+ * say it and which TypeScript infers correctly. JSR's npm declaration emit does
+ * not: it is syntactic, cannot expand the spread without inference, and silently
+ * published `declare const ITEM_TYPES: readonly ["order"]`. So every npm
+ * consumer saw `ItemTypeType` as the single literal `"order"`, and everything
+ * typed on it — `LineItem.type`, `ITEM_CONTRACTS`, `ItemTypeEnum` — degraded
+ * with it. Deno consumers read this source and were unaffected, which is exactly
+ * why nothing caught it: the api-cloudrun suite, `deno task check` and
+ * `deno publish --dry-run` all agree with the source. Measured cost: 57 of the
+ * 75 type errors on manager's `beta.88` → `beta.109` bump.
+ *
+ * The derivation survives as the parity assertion below, so the two cannot
+ * drift — a hand-written list without one is what core#41 is. Do not "tidy" this
+ * back into a spread; `tests/jsr-emit-safety.test.ts` fails if you do.
  */
-const ITEM_TYPES = [...DOC_ITEM_TYPES, "order"] as const;
+const ITEM_TYPES = [
+  "rental",
+  "destination",
+  "group",
+  "replacement",
+  "sale",
+  "service",
+  "surcharge",
+  "transaction_fee",
+  "order",
+] as const;
 /** Union of every order/invoice/fulfillment item type. */
 export type ItemTypeType = typeof ITEM_TYPES[number];
 /** Zod schema for {@link ItemTypeType}. */
 export const ItemTypeEnum: z.ZodType<ItemTypeType> = z.enum(ITEM_TYPES);
+
+// The derivation the list above replaces, asserted BOTH ways so the hand-written
+// members and `DOC_ITEM_TYPES + "order"` are provably the same set. Adding a
+// `DOC_ITEM_TYPES` member fails the first; inventing a member here fails the
+// second. Same shape as `_contractParity` below.
+type _DerivedItemTypeType = DocItemTypeType | "order";
+type _ItemTypesCoverDerived = Exclude<_DerivedItemTypeType, ItemTypeType> extends never ? true : never;
+type _DerivedCoversItemTypes = Exclude<ItemTypeType, _DerivedItemTypeType> extends never ? true : never;
+const _itemTypeParity: [_ItemTypesCoverDerived, _DerivedCoversItemTypes] = [true, true];
+void _itemTypeParity;
 
 // ── Item contracts ───────────────────────────────────────────────
 

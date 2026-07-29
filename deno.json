@@ -82,6 +82,7 @@
     "zod": "npm:zod@^4.3.6",
     "date-fns": "npm:date-fns@^4.1.0",
     "@date-fns/tz": "npm:@date-fns/tz@^1.4.1",
+    "@std/fs": "jsr:@std/fs@^1.0.24",
     "@std/assert": "jsr:@std/assert@^1.0.19",
     "currency.js": "npm:currency.js@^2.0.4",
     "@conventional-commits/parser": "npm:@conventional-commits/parser@^0.4.1"
