@@ -62,6 +62,7 @@
     "./utils/locations": "./src/utils/locations.ts",
     "./utils/allocation": "./src/utils/allocation.ts",
     "./utils/movements": "./src/utils/movements.ts",
+    "./utils/order-lines": "./src/utils/order-lines.ts",
     "./utils/orders": "./src/utils/orders.ts",
     "./utils/products": "./src/utils/products.ts",
     "./utils/taxes": "./src/utils/taxes.ts",

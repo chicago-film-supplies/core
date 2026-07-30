@@ -78,6 +78,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "movements": [
 
   ],
+  "order-lines": [
+
+  ],
   "orders": [
     { name: "buildPackingList", expr: "it.orders.buildPackingList(items, consolidated, destinationUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
     { name: "calculateItemDiscount", expr: "it.orders.calculateItemDiscount(item)", desc: "Calculate the discount dollar amount for a single line item.", returns: "number" },

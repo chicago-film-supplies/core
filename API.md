@@ -18789,6 +18789,139 @@ line carries both sides, negating it needs no knowledge of the movement type,
 and the per-kind contract makes the result either valid or rejected rather
 than silently lopsided.
 
+## `@cfs/core/utils/order-lines`
+
+The order/invoice line builders — the one answer to *"given catalog product P
+at quantity N, which line items does it produce, at what quantities?"*
+
+```ts
+import { buildOrderLineFromProduct, buildOrderComponentLines } from "@cfs/core/utils/order-lines";
+
+const line = buildOrderLineFromProduct(productDoc, { quantity: 2, chargeDays: 5, uidOrder });
+const kids = buildOrderComponentLines(productDoc, { quantity: 2, chargeDays: 5, uidOrder });
+```
+
+Pure and db-free — the input is a Typesense `ProductDocument` the caller
+already holds, and the output is a plain array. It lives here for the same
+reason `@cfs/core/utils/availability` does: it is shared verbatim so two
+consumers **cannot disagree**. There are three — the manager's staging
+popover, the manager's order/invoice stores, and the public webapp's order
+drafts — across two repos. A second copy of the component expansion is a
+second answer to "what does this kit bring", and the drafts a customer creates
+would then disagree with the operator's view of the same order.
+
+## What these builders do NOT do: price
+
+The returned lines carry `subtotal`/`subtotal_discounted`/`total` of `0`, and
+their `price.taxes` are bare `{ uid }` references copied from the catalog.
+Run {@link https://jsr.io/@cfs/core/doc/utils/orders | calculateItemPrice}
+against the live tax docs before persisting — that resolves each uid to
+name/rate/type and computes the amounts. Pricing is not folded in here
+because the custom-line builders receive the *line's* tax set rather than the
+tax catalog `calculateItemPrice` needs, so a single signature cannot express
+both.
+
+## The catalog `path` convention is the INVERSE of the doc-item one
+
+A `product.components[]` row's `path` **excludes** itself and starts at the
+root product: a direct child of product `A` has `path: ["A"]`, a grandchild
+has `path: ["A", "child"]`. A doc-item `path` **includes** itself, so its
+parent is `path.at(-2)`. {@link buildOrderComponentLines} is the seam where one
+becomes the other, and it derives every doc path from the **resolved parent**
+rather than concatenating the catalog chain — the same "one author, parent-
+derived" rule `computeItemPaths` follows, and for the same reason: a catalog
+row whose chain contradicts its position must not be able to write a path.
+
+### `CustomLineBuildOptions`
+
+Options for a one-off "custom" line with no product catalog entry behind it —
+the orders/invoices "Add Custom Item" flow.
+
+`taxes` is the line's own resolved tax set (already carrying name/rate/type),
+not the tax catalog: a custom line has no product to read tax references off,
+so the caller resolves them.
+
+```ts
+interface CustomLineBuildOptions {
+  type: DocLineItemTypeType;
+  name?: string;
+  quantity?: number;
+  base?: number;
+  formula?: PriceFormulaType;
+  chargeDays: number | null;
+  taxes: ReadonlyArray<typeLiteral>;
+  uidOrder?: string;
+}
+```
+
+### `OrderLineBuildOptions`
+
+Shared options for building order line items from a Typesense
+`ProductDocument` — used by the staging popover, the substitute flow, and any
+"add product to an order" surface.
+
+There is deliberately no `initial` option. All three consumers used to pass
+`getInitialValues(OrderItem)`, and the three seeds could drift; worse, the
+spread quietly supplied fields the builder did not own — every expanded
+component claimed `stock_method: "bulk"` regardless of the component's real
+value, and every line carried `order_number: 0` for a number only the server
+can allocate. Each builder now writes every field it emits.
+
+```ts
+interface OrderLineBuildOptions {
+  quantity: number;
+  chargeDays: number | null;
+  inheritedAncestry?: string[];
+  uidOrder?: string;
+}
+```
+
+### `buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, "uidOrder">): InvoiceDocLineItem`
+
+Build a custom (no-product) invoice line item.
+
+An invoice line is a strictly smaller shape than an order line: no
+`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`/
+`zero_priced`, and no `price.replacement` — an invoice does not track
+replacement value. This used to claim it "strips order-only fields" while the
+`initial` spread put `stock_method: "bulk"`, `order_number: 0` and
+`uid_order: ""` straight back in; constructing the object outright is what
+makes the docblock true.
+
+### `buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLineItemType`
+
+Build a custom (no-product) order line item.
+
+Stamps the `"custom-"` uid prefix, which is part of the data contract rather
+than a UI hint: api-cloudrun's `buildOrderLineItem` branches on it to skip the
+product lookup and accept the line's own payload.
+
+### `buildOrderComponentLines(doc: ProductDocument, opts: OrderLineBuildOptions): OrderDocLineItemType[]`
+
+Build the mandatory/default sub-component lines for a parent
+`ProductDocument`, scaling each component's quantity off the parent quantity.
+
+Walks the catalog tree depth-first (parent → its descendants → next sibling)
+and stable-sorts each parent's direct-children block `zero_priced === true`
+first. `computeItemPaths` re-linearizes downstream anyway, but emitting
+depth-first up front keeps the array readable when inspected raw.
+
+Quantities recurse with a per-level effective quantity —
+`ceil(comp.quantity × parentEffective)` — because a fractional catalog ratio
+compounds with depth. 34 of prod's 165 component rows carry a fractional
+quantity and 6 of those sit below a direct child, so scaling a whole subtree
+by one root-level ratio gives a different (wrong) answer. All 34 are
+`inclusion_type: "default"` and no fractional component is `mandatory`, so the
+result is always a valid integer.
+
+### `buildOrderLineFromProduct(doc: ProductDocument, opts: OrderLineBuildOptions): OrderDocLineItemType`
+
+Build a top-level order line item from a `ProductDocument`.
+
+`path` carries the component ancestry only — the item's own uid and the
+structural destination/group prefix are appended by `computeItemPaths`, which
+is the sole author of a stored `path`.
+
 ## `@cfs/core/utils/orders`
 
 Shared order utility functions for CFS applications.

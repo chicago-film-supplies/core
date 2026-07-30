@@ -132,6 +132,17 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "resyncInvoiceLines", // operator-triggered resync (write-path)
     "computeInvoiceSyncStatus", // manager line-badging, not rendering
   ],
+  // The line builders, denylisted whole. Every one of them CONSTRUCTS a line
+  // item from a Typesense `ProductDocument` — a write-path input a render context
+  // never holds (`template-context.ts` has no `product`; templates render orders,
+  // invoices and quotes, which already carry their `items[]`). A template
+  // producing new line items would be authoring data, not rendering it.
+  "order-lines": [
+    "buildOrderLineFromProduct", // stages an order line from the catalog
+    "buildCustomOrderLine", // mints a `custom-` order line
+    "buildCustomInvoiceLine", // mints a `custom-` invoice line
+    "buildOrderComponentLines", // expands a kit's component subtree
+  ],
   products: [
     // Denormalization machinery for `products.query_by_images`, re-exported here
     // from `schemas/product.ts` so writers have one import. Write-path only, and
