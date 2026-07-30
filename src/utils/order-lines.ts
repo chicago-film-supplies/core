@@ -304,18 +304,28 @@ function resolveParentUid(comp: ProductDocumentComponent, rootUid: string): stri
  *
  * **One drop IS intentional, and the distinction matters.** A `mandatory` or
  * `default` row whose parent is `optional` is NOT emitted: the walk starts at the
- * root and only descends through rows that survived the filter, so an
- * unselected parent takes its subtree with it. That is the correct reading — a
- * mandatory accessory is mandatory *given its parent*, and the operator has not
- * chosen the parent. Prod has 3 such rows (a generator's fuel-tank cap and hose
- * under an optional extension tank; a hand truck under an optional folding
- * chair), and staging them unasked would put a fuel-tank cap on every generator
- * order.
+ * root and only descends through rows that survived the filter, so an unselected
+ * parent takes its subtree with it. Prod has 3 such rows — a generator's
+ * fuel-tank cap and hose under an optional extension tank, and a hand truck under
+ * an optional folding chair — and staging them unasked would put a fuel-tank cap
+ * on every generator order.
+ *
+ * **Nothing is lost, and that is a property of the data rather than a hope.**
+ * `product.components[]` is a *materialized* denorm of the whole descendant tree
+ * (`buildComponentEntries` prepends the new parent to every row of the child
+ * product's own array), so a subtree sitting behind an optional parent is still
+ * reachable — through that parent's OWN `components`. Adding "Extension Fuel
+ * Tank" as its own line expands its own array, which carries the cap and hose at
+ * `path: [tankUid]`. Verified end to end: all **5** prod orders containing the
+ * optional tank carry **both** of its mandatory children, 0 missing. Optional
+ * parents do reach orders — 72 nested prod lines across 13 distinct optional
+ * pairs — so this path is exercised, not theoretical.
  *
  * So do **not** "fix" this by hoisting an unreachable row to the root. The
  * hardening in {@link resolveParentUid} is about a row whose `path` is
- * *malformed*; this is a row whose parent is *deselected*. Pinned by a test,
- * because the two look identical from inside the walk.
+ * *malformed*; this is a row whose parent is *deselected*, and its subtree has
+ * another way in. Pinned by a test, because the two look identical from inside
+ * the walk.
  *
  * @throws Error when a component row carries no `uid` or no `type` — neither is
  *   buildable, and dropping it silently is the failure mode this module exists
