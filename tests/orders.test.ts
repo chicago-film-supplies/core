@@ -191,6 +191,187 @@ Deno.test("calculateItemSubtotal: the day factor is applied as × days ÷ 5, exa
   assertEquals(r.subtotal_discounted, 1656);
 });
 
+// ── The sweep the three CLAUDE.md files claim ────────────────────
+//
+// All three assert `calculateItemSubtotal` is "verified against an exact BigInt
+// rational reference over 300k random inputs, 0 disagreements". Until now that
+// was a COMMENT plus the distilled examples above — the sweep did not exist, so
+// the claim was the very defect class this codebase keeps finding: a stated
+// guarantee that nothing executes. Pattern copied from `movements.test.ts`
+// (`exactCostOfUnits` + inline LCG + `assertEquals(disagreements, 0)`).
+//
+// **A BigInt-vs-BigInt oracle would be close to tautological**, and saying so
+// matters more than the green tick: the shipped code is already exact integer
+// arithmetic, so an oracle that mirrors its decomposition can only ever agree
+// with it. Two things give this sweep real discriminating power:
+//
+//   1. the oracle builds ONE reduced fraction and rounds once, rather than
+//      staging numerator and denominator the way the implementation does; and
+//   2. the FLOAT form it replaced is swept alongside it, and the test below
+//      asserts that form disagrees. A guard never seen to fail is not known to
+//      be a guard — the same discipline that made the `"voided"` filter test
+//      trustworthy.
+
+/** Exact half-up division of a reduced fraction. Non-negative numerator only. */
+function exactRound(num: bigint, den: bigint): bigint {
+  const g = gcd(num < 0n ? -num : num, den);
+  const n = num / g;
+  const d = den / g;
+  return n < 0n ? -((-2n * n + d) / (2n * d)) : (2n * n + d) / (2n * d);
+}
+
+function gcd(a: bigint, b: bigint): bigint {
+  while (b) [a, b] = [b, a % b];
+  return a || 1n;
+}
+
+interface SweepLine {
+  base: number;
+  quantity: number;
+  chargeableDays: number;
+  formula: "five_day_week" | "fixed";
+  discount: { type: "percent" | "flat"; rate: number } | null;
+}
+
+/**
+ * The true mathematical value of a line, in cents, as one exact rational.
+ *
+ * `subtotal = base × quantity × max(days/5, 1)` (the floor bites only above 5
+ * chargeable days, and `fixed` never engages it), then the discount:
+ * `percent` scales the subtotal by `(100 − rate)/100`; `flat` is dollars per
+ * unit **per pricing factor**, so it carries the same quantity and day factor
+ * as the price it discounts.
+ */
+function exactLineCents(line: SweepLine): { subtotal: bigint; discounted: bigint } {
+  const baseCents = BigInt(Math.round(line.base * 100));
+  const qty = BigInt(Math.round(line.quantity * 10_000));
+  const useDays = line.formula === "five_day_week" && line.chargeableDays > 5;
+  const factorNum = useDays ? BigInt(line.chargeableDays) : 1n;
+  const factorDen = useDays ? 5n : 1n;
+
+  const subtotal = exactRound(baseCents * qty * factorNum, 10_000n * factorDen);
+  if (!line.discount) return { subtotal, discounted: subtotal };
+
+  if (line.discount.type === "percent") {
+    const rate = BigInt(Math.round(line.discount.rate * 1_000_000));
+    return { subtotal, discounted: exactRound(subtotal * (100_000_000n - rate), 100_000_000n) };
+  }
+  const rateCents = BigInt(Math.round(line.discount.rate * 100));
+  const off = exactRound(rateCents * qty * factorNum, 10_000n * factorDen);
+  return { subtotal, discounted: subtotal - off };
+}
+
+/**
+ * A DIVIDE-FIRST implementation — the failure mode the money doctrine names:
+ * *"never `currency(a).divide(b)` to get a ratio: it quantizes the ratio, so
+ * scaling to a percent leaves only `precision − 2` decimals."*
+ *
+ * `Discount.rate` carries 4 decimals (Xero's `DiscountRate` does, so CFS
+ * stores 4), which makes `(100 − rate)/100` a **6**-decimal ratio. Quantizing
+ * it at currency.js's default precision truncates the two digits that decide
+ * the half-cent, exactly as the doctrine says.
+ *
+ * This deliberately models the DOCUMENTED failure rather than reconstructing
+ * the exact predecessor. The first attempt here did try to model "the float
+ * form", using plain float with a single final round — and it agreed with the
+ * oracle on all 300k lines, so it proved nothing. That near-miss is itself
+ * consistent with the note above these tests: the *subtotal* path tolerated
+ * float and never flipped a tie; it was the *discount* path that mis-rounded.
+ */
+function divideFirstLine(line: SweepLine, precision = 4): { subtotal: number; discounted: number } {
+  const q = 10 ** precision;
+  const useDays = line.formula === "five_day_week" && line.chargeableDays > 5;
+  const factor = useDays ? line.chargeableDays / 5 : 1;
+  const subtotal = Math.round(line.base * line.quantity * factor * 100) / 100;
+  if (!line.discount) return { subtotal, discounted: subtotal };
+  if (line.discount.type === "percent") {
+    const ratio = Math.round(((100 - line.discount.rate) / 100) * q) / q; // ← the quantized ratio
+    return { subtotal, discounted: Math.round(subtotal * ratio * 100) / 100 };
+  }
+  const off = Math.round(line.discount.rate * line.quantity * factor * 100) / 100;
+  return { subtotal, discounted: Math.round((subtotal - off) * 100) / 100 };
+}
+
+/** Seeded LCG — same generator as `movements.test.ts`, so runs are reproducible. */
+function sweepLines(count: number): SweepLine[] {
+  let seed = 987_654_321;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  const lines: SweepLine[] = [];
+  for (let i = 0; i < count; i++) {
+    // `chargeable_days` deliberately straddles the one-week floor at 5, so both
+    // the factor-1 and the factor-engaged branches are exercised; quantities are
+    // fractional because invoice items are not `z.int()` — QTY_SCALE exists for
+    // exactly that, and an integer-only sweep would never reach it.
+    const withDiscount = rand(4) !== 0;
+    lines.push({
+      base: rand(500_000) / 100,
+      quantity: rand(200_000) / 10_000,
+      chargeableDays: rand(40),
+      formula: rand(2) === 0 ? "five_day_week" : "fixed",
+      discount: !withDiscount ? null : rand(2) === 0
+        ? { type: "percent", rate: rand(1_000_000) / 10_000 }
+        : { type: "flat", rate: rand(20_000) / 100 },
+    });
+  }
+  return lines;
+}
+
+const SWEEP = sweepLines(300_000);
+
+const lineToItem = (line: SweepLine) =>
+  makeItem({ quantity: line.quantity }, {
+    base: line.base,
+    chargeable_days: line.chargeableDays,
+    formula: line.formula,
+    ...(line.discount ? { discount: { ...line.discount, amount: 0 } } : {}),
+  });
+
+Deno.test("calculateItemSubtotal matches exact rational arithmetic over 300k random lines", () => {
+  let disagreements = 0;
+  let first: string | null = null;
+  for (const line of SWEEP) {
+    const got = calculateItemSubtotal(lineToItem(line));
+    const want = exactLineCents(line);
+    if (
+      BigInt(Math.round(got.subtotal * 100)) !== want.subtotal ||
+      BigInt(Math.round(got.subtotal_discounted * 100)) !== want.discounted
+    ) {
+      disagreements++;
+      first ??= `${JSON.stringify(line)} → got ${JSON.stringify(got)}, want ` +
+        `${want.subtotal}/${want.discounted} cents`;
+    }
+  }
+  assertEquals(disagreements, 0, first ?? "");
+});
+
+Deno.test("…and a divide-first implementation DOES disagree — the sweep can fail", () => {
+  // Fail-closed companion, and the reason to trust the test above. Without it, a
+  // sweep whose oracle had drifted into a restatement of the implementation
+  // would pass forever and prove nothing — the `SETTLED_INVOICE_STATUSES`
+  // lesson, one level up: a guard never seen to fail is not known to be a guard.
+  let disagreements = 0;
+  for (const line of SWEEP) {
+    const want = exactLineCents(line);
+    const bad = divideFirstLine(line);
+    if (
+      BigInt(Math.round(bad.subtotal * 100)) !== want.subtotal ||
+      BigInt(Math.round(bad.discounted * 100)) !== want.discounted
+    ) disagreements++;
+  }
+  assertEquals(
+    disagreements > 0,
+    true,
+    "the divide-first form agreed on all 300k lines — the oracle has stopped discriminating",
+  );
+  console.log(
+    `  divide-first mis-rounds ${disagreements} of ${SWEEP.length} lines ` +
+      `(1 in ${Math.round(SWEEP.length / disagreements)})`,
+  );
+});
+
 Deno.test("calculateItemSubtotal: flat discount is per-unit, per pricing factor", () => {
   // rate 10/unit × qty 2 × (10/5) = 40 off a 100 × 2 × 2 = 400 subtotal.
   const item = makeItem({ quantity: 2 }, { base: 100, chargeable_days: 10, discount: { type: "flat", rate: 10, amount: 0 } });
