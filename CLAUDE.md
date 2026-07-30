@@ -75,6 +75,8 @@ const roundDivHalfUp = (num: bigint, den: bigint) => (2n * num + den) / (2n * de
 
 `calculateItemSubtotal` (`src/utils/orders.ts`) is the reference: the day factor is `× days ÷ 5`, the percent discount is `× (100·S − rate·S) ÷ 100·S`. Verified against an exact BigInt rational reference over 300k random lines, 0 disagreements. The float form it replaced mis-rounded ~1 line in 21,000 by a cent, always upward.
 
+**That sweep runs** — `tests/orders.test.ts`, *"matches exact rational arithmetic over 300k random lines"*, ~120 ms. Read its companion (*"…and a divide-first implementation DOES disagree"*) before trusting it: a BigInt-vs-BigInt oracle mirroring the implementation's own decomposition can only ever agree with it, so the companion sweeps a divide-first form and asserts it fails — measured at 1,150 of 300,000 lines, 1 in 261. `tests/movements.test.ts` (`costOfUnits`, 200k draws) is the same shape.
+
 `currency.js` stays for **summing** money (`calculateOrderTotals`) — that is what it is good at.
 
 `Discount.rate` means two things: for `percent` it is a percentage bounded `[0, 100]`; for `flat` it is **dollars per unit, per pricing factor** (`rate × quantity × pricingFactor === amount`), unbounded above, never negative. `RateType` is `["percent", "flat"]` — there is no `"amount"` member. Full cross-repo rule: workspace `CLAUDE.md` → "Money arithmetic (authoritative)".
