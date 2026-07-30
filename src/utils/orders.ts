@@ -107,6 +107,12 @@ export interface LineItem {
   description?: string;
   order_number?: number;
   uid_order?: string | null;
+  /**
+   * Revenue chart-of-accounts code, deciding whether the line is taxable at all
+   * ({@link isTaxableCoa}). Stored on an invoice line; absent on an order line,
+   * where it lives on the product — see {@link PricingItem.coa_revenue}.
+   */
+  coa_revenue?: number | null;
 }
 
 /**
@@ -173,6 +179,17 @@ export interface PricingItem {
   type: ItemTypeType;
   quantity?: number;
   price?: PricingPrice | null;
+  /**
+   * Revenue chart-of-accounts code, used to decide whether the line is taxable
+   * at all ({@link isTaxableCoa}).
+   *
+   * Optional because the two item shapes differ: an **invoice** line stores it,
+   * an **order** line does not (it lives on the product). A caller that can
+   * resolve it — anything holding the product — should populate it, or the line
+   * is priced as taxable. See {@link isTaxableCoa} for why unknown means
+   * taxable rather than exempt.
+   */
+  coa_revenue?: number | null;
 }
 
 /** A {@link PricingItem} that has passed {@link isPreTaxPricingItem}. */
@@ -671,6 +688,55 @@ export function calculateItemDiscount(item: LineItem): number {
 }
 
 /**
+ * The revenue COAs that sales/rental tax is actually owed on — the three
+ * `Sales`-type accounts: 4000 Rental Income, 4200 Retail Sales Income,
+ * 4210 Replacement Sales Income.
+ *
+ * **This is the single source of truth for line taxability**, and it has to be,
+ * because it previously existed only on the *Xero push* side and nowhere in the
+ * engine computing CFS's own totals. So CFS taxed lines it then told Xero were
+ * untaxable (`TaxType: "NONE"`), inflating `total` and leaving the difference as
+ * a phantom `amount_due`. Measured on prod 2026-07-30: **19 invoices /
+ * $2,741.78**, plus 9 orders / $453.50.
+ *
+ * Everything outside the set is a service or fee — Service Income, Delivery
+ * Surcharges, Pass Through, Transaction Fee, Other Income — and sales tax is not
+ * owed on it. Xero was right and the engine was wrong, so there is no historical
+ * under-collection: the customer was always billed the untaxed amount and CFS
+ * merely displayed a balance that was never real.
+ *
+ * `api-cloudrun/src/lib/xeroTax.ts` consumes this same constant so the push and
+ * the totals cannot drift apart again.
+ */
+export const TAXABLE_REVENUE_COAS: readonly number[] = [4000, 4200, 4210];
+
+/**
+ * Is a line with this revenue COA subject to tax?
+ *
+ * **`null`/`undefined` means UNKNOWN, and unknown is treated as TAXABLE** — the
+ * opposite of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`, and the
+ * asymmetry is deliberate. That call site resolves the COA from the product
+ * before asking, so absent there really does mean "not a taxable account". The
+ * pricing engine has no such guarantee: **an order line item carries no
+ * `coa_revenue` at all** — the field is on the invoice item and the product, not
+ * the order item. Folding unknown into "untaxable" here would silently zero the
+ * tax on every order line in the corpus.
+ *
+ * So this gate only ever *removes* tax from a line it can positively identify as
+ * non-revenue, and a caller that can resolve the COA must supply it (see
+ * {@link PricingItem.coa_revenue}).
+ *
+ * ⚠️ The two sides therefore still disagree for an unknown COA, which is exactly
+ * the state of a `custom-` line: it has no product, so the quote push sends
+ * `NONE` while the engine keeps taxing it. Closing that needs a decision about
+ * what a custom line's COA should be, not a change to this predicate.
+ */
+export function isTaxableCoa(coaRevenue: number | null | undefined): boolean {
+  if (coaRevenue === null || coaRevenue === undefined) return true;
+  return TAXABLE_REVENUE_COAS.includes(coaRevenue);
+}
+
+/**
  * Pure per-item tax amount for one tax against a given subtotal.
  * `percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.
  *
@@ -704,6 +770,11 @@ export function calculateItemTax(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
   }
+
+  // A non-revenue line is not taxable, and the Xero push has always known it —
+  // it sends `TaxType: "NONE"` for exactly these COAs. This gate is what stops
+  // CFS computing a tax it then tells Xero not to charge.
+  if (!isTaxableCoa(item.coa_revenue)) return [];
 
   const { subtotal_discounted } = calculateItemSubtotal(item);
   const quantity = item.quantity;

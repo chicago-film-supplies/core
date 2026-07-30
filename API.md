@@ -17911,6 +17911,7 @@ interface LineItem {
   description?: string;
   order_number?: number;
   uid_order?: string | null;
+  coa_revenue?: number | null;
 }
 ```
 
@@ -17970,6 +17971,7 @@ interface PricingItem {
   type: ItemTypeType;
   quantity?: number;
   price?: PricingPrice | null;
+  coa_revenue?: number | null;
 }
 ```
 
@@ -19097,6 +19099,7 @@ interface LineItem {
   description?: string;
   order_number?: number;
   uid_order?: string | null;
+  coa_revenue?: number | null;
 }
 ```
 
@@ -19220,6 +19223,7 @@ interface PricingItem {
   type: ItemTypeType;
   quantity?: number;
   price?: PricingPrice | null;
+  coa_revenue?: number | null;
 }
 ```
 
@@ -19276,6 +19280,32 @@ interface StructuralItem {
   type: ItemTypeType;
   path?: string[];
 }
+```
+
+### `TAXABLE_REVENUE_COAS`
+
+The revenue COAs that sales/rental tax is actually owed on — the three
+`Sales`-type accounts: 4000 Rental Income, 4200 Retail Sales Income,
+4210 Replacement Sales Income.
+
+**This is the single source of truth for line taxability**, and it has to be,
+because it previously existed only on the *Xero push* side and nowhere in the
+engine computing CFS's own totals. So CFS taxed lines it then told Xero were
+untaxable (`TaxType: "NONE"`), inflating `total` and leaving the difference as
+a phantom `amount_due`. Measured on prod 2026-07-30: **19 invoices /
+$2,741.78**, plus 9 orders / $453.50.
+
+Everything outside the set is a service or fee — Service Income, Delivery
+Surcharges, Pass Through, Transaction Fee, Other Income — and sales tax is not
+owed on it. Xero was right and the engine was wrong, so there is no historical
+under-collection: the customer was always billed the untaxed amount and CFS
+merely displayed a balance that was never real.
+
+`api-cloudrun/src/lib/xeroTax.ts` consumes this same constant so the push and
+the totals cannot drift apart again.
+
+```ts
+const TAXABLE_REVENUE_COAS: readonly number[];
 ```
 
 ### `Tax`
@@ -19607,6 +19637,28 @@ Whether charge dates match the delivery/collection dates
 Whether a destination's collection endpoint matches its delivery endpoint
 (address, contact, and instructions are all equal).
 
+### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
+
+Is a line with this revenue COA subject to tax?
+
+**`null`/`undefined` means UNKNOWN, and unknown is treated as TAXABLE** — the
+opposite of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`, and the
+asymmetry is deliberate. That call site resolves the COA from the product
+before asking, so absent there really does mean "not a taxable account". The
+pricing engine has no such guarantee: **an order line item carries no
+`coa_revenue` at all** — the field is on the invoice item and the product, not
+the order item. Folding unknown into "untaxable" here would silently zero the
+tax on every order line in the corpus.
+
+So this gate only ever *removes* tax from a line it can positively identify as
+non-revenue, and a caller that can resolve the COA must supply it (see
+{@link PricingItem.coa_revenue}).
+
+⚠️ The two sides therefore still disagree for an unknown COA, which is exactly
+the state of a `custom-` line: it has no product, so the quote push sends
+`NONE` while the engine keeps taxing it. Closing that needs a decision about
+what a custom line's COA should be, not a change to this predicate.
+
 ### `isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem`
 
 Determine whether a line item is a transaction fee.
@@ -19775,6 +19827,32 @@ implementation.
 
 Depends one-way on `./orders.ts` (base pricing module) — no cycle.
 
+### `TAXABLE_REVENUE_COAS`
+
+The revenue COAs that sales/rental tax is actually owed on — the three
+`Sales`-type accounts: 4000 Rental Income, 4200 Retail Sales Income,
+4210 Replacement Sales Income.
+
+**This is the single source of truth for line taxability**, and it has to be,
+because it previously existed only on the *Xero push* side and nowhere in the
+engine computing CFS's own totals. So CFS taxed lines it then told Xero were
+untaxable (`TaxType: "NONE"`), inflating `total` and leaving the difference as
+a phantom `amount_due`. Measured on prod 2026-07-30: **19 invoices /
+$2,741.78**, plus 9 orders / $453.50.
+
+Everything outside the set is a service or fee — Service Income, Delivery
+Surcharges, Pass Through, Transaction Fee, Other Income — and sales tax is not
+owed on it. Xero was right and the engine was wrong, so there is no historical
+under-collection: the customer was always billed the untaxed amount and CFS
+merely displayed a balance that was never real.
+
+`api-cloudrun/src/lib/xeroTax.ts` consumes this same constant so the push and
+the totals cannot drift apart again.
+
+```ts
+const TAXABLE_REVENUE_COAS: readonly number[];
+```
+
 ### `TAX_PROFILE_OVERRIDE_NAME`
 
 Doc-level location tax profiles → the Tax doc `name` they resolve to (by
@@ -19826,6 +19904,28 @@ no tax regardless of location) → else the doc-level location profile
 (doc over org) resolved to its Tax → else `null` (no override, `tax_applied`).
 
 **Returns** — `"exempt"` (→ empty taxes) | a resolved `Tax` | `null` (no override).
+
+### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
+
+Is a line with this revenue COA subject to tax?
+
+**`null`/`undefined` means UNKNOWN, and unknown is treated as TAXABLE** — the
+opposite of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`, and the
+asymmetry is deliberate. That call site resolves the COA from the product
+before asking, so absent there really does mean "not a taxable account". The
+pricing engine has no such guarantee: **an order line item carries no
+`coa_revenue` at all** — the field is on the invoice item and the product, not
+the order item. Folding unknown into "untaxable" here would silently zero the
+tax on every order line in the corpus.
+
+So this gate only ever *removes* tax from a line it can positively identify as
+non-revenue, and a caller that can resolve the COA must supply it (see
+{@link PricingItem.coa_revenue}).
+
+⚠️ The two sides therefore still disagree for an unknown COA, which is exactly
+the state of a `custom-` line: it has no product, so the quote push sends
+`NONE` while the engine keeps taxing it. Closing that needs a decision about
+what a custom line's COA should be, not a change to this predicate.
 
 ### `overrideItemTaxesForProfile(items: LineItem[], orgProfile: string, docProfile: string, taxCatalog: Tax[], asOf: string): void`
 

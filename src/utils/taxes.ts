@@ -14,15 +14,23 @@ import type { TaxProfileType } from "../schemas/mod.ts";
 import {
   computeItemTaxAmount,
   isPreTaxItem,
+  isTaxableCoa,
   type LineItem,
   type PriceModifier,
   type Tax,
+  TAXABLE_REVENUE_COAS,
 } from "./orders.ts";
 
 // Re-export the pure per-item tax formula so consumers can import everything
 // tax-related from `@cfs/core/utils/taxes` (it lives in orders.ts to avoid a
 // taxes ↔ orders import cycle).
 export { computeItemTaxAmount, type Tax };
+
+// The line-taxability rule lives in `orders.ts` for the same reason
+// `computeItemTaxAmount` does — `taxes.ts` depends one-way on `orders.ts`, and
+// the pricing engine there needs the gate. Re-exported so consumers can import
+// everything tax-related from `@cfs/core/utils/taxes`.
+export { isTaxableCoa, TAXABLE_REVENUE_COAS };
 
 /**
  * Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched
@@ -128,6 +136,19 @@ export function overrideItemTaxesForProfile(
   for (const item of items) {
     if (!isPreTaxItem(item)) continue;
     const subtotalDiscounted = item.price.subtotal_discounted ?? 0;
+
+    // A non-revenue line is not taxable under ANY profile. Without this clause
+    // the location overrides re-taxed exactly the lines the Xero push then
+    // strips to `TaxType: "NONE"` — a clean A/B in prod: #1647 (`tax_applied`)
+    // held Delivery with `taxes: []`, while #2051 (`tax_rantoul`) had the same
+    // product at the same COA carrying a 9% tax. Same rule as
+    // `calculateItemTax`, so the profile path cannot reintroduce what the base
+    // path now removes.
+    if (!isTaxableCoa(item.coa_revenue)) {
+      item.price.taxes = [];
+      item.price.total = subtotalDiscounted;
+      continue;
+    }
 
     if (effective === "exempt") {
       item.price.taxes = [];

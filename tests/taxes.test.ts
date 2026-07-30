@@ -149,3 +149,33 @@ Deno.test("override skips non-priceable (group) items", () => {
   assertEquals((items[0] as LineItem).type, "group");
   assertEquals(px(items[1]).taxes[0].uid, "frankfort-tax");
 });
+
+// ── COA gate on the profile-override path ────────────────────────
+//
+// `overrideItemTaxesForProfile` was the SECOND place the taxability rule was
+// missing. Clean A/B from prod: #1647 (`tax_applied`) held a Delivery line with
+// `taxes: []`, while #2051 (`tax_rantoul`) carried the same product at the same
+// COA with a 9% tax — so the location override re-taxed exactly the lines the
+// Xero push then stripped to `NONE`.
+
+Deno.test("override does NOT re-tax a non-revenue COA under a location profile", () => {
+  const items = [makeItem({ coa_revenue: 4100 })];
+  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes, []);
+  assertEquals(px(items[0]).total, 100, "total is the untaxed subtotal");
+});
+
+Deno.test("override still applies the location profile on a revenue COA", () => {
+  // The discriminating half: same profile, same line, only `coa_revenue` differs.
+  // Without it the test above would pass against a function that taxed nothing.
+  const items = [makeItem({ coa_revenue: 4000 })];
+  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes.length, 1);
+  assertEquals(px(items[0]).total, 108);
+});
+
+Deno.test("override leaves an absent COA taxable (order lines carry none)", () => {
+  const items = [makeItem()];
+  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes.length, 1);
+});

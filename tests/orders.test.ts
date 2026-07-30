@@ -17,6 +17,7 @@ import {
   calculateItemPrice,
   calculateItemSubtotal,
   calculateItemTax,
+  isTaxableCoa,
   calculateItemTotal,
   calculateTransactionFeeAmount,
   calculateOrderTotals,
@@ -2480,4 +2481,68 @@ Deno.test("validateItemParentage rejects a fee nested under a product, and an un
   const dangling = validateItemParentage([parentageItem("c1", "sale", ["gone", "c1"])]);
   assertEquals(dangling.length, 1);
   assertEquals(dangling[0].parentType, "<unresolved>");
+});
+
+// ── isTaxableCoa / the COA taxability gate ───────────────────────
+//
+// Regression cover for the phantom-receivable defect: the taxability rule lived
+// only on the Xero push side, so CFS computed tax on lines it then told Xero were
+// untaxable (`TaxType: "NONE"`). Measured on prod 2026-07-30 before the fix:
+// 19 invoices / $2,741.78.
+
+Deno.test("isTaxableCoa: only the three Sales revenue accounts are taxable", () => {
+  for (const coa of [4000, 4200, 4210]) {
+    assertEquals(isTaxableCoa(coa), true, `${coa} is a Sales revenue account`);
+  }
+  // Service Income, Delivery Surcharges, Pass Through, Transaction Fee, Other
+  // Income, and the Bottled Water Tax liability — every one of these appears in
+  // the prod defect set.
+  for (const coa of [2210, 2800, 4100, 4110, 4120, 4130, 4140, 4150, 4700, 4800]) {
+    assertEquals(isTaxableCoa(coa), false, `${coa} is not a taxable revenue account`);
+  }
+});
+
+Deno.test("isTaxableCoa: an UNKNOWN coa is taxable — the asymmetry with the Xero push", () => {
+  // The push uses `![4000,4200,4210].includes(coa ?? 0)`, i.e. unknown ⇒ NONE.
+  // Mirroring that here would zero the tax on every ORDER line in the corpus,
+  // because an order line carries no `coa_revenue` at all. The gate must only
+  // ever remove tax from a line it can positively identify as non-revenue.
+  assertEquals(isTaxableCoa(undefined), true);
+  assertEquals(isTaxableCoa(null), true);
+});
+
+Deno.test("calculateItemTax: a non-revenue COA yields no tax", () => {
+  const item = makeItem({ coa_revenue: 4100 }, { taxes: [{ uid: "chi-rental-tax" }] });
+  assertEquals(calculateItemTax(item, TAXES), []);
+});
+
+Deno.test("calculateItemTax: the SAME line taxes normally on a revenue COA", () => {
+  // Paired with the case above so the gate is shown to discriminate rather than
+  // to suppress everything — the two differ only in `coa_revenue`.
+  const item = makeItem({ coa_revenue: 4000 }, { taxes: [{ uid: "chi-rental-tax" }] });
+  const result = calculateItemTax(item, TAXES);
+  assertEquals(result.length, 1);
+  assertEquals(result[0].amount, 15);
+});
+
+Deno.test("calculateItemTax: an absent COA still taxes (order lines carry none)", () => {
+  const item = makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] });
+  assertEquals(calculateItemTax(item, TAXES).length, 1);
+});
+
+Deno.test("calculateItemPrice: a non-revenue COA drops tax out of the total", () => {
+  // The end-to-end shape of the prod defect: #1330 was a single `service` line at
+  // coa 4100 whose CFS total read 7063.20 against Xero's 6480.00 — the entire
+  // 583.20 delta being tax CFS invented.
+  const taxed = calculateItemPrice(
+    makeItem({ coa_revenue: 4000 }, { taxes: [{ uid: "chi-rental-tax" }] }),
+    TAXES,
+  );
+  const gated = calculateItemPrice(
+    makeItem({ coa_revenue: 4100 }, { taxes: [{ uid: "chi-rental-tax" }] }),
+    TAXES,
+  );
+  assertEquals(taxed.total, 115);
+  assertEquals(gated.total, 100);
+  assertEquals(gated.total, gated.subtotal_discounted, "total is the untaxed subtotal");
 });
