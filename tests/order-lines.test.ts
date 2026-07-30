@@ -230,6 +230,31 @@ Deno.test("only mandatory and default components expand", () => {
   );
 });
 
+Deno.test("a mandatory/default child of an OPTIONAL parent is deliberately not staged", () => {
+  // Not the same thing as the malformed-path drop above, though it looks identical
+  // from inside the walk: this parent was deselected, not misfiled. A mandatory
+  // accessory is mandatory GIVEN its parent, and the operator has not chosen the
+  // parent — prod has 3 such rows (a generator's fuel-tank cap and hose under an
+  // optional extension tank; a hand truck under an optional folding chair), and
+  // staging them unasked would put a fuel-tank cap on every generator order.
+  //
+  // This is the test that stops someone "fixing" it by hoisting an unreachable
+  // row to the root.
+  const doc = product({
+    components: [
+      comp("tank", ["A"], { inclusion_type: "optional" }),
+      comp("cap", ["A", "tank"], { inclusion_type: "mandatory" }),
+      comp("hose", ["A", "tank"], { inclusion_type: "mandatory" }),
+      comp("kept", ["A"], { inclusion_type: "default" }),
+    ],
+  });
+
+  const lines = buildOrderComponentLines(doc, OPTS);
+  assertEquals(lines.map((l) => l.uid), ["kept"]);
+  // Specifically NOT reparented to the root.
+  assert(!lines.some((l) => l.path.at(-2) === "A" && l.uid === "cap"));
+});
+
 Deno.test("zero-priced components precede priced ones within a parent block", () => {
   const doc = product({
     components: [

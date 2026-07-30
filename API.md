@@ -18914,6 +18914,21 @@ by one root-level ratio gives a different (wrong) answer. All 34 are
 `inclusion_type: "default"` and no fractional component is `mandatory`, so the
 result is always a valid integer.
 
+**One drop IS intentional, and the distinction matters.** A `mandatory` or
+`default` row whose parent is `optional` is NOT emitted: the walk starts at the
+root and only descends through rows that survived the filter, so an
+unselected parent takes its subtree with it. That is the correct reading — a
+mandatory accessory is mandatory *given its parent*, and the operator has not
+chosen the parent. Prod has 3 such rows (a generator's fuel-tank cap and hose
+under an optional extension tank; a hand truck under an optional folding
+chair), and staging them unasked would put a fuel-tank cap on every generator
+order.
+
+So do **not** "fix" this by hoisting an unreachable row to the root. The
+hardening in {@link resolveParentUid} is about a row whose `path` is
+*malformed*; this is a row whose parent is *deselected*. Pinned by a test,
+because the two look identical from inside the walk.
+
 ### `buildOrderLineFromProduct(doc: ProductDocument, opts: OrderLineBuildOptions): OrderDocLineItemType`
 
 Build a top-level order line item from a `ProductDocument`.
