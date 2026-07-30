@@ -1571,7 +1571,6 @@ interface CreateProductInputType {
   components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
-  tracking_category_name?: string;
   uid_tracking_category?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
@@ -7068,7 +7067,7 @@ interface UpdateProductInputType {
   components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
-  uid_tracking_category?: string;
+  uid_tracking_category?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
   webshop?: typeLiteral;
@@ -12547,7 +12546,6 @@ interface CreateProductInputType {
   components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
-  tracking_category_name?: string;
   uid_tracking_category?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
@@ -12753,7 +12751,7 @@ interface UpdateProductInputType {
   components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
-  uid_tracking_category?: string;
+  uid_tracking_category?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
   webshop?: typeLiteral;
@@ -16448,7 +16446,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
 ```
 
 ### `XeroEventLogRecord`

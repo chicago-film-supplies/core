@@ -112,6 +112,20 @@ export const XERO_EVENT_MSGS = [
   "xero_write_deferred",
   "xero_defer_escalated",
   "xero_tracking_option_create_failed",
+  // A line was about to be pushed carrying an `xero_tracking_option_id` that
+  // matches no known Xero tracking option, so CFS omitted the `Tracking`
+  // element rather than sending it. This log is the ONLY signal that the line
+  // landed unclassified: Xero **silently drops** a `Tracking` element whose
+  // `TrackingOptionID` doesn't resolve — no 400, the push returns 200, and the
+  // line shows up untracked in every report grouped by product line. 29 of 547
+  // prod products carried such a dead id (2026-07-29), minted by a delete +
+  // recreate of the option and by a hardcoded uuid in `createReplacementDoc`.
+  //
+  // Deliberately a warn, not a throw. Money resolves or fails; reporting
+  // metadata degrades and says so. Carries `xero_tracking_option_id` +
+  // `product_uid` + `item_name`, and whichever of `invoice_uid`/`order_uid`
+  // identifies the document being pushed.
+  "xero_tracking_option_unresolved",
   "xero_tracking_option_update_failed",
   "xero_void_failed",
   "xero_void_requires_manual_action",

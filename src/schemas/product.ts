@@ -461,7 +461,13 @@ export interface CreateProductInputType {
   components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
-  tracking_category_name?: string;
+  // NOTE: no `tracking_category_name`. It is a DERIVED denorm of the tracking
+  // category's name, and `createProduct` reads it off the category doc it
+  // already fetches. Accepting it from the client made it a free-text field
+  // shadowing a derived one — a caller could name the category anything, and
+  // whatever it sent was persisted unvalidated whenever `uid_tracking_category`
+  // was absent. Removing it breaks nobody: the input object strips unknown keys
+  // rather than rejecting them, so a client still sending it is simply ignored.
   uid_tracking_category?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
@@ -513,7 +519,6 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   components: z.array(ComponentSchema).default([]),
   component_of: z.array(ComponentSchema).default([]),
   tags: z.array(UidNameRef).default([]),
-  tracking_category_name: z.string().optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.nullable().optional(),
   uid_linked_replacement: FirestoreId.nullable().optional(),
@@ -584,7 +589,14 @@ export interface UpdateProductInputType {
   components?: ProductComponent[];
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
-  uid_tracking_category?: string;
+  /**
+   * `null` clears the product's tracking category. It is nullable, not merely
+   * optional, because "absent" already means "leave it alone" on a patch input —
+   * without a null there is no wire value for un-assign at all, and the clear
+   * half of the service's tracking branch is unreachable. Clearing also nulls
+   * `xero_tracking_option_id` and unsets `tracking_category_name`.
+   */
+  uid_tracking_category?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
   webshop?: {
@@ -627,7 +639,7 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
   components: z.array(ComponentSchema).optional(),
   component_of: z.array(ComponentSchema).optional(),
   tags: z.array(UidNameRef).optional(),
-  uid_tracking_category: FirestoreId.optional(),
+  uid_tracking_category: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.optional(),
   uid_linked_replacement: FirestoreId.optional(),
   webshop: z.object({

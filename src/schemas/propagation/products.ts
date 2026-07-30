@@ -27,12 +27,18 @@ export const createProductRules: CollectionRule[] = [
     source: "products",
     target: "tracking-categories",
     mode: "co-write",
-    invariant: "Tracking categories track which products are assigned for Xero reporting",
+    invariant:
+      "Tracking categories track which products are assigned for Xero reporting. The registration covers the auto-minted replacement product too: a rental product mints `Replacement: {name}` in the same transaction, and that doc gets the SAME three tracking fields — so it must be registered in `products{}` and counted alongside its parent. For as long as it wasn't, `createReplacementDoc` hardcoded one dead option uuid and omitted the category link entirely, so every minted replacement was born with an id resolving to nothing in Xero (8 in prod) and the Replacements category's `count` under-reported by the same number.",
     transaction: "create-product",
     fields: [
       { source: ["uid"], target: ["products", "uid"] },
       { source: ["name"], target: ["products", "name"] },
       { source: [], target: ["count"], transform: "FieldValue.increment(1)" },
+      {
+        source: ["uid_linked_replacement"],
+        target: ["products"],
+        transform: "the minted replacement is registered + counted in its own category, and carries uid_tracking_category + tracking_category_name + xero_tracking_option_id read from that category doc",
+      },
     ],
   },
   {
@@ -236,11 +242,18 @@ export const updateProductRules: CollectionRule[] = [
     source: "products",
     target: "tracking-categories",
     mode: "co-write",
-    invariant: "When a product's tracking category changes, old category loses the ref and new one gains it",
+    invariant:
+      "When a product's tracking category changes, old category loses the ref and new one gains it — AND the product's two denorms of that category (`tracking_category_name`, `xero_tracking_option_id`) are rewritten from the target doc in the same transaction. The reverse denorm is the half that was missing: for as long as it was absent a category move left the old name and the old Xero option id on the product, and the stale option is what ships to Xero on the next push. Clearing the category (`uid_tracking_category: null`) sets `xero_tracking_option_id: null` and unsets `tracking_category_name` — nullable vs optional differ in the storage schema, so the clear path is two different operations, not one.",
     transaction: "update-product",
     fields: [
       { source: [], target: ["products"], transform: "old tracking category → remove product, decrement count" },
       { source: [], target: ["products"], transform: "new tracking category → add product, increment count" },
+      { source: ["uid_tracking_category"], target: [], transform: "reverse denorm → product.tracking_category_name = category.name" },
+      {
+        source: ["uid_tracking_category"],
+        target: [],
+        transform: "reverse denorm → product.xero_tracking_option_id = category.xero_tracking_option_id (null when the category has no option yet, or when the category is cleared)",
+      },
     ],
   },
   {
