@@ -498,6 +498,22 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
+### `COAClass`
+
+Zod schema for COAClass.
+
+```ts
+const COAClass: z.ZodType<COAClassType>;
+```
+
+### `COAClassType`
+
+Which side of a posting this account sits on.
+
+```ts
+type COAClassType = indexedAccess;
+```
+
 ### `COACode`
 
 Zod schema for COACode.
@@ -508,10 +524,14 @@ const COACode: z.ZodType<COACodeType>;
 
 ### `COACodeType`
 
-Valid chart of accounts code values.
+A chart-of-accounts code.
+
+No longer a closed union — see the module docstring. The catalog is the
+`chart-of-accounts` collection, so an unknown code is caught by a lookup that
+can actually be refreshed, not by a literal list that goes stale silently.
 
 ```ts
-type COACodeType = indexedAccess;
+type COACodeType = number;
 ```
 
 ### `COARevenueEnum`
@@ -530,6 +550,22 @@ Allowed values for chart-of-accounts revenue code.
 type COARevenueType = indexedAccess;
 ```
 
+### `COAStatus`
+
+Zod schema for COAStatus.
+
+```ts
+const COAStatus: z.ZodType<COAStatusType>;
+```
+
+### `COAStatusType`
+
+Whether Xero still offers this account for new coding.
+
+```ts
+type COAStatusType = indexedAccess;
+```
+
 ### `COAType`
 
 Zod schema for COAType.
@@ -544,6 +580,14 @@ Valid chart of accounts type values.
 
 ```ts
 type COATypeType = indexedAccess;
+```
+
+### `COA_BAD_DEBT`
+
+Xero's Bad Debt account. The one posting account a `reason` determines.
+
+```ts
+const COA_BAD_DEBT: 6900;
 ```
 
 ### `CREDIT_NOTE_REASONS`
@@ -902,6 +946,9 @@ interface ChartOfAccounts {
   code: COACodeType;
   name: string;
   type: COATypeType;
+  class: COAClassType;
+  status: COAStatusType;
+  xero_id: string | null;
   description?: string;
   default_tax_profile: string;
   version: number;
@@ -1862,6 +1909,24 @@ provenance.
 whole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`
 machinery that goes with it — has nothing to organize here. Lines are flat.
 
+## `coa_revenue` and `coa_posting` are TWO facts, and a line has both
+
+They are routinely different, and collapsing them loses real information.
+Measured on the live tenant: CN-1009 writes off 35 lines whose products are
+rentals — `product.price.coa_revenue` 4000 Rental Income — and every one of
+them posts to **6900 Bad Debt**. Store only the posting account and the
+revenue attribution that tracking-category rollups and the tax tables depend
+on is gone; store only the revenue account and the write-off is invisible.
+
+- **`coa_revenue`** — the revenue account of the *thing being credited*.
+  Product-sourced, same vocabulary as the invoice line it mirrors, and the
+  input to {@link isTaxableCoa}. Never the account the credit posts to.
+- **`coa_posting`** — where this credit lands in the ledger. Any account in
+  the `chart-of-accounts` catalog, including the expense range, which is
+  exactly why it cannot be `COARevenueEnum`: that enum is shared with
+  `Product.price.coa_revenue`, and widening it would make a catalog product
+  whose revenue account is Bad Debt Expense representable.
+
 ```ts
 interface CreditNoteDocLineItem {
   uid: string;
@@ -1870,7 +1935,8 @@ interface CreditNoteDocLineItem {
   description: string;
   quantity: number;
   price: CreditNoteDocItemPrice;
-  coa_revenue: COARevenueType;
+  coa_revenue: COARevenueType | null;
+  coa_posting: number;
   tracking_category: string | null;
   xero_id: string | null;
   xero_tracking_option_id: string | null;
@@ -8197,6 +8263,39 @@ const deleteUserRules: CollectionRule[];
 const deleteUserTransaction: TransactionDefinition;
 ```
 
+### `deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null`
+
+Where a credit line posts, from the two facts that decide it.
+
+**Bad debt is not a revenue reversal, and that is the whole rule.** The money
+*was* owed — the sale stands — and the write-off moves it to Bad Debt so it
+can be written off: `DR 6900 / CR A/R`. Everything else is a return or an
+allowance, where the customer never owed the money and the revenue itself is
+reversed: `DR <the line's own revenue account> / CR A/R`. `early_return` is
+the clearest case of the second kind.
+
+**New notes derive this; history does not obey it.** Of the 12 notes in the
+live tenant, 8 agree and 4 are miscodings the owner has ruled historic rather
+than sanctioned — CN-1007 books a bad-debt write-off to 4210 (revenue), and
+CN-1010/1011/1012 book a customer credit to 6000 General Operating Expenses
+on a free-text line whose `TaxType` is `INPUT`, a *purchase* tax type on a
+receivable. CFS stores the corrected account and leaves Xero alone; the
+divergence is recorded as a comment on the note's thread, and
+`audit-credit-note-posting.ts` reports it. Xero still holds the original, so
+nothing is lost by correcting.
+
+That is also why `coa_posting` is STORED rather than derived on read: the
+stored value is what CFS asserts, this function is what CFS intends, and an
+audit comparing them against Xero is a real guard precisely because the three
+come from different places. Deriving on read would make the check a
+restatement of its own oracle.
+
+`correction` is deliberately absent: it is bidirectional — an operator may be
+adding a credit they missed or removing one that never happened — so its
+posting depends on what is being corrected. Callers must supply it.
+
+**Returns** — the account code, or `null` when the rule has no opinion.
+
 ### `deriveName(parts: PartialNameParts): string`
 
 Canonical join rule for deriving a single display string from name parts.
@@ -10306,6 +10405,22 @@ interface UpdateCardInputType {
 
 ## `@cfs/core/schemas/chart-of-accounts`
 
+### `COAClass`
+
+Zod schema for COAClass.
+
+```ts
+const COAClass: z.ZodType<COAClassType>;
+```
+
+### `COAClassType`
+
+Which side of a posting this account sits on.
+
+```ts
+type COAClassType = indexedAccess;
+```
+
 ### `COACode`
 
 Zod schema for COACode.
@@ -10316,10 +10431,30 @@ const COACode: z.ZodType<COACodeType>;
 
 ### `COACodeType`
 
-Valid chart of accounts code values.
+A chart-of-accounts code.
+
+No longer a closed union — see the module docstring. The catalog is the
+`chart-of-accounts` collection, so an unknown code is caught by a lookup that
+can actually be refreshed, not by a literal list that goes stale silently.
 
 ```ts
-type COACodeType = indexedAccess;
+type COACodeType = number;
+```
+
+### `COAStatus`
+
+Zod schema for COAStatus.
+
+```ts
+const COAStatus: z.ZodType<COAStatusType>;
+```
+
+### `COAStatusType`
+
+Whether Xero still offers this account for new coding.
+
+```ts
+type COAStatusType = indexedAccess;
 ```
 
 ### `COAType`
@@ -10348,6 +10483,9 @@ interface ChartOfAccounts {
   code: COACodeType;
   name: string;
   type: COATypeType;
+  class: COAClassType;
+  status: COAStatusType;
+  xero_id: string | null;
   description?: string;
   default_tax_profile: string;
   version: number;
@@ -13448,6 +13586,14 @@ but CFS has no contact-scoped billing document and every invoice carries the
 denormalized `organization` block. A contact-scoped document could not reuse
 it and would lose the `organization.name` Typesense sort.
 
+### `COA_BAD_DEBT`
+
+Xero's Bad Debt account. The one posting account a `reason` determines.
+
+```ts
+const COA_BAD_DEBT: 6900;
+```
+
 ### `CREDIT_NOTE_REASONS`
 
 Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
@@ -13527,6 +13673,24 @@ provenance.
 whole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`
 machinery that goes with it — has nothing to organize here. Lines are flat.
 
+## `coa_revenue` and `coa_posting` are TWO facts, and a line has both
+
+They are routinely different, and collapsing them loses real information.
+Measured on the live tenant: CN-1009 writes off 35 lines whose products are
+rentals — `product.price.coa_revenue` 4000 Rental Income — and every one of
+them posts to **6900 Bad Debt**. Store only the posting account and the
+revenue attribution that tracking-category rollups and the tax tables depend
+on is gone; store only the revenue account and the write-off is invisible.
+
+- **`coa_revenue`** — the revenue account of the *thing being credited*.
+  Product-sourced, same vocabulary as the invoice line it mirrors, and the
+  input to {@link isTaxableCoa}. Never the account the credit posts to.
+- **`coa_posting`** — where this credit lands in the ledger. Any account in
+  the `chart-of-accounts` catalog, including the expense range, which is
+  exactly why it cannot be `COARevenueEnum`: that enum is shared with
+  `Product.price.coa_revenue`, and widening it would make a catalog product
+  whose revenue account is Bad Debt Expense representable.
+
 ```ts
 interface CreditNoteDocLineItem {
   uid: string;
@@ -13535,7 +13699,8 @@ interface CreditNoteDocLineItem {
   description: string;
   quantity: number;
   price: CreditNoteDocItemPrice;
-  coa_revenue: COARevenueType;
+  coa_revenue: COARevenueType | null;
+  coa_posting: number;
   tracking_category: string | null;
   xero_id: string | null;
   xero_tracking_option_id: string | null;
@@ -13597,6 +13762,39 @@ Allowed credit-note statuses.
 ```ts
 type CreditNoteStatusType = indexedAccess;
 ```
+
+### `deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null`
+
+Where a credit line posts, from the two facts that decide it.
+
+**Bad debt is not a revenue reversal, and that is the whole rule.** The money
+*was* owed — the sale stands — and the write-off moves it to Bad Debt so it
+can be written off: `DR 6900 / CR A/R`. Everything else is a return or an
+allowance, where the customer never owed the money and the revenue itself is
+reversed: `DR <the line's own revenue account> / CR A/R`. `early_return` is
+the clearest case of the second kind.
+
+**New notes derive this; history does not obey it.** Of the 12 notes in the
+live tenant, 8 agree and 4 are miscodings the owner has ruled historic rather
+than sanctioned — CN-1007 books a bad-debt write-off to 4210 (revenue), and
+CN-1010/1011/1012 book a customer credit to 6000 General Operating Expenses
+on a free-text line whose `TaxType` is `INPUT`, a *purchase* tax type on a
+receivable. CFS stores the corrected account and leaves Xero alone; the
+divergence is recorded as a comment on the note's thread, and
+`audit-credit-note-posting.ts` reports it. Xero still holds the original, so
+nothing is lost by correcting.
+
+That is also why `coa_posting` is STORED rather than derived on read: the
+stored value is what CFS asserts, this function is what CFS intends, and an
+audit comparing them against Xero is a real guard precisely because the three
+come from different places. Deriving on read would make the check a
+restatement of its own oracle.
+
+`correction` is deliberately absent: it is bidirectional — an operator may be
+adding a credit they missed or removing one that never happened — so its
+posting depends on what is being corrected. Callers must supply it.
+
+**Returns** — the account code, or `null` when the rule has no opinion.
 
 ## `@cfs/core/schemas/session`
 

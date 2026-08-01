@@ -503,10 +503,14 @@ export {
 
 export {
   ChartOfAccountsSchema,
+  COAClass,
   COACode,
+  COAStatus,
   COAType,
   type ChartOfAccounts,
+  type COAClassType,
   type COACodeType,
+  type COAStatusType,
   type COATypeType,
 } from "./chart-of-accounts.ts";
 
@@ -678,6 +682,8 @@ export {
 } from "./settlement.ts";
 export {
   CREDIT_NOTE_REASONS,
+  COA_BAD_DEBT,
+  deriveCreditPostingAccount,
   type CreditNote,
   type CreditNoteDocItemPrice,
   CreditNoteDocLineItem,

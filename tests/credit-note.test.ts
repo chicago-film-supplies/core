@@ -11,8 +11,10 @@
  */
 import { assertEquals } from "@std/assert";
 import {
+  COA_BAD_DEBT,
   CREDIT_NOTE_REASONS,
   CreditNoteSchema,
+  deriveCreditPostingAccount,
   SETTLEMENT_CONTRACTS,
 } from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
@@ -53,6 +55,7 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
         total: 2196,
       },
       coa_revenue: 4000,
+      coa_posting: 4000,
       tracking_category: null,
       xero_id: null,
       xero_tracking_option_id: null,
@@ -172,12 +175,42 @@ Deno.test("number is stored BARE — CN- is presentation only", () => {
   assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ number: 1009 })).success, true);
 });
 
-Deno.test("a line must declare its revenue account", () => {
+Deno.test("a line must declare both accounts, and they are allowed to differ", () => {
   // A credit spanning lines with different COAs (#1689 hits 4000 and 4100)
   // cannot be posted from a document-level amount, and apportioning it
   // afterwards is inferring cause from effect.
-  const items = makeCreditNote().items.map(({ coa_revenue: _drop, ...rest }) => rest);
-  assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items })).success, false);
+  const noRevenue = makeCreditNote().items.map(({ coa_revenue: _d, ...rest }) => rest);
+  assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items: noRevenue })).success, false);
+
+  const noPosting = makeCreditNote().items.map(({ coa_posting: _d, ...rest }) => rest);
+  assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items: noPosting })).success, false);
+
+  // `coa_revenue` is nullable — a free-text credit line has no catalog product
+  // behind it, and CN-1012's sole line is exactly that. Stricter than the
+  // invoice it credits would be unable to represent the corpus.
+  const nullRevenue = makeCreditNote().items.map((i) => ({ ...i, coa_revenue: null }));
+  assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items: nullRevenue })).success, true);
+
+  // The two are different facts. CN-1009 writes off 35 RENTAL lines (revenue
+  // 4000) to 6900 Bad Debt; collapsing them loses the revenue attribution the
+  // tracking-category rollups depend on.
+  const writeOff = makeCreditNote().items.map((i) => ({ ...i, coa_revenue: 4000, coa_posting: 6900 }));
+  assertEquals(CreditNoteSchema.safeParse(makeCreditNote({ items: writeOff })).success, true);
+});
+
+Deno.test("deriveCreditPostingAccount: bad debt leaves revenue alone, returns reverse it", () => {
+  // Bad debt is NOT a revenue reversal — the sale stands and the money was
+  // owed, so it moves to Bad Debt to be written off. Everything else is a
+  // return or allowance, where the customer never owed it and revenue reverses.
+  assertEquals(deriveCreditPostingAccount("bad_debt", 4000), COA_BAD_DEBT);
+  assertEquals(deriveCreditPostingAccount("bad_debt", null), COA_BAD_DEBT);
+  assertEquals(deriveCreditPostingAccount("early_return", 4000), 4000);
+  assertEquals(deriveCreditPostingAccount("order_adjustment", 4210), 4210);
+  assertEquals(deriveCreditPostingAccount("goodwill", 4100), 4100);
+
+  // Bidirectional or unclassified — the rule has no opinion and must not invent one.
+  assertEquals(deriveCreditPostingAccount("correction", 4000), null);
+  assertEquals(deriveCreditPostingAccount("unspecified", 4000), null);
 });
 
 Deno.test("date is a calendar date, not an instant", () => {

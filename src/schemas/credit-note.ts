@@ -61,6 +61,53 @@ import {
   PriceModifier,
   type PriceModifierType,
 } from "./order.ts";
+import { COACode } from "./chart-of-accounts.ts";
+
+// ── Posting ──────────────────────────────────────────────────────
+
+/** Xero's Bad Debt account. The one posting account a `reason` determines. */
+export const COA_BAD_DEBT = 6900;
+
+/**
+ * Where a credit line posts, from the two facts that decide it.
+ *
+ * **Bad debt is not a revenue reversal, and that is the whole rule.** The money
+ * *was* owed — the sale stands — and the write-off moves it to Bad Debt so it
+ * can be written off: `DR 6900 / CR A/R`. Everything else is a return or an
+ * allowance, where the customer never owed the money and the revenue itself is
+ * reversed: `DR <the line's own revenue account> / CR A/R`. `early_return` is
+ * the clearest case of the second kind.
+ *
+ * **New notes derive this; history does not obey it.** Of the 12 notes in the
+ * live tenant, 8 agree and 4 are miscodings the owner has ruled historic rather
+ * than sanctioned — CN-1007 books a bad-debt write-off to 4210 (revenue), and
+ * CN-1010/1011/1012 book a customer credit to 6000 General Operating Expenses
+ * on a free-text line whose `TaxType` is `INPUT`, a *purchase* tax type on a
+ * receivable. CFS stores the corrected account and leaves Xero alone; the
+ * divergence is recorded as a comment on the note's thread, and
+ * `audit-credit-note-posting.ts` reports it. Xero still holds the original, so
+ * nothing is lost by correcting.
+ *
+ * That is also why `coa_posting` is STORED rather than derived on read: the
+ * stored value is what CFS asserts, this function is what CFS intends, and an
+ * audit comparing them against Xero is a real guard precisely because the three
+ * come from different places. Deriving on read would make the check a
+ * restatement of its own oracle.
+ *
+ * `correction` is deliberately absent: it is bidirectional — an operator may be
+ * adding a credit they missed or removing one that never happened — so its
+ * posting depends on what is being corrected. Callers must supply it.
+ *
+ * @returns the account code, or `null` when the rule has no opinion.
+ */
+export function deriveCreditPostingAccount(
+  reason: SettlementReasonType,
+  coaRevenue: number | null,
+): number | null {
+  if (reason === "bad_debt") return COA_BAD_DEBT;
+  if (reason === "correction" || reason === "unspecified") return null;
+  return coaRevenue;
+}
 
 // ── Status ───────────────────────────────────────────────────────
 
@@ -145,6 +192,24 @@ const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strict
  * **No dividers.** A credit note has no destinations and bills no orders, so the
  * whole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`
  * machinery that goes with it — has nothing to organize here. Lines are flat.
+ *
+ * ## `coa_revenue` and `coa_posting` are TWO facts, and a line has both
+ *
+ * They are routinely different, and collapsing them loses real information.
+ * Measured on the live tenant: CN-1009 writes off 35 lines whose products are
+ * rentals — `product.price.coa_revenue` 4000 Rental Income — and every one of
+ * them posts to **6900 Bad Debt**. Store only the posting account and the
+ * revenue attribution that tracking-category rollups and the tax tables depend
+ * on is gone; store only the revenue account and the write-off is invisible.
+ *
+ * - **`coa_revenue`** — the revenue account of the *thing being credited*.
+ *   Product-sourced, same vocabulary as the invoice line it mirrors, and the
+ *   input to {@link isTaxableCoa}. Never the account the credit posts to.
+ * - **`coa_posting`** — where this credit lands in the ledger. Any account in
+ *   the `chart-of-accounts` catalog, including the expense range, which is
+ *   exactly why it cannot be `COARevenueEnum`: that enum is shared with
+ *   `Product.price.coa_revenue`, and widening it would make a catalog product
+ *   whose revenue account is Bad Debt Expense representable.
  */
 export interface CreditNoteDocLineItem {
   uid: string;
@@ -153,7 +218,19 @@ export interface CreditNoteDocLineItem {
   description: string;
   quantity: number;
   price: CreditNoteDocItemPrice;
-  coa_revenue: COARevenueType;
+  /**
+   * The revenue account of the thing credited. **Nullable**, matching
+   * `InvoiceDocLineItem` — a credit can be raised on a free-text line with no
+   * catalog product behind it, and the live tenant already holds one (CN-1012's
+   * sole line has no `ItemCode`). A schema stricter than the invoice it credits
+   * cannot represent the corpus.
+   */
+  coa_revenue: COARevenueType | null;
+  /**
+   * The account this credit posts to. See {@link deriveCreditPostingAccount} —
+   * new notes derive it, history stores what actually happened.
+   */
+  coa_posting: number;
   tracking_category: string | null;
   xero_id: string | null;
   xero_tracking_option_id: string | null;
@@ -169,7 +246,8 @@ const CreditNoteDocLineItemInner = z.strictObject({
   description: z.string().meta({ pii: "none" }).default(""),
   quantity: z.number().default(0),
   price: CreditNoteDocItemPriceSchema,
-  coa_revenue: COARevenueEnum,
+  coa_revenue: COARevenueEnum.nullable(),
+  coa_posting: COACode,
   tracking_category: z.string().nullable().default(null),
   xero_id: z.uuid().nullable().default(null),
   xero_tracking_option_id: z.uuid().nullable().default(null),

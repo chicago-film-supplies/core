@@ -242,6 +242,18 @@
         },
         {
           "kind": "variable",
+          "name": "COAClass",
+          "declaration": "const COAClass: z.ZodType<COAClassType>;",
+          "doc": "Zod schema for COAClass."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "COAClassType",
+          "declaration": "type COAClassType = indexedAccess;",
+          "doc": "Which side of a posting this account sits on."
+        },
+        {
+          "kind": "variable",
           "name": "COACode",
           "declaration": "const COACode: z.ZodType<COACodeType>;",
           "doc": "Zod schema for COACode."
@@ -249,8 +261,8 @@
         {
           "kind": "typeAlias",
           "name": "COACodeType",
-          "declaration": "type COACodeType = indexedAccess;",
-          "doc": "Valid chart of accounts code values."
+          "declaration": "type COACodeType = number;",
+          "doc": "A chart-of-accounts code.\n\nNo longer a closed union — see the module docstring. The catalog is the\n`chart-of-accounts` collection, so an unknown code is caught by a lookup that\ncan actually be refreshed, not by a literal list that goes stale silently."
         },
         {
           "kind": "variable",
@@ -266,6 +278,18 @@
         },
         {
           "kind": "variable",
+          "name": "COAStatus",
+          "declaration": "const COAStatus: z.ZodType<COAStatusType>;",
+          "doc": "Zod schema for COAStatus."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "COAStatusType",
+          "declaration": "type COAStatusType = indexedAccess;",
+          "doc": "Whether Xero still offers this account for new coding."
+        },
+        {
+          "kind": "variable",
           "name": "COAType",
           "declaration": "const COAType: z.ZodType<COATypeType>;",
           "doc": "Zod schema for COAType."
@@ -275,6 +299,12 @@
           "name": "COATypeType",
           "declaration": "type COATypeType = indexedAccess;",
           "doc": "Valid chart of accounts type values."
+        },
+        {
+          "kind": "variable",
+          "name": "COA_BAD_DEBT",
+          "declaration": "const COA_BAD_DEBT: 6900;",
+          "doc": "Xero's Bad Debt account. The one posting account a `reason` determines."
         },
         {
           "kind": "variable",
@@ -453,7 +483,7 @@
         {
           "kind": "interface",
           "name": "ChartOfAccounts",
-          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  class: COAClassType;\n  status: COAStatusType;\n  xero_id: string | null;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A chart of accounts document in Firestore."
         },
         {
@@ -939,8 +969,8 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n}",
-          "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat."
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n}",
+          "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat.\n\n## `coa_revenue` and `coa_posting` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`coa_revenue`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors, and the\n  input to {@link isTaxableCoa}. Never the account the credit posts to.\n- **`coa_posting`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
           "kind": "variable",
@@ -4231,6 +4261,14 @@
         },
         {
           "kind": "function",
+          "name": "deriveCreditPostingAccount",
+          "signature": "deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null",
+          "doc": "Where a credit line posts, from the two facts that decide it.\n\n**Bad debt is not a revenue reversal, and that is the whole rule.** The money\n*was* owed — the sale stands — and the write-off moves it to Bad Debt so it\ncan be written off: `DR 6900 / CR A/R`. Everything else is a return or an\nallowance, where the customer never owed the money and the revenue itself is\nreversed: `DR <the line's own revenue account> / CR A/R`. `early_return` is\nthe clearest case of the second kind.\n\n**New notes derive this; history does not obey it.** Of the 12 notes in the\nlive tenant, 8 agree and 4 are miscodings the owner has ruled historic rather\nthan sanctioned — CN-1007 books a bad-debt write-off to 4210 (revenue), and\nCN-1010/1011/1012 book a customer credit to 6000 General Operating Expenses\non a free-text line whose `TaxType` is `INPUT`, a *purchase* tax type on a\nreceivable. CFS stores the corrected account and leaves Xero alone; the\ndivergence is recorded as a comment on the note's thread, and\n`audit-credit-note-posting.ts` reports it. Xero still holds the original, so\nnothing is lost by correcting.\n\nThat is also why `coa_posting` is STORED rather than derived on read: the\nstored value is what CFS asserts, this function is what CFS intends, and an\naudit comparing them against Xero is a real guard precisely because the three\ncome from different places. Deriving on read would make the check a\nrestatement of its own oracle.\n\n`correction` is deliberately absent: it is bidirectional — an operator may be\nadding a credit they missed or removing one that never happened — so its\nposting depends on what is being corrected. Callers must supply it.",
+          "paramTags": [],
+          "returnsTag": "the account code, or `null` when the rule has no opinion."
+        },
+        {
+          "kind": "function",
           "name": "deriveName",
           "signature": "deriveName(parts: PartialNameParts): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
@@ -5587,6 +5625,18 @@
       "symbols": [
         {
           "kind": "variable",
+          "name": "COAClass",
+          "declaration": "const COAClass: z.ZodType<COAClassType>;",
+          "doc": "Zod schema for COAClass."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "COAClassType",
+          "declaration": "type COAClassType = indexedAccess;",
+          "doc": "Which side of a posting this account sits on."
+        },
+        {
+          "kind": "variable",
           "name": "COACode",
           "declaration": "const COACode: z.ZodType<COACodeType>;",
           "doc": "Zod schema for COACode."
@@ -5594,8 +5644,20 @@
         {
           "kind": "typeAlias",
           "name": "COACodeType",
-          "declaration": "type COACodeType = indexedAccess;",
-          "doc": "Valid chart of accounts code values."
+          "declaration": "type COACodeType = number;",
+          "doc": "A chart-of-accounts code.\n\nNo longer a closed union — see the module docstring. The catalog is the\n`chart-of-accounts` collection, so an unknown code is caught by a lookup that\ncan actually be refreshed, not by a literal list that goes stale silently."
+        },
+        {
+          "kind": "variable",
+          "name": "COAStatus",
+          "declaration": "const COAStatus: z.ZodType<COAStatusType>;",
+          "doc": "Zod schema for COAStatus."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "COAStatusType",
+          "declaration": "type COAStatusType = indexedAccess;",
+          "doc": "Whether Xero still offers this account for new coding."
         },
         {
           "kind": "variable",
@@ -5612,7 +5674,7 @@
         {
           "kind": "interface",
           "name": "ChartOfAccounts",
-          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  class: COAClassType;\n  status: COAStatusType;\n  xero_id: string | null;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A chart of accounts document in Firestore."
         },
         {
@@ -7141,6 +7203,12 @@
       "symbols": [
         {
           "kind": "variable",
+          "name": "COA_BAD_DEBT",
+          "declaration": "const COA_BAD_DEBT: 6900;",
+          "doc": "Xero's Bad Debt account. The one posting account a `reason` determines."
+        },
+        {
+          "kind": "variable",
           "name": "CREDIT_NOTE_REASONS",
           "declaration": "const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];",
           "doc": "Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},\n**derived rather than re-listed**, so the document and the settlements it\nspawns can never offer different reasons.\n\nThe reason lives on the *document* and is denormalized onto each settlement:\none credit note allocated across three invoices has one reason, and authoring\nit three times invites three answers."
@@ -7160,8 +7228,8 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n}",
-          "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat."
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n}",
+          "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat.\n\n## `coa_revenue` and `coa_posting` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`coa_revenue`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors, and the\n  input to {@link isTaxableCoa}. Never the account the credit posts to.\n- **`coa_posting`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
           "kind": "variable",
@@ -7192,6 +7260,14 @@
           "name": "CreditNoteStatusType",
           "declaration": "type CreditNoteStatusType = indexedAccess;",
           "doc": "Allowed credit-note statuses."
+        },
+        {
+          "kind": "function",
+          "name": "deriveCreditPostingAccount",
+          "signature": "deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null",
+          "doc": "Where a credit line posts, from the two facts that decide it.\n\n**Bad debt is not a revenue reversal, and that is the whole rule.** The money\n*was* owed — the sale stands — and the write-off moves it to Bad Debt so it\ncan be written off: `DR 6900 / CR A/R`. Everything else is a return or an\nallowance, where the customer never owed the money and the revenue itself is\nreversed: `DR <the line's own revenue account> / CR A/R`. `early_return` is\nthe clearest case of the second kind.\n\n**New notes derive this; history does not obey it.** Of the 12 notes in the\nlive tenant, 8 agree and 4 are miscodings the owner has ruled historic rather\nthan sanctioned — CN-1007 books a bad-debt write-off to 4210 (revenue), and\nCN-1010/1011/1012 book a customer credit to 6000 General Operating Expenses\non a free-text line whose `TaxType` is `INPUT`, a *purchase* tax type on a\nreceivable. CFS stores the corrected account and leaves Xero alone; the\ndivergence is recorded as a comment on the note's thread, and\n`audit-credit-note-posting.ts` reports it. Xero still holds the original, so\nnothing is lost by correcting.\n\nThat is also why `coa_posting` is STORED rather than derived on read: the\nstored value is what CFS asserts, this function is what CFS intends, and an\naudit comparing them against Xero is a real guard precisely because the three\ncome from different places. Deriving on read would make the check a\nrestatement of its own oracle.\n\n`correction` is deliberately absent: it is bidirectional — an operator may be\nadding a credit they missed or removing one that never happened — so its\nposting depends on what is being corrected. Callers must supply it.",
+          "paramTags": [],
+          "returnsTag": "the account code, or `null` when the rule has no opinion."
         }
       ]
     },
