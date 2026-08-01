@@ -32,6 +32,16 @@ export type {
   InventoryLedgerRecalculated,
 } from "./products.ts";
 
+// ── Settlement aggregate ────────────────────────────────────────────
+
+export type {
+  CreditNoteCreated,
+  CreditNoteUpdated,
+  CreditNoteVoided,
+  SettlementRecorded,
+  SettlementReversed,
+} from "./settlements.ts";
+
 // ── Invoice aggregate ───────────────────────────────────────────────
 
 export type {

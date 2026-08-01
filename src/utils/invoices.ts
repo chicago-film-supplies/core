@@ -46,8 +46,14 @@ export {
 } from "./orders.ts";
 
 import currency from "currency.js";
-import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, OrderDocDestinationItemType, PriceFormulaType } from "../schemas/mod.ts";
-import { isDividerItemType, isLineItemType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, InvoiceStatusType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
+import {
+  getSettlementMultiplier,
+  isDividerItemType,
+  isLineItemType,
+  SETTLEMENT_CONTRACTS,
+} from "../schemas/mod.ts";
+import { fromCents } from "./money.ts";
 import {
   calculateItemSubtotal,
   computeItemPaths,
@@ -114,12 +120,21 @@ export type InvoiceTotals = InvoiceDocTotals;
  *
  * @param items - Full invoice items array (structural items are filtered out)
  * @param taxes - Tax definitions for tax calculation
- * @param payments - Optional payments array for amount_paid/amount_due
+ * @param settlements - Every settlement against the invoice, reversals included
  */
 export function calculateInvoiceTotals(
   items: InvoiceItem[],
   taxes: Tax[],
-  payments?: { amount: number; status: string }[],
+  // BREAKING, deliberately. An optional param means any un-updated call site
+  // silently computes `amount_credited: 0` and re-inflates `amount_due` — the
+  // exact class that flipped 14 invoices in #409. Renaming the parameter and
+  // changing its element shape turns every one of the 11 call sites into a
+  // compile error instead.
+  settlements?: readonly {
+    type: SettlementTypeType;
+    reason: SettlementReasonType;
+    amount_cents: number;
+  }[],
 ): InvoiceTotals {
   const billable = flattenForXero(items);
 
@@ -154,8 +169,11 @@ export function calculateInvoiceTotals(
 
   const total = currency(subtotal_discounted).add(taxSum).add(feeSum).value;
 
-  // Payment accounting
-  const { amount_paid, amount_due } = recomputePaymentTotals(total, payments ?? []);
+  // Settlement accounting — the projection of the journal onto this document.
+  const { amount_paid, amount_credited, amount_due } = recomputeSettlementTotals(
+    total,
+    settlements ?? [],
+  );
 
   return {
     discount_amount,
@@ -165,6 +183,7 @@ export function calculateInvoiceTotals(
     transaction_fees,
     total,
     amount_paid,
+    amount_credited,
     amount_due,
   };
 }
@@ -172,46 +191,106 @@ export function calculateInvoiceTotals(
 // ── Payment helpers ─────────────────────────────────────────────
 
 /**
- * Derive invoice status from payment amounts.
+ * Derive invoice status from settlement amounts.
  * Pure function — does not mutate the invoice.
  *
+ * **No new status member is needed for a credited invoice.** `paid` already
+ * means `amount_due === 0`, not "cash received" — which is exactly what Xero
+ * says: #1751 and #1322 are both PAID there with `AmountPaid: 0`.
+ *
  * @param currentStatus - Current invoice status
- * @param amountPaid - Total amount paid
- * @param amountDue - Total amount still due
+ * @param amountPaid - Total settled in cash
+ * @param amountDue - Total still outstanding
+ * @param amountCredited - Total settled by credit note
  * @returns The derived status
  */
 export function derivePaymentStatus(
   currentStatus: string,
   amountPaid: number,
   amountDue: number,
-): string {
+  amountCredited = 0,
+): InvoiceStatusType {
   if (currentStatus === "draft" || currentStatus === "void") return currentStatus;
   if (currency(amountDue).value <= 0) return "paid";
-  if (currency(amountPaid).value > 0) return "part_paid";
+  // A partially-credited invoice is as much "part paid" as a partially-paid one
+  // — the operator's question is "has anything settled this yet?"
+  if (currency(amountPaid).value > 0 || currency(amountCredited).value > 0) return "part_paid";
   return "issued";
 }
 
 /**
- * Compute amount_paid and amount_due from a payments array.
- * Pure function — returns values instead of mutating.
+ * Turn the settlements journal into the invoice's stored totals.
  *
- * @param total - Invoice total amount
- * @param payments - Payments array with amount and status fields
- * @returns Computed amount_paid and amount_due
+ * **This is the one function that produces `amount_paid`, `amount_credited` and
+ * `amount_due`**, and the one place the cents↔dollars boundary is crossed. It
+ * runs inside the api's co-write transaction and again in manager's optimistic
+ * recompute, so the two cannot disagree — the property `computeAvailability`
+ * already provides for stock.
+ *
+ * **A straight signed fold over EVERY row, with no filtering.** A reversal is
+ * simply a settlement whose contract multiplier is −1, so a do/undo pair nets to
+ * zero arithmetically rather than by being excluded, and an invoice's
+ * settlements can do and undo each other perpetually with the totals correct
+ * after every single append. That deletes the liveness derivation entirely —
+ * along with the `R2 → R1 → S1` chain that silently vanished money when the
+ * trichotomy got it wrong, which under the fold is just `+500 −500 +500 = +500`,
+ * correct at every step. `reverses` is provenance for the UI and for audit; it
+ * contributes nothing to the sum.
+ *
+ * Integer sums are exact by construction — nothing to round, no ordering to get
+ * wrong — which is the whole reason the journal stores minor units.
+ * `Number.MAX_SAFE_INTEGER` is ~$90 trillion in cents, so plain integers are
+ * safe here without BigInt.
+ *
+ * **Negative results are preserved, never clamped.** An over-credited invoice
+ * must stay negative, exactly as availability preserves an oversold product's
+ * negative. Clamping hides the defect this exists to find.
+ *
+ * @param total - Invoice total, in dollars, from `items[]`
+ * @param settlements - Every settlement against the invoice, reversals included
+ * @returns The three projected totals plus a per-reason breakdown, in dollars
  */
-export function recomputePaymentTotals(
+export function recomputeSettlementTotals(
   total: number,
-  payments: { amount: number; status: string }[],
-): { amount_paid: number; amount_due: number } {
-  let amountPaid = currency(0);
-  for (const p of payments) {
-    if (p.status === "active") {
-      amountPaid = amountPaid.add(p.amount);
-    }
+  settlements: readonly {
+    type: SettlementTypeType;
+    reason: SettlementReasonType;
+    amount_cents: number;
+  }[],
+): {
+  amount_paid: number;
+  amount_credited: number;
+  amount_due: number;
+  breakdown: Partial<Record<SettlementReasonType, number>>;
+} {
+  let paidCents = 0;
+  let creditedCents = 0;
+  const breakdownCents: Partial<Record<SettlementReasonType, number>> = {};
+
+  for (const s of settlements) {
+    const signed = s.amount_cents * getSettlementMultiplier(s.type);
+    if (SETTLEMENT_CONTRACTS[s.type].sums_into === "amount_paid") paidCents += signed;
+    else creditedCents += signed;
+    breakdownCents[s.reason] = (breakdownCents[s.reason] ?? 0) + signed;
   }
+
+  // The ONE conversion boundary, crossed once, at the end.
+  const amount_paid = fromCents(paidCents);
+  const amount_credited = fromCents(creditedCents);
+
+  const breakdown: Partial<Record<SettlementReasonType, number>> = {};
+  for (const [reason, cents] of Object.entries(breakdownCents)) {
+    breakdown[reason as SettlementReasonType] = fromCents(cents);
+  }
+
   return {
-    amount_paid: amountPaid.value,
-    amount_due: currency(total).subtract(amountPaid).value,
+    amount_paid,
+    amount_credited,
+    // currency.js appears only here, where the dollar-denominated `total` (from
+    // `items[]`) meets the converted figures. Money minus money is exactly what
+    // it is for.
+    amount_due: currency(total).subtract(amount_paid).subtract(amount_credited).value,
+    breakdown,
   };
 }
 

@@ -38,6 +38,7 @@ export type {
   DestinationDocument,
   FulfillmentDocument,
   InvoiceDocument,
+  CreditNoteDocument,
   LocationDocument,
   OrderDocument,
   OrganizationDocument,
@@ -63,6 +64,7 @@ export { comments } from "./comments.ts";
 export { contacts } from "./contacts.ts";
 export { destinations } from "./destinations.ts";
 export { invoices } from "./invoices.ts";
+export { creditNotes } from "./credit-notes.ts";
 export { locations } from "./locations.ts";
 export { orders } from "./orders.ts";
 export { fulfillments } from "./fulfillments.ts";
@@ -87,6 +89,7 @@ import { comments } from "./comments.ts";
 import { contacts } from "./contacts.ts";
 import { destinations } from "./destinations.ts";
 import { invoices } from "./invoices.ts";
+import { creditNotes } from "./credit-notes.ts";
 import { locations } from "./locations.ts";
 import { orders } from "./orders.ts";
 import { fulfillments } from "./fulfillments.ts";
@@ -110,6 +113,7 @@ const allSchemas: TypesenseCollectionConfig[] = [
   contacts,
   destinations,
   invoices,
+  creditNotes,
   locations,
   orders,
   fulfillments,
@@ -135,6 +139,7 @@ export type TypesenseAlias =
   | "contacts"
   | "destinations"
   | "invoices"
+  | "credit-notes"
   | "locations"
   | "orders"
   | "fulfillments"
@@ -216,6 +221,7 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "contacts": "contacts.search",
   "destinations": "destinations.search",
   "invoices": "invoices.search",
+  "credit-notes": "creditNotes.search",
   "locations": "locations.search",
   "orders": "orders.search",
   "fulfillments": "fulfillment.search",

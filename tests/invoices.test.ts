@@ -15,7 +15,7 @@ import {
   type InvoiceItem,
   type LineItem,
   type Tax,
-  recomputePaymentTotals,
+  recomputeSettlementTotals,
   removeOrderScopedDestinations,
   removeOrderScopedItems,
   resyncInvoiceLines,
@@ -27,7 +27,22 @@ import {
   validateInvoiceItemPaths,
   validateInvoiceItemUniqueness,
 } from "../src/utils/invoices.ts";
-import type { FirestoreTimestampType, OrderDocDatesType } from "../src/schemas/mod.ts";
+import type {
+  FirestoreTimestampType,
+  OrderDocDatesType,
+  SettlementReasonType,
+  SettlementTypeType,
+} from "../src/schemas/mod.ts";
+
+/** A settlement row reduced to what the totals fold reads. */
+const S = (
+  o: Partial<{ type: SettlementTypeType; reason: SettlementReasonType; amount_cents: number }> = {},
+) => ({
+  type: "payment" as SettlementTypeType,
+  reason: "payment_received" as SettlementReasonType,
+  amount_cents: 0,
+  ...o,
+});
 
 // Invoice destination pairs require per-destination dates; these sync helpers
 // don't read them, so a zeroed doc-dates object satisfies the type.
@@ -581,14 +596,18 @@ Deno.test("calculateInvoiceTotals with payments reduces amount_due", () => {
       { base: 1000, formula: "fixed", subtotal: 1000, subtotal_discounted: 1000, total: 1000 },
     ),
   ];
-  const payments = [
-    { amount: 400, status: "active" },
-    { amount: 100, status: "deleted" },
-    { amount: 200, status: "active" },
+  // The "deleted" row is now an appended reverser rather than a status flag, so
+  // the do/undo pair nets to zero arithmetically instead of being filtered out.
+  const settlements = [
+    S({ amount_cents: 400_00 }),
+    S({ amount_cents: 100_00 }),
+    S({ type: "payment_reversal", reason: "correction", amount_cents: 100_00 }),
+    S({ amount_cents: 200_00 }),
   ];
-  const result = calculateInvoiceTotals(items, [], payments);
+  const result = calculateInvoiceTotals(items, [], settlements);
   assertEquals(result.total, 1000);
   assertEquals(result.amount_paid, 600);
+  assertEquals(result.amount_credited, 0);
   assertEquals(result.amount_due, 400);
 });
 
@@ -644,27 +663,31 @@ Deno.test("derivePaymentStatus returns issued when nothing paid", () => {
   assertEquals(derivePaymentStatus("issued", 0, 1000), "issued");
 });
 
-// ── recomputePaymentTotals ──────────────────────────────────────
+// ── recomputeSettlementTotals ───────────────────────────────────
+// The behavioural core lives in `tests/settlements.test.ts`; these three are the
+// direct successors of the `recomputePaymentTotals` cases, kept so the migration
+// of each is visible.
 
-Deno.test("recomputePaymentTotals sums active payments only", () => {
-  const payments = [
-    { amount: 400, status: "active" },
-    { amount: 100, status: "deleted" },
-    { amount: 200, status: "active" },
-  ];
-  const result = recomputePaymentTotals(1000, payments);
+Deno.test("recomputeSettlementTotals nets a reversal pair to zero", () => {
+  const result = recomputeSettlementTotals(1000, [
+    S({ amount_cents: 400_00 }),
+    S({ amount_cents: 100_00 }),
+    S({ type: "payment_reversal", reason: "source_retracted", amount_cents: 100_00 }),
+    S({ amount_cents: 200_00 }),
+  ]);
   assertEquals(result.amount_paid, 600);
   assertEquals(result.amount_due, 400);
 });
 
-Deno.test("recomputePaymentTotals with no payments", () => {
-  const result = recomputePaymentTotals(500, []);
+Deno.test("recomputeSettlementTotals with no settlements", () => {
+  const result = recomputeSettlementTotals(500, []);
   assertEquals(result.amount_paid, 0);
+  assertEquals(result.amount_credited, 0);
   assertEquals(result.amount_due, 500);
 });
 
-Deno.test("recomputePaymentTotals with zero total", () => {
-  const result = recomputePaymentTotals(0, [{ amount: 50, status: "active" }]);
+Deno.test("recomputeSettlementTotals with zero total goes negative, not clamped", () => {
+  const result = recomputeSettlementTotals(0, [S({ amount_cents: 50_00 })]);
   assertEquals(result.amount_paid, 50);
   assertEquals(result.amount_due, -50);
 });

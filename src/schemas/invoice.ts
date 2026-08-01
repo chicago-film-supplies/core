@@ -53,9 +53,30 @@ const InvoiceStatus: z.ZodType<InvoiceStatusType> = InvoiceStatusEnum;
 
 const PAYMENT_STATUSES = ["active", "deleted"] as const;
 
-// ── Payment tracking ─────────────────────────────────────────────
+// ── Payment tracking (RETIRED — see `settlements`) ───────────────
+//
+// Settlement moved to the top-level append-only `settlements` collection, which
+// is what made credit notes expressible at all: Xero settles an invoice two ways
+// — cash (`Payments[]`) and credit allocation (`CreditNotes[]`) — and this array
+// could only ever model the first. Invoice #1322 recorded $4,495.62 as cash
+// collected that was never collected, and every reconciliation reported it clean
+// because CFS and Xero agreed on the one number they could both express.
+//
+// **`payments` stays declared for PARSE TOLERANCE, not compatibility.**
+// `InvoiceSchema` is a `z.strictObject`, so until the migration's `--drop-legacy`
+// pass has stripped the field corpus-wide, an undeclared `payments` would make
+// every remaining invoice fail validation on its next write. That is the entire
+// reason it survives, and it is the minimum: no fallback reader, no dual-write,
+// no shim. The migration runs against prod BEFORE the new code deploys, so no
+// reader ever needs one.
 
-/** A payment received against this invoice (synced from Xero). */
+/**
+ * A payment received against this invoice (synced from Xero).
+ *
+ * @deprecated Superseded by the `settlements` collection. Declared only so a
+ * not-yet-stripped document still parses; nothing reads it. Removed from this
+ * schema once `--drop-legacy` has run and `audit-settlement-totals.ts` is clean.
+ */
 export interface InvoicePayment {
   uid: string;
   xero_payment_id: string;
@@ -208,7 +229,21 @@ export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocL
 
 // ── Totals ───────────────────────────────────────────────────────
 
-/** Invoice-level totals with payment tracking. */
+/**
+ * Invoice-level totals with settlement tracking.
+ *
+ * `amount_paid`, `amount_credited` and `amount_due` are a **co-written
+ * projection** of the `settlements` journal — produced only by
+ * `recomputeSettlementTotals`, written in the same transaction as the settlement
+ * that changed them, and rebuildable from the log by
+ * `scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
+ * to apologise for; they are the target architecture, and the same shape
+ * `stock-summaries` already has against the movement journal.
+ *
+ * `total` is NOT part of that projection — it derives from `items[]`. So the
+ * rebuild is deliberately **partial**: it repairs the settlement-fed fields
+ * without re-pricing anything.
+ */
 export interface InvoiceDocTotals {
   subtotal: number;
   subtotal_discounted: number;
@@ -217,6 +252,15 @@ export interface InvoiceDocTotals {
   transaction_fees: PriceModifierType[];
   total: number;
   amount_paid: number;
+  /**
+   * Value settled by credit note rather than cash. **Sits beside `total` and
+   * never reduces it** — keeping "billed 18,196 / collected 16,000 / wrote off
+   * 2,196" legible is the entire point.
+   *
+   * Optional so the compiler forces `?? 0` at every read until the migration has
+   * stamped the ~962 pre-existing invoices.
+   */
+  amount_credited?: number;
   amount_due: number;
 }
 
@@ -228,6 +272,7 @@ const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
   transaction_fees: z.array(PriceModifier).default([]),
   total: z.number().default(0),
   amount_paid: z.number().default(0),
+  amount_credited: z.number().optional(),
   amount_due: z.number().default(0),
 });
 
@@ -281,7 +326,8 @@ export interface Invoice {
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
-  payments: InvoicePayment[];
+  /** @deprecated Superseded by the `settlements` collection. Parse tolerance only — nothing reads it. */
+  payments?: InvoicePayment[];
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -351,7 +397,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   destinations: z.array(InvoiceDocDestination).default([]),
   items: z.array(InvoiceDocItem).default([]),
   totals: InvoiceDocTotalsSchema,
-  payments: z.array(InvoicePaymentSchema).default([]),
+  payments: z.array(InvoicePaymentSchema).optional(),
   xero_id: z.uuid().nullable(),
   uploadcare_uuid: uploadcareRef(z.string().nullable().default(null)),
   pdf_generated_at: FirestoreTimestamp.nullable().default(null),
@@ -387,6 +433,18 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
 }).refine(
   (inv) => inv.query_by_orders.length === 0 || inv.destinations.length >= 1,
   { message: "destinations must be provided when the invoice is linked to at least one source order", path: ["destinations"] },
+).refine(
+  (inv) =>
+    inv.status === "void" ||
+    Math.abs(
+      inv.totals.amount_paid + (inv.totals.amount_credited ?? 0) + inv.totals.amount_due -
+        inv.totals.total,
+    ) <= 0.005,
+  {
+    message:
+      "amount_paid + amount_credited + amount_due must equal total (within half a cent)",
+    path: ["totals", "amount_due"],
+  },
 ).meta({
   title: "Invoice",
   collection: "invoices",

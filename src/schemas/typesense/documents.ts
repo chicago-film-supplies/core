@@ -225,6 +225,8 @@ export interface InvoiceDocument {
     total_str?: string;
     amount_paid?: number;
     amount_paid_str?: string;
+    amount_credited?: number;
+    amount_credited_str?: string;
     amount_due?: number;
     amount_due_str?: string;
   };
@@ -234,6 +236,51 @@ export interface InvoiceDocument {
   updated_by?: TypesenseActorRef;
   date_fs: number;
   due_date_fs?: number;
+  created_at?: number;
+  updated_at?: number;
+}
+
+// ── Credit notes ────────────────────────────────────────────────────
+
+/** Typesense document type for credit notes. */
+export interface CreditNoteDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  status: string;
+  reason: string;
+  tax_profile: string;
+  reference?: string;
+  external_notes?: string;
+  internal_notes?: string;
+  organization: {
+    uid?: string;
+    name: string;
+    crms_id?: number;
+    crms_id_str?: string;
+    tax_profile?: string;
+    xero_id?: string;
+    billing_address?: TypesenseAddressFields;
+  };
+  items?: Array<{
+    uid?: string;
+    name?: string;
+    quantity?: number;
+    type?: string;
+    coa_revenue?: number;
+  }>;
+  totals?: {
+    total?: number;
+    total_str?: string;
+  };
+  remaining_credit?: number;
+  remaining_credit_str?: string;
+  query_by_sources?: string[];
+  xero_credit_note_id?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  date_fs: number;
   created_at?: number;
   updated_at?: number;
 }
@@ -799,6 +846,7 @@ export type TypesenseDocument =
   | ContactDocument
   | DestinationDocument
   | InvoiceDocument
+  | CreditNoteDocument
   | LocationDocument
   | OrderDocument
   | FulfillmentDocument
@@ -821,6 +869,7 @@ export interface TypesenseDocumentMap {
   contacts: ContactDocument;
   destinations: DestinationDocument;
   invoices: InvoiceDocument;
+  "credit-notes": CreditNoteDocument;
   locations: LocationDocument;
   orders: OrderDocument;
   fulfillments: FulfillmentDocument;

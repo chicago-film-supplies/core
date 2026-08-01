@@ -495,7 +495,7 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 `DocSource` shape is unchanged.
 
 ```ts
-const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
 ### `COACode`
@@ -544,6 +544,20 @@ Valid chart of accounts type values.
 
 ```ts
 type COATypeType = indexedAccess;
+```
+
+### `CREDIT_NOTE_REASONS`
+
+Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
+**derived rather than re-listed**, so the document and the settlements it
+spawns can never offer different reasons.
+
+The reason lives on the *document* and is denormalized onto each settlement:
+one credit note allocated across three invoices has one reason, and authoring
+it three times invites three answers.
+
+```ts
+const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];
 ```
 
 ### `CUSTODY_PLACE_KINDS`
@@ -1783,6 +1797,150 @@ interface CreateVariableHolidayInputType {
 }
 ```
 
+### `CreditNote`
+
+A credit note issued to an organization.
+
+```ts
+interface CreditNote {
+  uid: string;
+  number: number;
+  status: CreditNoteStatusType;
+  reason: SettlementReasonType;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string | null;
+  external_notes?: string | null;
+  internal_notes?: string | null;
+  organization: typeLiteral;
+  tax_profile: TaxProfileType;
+  items: CreditNoteDocLineItem[];
+  totals: CreditNoteDocTotals;
+  remaining_credit: number;
+  sources: DocSourceType[];
+  query_by_sources: string[];
+  xero_credit_note_id: string | null;
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `CreditNoteDocItemPrice`
+
+Pricing breakdown for a single credit-note line.
+
+```ts
+interface CreditNoteDocItemPrice {
+  base: number;
+  chargeable_days: number | null;
+  formula: PriceFormulaType;
+  subtotal: number;
+  subtotal_discounted: number;
+  discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  total: number;
+}
+```
+
+### `CreditNoteDocLineItem`
+
+A credited line.
+
+**`coa_revenue` is required, not optional.** A credit spanning lines with
+different revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)
+cannot be posted correctly from a document-level amount, and apportioning it
+afterwards is inferring cause from effect — the thing `transaction.ts` warns
+against. This is also the gap Xero *has*: its allocation view carries
+`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level
+provenance.
+
+**No dividers.** A credit note has no destinations and bills no orders, so the
+whole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`
+machinery that goes with it — has nothing to organize here. Lines are flat.
+
+```ts
+interface CreditNoteDocLineItem {
+  uid: string;
+  type: DocLineItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: CreditNoteDocItemPrice;
+  coa_revenue: COARevenueType;
+  tracking_category: string | null;
+  xero_id: string | null;
+  xero_tracking_option_id: string | null;
+  uid_invoice_item: string | null;
+}
+```
+
+### `CreditNoteDocLineItem`
+
+Zod schema for a credit-note line item.
+
+```ts
+const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem>;
+```
+
+### `CreditNoteDocLineItemType`
+
+_(reference — see source)_
+
+### `CreditNoteDocLineItemType`
+
+_(reference — see source)_
+
+### `CreditNoteDocTotals`
+
+Credit-note totals.
+
+Dollars, not cents — they sit beside `items[]` priced in dollars, and a
+document that mixed both internally would be worse than either. The cents
+boundary is the `settlements` journal; `total` here is what an allocation
+draws *from*.
+
+**No `transaction_fees`.** A card-processing fee is charged when money is
+taken, not when it is given back; crediting one is an `order_adjustment` line,
+not a fee row.
+
+```ts
+interface CreditNoteDocTotals {
+  subtotal: number;
+  subtotal_discounted: number;
+  discount_amount: number;
+  taxes: PriceModifierType[];
+  total: number;
+}
+```
+
+### `CreditNoteSchema`
+
+Zod schema for a CreditNote.
+
+```ts
+const CreditNoteSchema: z.ZodType<CreditNote>;
+```
+
+### `CreditNoteStatusEnum`
+
+Zod schema for CreditNoteStatusType.
+
+```ts
+const CreditNoteStatusEnum: z.ZodType<CreditNoteStatusType>;
+```
+
+### `CreditNoteStatusType`
+
+Allowed credit-note statuses.
+
+```ts
+type CreditNoteStatusType = indexedAccess;
+```
+
 ### `DOC_LINE_ITEM_TYPES`
 
 Billable line item types stored in order/invoice documents (excludes destination/group dividers).
@@ -2920,7 +3078,7 @@ interface Invoice {
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
-  payments: InvoicePayment[];
+  payments?: InvoicePayment[];
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -3052,7 +3210,19 @@ interface InvoiceDocOrderItemType {
 
 ### `InvoiceDocTotals`
 
-Invoice-level totals with payment tracking.
+Invoice-level totals with settlement tracking.
+
+`amount_paid`, `amount_credited` and `amount_due` are a **co-written
+projection** of the `settlements` journal — produced only by
+`recomputeSettlementTotals`, written in the same transaction as the settlement
+that changed them, and rebuildable from the log by
+`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
+to apologise for; they are the target architecture, and the same shape
+`stock-summaries` already has against the movement journal.
+
+`total` is NOT part of that projection — it derives from `items[]`. So the
+rebuild is deliberately **partial**: it repairs the settlement-fed fields
+without re-pricing anything.
 
 ```ts
 interface InvoiceDocTotals {
@@ -3063,6 +3233,7 @@ interface InvoiceDocTotals {
   transaction_fees: PriceModifierType[];
   total: number;
   amount_paid: number;
+  amount_credited?: number;
   amount_due: number;
 }
 ```
@@ -4815,7 +4986,7 @@ type OutOfServiceUpdated = EventEnvelope<OutOfService> & typeLiteral;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `PLACE_KINDS`
@@ -5706,6 +5877,25 @@ HTTP methods accepted by the runtime route manifest.
 type RouteMethod = "get" | "post" | "put" | "delete" | "patch";
 ```
 
+### `SETTLEMENT_CONTRACTS`
+
+The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}
+member — a table the schema reads, so a contradiction is reported by the
+schema instead of restated in every consumer.
+
+`sums_into` is load-bearing rather than documentation: `calculateInvoiceTotals`
+takes its settlement argument structurally, so without a declared target a
+credit row would be silently summed into `amount_paid`. Reading the target
+from the table removes that class entirely.
+
+A reversal carries **no** external id. The reap appends a reverser because
+Xero stopped reporting a payment — the reverser is a CFS event with no Xero
+counterpart, and the id it retracts is still on the row `reverses` names.
+
+```ts
+const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, SettlementContract>>;
+```
+
 ### `SaveQuoteVersionInput`
 
 Zod schema for SaveQuoteVersionInput.
@@ -5729,7 +5919,7 @@ interface SaveQuoteVersionInputType {
 Union of all Firestore document types. Use with validateBeforeWrite.
 
 ```ts
-type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 ```
 
 ### `SchemaField`
@@ -5766,6 +5956,90 @@ Zod schema for Session.
 
 ```ts
 const SessionSchema: z.ZodType<Session>;
+```
+
+### `Settlement`
+
+One settlement event against an invoice.
+
+```ts
+interface Settlement {
+  uid: string;
+  uid_invoice: string;
+  uid_organization: string;
+  type: SettlementTypeType;
+  reason: SettlementReasonType;
+  amount_cents: number;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string | null;
+  uid_session: string;
+  reverses: string | null;
+  uid_credit_note: string | null;
+  number_credit_note: string | null;
+  xero_payment_id: string | null;
+  xero_credit_note_id: string | null;
+  synced_at: FirestoreTimestampType | null;
+  legacy_payment_uid: string | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `SettlementContract`
+
+How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}
+
+```ts
+interface SettlementContract {
+  reasons: readonly SettlementReasonType[];
+  xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
+  sums_into: "amount_paid" | "amount_credited";
+  reverses: "required" | "forbidden";
+}
+```
+
+### `SettlementReasonEnum`
+
+Zod schema for SettlementReasonType.
+
+```ts
+const SettlementReasonEnum: z.ZodType<SettlementReasonType>;
+```
+
+### `SettlementReasonType`
+
+Why a settlement happened. @see {@link SETTLEMENT_CONTRACTS}
+
+```ts
+type SettlementReasonType = indexedAccess;
+```
+
+### `SettlementSchema`
+
+Zod schema for a Settlement.
+
+```ts
+const SettlementSchema: z.ZodType<Settlement>;
+```
+
+### `SettlementTypeEnum`
+
+Zod schema for SettlementTypeType.
+
+```ts
+const SettlementTypeEnum: z.ZodType<SettlementTypeType>;
+```
+
+### `SettlementTypeType`
+
+One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS}
+
+```ts
+type SettlementTypeType = indexedAccess;
 ```
 
 ### `StockMethodEnum`
@@ -8008,6 +8282,27 @@ Firestore field the sort maps to (often an `_fs` timestamp sibling).
 Descends one level into nested objects (matching the column walker depth).
 Arrays are not traversed.
 
+### `getSettlementMultiplier(type: SettlementTypeType): 1 | -1`
+
+`+1` for a settlement that increases the total it feeds, `-1` for one that
+reduces it.
+
+**Derived from the contract, never declared**, exactly as
+`getTransactionMultiplier` derives from `places` rather than carrying a ±1
+column: a type that must name what it reverses IS a retraction, and one that
+must not IS an application. Two facts that could disagree become one that
+cannot.
+
+**The sign keys on `type`, not on `reason`.** The package answers this the
+same way three times over — `getTransactionMultiplier(type)`, and
+`out_of_service_breakdown[o.reason]` where reason is a *breakdown dimension*
+rather than a direction. It is also forced here: `correction` is genuinely
+bidirectional (an operator may be adding a payment they missed or removing one
+that never happened), so a reason-keyed sign would have to split it into
+`correction_added`/`correction_removed`, and every other bidirectional reason
+after it. Type carries direction, reason carries why, and the contract's
+`reasons` list keeps the pairs legal.
+
 ### `getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0`
 
 Returns +1 for movements that increase owned quantity, -1 for those that
@@ -8195,6 +8490,12 @@ All document schemas keyed by singular and plural collection names.
 ```ts
 const schemas: Record<string, z.ZodType>;
 ```
+
+### `settlementContract(type: string): SettlementContract | undefined`
+
+The contract for a settlement `type`, or `undefined` for a value outside
+{@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
+{@link itemContract} is — callers hold types from loosely-typed sources.
 
 ### `templateHelpers`
 
@@ -8558,7 +8859,7 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 `DocSource` shape is unchanged.
 
 ```ts
-const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
 ### `COARevenueEnum`
@@ -9111,6 +9412,70 @@ Zod schema for RateType.
 const RateTypeEnum: z.ZodType<RateType>;
 ```
 
+### `SETTLEMENT_CONTRACTS`
+
+The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}
+member — a table the schema reads, so a contradiction is reported by the
+schema instead of restated in every consumer.
+
+`sums_into` is load-bearing rather than documentation: `calculateInvoiceTotals`
+takes its settlement argument structurally, so without a declared target a
+credit row would be silently summed into `amount_paid`. Reading the target
+from the table removes that class entirely.
+
+A reversal carries **no** external id. The reap appends a reverser because
+Xero stopped reporting a payment — the reverser is a CFS event with no Xero
+counterpart, and the id it retracts is still on the row `reverses` names.
+
+```ts
+const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, SettlementContract>>;
+```
+
+### `SettlementContract`
+
+How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}
+
+```ts
+interface SettlementContract {
+  reasons: readonly SettlementReasonType[];
+  xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
+  sums_into: "amount_paid" | "amount_credited";
+  reverses: "required" | "forbidden";
+}
+```
+
+### `SettlementReasonEnum`
+
+Zod schema for SettlementReasonType.
+
+```ts
+const SettlementReasonEnum: z.ZodType<SettlementReasonType>;
+```
+
+### `SettlementReasonType`
+
+Why a settlement happened. @see {@link SETTLEMENT_CONTRACTS}
+
+```ts
+type SettlementReasonType = indexedAccess;
+```
+
+### `SettlementTypeEnum`
+
+Zod schema for SettlementTypeType.
+
+```ts
+const SettlementTypeEnum: z.ZodType<SettlementTypeType>;
+```
+
+### `SettlementTypeType`
+
+One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS}
+
+```ts
+type SettlementTypeType = indexedAccess;
+```
+
 ### `StockMethodEnum`
 
 Zod schema for StockMethodType.
@@ -9273,6 +9638,27 @@ parts are dropped, never produce empty padding) and appends ` (pronunciation)`
 when set. This is the single source of truth — every `name` field on a
 stored document and `ActorRef.name` is computed by passing through here.
 
+### `getSettlementMultiplier(type: SettlementTypeType): 1 | -1`
+
+`+1` for a settlement that increases the total it feeds, `-1` for one that
+reduces it.
+
+**Derived from the contract, never declared**, exactly as
+`getTransactionMultiplier` derives from `places` rather than carrying a ±1
+column: a type that must name what it reverses IS a retraction, and one that
+must not IS an application. Two facts that could disagree become one that
+cannot.
+
+**The sign keys on `type`, not on `reason`.** The package answers this the
+same way three times over — `getTransactionMultiplier(type)`, and
+`out_of_service_breakdown[o.reason]` where reason is a *breakdown dimension*
+rather than a direction. It is also forced here: `correction` is genuinely
+bidirectional (an operator may be adding a payment they missed or removing one
+that never happened), so a reason-keyed sign would have to split it into
+`correction_added`/`correction_removed`, and every other bidirectional reason
+after it. Type carries direction, reason carries why, and the contract's
+`reasons` list keeps the pairs legal.
+
 ### `isDividerItemType(type: string): type is DividerItemType`
 
 Whether an item type is a structural divider — the complement of {@link isLineItemType}.
@@ -9304,6 +9690,12 @@ The contract for an item `type`, or `undefined` for a value outside
 {@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in
 `@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
 contract and every derived predicate answers `false` for it.
+
+### `settlementContract(type: string): SettlementContract | undefined`
+
+The contract for a settlement `type`, or `undefined` for a value outside
+{@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
+{@link itemContract} is — callers hold types from loosely-typed sources.
 
 ## `@cfs/core/schemas/booking`
 
@@ -10513,7 +10905,7 @@ interface Invoice {
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
-  payments: InvoicePayment[];
+  payments?: InvoicePayment[];
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -10639,7 +11031,19 @@ interface InvoiceDocOrderItemType {
 
 ### `InvoiceDocTotals`
 
-Invoice-level totals with payment tracking.
+Invoice-level totals with settlement tracking.
+
+`amount_paid`, `amount_credited` and `amount_due` are a **co-written
+projection** of the `settlements` journal — produced only by
+`recomputeSettlementTotals`, written in the same transaction as the settlement
+that changed them, and rebuildable from the log by
+`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
+to apologise for; they are the target architecture, and the same shape
+`stock-summaries` already has against the movement journal.
+
+`total` is NOT part of that projection — it derives from `items[]`. So the
+rebuild is deliberately **partial**: it repairs the settlement-fed fields
+without re-pricing anything.
 
 ```ts
 interface InvoiceDocTotals {
@@ -10650,6 +11054,7 @@ interface InvoiceDocTotals {
   transaction_fees: PriceModifierType[];
   total: number;
   amount_paid: number;
+  amount_credited?: number;
   amount_due: number;
 }
 ```
@@ -13012,6 +13417,187 @@ interface UpdateRecurrenceInputType {
 }
 ```
 
+## `@cfs/core/schemas/credit-note`
+
+CreditNote document schema — Firestore collection: `credit-notes`
+
+The **value instrument**: a credit issued to an organization, with lines, tax,
+a number and a remaining balance. Where it gets *applied* is not stored here —
+an allocation is a `settlements` document, and `where("uid_credit_note","==",uid)`
+is an ordinary query. Three of the four platforms surveyed (TigerBeetle, Odoo,
+Xero) make the allocation its own record; the one that doesn't, ERPNext, is the
+one whose seam is its documented failure source.
+
+**A first-class collection, not an invoice variant.** `Invoice` carries a
+`query_by_orders` min-1 + destinations refine a credit note has no analogue
+for, the Xero push targets a different endpoint, and `Discount.amount` is
+`.min(0)` with sign-naive item math — so Odoo's positive-amount-with-a-type
+trick would mean threading a direction sign through `calculateItemSubtotal`
+and `getTaxTotals`. Against ~4 notes a year, a union would make all 962
+invoices carry credit-note columns.
+
+**`credit-notes`, not `credits`.** Both fit the kebab-case-plural convention,
+but `credit` is the most overloaded word in this space — it is the
+double-entry *side*, it is TigerBeetle's `credits_pending`/`credits_posted`,
+and it is the accounting sense throughout `chart-of-accounts`. A collection
+called `credits` would collide head-on with the ledger vocabulary the moment
+CFS owns its ledger, which is the stated destination.
+
+**Organization-scoped, not contact-scoped.** Xero's model is contact-scoped,
+but CFS has no contact-scoped billing document and every invoice carries the
+denormalized `organization` block. A contact-scoped document could not reuse
+it and would lose the `organization.name` Typesense sort.
+
+### `CREDIT_NOTE_REASONS`
+
+Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
+**derived rather than re-listed**, so the document and the settlements it
+spawns can never offer different reasons.
+
+The reason lives on the *document* and is denormalized onto each settlement:
+one credit note allocated across three invoices has one reason, and authoring
+it three times invites three answers.
+
+```ts
+const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];
+```
+
+### `CreditNote`
+
+A credit note issued to an organization.
+
+```ts
+interface CreditNote {
+  uid: string;
+  number: number;
+  status: CreditNoteStatusType;
+  reason: SettlementReasonType;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string | null;
+  external_notes?: string | null;
+  internal_notes?: string | null;
+  organization: typeLiteral;
+  tax_profile: TaxProfileType;
+  items: CreditNoteDocLineItem[];
+  totals: CreditNoteDocTotals;
+  remaining_credit: number;
+  sources: DocSourceType[];
+  query_by_sources: string[];
+  xero_credit_note_id: string | null;
+  defaultThreadId?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `CreditNoteDocItemPrice`
+
+Pricing breakdown for a single credit-note line.
+
+```ts
+interface CreditNoteDocItemPrice {
+  base: number;
+  chargeable_days: number | null;
+  formula: PriceFormulaType;
+  subtotal: number;
+  subtotal_discounted: number;
+  discount: DiscountType | null;
+  taxes: PriceModifierType[];
+  total: number;
+}
+```
+
+### `CreditNoteDocLineItem`
+
+A credited line.
+
+**`coa_revenue` is required, not optional.** A credit spanning lines with
+different revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)
+cannot be posted correctly from a document-level amount, and apportioning it
+afterwards is inferring cause from effect — the thing `transaction.ts` warns
+against. This is also the gap Xero *has*: its allocation view carries
+`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level
+provenance.
+
+**No dividers.** A credit note has no destinations and bills no orders, so the
+whole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`
+machinery that goes with it — has nothing to organize here. Lines are flat.
+
+```ts
+interface CreditNoteDocLineItem {
+  uid: string;
+  type: DocLineItemTypeType;
+  name: string;
+  description: string;
+  quantity: number;
+  price: CreditNoteDocItemPrice;
+  coa_revenue: COARevenueType;
+  tracking_category: string | null;
+  xero_id: string | null;
+  xero_tracking_option_id: string | null;
+  uid_invoice_item: string | null;
+}
+```
+
+### `CreditNoteDocLineItem`
+
+Zod schema for a credit-note line item.
+
+```ts
+const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem>;
+```
+
+### `CreditNoteDocTotals`
+
+Credit-note totals.
+
+Dollars, not cents — they sit beside `items[]` priced in dollars, and a
+document that mixed both internally would be worse than either. The cents
+boundary is the `settlements` journal; `total` here is what an allocation
+draws *from*.
+
+**No `transaction_fees`.** A card-processing fee is charged when money is
+taken, not when it is given back; crediting one is an `order_adjustment` line,
+not a fee row.
+
+```ts
+interface CreditNoteDocTotals {
+  subtotal: number;
+  subtotal_discounted: number;
+  discount_amount: number;
+  taxes: PriceModifierType[];
+  total: number;
+}
+```
+
+### `CreditNoteSchema`
+
+Zod schema for a CreditNote.
+
+```ts
+const CreditNoteSchema: z.ZodType<CreditNote>;
+```
+
+### `CreditNoteStatusEnum`
+
+Zod schema for CreditNoteStatusType.
+
+```ts
+const CreditNoteStatusEnum: z.ZodType<CreditNoteStatusType>;
+```
+
+### `CreditNoteStatusType`
+
+Allowed credit-note statuses.
+
+```ts
+type CreditNoteStatusType = indexedAccess;
+```
+
 ## `@cfs/core/schemas/session`
 
 ### `Session`
@@ -13037,6 +13623,74 @@ Zod schema for Session.
 
 ```ts
 const SessionSchema: z.ZodType<Session>;
+```
+
+## `@cfs/core/schemas/settlement`
+
+Settlement document schema — Firestore collection: `settlements`
+
+One settlement event against an invoice. **The revenue-side twin of the
+`transactions` movement journal**: append-only, dated, reversible, and
+type-blind by design — a cash payment and a credit-note allocation differ
+only in `type` and `reason`.
+
+CFS puts event journals in collections and value-detail in arrays. `items[]`
+is detail; movements are events; a settlement is an event. `transaction.ts`
+draws the boundary from the other side — *"cost is cost only, never revenue —
+customer-facing money lives in Xero"* — so the shape is the model and revenue
+is exactly what it excludes. This is that missing half.
+
+**APPEND-ONLY.** Nothing is edited or deleted; a correction is a NEW document
+carrying `reverses`. There is deliberately no `status` field, for the same
+reason `Movement` has none: a status flag *and* a reverser link is two sources
+of truth. The one permitted mutation in the whole design is
+`linkSettlementToXero` (api-cloudrun `src/lib/settlements.ts`) writing
+`xero_payment_id` null → value once — late-binding external linkage is not
+part of the money fact.
+
+The invoice's `totals.{amount_paid, amount_credited, amount_due}` are a
+**co-written projection** of this log, produced only by
+`recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —
+an event log plus a client-ready projection for snapshot listeners — arriving
+early in one domain, and it is `transactions` + `stock-summaries` for money.
+
+### `Settlement`
+
+One settlement event against an invoice.
+
+```ts
+interface Settlement {
+  uid: string;
+  uid_invoice: string;
+  uid_organization: string;
+  type: SettlementTypeType;
+  reason: SettlementReasonType;
+  amount_cents: number;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string | null;
+  uid_session: string;
+  reverses: string | null;
+  uid_credit_note: string | null;
+  number_credit_note: string | null;
+  xero_payment_id: string | null;
+  xero_credit_note_id: string | null;
+  synced_at: FirestoreTimestampType | null;
+  legacy_payment_uid: string | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `SettlementSchema`
+
+Zod schema for a Settlement.
+
+```ts
+const SettlementSchema: z.ZodType<Settlement>;
 ```
 
 ## `@cfs/core/schemas/stock-summary`
@@ -14052,6 +14706,37 @@ interface ContactDocument {
 }
 ```
 
+### `CreditNoteDocument`
+
+Typesense document type for credit notes.
+
+```ts
+interface CreditNoteDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  status: string;
+  reason: string;
+  tax_profile: string;
+  reference?: string;
+  external_notes?: string;
+  internal_notes?: string;
+  organization: typeLiteral;
+  items?: Array<typeLiteral>;
+  totals?: typeLiteral;
+  remaining_credit?: number;
+  remaining_credit_str?: string;
+  query_by_sources?: string[];
+  xero_credit_note_id?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  date_fs: number;
+  created_at?: number;
+  updated_at?: number;
+}
+```
+
 ### `DestinationDocument`
 
 Typesense document type for destinations.
@@ -14465,7 +15150,7 @@ interface TypesenseAddressFields {
 Union of all Typesense collection alias names.
 
 ```ts
-type TypesenseAlias = "bookings" | "cards" | "chart-of-accounts" | "comments" | "contacts" | "destinations" | "invoices" | "locations" | "orders" | "fulfillments" | "organizations" | "out-of-service" | "products" | "stores" | "tags" | "templates" | "template-components" | "threads" | "tracking-categories" | "users" | "webshop-products";
+type TypesenseAlias = "bookings" | "cards" | "chart-of-accounts" | "comments" | "contacts" | "destinations" | "invoices" | "credit-notes" | "locations" | "orders" | "fulfillments" | "organizations" | "out-of-service" | "products" | "stores" | "tags" | "templates" | "template-components" | "threads" | "tracking-categories" | "users" | "webshop-products";
 ```
 
 ### `TypesenseCollectionConfig`
@@ -14521,7 +15206,7 @@ const TypesenseDisplayDefaultsSchema: z.ZodType<TypesenseDisplayDefaults>;
 Union of all Typesense document types.
 
 ```ts
-type TypesenseDocument = BookingDocument | ChartOfAccountsDocument | CommentDocument | ContactDocument | DestinationDocument | InvoiceDocument | LocationDocument | OrderDocument | FulfillmentDocument | OrganizationDocument | OutOfServiceDocument | ProductDocument | StoreDocument | TagDocument | TemplateDocument | TemplateComponentDocument | TrackingCategoryDocument | UserDocument | WebshopProductDocument;
+type TypesenseDocument = BookingDocument | ChartOfAccountsDocument | CommentDocument | ContactDocument | DestinationDocument | InvoiceDocument | CreditNoteDocument | LocationDocument | OrderDocument | FulfillmentDocument | OrganizationDocument | OutOfServiceDocument | ProductDocument | StoreDocument | TagDocument | TemplateDocument | TemplateComponentDocument | TrackingCategoryDocument | UserDocument | WebshopProductDocument;
 ```
 
 ### `TypesenseDocumentMap`
@@ -14536,6 +15221,7 @@ interface TypesenseDocumentMap {
   contacts: ContactDocument;
   destinations: DestinationDocument;
   invoices: InvoiceDocument;
+  credit-notes: CreditNoteDocument;
   locations: LocationDocument;
   orders: OrderDocument;
   fulfillments: FulfillmentDocument;
@@ -14777,6 +15463,23 @@ Typesense collection config for contacts.
 
 ```ts
 const contacts: TypesenseCollectionConfig;
+```
+
+### `creditNotes`
+
+Typesense collection config for credit notes.
+
+`number` is the `default_sorting_field` and is stored bare — `CN-` is
+presentation only. A prefixed string number would make this field a string
+and break the sort outright, which is the concrete reason the schema stores an
+int rather than a display label.
+
+There is deliberately **no `settlements` collection here**: settlements are
+reached by query (`where("uid_invoice","==",…)`), not by search, and a journal
+with no free-text field has nothing to match on.
+
+```ts
+const creditNotes: TypesenseCollectionConfig;
 ```
 
 ### `destinations`
@@ -16446,7 +17149,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -16460,7 +17163,16 @@ interface XeroEventLogRecord {
   ts: string;
   xero_invoice_id?: string;
   xero_payment_id?: string;
+  xero_credit_note_id?: string;
   xero_contact_id?: string;
+  settlement_uid?: string;
+  settlement_type?: string;
+  credit_note_number?: string;
+  seam?: string;
+  remedy?: string;
+  xero_url?: string;
+  xero_error?: string;
+  invoice_number?: number;
   invoice_uid?: string;
   order_uid?: string;
   xero_quote_id?: string | null;
@@ -16919,7 +17631,7 @@ const RoleSchema: z.ZodType<Role>;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `Permission`
@@ -18071,7 +18783,7 @@ divider uid to its path.
 
 **Returns** — Items projected to invoice shape with path prepended by orderDividerUid
 
-### `calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], payments?: typeLiteral[]): InvoiceTotals`
+### `calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], settlements?: readonly typeLiteral[]): InvoiceTotals`
 
 Calculate aggregated pricing totals for an invoice.
 
@@ -18084,7 +18796,7 @@ different totals logic in the future (credit notes, partial billing, etc.).
 
 - `items` — Full invoice items array (structural items are filtered out)
 - `taxes` — Tax definitions for tax calculation
-- `payments` — Optional payments array for amount_paid/amount_due
+- `settlements` — Every settlement against the invoice, reversals included
 
 ### `calculateItemDiscount(item: LineItem): number`
 
@@ -18224,16 +18936,21 @@ its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
 and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
 every returned `path` is non-empty and ends in the item's own uid.
 
-### `derivePaymentStatus(currentStatus: string, amountPaid: number, amountDue: number): string`
+### `derivePaymentStatus(currentStatus: string, amountPaid: number, amountDue: number, _: unknown): InvoiceStatusType`
 
-Derive invoice status from payment amounts.
+Derive invoice status from settlement amounts.
 Pure function — does not mutate the invoice.
+
+**No new status member is needed for a credited invoice.** `paid` already
+means `amount_due === 0`, not "cash received" — which is exactly what Xero
+says: #1751 and #1322 are both PAID there with `AmountPaid: 0`.
 
 **Parameters**
 
 - `currentStatus` — Current invoice status
-- `amountPaid` — Total amount paid
-- `amountDue` — Total amount still due
+- `amountPaid` — Total settled in cash
+- `amountDue` — Total still outstanding
+- `amountCredited` — Total settled by credit note
 
 **Returns** — The derived status
 
@@ -18353,17 +19070,41 @@ Determine whether a line item is priceable (has a price object, not a structural
 
 Determine whether a line item is a transaction fee.
 
-### `recomputePaymentTotals(total: number, payments: typeLiteral[]): typeLiteral`
+### `recomputeSettlementTotals(total: number, settlements: readonly typeLiteral[]): typeLiteral`
 
-Compute amount_paid and amount_due from a payments array.
-Pure function — returns values instead of mutating.
+Turn the settlements journal into the invoice's stored totals.
+
+**This is the one function that produces `amount_paid`, `amount_credited` and
+`amount_due`**, and the one place the cents↔dollars boundary is crossed. It
+runs inside the api's co-write transaction and again in manager's optimistic
+recompute, so the two cannot disagree — the property `computeAvailability`
+already provides for stock.
+
+**A straight signed fold over EVERY row, with no filtering.** A reversal is
+simply a settlement whose contract multiplier is −1, so a do/undo pair nets to
+zero arithmetically rather than by being excluded, and an invoice's
+settlements can do and undo each other perpetually with the totals correct
+after every single append. That deletes the liveness derivation entirely —
+along with the `R2 → R1 → S1` chain that silently vanished money when the
+trichotomy got it wrong, which under the fold is just `+500 −500 +500 = +500`,
+correct at every step. `reverses` is provenance for the UI and for audit; it
+contributes nothing to the sum.
+
+Integer sums are exact by construction — nothing to round, no ordering to get
+wrong — which is the whole reason the journal stores minor units.
+`Number.MAX_SAFE_INTEGER` is ~$90 trillion in cents, so plain integers are
+safe here without BigInt.
+
+**Negative results are preserved, never clamped.** An over-credited invoice
+must stay negative, exactly as availability preserves an oversold product's
+negative. Clamping hides the defect this exists to find.
 
 **Parameters**
 
-- `total` — Invoice total amount
-- `payments` — Payments array with amount and status fields
+- `total` — Invoice total, in dollars, from `items[]`
+- `settlements` — Every settlement against the invoice, reversals included
 
-**Returns** — Computed amount_paid and amount_due
+**Returns** — The three projected totals plus a per-reason breakdown, in dollars
 
 ### `removeOrderScopedDestinations(dests: InvoiceDestinationPair[], uidOrder: string): InvoiceDestinationPair[]`
 

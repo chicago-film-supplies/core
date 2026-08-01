@@ -49,6 +49,21 @@ export const PERMISSIONS = [
   "invoices.delete",
   "invoices.search",
 
+  // The settlements journal is append-only, so there is no `update` or `delete`
+  // verb to grant — a correction is a `settlements.reverse`, which appends.
+  "settlements.create",
+  "settlements.read",
+  "settlements.reverse",
+
+  // A credit note IS editable while `draft`; `void` is its own verb because
+  // voiding one that carries an unreversed allocation must be refused, and that
+  // is a different authority from editing a draft.
+  "creditNotes.create",
+  "creditNotes.read",
+  "creditNotes.update",
+  "creditNotes.void",
+  "creditNotes.search",
+
   "quotes.create",
   "quotes.read",
   "quotes.update",

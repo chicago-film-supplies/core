@@ -168,7 +168,7 @@ export const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
     source: "orders",
     target: "invoices",
     mode: "fan-out",
-    invariant: "A recomputed draft order must re-sync its draft invoices' chargeable_days/prices; terminal invoices (payments.length > 0 or status in {paid, void}) stay frozen",
+    invariant: "A recomputed draft order must re-sync its draft invoices' chargeable_days/prices; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
     trigger: "draft-order recompute — transitive via updateOrder's existing draft-invoice sync (projectOrderItemToInvoiceItem inherits the recomputed durations)",
     fields: [
       { source: ["items", "chargeable_days"], target: ["items", "chargeable_days"], transform: "inherited via projectOrderItemToInvoiceItem; draft invoices only — terminal ones skipped" },

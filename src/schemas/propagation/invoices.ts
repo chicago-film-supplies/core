@@ -8,7 +8,8 @@
  *    array entry when an invoice's status changes (e.g. issued → paid).
  *
  * 3. update-order → invoices: when an order's items, destinations, subject,
- *    reference, or organization change, unpaid invoices (payments.length === 0)
+ *    reference, or organization change, unsettled invoices (no unreversed
+ *    settlement)
  *    referencing the order via query_by_orders are updated — items and
  *    destinations scoped by order are selectively synced (respecting
  *    invoice-side overrides); scalar fields co-write only if the invoice
@@ -80,7 +81,7 @@ export const updateOrderInvoiceRules: CollectionRule[] = [
     target: "invoices",
     mode: "co-write",
     invariant: "Unpaid invoices stay in sync with their source orders — items and destinations scoped by order are selectively synced (respecting invoice-side overrides); scalar fields (subject, reference, organization) co-write only while the invoice value still matches the prev order value",
-    trigger: "items, destinations, subject, reference, or organization change on order — targets invoices where query_by_orders contains order uid AND payments is empty",
+    trigger: "items, destinations, subject, reference, or organization change on order — targets invoices where query_by_orders contains order uid AND the invoice has no unreversed settlement (an active CREDIT freezes it too: re-syncing items under a credit re-bakes the drift the credit exists to separate)",
     fields: [
       { source: ["uid"], target: ["items", "uid"], transform: "match order divider by uid (= source order id) to scope item removal/rebuild" },
       { source: ["items"], target: ["items"], transform: "selective sync: compare prev order items to current invoice items by path — update only non-overridden items, add new items, remove deleted non-overridden items. Invoice-only fields (coa_revenue, tracking_category, xero_id, xero_tracking_option_id) are preserved." },
@@ -97,7 +98,7 @@ export const updateOrderInvoiceRules: CollectionRule[] = [
     target: "invoices",
     mode: "co-write",
     invariant: "When an order is canceled, unpaid invoices referencing it remove the order's scoped items, destinations, and uid from query_by_orders",
-    trigger: "status change to canceled — targets invoices where query_by_orders contains order uid AND payments is empty",
+    trigger: "status change to canceled — targets invoices where query_by_orders contains order uid AND the invoice has no unreversed settlement (payment or credit)",
     fields: [
       { source: ["uid"], target: ["query_by_orders"], transform: "remove order uid from query_by_orders array" },
       { source: ["uid"], target: ["items"], transform: "remove order divider and all items under its path scope" },

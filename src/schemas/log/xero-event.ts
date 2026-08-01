@@ -82,6 +82,26 @@ export const XERO_EVENT_MSGS = [
   // doc, so this log is the ONLY audit trail: it carries the returned bill
   // `xero_invoice_id`, the `delta` posted, and the pre-bill `quantity_on_hand`.
   "xero_stock_adjustment_bill",
+  // ── Settlements (the `settlements` journal) ──
+  // A settlement document was written from a Xero payment or credit-note
+  // allocation. Carries `settlement_uid` + `settlement_type`.
+  "xero_settlement_synced",
+  // Xero stopped reporting a settlement CFS holds, so the reap appended a
+  // reverser (`reason: "source_retracted"`) rather than tombstoning. A real
+  // event with a real date, which is why it is an append and not a status flip.
+  "xero_settlement_reaped",
+  // A Xero payment whose id matches only a REVERSED settlement. Treated as
+  // unmatched and appended fresh (self-healing, Xero being the source of truth
+  // for payments) — but it means the reap and Xero now disagree, and that is
+  // worth a human knowing rather than being repaired invisibly.
+  "xero_settlement_resurrected",
+  // A seam CFS cannot clear via the API: money moved, or a refusal stands, and
+  // only a person in the Xero UI can resolve it. One arm, one helper
+  // (`reportManualXeroIntervention`), so adding a seam is an enum member rather
+  // than a new alert. Until credit-note origination ships, EVERY credit note in
+  // the business is created by hand in Xero and silently changes a CFS
+  // invoice's balance — `credit_created_out_of_band` is that signal.
+  "xero_manual_intervention_required",
   "xero_payment_already_synced",
   "xero_payment_appended",
   "xero_payment_backfilled",
@@ -143,7 +163,19 @@ export interface XeroEventLogRecord {
   ts: string;
   xero_invoice_id?: string;
   xero_payment_id?: string;
+  xero_credit_note_id?: string;
   xero_contact_id?: string;
+  /** The settlement document written, reaped or resurrected. */
+  settlement_uid?: string;
+  settlement_type?: string;
+  credit_note_number?: string;
+  /** Which manual-intervention seam fired. @see `xero_manual_intervention_required` */
+  seam?: string;
+  /** What a human must do about it — carried into the alert annotation. */
+  remedy?: string;
+  xero_url?: string;
+  xero_error?: string;
+  invoice_number?: number;
   invoice_uid?: string;
   order_uid?: string;
   /** Quote-push identity + state. Emitted by the whole quote path (`synced`,
@@ -201,7 +233,16 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   msg: z.enum(XERO_EVENT_MSGS),
   xero_invoice_id: z.string().optional(),
   xero_payment_id: z.string().optional(),
+  xero_credit_note_id: z.string().optional(),
   xero_contact_id: z.string().optional(),
+  settlement_uid: z.string().optional(),
+  settlement_type: z.string().optional(),
+  credit_note_number: z.string().optional(),
+  seam: z.string().optional(),
+  remedy: z.string().optional(),
+  xero_url: z.string().optional(),
+  xero_error: z.string().optional(),
+  invoice_number: z.number().optional(),
   invoice_uid: z.string().optional(),
   order_uid: z.string().optional(),
   xero_quote_id: z.string().nullable().optional(),

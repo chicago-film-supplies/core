@@ -582,3 +582,111 @@ Deno.test("CreateInvoiceInput: an invoice may still start with a line item", () 
     true,
   );
 });
+
+// ── The three-term settlement identity ───────────────────────────
+//
+// `amount_paid + amount_credited + amount_due === total`. Shipped here rather
+// than as a parnas Item 3 step, and with `void` exempt from the start —
+// `markInvoiceVoidedFromXero` zeroes both amounts while keeping `total`, which
+// is exactly the 4 corpus-wide violators, all of them void.
+
+const withTotals = (t: Record<string, number>) => ({
+  ...validInvoice,
+  totals: { ...validInvoice.totals, ...t },
+});
+
+Deno.test("the identity refine rejects a three-term violation", () => {
+  const bad = InvoiceSchema.safeParse(
+    withTotals({ total: 1000, amount_paid: 400, amount_credited: 100, amount_due: 400 }),
+  );
+  assertEquals(bad.success, false);
+  assertEquals(bad.error?.issues[0].path, ["totals", "amount_due"]);
+});
+
+Deno.test("the identity refine accepts a fully-credited invoice", () => {
+  // #1301's shape: billed 18,196 / collected 16,000 / wrote off 2,196.
+  assertEquals(
+    InvoiceSchema.safeParse(
+      withTotals({ total: 18_196, amount_paid: 16_000, amount_credited: 2_196, amount_due: 0 }),
+    ).success,
+    true,
+  );
+});
+
+Deno.test("the identity refine accepts a credit with ZERO cash — #1322's shape", () => {
+  assertEquals(
+    InvoiceSchema.safeParse(
+      withTotals({ total: 4_495.62, amount_paid: 0, amount_credited: 4_495.62, amount_due: 0 }),
+    ).success,
+    true,
+  );
+});
+
+Deno.test("the identity refine tolerates a half-cent, not a whole one", () => {
+  assertEquals(
+    InvoiceSchema.safeParse(withTotals({ total: 1000, amount_paid: 999.996, amount_due: 0 }))
+      .success,
+    true,
+  );
+  assertEquals(
+    InvoiceSchema.safeParse(withTotals({ total: 1000, amount_paid: 999.98, amount_due: 0 }))
+      .success,
+    false,
+  );
+});
+
+Deno.test("VOID is exempt, and that exemption is load-bearing", () => {
+  // Without it every voided invoice becomes unwritable. This assertion is what
+  // stops the exemption being removed later as "an obviously wrong special case".
+  assertEquals(
+    InvoiceSchema.safeParse({
+      ...withTotals({ total: 2_470, amount_paid: 0, amount_credited: 0, amount_due: 0 }),
+      status: "void",
+    }).success,
+    true,
+  );
+  // ...and the same numbers on a non-void invoice are still rejected, so the
+  // exemption is narrow rather than a hole.
+  assertEquals(
+    InvoiceSchema.safeParse({
+      ...withTotals({ total: 2_470, amount_paid: 0, amount_credited: 0, amount_due: 0 }),
+      status: "issued",
+    }).success,
+    false,
+  );
+});
+
+Deno.test("amount_credited is OPTIONAL, so the 962 pre-migration invoices still parse", () => {
+  const { amount_credited: _drop, ...totalsWithout } = {
+    ...validInvoice.totals,
+    total: 1000,
+    amount_paid: 600,
+    amount_due: 400,
+    amount_credited: undefined,
+  };
+  assertEquals(
+    InvoiceSchema.safeParse({ ...validInvoice, totals: totalsWithout }).success,
+    true,
+  );
+});
+
+Deno.test("payments survives as PARSE TOLERANCE — a not-yet-stripped doc still writes", () => {
+  // `InvoiceSchema` is a strictObject, so an undeclared `payments` would make
+  // every un-migrated invoice fail validation on its next write. That is the
+  // entire reason the field is still declared, and this pins it until
+  // `--drop-legacy` has run and the field is deleted from the schema.
+  assertEquals(
+    InvoiceSchema.safeParse({
+      ...withTotals({ total: 500, amount_paid: 500, amount_due: 0 }),
+      payments: [{
+        uid: "0195f3a1-0000-7000-8000-000000000002",
+        xero_payment_id: "xp-1",
+        date: "2026-03-01T00:00:00.000-06:00",
+        amount: 500,
+        reference: null,
+        status: "active",
+      }],
+    }).success,
+    true,
+  );
+});

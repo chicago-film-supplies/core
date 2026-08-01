@@ -235,6 +235,11 @@ export {
   FULFILLMENT_LINE_ITEM_TYPES,
   CfsSourceCollectionEnum,
   CFS_SOURCE_COLLECTIONS,
+  SettlementTypeEnum,
+  SettlementReasonEnum,
+  SETTLEMENT_CONTRACTS,
+  settlementContract,
+  getSettlementMultiplier,
   type AddressType,
   type CfsSourceCollectionType,
   type CoordinatesType,
@@ -264,6 +269,9 @@ export {
   type PreTaxItemType,
   type FromTotalItemType,
   type DividerItemType,
+  type SettlementTypeType,
+  type SettlementReasonType,
+  type SettlementContract,
   StoreBreakdownEntrySchema,
   StoreBreakdownLocationSchema,
   type StoreBreakdownEntry,
@@ -664,6 +672,21 @@ export {
   UpdateOutOfServiceInput,
   type UpdateOutOfServiceInputType,
 } from "./out-of-service.ts";
+export {
+  type Settlement,
+  SettlementSchema,
+} from "./settlement.ts";
+export {
+  CREDIT_NOTE_REASONS,
+  type CreditNote,
+  type CreditNoteDocItemPrice,
+  CreditNoteDocLineItem,
+  type CreditNoteDocLineItem as CreditNoteDocLineItemType,
+  CreditNoteSchema,
+  CreditNoteStatusEnum,
+  type CreditNoteStatusType,
+  type CreditNoteDocTotals,
+} from "./credit-note.ts";
 
 export {
   StockSummarySchema,
@@ -972,6 +995,8 @@ import type { LocationType } from "./location-type.ts";
 import type { Order } from "./order.ts";
 import type { Organization } from "./organization.ts";
 import type { OutOfService } from "./out-of-service.ts";
+import type { Settlement } from "./settlement.ts";
+import type { CreditNote } from "./credit-note.ts";
 import type { PasswordReset } from "./password-reset.ts";
 import type { Product } from "./product.ts";
 import type { Quote } from "./quote.ts";
@@ -1009,7 +1034,7 @@ export type SchemaDocType =
   | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
   | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
-  | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User
+  | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User
   | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState
   | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 
@@ -1039,6 +1064,8 @@ import { LocationTypeSchema } from "./location-type.ts";
 import { OrderSchema } from "./order.ts";
 import { OrganizationSchema } from "./organization.ts";
 import { OutOfServiceSchema } from "./out-of-service.ts";
+import { SettlementSchema } from "./settlement.ts";
+import { CreditNoteSchema } from "./credit-note.ts";
 import { PasswordResetSchema } from "./password-reset.ts";
 import { ProductSchema } from "./product.ts";
 import { QuoteSchema as QuoteSchema_ } from "./quote.ts";
@@ -1113,6 +1140,8 @@ export const schemas: Record<string, z.ZodType> = {
   "role": RoleSchema, "roles": RoleSchema,
   "public-stock-summary": PublicStockSummarySchema, "public-stock-summaries": PublicStockSummarySchema,
   "session": SessionSchema, "sessions": SessionSchema,
+  "credit-note": CreditNoteSchema, "credit-notes": CreditNoteSchema,
+  "settlement": SettlementSchema, "settlements": SettlementSchema,
   "stock-summary": StockSummarySchema, "stock-summaries": StockSummarySchema,
   "store": StoreSchema, "stores": StoreSchema,
   "tag": TagSchema, "tags": TagSchema,

@@ -230,6 +230,7 @@ export const CFS_SOURCE_COLLECTIONS = [
   "bookings",
   "cards",
   "contacts",
+  "credit-notes",
   "invoices",
   "locations",
   "orders",
@@ -237,6 +238,7 @@ export const CFS_SOURCE_COLLECTIONS = [
   "out-of-service",
   "products",
   "roles",
+  "settlements",
   "template-components",
   "templates",
   "templates-versions",
@@ -753,6 +755,180 @@ const OOS_REASONS = ["cleaning", "damaged", "maintenance", "lost"] as const;
 export type OOSReasonType = typeof OOS_REASONS[number];
 /** Zod schema for OOSReasonType. */
 export const OOSReasonEnum: z.ZodType<OOSReasonType> = z.enum(OOS_REASONS);
+
+// ── Settlements ──────────────────────────────────────────────────
+//
+// The vocabulary of the `settlements` journal — the revenue-side twin of the
+// `transactions` movement journal. It lives in `common.ts` rather than in
+// `settlement.ts` because `credit-notes` shares the reason enum: one credit
+// note allocated across three invoices has ONE reason, denormalized onto each
+// settlement, and authoring it three times invites three answers.
+
+/**
+ * FOUR members, not two.
+ *
+ * The reversal arms are their own **types**, exactly as `MOVEMENT_TYPES` carries
+ * `sale` and `sale_return` rather than a second `kind` field. That is what lets
+ * the totals be a plain signed fold over *every* row: a do/undo pair nets to
+ * zero arithmetically rather than by being filtered out, so an invoice can do
+ * and undo perpetually with correct totals after each append, and there is no
+ * liveness derivation to get wrong.
+ */
+const SETTLEMENT_TYPES = [
+  "payment",
+  "payment_reversal",
+  "credit",
+  "credit_reversal",
+] as const;
+/** One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS} */
+export type SettlementTypeType = typeof SETTLEMENT_TYPES[number];
+/** Zod schema for SettlementTypeType. */
+export const SettlementTypeEnum: z.ZodType<SettlementTypeType> = z.enum(SETTLEMENT_TYPES);
+
+/**
+ * Why a settlement happened. **Closed by design**, and the one thing here that
+ * is expensive to change later: it becomes a 16-bit `code` when CFS owns its
+ * ledger, and a taxonomy that started as prose cannot be mechanically ported.
+ * Widening is additive and free; *re-meaning* a member after history carries it
+ * is not.
+ *
+ * **Xero's `Reference` is a description, not a reason — never auto-map from
+ * it.** Deriving `reason` from the reference string was proposed and rejected on
+ * the evidence: CN-1013 reads *"L&D Refund"* but is economically an adjustment
+ * down, and CN-1017 reads *"Tables & Racks"* — which names the items credited
+ * while the actual reason was an early return. The string says *what* was
+ * credited; the enum records *why*. A plausible-looking auto-map would write
+ * eight wrong reasons indistinguishable from correct ones, so the backfill
+ * writes `unspecified` and an operator classifies the eight by hand.
+ *
+ * `damage_settlement` was drafted and dropped before shipping: if L&D refunds
+ * are adjustments, it described nothing. A member that describes nothing is easy
+ * to drop *before* history uses it and impossible after.
+ */
+const SETTLEMENT_REASONS = [
+  /** payment — cash received against the invoice. */
+  "payment_received",
+  /** credit — uncollectible, written off (#1301, #1981). */
+  "bad_debt",
+  /** credit — a rental came back early (CN-1015). */
+  "early_return",
+  /** credit — the billed amount was corrected after the fact (CN-1013, CN-1016). */
+  "order_adjustment",
+  /** credit — discretionary. */
+  "goodwill",
+  /** reversal — the originating system no longer reports it (the reap). */
+  "source_retracted",
+  /** any — an operator fixing their own record. */
+  "correction",
+  /** backfilled history only — never written by new code. */
+  "unspecified",
+] as const;
+/** Why a settlement happened. @see {@link SETTLEMENT_CONTRACTS} */
+export type SettlementReasonType = typeof SETTLEMENT_REASONS[number];
+/** Zod schema for SettlementReasonType. */
+export const SettlementReasonEnum: z.ZodType<SettlementReasonType> = z.enum(SETTLEMENT_REASONS);
+
+/** How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS} */
+export interface SettlementContract {
+  /** Which reasons are legal for this type. */
+  reasons: readonly SettlementReasonType[];
+  /** Which external-id field this type may carry; `null` ⇒ neither. */
+  xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
+  /** Which invoice total this type feeds. */
+  sums_into: "amount_paid" | "amount_credited";
+  /** Whether `reverses` must or must not be set. */
+  reverses: "required" | "forbidden";
+}
+
+/**
+ * The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}
+ * member — a table the schema reads, so a contradiction is reported by the
+ * schema instead of restated in every consumer.
+ *
+ * `sums_into` is load-bearing rather than documentation: `calculateInvoiceTotals`
+ * takes its settlement argument structurally, so without a declared target a
+ * credit row would be silently summed into `amount_paid`. Reading the target
+ * from the table removes that class entirely.
+ *
+ * A reversal carries **no** external id. The reap appends a reverser because
+ * Xero stopped reporting a payment — the reverser is a CFS event with no Xero
+ * counterpart, and the id it retracts is still on the row `reverses` names.
+ */
+export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, SettlementContract>> = {
+  payment: {
+    reasons: ["payment_received", "correction", "unspecified"],
+    xero_id_field: "xero_payment_id",
+    sums_into: "amount_paid",
+    reverses: "forbidden",
+  },
+  payment_reversal: {
+    reasons: ["source_retracted", "correction", "unspecified"],
+    xero_id_field: null,
+    sums_into: "amount_paid",
+    reverses: "required",
+  },
+  credit: {
+    reasons: [
+      "bad_debt",
+      "early_return",
+      "order_adjustment",
+      "goodwill",
+      "correction",
+      "unspecified",
+    ],
+    xero_id_field: "xero_credit_note_id",
+    sums_into: "amount_credited",
+    reverses: "forbidden",
+  },
+  credit_reversal: {
+    reasons: ["source_retracted", "correction", "unspecified"],
+    xero_id_field: null,
+    sums_into: "amount_credited",
+    reverses: "required",
+  },
+};
+
+/**
+ * The contract for a settlement `type`, or `undefined` for a value outside
+ * {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
+ * {@link itemContract} is — callers hold types from loosely-typed sources.
+ */
+export function settlementContract(type: string): SettlementContract | undefined {
+  return SETTLEMENT_CONTRACTS[type as SettlementTypeType];
+}
+
+/**
+ * `+1` for a settlement that increases the total it feeds, `-1` for one that
+ * reduces it.
+ *
+ * **Derived from the contract, never declared**, exactly as
+ * `getTransactionMultiplier` derives from `places` rather than carrying a ±1
+ * column: a type that must name what it reverses IS a retraction, and one that
+ * must not IS an application. Two facts that could disagree become one that
+ * cannot.
+ *
+ * **The sign keys on `type`, not on `reason`.** The package answers this the
+ * same way three times over — `getTransactionMultiplier(type)`, and
+ * `out_of_service_breakdown[o.reason]` where reason is a *breakdown dimension*
+ * rather than a direction. It is also forced here: `correction` is genuinely
+ * bidirectional (an operator may be adding a payment they missed or removing one
+ * that never happened), so a reason-keyed sign would have to split it into
+ * `correction_added`/`correction_removed`, and every other bidirectional reason
+ * after it. Type carries direction, reason carries why, and the contract's
+ * `reasons` list keeps the pairs legal.
+ */
+export function getSettlementMultiplier(type: SettlementTypeType): 1 | -1 {
+  return SETTLEMENT_CONTRACTS[type].reverses === "required" ? -1 : 1;
+}
+
+// A type list and a contract table are two hand-written lists of the same names;
+// this makes a gap between them a compile error rather than a runtime hole —
+// the drift core#41 is.
+type _SettlementContractsCoverTypes = SettlementTypeType extends keyof typeof SETTLEMENT_CONTRACTS
+  ? true
+  : never;
+const _settlementContractParity: _SettlementContractsCoverTypes = true;
+void _settlementContractParity;
 
 // ── Store breakdown (shared by InventoryLedger & StockSummary) ──────
 
