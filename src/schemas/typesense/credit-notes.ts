@@ -18,6 +18,14 @@ export const creditNotes: TypesenseCollectionConfig = {
   version: 1,
   firestoreCollection: "credit-notes",
   collectionName: "credit-notes_v1",
+  // Registered but NOT provisioned. The collection holds no documents until the
+  // bootstrap imports the 12 existing Xero notes, and no UI reaches it until
+  // credit-note origination ships — so an eventarc sync trigger and a minted
+  // search key would both be infrastructure for an empty index. Same posture as
+  // `bookings`. Flip to enabled in Phase 6, alongside the search UI, and add
+  // "credit-notes" to `local.typesense_collections` in `infra/main.tf` in the
+  // same change — `typesenseTriggerCoverage` pins the two lists together.
+  enabled: false,
   schema: {
     name: "credit-notes_v1",
     enable_nested_fields: true,
