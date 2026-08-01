@@ -18651,6 +18651,90 @@ that currently hold stock (`reserved + prepped + out > 0`, the same definition
 as `quantity_booked`) contribute — a returned/quoted booking reserves nothing
 even if a stale `stores` array lingers.
 
+## `@cfs/core/utils/money`
+
+Money as integer minor units — the dollars↔cents boundary, the exact-division
+primitive that factor arithmetic is built on, and a float-free formatter.
+
+```ts
+import { formatCents, roundDivHalfUp, toCents } from "@cfs/core/utils/money";
+
+toCents(19.99); // 1999
+formatCents(-4495_62); // "-$4,495.62"
+roundDivHalfUp(1000n * 33n, 100n); // 330n  — × n ÷ d, never × (n/d)
+```
+
+**Never let a float carry a money value or a factor applied to one.** The trap
+is operation order, not precision: `× (n / d)` bakes an unrepresentable
+quotient into the money before it is ever scaled, while `× n ÷ d` over integer
+cents rounds exactly once, at the end. Measured over a 500k-pair corpus,
+divide-first is wrong 496,088 times and integer cents 0.
+
+## Two numeric flavours, and which to reach for
+
+- **`number`** — `toCents` / `fromCents` / `formatCents`. The storage and
+  display boundary: a `*_cents` field, a wire payload, a rendered row. Safe
+  because `Number.MAX_SAFE_INTEGER` is 9.007e15 cents ≈ **$90 trillion**, so a
+  cent value and a sum of cent values never approach it.
+- **`bigint`** — `toCentsBig` / `fromCentsBig` / `roundDivHalfUp`. Applying a
+  *factor* to money, where the intermediate is the problem rather than the
+  result: `calculateItemSubtotal` scales cents by `100 × RATE_SCALE` = 1e8, so
+  a $1M line reaches 1e16 and overflows 2^53 before any division happens.
+
+Sums of cents need neither — integer addition is exact by construction, which
+is the whole reason journals store minor units.
+
+### `formatCents(cents: number, _: unknown): string`
+
+Format integer cents for display **without ever creating a float**.
+
+Integer division and a modulo, then string work — so the number on screen and
+the number in the journal are the same object, which is what a ledger UI
+should do. Output matches manager's `formatCurrency`
+(`currency(v, { symbol: "$" }).format()`) so this is a visual drop-in for a
+cents-denominated value: `"$1,234.56"`, `"-$50.00"`.
+
+`cents` is expected to be an integer — every `*_cents` field is a `z.int()`.
+The truncation is a display guard against a stray float reaching the renderer,
+not a rounding policy; a caller with a fractional cent has a bug upstream.
+
+### `fromCents(cents: number): number`
+
+Narrow integer cents back to dollars, for a dollar-denominated projection.
+
+This is the one place a money value re-enters float space, so it belongs at a
+named boundary and nowhere else — see `recomputeSettlementTotals`.
+
+### `fromCentsBig(cents: bigint): number`
+
+The `bigint` flavour of {@linkcode fromCents}.
+
+### `roundDivHalfUp(num: bigint, den: bigint): bigint`
+
+Round `num / den` half-up, exactly, over integers.
+
+**Non-negative numerator and positive denominator only.** BigInt division
+truncates toward zero, so `(2n + d) / 2d` rounds a negative numerator the
+wrong way — toward zero rather than half-up. Every caller applies a factor to
+a non-negative money value (a base price, a quantity, a chargeable-day count,
+a rate, a cost basis), which is what makes the form correct rather than merely
+convenient. A caller that acquires a negative numerator must not reach for
+this without revisiting the rounding rule.
+
+### `toCents(dollars: number): number`
+
+Widen dollars to exact integer cents.
+
+Stored money is 2dp, so `× 100` is a lossless widening rather than a rounding;
+the `Math.round` is there to absorb the binary representation error in values
+like `19.99 * 100 === 1998.9999999999998`, not to make a decision about a
+third decimal place.
+
+### `toCentsBig(dollars: number): bigint`
+
+The `bigint` flavour of {@linkcode toCents}, for factor arithmetic whose
+intermediates exceed `Number.MAX_SAFE_INTEGER`.
+
 ## `@cfs/core/utils/movements`
 
 Pure helpers over the movement journal — the fold from an event's lines onto
@@ -19413,9 +19497,18 @@ always been computed against).
   flat processing charge stays expressible without a second formula.
 
 Exact: the percentage is applied as `× rate ÷ 100` over integer cents rather
-than as a pre-divided float factor, and rounds half-up exactly once. The form
-this replaced was `currency(basis).multiply(rate / 100)`, which quantizes the
-ratio at currency.js's precision before it ever reaches the money.
+than as a pre-divided float factor, and rounds half-up exactly once.
+
+The form this replaced was `currency(basis).multiply(rate / 100)`. That is the
+*benign* float form, and an earlier version of this docstring was wrong about
+why — `multiply` takes a plain JS number and never wraps it, so nothing
+quantizes the ratio; it carries only the ~1e-18 representation error in
+`rate / 100`, which flips a tie so rarely that it mis-costs **0** of the fee
+sweep's pairs. The form that genuinely loses money is **divide-first**,
+`currency(rate).divide(100)`, which does re-enter the constructor and
+quantizes: `currency(12.345).divide(100) === 0.12`. Both are measured on every
+run by the fail-closed companion in `tests/orders.test.ts` — the assertion
+pins divide-first, the benign form is reported.
 
 ### `computeItemPaths(items: T[], _: unknown): T[]`
 

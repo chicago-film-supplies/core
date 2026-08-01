@@ -75,6 +75,14 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "locations": [
     { name: "normalizeLocationName", expr: "it.locations.normalizeLocationName(name)", desc: "Canonical uniqueness key for a location name, scoped within its store.", returns: "string" },
   ],
+  "money": [
+    { name: "formatCents", expr: "it.money.formatCents(cents, arg2)", desc: "Format integer cents for display **without ever creating a float**.", returns: "string" },
+    { name: "fromCents", expr: "it.money.fromCents(cents)", desc: "Narrow integer cents back to dollars, for a dollar-denominated projection.", returns: "number" },
+    { name: "fromCentsBig", expr: "it.money.fromCentsBig(cents)", desc: "The `bigint` flavour of {@linkcode fromCents}.", returns: "number" },
+    { name: "roundDivHalfUp", expr: "it.money.roundDivHalfUp(num, den)", desc: "Round `num / den` half-up, exactly, over integers.", returns: "bigint" },
+    { name: "toCents", expr: "it.money.toCents(dollars)", desc: "Widen dollars to exact integer cents.", returns: "number" },
+    { name: "toCentsBig", expr: "it.money.toCentsBig(dollars)", desc: "The `bigint` flavour of {@linkcode toCents}, for factor arithmetic whose intermediates exceed `Number.MAX_SAFE_INTEGER`.", returns: "bigint" },
+  ],
   "movements": [
 
   ],

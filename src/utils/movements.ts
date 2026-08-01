@@ -26,29 +26,9 @@ import type {
   StoreBreakdownLocation,
 } from "../schemas/mod.ts";
 import { MOVEMENT_CONTRACTS } from "../schemas/mod.ts";
+import { fromCentsBig, roundDivHalfUp, toCentsBig } from "./money.ts";
 
 // ── Money ───────────────────────────────────────────────────────────
-
-/**
- * Money as integer cents. Inputs are already 2dp, so `× 100` is a lossless
- * widening rather than a rounding.
- */
-function toCents(money: number): bigint {
-  return BigInt(Math.round(money * 100));
-}
-
-/** Cents back to a 2dp number. */
-function fromCents(cents: bigint): number {
-  return Number(cents) / 100;
-}
-
-/**
- * Round `num / den` half-up. Non-negative numerator only — BigInt division
- * truncates toward zero, so a negative numerator would round the wrong way.
- */
-function roundDivHalfUp(num: bigint, den: bigint): bigint {
-  return (2n * num + den) / (2n * den);
-}
 
 /**
  * The carrying value of `quantity` units drawn from a basis of `basisCents`
@@ -255,26 +235,26 @@ export function applyMovementToLedger(
   let costApplied = 0;
   let unitCost = 0;
   if (carriesCost) {
-    const basisCents = toCents(next.total_cost_basis);
+    const basisCents = toCentsBig(next.total_cost_basis);
     if (delta > 0) {
-      const addCents = toCents(movement.cost?.amount ?? 0);
-      costApplied = fromCents(addCents);
-      unitCost = delta > 0 ? fromCents(roundDivHalfUp(addCents, BigInt(delta))) : 0;
-      next.total_cost_basis = fromCents(basisCents + addCents);
+      const addCents = toCentsBig(movement.cost?.amount ?? 0);
+      costApplied = fromCentsBig(addCents);
+      unitCost = delta > 0 ? fromCentsBig(roundDivHalfUp(addCents, BigInt(delta))) : 0;
+      next.total_cost_basis = fromCentsBig(basisCents + addCents);
     } else if (delta < 0) {
       const units = -delta;
       const outCents = costOfUnits(basisCents, next.quantity_held, units);
-      costApplied = -fromCents(outCents);
-      unitCost = fromCents(roundDivHalfUp(outCents, BigInt(units)));
-      next.total_cost_basis = fromCents(basisCents - outCents);
+      costApplied = -fromCentsBig(outCents);
+      unitCost = fromCentsBig(roundDivHalfUp(outCents, BigInt(units)));
+      next.total_cost_basis = fromCentsBig(basisCents - outCents);
     }
   }
 
   next.quantity_held += delta;
 
   if (next.quantity_held > 0) {
-    next.average_unit_cost = fromCents(
-      roundDivHalfUp(toCents(next.total_cost_basis), BigInt(next.quantity_held)),
+    next.average_unit_cost = fromCentsBig(
+      roundDivHalfUp(toCentsBig(next.total_cost_basis), BigInt(next.quantity_held)),
     );
   } else if (carriesCost) {
     // No units held after a cost-bearing move (a sale of the last unit) means no

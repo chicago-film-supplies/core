@@ -9990,6 +9990,60 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/money",
+      "moduleDoc": "Money as integer minor units — the dollars↔cents boundary, the exact-division\nprimitive that factor arithmetic is built on, and a float-free formatter.\n\n```ts\nimport { formatCents, roundDivHalfUp, toCents } from \"@cfs/core/utils/money\";\n\ntoCents(19.99); // 1999\nformatCents(-4495_62); // \"-$4,495.62\"\nroundDivHalfUp(1000n * 33n, 100n); // 330n  — × n ÷ d, never × (n/d)\n```\n\n**Never let a float carry a money value or a factor applied to one.** The trap\nis operation order, not precision: `× (n / d)` bakes an unrepresentable\nquotient into the money before it is ever scaled, while `× n ÷ d` over integer\ncents rounds exactly once, at the end. Measured over a 500k-pair corpus,\ndivide-first is wrong 496,088 times and integer cents 0.\n\n## Two numeric flavours, and which to reach for\n\n- **`number`** — `toCents` / `fromCents` / `formatCents`. The storage and\n  display boundary: a `*_cents` field, a wire payload, a rendered row. Safe\n  because `Number.MAX_SAFE_INTEGER` is 9.007e15 cents ≈ **$90 trillion**, so a\n  cent value and a sum of cent values never approach it.\n- **`bigint`** — `toCentsBig` / `fromCentsBig` / `roundDivHalfUp`. Applying a\n  *factor* to money, where the intermediate is the problem rather than the\n  result: `calculateItemSubtotal` scales cents by `100 × RATE_SCALE` = 1e8, so\n  a $1M line reaches 1e16 and overflows 2^53 before any division happens.\n\nSums of cents need neither — integer addition is exact by construction, which\nis the whole reason journals store minor units.",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "formatCents",
+          "signature": "formatCents(cents: number, _: unknown): string",
+          "doc": "Format integer cents for display **without ever creating a float**.\n\nInteger division and a modulo, then string work — so the number on screen and\nthe number in the journal are the same object, which is what a ledger UI\nshould do. Output matches manager's `formatCurrency`\n(`currency(v, { symbol: \"$\" }).format()`) so this is a visual drop-in for a\ncents-denominated value: `\"$1,234.56\"`, `\"-$50.00\"`.\n\n`cents` is expected to be an integer — every `*_cents` field is a `z.int()`.\nThe truncation is a display guard against a stray float reaching the renderer,\nnot a rounding policy; a caller with a fractional cent has a bug upstream.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "fromCents",
+          "signature": "fromCents(cents: number): number",
+          "doc": "Narrow integer cents back to dollars, for a dollar-denominated projection.\n\nThis is the one place a money value re-enters float space, so it belongs at a\nnamed boundary and nowhere else — see `recomputeSettlementTotals`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "fromCentsBig",
+          "signature": "fromCentsBig(cents: bigint): number",
+          "doc": "The `bigint` flavour of {@linkcode fromCents}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "roundDivHalfUp",
+          "signature": "roundDivHalfUp(num: bigint, den: bigint): bigint",
+          "doc": "Round `num / den` half-up, exactly, over integers.\n\n**Non-negative numerator and positive denominator only.** BigInt division\ntruncates toward zero, so `(2n + d) / 2d` rounds a negative numerator the\nwrong way — toward zero rather than half-up. Every caller applies a factor to\na non-negative money value (a base price, a quantity, a chargeable-day count,\na rate, a cost basis), which is what makes the form correct rather than merely\nconvenient. A caller that acquires a negative numerator must not reach for\nthis without revisiting the rounding rule.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "toCents",
+          "signature": "toCents(dollars: number): number",
+          "doc": "Widen dollars to exact integer cents.\n\nStored money is 2dp, so `× 100` is a lossless widening rather than a rounding;\nthe `Math.round` is there to absorb the binary representation error in values\nlike `19.99 * 100 === 1998.9999999999998`, not to make a decision about a\nthird decimal place.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "toCentsBig",
+          "signature": "toCentsBig(dollars: number): bigint",
+          "doc": "The `bigint` flavour of {@linkcode toCents}, for factor arithmetic whose\nintermediates exceed `Number.MAX_SAFE_INTEGER`.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/movements",
       "moduleDoc": "Pure helpers over the movement journal — the fold from an event's lines onto\nan inventory ledger, the reversal transform, and the placement helpers that\nturn a contract plus an allocation into lines.\n\n```ts\nimport { applyMovementToLedger, negateLines } from \"@cfs/core/utils/movements\";\n```\n\nDb-free and side-effect-free, so the same fold runs server-side inside a\nFirestore transaction and in a test over a plain object. Document refs,\nthrows and logging stay in api-cloudrun; this module only computes.\n\nThe contract tables themselves (`MOVEMENT_CONTRACTS`, `CUSTODY_PLACE_KINDS`)\nlive in `schemas/transaction.ts`, not here — the document schema validates\nagainst them, and schema modules cannot import utils.",
       "symbols": [
@@ -10351,7 +10405,7 @@
           "kind": "function",
           "name": "calculateTransactionFeeAmount",
           "signature": "calculateTransactionFeeAmount(item: LineItem, basis: number): number",
-          "doc": "The dollar amount a `transaction_fee` line contributes to a document.\n\nA fee is priced from the document, not from itself, so it needs the one input\n`calculateItemSubtotal` cannot see: `basis`, the document's\n`subtotal_discounted` (pre-tax, post-discount — the same base the fee has\nalways been computed against).\n\n- `percent_of_total` → `basis × base / 100`.\n- anything else → the ordinary per-unit subtotal, `base × quantity`, so a\n  flat processing charge stays expressible without a second formula.\n\nExact: the percentage is applied as `× rate ÷ 100` over integer cents rather\nthan as a pre-divided float factor, and rounds half-up exactly once. The form\nthis replaced was `currency(basis).multiply(rate / 100)`, which quantizes the\nratio at currency.js's precision before it ever reaches the money.",
+          "doc": "The dollar amount a `transaction_fee` line contributes to a document.\n\nA fee is priced from the document, not from itself, so it needs the one input\n`calculateItemSubtotal` cannot see: `basis`, the document's\n`subtotal_discounted` (pre-tax, post-discount — the same base the fee has\nalways been computed against).\n\n- `percent_of_total` → `basis × base / 100`.\n- anything else → the ordinary per-unit subtotal, `base × quantity`, so a\n  flat processing charge stays expressible without a second formula.\n\nExact: the percentage is applied as `× rate ÷ 100` over integer cents rather\nthan as a pre-divided float factor, and rounds half-up exactly once.\n\nThe form this replaced was `currency(basis).multiply(rate / 100)`. That is the\n*benign* float form, and an earlier version of this docstring was wrong about\nwhy — `multiply` takes a plain JS number and never wraps it, so nothing\nquantizes the ratio; it carries only the ~1e-18 representation error in\n`rate / 100`, which flips a tie so rarely that it mis-costs **0** of the fee\nsweep's pairs. The form that genuinely loses money is **divide-first**,\n`currency(rate).divide(100)`, which does re-enter the constructor and\nquantizes: `currency(12.345).divide(100) === 0.12`. Both are measured on every\nrun by the fail-closed companion in `tests/orders.test.ts` — the assertion\npins divide-first, the benign form is reported.",
           "paramTags": [],
           "returnsTag": null
         },

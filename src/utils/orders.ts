@@ -50,6 +50,7 @@ import type {
 } from "../schemas/mod.ts";
 import { itemContract } from "../schemas/mod.ts";
 import { getDuration, toChicagoYmd } from "./dates.ts";
+import { fromCentsBig, roundDivHalfUp, toCentsBig } from "./money.ts";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -545,20 +546,6 @@ const QTY_SCALE = 10_000n;
 /** Scale for a discount `rate`, in millionths of a percentage point. */
 const RATE_SCALE = 1_000_000n;
 
-/**
- * Round `num / den` half-up. Only ever called with a non-negative numerator and
- * a positive denominator (`base`, `quantity`, `chargeable_days` and `rate` are
- * all non-negative), which is what makes the `(2n + d) / 2d` form correct —
- * BigInt division truncates toward zero, so a negative numerator would round the
- * wrong way.
- */
-function roundDivHalfUp(num: bigint, den: bigint): bigint {
-  return (2n * num + den) / (2n * den);
-}
-
-/** A money value in exact integer cents. Inputs are 2dp, so this is lossless. */
-const toCents = (money: number) => BigInt(Math.round(money * 100));
-
 // ── Item-level calculations ──────────────────────────────────────
 
 /**
@@ -608,7 +595,7 @@ function perUnitSubtotal(
   // only above the one-week floor. At exactly 5 days it is 1, as is `fixed`.
   const useDays = formula === "five_day_week" && days > 5;
 
-  let num = toCents(base) * quantity;
+  let num = toCentsBig(base) * quantity;
   let den = QTY_SCALE;
   if (useDays) {
     num *= BigInt(days);
@@ -617,7 +604,7 @@ function perUnitSubtotal(
   const subtotalCents = roundDivHalfUp(num, den);
 
   if (!discount) {
-    const v = Number(subtotalCents) / 100;
+    const v = fromCentsBig(subtotalCents);
     return { subtotal: v, subtotal_discounted: v };
   }
 
@@ -629,7 +616,7 @@ function perUnitSubtotal(
     discountedCents = roundDivHalfUp(subtotalCents * (scale - rate), scale);
   } else {
     // `flat`: rate is dollars per unit, per pricing factor — not a line total.
-    let dNum = toCents(discount.rate) * quantity;
+    let dNum = toCentsBig(discount.rate) * quantity;
     let dDen = QTY_SCALE;
     if (useDays) {
       dNum *= BigInt(days);
@@ -641,8 +628,8 @@ function perUnitSubtotal(
   }
 
   return {
-    subtotal: Number(subtotalCents) / 100,
-    subtotal_discounted: Number(discountedCents) / 100,
+    subtotal: fromCentsBig(subtotalCents),
+    subtotal_discounted: fromCentsBig(discountedCents),
   };
 }
 
@@ -659,9 +646,18 @@ function perUnitSubtotal(
  *   flat processing charge stays expressible without a second formula.
  *
  * Exact: the percentage is applied as `× rate ÷ 100` over integer cents rather
- * than as a pre-divided float factor, and rounds half-up exactly once. The form
- * this replaced was `currency(basis).multiply(rate / 100)`, which quantizes the
- * ratio at currency.js's precision before it ever reaches the money.
+ * than as a pre-divided float factor, and rounds half-up exactly once.
+ *
+ * The form this replaced was `currency(basis).multiply(rate / 100)`. That is the
+ * *benign* float form, and an earlier version of this docstring was wrong about
+ * why — `multiply` takes a plain JS number and never wraps it, so nothing
+ * quantizes the ratio; it carries only the ~1e-18 representation error in
+ * `rate / 100`, which flips a tie so rarely that it mis-costs **0** of the fee
+ * sweep's pairs. The form that genuinely loses money is **divide-first**,
+ * `currency(rate).divide(100)`, which does re-enter the constructor and
+ * quantizes: `currency(12.345).divide(100) === 0.12`. Both are measured on every
+ * run by the fail-closed companion in `tests/orders.test.ts` — the assertion
+ * pins divide-first, the benign form is reported.
  */
 export function calculateTransactionFeeAmount(item: LineItem, basis: number): number {
   if (!isTransactionFeeItem(item)) {
@@ -675,8 +671,8 @@ export function calculateTransactionFeeAmount(item: LineItem, basis: number): nu
   // negative document total is not a thing either side of this expresses.
   const rate = BigInt(Math.round(Math.max(item.price.base ?? 0, 0) * Number(RATE_SCALE)));
   const scale = 100n * RATE_SCALE;
-  const cents = roundDivHalfUp(toCents(Math.max(basis, 0)) * rate, scale);
-  return Number(cents) / 100;
+  const cents = roundDivHalfUp(toCentsBig(Math.max(basis, 0)) * rate, scale);
+  return fromCentsBig(cents);
 }
 
 /**
