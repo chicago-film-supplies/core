@@ -18709,6 +18709,22 @@ named boundary and nowhere else — see `recomputeSettlementTotals`.
 
 The `bigint` flavour of {@linkcode fromCents}.
 
+### `roundDivHalfAwayFromZero(num: bigint, den: bigint): bigint`
+
+{@linkcode roundDivHalfUp} for a numerator of **either** sign, rounding half
+*away from zero*: `1/2 → 1` and `-1/2 → -1`.
+
+Money that can legitimately go negative needs this rather than the bare
+half-up form, and the distinction is not academic — `calculateItemSubtotal`
+deliberately lets a flat discount larger than its line produce a negative
+`subtotal_discounted` ("the caller's problem to surface, not ours to clamp"),
+and that value is then handed straight to the tax calculation. Clamping it to
+zero would silently drop the sign; passing it to `roundDivHalfUp` would round
+it toward zero instead of half-up.
+
+Symmetry is the point: `f(-x) === -f(x)` for every input, so a sign flip
+upstream can never change a magnitude downstream.
+
 ### `roundDivHalfUp(num: bigint, den: bigint): bigint`
 
 Round `num / den` half-up, exactly, over integers.
@@ -19566,6 +19582,21 @@ webhook (which passes its `charge_total`-authoritative stored subtotal) share
 one formula. Lives here (base module) and is re-exported from
 `@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.
 
+Exact: both factors are applied as `× n ÷ d` over integer cents and rounded
+half-up exactly once (core#47). The form this replaced was
+`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float
+ratio, and **the one percent-of-money path that never migrated to integer
+cents**: inside a single `calculateItemPrice` call the discount on a line was
+already exact BigInt while the tax on that same line was not. It was measured
+benign across CFS's six live rates, which is precisely why it survived; the
+sweep in `tests/orders.test.ts` is what makes a future rate or magnitude
+unable to change that silently.
+
+A negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat
+discount exceed its line rather than clamping — so the rounding is half *away
+from zero* and the tax carries the subtotal's sign, exactly as the currency.js
+form did.
+
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
 Deduplicate line items by product UID and sum quantities.
@@ -19977,6 +20008,21 @@ path (which passes its `calculateItemSubtotal` result) and the CRMS invoice
 webhook (which passes its `charge_total`-authoritative stored subtotal) share
 one formula. Lives here (base module) and is re-exported from
 `@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.
+
+Exact: both factors are applied as `× n ÷ d` over integer cents and rounded
+half-up exactly once (core#47). The form this replaced was
+`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float
+ratio, and **the one percent-of-money path that never migrated to integer
+cents**: inside a single `calculateItemPrice` call the discount on a line was
+already exact BigInt while the tax on that same line was not. It was measured
+benign across CFS's six live rates, which is precisely why it survived; the
+sweep in `tests/orders.test.ts` is what makes a future rate or magnitude
+unable to change that silently.
+
+A negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat
+discount exceed its line rather than clamping — so the rounding is half *away
+from zero* and the tax carries the subtotal's sign, exactly as the currency.js
+form did.
 
 ### `findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null`
 

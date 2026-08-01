@@ -10019,6 +10019,14 @@
         },
         {
           "kind": "function",
+          "name": "roundDivHalfAwayFromZero",
+          "signature": "roundDivHalfAwayFromZero(num: bigint, den: bigint): bigint",
+          "doc": "{@linkcode roundDivHalfUp} for a numerator of **either** sign, rounding half\n*away from zero*: `1/2 → 1` and `-1/2 → -1`.\n\nMoney that can legitimately go negative needs this rather than the bare\nhalf-up form, and the distinction is not academic — `calculateItemSubtotal`\ndeliberately lets a flat discount larger than its line produce a negative\n`subtotal_discounted` (\"the caller's problem to surface, not ours to clamp\"),\nand that value is then handed straight to the tax calculation. Clamping it to\nzero would silently drop the sign; passing it to `roundDivHalfUp` would round\nit toward zero instead of half-up.\n\nSymmetry is the point: `f(-x) === -f(x)` for every input, so a sign flip\nupstream can never change a magnitude downstream.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "roundDivHalfUp",
           "signature": "roundDivHalfUp(num: bigint, den: bigint): bigint",
           "doc": "Round `num / den` half-up, exactly, over integers.\n\n**Non-negative numerator and positive denominator only.** BigInt division\ntruncates toward zero, so `(2n + d) / 2d` rounds a negative numerator the\nwrong way — toward zero rather than half-up. Every caller applies a factor to\na non-negative money value (a base price, a quantity, a chargeable-day count,\na rate, a cost basis), which is what makes the form correct rather than merely\nconvenient. A caller that acquires a negative numerator must not reach for\nthis without revisiting the rounding rule.",
@@ -10421,7 +10429,7 @@
           "kind": "function",
           "name": "computeItemTaxAmount",
           "signature": "computeItemTaxAmount(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscounted: number, quantity: number): number",
-          "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.",
+          "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.\n\nExact: both factors are applied as `× n ÷ d` over integer cents and rounded\nhalf-up exactly once (core#47). The form this replaced was\n`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float\nratio, and **the one percent-of-money path that never migrated to integer\ncents**: inside a single `calculateItemPrice` call the discount on a line was\nalready exact BigInt while the tax on that same line was not. It was measured\nbenign across CFS's six live rates, which is precisely why it survived; the\nsweep in `tests/orders.test.ts` is what makes a future rate or magnitude\nunable to change that silently.\n\nA negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat\ndiscount exceed its line rather than clamping — so the rounding is half *away\nfrom zero* and the tax carries the subtotal's sign, exactly as the currency.js\nform did.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10765,7 +10773,7 @@
           "kind": "function",
           "name": "computeItemTaxAmount",
           "signature": "computeItemTaxAmount(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscounted: number, quantity: number): number",
-          "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.",
+          "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.\n\nExact: both factors are applied as `× n ÷ d` over integer cents and rounded\nhalf-up exactly once (core#47). The form this replaced was\n`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float\nratio, and **the one percent-of-money path that never migrated to integer\ncents**: inside a single `calculateItemPrice` call the discount on a line was\nalready exact BigInt while the tax on that same line was not. It was measured\nbenign across CFS's six live rates, which is precisely why it survived; the\nsweep in `tests/orders.test.ts` is what makes a future rate or magnitude\nunable to change that silently.\n\nA negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat\ndiscount exceed its line rather than clamping — so the rounding is half *away\nfrom zero* and the tax carries the subtotal's sign, exactly as the currency.js\nform did.",
           "paramTags": [],
           "returnsTag": null
         },

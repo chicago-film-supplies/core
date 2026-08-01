@@ -50,7 +50,12 @@ import type {
 } from "../schemas/mod.ts";
 import { itemContract } from "../schemas/mod.ts";
 import { getDuration, toChicagoYmd } from "./dates.ts";
-import { fromCentsBig, roundDivHalfUp, toCentsBig } from "./money.ts";
+import {
+  fromCentsBig,
+  roundDivHalfAwayFromZero,
+  roundDivHalfUp,
+  toCentsBig,
+} from "./money.ts";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -741,6 +746,21 @@ export function isTaxableCoa(coaRevenue: number | null | undefined): boolean {
  * webhook (which passes its `charge_total`-authoritative stored subtotal) share
  * one formula. Lives here (base module) and is re-exported from
  * `@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.
+ *
+ * Exact: both factors are applied as `× n ÷ d` over integer cents and rounded
+ * half-up exactly once (core#47). The form this replaced was
+ * `currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float
+ * ratio, and **the one percent-of-money path that never migrated to integer
+ * cents**: inside a single `calculateItemPrice` call the discount on a line was
+ * already exact BigInt while the tax on that same line was not. It was measured
+ * benign across CFS's six live rates, which is precisely why it survived; the
+ * sweep in `tests/orders.test.ts` is what makes a future rate or magnitude
+ * unable to change that silently.
+ *
+ * A negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat
+ * discount exceed its line rather than clamping — so the rounding is half *away
+ * from zero* and the tax carries the subtotal's sign, exactly as the currency.js
+ * form did.
  */
 export function computeItemTaxAmount(
   tax: Pick<Tax, "rate" | "type">,
@@ -748,9 +768,18 @@ export function computeItemTaxAmount(
   quantity: number,
 ): number {
   if (tax.type === "percent") {
-    return currency(subtotalDiscounted).multiply(tax.rate / 100).value;
+    // subtotal × rate ÷ 100, as cents × (rate·RATE_SCALE) / (100·RATE_SCALE).
+    const rate = BigInt(Math.round(tax.rate * Number(RATE_SCALE)));
+    const cents = roundDivHalfAwayFromZero(
+      toCentsBig(subtotalDiscounted) * rate,
+      100n * RATE_SCALE,
+    );
+    return fromCentsBig(cents);
   }
-  return currency(tax.rate).multiply(quantity).value;
+  // `flat`: dollars per unit. Invoice quantities are not `z.int()`, so the
+  // quantity is a factor too and gets the same treatment.
+  const qty = BigInt(Math.round(quantity * Number(QTY_SCALE)));
+  return fromCentsBig(roundDivHalfAwayFromZero(toCentsBig(tax.rate) * qty, QTY_SCALE));
 }
 
 /**
@@ -1082,13 +1111,14 @@ export function calculateReplacementTotals(
       const taxDoc = taxes.find((t) => t.uid === itemTax.uid);
       if (!taxDoc) continue;
 
-      if (taxDoc.type === "percent") {
-        taxTotal = taxTotal.add(
-          itemReplacementSubtotal.multiply(taxDoc.rate / 100),
-        );
-      } else {
-        taxTotal = taxTotal.add(currency(taxDoc.rate).multiply(quantity));
-      }
+      // Delegated rather than repeated. This WAS a second, independent copy of
+      // the percent/flat branch — so core#47's fix to `computeItemTaxAmount`
+      // would not have reached it, and the replacement path would have kept the
+      // float ratio the rest of the module had migrated off. One formula, one
+      // place to be wrong.
+      taxTotal = taxTotal.add(
+        computeItemTaxAmount(taxDoc, itemReplacementSubtotal.value, quantity),
+      );
     }
   }
 

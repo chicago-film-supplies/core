@@ -76,6 +76,25 @@ export function roundDivHalfUp(num: bigint, den: bigint): bigint {
 }
 
 /**
+ * {@linkcode roundDivHalfUp} for a numerator of **either** sign, rounding half
+ * *away from zero*: `1/2 → 1` and `-1/2 → -1`.
+ *
+ * Money that can legitimately go negative needs this rather than the bare
+ * half-up form, and the distinction is not academic — `calculateItemSubtotal`
+ * deliberately lets a flat discount larger than its line produce a negative
+ * `subtotal_discounted` ("the caller's problem to surface, not ours to clamp"),
+ * and that value is then handed straight to the tax calculation. Clamping it to
+ * zero would silently drop the sign; passing it to `roundDivHalfUp` would round
+ * it toward zero instead of half-up.
+ *
+ * Symmetry is the point: `f(-x) === -f(x)` for every input, so a sign flip
+ * upstream can never change a magnitude downstream.
+ */
+export function roundDivHalfAwayFromZero(num: bigint, den: bigint): bigint {
+  return num < 0n ? -roundDivHalfUp(-num, den) : roundDivHalfUp(num, den);
+}
+
+/**
  * Format integer cents for display **without ever creating a float**.
  *
  * Integer division and a modulo, then string work — so the number on screen and

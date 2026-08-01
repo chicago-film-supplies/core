@@ -20,6 +20,7 @@ import {
   calculateItemPrice,
   calculateItemSubtotal,
   calculateItemTax,
+  computeItemTaxAmount,
   isTaxableCoa,
   calculateItemTotal,
   calculateTransactionFeeAmount,
@@ -2567,6 +2568,162 @@ Deno.test("isTaxableCoa: an UNKNOWN coa is taxable — the asymmetry with the Xe
   // ever remove tax from a line it can positively identify as non-revenue.
   assertEquals(isTaxableCoa(undefined), true);
   assertEquals(isTaxableCoa(null), true);
+});
+
+// ── computeItemTaxAmount: the sweep core#47 shipped without ──────
+//
+// This was the one percent-of-money path that never migrated to integer cents.
+// Inside a single `calculateItemPrice` call the discount on a line was already
+// exact BigInt while the tax on that same line was
+// `currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float
+// ratio, applied to EVERY percent tax on every order and invoice line, with
+// nothing that would catch a change in rate or magnitude.
+//
+// Same rig as the subtotal and fee sweeps above: an oracle that rounds by the
+// definition, and a companion asserting a wrong form disagrees.
+
+/** The true tax in cents, as one exact rational, rounded half away from zero. */
+function exactTaxCents(rate: number, type: "percent" | "flat", subtotal: number, qty: number) {
+  const round = (num: bigint, den: bigint) => {
+    const neg = num < 0n;
+    const n = neg ? -num : num;
+    const q = n / den;
+    const r = n % den;
+    const up = 2n * r >= den ? q + 1n : q;
+    return neg ? -up : up;
+  };
+  if (type === "percent") {
+    const rateMilli = BigInt(Math.round(rate * 1_000_000));
+    return round(BigInt(Math.round(subtotal * 100)) * rateMilli, 100n * 1_000_000n);
+  }
+  return round(BigInt(Math.round(rate * 100)) * BigInt(Math.round(qty * 10_000)), 10_000n);
+}
+
+const TAX_SWEEP: { rate: number; type: "percent" | "flat"; subtotal: number; qty: number }[] =
+  (() => {
+    let seed = 55_555;
+    const rand = (n: number) => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % n;
+    };
+    const rows = [];
+    // CFS's six live rates, plus randomly drawn ones — the live set is what runs
+    // today, the random ones are what stop "benign at today's rates" from being
+    // mistaken for "correct".
+    const live = [15, 10.25, 9, 11, 8, 0];
+    for (let i = 0; i < 200_000; i++) {
+      const percent = rand(5) !== 0;
+      // Negative subtotals are IN the domain: a flat discount larger than its
+      // line produces one, and `calculateItemSubtotal` deliberately does not
+      // clamp it. A sweep over non-negative subtotals only would never reach
+      // the sign path.
+      const subtotal = (rand(20_000_000) - 2_000_000) / 100;
+      rows.push({
+        rate: percent
+          ? (rand(6) === 0 ? live[rand(live.length)] : rand(3_000_000) / 10_000)
+          : rand(2_000) / 100,
+        type: (percent ? "percent" : "flat") as "percent" | "flat",
+        subtotal,
+        qty: rand(200_000) / 10_000,
+      });
+    }
+    return rows;
+  })();
+
+Deno.test("computeItemTaxAmount matches exact rational arithmetic over 200k random taxes", () => {
+  let disagreements = 0;
+  let first: string | null = null;
+  for (const r of TAX_SWEEP) {
+    const got = computeItemTaxAmount({ rate: r.rate, type: r.type }, r.subtotal, r.qty);
+    const want = exactTaxCents(r.rate, r.type, r.subtotal, r.qty);
+    if (BigInt(Math.round(got * 100)) !== want) {
+      disagreements++;
+      first ??= `${JSON.stringify(r)} → got ${got}, want ${Number(want) / 100}`;
+    }
+  }
+  assertEquals(disagreements, 0, first ?? "");
+});
+
+Deno.test("…and the divide-first tax form DOES disagree — the tax sweep can fail", () => {
+  // Two wrong forms, measured with REAL currency.js rather than modelled:
+  //
+  //   - the predecessor, `currency(subtotal).multiply(rate / 100)`. `multiply`
+  //     takes a plain JS number and never wraps it, so nothing quantizes the
+  //     ratio — this is the benign float form, and core#47's own probe over
+  //     CFS's six live rates found 0 disagreements. REPORTED, not asserted:
+  //     asserting a floor would tune the corpus to a remembered number, and the
+  //     whole finding is that it is wrong by the RULE, not by measurement.
+  //   - divide-first, `currency(rate).divide(100)`, which does re-enter the
+  //     constructor and quantizes the ratio to two decimals. This is what the
+  //     doctrine forbids, and the assertion pins it.
+  let divideFirst = 0;
+  let multiplyFirst = 0;
+  let worstCents = 0n;
+  for (const r of TAX_SWEEP) {
+    if (r.type !== "percent") continue;
+    const want = exactTaxCents(r.rate, r.type, r.subtotal, r.qty);
+
+    if (BigInt(Math.round(currency(r.subtotal).multiply(r.rate / 100).value * 100)) !== want) {
+      multiplyFirst++;
+    }
+
+    const bad = currency(r.subtotal).multiply(currency(r.rate).divide(100).value).value;
+    if (BigInt(Math.round(bad * 100)) !== want) {
+      divideFirst++;
+      const off = BigInt(Math.round(bad * 100)) - want;
+      const mag = off < 0n ? -off : off;
+      if (mag > worstCents) worstCents = mag;
+    }
+  }
+  assertEquals(
+    divideFirst > 0,
+    true,
+    "the divide-first tax form agreed on every row — the oracle has stopped discriminating",
+  );
+  console.log(
+    `  divide-first mis-taxes ${divideFirst} rows (worst $${Number(worstCents) / 100} off); ` +
+      `multiply-first mis-taxes ${multiplyFirst}`,
+  );
+});
+
+Deno.test("computeItemTaxAmount carries the subtotal's sign — a negative line is not clamped", () => {
+  // `calculateItemSubtotal` lets a flat discount exceed its line ("the caller's
+  // problem to surface, not ours to clamp"), so a negative subtotal reaches here
+  // and must produce negative tax. Clamping would silently drop it, and the
+  // rounding must be symmetric: f(-x) === -f(x).
+  const tax = { rate: 15, type: "percent" as const };
+  assertEquals(computeItemTaxAmount(tax, -100, 1), -15);
+  assertEquals(computeItemTaxAmount(tax, 100, 1), 15);
+  for (const subtotal of [0.03, 1.115, 33.335, 999.995, 12_345.67]) {
+    assertEquals(
+      computeItemTaxAmount(tax, -subtotal, 1),
+      -computeItemTaxAmount(tax, subtotal, 1),
+      `asymmetric at ${subtotal}`,
+    );
+  }
+});
+
+Deno.test("calculateReplacementTotals shares ONE tax formula with the order path", () => {
+  // It used to hold a second, independent copy of the percent/flat branch, so
+  // core#47's fix would not have reached it. Pinning the equality is what stops
+  // the copy growing back.
+  const item = makeItem({ quantity: 3 }, {
+    base: 100,
+    replacement: 250.55,
+    taxes: [{ uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.25, type: "percent" }],
+  });
+  const totals = calculateReplacementTotals([item], TAXES);
+  assertEquals(totals.subtotal, 751.65);
+  assertEquals(
+    totals.tax,
+    computeItemTaxAmount({ rate: 10.25, type: "percent" }, 751.65, 3),
+    "the replacement path diverged from computeItemTaxAmount",
+  );
+  // Written as `751.65 + totals.tax` first, which fails at 828.6899999999999 —
+  // float addition on two 2dp values. The implementation is right and the
+  // assertion was wrong, which is the whole campaign in miniature.
+  assertEquals(totals.tax, 77.04);
+  assertEquals(totals.total, 828.69);
 });
 
 Deno.test("calculateItemTax: a non-revenue COA yields no tax", () => {
