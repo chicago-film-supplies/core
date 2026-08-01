@@ -106,32 +106,132 @@ Deno.test("allocationSide follows the contract, so the client stays direction-ag
 });
 
 // ── Cost: checked against exact rational arithmetic ─────────────────
+//
+// **This sweep was not a guard until 2026-08-01 (core#48), in two ways**, and
+// recording both matters more than the green tick:
+//
+//   1. Its oracle was `costOfUnits` inlined — same guards, same
+//      `(2n·num + den) / (2n·den)`, same clamp — so it could not disagree by
+//      construction. The repair applied to `orders.test.ts` was never
+//      back-ported to the file it had been copied FROM.
+//   2. Its "fail-closed companion" was three hand-picked values, not a sweep
+//      asserting a disagreement count.
+//
+// And the domain had a third hole nothing named: `quantity = rand(held) + 1`
+// never exceeds `held`, and at `quantity === held` the draw lands on exactly
+// `basisCents`, so **the clamp never executed in 200k draws**. It does now.
+//
+// The oracle below rounds by the DEFINITION — floor, then compare twice the
+// remainder against the denominator — rather than by the implementation's
+// `(2n + d) / 2d` identity. Same idiom as `calculateTransactionFeeAmount`'s
+// reference in `orders.test.ts`: provably equal, structurally distinct, so a
+// change to either arithmetic shows up as a disagreement.
 
-/** Exact reference: the true value of basis × quantity / held, half-up, in cents. */
+/**
+ * Exact reference: the true value of `basis × quantity / held`, half-up, in
+ * cents, clamped to the basis.
+ *
+ * The guards and the clamp ARE the contract, so the oracle keeps them; what it
+ * must not share is the arithmetic, and it does not.
+ */
 function exactCostOfUnits(basisCents: bigint, held: number, quantity: number): bigint {
   if (held <= 0 || quantity <= 0 || basisCents <= 0n) return 0n;
   const num = basisCents * BigInt(quantity);
   const den = BigInt(held);
-  const exact = (2n * num + den) / (2n * den);
+  const floor = num / den; // non-negative, so truncation IS floor
+  const remainder = num % den;
+  const exact = 2n * remainder >= den ? floor + 1n : floor;
   return exact > basisCents ? basisCents : exact;
 }
 
-Deno.test("costOfUnits matches exact rational arithmetic over 200k random draws", () => {
-  let disagreements = 0;
+/**
+ * The predecessor's shape, and the reason `costOfUnits` exists: derive the
+ * per-unit average FIRST — quantizing it — then scale by the quantity.
+ *
+ * `applyMovementToLedger` used to read the stored (already-rounded)
+ * `average_unit_cost` and multiply. The error is one of operation order, not
+ * precision: a half-cent dropped from the average is multiplied up by every
+ * unit drawn.
+ */
+function averageThenMultiply(basisCents: bigint, held: number, quantity: number): bigint {
+  if (held <= 0 || quantity <= 0 || basisCents <= 0n) return 0n;
+  const heldBig = BigInt(held);
+  const average = (2n * basisCents + heldBig) / (2n * heldBig); // quantized here — the defect
+  const drawn = average * BigInt(quantity);
+  return drawn > basisCents ? basisCents : drawn;
+}
+
+interface CostDraw {
+  basisCents: bigint;
+  held: number;
+  quantity: number;
+}
+
+/** Seeded LCG — same generator as `orders.test.ts`, so runs are reproducible. */
+function sweepDraws(count: number): CostDraw[] {
   let seed = 12345;
   const rand = (n: number) => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     return seed % n;
   };
-  for (let i = 0; i < 200_000; i++) {
-    const basisCents = BigInt(rand(50_000_00));
+  const draws: CostDraw[] = [];
+  for (let i = 0; i < count; i++) {
     const held = rand(500) + 1;
-    const quantity = rand(held) + 1;
-    if (costOfUnits(basisCents, held, quantity) !== exactCostOfUnits(basisCents, held, quantity)) {
+    // One draw in eight OVER-draws, so the clamp is exercised. A draw of exactly
+    // `held` lands on `basisCents` and slips past it.
+    const quantity = rand(8) === 0 ? held + rand(10) + 1 : rand(held) + 1;
+    draws.push({ basisCents: BigInt(rand(50_000_00)), held, quantity });
+  }
+  return draws;
+}
+
+const COST_SWEEP = sweepDraws(200_000);
+
+Deno.test("costOfUnits matches exact rational arithmetic over 200k random draws", () => {
+  let disagreements = 0;
+  let first: string | null = null;
+  for (const d of COST_SWEEP) {
+    const got = costOfUnits(d.basisCents, d.held, d.quantity);
+    const want = exactCostOfUnits(d.basisCents, d.held, d.quantity);
+    if (got !== want) {
       disagreements++;
+      first ??= `basis=${d.basisCents}c held=${d.held} qty=${d.quantity} → got ${got}, want ${want}`;
     }
   }
-  assertEquals(disagreements, 0);
+  assertEquals(disagreements, 0, first ?? "");
+});
+
+Deno.test("…and an average-then-multiply implementation DOES disagree — the sweep can fail", () => {
+  // Fail-closed companion, and the reason to trust the test above. Without it an
+  // oracle that had drifted into a restatement of the implementation would pass
+  // forever and prove nothing — which is precisely what this file shipped until
+  // core#48. A guard never seen to fail is not known to be a guard.
+  let disagreements = 0;
+  for (const d of COST_SWEEP) {
+    if (
+      averageThenMultiply(d.basisCents, d.held, d.quantity) !==
+        exactCostOfUnits(d.basisCents, d.held, d.quantity)
+    ) disagreements++;
+  }
+  assertEquals(
+    disagreements > 0,
+    true,
+    "the average-then-multiply form agreed on all 200k draws — the oracle has stopped discriminating",
+  );
+  console.log(
+    `  average-then-multiply mis-costs ${disagreements} of ${COST_SWEEP.length} draws ` +
+      `(1 in ${Math.round(COST_SWEEP.length / disagreements)})`,
+  );
+});
+
+Deno.test("the cost sweep exercises the over-draw clamp", () => {
+  // The hole core#48 did not name: without over-draws the clamp is dead code in
+  // the sweep, so a regression that removed it would still pass 200k draws.
+  const clamped = COST_SWEEP.filter((d) =>
+    d.basisCents > 0n && d.quantity > d.held &&
+    exactCostOfUnits(d.basisCents, d.held, d.quantity) === d.basisCents
+  );
+  assertEquals(clamped.length > 1000, true, `only ${clamped.length} draws reach the clamp`);
 });
 
 Deno.test("cost divides LAST — the old average-then-multiply form loses cents", () => {

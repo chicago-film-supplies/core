@@ -1,4 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
+// Real currency.js, not a model of it — the fail-closed companions measure the
+// forms the docstrings quote rather than reconstructing them.
+import currency from "currency.js";
 import {
   DOC_LINE_ITEM_TYPES,
   FULFILLMENT_LINE_ITEM_TYPES,
@@ -2234,34 +2237,89 @@ Deno.test("calculateItemSubtotal refuses percent_of_total — it cannot see the 
   );
 });
 
+// The fee sweep and its reference, hoisted so the fail-closed companion below
+// can reuse both. Independent of the implementation's `(2n·num + den) / (2n·den)`
+// trick: take the exact quotient and remainder, then round half-up by hand.
+const feeReferenceCents = (basisCents: bigint, rateMillipercent: bigint) => {
+  const num = basisCents * rateMillipercent;
+  const den = 100n * 1_000_000n;
+  const q = num / den;
+  const r = num % den;
+  return 2n * r >= den ? q + 1n : q;
+};
+
+const FEE_RATES = [2.9, 3, 3.5, 0.05, 1.75, 12.345];
+const FEE_SWEEP: { basisCents: bigint; rate: number }[] = (() => {
+  const pairs: { basisCents: bigint; rate: number }[] = [];
+  for (let basisCents = 1n; basisCents <= 200_000n; basisCents += 991n) {
+    for (const rate of FEE_RATES) pairs.push({ basisCents, rate });
+  }
+  return pairs;
+})();
+
 Deno.test("calculateTransactionFeeAmount is exact — matches a BigInt rational reference", () => {
   // The form this replaced was `currency(basis).multiply(rate / 100)`, which
   // pre-divides into a float and lets currency.js quantize the RATIO. Sweep
   // basis × rate pairs against an exact integer-cents reference; 0 disagreements.
-  // Independent of the implementation's `(2n·num + den) / (2n·den)` trick:
-  // take the exact quotient and remainder, then round half-up by hand.
-  const referenceCents = (basisCents: bigint, rateMillipercent: bigint) => {
-    const num = basisCents * rateMillipercent;
-    const den = 100n * 1_000_000n;
-    const q = num / den;
-    const r = num % den;
-    return 2n * r >= den ? q + 1n : q;
-  };
+  for (const { basisCents, rate } of FEE_SWEEP) {
+    const rateMilli = BigInt(Math.round(rate * 1_000_000));
+    const expected = Number(feeReferenceCents(basisCents, rateMilli)) / 100;
+    const actual = calculateTransactionFeeAmount(
+      makeFeeItem({}, { base: rate }),
+      Number(basisCents) / 100,
+    );
+    assertEquals(actual, expected, `basis=${basisCents}c rate=${rate}`);
+  }
+  assertEquals(FEE_SWEEP.length > 1000, true, "sweep did not run");
+});
 
-  let checked = 0;
-  for (let basisCents = 1n; basisCents <= 200_000n; basisCents += 991n) {
-    for (const rate of [2.9, 3, 3.5, 0.05, 1.75, 12.345]) {
-      const rateMilli = BigInt(Math.round(rate * 1_000_000));
-      const expected = Number(referenceCents(basisCents, rateMilli)) / 100;
-      const actual = calculateTransactionFeeAmount(
-        makeFeeItem({}, { base: rate }),
-        Number(basisCents) / 100,
-      );
-      assertEquals(actual, expected, `basis=${basisCents}c rate=${rate}`);
-      checked++;
+Deno.test("…and the divide-first fee form DOES disagree — the fee sweep can fail", () => {
+  // The companion this sweep shipped without (core#48). It runs REAL currency.js
+  // over both candidate wrong forms rather than modelling them, so the numbers
+  // below are measured on every run instead of remembered in a comment.
+  //
+  // **The two forms are not equally wrong, and conflating them is why the
+  // docstring on `calculateTransactionFeeAmount` was overstated.**
+  //
+  //   - `multiply(rate / 100)` — the ACTUAL predecessor (git a4b231c:272).
+  //     `multiply` takes a plain JS number and never wraps it, so nothing
+  //     quantizes the ratio; all it carries is the float representation error in
+  //     `rate / 100`, which is ~1e-18 relative and only matters within a hair of
+  //     a half-cent tie. REPORTED, not asserted — asserting a floor would mean
+  //     tuning the corpus to a remembered number, and on this corpus it is 0.
+  //   - `multiply(currency(rate).divide(100).value)` — divide-first, the form
+  //     the money doctrine actually forbids. `divide` DOES re-enter the currency
+  //     constructor, so at precision 2 the ratio is quantized to two decimals:
+  //     `currency(2.9).divide(100) === 0.03`, `currency(12.345).divide(100) ===
+  //     0.12`. This is api-cloudrun#415's literal shape, and it is what the
+  //     assertion below pins.
+  let divideFirst = 0;
+  let multiplyFirst = 0;
+  let worstCents = 0n;
+  for (const { basisCents, rate } of FEE_SWEEP) {
+    const basis = Number(basisCents) / 100;
+    const want = feeReferenceCents(basisCents, BigInt(Math.round(rate * 1_000_000)));
+    const wantDollars = Number(want) / 100;
+
+    if (currency(basis).multiply(rate / 100).value !== wantDollars) multiplyFirst++;
+
+    const bad = currency(basis).multiply(currency(rate).divide(100).value).value;
+    if (bad !== wantDollars) {
+      divideFirst++;
+      const off = BigInt(Math.round(bad * 100)) - want;
+      const mag = off < 0n ? -off : off;
+      if (mag > worstCents) worstCents = mag;
     }
   }
-  assertEquals(checked > 1000, true, "sweep did not run");
+  assertEquals(
+    divideFirst > 0,
+    true,
+    "the divide-first fee form agreed on every pair — the reference has stopped discriminating",
+  );
+  console.log(
+    `  divide-first mis-costs ${divideFirst} of ${FEE_SWEEP.length} fee pairs ` +
+      `(worst ${Number(worstCents) / 100} off); multiply-first mis-costs ${multiplyFirst}`,
+  );
 });
 
 Deno.test("getTransactionFeeTotals derives rate/type from the price, identity from the item", () => {
