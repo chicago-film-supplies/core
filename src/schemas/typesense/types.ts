@@ -29,6 +29,34 @@ export interface TypesenseField {
   facet?: boolean;
   index?: boolean;
   optional?: boolean;
+  /**
+   * This numeric field carries **money**, so its `_str` search mirror must be
+   * rendered rather than stringified.
+   *
+   * `addStringMirrors` writes `String(value)`, which is right for an identifier
+   * and wrong for money: a `$1,500.00` total is stored as the float `1500` and
+   * mirrors as `"1500"`, one token. The query `1500.00` tokenizes to
+   * `1500` + `00`, fails to match, and typo tolerance hands back **$15,000 and
+   * $10,000 instead** — measured against the live index 2026-08-01. The pattern
+   * only ever worked where the float happened to render with two decimals.
+   *
+   * A money mirror renders at the precision the field is denominated in — 2,
+   * because every money `_str` today is a total. **4dp would be worse, not
+   * merely redundant**: `"1500.0000"` tokenizes to `1500` + `0000`, and
+   * matching `00` against `0000` costs two edits, exactly the default
+   * `num_typos` boundary.
+   *
+   * **Not for rates.** `Discount.rate`, `TaxRef.rate` and friends are `float`
+   * and sit right beside the amounts, but a rate is not money — it holds 4dp to
+   * match Xero's `DiscountRate`, and nobody searches for one. Marking a rate
+   * here would coarsen it in the mirror and buy nothing.
+   *
+   * The numeric field still owns every facet, sort and range filter; the mirror
+   * is purely a `query_by` text target and is always `facet: false, sort: false`
+   * — faceting formatted text buckets by string, and range-filtering it compares
+   * lexically.
+   */
+  money?: boolean;
 }
 
 /** Zod schema for TypesenseField. */
@@ -40,7 +68,44 @@ export const TypesenseFieldSchema: z.ZodType<TypesenseField> = z.strictObject({
   facet: z.boolean().optional(),
   index: z.boolean().optional(),
   optional: z.boolean().optional(),
+  money: z.boolean().optional(),
 });
+
+/**
+ * Field keys that are **CFS annotations, not Typesense field properties**, and
+ * must be stripped before the schema reaches the collections API.
+ *
+ * `sort`, `stem`, `facet`, `index` and `optional` are all real Typesense
+ * properties and pass through. `money` is not — it instructs *our* `_str` mirror
+ * builder and means nothing to the search engine.
+ */
+const CFS_ONLY_FIELD_KEYS = ["money"] as const;
+
+/**
+ * The wire form of a collection schema — what actually gets POSTed to
+ * `collections`.
+ *
+ * A CFS annotation left on a field would be sent to Typesense as if it were a
+ * field property. Call this at the one place the create-collection body is
+ * built; everywhere else wants the annotated schema.
+ *
+ * **Deliberately not used for the reindex schema hash.** The hash covers the
+ * full annotated schema, so adding or removing a `money` marker changes it and
+ * forces a reindex — which is exactly right, because the marker changes what
+ * every `_str` mirror in that collection contains. A hash over the wire form
+ * would call the change a no-op and leave a stale index that no dollar-amount
+ * query could reach.
+ */
+export function toWireSchema(schema: TypesenseSchema): TypesenseSchema {
+  return {
+    ...schema,
+    fields: schema.fields.map((field) => {
+      const wire: Record<string, unknown> = { ...field };
+      for (const key of CFS_ONLY_FIELD_KEYS) delete wire[key];
+      return wire as unknown as TypesenseField;
+    }),
+  };
+}
 
 /** The schema portion passed to the Typesense collections API. */
 export interface TypesenseSchema {

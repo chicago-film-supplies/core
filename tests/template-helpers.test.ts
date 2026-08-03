@@ -17,6 +17,7 @@ import * as contactNameUtils from "../src/utils/contact-name.ts";
 import * as dateUtils from "../src/utils/dates.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as locationUtils from "../src/utils/locations.ts";
+import * as moneyUtils from "../src/utils/money.ts";
 import * as orderUtils from "../src/utils/orders.ts";
 import * as productUtils from "../src/utils/products.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
@@ -38,6 +39,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   dates: dateUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
+  money: moneyUtils,
   orders: orderUtils,
   products: productUtils,
   taxes: taxUtils,
@@ -217,21 +219,22 @@ Deno.test("every emitted entry carries a description and a return type", () => {
 
 Deno.test("availableUtilNamespaces resolves the union of source + target", () => {
   // The live quote template.
-  assertEquals(availableUtilNamespaces(["orders"], ["quotes"]), ["dates", "orders"]);
+  assertEquals(availableUtilNamespaces(["orders"], ["quotes"]), ["dates", "money", "orders"]);
   // packing_lists contributes no namespace.
-  assertEquals(availableUtilNamespaces(["orders"], ["packing_lists"]), ["dates", "orders"]);
+  assertEquals(availableUtilNamespaces(["orders"], ["packing_lists"]), ["dates", "money", "orders"]);
   // The only combination where the target arm widens the union.
-  assertEquals(availableUtilNamespaces(["orders"], ["invoices"]), ["dates", "orders", "invoices"]);
+  assertEquals(availableUtilNamespaces(["orders"], ["invoices"]), ["dates", "money", "orders", "invoices"]);
   // Source and target agreeing must not duplicate.
-  assertEquals(availableUtilNamespaces(["invoices"], ["invoices"]), ["dates", "invoices"]);
-  // Always-on survives an empty collection set.
-  assertEquals(availableUtilNamespaces([], []), ["dates"]);
+  assertEquals(availableUtilNamespaces(["invoices"], ["invoices"]), ["dates", "money", "invoices"]);
+  // Always-on survives an empty collection set — and `money` is always-on
+  // because every document a template renders carries money.
+  assertEquals(availableUtilNamespaces([], []), ["dates", "money"]);
 });
 
 Deno.test("availableUtilNamespaces takes lists (forward-compatible with multi-collection)", () => {
   assertEquals(
     availableUtilNamespaces(["orders", "invoices"], ["quotes", "packing_lists"]),
-    ["dates", "orders", "invoices"],
+    ["dates", "money", "orders", "invoices"],
   );
 });
 

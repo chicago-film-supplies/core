@@ -27,6 +27,7 @@ export {
   TypesenseOneWaySynonymSchema,
   TypesenseSynonymSchema,
   typesenseAddressFields,
+  toWireSchema,
 } from "./types.ts";
 
 export type {

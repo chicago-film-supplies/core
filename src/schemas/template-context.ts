@@ -38,8 +38,28 @@ export const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, s
   invoices: "invoices",
 };
 
-/** Utils namespaces injected for every template regardless of collection. */
-export const ALWAYS_ON_UTIL_NAMESPACES: readonly string[] = ["dates"];
+/**
+ * Utils namespaces injected for every template regardless of collection.
+ *
+ * `money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every
+ * document a template renders carries money — an order, an invoice and a quote
+ * all need `it.money.formatCents`, so keying it to one collection would just
+ * mean listing it under all of them.
+ *
+ * It also closes a gap the generated helper catalogue had already opened:
+ * `template-helpers.generated.ts` derives its namespaces from `src/utils/`, so
+ * it has been advertising eleven `it.money.*` helpers to template authors while
+ * the render path injected none of them. Documentation promising a global that
+ * throws at render time is worse than no documentation.
+ *
+ * ⚠️ `it.currency` (raw currency.js, see {@link TEMPLATE_LIB_GLOBALS}) stays for
+ * now and is NOT superseded by this. 19 call sites in `templates/quote.eta`
+ * alone use `it.currency(x).format()`, and the natural replacement takes
+ * **cents** while template documents hold dollars — so today it would read
+ * `it.money.formatCents(it.money.toCents(x))` at every site, which is worse
+ * than what it replaces. That trade flips when documents are cents-denominated.
+ */
+export const ALWAYS_ON_UTIL_NAMESPACES: readonly string[] = ["dates", "money"];
 
 /**
  * Third-party libraries injected as `it.*` globals for every template
