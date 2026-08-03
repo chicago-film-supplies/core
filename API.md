@@ -20968,6 +20968,14 @@ Doc-level location tax profiles → the Tax doc `name` they resolve to (by
 `findTaxAt`, as-of date). `tax_applied` (no override) and `tax_exempt`
 (handled separately) are absent.
 
+**A profile added here needs a `taxes/` document with that exact name, or
+`findTaxAt` returns `null` and the override silently does nothing.** That is
+the failure mode `tax_paxton` was added to fix rather than to repeat: prod
+#1978 was delivered to Paxton, Illinois, Xero taxed it `TAX005` at the 6.25%
+IL-state rate, and CFS had no Paxton profile at all — so it fell back to
+Rantoul's 9% and disagreed with Xero by $4.89 on top of the service-line tax
+it should not have charged.
+
 ```ts
 const TAX_PROFILE_OVERRIDE_NAME: Partial<Record<TaxProfileType, string>>;
 ```

@@ -11121,7 +11121,7 @@
           "kind": "variable",
           "name": "TAX_PROFILE_OVERRIDE_NAME",
           "declaration": "const TAX_PROFILE_OVERRIDE_NAME: Partial<Record<TaxProfileType, string>>;",
-          "doc": "Doc-level location tax profiles → the Tax doc `name` they resolve to (by\n`findTaxAt`, as-of date). `tax_applied` (no override) and `tax_exempt`\n(handled separately) are absent."
+          "doc": "Doc-level location tax profiles → the Tax doc `name` they resolve to (by\n`findTaxAt`, as-of date). `tax_applied` (no override) and `tax_exempt`\n(handled separately) are absent.\n\n**A profile added here needs a `taxes/` document with that exact name, or\n`findTaxAt` returns `null` and the override silently does nothing.** That is\nthe failure mode `tax_paxton` was added to fix rather than to repeat: prod\n#1978 was delivered to Paxton, Illinois, Xero taxed it `TAX005` at the 6.25%\nIL-state rate, and CFS had no Paxton profile at all — so it fell back to\nRantoul's 9% and disagreed with Xero by $4.89 on top of the service-line tax\nit should not have charged."
         },
         {
           "kind": "typeAlias",

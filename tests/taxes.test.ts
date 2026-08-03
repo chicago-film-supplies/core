@@ -4,7 +4,9 @@ import {
   findTaxAt,
   getEffectiveProfileTax,
   overrideItemTaxesForProfile,
+  TAX_PROFILE_OVERRIDE_NAME,
 } from "../src/utils/taxes.ts";
+import { TaxProfileEnum } from "../src/schemas/mod.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
@@ -178,4 +180,62 @@ Deno.test("override leaves an absent COA taxable (order lines carry none)", () =
   const items = [makeItem()];
   overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
   assertEquals(px(items[0]).taxes.length, 1);
+});
+
+// ── Every location profile must name a Tax, or it silently does nothing ──
+
+Deno.test("every tax profile except tax_applied/tax_exempt maps to a Tax name", () => {
+  // The failure mode this catches is silent: a profile added to the enum with
+  // no entry here makes `getEffectiveProfileTax` return `null`, which reads as
+  // "no override" — so the document keeps whatever tax it already had and
+  // nothing anywhere reports a problem. `tax_paxton` exists because prod #1978
+  // hit the neighbouring version of that: no Paxton profile at all, so a Paxton
+  // delivery silently kept Rantoul's 9% against Xero's 6.25%.
+  const special = new Set(["tax_applied", "tax_exempt"]);
+  // Read off the enum itself, with NO literal fallback: a hard-coded list would
+  // stop growing the day someone adds a profile, which is the exact thing being
+  // guarded against. `TaxProfileEnum` is annotated `z.ZodType<TaxProfileType>`
+  // for JSR's no-slow-types, so `.options` needs the cast to be visible — it is
+  // there at runtime, and this throws rather than degrading if it ever is not.
+  const profiles = (TaxProfileEnum as unknown as { options: string[] }).options;
+  assertEquals(Array.isArray(profiles) && profiles.length > 0, true, "enum options unreadable");
+  assertEquals(profiles.includes("tax_paxton"), true, "the enum is the source, not a copy");
+  for (const p of profiles) {
+    if (special.has(p)) {
+      assertEquals(
+        TAX_PROFILE_OVERRIDE_NAME[p as keyof typeof TAX_PROFILE_OVERRIDE_NAME],
+        undefined,
+        `${p} is handled specially and must NOT name a Tax`,
+      );
+      continue;
+    }
+    assertEquals(
+      typeof TAX_PROFILE_OVERRIDE_NAME[p as keyof typeof TAX_PROFILE_OVERRIDE_NAME],
+      "string",
+      `${p} has no Tax name — the override would silently no-op`,
+    );
+  }
+});
+
+Deno.test("tax_paxton resolves the Paxton tax, and loses to tax_exempt", () => {
+  const catalog: Tax[] = [
+    ...CATALOG,
+    {
+      uid: "paxton-tax",
+      name: "Paxton Sales Tax",
+      rate: 6.25,
+      type: "percent",
+      valid_from: "2020-01-01T00:00:00.000-06:00",
+      valid_to: null,
+    } as Tax,
+  ];
+  const resolved = getEffectiveProfileTax("tax_applied", "tax_paxton", catalog, AS_OF);
+  assertEquals(resolved !== null && resolved !== "exempt" && resolved.uid, "paxton-tax");
+  assertEquals(getEffectiveProfileTax("tax_paxton", "tax_exempt", catalog, AS_OF), "exempt");
+});
+
+Deno.test("tax_paxton with no Paxton doc in the catalog resolves to null, not a wrong tax", () => {
+  // The guard that matters: an unseeded profile must NOT fall through to
+  // whichever location tax happens to be in the catalog.
+  assertEquals(getEffectiveProfileTax("tax_applied", "tax_paxton", CATALOG, AS_OF), null);
 });
