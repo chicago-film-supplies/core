@@ -8,10 +8,17 @@
  * would put the journal and the pricing path on different money.
  */
 import { assertEquals, assertThrows } from "@std/assert";
+// The one comparison that needs the library this module is replacing. It exists
+// here and nowhere else in the test suite.
+import currency from "currency.js";
 import {
+  distributeCents,
   formatCents,
   fromCents,
   fromCentsBig,
+  parseMoney,
+  parseRate,
+  PAYMENT_MATCH_TOLERANCE_CENTS,
   perUnitCostAt4dp,
   roundDivHalfUp,
   toCents,
@@ -115,6 +122,26 @@ Deno.test("formatCents derives the string from the integer, never through a floa
   assertEquals(formatCents(1999, { symbol: "" }), "19.99");
 });
 
+Deno.test("formatCents { symbol: '', group: false } is the search-mirror form", () => {
+  // A Typesense `_str` mirror must contain the literal digits a user types.
+  // `$` and `,` are token separators, so "$1,234.56" tokenizes as 1/234/56 and
+  // the query `1234.56` cannot match it. This replaced `plain2dp` in
+  // api-cloudrun/scripts/_moneySurface.ts.
+  const mirror = (cents: number) => formatCents(cents, { symbol: "", group: false });
+  assertEquals(mirror(123456), "1234.56");
+  assertEquals(mirror(150000), "1500.00");
+  assertEquals(mirror(0), "0.00");
+  assertEquals(mirror(7), "0.07");
+  assertEquals(mirror(-449562), "-4495.62");
+  assertEquals(mirror(100_000_000_00), "100000000.00");
+  // The grouped default is unchanged — the option is additive.
+  assertEquals(formatCents(123456), "$1,234.56");
+  // …and this is the failure the marker exists to fix: the raw float renders as
+  // one token that no dollar-and-cents query reaches.
+  assertEquals(String(1500), "1500");
+  assertEquals(mirror(toCents(1500)), "1500.00");
+});
+
 Deno.test("formatCents matches manager's formatCurrency, so it is a visual drop-in", () => {
   // manager/src/utils/format.ts: currency(v, { symbol: "$" }).format()
   // Verified against currency.js's own output for the shapes a settlements table
@@ -205,4 +232,218 @@ Deno.test("perUnitCostAt4dp is total — zero units yields 0, never a divide", (
   assertEquals(perUnitCostAt4dp(500n, 0n), 0);
   assertEquals(perUnitCostAt4dp(500n, -3n), 0);
   assertEquals(perUnitCostAt4dp(0n, 10n), 0);
+});
+
+// ── parseMoney / parseRate — the string→money direction ─────────────
+//
+// The direction the module had no answer for until 2026-08-03, which is exactly
+// why `CurrencyInput.parse` and the CRMS webhook ingest each grew their own.
+
+Deno.test("parseMoney handles the separators and symbols a hand-rolled parser gets wrong", () => {
+  assertEquals(parseMoney("$1,583.50"), 1583.5);
+  assertEquals(parseMoney("1,583.50"), 1583.5);
+  assertEquals(parseMoney("1583.50"), 1583.5);
+  assertEquals(parseMoney("$12.00"), 12);
+  assertEquals(parseMoney("0.07"), 0.07);
+  // Sign survives. A non-negative caller strips it before calling; that is a UI
+  // contract, and baking it in here would swallow a legitimate credit.
+  assertEquals(parseMoney("-5.00"), -5);
+  assertEquals(parseMoney("-$1,200.99"), -1200.99);
+});
+
+Deno.test("parseMoney is total — bad input is 0, never NaN and never a throw", () => {
+  // It sits on two ingest boundaries. A parser that can fail closed turns one
+  // bad character in a CRMS webhook body into a 500.
+  assertEquals(parseMoney(""), 0);
+  assertEquals(parseMoney("abc"), 0);
+  assertEquals(parseMoney("$"), 0);
+  assertEquals(parseMoney(null), 0);
+  assertEquals(parseMoney(undefined), 0);
+});
+
+Deno.test("parseMoney quantizes to the money quantum, so toCents is a lossless widening after it", () => {
+  // `toCents` documents its own precondition — 2dp in — and nothing in the
+  // system enforces it. This is what enforces it at the boundary where text
+  // becomes money.
+  assertEquals(parseMoney("1,583.505"), 1583.51);
+  assertEquals(parseMoney("0.005"), 0.01);
+  assertEquals(parseMoney("0.004"), 0);
+  let seed = 90_210;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  let checked = 0;
+  for (let i = 0; i < 50_000; i++) {
+    // Three- and four-decimal text, with and without grouping and a symbol —
+    // the shapes CRMS and an operator's keyboard actually produce.
+    const whole = rand(1_000_000);
+    const frac = String(rand(10_000)).padStart(4, "0");
+    const grouped = whole.toLocaleString("en-US");
+    const s = `${i % 2 ? "$" : ""}${i % 3 ? grouped : String(whole)}.${frac}`;
+    const parsed = parseMoney(s);
+    assertEquals(
+      fromCents(toCents(parsed)),
+      parsed,
+      `parseMoney(${s}) = ${parsed} is not representable at 2dp`,
+    );
+    checked++;
+  }
+  assertEquals(checked, 50_000, "the sweep must actually have run");
+});
+
+Deno.test("the parsers a hand-rolled boundary reaches for DO disagree — the fail-closed half", () => {
+  // Both of these have been live in CFS. If either ever agrees across this
+  // corpus, `parseMoney` has quietly become one of them.
+  const naiveFloat = (s: string) => parseFloat(s);
+  const stripThenFloat = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, ""));
+
+  const corpus = ["$1,583.50", "1,583.50", "$12.00", "1,583.505", "-$1,200.99", "abc", ""];
+  const naiveWrong = corpus.filter((s) => !Object.is(naiveFloat(s), parseMoney(s)));
+  const strippedWrong = corpus.filter((s) => !Object.is(stripThenFloat(s), parseMoney(s)));
+
+  // `parseFloat("1,583.50")` is 1 — off by three orders of magnitude, silently.
+  assertEquals(naiveFloat("1,583.50"), 1);
+  assertEquals(naiveWrong.length > 0, true, "bare parseFloat must disagree somewhere");
+  // Stripping the separators fixes the grouping but not the quantum: a 3dp
+  // string still arrives as a 3dp number, which is the corpus defect Phase 1
+  // spent a repair script on.
+  assertEquals(stripThenFloat("1,583.505"), 1583.505);
+  assertEquals(strippedWrong.length > 0, true, "strip-then-parseFloat must disagree somewhere");
+});
+
+Deno.test("parseRate keeps four decimals, and is a separate function for that reason", () => {
+  // A rate is not an amount. Xero's DiscountRate holds 4dp and is a line's only
+  // discount channel, so 33.3333% must survive the boundary intact.
+  assertEquals(parseRate("33.3333"), 33.3333);
+  assertEquals(parseMoney("33.3333"), 33.33, "…and money must NOT — the two differ on purpose");
+  assertEquals(parseRate("50"), 50);
+  assertEquals(parseRate("0"), 0);
+  assertEquals(parseRate(null), 0);
+  assertEquals(parseRate("abc"), 0);
+  // 5dp is past what Xero can carry, so it quantizes — half-up, like everything.
+  assertEquals(parseRate("12.34565"), 12.3457);
+});
+
+// ── distributeCents — conservation is the contract ──────────────────
+
+Deno.test("distributeCents front-loads the residual, matching what it replaced", () => {
+  // currency.js's `distribute` produced exactly these. Preserving the order
+  // means no stored `unit_costs[]` array changes shape — but the policy is now
+  // named rather than inherited.
+  assertEquals(distributeCents(100_00n, 3), [3334n, 3333n, 3333n]);
+  assertEquals(distributeCents(5n, 3), [2n, 2n, 1n]);
+  assertEquals(distributeCents(10_00n, 4), [250n, 250n, 250n, 250n]);
+  assertEquals(distributeCents(0n, 3), [0n, 0n, 0n]);
+  assertEquals(distributeCents(100_00n, 7), [1429n, 1429n, 1429n, 1429n, 1428n, 1428n, 1428n]);
+  assertEquals(distributeCents(7n, 1), [7n]);
+});
+
+Deno.test("distributeCents is symmetric on negatives — a sign flip cannot change a magnitude", () => {
+  for (const [total, parts] of [[100_00n, 3], [5n, 3], [1n, 7], [99n, 100]] as const) {
+    const positive = distributeCents(total, parts);
+    const negative = distributeCents(-total, parts);
+    assertEquals(negative, positive.map((c) => -c), `${total}/${parts}`);
+  }
+});
+
+Deno.test("distributeCents conserves the total over 200k random splits", () => {
+  let seed = 31_337;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  let checked = 0;
+  let residualSeen = 0;
+  for (let i = 0; i < 200_000; i++) {
+    const total = BigInt(rand(100_000_000) - 50_000_000);
+    const parts = rand(40) + 1;
+    const shares = distributeCents(total, parts);
+
+    assertEquals(shares.length, parts, `wrong share count for ${total}/${parts}`);
+    assertEquals(
+      shares.reduce((sum, c) => sum + c, 0n),
+      total,
+      `shares do not sum to ${total} over ${parts} parts`,
+    );
+    // Every share is within one cent of every other — the split is as even as
+    // whole cents allow, which is the property "front-loaded" is a refinement of.
+    const min = shares.reduce((a, b) => b < a ? b : a);
+    const max = shares.reduce((a, b) => b > a ? b : a);
+    assertEquals(max - min <= 1n, true, `shares spread by more than a cent: ${total}/${parts}`);
+    if (max !== min) residualSeen++;
+    checked++;
+  }
+  assertEquals(checked, 200_000, "the sweep must actually have run");
+  // Domain coverage, asserted separately from correctness: an even-split-only
+  // corpus would exercise none of the remainder arithmetic and still pass.
+  assertEquals(residualSeen > 100_000, true, `only ${residualSeen} splits had a residual`);
+});
+
+Deno.test("a naive per-share round does NOT conserve — the fail-closed half", () => {
+  // The obvious implementation: round each share independently. It is off by
+  // the residual on every non-even split, which is money quietly created or
+  // destroyed. If this ever stops disagreeing, `distributeCents` has become it.
+  const naive = (total: bigint, parts: number): bigint[] =>
+    Array.from({ length: parts }, () => roundDivHalfUp(total, BigInt(parts)));
+
+  let seed = 4_242;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  let wrong = 0;
+  for (let i = 0; i < 100_000; i++) {
+    const total = BigInt(rand(50_000_000));
+    const parts = rand(40) + 1;
+    if (naive(total, parts).reduce((sum, c) => sum + c, 0n) !== total) wrong++;
+  }
+  assertEquals(wrong > 0, true, "the naive form must fail conservation somewhere");
+});
+
+Deno.test("distributeCents matches the currency.js distribute it replaced, over 100k splits", () => {
+  // The docstring claims stored `unit_costs[]` arrays do not change shape. That
+  // is a parity claim about a function being deleted, so it runs here rather
+  // than being asserted in prose — this is the last commit in which both
+  // implementations exist and the comparison is possible at all.
+  //
+  // currency.js measured 0/200,000 against an exact reference: it was never
+  // broken. The reasons for replacing it are unit consistency, a named residual
+  // policy, and its silent `[]` on zero parts — not correctness.
+  let seed = 8_675_309;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  let checked = 0;
+  for (let i = 0; i < 100_000; i++) {
+    const dollars = (rand(10_000_000) - 5_000_000) / 100;
+    const parts = rand(24) + 1;
+    assertEquals(
+      distributeCents(toCentsBig(dollars), parts).map(fromCentsBig),
+      currency(dollars).distribute(parts).map((c) => c.value),
+      `${dollars} over ${parts} parts`,
+    );
+    checked++;
+  }
+  assertEquals(checked, 100_000, "the sweep must actually have run");
+});
+
+Deno.test("distributeCents refuses a non-positive part count rather than losing the money", () => {
+  // currency.js returned `[]` here, so `distribute(100, 0)` silently discarded
+  // $100. Both CFS callers had to guard at the call site to avoid it — and a
+  // call-site guard is one new caller away from being forgotten.
+  assertThrows(() => distributeCents(100_00n, 0), RangeError, "positive integer part count");
+  assertThrows(() => distributeCents(100_00n, -3), RangeError, "positive integer part count");
+  assertThrows(() => distributeCents(100_00n, 2.5), RangeError, "positive integer part count");
+  assertThrows(() => distributeCents(100_00n, NaN), RangeError, "positive integer part count");
+});
+
+Deno.test("PAYMENT_MATCH_TOLERANCE_CENTS is one cent, and lives in core because it is a domain rule", () => {
+  // Xero rounds its own line arithmetic, so a payment can land a cent from what
+  // CFS computed. The pre-2026-08 matcher used `<= 0.01` on floats — twice as
+  // loose as the 0.005 the repair scripts used to re-check the same match, so
+  // the live matcher could bind a pair those scripts then flagged.
+  assertEquals(PAYMENT_MATCH_TOLERANCE_CENTS, 1);
+  assertEquals(Number.isInteger(PAYMENT_MATCH_TOLERANCE_CENTS), true);
 });

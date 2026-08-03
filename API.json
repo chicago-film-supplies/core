@@ -10,7 +10,7 @@
           "kind": "variable",
           "name": "ALWAYS_ON_UTIL_NAMESPACES",
           "declaration": "const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];",
-          "doc": "Utils namespaces injected for every template regardless of collection."
+          "doc": "Utils namespaces injected for every template regardless of collection.\n\n`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every\ndocument a template renders carries money — an order, an invoice and a quote\nall need `it.money.formatCents`, so keying it to one collection would just\nmean listing it under all of them.\n\nIt also closes a gap the generated helper catalogue had already opened:\n`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so\nit has been advertising eleven `it.money.*` helpers to template authors while\nthe render path injected none of them. Documentation promising a global that\nthrows at render time is worse than no documentation.\n\n⚠️ `it.currency` (raw currency.js, see {@link TEMPLATE_LIB_GLOBALS}) stays for\nnow and is NOT superseded by this. 19 call sites in `templates/quote.eta`\nalone use `it.currency(x).format()`, and the natural replacement takes\n**cents** while template documents hold dollars — so today it would read\n`it.money.formatCents(it.money.toCents(x))` at every site, which is worse\nthan what it replaces. That trade flips when documents are cents-denominated."
         },
         {
           "kind": "variable",
@@ -1599,7 +1599,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  payments?: InvoicePayment[];\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -1727,18 +1727,6 @@
           "name": "InvoiceItemInputType",
           "declaration": "type InvoiceItemInputType = InvoiceItemInputLineType | InvoiceItemInputDestinationType | InvoiceItemInputGroupType | InvoiceItemInputOrderType;",
           "doc": "Input version of an invoice item — a line, or one of the three dividers."
-        },
-        {
-          "kind": "interface",
-          "name": "InvoicePayment",
-          "declaration": "interface InvoicePayment {\n  uid: string;\n  xero_payment_id: string;\n  date: string;\n  amount: number;\n  reference: string | null;\n  status: indexedAccess;\n  synced_at?: FirestoreTimestampType;\n}",
-          "doc": "A payment received against this invoice (synced from Xero)."
-        },
-        {
-          "kind": "typeAlias",
-          "name": "InvoicePaymentReceived",
-          "declaration": "type InvoicePaymentReceived = EventEnvelope<Invoice> & typeLiteral;",
-          "doc": ""
         },
         {
           "kind": "variable",
@@ -3719,18 +3707,6 @@
           "name": "UpdateOutOfServiceInputType",
           "declaration": "interface UpdateOutOfServiceInputType {\n  status?: OOSStatusType;\n  breakdown?: OOSBreakdown;\n  dates?: typeLiteral;\n  stores?: OOSStore[];\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) must be the complete next state — the writer\nenforces `sum(breakdown) === quantity`. `status` is server-derived; only\n`\"canceled\"` is honored from the client and translated into\n`canceled_at = now()`.\n\n`dates.start` is honored on update only when the record has no sources\n(`sources.length === 0` — manually created / ad-hoc). Source-bound records\n(booking PUT or order check-in lineage) reject `dates.start` updates with a\n400 — the start there reflects a real ledger event recorded by the upstream\nwriter, and operator-side drift would desync the OOS from the source's\naudit trail."
-        },
-        {
-          "kind": "variable",
-          "name": "UpdatePaymentInput",
-          "declaration": "const UpdatePaymentInput: z.ZodType<UpdatePaymentInputType>;",
-          "doc": "Input schema for updating a single payment on an invoice."
-        },
-        {
-          "kind": "interface",
-          "name": "UpdatePaymentInputType",
-          "declaration": "interface UpdatePaymentInputType {\n  date?: string;\n  amount?: number;\n  reference?: string | null;\n  status?: indexedAccess;\n  version: number;\n}",
-          "doc": "Input schema for PATCH /invoices/{uid}/payments/{payment_uid} — partial update of a single payment."
         },
         {
           "kind": "variable",
@@ -5986,7 +5962,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  payments?: InvoicePayment[];\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -6110,12 +6086,6 @@
           "doc": "Input version of an invoice item — a line, or one of the three dividers."
         },
         {
-          "kind": "interface",
-          "name": "InvoicePayment",
-          "declaration": "interface InvoicePayment {\n  uid: string;\n  xero_payment_id: string;\n  date: string;\n  amount: number;\n  reference: string | null;\n  status: indexedAccess;\n  synced_at?: FirestoreTimestampType;\n}",
-          "doc": "A payment received against this invoice (synced from Xero)."
-        },
-        {
           "kind": "variable",
           "name": "InvoiceSchema",
           "declaration": "const InvoiceSchema: z.ZodType<Invoice>;",
@@ -6138,18 +6108,6 @@
           "name": "UpdateInvoiceInputType",
           "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
-        },
-        {
-          "kind": "variable",
-          "name": "UpdatePaymentInput",
-          "declaration": "const UpdatePaymentInput: z.ZodType<UpdatePaymentInputType>;",
-          "doc": "Input schema for updating a single payment on an invoice."
-        },
-        {
-          "kind": "interface",
-          "name": "UpdatePaymentInputType",
-          "declaration": "interface UpdatePaymentInputType {\n  date?: string;\n  amount?: number;\n  reference?: string | null;\n  status?: indexedAccess;\n  version: number;\n}",
-          "doc": "Input schema for PATCH /invoices/{uid}/payments/{payment_uid} — partial update of a single payment."
         },
         {
           "kind": "function",
@@ -7938,7 +7896,7 @@
         {
           "kind": "interface",
           "name": "TypesenseField",
-          "declaration": "interface TypesenseField {\n  name: string;\n  type: TypesenseFieldType;\n  sort?: boolean;\n  stem?: boolean;\n  facet?: boolean;\n  index?: boolean;\n  optional?: boolean;\n}",
+          "declaration": "interface TypesenseField {\n  name: string;\n  type: TypesenseFieldType;\n  sort?: boolean;\n  stem?: boolean;\n  facet?: boolean;\n  index?: boolean;\n  optional?: boolean;\n  money?: boolean;\n}",
           "doc": "A single field definition in a Typesense collection schema."
         },
         {
@@ -8164,6 +8122,14 @@
           "doc": "Typesense collection config for threads.\n\nReserved slot — threads aren't currently indexed (Phase 1 searches comments\ndirectly; thread-level search can pivot off comment hits). `enabled: false`\nso provisioning skips this collection; the schema exists only to keep the\n`threads.search` permission mapped in `SEARCH_PERMISSION_BY_ALIAS`."
         },
         {
+          "kind": "function",
+          "name": "toWireSchema",
+          "signature": "toWireSchema(schema: TypesenseSchema): TypesenseSchema",
+          "doc": "The wire form of a collection schema — what actually gets POSTed to\n`collections`.\n\nA CFS annotation left on a field would be sent to Typesense as if it were a\nfield property. Call this at the one place the create-collection body is\nbuilt; everywhere else wants the annotated schema.\n\n**Deliberately not used for the reindex schema hash.** The hash covers the\nfull annotated schema, so adding or removing a `money` marker changes it and\nforces a reindex — which is exactly right, because the marker changes what\nevery `_str` mirror in that collection contains. A hash over the wire form\nwould call the change a no-op and leave a stale index that no dollar-amount\nquery could reach.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
           "kind": "variable",
           "name": "trackingCategories",
           "declaration": "const trackingCategories: TypesenseCollectionConfig;",
@@ -8355,7 +8321,7 @@
           "kind": "variable",
           "name": "ALWAYS_ON_UTIL_NAMESPACES",
           "declaration": "const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];",
-          "doc": "Utils namespaces injected for every template regardless of collection."
+          "doc": "Utils namespaces injected for every template regardless of collection.\n\n`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every\ndocument a template renders carries money — an order, an invoice and a quote\nall need `it.money.formatCents`, so keying it to one collection would just\nmean listing it under all of them.\n\nIt also closes a gap the generated helper catalogue had already opened:\n`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so\nit has been advertising eleven `it.money.*` helpers to template authors while\nthe render path injected none of them. Documentation promising a global that\nthrows at render time is worse than no documentation.\n\n⚠️ `it.currency` (raw currency.js, see {@link TEMPLATE_LIB_GLOBALS}) stays for\nnow and is NOT superseded by this. 19 call sites in `templates/quote.eta`\nalone use `it.currency(x).format()`, and the natural replacement takes\n**cents** while template documents hold dollars — so today it would read\n`it.money.formatCents(it.money.toCents(x))` at every site, which is worse\nthan what it replaces. That trade flips when documents are cents-denominated."
         },
         {
           "kind": "variable",
@@ -10023,7 +9989,7 @@
           "kind": "function",
           "name": "getXeroUnitAmount",
           "signature": "getXeroUnitAmount(subtotal: number, quantity: number): number",
-          "doc": "Compute the Xero unit amount from subtotal and quantity.\nBakes duration (chargeable_days × formula) into per-unit price,\nsince Xero has no concept of rental duration.",
+          "doc": "Compute the Xero unit amount from subtotal and quantity.\nBakes duration (chargeable_days × formula) into per-unit price,\nsince Xero has no concept of rental duration.\n\n## The round trip does not close, and that is a property, not a bug\n\nXero recomputes `LineAmount = UnitAmount × Quantity` on its own side, so the\nremainder this division discards is **real money in someone else's ledger** —\nunlike the booking `unit_price` denorm, whose residual is discarded on\npurpose because nothing ever multiplies it back.\n\n`getXeroUnitAmount(100, 3)` is `33.33`, and Xero will bill `99.99`. **Rounding\nbetter does not fix this**: `10000 ÷ 3` is `3333` cents too, and `× 3` is\n`9999` cents regardless of the arithmetic. The gap is bounded by\n`quantity − 1` cents on a line and is absorbed through the discount channel\n(`DiscountRate` at 4dp), which is the only per-line lever Xero gives us.\n\nSo the exactness this function buys is not a closed round trip — it is that\nthe residual is **at most one cent per unit and never grows**. The float form\nit replaced could quantize the quotient and then have that error scale with\nthe line.\n\nHalf away from zero rather than plain half-up: a line's `subtotal_discounted`\nmay be negative when a flat discount exceeds it, and `roundDivHalfUp` rounds\na negative numerator toward zero. Symmetry means a credit and its matching\ncharge cannot differ in magnitude.",
           "paramTags": [
             {
               "name": "subtotal",
@@ -10031,7 +9997,7 @@
             },
             {
               "name": "quantity",
-              "doc": "Item quantity"
+              "doc": "Item quantity. May be fractional; scaled rather than\nnarrowed, so a non-integer cannot throw on the Xero push path."
             }
           ],
           "returnsTag": "Per-unit amount for Xero, or 0 if quantity is 0"
@@ -10343,14 +10309,50 @@
     },
     {
       "entrypoint": "@cfs/core/utils/money",
-      "moduleDoc": "Money as integer minor units — the dollars↔cents boundary, the exact-division\nprimitive that factor arithmetic is built on, and a float-free formatter.\n\n```ts\nimport { formatCents, roundDivHalfUp, toCents } from \"@cfs/core/utils/money\";\n\ntoCents(19.99); // 1999\nformatCents(-4495_62); // \"-$4,495.62\"\nroundDivHalfUp(1000n * 33n, 100n); // 330n  — × n ÷ d, never × (n/d)\n```\n\n**Never let a float carry a money value or a factor applied to one.** The trap\nis operation order, not precision: `× (n / d)` bakes an unrepresentable\nquotient into the money before it is ever scaled, while `× n ÷ d` over integer\ncents rounds exactly once, at the end. Measured over a 500k-pair corpus,\ndivide-first is wrong 496,088 times and integer cents 0.\n\n## Two numeric flavours, and which to reach for\n\n- **`number`** — `toCents` / `fromCents` / `formatCents`. The storage and\n  display boundary: a `*_cents` field, a wire payload, a rendered row. Safe\n  because `Number.MAX_SAFE_INTEGER` is 9.007e15 cents ≈ **$90 trillion**, so a\n  cent value and a sum of cent values never approach it.\n- **`bigint`** — `toCentsBig` / `fromCentsBig` / `roundDivHalfUp`. Applying a\n  *factor* to money, where the intermediate is the problem rather than the\n  result: `calculateItemSubtotal` scales cents by `100 × RATE_SCALE` = 1e8, so\n  a $1M line reaches 1e16 and overflows 2^53 before any division happens.\n\nSums of cents need neither — integer addition is exact by construction, which\nis the whole reason journals store minor units.",
+      "moduleDoc": "Money as integer minor units — the dollars↔cents boundary, the exact-division\nprimitive that factor arithmetic is built on, and a float-free formatter.\n\n```ts\nimport { formatCents, roundDivHalfUp, toCents } from \"@cfs/core/utils/money\";\n\ntoCents(19.99); // 1999\nformatCents(-4495_62); // \"-$4,495.62\"\nroundDivHalfUp(1000n * 33n, 100n); // 330n  — × n ÷ d, never × (n/d)\n```\n\n**Never let a float carry a money value or a factor applied to one.** The trap\nis operation order, not precision: `× (n / d)` bakes an unrepresentable\nquotient into the money before it is ever scaled, while `× n ÷ d` over integer\ncents rounds exactly once, at the end. Measured over a 500k-pair corpus,\ndivide-first is wrong 496,088 times and integer cents 0.\n\n## Two numeric flavours, and which to reach for\n\n- **`number`** — `toCents` / `fromCents` / `formatCents`. The storage and\n  display boundary: a `*_cents` field, a wire payload, a rendered row. Safe\n  because `Number.MAX_SAFE_INTEGER` is 9.007e15 cents ≈ **$90 trillion**, so a\n  cent value and a sum of cent values never approach it.\n- **`bigint`** — `toCentsBig` / `fromCentsBig` / `roundDivHalfUp`. Applying a\n  *factor* to money, where the intermediate is the problem rather than the\n  result: `calculateItemSubtotal` scales cents by `100 × RATE_SCALE` = 1e8, so\n  a $1M line reaches 1e16 and overflows 2^53 before any division happens.\n\nSums of cents need neither — integer addition is exact by construction, which\nis the whole reason journals store minor units.\n\n## currency.js appears here, once, on purpose\n\n{@linkcode parseMoney} and {@linkcode parseRate} **wrap** currency.js rather\nthan reimplementing it, and they are the only place in CFS that should.\nSeparator, symbol, sign and epsilon handling is exactly the hand-rolled money\ncode this module exists to delete — `\"$1,583.505\"` has three ways to go wrong\nbefore it is ever a number. {@linkcode distributeCents} takes the opposite\ncall and reimplements, because in integers it is five lines that outsource no\nsubtlety at all.",
       "symbols": [
+        {
+          "kind": "variable",
+          "name": "PAYMENT_MATCH_TOLERANCE_CENTS",
+          "declaration": "const PAYMENT_MATCH_TOLERANCE_CENTS: 1;",
+          "doc": "How far a CFS settlement may sit from the Xero payment it matches, in cents.\n\nA domain rule, not a fudge factor: Xero rounds its own line arithmetic, so a\npayment can land one cent from what CFS computed for the same invoice. One\ncent is the whole allowance — the pre-2026-08 matcher used `<= 0.01` **on\nfloats**, twice as loose as the `0.005` the repair scripts used to re-check\nthe same match, so the live matcher could bind a pair those scripts then\nflagged as broken."
+        },
+        {
+          "kind": "function",
+          "name": "distributeCents",
+          "signature": "distributeCents(total: bigint, parts: number): bigint[]",
+          "doc": "Split `total` cents into `parts` whole-cent shares that **sum to exactly\n`total`**.\n\nConservation is the entire contract: `sum(distributeCents(t, n)) === t` for\nevery input. Everything else — how many shares, what order — is subordinate\nto that.\n\n**Residual policy: front-loaded, and it is CFS's choice rather than an\ninherited one.** `distributeCents(100_00n, 3n)` is\n`[3334n, 3333n, 3333n]` — the leftover cent goes to the earliest shares. This\nmatches what `currency.js.distribute()` did before this function replaced it,\nso no stored `unit_costs[]` array changes shape; but it is now *named*, and a\ncaller that needs the residual somewhere else has to say so rather than\ndiscover it. Today the only consumer sums the shares back, so the order is\nunobservable — display and any future FIFO cost semantics would not be.\n\n**Symmetric on negatives**: `f(-t, n) === f(t, n).map(x => -x)`, so a sign\nflip upstream can never change a magnitude downstream. BigInt division\ntruncates toward zero, which is what makes the sign fold below correct rather\nthan merely convenient.\n\n**Throws on `parts <= 0`.** currency.js returned `[]`, which loses the whole\namount silently — both CFS callers had to guard at the call site to avoid it,\nand a call-site guard is only ever one new caller away from being forgotten.\nThere is no split of $100 into zero parts that conserves $100, so the honest\nanswer is a refusal.\n\n`parts` is a `number` while `total` is a `bigint`, and the asymmetry is\ndeliberate: the returned array's **length must equal `parts` exactly**, so a\n`bigint` count would have to be narrowed to build it — putting one lossy\nconversion inside the function whose whole contract is conservation. A count\nis not money; every schema already types a quantity as `z.number().int()`.",
+          "paramTags": [
+            {
+              "name": "total",
+              "doc": "The amount to split, in whole cents. Either sign."
+            },
+            {
+              "name": "parts",
+              "doc": "How many shares. Must be a positive integer."
+            }
+          ],
+          "returnsTag": "`parts` shares, in cents, summing to `total`."
+        },
         {
           "kind": "function",
           "name": "formatCents",
           "signature": "formatCents(cents: number, _: unknown): string",
-          "doc": "Format integer cents for display **without ever creating a float**.\n\nInteger division and a modulo, then string work — so the number on screen and\nthe number in the journal are the same object, which is what a ledger UI\nshould do. Output matches manager's `formatCurrency`\n(`currency(v, { symbol: \"$\" }).format()`) so this is a visual drop-in for a\ncents-denominated value: `\"$1,234.56\"`, `\"-$50.00\"`.\n\n`cents` is expected to be an integer — every `*_cents` field is a `z.int()`.\nThe truncation is a display guard against a stray float reaching the renderer,\nnot a rounding policy; a caller with a fractional cent has a bug upstream.",
-          "paramTags": [],
+          "doc": "Format integer cents for display **without ever creating a float**.\n\nInteger division and a modulo, then string work — so the number on screen and\nthe number in the journal are the same object, which is what a ledger UI\nshould do. Output matches manager's `formatCurrency`\n(`currency(v, { symbol: \"$\" }).format()`) so this is a visual drop-in for a\ncents-denominated value: `\"$1,234.56\"`, `\"-$50.00\"`.\n\n`cents` is expected to be an integer — every `*_cents` field is a `z.int()`.\nThe truncation is a display guard against a stray float reaching the renderer,\nnot a rounding policy; a caller with a fractional cent has a bug upstream.\n\n## `{ symbol: \"\", group: false }` — the search-mirror form\n\nA Typesense `_str` mirror needs `\"1234.56\"`, not `\"$1,234.56\"`: **both `$`\nand `,` are token separators**, so the display form tokenizes as\n`1`/`234`/`56` and a plain `1234.56` query cannot match it. That is the whole\nreason a second renderer existed in `api-cloudrun/scripts/_moneySurface.ts`\nfor two weeks; the options are cheaper than the copy, and this way the mirror\nand the display cannot drift on rounding.",
+          "paramTags": [
+            {
+              "name": "cents",
+              "doc": "Integer minor units."
+            },
+            {
+              "name": "options.symbol",
+              "doc": "Currency symbol. `\"\"` for a search mirror."
+            },
+            {
+              "name": "options.group",
+              "doc": "Thousands separators. `false` for a search mirror."
+            }
+          ],
           "returnsTag": null
         },
         {
@@ -10366,6 +10368,22 @@
           "name": "fromCentsBig",
           "signature": "fromCentsBig(cents: bigint): number",
           "doc": "The `bigint` flavour of {@linkcode fromCents}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "parseMoney",
+          "signature": "parseMoney(s: string | null | undefined): number",
+          "doc": "Parse a money string to 2dp dollars — the string→money direction.\n\nEvery external money value reaches CFS as text: an operator types into\n`CurrencyInput`, CRMS sends `\"1,583.50\"` in a webhook body. Both grew their\nown parser, and both were wrong in the same way — a bare\n`parseFloat(\"1,583.50\")` is **1**, and `Number(\"$12.00\")` is `NaN`. This is\nthe one direction the module had no answer for, which is precisely why the\nlocal copies appeared.\n\nTotal by contract: unparseable input yields `0`, never `NaN` and never a\nthrow. `parseMoney(\"\")` and `parseMoney(\"abc\")` are both `0` — a parser at an\ningest boundary that can fail closed turns a bad character into a 500.\n\n```ts\nparseMoney(\"$1,583.50\");  // 1583.5\nparseMoney(\"1,583.505\");  // 1583.51 — quantized to the money quantum\nparseMoney(\"-5.00\");      // -5   (sign preserved; a non-negative caller strips it)\nparseMoney(\"abc\");        // 0\n```\n\n**Sign is preserved.** A caller whose field is non-negative — `CurrencyInput`\nis — strips it before calling; that is a UI contract, not a parsing rule, and\nbaking it in here would silently swallow a legitimate credit.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "parseRate",
+          "signature": "parseRate(s: string | null | undefined): number",
+          "doc": "Parse a **rate** string to 4dp — {@linkcode parseMoney}'s twin, and\ndeliberately a separate function rather than a `precision` option.\n\nA rate is not an amount. `Discount.rate`, `PriceModifier.rate` and `Tax.rate`\nhold four decimals because Xero's `DiscountRate` does and it is a line's only\ndiscount channel, so quantizing a rate to the money quantum coarsens every\ndiscount in the system. Making the caller choose a `precision` argument would\nput that domain fact behind a default — the failure mode this whole module is\norganized against.\n\n```ts\nparseRate(\"33.3333\"); // 33.3333 — parseMoney would give 33.33\n```",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10797,7 +10815,7 @@
           "kind": "function",
           "name": "consolidateItems",
           "signature": "consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]",
-          "doc": "Deduplicate line items by product UID and sum quantities.",
+          "doc": "Deduplicate line items by product UID and sum quantities.\n\n## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`\n\n`total_price` is the authoritative figure — it is a sum of line totals, and\nsumming money is exact. `unit_price` is derived from it by a division that\nusually has a remainder, so the two are related by *rounding*, not by\nmultiplication: 3 units totalling $100 give `unit_price` $33.33, and\n`33.33 × 3` is $99.99.\n\n**That is correct, and it is written down here because it does not look\ncorrect.** The field exists so `bookings` can be queried as a flat per-line\nfact table — sortable, filterable, \"show me every line over $500/unit\" — and\nfor that a single representative per-unit figure is exactly right. It is\nnever summed and never reconciled against; anything that multiplies it back\nto recover a total should read `total_price` instead. The four money÷quantity\nsites in CFS have four different residual contracts, and this is the\nstored-denorm one: **the residual is discarded on purpose.**\n\n(Contrast `getXeroUnitAmount`, whose residual is real money because Xero\nrecomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)",
           "paramTags": [],
           "returnsTag": null
         },

@@ -77,9 +77,12 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "normalizeLocationName", expr: "it.locations.normalizeLocationName(name)", desc: "Canonical uniqueness key for a location name, scoped within its store.", returns: "string" },
   ],
   "money": [
+    { name: "distributeCents", expr: "it.money.distributeCents(total, parts)", desc: "Split `total` cents into `parts` whole-cent shares that **sum to exactly `total`**.", returns: "bigint[]" },
     { name: "formatCents", expr: "it.money.formatCents(cents, arg2)", desc: "Format integer cents for display **without ever creating a float**.", returns: "string" },
     { name: "fromCents", expr: "it.money.fromCents(cents)", desc: "Narrow integer cents back to dollars, for a dollar-denominated projection.", returns: "number" },
     { name: "fromCentsBig", expr: "it.money.fromCentsBig(cents)", desc: "The `bigint` flavour of {@linkcode fromCents}.", returns: "number" },
+    { name: "parseMoney", expr: "it.money.parseMoney(s)", desc: "Parse a money string to 2dp dollars — the string→money direction.", returns: "number" },
+    { name: "parseRate", expr: "it.money.parseRate(s)", desc: "Parse a **rate** string to 4dp — {@linkcode parseMoney}'s twin, and deliberately a separate function rather than a `precision` option.", returns: "number" },
     { name: "perUnitCostAt4dp", expr: "it.money.perUnitCostAt4dp(cents, units)", desc: "A per-unit **rate** in dollars at 4dp — `cents ÷ units`, rounded once.", returns: "number" },
     { name: "roundDivHalfAwayFromZero", expr: "it.money.roundDivHalfAwayFromZero(num, den)", desc: "{@linkcode roundDivHalfUp} for a numerator of **either** sign, rounding half *away from zero*: `1/2 → 1` and `-1/2 → -1`.", returns: "bigint" },
     { name: "roundDivHalfUp", expr: "it.money.roundDivHalfUp(num, den)", desc: "Round `num / den` half-up, exactly, over integers.", returns: "bigint" },

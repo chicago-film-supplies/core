@@ -30,8 +30,19 @@
  * Sums of cents need neither — integer addition is exact by construction, which
  * is the whole reason journals store minor units.
  *
+ * ## currency.js appears here, once, on purpose
+ *
+ * {@linkcode parseMoney} and {@linkcode parseRate} **wrap** currency.js rather
+ * than reimplementing it, and they are the only place in CFS that should.
+ * Separator, symbol, sign and epsilon handling is exactly the hand-rolled money
+ * code this module exists to delete — `"$1,583.505"` has three ways to go wrong
+ * before it is ever a number. {@linkcode distributeCents} takes the opposite
+ * call and reimplements, because in integers it is five lines that outsource no
+ * subtlety at all.
+ *
  * @module
  */
+import currency from "currency.js";
 
 /**
  * Widen dollars to exact integer cents.
@@ -121,6 +132,117 @@ export function perUnitCostAt4dp(cents: bigint, units: bigint): number {
 }
 
 /**
+ * Parse a money string to 2dp dollars — the string→money direction.
+ *
+ * Every external money value reaches CFS as text: an operator types into
+ * `CurrencyInput`, CRMS sends `"1,583.50"` in a webhook body. Both grew their
+ * own parser, and both were wrong in the same way — a bare
+ * `parseFloat("1,583.50")` is **1**, and `Number("$12.00")` is `NaN`. This is
+ * the one direction the module had no answer for, which is precisely why the
+ * local copies appeared.
+ *
+ * Total by contract: unparseable input yields `0`, never `NaN` and never a
+ * throw. `parseMoney("")` and `parseMoney("abc")` are both `0` — a parser at an
+ * ingest boundary that can fail closed turns a bad character into a 500.
+ *
+ * ```ts
+ * parseMoney("$1,583.50");  // 1583.5
+ * parseMoney("1,583.505");  // 1583.51 — quantized to the money quantum
+ * parseMoney("-5.00");      // -5   (sign preserved; a non-negative caller strips it)
+ * parseMoney("abc");        // 0
+ * ```
+ *
+ * **Sign is preserved.** A caller whose field is non-negative — `CurrencyInput`
+ * is — strips it before calling; that is a UI contract, not a parsing rule, and
+ * baking it in here would silently swallow a legitimate credit.
+ */
+export const parseMoney = (s: string | null | undefined): number =>
+  s == null ? 0 : currency(s).value;
+
+/**
+ * Parse a **rate** string to 4dp — {@linkcode parseMoney}'s twin, and
+ * deliberately a separate function rather than a `precision` option.
+ *
+ * A rate is not an amount. `Discount.rate`, `PriceModifier.rate` and `Tax.rate`
+ * hold four decimals because Xero's `DiscountRate` does and it is a line's only
+ * discount channel, so quantizing a rate to the money quantum coarsens every
+ * discount in the system. Making the caller choose a `precision` argument would
+ * put that domain fact behind a default — the failure mode this whole module is
+ * organized against.
+ *
+ * ```ts
+ * parseRate("33.3333"); // 33.3333 — parseMoney would give 33.33
+ * ```
+ */
+export const parseRate = (s: string | null | undefined): number =>
+  s == null ? 0 : currency(s, { precision: 4 }).value;
+
+/**
+ * Split `total` cents into `parts` whole-cent shares that **sum to exactly
+ * `total`**.
+ *
+ * Conservation is the entire contract: `sum(distributeCents(t, n)) === t` for
+ * every input. Everything else — how many shares, what order — is subordinate
+ * to that.
+ *
+ * **Residual policy: front-loaded, and it is CFS's choice rather than an
+ * inherited one.** `distributeCents(100_00n, 3n)` is
+ * `[3334n, 3333n, 3333n]` — the leftover cent goes to the earliest shares. This
+ * matches what `currency.js.distribute()` did before this function replaced it,
+ * so no stored `unit_costs[]` array changes shape; but it is now *named*, and a
+ * caller that needs the residual somewhere else has to say so rather than
+ * discover it. Today the only consumer sums the shares back, so the order is
+ * unobservable — display and any future FIFO cost semantics would not be.
+ *
+ * **Symmetric on negatives**: `f(-t, n) === f(t, n).map(x => -x)`, so a sign
+ * flip upstream can never change a magnitude downstream. BigInt division
+ * truncates toward zero, which is what makes the sign fold below correct rather
+ * than merely convenient.
+ *
+ * **Throws on `parts <= 0`.** currency.js returned `[]`, which loses the whole
+ * amount silently — both CFS callers had to guard at the call site to avoid it,
+ * and a call-site guard is only ever one new caller away from being forgotten.
+ * There is no split of $100 into zero parts that conserves $100, so the honest
+ * answer is a refusal.
+ *
+ * `parts` is a `number` while `total` is a `bigint`, and the asymmetry is
+ * deliberate: the returned array's **length must equal `parts` exactly**, so a
+ * `bigint` count would have to be narrowed to build it — putting one lossy
+ * conversion inside the function whose whole contract is conservation. A count
+ * is not money; every schema already types a quantity as `z.number().int()`.
+ *
+ * @param total - The amount to split, in whole cents. Either sign.
+ * @param parts - How many shares. Must be a positive integer.
+ * @returns `parts` shares, in cents, summing to `total`.
+ */
+export function distributeCents(total: bigint, parts: number): bigint[] {
+  if (!Number.isSafeInteger(parts) || parts <= 0) {
+    throw new RangeError(
+      `distributeCents needs a positive integer part count, got ${parts} — ` +
+        `no split of ${total} into ${parts} parts conserves it`,
+    );
+  }
+  if (total < 0n) return distributeCents(-total, parts).map((c) => -c);
+
+  const n = BigInt(parts);
+  const share = total / n;
+  const remainder = total % n;
+  return Array.from({ length: parts }, (_, i) => BigInt(i) < remainder ? share + 1n : share);
+}
+
+/**
+ * How far a CFS settlement may sit from the Xero payment it matches, in cents.
+ *
+ * A domain rule, not a fudge factor: Xero rounds its own line arithmetic, so a
+ * payment can land one cent from what CFS computed for the same invoice. One
+ * cent is the whole allowance — the pre-2026-08 matcher used `<= 0.01` **on
+ * floats**, twice as loose as the `0.005` the repair scripts used to re-check
+ * the same match, so the live matcher could bind a pair those scripts then
+ * flagged as broken.
+ */
+export const PAYMENT_MATCH_TOLERANCE_CENTS = 1;
+
+/**
  * Format integer cents for display **without ever creating a float**.
  *
  * Integer division and a modulo, then string work — so the number on screen and
@@ -132,11 +254,28 @@ export function perUnitCostAt4dp(cents: bigint, units: bigint): number {
  * `cents` is expected to be an integer — every `*_cents` field is a `z.int()`.
  * The truncation is a display guard against a stray float reaching the renderer,
  * not a rounding policy; a caller with a fractional cent has a bug upstream.
+ *
+ * ## `{ symbol: "", group: false }` — the search-mirror form
+ *
+ * A Typesense `_str` mirror needs `"1234.56"`, not `"$1,234.56"`: **both `$`
+ * and `,` are token separators**, so the display form tokenizes as
+ * `1`/`234`/`56` and a plain `1234.56` query cannot match it. That is the whole
+ * reason a second renderer existed in `api-cloudrun/scripts/_moneySurface.ts`
+ * for two weeks; the options are cheaper than the copy, and this way the mirror
+ * and the display cannot drift on rounding.
+ *
+ * @param cents - Integer minor units.
+ * @param options.symbol - Currency symbol. `""` for a search mirror.
+ * @param options.group - Thousands separators. `false` for a search mirror.
  */
-export function formatCents(cents: number, options: { symbol?: string } = {}): string {
-  const { symbol = "$" } = options;
+export function formatCents(
+  cents: number,
+  options: { symbol?: string; group?: boolean } = {},
+): string {
+  const { symbol = "$", group = true } = options;
   const abs = Math.abs(Math.trunc(cents));
-  const dollars = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const whole = String(Math.floor(abs / 100));
+  const dollars = group ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : whole;
   const minor = String(abs % 100).padStart(2, "0");
   return `${cents < 0 ? "-" : ""}${symbol}${dollars}.${minor}`;
 }

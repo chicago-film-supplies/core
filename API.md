@@ -8,6 +8,24 @@ _Generated from source by `scripts/generate-api-docs.ts` — do not edit by hand
 
 Utils namespaces injected for every template regardless of collection.
 
+`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every
+document a template renders carries money — an order, an invoice and a quote
+all need `it.money.formatCents`, so keying it to one collection would just
+mean listing it under all of them.
+
+It also closes a gap the generated helper catalogue had already opened:
+`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so
+it has been advertising eleven `it.money.*` helpers to template authors while
+the render path injected none of them. Documentation promising a global that
+throws at render time is worse than no documentation.
+
+⚠️ `it.currency` (raw currency.js, see {@link TEMPLATE_LIB_GLOBALS}) stays for
+now and is NOT superseded by this. 19 call sites in `templates/quote.eta`
+alone use `it.currency(x).format()`, and the natural replacement takes
+**cents** while template documents hold dollars — so today it would read
+`it.money.formatCents(it.money.toCents(x))` at every site, which is worse
+than what it replaces. That trade flips when documents are cents-denominated.
+
 ```ts
 const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];
 ```
@@ -3144,7 +3162,6 @@ interface Invoice {
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
-  payments?: InvoicePayment[];
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -3418,28 +3435,6 @@ Input version of an invoice item — a line, or one of the three dividers.
 
 ```ts
 type InvoiceItemInputType = InvoiceItemInputLineType | InvoiceItemInputDestinationType | InvoiceItemInputGroupType | InvoiceItemInputOrderType;
-```
-
-### `InvoicePayment`
-
-A payment received against this invoice (synced from Xero).
-
-```ts
-interface InvoicePayment {
-  uid: string;
-  xero_payment_id: string;
-  date: string;
-  amount: number;
-  reference: string | null;
-  status: indexedAccess;
-  synced_at?: FirestoreTimestampType;
-}
-```
-
-### `InvoicePaymentReceived`
-
-```ts
-type InvoicePaymentReceived = EventEnvelope<Invoice> & typeLiteral;
 ```
 
 ### `InvoiceSchema`
@@ -7354,28 +7349,6 @@ interface UpdateOutOfServiceInputType {
 }
 ```
 
-### `UpdatePaymentInput`
-
-Input schema for updating a single payment on an invoice.
-
-```ts
-const UpdatePaymentInput: z.ZodType<UpdatePaymentInputType>;
-```
-
-### `UpdatePaymentInputType`
-
-Input schema for PATCH /invoices/{uid}/payments/{payment_uid} — partial update of a single payment.
-
-```ts
-interface UpdatePaymentInputType {
-  date?: string;
-  amount?: number;
-  reference?: string | null;
-  status?: indexedAccess;
-  version: number;
-}
-```
-
 ### `UpdateProductInput`
 
 Input schema for updating a product.
@@ -11043,7 +11016,6 @@ interface Invoice {
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
-  payments?: InvoicePayment[];
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -11321,22 +11293,6 @@ Input version of an invoice item — a line, or one of the three dividers.
 type InvoiceItemInputType = InvoiceItemInputLineType | InvoiceItemInputDestinationType | InvoiceItemInputGroupType | InvoiceItemInputOrderType;
 ```
 
-### `InvoicePayment`
-
-A payment received against this invoice (synced from Xero).
-
-```ts
-interface InvoicePayment {
-  uid: string;
-  xero_payment_id: string;
-  date: string;
-  amount: number;
-  reference: string | null;
-  status: indexedAccess;
-  synced_at?: FirestoreTimestampType;
-}
-```
-
 ### `InvoiceSchema`
 
 Zod schema for an Invoice document.
@@ -11376,28 +11332,6 @@ interface UpdateInvoiceInputType {
   reference?: string | null;
   external_notes?: string;
   internal_notes?: string;
-  version: number;
-}
-```
-
-### `UpdatePaymentInput`
-
-Input schema for updating a single payment on an invoice.
-
-```ts
-const UpdatePaymentInput: z.ZodType<UpdatePaymentInputType>;
-```
-
-### `UpdatePaymentInputType`
-
-Input schema for PATCH /invoices/{uid}/payments/{payment_uid} — partial update of a single payment.
-
-```ts
-interface UpdatePaymentInputType {
-  date?: string;
-  amount?: number;
-  reference?: string | null;
-  status?: indexedAccess;
   version: number;
 }
 ```
@@ -15449,6 +15383,7 @@ interface TypesenseField {
   facet?: boolean;
   index?: boolean;
   optional?: boolean;
+  money?: boolean;
 }
 ```
 
@@ -15822,6 +15757,22 @@ so provisioning skips this collection; the schema exists only to keep the
 const threads: TypesenseCollectionConfig;
 ```
 
+### `toWireSchema(schema: TypesenseSchema): TypesenseSchema`
+
+The wire form of a collection schema — what actually gets POSTed to
+`collections`.
+
+A CFS annotation left on a field would be sent to Typesense as if it were a
+field property. Call this at the one place the create-collection body is
+built; everywhere else wants the annotated schema.
+
+**Deliberately not used for the reindex schema hash.** The hash covers the
+full annotated schema, so adding or removing a `money` marker changes it and
+forces a reindex — which is exactly right, because the marker changes what
+every `_str` mirror in that collection contains. A hash over the wire form
+would call the change a no-op and leave a stale index that no dollar-amount
+query could reach.
+
 ### `trackingCategories`
 
 Typesense collection config for tracking categories.
@@ -16123,6 +16074,24 @@ multiple sources/targets, only the call sites change — not this contract.
 ### `ALWAYS_ON_UTIL_NAMESPACES`
 
 Utils namespaces injected for every template regardless of collection.
+
+`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every
+document a template renders carries money — an order, an invoice and a quote
+all need `it.money.formatCents`, so keying it to one collection would just
+mean listing it under all of them.
+
+It also closes a gap the generated helper catalogue had already opened:
+`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so
+it has been advertising eleven `it.money.*` helpers to template authors while
+the render path injected none of them. Documentation promising a global that
+throws at render time is worse than no documentation.
+
+⚠️ `it.currency` (raw currency.js, see {@link TEMPLATE_LIB_GLOBALS}) stays for
+now and is NOT superseded by this. 19 call sites in `templates/quote.eta`
+alone use `it.currency(x).format()`, and the natural replacement takes
+**cents** while template documents hold dollars — so today it would read
+`it.money.formatCents(it.money.toCents(x))` at every site, which is worse
+than what it replaces. That trade flips when documents are cents-denominated.
 
 ```ts
 const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];
@@ -19223,10 +19192,34 @@ Compute the Xero unit amount from subtotal and quantity.
 Bakes duration (chargeable_days × formula) into per-unit price,
 since Xero has no concept of rental duration.
 
+## The round trip does not close, and that is a property, not a bug
+
+Xero recomputes `LineAmount = UnitAmount × Quantity` on its own side, so the
+remainder this division discards is **real money in someone else's ledger** —
+unlike the booking `unit_price` denorm, whose residual is discarded on
+purpose because nothing ever multiplies it back.
+
+`getXeroUnitAmount(100, 3)` is `33.33`, and Xero will bill `99.99`. **Rounding
+better does not fix this**: `10000 ÷ 3` is `3333` cents too, and `× 3` is
+`9999` cents regardless of the arithmetic. The gap is bounded by
+`quantity − 1` cents on a line and is absorbed through the discount channel
+(`DiscountRate` at 4dp), which is the only per-line lever Xero gives us.
+
+So the exactness this function buys is not a closed round trip — it is that
+the residual is **at most one cent per unit and never grows**. The float form
+it replaced could quantize the quotient and then have that error scale with
+the line.
+
+Half away from zero rather than plain half-up: a line's `subtotal_discounted`
+may be negative when a flat discount exceeds it, and `roundDivHalfUp` rounds
+a negative numerator toward zero. Symmetry means a credit and its matching
+charge cannot differ in magnitude.
+
 **Parameters**
 
 - `subtotal` — Pre-discount subtotal (base × days × formula × quantity)
-- `quantity` — Item quantity
+- `quantity` — Item quantity. May be fractional; scaled rather than
+narrowed, so a non-integer cannot throw on the Xero push path.
 
 **Returns** — Per-unit amount for Xero, or 0 if quantity is 0
 
@@ -19623,6 +19616,73 @@ divide-first is wrong 496,088 times and integer cents 0.
 Sums of cents need neither — integer addition is exact by construction, which
 is the whole reason journals store minor units.
 
+## currency.js appears here, once, on purpose
+
+{@linkcode parseMoney} and {@linkcode parseRate} **wrap** currency.js rather
+than reimplementing it, and they are the only place in CFS that should.
+Separator, symbol, sign and epsilon handling is exactly the hand-rolled money
+code this module exists to delete — `"$1,583.505"` has three ways to go wrong
+before it is ever a number. {@linkcode distributeCents} takes the opposite
+call and reimplements, because in integers it is five lines that outsource no
+subtlety at all.
+
+### `PAYMENT_MATCH_TOLERANCE_CENTS`
+
+How far a CFS settlement may sit from the Xero payment it matches, in cents.
+
+A domain rule, not a fudge factor: Xero rounds its own line arithmetic, so a
+payment can land one cent from what CFS computed for the same invoice. One
+cent is the whole allowance — the pre-2026-08 matcher used `<= 0.01` **on
+floats**, twice as loose as the `0.005` the repair scripts used to re-check
+the same match, so the live matcher could bind a pair those scripts then
+flagged as broken.
+
+```ts
+const PAYMENT_MATCH_TOLERANCE_CENTS: 1;
+```
+
+### `distributeCents(total: bigint, parts: number): bigint[]`
+
+Split `total` cents into `parts` whole-cent shares that **sum to exactly
+`total`**.
+
+Conservation is the entire contract: `sum(distributeCents(t, n)) === t` for
+every input. Everything else — how many shares, what order — is subordinate
+to that.
+
+**Residual policy: front-loaded, and it is CFS's choice rather than an
+inherited one.** `distributeCents(100_00n, 3n)` is
+`[3334n, 3333n, 3333n]` — the leftover cent goes to the earliest shares. This
+matches what `currency.js.distribute()` did before this function replaced it,
+so no stored `unit_costs[]` array changes shape; but it is now *named*, and a
+caller that needs the residual somewhere else has to say so rather than
+discover it. Today the only consumer sums the shares back, so the order is
+unobservable — display and any future FIFO cost semantics would not be.
+
+**Symmetric on negatives**: `f(-t, n) === f(t, n).map(x => -x)`, so a sign
+flip upstream can never change a magnitude downstream. BigInt division
+truncates toward zero, which is what makes the sign fold below correct rather
+than merely convenient.
+
+**Throws on `parts <= 0`.** currency.js returned `[]`, which loses the whole
+amount silently — both CFS callers had to guard at the call site to avoid it,
+and a call-site guard is only ever one new caller away from being forgotten.
+There is no split of $100 into zero parts that conserves $100, so the honest
+answer is a refusal.
+
+`parts` is a `number` while `total` is a `bigint`, and the asymmetry is
+deliberate: the returned array's **length must equal `parts` exactly**, so a
+`bigint` count would have to be narrowed to build it — putting one lossy
+conversion inside the function whose whole contract is conservation. A count
+is not money; every schema already types a quantity as `z.number().int()`.
+
+**Parameters**
+
+- `total` — The amount to split, in whole cents. Either sign.
+- `parts` — How many shares. Must be a positive integer.
+
+**Returns** — `parts` shares, in cents, summing to `total`.
+
 ### `formatCents(cents: number, _: unknown): string`
 
 Format integer cents for display **without ever creating a float**.
@@ -19637,6 +19697,21 @@ cents-denominated value: `"$1,234.56"`, `"-$50.00"`.
 The truncation is a display guard against a stray float reaching the renderer,
 not a rounding policy; a caller with a fractional cent has a bug upstream.
 
+## `{ symbol: "", group: false }` — the search-mirror form
+
+A Typesense `_str` mirror needs `"1234.56"`, not `"$1,234.56"`: **both `$`
+and `,` are token separators**, so the display form tokenizes as
+`1`/`234`/`56` and a plain `1234.56` query cannot match it. That is the whole
+reason a second renderer existed in `api-cloudrun/scripts/_moneySurface.ts`
+for two weeks; the options are cheaper than the copy, and this way the mirror
+and the display cannot drift on rounding.
+
+**Parameters**
+
+- `cents` — Integer minor units.
+- `options.symbol` — Currency symbol. `""` for a search mirror.
+- `options.group` — Thousands separators. `false` for a search mirror.
+
 ### `fromCents(cents: number): number`
 
 Narrow integer cents back to dollars, for a dollar-denominated projection.
@@ -19647,6 +19722,48 @@ named boundary and nowhere else — see `recomputeSettlementTotals`.
 ### `fromCentsBig(cents: bigint): number`
 
 The `bigint` flavour of {@linkcode fromCents}.
+
+### `parseMoney(s: string | null | undefined): number`
+
+Parse a money string to 2dp dollars — the string→money direction.
+
+Every external money value reaches CFS as text: an operator types into
+`CurrencyInput`, CRMS sends `"1,583.50"` in a webhook body. Both grew their
+own parser, and both were wrong in the same way — a bare
+`parseFloat("1,583.50")` is **1**, and `Number("$12.00")` is `NaN`. This is
+the one direction the module had no answer for, which is precisely why the
+local copies appeared.
+
+Total by contract: unparseable input yields `0`, never `NaN` and never a
+throw. `parseMoney("")` and `parseMoney("abc")` are both `0` — a parser at an
+ingest boundary that can fail closed turns a bad character into a 500.
+
+```ts
+parseMoney("$1,583.50");  // 1583.5
+parseMoney("1,583.505");  // 1583.51 — quantized to the money quantum
+parseMoney("-5.00");      // -5   (sign preserved; a non-negative caller strips it)
+parseMoney("abc");        // 0
+```
+
+**Sign is preserved.** A caller whose field is non-negative — `CurrencyInput`
+is — strips it before calling; that is a UI contract, not a parsing rule, and
+baking it in here would silently swallow a legitimate credit.
+
+### `parseRate(s: string | null | undefined): number`
+
+Parse a **rate** string to 4dp — {@linkcode parseMoney}'s twin, and
+deliberately a separate function rather than a `precision` option.
+
+A rate is not an amount. `Discount.rate`, `PriceModifier.rate` and `Tax.rate`
+hold four decimals because Xero's `DiscountRate` does and it is a line's only
+discount channel, so quantizing a rate to the money quantum coarsens every
+discount in the system. Making the caller choose a `precision` argument would
+put that domain fact behind a default — the failure mode this whole module is
+organized against.
+
+```ts
+parseRate("33.3333"); // 33.3333 — parseMoney would give 33.33
+```
 
 ### `perUnitCostAt4dp(cents: bigint, units: bigint): number`
 
@@ -20576,6 +20693,26 @@ form did.
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
 Deduplicate line items by product UID and sum quantities.
+
+## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`
+
+`total_price` is the authoritative figure — it is a sum of line totals, and
+summing money is exact. `unit_price` is derived from it by a division that
+usually has a remainder, so the two are related by *rounding*, not by
+multiplication: 3 units totalling $100 give `unit_price` $33.33, and
+`33.33 × 3` is $99.99.
+
+**That is correct, and it is written down here because it does not look
+correct.** The field exists so `bookings` can be queried as a flat per-line
+fact table — sortable, filterable, "show me every line over $500/unit" — and
+for that a single representative per-unit figure is exactly right. It is
+never summed and never reconciled against; anything that multiplies it back
+to recover a total should read `total_price` instead. The four money÷quantity
+sites in CFS have four different residual contracts, and this is the
+stored-denorm one: **the residual is discarded on purpose.**
+
+(Contrast `getXeroUnitAmount`, whose residual is real money because Xero
+recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
 
 ### `costTransactionFees(items: LineItem[], basis: number): LineItem[]`
 
