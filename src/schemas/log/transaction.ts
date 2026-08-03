@@ -68,6 +68,40 @@ export interface TransactionLogRecord {
    * only `read_counts.<collection>` is predictable from a fixture.
    */
   read_counts?: Record<string, number>;
+  /**
+   * RANGE reads per collection — the subset of `read_counts` that took an index-range
+   * lock rather than a single-document one, i.e. reads issued against a `Query` or a
+   * `CollectionReference` rather than a `DocumentReference`. A `getAll` is N point
+   * reads and is correctly excluded.
+   *
+   * The distinction is the one that decides whether concurrent peers can deadlock.
+   * Measured on cfs-dev-3100 2026-08-01: two transactions that both range-read a
+   * collection and both write INTO it hold shared range locks they must each upgrade to
+   * exclusive, and Firestore resolves that by BLOCKING to the 25s client deadline rather
+   * than aborting — so the retry machinery never engages. Two transactions that
+   * range-read a collection and write ELSEWHERE both commit in under 600ms.
+   *
+   * Derived at the read site, deliberately NOT from `read_paths`: that field caps at 20
+   * entries and folds repeats, so a counter derived from it would silently stop
+   * measuring exactly where the fan-out gets interesting. Same reason `read_count` was
+   * split out.
+   */
+  range_reads?: Record<string, number>;
+  /**
+   * Collections this transaction both RANGE-READ and WROTE — `keys(range_reads) ∩
+   * keys(target_counts)`, and the deadlock-class signature above, named.
+   *
+   * Non-empty escalates the record to `warn`. The read-side sibling of
+   * `WARN_BYTES`/`WARN_WRITES`, and the durable one: a volume threshold has to be
+   * re-derived as the corpus grows, while a SHAPE invariant survives untouched.
+   *
+   * **It fires on the SUCCESSFUL runs of a path, not the hung ones.** A transaction
+   * that blocks to the deadline usually staged no writes at all (`write_count: 0` on
+   * every abort sampled), so `target_counts` is empty and the intersection is too.
+   * That is sufficient rather than a gap: the overlap is a property of the CODE, so any
+   * run of that code reports it, and 83% of `crms-opportunity-order`'s runs succeeded.
+   */
+  contended_ranges?: string[];
   error_name?: string;
   error_message?: string;
   error_stack?: string;
@@ -97,6 +131,8 @@ export const TransactionLogRecordSchema: z.ZodType<TransactionLogRecord> = z.obj
   read_paths: z.array(z.string()).max(20).optional(),
   read_count: z.number().optional(),
   read_counts: z.record(z.string(), z.number()).optional(),
+  range_reads: z.record(z.string(), z.number()).optional(),
+  contended_ranges: z.array(z.string()).max(20).optional(),
   error_name: z.string().max(200).optional(),
   error_message: z.string().max(500).optional(),
   error_stack: z.string().max(2048).optional(),
