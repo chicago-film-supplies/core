@@ -706,6 +706,106 @@ Deno.test("getXeroUnitAmount handles fractional result", () => {
   assertEquals(getXeroUnitAmount(100, 3), 33.33);
 });
 
+Deno.test("getXeroUnitAmount rounds a negative tie AWAY from zero, unlike the divide it replaced", () => {
+  // `currency(-0.05).divide(2)` is -0.02: JS `Math.round(-2.5)` goes toward +∞,
+  // so the magnitude shrinks. A credit and its matching charge then differ by a
+  // cent, which is the asymmetry `roundDivHalfAwayFromZero` exists to prevent.
+  assertEquals(getXeroUnitAmount(-0.05, 2), -0.03);
+  assertEquals(getXeroUnitAmount(0.05, 2), 0.03);
+  assertEquals(getXeroUnitAmount(-100.01, 2), -50.01);
+  assertEquals(getXeroUnitAmount(-0.01, 2), -0.01);
+  // Symmetry as a property, not three examples.
+  for (const [s, q] of [[0.05, 2], [100.01, 2], [0.25, 2], [19181.15, 10]] as const) {
+    assertEquals(getXeroUnitAmount(-s, q), -getXeroUnitAmount(s, q), `${s}/${q}`);
+  }
+});
+
+Deno.test("getXeroUnitAmount matches exact rational arithmetic over 500k lines", () => {
+  // The oracle is structurally distinct from the implementation: a single
+  // reduced fraction, rounded by the DEFINITION (floor, then compare the
+  // doubled remainder) rather than by the `(2n+d)/2d` identity the
+  // implementation uses. A BigInt oracle that mirrors the implementation's own
+  // decomposition can only ever agree with it — core#48.
+  const exact = (subtotal: number, quantity: number): number => {
+    if (!quantity) return 0;
+    const num = BigInt(Math.round(subtotal * 100)) * 10_000n;
+    const den = BigInt(Math.round(quantity * 10_000));
+    const negative = num < 0n;
+    const magnitude = negative ? -num : num;
+    const floor = magnitude / den;
+    const remainder = magnitude % den;
+    const rounded = 2n * remainder >= den ? floor + 1n : floor;
+    return Number(negative ? -rounded : rounded) / 100;
+  };
+
+  let seed = 777;
+  // `seed >>> 8`, NOT `seed % n` on the raw seed. This LCG's low bit strictly
+  // alternates (odd multiplier, odd increment), so a modulus that is even makes
+  // the parity of every same-position draw a CONSTANT. The first version of
+  // this sweep did exactly that and reported 0 disagreements over 500k — not
+  // because the forms agree, but because it could not generate an odd cent
+  // count and therefore never reached a single half-cent tie.
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return (seed >>> 8) % n;
+  };
+
+  let checked = 0, oddCents = 0, ties = 0, wrong = 0;
+  for (let i = 0; i < 500_000; i++) {
+    const cents = rand(20_000_000) - 10_000_000;
+    const subtotal = cents / 100;
+    const quantity = rand(50) + 1;
+    if (cents % 2 !== 0) oddCents++;
+    if (2 * (Math.abs(cents) % quantity) === quantity) ties++;
+    if (getXeroUnitAmount(subtotal, quantity) !== exact(subtotal, quantity)) wrong++;
+    checked++;
+  }
+  assertEquals(checked, 500_000, "the sweep must actually have run");
+  assertEquals(wrong, 0, `${wrong} of 500,000 lines disagree with exact rational arithmetic`);
+  // Domain coverage, asserted separately from correctness — this is the
+  // assertion whose absence hid the tie case entirely.
+  assertEquals(oddCents > 100_000, true, `only ${oddCents} draws had an odd cent count`);
+  assertEquals(ties > 1_000, true, `only ${ties} draws landed on an exact half-cent tie`);
+});
+
+Deno.test("…and currency.js's divide DOES disagree — the fail-closed companion", () => {
+  // Measured: 18,437 of the same 500,000 lines, every one of them a negative
+  // subtotal at an exact half-cent tie. currency.js was never wrong about
+  // positive money here; it is wrong about the sign convention, which is why
+  // this was invisible until the corpus could produce a negative tie.
+  const currencyDivide = (subtotal: number, quantity: number): number => {
+    if (!quantity) return 0;
+    const cents = Math.round(subtotal * 100);
+    return Math.round(cents / quantity) / 100; // what currency.js.divide does
+  };
+  const exact = (subtotal: number, quantity: number): number => {
+    const num = BigInt(Math.round(subtotal * 100)) * 10_000n;
+    const den = BigInt(Math.round(quantity * 10_000));
+    const negative = num < 0n;
+    const magnitude = negative ? -num : num;
+    const floor = magnitude / den;
+    const rounded = 2n * (magnitude % den) >= den ? floor + 1n : floor;
+    return Number(negative ? -rounded : rounded) / 100;
+  };
+
+  let seed = 777;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return (seed >>> 8) % n;
+  };
+  let wrong = 0;
+  for (let i = 0; i < 500_000; i++) {
+    const subtotal = (rand(20_000_000) - 10_000_000) / 100;
+    const quantity = rand(50) + 1;
+    if (currencyDivide(subtotal, quantity) !== exact(subtotal, quantity)) wrong++;
+  }
+  // Asserted as "disagrees", reported as a count. Asserting the remembered
+  // 18,437 would mean tuning the corpus until it reproduced a number, which is
+  // fitting rather than testing.
+  assertEquals(wrong > 0, true, "the replaced form must be seen to fail somewhere");
+  console.log(`  currency.js divide: ${wrong} of 500,000 lines wrong`);
+});
+
 // ── computeInvoiceItemPaths ────────────────────────────────────
 
 Deno.test("computeInvoiceItemPaths computes paths within order scopes", () => {

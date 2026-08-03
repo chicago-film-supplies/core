@@ -1663,6 +1663,26 @@ export function getGroupPath(items: LineItem[], index: number): GroupPath {
 
 /**
  * Deduplicate line items by product UID and sum quantities.
+ *
+ * ## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`
+ *
+ * `total_price` is the authoritative figure — it is a sum of line totals, and
+ * summing money is exact. `unit_price` is derived from it by a division that
+ * usually has a remainder, so the two are related by *rounding*, not by
+ * multiplication: 3 units totalling $100 give `unit_price` $33.33, and
+ * `33.33 × 3` is $99.99.
+ *
+ * **That is correct, and it is written down here because it does not look
+ * correct.** The field exists so `bookings` can be queried as a flat per-line
+ * fact table — sortable, filterable, "show me every line over $500/unit" — and
+ * for that a single representative per-unit figure is exactly right. It is
+ * never summed and never reconciled against; anything that multiplies it back
+ * to recover a total should read `total_price` instead. The four money÷quantity
+ * sites in CFS have four different residual contracts, and this is the
+ * stored-denorm one: **the residual is discarded on purpose.**
+ *
+ * (Contrast `getXeroUnitAmount`, whose residual is real money because Xero
+ * recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
  */
 export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
   if (!Array.isArray(lineItems)) {
@@ -1708,8 +1728,24 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
     type: entry.type,
     quantity: entry.quantity,
     total_price: entry.total_price.value,
+    // `× QTY_SCALE ÷ scaledQuantity` over integer cents: one rounding, at the
+    // end, on exact integers. `total_price` stays the currency.js sum above —
+    // summing money is what currency.js is for; dividing it is not.
+    //
+    // `QTY_SCALE` rather than a bare `BigInt(quantity)` for the same reason
+    // `perUnitSubtotal` uses it: `LineItem.quantity` is `number` in the type
+    // even though the schema constrains it to an int, and `BigInt(1.5)` throws
+    // — turning a data anomaly into a failed order write inside a transaction.
+    //
+    // Half **away from zero**, not plain half-up: a flat discount larger than
+    // its line gives a negative `price.total`, which `calculateItemSubtotal`
+    // deliberately does not clamp, and `roundDivHalfUp` rounds a negative
+    // numerator toward zero rather than half-up.
     unit_price: entry.quantity > 0
-      ? currency(entry.total_price).divide(entry.quantity).value
+      ? fromCentsBig(roundDivHalfAwayFromZero(
+        toCentsBig(entry.total_price.value) * QTY_SCALE,
+        BigInt(Math.round(entry.quantity * Number(QTY_SCALE))),
+      ))
       : 0,
     stock_method: entry.stock_method,
   }));

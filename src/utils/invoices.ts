@@ -53,7 +53,7 @@ import {
   isLineItemType,
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
-import { fromCents } from "./money.ts";
+import { fromCents, fromCentsBig, roundDivHalfAwayFromZero, toCentsBig } from "./money.ts";
 import {
   calculateItemSubtotal,
   computeItemPaths,
@@ -297,17 +297,51 @@ export function recomputeSettlementTotals(
 // ── Xero helpers ────────────────────────────────────────────────
 
 /**
+ * Quantity widening for {@link getXeroUnitAmount}, matching `QTY_SCALE` in
+ * `utils/orders.ts`. Four decimal places of quantity, so the division is exact
+ * integers all the way down and a fractional quantity cannot reach `BigInt()`.
+ */
+const XERO_QTY_SCALE = 10_000n;
+
+/**
  * Compute the Xero unit amount from subtotal and quantity.
  * Bakes duration (chargeable_days × formula) into per-unit price,
  * since Xero has no concept of rental duration.
  *
+ * ## The round trip does not close, and that is a property, not a bug
+ *
+ * Xero recomputes `LineAmount = UnitAmount × Quantity` on its own side, so the
+ * remainder this division discards is **real money in someone else's ledger** —
+ * unlike the booking `unit_price` denorm, whose residual is discarded on
+ * purpose because nothing ever multiplies it back.
+ *
+ * `getXeroUnitAmount(100, 3)` is `33.33`, and Xero will bill `99.99`. **Rounding
+ * better does not fix this**: `10000 ÷ 3` is `3333` cents too, and `× 3` is
+ * `9999` cents regardless of the arithmetic. The gap is bounded by
+ * `quantity − 1` cents on a line and is absorbed through the discount channel
+ * (`DiscountRate` at 4dp), which is the only per-line lever Xero gives us.
+ *
+ * So the exactness this function buys is not a closed round trip — it is that
+ * the residual is **at most one cent per unit and never grows**. The float form
+ * it replaced could quantize the quotient and then have that error scale with
+ * the line.
+ *
+ * Half away from zero rather than plain half-up: a line's `subtotal_discounted`
+ * may be negative when a flat discount exceeds it, and `roundDivHalfUp` rounds
+ * a negative numerator toward zero. Symmetry means a credit and its matching
+ * charge cannot differ in magnitude.
+ *
  * @param subtotal - Pre-discount subtotal (base × days × formula × quantity)
- * @param quantity - Item quantity
+ * @param quantity - Item quantity. May be fractional; scaled rather than
+ *   narrowed, so a non-integer cannot throw on the Xero push path.
  * @returns Per-unit amount for Xero, or 0 if quantity is 0
  */
 export function getXeroUnitAmount(subtotal: number, quantity: number): number {
   if (!quantity) return 0;
-  return currency(subtotal).divide(quantity).value;
+  return fromCentsBig(roundDivHalfAwayFromZero(
+    toCentsBig(subtotal) * XERO_QTY_SCALE,
+    BigInt(Math.round(quantity * Number(XERO_QTY_SCALE))),
+  ));
 }
 
 // ── Selective sync helpers ──────────────────────────────────────
