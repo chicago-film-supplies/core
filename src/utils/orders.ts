@@ -689,9 +689,9 @@ export function calculateItemDiscount(item: LineItem): number {
 }
 
 /**
- * The revenue COAs that sales/rental tax is actually owed on — the three
- * `Sales`-type accounts: 4000 Rental Income, 4200 Retail Sales Income,
- * 4210 Replacement Sales Income.
+ * The revenue COAs that sales/rental tax is actually owed on — 4000 Rental
+ * Income, 4140 Pass Through Income, 4200 Retail Sales Income, 4210 Replacement
+ * Sales Income.
  *
  * **This is the single source of truth for line taxability**, and it has to be,
  * because it previously existed only on the *Xero push* side and nowhere in the
@@ -701,15 +701,24 @@ export function calculateItemDiscount(item: LineItem): number {
  * $2,741.78**, plus 9 orders / $453.50.
  *
  * Everything outside the set is a service or fee — Service Income, Delivery
- * Surcharges, Pass Through, Transaction Fee, Other Income — and sales tax is not
- * owed on it. Xero was right and the engine was wrong, so there is no historical
+ * Surcharges, Transaction Fee, Other Income — and sales tax is not owed on it.
+ * Xero was right and the engine was wrong, so there is no historical
  * under-collection: the customer was always billed the untaxed amount and CFS
  * merely displayed a balance that was never real.
+ *
+ * **4140 Pass Through Income was added 2026-08-02, and the direction matters.**
+ * Every other member of this set was here because Xero disagreed with the engine
+ * and Xero was right. 4140 is the one case where the two agreed with each other
+ * and the constant was the outlier: prod invoice #1897 carries its SSD Card line
+ * at `AccountCode: 4140` in CFS *and* in Xero, taxed `TAX003` (Chicago Rental,
+ * 11%) for $510.40 in both, paid in full. Excluding 4140 meant the next reprice
+ * of that invoice would have deleted tax that was charged, collected and
+ * remitted. Operator decision: pass-through income is taxable.
  *
  * `api-cloudrun/src/lib/xeroTax.ts` consumes this same constant so the push and
  * the totals cannot drift apart again.
  */
-export const TAXABLE_REVENUE_COAS: readonly number[] = [4000, 4200, 4210];
+export const TAXABLE_REVENUE_COAS: readonly number[] = [4000, 4140, 4200, 4210];
 
 /**
  * Is a line with this revenue COA subject to tax?

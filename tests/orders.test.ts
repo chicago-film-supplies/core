@@ -22,6 +22,7 @@ import {
   calculateItemTax,
   computeItemTaxAmount,
   isTaxableCoa,
+  TAXABLE_REVENUE_COAS,
   calculateItemTotal,
   calculateTransactionFeeAmount,
   calculateOrderTotals,
@@ -2549,16 +2550,33 @@ Deno.test("validateItemParentage rejects a fee nested under a product, and an un
 // untaxable (`TaxType: "NONE"`). Measured on prod 2026-07-30 before the fix:
 // 19 invoices / $2,741.78.
 
-Deno.test("isTaxableCoa: only the three Sales revenue accounts are taxable", () => {
-  for (const coa of [4000, 4200, 4210]) {
-    assertEquals(isTaxableCoa(coa), true, `${coa} is a Sales revenue account`);
+Deno.test("isTaxableCoa: exactly the taxable revenue accounts, and no others", () => {
+  for (const coa of [4000, 4140, 4200, 4210]) {
+    assertEquals(isTaxableCoa(coa), true, `${coa} is a taxable revenue account`);
   }
-  // Service Income, Delivery Surcharges, Pass Through, Transaction Fee, Other
-  // Income, and the Bottled Water Tax liability — every one of these appears in
-  // the prod defect set.
-  for (const coa of [2210, 2800, 4100, 4110, 4120, 4130, 4140, 4150, 4700, 4800]) {
+  // Service Income, Delivery Surcharges, Contract Labor, PSA, Shipping,
+  // Transaction Fee, Other Income, and the Bottled Water Tax liability — every
+  // one of these appears in the prod defect set.
+  for (const coa of [2210, 2800, 4100, 4110, 4120, 4130, 4150, 4700, 4800]) {
     assertEquals(isTaxableCoa(coa), false, `${coa} is not a taxable revenue account`);
   }
+  // The two lists must be exhaustive over the enum, or a COA added later is
+  // silently untested — which is how 4140 sat on the wrong side unexamined
+  // while a $510.40 prod line was taxed at it in both CFS and Xero.
+  assertEquals(
+    [...TAXABLE_REVENUE_COAS].sort((a, b) => a - b),
+    [4000, 4140, 4200, 4210],
+  );
+});
+
+Deno.test("isTaxableCoa: 4140 Pass Through is taxable, and the reason is not symmetric", () => {
+  // Every other member of the set is there because the Xero push already said
+  // so and the engine disagreed. 4140 is the opposite: CFS and Xero AGREED —
+  // prod #1897 holds its SSD Card line at 4140 in both, taxed TAX003 at 11% for
+  // $510.40, paid — and the constant was the thing out of step. Excluding it
+  // meant the next reprice would delete tax that had been collected and
+  // remitted, so this case is a guard against a repair, not against a charge.
+  assertEquals(isTaxableCoa(4140), true);
 });
 
 Deno.test("isTaxableCoa: an UNKNOWN coa is taxable — the asymmetry with the Xero push", () => {
