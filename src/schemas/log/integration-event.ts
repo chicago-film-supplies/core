@@ -27,6 +27,14 @@ export const INTEGRATION_EVENT_MSGS = [
   // lack a size>1 guard; carries `collection` + `filter_value` + `count`. #342.
   "crms_multiple_matches_found",
   "crms_invoice_order_not_found",
+  // A CRMS invoice line's `subtotal` was derived from its `charge_total` by
+  // inverting the discount, and re-applying the discount to that subtotal does
+  // NOT reproduce the charge total within a cent. The gross-up itself is exact
+  // integer arithmetic (api-cloudrun#415), so a drift here is a statement about
+  // CRMS's own data — its `charge_total` and `discount_percent` disagree — not
+  // about CFS's arithmetic. Carries `crms_id`, `line`, `rate`, `charge_total`,
+  // `subtotal` and `drift_cents`. Retire with CRMS.
+  "crms_discount_roundtrip_drift",
   "crms_mark_paid_failed",
   "crms_product_not_found",
   "uploadcare_draft_cleanup_failed",
