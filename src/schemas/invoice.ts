@@ -51,51 +51,28 @@ const InvoiceStatus: z.ZodType<InvoiceStatusType> = InvoiceStatusEnum;
 // own literal and the combined enum has no consumer left. The vocabulary itself
 // still lives in `common.ts` (`ITEM_TYPES` / `ITEM_CONTRACTS`).
 
-const PAYMENT_STATUSES = ["active", "deleted"] as const;
-
-// ── Payment tracking (RETIRED — see `settlements`) ───────────────
+// ── Payment tracking: GONE, not deprecated ──────────────────────
 //
-// Settlement moved to the top-level append-only `settlements` collection, which
-// is what made credit notes expressible at all: Xero settles an invoice two ways
-// — cash (`Payments[]`) and credit allocation (`CreditNotes[]`) — and this array
-// could only ever model the first. Invoice #1322 recorded $4,495.62 as cash
-// collected that was never collected, and every reconciliation reported it clean
-// because CFS and Xero agreed on the one number they could both express.
+// `Invoice.payments[]` and its `InvoicePayment` type were deleted here on
+// 2026-08-03. Settlement lives in the top-level append-only `settlements`
+// collection, which is what made credit notes expressible at all: Xero settles
+// an invoice two ways — cash (`Payments[]`) and credit allocation
+// (`CreditNotes[]`) — and this array could only ever model the first. Invoice
+// #1322 recorded $4,495.62 as cash collected that was never collected, and
+// every reconciliation reported it clean because CFS and Xero agreed on the one
+// number they could both express.
 //
-// **`payments` stays declared for PARSE TOLERANCE, not compatibility.**
-// `InvoiceSchema` is a `z.strictObject`, so until the migration's `--drop-legacy`
-// pass has stripped the field corpus-wide, an undeclared `payments` would make
-// every remaining invoice fail validation on its next write. That is the entire
-// reason it survives, and it is the minimum: no fallback reader, no dual-write,
-// no shim. The migration runs against prod BEFORE the new code deploys, so no
-// reader ever needs one.
-
-/**
- * A payment received against this invoice (synced from Xero).
- *
- * @deprecated Superseded by the `settlements` collection. Declared only so a
- * not-yet-stripped document still parses; nothing reads it. Removed from this
- * schema once `--drop-legacy` has run and `audit-settlement-totals.ts` is clean.
- */
-export interface InvoicePayment {
-  uid: string;
-  xero_payment_id: string;
-  date: string;
-  amount: number;
-  reference: string | null;
-  status: typeof PAYMENT_STATUSES[number];
-  synced_at?: FirestoreTimestampType;
-}
-
-const InvoicePaymentSchema: z.ZodType<InvoicePayment> = z.strictObject({
-  uid: z.uuid(),
-  xero_payment_id: z.string(),
-  date: chicagoStartOfDay(),
-  amount: z.number(),
-  reference: z.string().nullable(),
-  status: z.enum(PAYMENT_STATUSES),
-  synced_at: FirestoreTimestamp.optional(),
-});
+// The field survived one beta past its replacement purely as PARSE TOLERANCE:
+// `InvoiceSchema` is a `z.strictObject`, so an undeclared `payments` would have
+// failed validation on the next write of any document still carrying one. That
+// is now moot — `migrate-payments-to-settlements.ts --drop-legacy` stripped it
+// from all 967 prod / 968 dev invoices on 2026-08-02, and
+// `audit-settlement-totals.ts` reports both envs clean. A strict object is the
+// enforcement: an invoice cannot acquire a `payments` array again.
+//
+// `PAYMENT_STATUSES` and `UpdatePaymentInput` went with it — the endpoints they
+// typed (`POST /invoices/{uid}/payments`, `PATCH .../payments/{payment_uid}`)
+// no longer exist, because correcting an append-only journal is another append.
 
 // ── Item price ───────────────────────────────────────────────────
 
@@ -326,8 +303,6 @@ export interface Invoice {
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
-  /** @deprecated Superseded by the `settlements` collection. Parse tolerance only — nothing reads it. */
-  payments?: InvoicePayment[];
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -397,7 +372,6 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   destinations: z.array(InvoiceDocDestination).default([]),
   items: z.array(InvoiceDocItem).default([]),
   totals: InvoiceDocTotalsSchema,
-  payments: z.array(InvoicePaymentSchema).optional(),
   xero_id: z.uuid().nullable(),
   uploadcare_uuid: uploadcareRef(z.string().nullable().default(null)),
   pdf_generated_at: FirestoreTimestamp.nullable().default(null),
@@ -686,20 +660,3 @@ export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   version: z.int().min(0),
 });
 
-/** Input schema for PATCH /invoices/{uid}/payments/{payment_uid} — partial update of a single payment. */
-export interface UpdatePaymentInputType {
-  date?: string;
-  amount?: number;
-  reference?: string | null;
-  status?: typeof PAYMENT_STATUSES[number];
-  version: number;
-}
-
-/** Input schema for updating a single payment on an invoice. */
-export const UpdatePaymentInput: z.ZodType<UpdatePaymentInputType> = z.object({
-  date: chicagoStartOfDay().optional(),
-  amount: z.number().positive().optional(),
-  reference: z.string().nullable().optional(),
-  status: z.enum(PAYMENT_STATUSES).optional(),
-  version: z.int().min(0),
-});

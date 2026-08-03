@@ -587,7 +587,6 @@ export {
   InvoiceSchema,
   isInvoiceLineItem,
   UpdateInvoiceInput,
-  UpdatePaymentInput,
   type CreateInvoiceInputType,
   type Invoice,
   type InvoiceDocDestinationType,
@@ -601,10 +600,8 @@ export {
   type InvoiceItemInputDestinationType,
   type InvoiceItemInputGroupType,
   type InvoiceItemInputOrderType,
-  type InvoicePayment,
   type InvoiceStatusType,
   type UpdateInvoiceInputType,
-  type UpdatePaymentInputType,
 } from "./invoice.ts";
 
 export {
@@ -923,7 +920,6 @@ export type {
   // Invoice aggregate
   InvoiceCreated,
   InvoiceIssued,
-  InvoicePaymentReceived,
   InvoiceUpdated,
   InvoiceVoided,
   // Organization aggregate

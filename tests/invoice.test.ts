@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, UpdateInvoiceInput, UpdatePaymentInput } from "../src/schemas/invoice.ts";
+import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const invoiceBase = getInitialValues(InvoiceSchema) as Record<string, unknown>;
@@ -155,18 +155,12 @@ Deno.test("InvoiceSchema rejects removed legacy item-level tax_profile field", (
   assertEquals(InvoiceSchema.safeParse(doc).success, false);
 });
 
-Deno.test("InvoiceSchema accepts payments", () => {
+Deno.test("InvoiceSchema carries settlement totals without a payments array", () => {
+  // `payments[]` was deleted 2026-08-03. The totals it used to sit beside are
+  // now derived from the `settlements` journal by `recomputeSettlementTotals`.
   const doc = {
     ...validInvoice,
     status: "part_paid",
-    payments: [{
-      uid: "22222222-2222-4222-8222-222222222222",
-      xero_payment_id: "xero-pay-1",
-      date: "2026-03-15T00:00:00Z",
-      amount: 250,
-      reference: "CHK-001",
-      status: "active",
-    }],
     totals: {
       ...validInvoice.totals,
       amount_paid: 250,
@@ -448,63 +442,6 @@ Deno.test("UpdateInvoiceInput requires version", () => {
   assertEquals(UpdateInvoiceInput.safeParse({ ...input, version: 1 }).success, true);
 });
 
-Deno.test("UpdatePaymentInput requires version", () => {
-  assertEquals(UpdatePaymentInput.safeParse({ reference: "CHK #42" }).success, false);
-  assertEquals(
-    UpdatePaymentInput.safeParse({ reference: "CHK #42", version: 1 }).success,
-    true,
-  );
-});
-
-Deno.test("UpdatePaymentInput accepts all whitelisted fields", () => {
-  const input = {
-    date: "2026-04-23T00:00:00.000-05:00",
-    amount: 150.25,
-    reference: "wire",
-    status: "active" as const,
-    version: 3,
-  };
-  assertEquals(UpdatePaymentInput.safeParse(input).success, true);
-});
-
-Deno.test("UpdatePaymentInput rejects zero and negative amounts", () => {
-  assertEquals(UpdatePaymentInput.safeParse({ amount: 0, version: 0 }).success, false);
-  assertEquals(UpdatePaymentInput.safeParse({ amount: -5, version: 0 }).success, false);
-});
-
-Deno.test("UpdatePaymentInput normalizes date to Chicago offset form", () => {
-  const parsed = UpdatePaymentInput.safeParse({
-    date: "2026-04-23T12:00:00.000Z",
-    version: 0,
-  });
-  assertEquals(parsed.success, true);
-  if (parsed.success) {
-    assertEquals(parsed.data.date, "2026-04-23T00:00:00.000-05:00");
-  }
-});
-
-Deno.test("UpdatePaymentInput strips unknown fields (xero_payment_id/uid/synced_at)", () => {
-  const parsed = UpdatePaymentInput.safeParse({
-    reference: "ok",
-    xero_payment_id: "forged",
-    uid: "forged",
-    synced_at: "forged",
-    version: 0,
-  });
-  assertEquals(parsed.success, true);
-  if (parsed.success) {
-    assertEquals("xero_payment_id" in parsed.data, false);
-    assertEquals("uid" in parsed.data, false);
-    assertEquals("synced_at" in parsed.data, false);
-  }
-});
-
-Deno.test("UpdatePaymentInput restricts status to active/deleted", () => {
-  assertEquals(UpdatePaymentInput.safeParse({ status: "active", version: 0 }).success, true);
-  assertEquals(UpdatePaymentInput.safeParse({ status: "deleted", version: 0 }).success, true);
-  assertEquals(UpdatePaymentInput.safeParse({ status: "pending", version: 0 }).success, false);
-});
-
 // ── Invoice item input — the discriminated boundary ───────────────
 
 Deno.test("CreateInvoiceInput: an item must declare its type", () => {
@@ -670,11 +607,14 @@ Deno.test("amount_credited is OPTIONAL, so the 962 pre-migration invoices still 
   );
 });
 
-Deno.test("payments survives as PARSE TOLERANCE — a not-yet-stripped doc still writes", () => {
-  // `InvoiceSchema` is a strictObject, so an undeclared `payments` would make
-  // every un-migrated invoice fail validation on its next write. That is the
-  // entire reason the field is still declared, and this pins it until
-  // `--drop-legacy` has run and the field is deleted from the schema.
+Deno.test("payments is REJECTED now — the strict object is what enforces the deletion", () => {
+  // The inverse of the test this replaces. `payments[]` survived one beta purely
+  // as parse tolerance, because a strictObject would have failed every
+  // un-migrated invoice on its next write. `--drop-legacy` stripped the field
+  // from all 967 prod / 968 dev invoices on 2026-08-02, so the same strictness
+  // now runs the other way: an invoice cannot acquire a `payments` array again,
+  // and a writer that tries gets a validation error rather than a silent second
+  // settlement ledger.
   assertEquals(
     InvoiceSchema.safeParse({
       ...withTotals({ total: 500, amount_paid: 500, amount_due: 0 }),
@@ -687,6 +627,12 @@ Deno.test("payments survives as PARSE TOLERANCE — a not-yet-stripped doc still
         status: "active",
       }],
     }).success,
+    false,
+  );
+  // …and the same document without it still parses, so the rejection is about
+  // `payments` and not about the fixture drifting.
+  assertEquals(
+    InvoiceSchema.safeParse(withTotals({ total: 500, amount_paid: 500, amount_due: 0 })).success,
     true,
   );
 });

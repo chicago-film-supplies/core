@@ -47,7 +47,6 @@ export type {
 export type {
   InvoiceCreated,
   InvoiceIssued,
-  InvoicePaymentReceived,
   InvoiceUpdated,
   InvoiceVoided,
 } from "./invoices.ts";
