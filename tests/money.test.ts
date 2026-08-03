@@ -12,6 +12,7 @@ import {
   formatCents,
   fromCents,
   fromCentsBig,
+  perUnitCostAt4dp,
   roundDivHalfUp,
   toCents,
   toCentsBig,
@@ -144,4 +145,64 @@ Deno.test("the money module exports no throwing paths — the boundary must not 
   // turn a display concern into a 500, so the contract is total.
   assertEquals(formatCents(Number.MAX_SAFE_INTEGER).startsWith("$90,071,992,547,409."), true);
   assertThrows(() => roundDivHalfUp(1n, 0n), RangeError, "Division by zero");
+});
+
+// ── perUnitCostAt4dp — a rate, not an amount ────────────────────────
+//
+// The whole point of this helper is that it must NOT agree with
+// `fromCentsBig(roundDivHalfUp(…))`. Both were the same function until
+// 2026-08-03, and the entire suite stayed green when the applier switched from
+// one to the other — every fixture divided evenly, so nothing in the corpus of
+// tests could tell the two apart. These are the cases that can.
+
+Deno.test("perUnitCostAt4dp keeps the sub-cent a per-unit rate really has", () => {
+  // The motivating case: 100 units for $6.39. Quantized to the cent this reads
+  // $0.06/unit, a 6% error on a figure an operator is shown.
+  assertEquals(perUnitCostAt4dp(639n, 100n), 0.0639);
+  // Every sub-cent value the prod corpus actually held, recomputed from its
+  // stored basis and quantity.
+  assertEquals(perUnitCostAt4dp(13036n, 40n), 3.259);
+  assertEquals(perUnitCostAt4dp(61718n, 288n), 2.143);
+  assertEquals(perUnitCostAt4dp(766n, 5n), 1.532);
+  assertEquals(perUnitCostAt4dp(19000n, 46n), 4.1304);
+  assertEquals(perUnitCostAt4dp(50400n, 78n), 6.4615);
+});
+
+Deno.test("perUnitCostAt4dp DISAGREES with the cents form — the fail-closed half", () => {
+  // If these ever agree, the helper has quietly become `fromCentsBig` again and
+  // every assertion above would still pass on round numbers.
+  const cases: Array<[bigint, bigint]> = [[639n, 100n], [19000n, 46n], [100n, 3n]];
+  for (const [cents, units] of cases) {
+    const atCent = fromCentsBig(roundDivHalfUp(cents, units));
+    assertEquals(
+      perUnitCostAt4dp(cents, units) === atCent,
+      false,
+      `${cents}/${units} must not equal the cent-quantized form`,
+    );
+  }
+});
+
+Deno.test("perUnitCostAt4dp rounds once, half-up, at the 4th decimal", () => {
+  // One cent over three units is $0.003333… per unit → 0.0033.
+  assertEquals(perUnitCostAt4dp(1n, 3n), 0.0033);
+  assertEquals(perUnitCostAt4dp(2n, 3n), 0.0067);
+  // Exactly half at the 4th decimal goes UP, matching roundDivHalfUp: one cent
+  // over eight units is $0.00125 exactly.
+  assertEquals(perUnitCostAt4dp(1n, 8n), 0.0013);
+  // …and just under half goes down: $0.000625 → 0.0006.
+  assertEquals(perUnitCostAt4dp(1n, 16n), 0.0006);
+});
+
+Deno.test("perUnitCostAt4dp agrees with the cents form whenever the division is exact", () => {
+  // The compatibility half: where a unit cost lands on a whole cent, nothing
+  // changed, which is why every pre-existing fixture stayed green.
+  for (const [cents, units] of [[4000n, 10n], [400n, 1n], [900n, 3n], [0n, 7n]] as const) {
+    assertEquals(perUnitCostAt4dp(cents, units), fromCentsBig(roundDivHalfUp(cents, units)));
+  }
+});
+
+Deno.test("perUnitCostAt4dp is total — zero units yields 0, never a divide", () => {
+  assertEquals(perUnitCostAt4dp(500n, 0n), 0);
+  assertEquals(perUnitCostAt4dp(500n, -3n), 0);
+  assertEquals(perUnitCostAt4dp(0n, 10n), 0);
 });

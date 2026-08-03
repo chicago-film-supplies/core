@@ -284,6 +284,55 @@ Deno.test("a purchase adds basis and units, and lands them on the shelf", () => 
   assertEquals(next.query_by_uid_location, [LOC_A]);
 });
 
+Deno.test("a purchase reports its unit cost as a 4dp RATE, not cent-quantized money", () => {
+  // The case the whole suite was blind to until 2026-08-03: every fixture
+  // divided evenly, so the applier could switch between the cent form and the
+  // 4dp form with nothing going red. 100 units for $6.39 is $0.0639/unit, and
+  // reporting $0.06 is a 6% error on a figure that is only ever displayed.
+  const { ledger: next, unitCost, costApplied } = applyMovementToLedger(
+    ledger(),
+    {
+      type: "purchase",
+      quantity: 100,
+      lines: [line(100, null, at(LOC_A))],
+      cost: { amount: 6.39, unit_cost: 0, unit_costs: [] },
+    },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(unitCost, 0.0639);
+  assertEquals(next.average_unit_cost, 0.0639);
+  // The BASIS is money and stays at the cent — the rate got finer, the money
+  // did not move.
+  assertEquals(costApplied, 6.39);
+  assertEquals(next.total_cost_basis, 6.39);
+  assertEquals(next.quantity_held, 100);
+});
+
+Deno.test("a cost-bearing decrease reports its unit cost at 4dp too", () => {
+  // The out-leg reads the weighted-average share, so it has the same rounding
+  // decision and must make it the same way.
+  const start = ledger({ quantity_held: 100, total_cost_basis: 6.39, average_unit_cost: 0.0639 });
+  const { ledger: next, unitCost } = applyMovementToLedger(
+    start,
+    {
+      type: "sale",
+      quantity: 30,
+      lines: [line(30, at(LOC_A), null)],
+      cost: { amount: 0, unit_cost: 0, unit_costs: [] },
+    },
+    placements,
+    mockTimestamp,
+  );
+  // 639 cents × 30 / 100 = 191.7 → 192 cents out; 192 / 30 = $0.064 per unit.
+  assertEquals(unitCost, 0.064);
+  assertEquals(next.quantity_held, 70);
+  // Basis still money: $6.39 − $1.92.
+  assertEquals(next.total_cost_basis, 4.47);
+  // And the ledger's average follows the same rule: 447 / 70 = $0.0639.
+  assertEquals(next.average_unit_cost, 0.0639);
+});
+
 Deno.test("a placement stamps the store's and the location's identity, on create AND on refresh", () => {
   // `allocateBookingToStores` sorts on store.default, store.name and
   // location.default, so a fold that left them at ""/false would silently cost

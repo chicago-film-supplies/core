@@ -95,6 +95,32 @@ export function roundDivHalfAwayFromZero(num: bigint, den: bigint): bigint {
 }
 
 /**
+ * A per-unit **rate** in dollars at 4dp — `cents ÷ units`, rounded once.
+ *
+ * **This is deliberately finer than money.** A purchase of 100 units for $6.39
+ * has a true unit cost of $0.0639; quantizing it to cents stores $0.06, a 6%
+ * error on the figure an operator reads. The same argument the schema makes for
+ * `Discount.rate` at 4dp — a rate is not an amount, and forcing it to the money
+ * quantum destroys information that was never money in the first place.
+ *
+ * So do **not** reach for `fromCentsBig(roundDivHalfUp(…))` here: it is the
+ * right call for a value that will be stored, summed or paid, and the wrong one
+ * for a ratio that only ever gets displayed. 4dp also matches what CFS already
+ * does at its other rate boundary — Xero's `DiscountRate` holds 4 decimals.
+ *
+ * `× 100 ÷ units` widens to hundredths-of-a-cent *before* dividing, so the
+ * rounding happens once, at the end, on exact integers.
+ *
+ * **Non-negative `cents` only** — {@linkcode roundDivHalfUp}'s precondition, and
+ * every caller applies it to a cost basis. `units <= 0` yields 0 rather than
+ * dividing. Headroom: the quotient must stay under `2^53`, i.e. ~$900B.
+ */
+export function perUnitCostAt4dp(cents: bigint, units: bigint): number {
+  if (units <= 0n) return 0;
+  return Number(roundDivHalfUp(cents * 100n, units)) / 10_000;
+}
+
+/**
  * Format integer cents for display **without ever creating a float**.
  *
  * Integer division and a modulo, then string work — so the number on screen and

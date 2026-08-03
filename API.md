@@ -19648,6 +19648,28 @@ named boundary and nowhere else — see `recomputeSettlementTotals`.
 
 The `bigint` flavour of {@linkcode fromCents}.
 
+### `perUnitCostAt4dp(cents: bigint, units: bigint): number`
+
+A per-unit **rate** in dollars at 4dp — `cents ÷ units`, rounded once.
+
+**This is deliberately finer than money.** A purchase of 100 units for $6.39
+has a true unit cost of $0.0639; quantizing it to cents stores $0.06, a 6%
+error on the figure an operator reads. The same argument the schema makes for
+`Discount.rate` at 4dp — a rate is not an amount, and forcing it to the money
+quantum destroys information that was never money in the first place.
+
+So do **not** reach for `fromCentsBig(roundDivHalfUp(…))` here: it is the
+right call for a value that will be stored, summed or paid, and the wrong one
+for a ratio that only ever gets displayed. 4dp also matches what CFS already
+does at its other rate boundary — Xero's `DiscountRate` holds 4 decimals.
+
+`× 100 ÷ units` widens to hundredths-of-a-cent *before* dividing, so the
+rounding happens once, at the end, on exact integers.
+
+**Non-negative `cents` only** — {@linkcode roundDivHalfUp}'s precondition, and
+every caller applies it to a cost basis. `units <= 0` yields 0 rather than
+dividing. Headroom: the quotient must stay under `2^53`, i.e. ~$900B.
+
 ### `roundDivHalfAwayFromZero(num: bigint, den: bigint): bigint`
 
 {@linkcode roundDivHalfUp} for a numerator of **either** sign, rounding half
@@ -19772,6 +19794,12 @@ Increases add the caller-supplied acquisition cost. Cost-bearing decreases
 remove the weighted-average share of the basis captured BEFORE the quantity
 changes — never the caller's number, which is revenue or an estimate and let
 the basis drift from quantity and even go negative.
+
+The returned `unitCost` and the ledger's `average_unit_cost` are per-unit
+**rates at 4dp** (`perUnitCostAt4dp`), not money. Both were quantized to the
+cent until 2026-08-03, which reported a 100-unit purchase at $6.39 as
+$0.06/unit — a 6% error on a figure that is only ever displayed. The basis
+itself is money and is unchanged.
 
 A type whose contract forbids cost never touches the basis at all. That is
 what makes #286 (a costed transfer corrupting the basis) structurally

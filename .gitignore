@@ -2,3 +2,6 @@ node_modules/
 .DS_Store
 .claude/zod-llms.txt
 .claude/deno-llms.txt
+
+# Agent worktrees — a checkout, never content.
+.claude/worktrees/

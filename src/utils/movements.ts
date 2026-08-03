@@ -26,7 +26,7 @@ import type {
   StoreBreakdownLocation,
 } from "../schemas/mod.ts";
 import { MOVEMENT_CONTRACTS } from "../schemas/mod.ts";
-import { fromCentsBig, roundDivHalfUp, toCentsBig } from "./money.ts";
+import { fromCentsBig, perUnitCostAt4dp, roundDivHalfUp, toCentsBig } from "./money.ts";
 
 // ── Money ───────────────────────────────────────────────────────────
 
@@ -212,6 +212,12 @@ export interface LocationPlacement {
  * changes — never the caller's number, which is revenue or an estimate and let
  * the basis drift from quantity and even go negative.
  *
+ * The returned `unitCost` and the ledger's `average_unit_cost` are per-unit
+ * **rates at 4dp** (`perUnitCostAt4dp`), not money. Both were quantized to the
+ * cent until 2026-08-03, which reported a 100-unit purchase at $6.39 as
+ * $0.06/unit — a 6% error on a figure that is only ever displayed. The basis
+ * itself is money and is unchanged.
+ *
  * A type whose contract forbids cost never touches the basis at all. That is
  * what makes #286 (a costed transfer corrupting the basis) structurally
  * impossible rather than gated: a transfer has no cost object to mis-gate.
@@ -232,6 +238,11 @@ export function applyMovementToLedger(
   const carriesCost = MOVEMENT_CONTRACTS[movement.type].cost === "required";
 
   // ── Cost basis, before the quantity moves ──
+  //
+  // The basis is MONEY and stays at the cent. `unitCost` is a RATE and does not:
+  // see `perUnitCostAt4dp`. Both are derived from the same integer cents, so the
+  // pair cannot disagree about how much moved — only about how finely the
+  // per-unit figure is reported.
   let costApplied = 0;
   let unitCost = 0;
   if (carriesCost) {
@@ -239,13 +250,13 @@ export function applyMovementToLedger(
     if (delta > 0) {
       const addCents = toCentsBig(movement.cost?.amount ?? 0);
       costApplied = fromCentsBig(addCents);
-      unitCost = delta > 0 ? fromCentsBig(roundDivHalfUp(addCents, BigInt(delta))) : 0;
+      unitCost = perUnitCostAt4dp(addCents, BigInt(delta));
       next.total_cost_basis = fromCentsBig(basisCents + addCents);
     } else if (delta < 0) {
       const units = -delta;
       const outCents = costOfUnits(basisCents, next.quantity_held, units);
       costApplied = -fromCentsBig(outCents);
-      unitCost = fromCentsBig(roundDivHalfUp(outCents, BigInt(units)));
+      unitCost = perUnitCostAt4dp(outCents, BigInt(units));
       next.total_cost_basis = fromCentsBig(basisCents - outCents);
     }
   }
@@ -253,8 +264,9 @@ export function applyMovementToLedger(
   next.quantity_held += delta;
 
   if (next.quantity_held > 0) {
-    next.average_unit_cost = fromCentsBig(
-      roundDivHalfUp(toCentsBig(next.total_cost_basis), BigInt(next.quantity_held)),
+    next.average_unit_cost = perUnitCostAt4dp(
+      toCentsBig(next.total_cost_basis),
+      BigInt(next.quantity_held),
     );
   } else if (carriesCost) {
     // No units held after a cost-bearing move (a sale of the last unit) means no
