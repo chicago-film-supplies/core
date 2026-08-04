@@ -92,10 +92,48 @@ export function seedStockSummaryRules(
   ];
 }
 
+/** Where the deferred rebuild actually runs — the `trigger` on all four edges. */
+const REBUILD_TRIGGER = "cloud-task:/tasks/rebuild-stock-summary";
+
 /**
  * The four stock-summary rules for one transaction.
  *
- * @param transactionId - the owning TransactionDefinition id, e.g. "create-order"
+ * **These are `fan-out`, not co-writes, as of 2026-08-02 (api-cloudrun#358).**
+ * The rebuild used to run inside the originating Firestore transaction, where it
+ * issued `bookings where uid_product == X` plus the matching `out-of-service`
+ * query PER PRODUCT and then wrote into the bookings range it had just read. That
+ * is the one lock shape Firestore resolves by BLOCKING the loser to its 25s
+ * client deadline instead of aborting it, so the retry machinery never engages —
+ * measured on cfs-dev-3100 2026-08-01, and 138 of prod's 315 deadline aborts in
+ * the 30 days to 2026-08-02 were on `crms-opportunity-order` doing exactly this.
+ * It also did not scale: the largest live order covers 61 distinct products, so
+ * one PUT issued 122 range queries and 122 summary writes.
+ *
+ * It is deferrable because a stock summary is a projection with **no
+ * server-side consumer** — every hard stock gate reads the ledger, the OOS
+ * records or the shelf counts transactionally instead. So the atomicity traded
+ * bought display consistency, not an invariant.
+ *
+ * What that means for these declarations, and why each field moved:
+ *
+ *  - `mode: "fan-out"` — "source changes propagate to targets via events", which
+ *    is now literally true. The old `embed`/`derive` said the value moved as part
+ *    of the same write.
+ *  - `trigger` names the Cloud Task, so the graph says WHERE it runs.
+ *  - **`transaction` is dropped.** That field means "grouped into this atomic
+ *    operation" and would be the one outright false claim left. The ids stay in
+ *    the owning definition's `steps` (the operation genuinely still causes them,
+ *    and `getPropagationMarkdown`/the diagram generator both resolve rules by
+ *    step id, so the edges keep rendering) — but nothing asserts atomicity.
+ *
+ * {@link seedStockSummaryRules} is deliberately NOT changed: the create-product
+ * seed still writes the summary inside its own transaction, and it can, because
+ * a brand-new product has no bookings and no OOS records so the seed issues no
+ * queries at all. It is the co-write it says it is.
+ *
+ * @param transactionId - the TransactionDefinition id that CAUSES the rebuild,
+ *   e.g. "create-order". Kept in the rule ids, since that is what the api-cloudrun
+ *   task logs and what `propagationCoverage` greps for.
  * @param trigger - what causes the rebuild, woven into the invariants
  */
 export function stockSummaryRules(
@@ -107,10 +145,10 @@ export function stockSummaryRules(
       id: transactionId + ":ledger-to-stock-summary",
       source: "inventory-ledgers",
       target: "stock-summaries",
-      mode: "embed",
+      mode: "fan-out",
       invariant:
         "The summary embeds the ledger's current quantity_held and product type. These are the only ledger fields availability needs — store_breakdown is NOT copied (no client reads a per-store split; the manager reads inventory-ledgers directly for that), so a store transfer, which moves stock between stores without changing quantity_held, correctly leaves the summary untouched.",
-      transaction: transactionId,
+      trigger: REBUILD_TRIGGER,
       fields: [
         { source: ["quantity_held"], target: ["quantity_held"] },
         { source: ["type"], target: ["type"] },
@@ -120,11 +158,11 @@ export function stockSummaryRules(
       id: transactionId + ":bookings-to-stock-summary",
       source: "bookings",
       target: "stock-summaries",
-      mode: "derive",
+      mode: "fan-out",
       invariant:
         trigger +
         " re-derives stock-summaries.bookings[] — every non-complete booking for the product, as an interval (start/end + their Firestore-timestamp twins) plus its breakdown. Stored as raw intervals, never as a per-window answer: quantity_booked for ANY window is Σ(reserved+prepped+out) over the entries overlapping it, so no window is privileged and none needs its own document. A sale booking carries end: null (a sold unit does not come back) and so keeps consuming stock in every later window until it completes.",
-      transaction: transactionId,
+      trigger: REBUILD_TRIGGER,
       fields: [
         { source: ["uid"], target: ["bookings", "uid"] },
         { source: ["number"], target: ["bookings", "number"] },
@@ -145,11 +183,11 @@ export function stockSummaryRules(
       id: transactionId + ":oos-to-stock-summary",
       source: "out-of-service",
       target: "stock-summaries",
-      mode: "derive",
+      mode: "fan-out",
       invariant:
         trigger +
         " re-derives stock-summaries.out_of_service[] — every non-terminal (not complete/canceled) OOS record for the product, as an interval plus its quantity/reason/status. Same interval model as bookings; an open-ended record (end: null) reduces availability in every window from its start onward.",
-      transaction: transactionId,
+      trigger: REBUILD_TRIGGER,
       fields: [
         { source: ["uid"], target: ["out_of_service", "uid"] },
         { source: ["dates", "start"], target: ["out_of_service", "start"] },
@@ -165,10 +203,10 @@ export function stockSummaryRules(
       id: transactionId + ":stock-summary-to-public",
       source: "stock-summaries",
       target: "public-stock-summaries",
-      mode: "derive",
+      mode: "fan-out",
       invariant:
         "The public twin is written in the same transaction, via toPublicStockSummary (@cfs/core/utils/availability) — the single definition of the sanitized shape. Bookings and OOS merge into one anonymous unavailable[] interval list (no uid, no booking number, no order, no OOS reason), carrying only the consuming quantity, so an outsider cannot tell 'booked' from 'in for repair' yet still derives the exact quantity_available for any window.",
-      transaction: transactionId,
+      trigger: REBUILD_TRIGGER,
       fields: [
         { source: ["quantity_held"], target: ["quantity_held"] },
         { source: ["type"], target: ["type"] },
