@@ -1,10 +1,25 @@
 name: CI
 
+# `push` is not redundant with `pull_request` here — it is the only trigger that
+# fires on this repo's ACTUAL workflow.
+#
+# Per the workspace CLAUDE.md, core is committed to directly on `beta`; a PR is
+# the exception, not the rule. So with a PR-only trigger, the normal path —
+# commit on beta, push, semantic-release publishes the next `-beta.N` to JSR —
+# ran no CI at all. The `.githooks/pre-commit` and `pre-push` hooks both run the
+# full suite, which is why this was never felt, but a `--no-verify` or a clone
+# that never ran `deno task setup` publishes a package to JSR with nothing
+# having checked it. Consumers pin that version minutes later.
 on:
   pull_request:
     branches:
       - main
       - beta
+  push:
+    branches:
+      - main
+      - beta
+  workflow_dispatch:
 
 jobs:
   ci:
