@@ -134,6 +134,7 @@ export const templateSchemaFields: Partial<
     { path: "items[] (type: rental, replacement, ...).inclusion_type", type: "default | mandatory | optional? | null" },
     { path: "items[] (type: rental, replacement, ...).zero_priced", type: "boolean? | null" },
     { path: "items[] (type: rental, replacement, ...).crms_id", type: "number? | null" },
+    { path: "items[] (type: rental, replacement, ...).coa_revenue", type: "union? | null" },
     { path: "items[] (type: destination).uid", type: "string" },
     { path: "items[] (type: destination).type", type: "destination" },
     { path: "items[] (type: destination).name", type: "string" },

@@ -4724,6 +4724,7 @@ interface OrderDocLineItemType {
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced?: boolean | null;
   crms_id?: number | null;
+  coa_revenue?: COARevenueType | null;
 }
 ```
 
@@ -12165,6 +12166,7 @@ interface OrderDocLineItemType {
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced?: boolean | null;
   crms_id?: number | null;
+  coa_revenue?: COARevenueType | null;
 }
 ```
 

@@ -10,6 +10,8 @@ import {
   type AddressType,
   checkItemContract,
   checkItemPriceFormula,
+  COARevenueEnum,
+  type COARevenueType,
   DOC_LINE_ITEM_TYPES,
   type DocLineItemTypeType,
   FirestoreTimestamp,
@@ -693,6 +695,32 @@ export interface OrderDocLineItemType {
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced?: boolean | null;
   crms_id?: number | null;
+  /**
+   * Revenue chart-of-accounts code, denormalized from the product at write time,
+   * deciding whether the line is taxable at all (`isTaxableCoa` in
+   * `@cfs/core/utils/orders`).
+   *
+   * **Absent on every line written before `10.0.0-beta.120`** — which is
+   * api-cloudrun#421 tail 3, and the reason this field exists. `isTaxableCoa`
+   * treats an absent COA as *taxable* (unknown means unknown, and the engine may
+   * only remove tax from a line it can positively identify), so while an order
+   * line carried no COA the gate was **inert for the entire order corpus**: CFS
+   * taxed delivery, labour and pass-through lines on the order while the Xero
+   * quote push (which resolves from the product) sent `TaxType: NONE` and the
+   * resulting invoice (which stores a product-resolved COA) charged nothing.
+   * Measured on prod 2026-08-03: 16 lines / 9 orders / $453.50 of tax an invoice
+   * would not carry. Order #563 and its invoice #1978 disagreed by exactly the
+   * $67.50 that invoice's own repair had already stripped.
+   *
+   * **Server-resolved, never client-supplied** — deliberately absent from the
+   * INPUT schema (`OrderItemLineInner`). api-cloudrun#409's landing fix was
+   * precisely that `coa_revenue` must be resolved from the product rather than
+   * trusted from the payload; the manager ships `items` back whole, so a
+   * client-sent value would round-trip a stale COA into the taxability decision.
+   * The input schema is non-strict, so an incoming value is stripped and the
+   * server re-derives it.
+   */
+  coa_revenue?: COARevenueType | null;
 }
 
 // Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;
@@ -747,6 +775,12 @@ const OrderDocLineItemInner = z.strictObject({
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
   crms_id: z.number().nullable().optional(),
+  // Denormalized from the product at write time — see the interface docblock for
+  // why this is on the DOC line and not the input one. `.optional()` rather than
+  // defaulted: `validateBeforeWrite` persists the RAW doc, so a `.default()`
+  // never materializes, and every line written before beta.120 is genuinely
+  // absent rather than null.
+  coa_revenue: COARevenueEnum.nullable().optional(),
 }).superRefine(checkItemContract);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
