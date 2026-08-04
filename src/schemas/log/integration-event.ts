@@ -35,6 +35,19 @@ export const INTEGRATION_EVENT_MSGS = [
   // about CFS's arithmetic. Carries `crms_id`, `line`, `rate`, `charge_total`,
   // `subtotal` and `drift_cents`. Retire with CRMS.
   "crms_discount_roundtrip_drift",
+  // A CRMS invoice line stored a `subtotal` that its own price fields cannot
+  // reproduce, and nothing recovered the missing day factor —
+  // `resolveInvoiceChargeableDays` found neither a source-order line nor a
+  // decomposition that lands on the stored money exactly. `CrmsInvoiceItem`
+  // carries no `chargeable_days` (only `CrmsOpportunityItem` does), so the
+  // invoice webhook wrote `null` beside a `charge_total`-derived subtotal with
+  // the factor baked in — 1,303 of 8,918 prod lines, and the next reprice of a
+  // non-terminal one silently drops the factor (api-cloudrun#433). This is the
+  // detector that did not exist: the corpus went unnoticed because nothing ever
+  // compared a stored subtotal against the function that claims to produce it.
+  // Carries `crms_id`, `line`, `base`, `quantity`, `subtotal` and `computed`.
+  // Retire with CRMS.
+  "crms_invoice_chargeable_days_unresolved",
   "crms_mark_paid_failed",
   "crms_product_not_found",
   "uploadcare_draft_cleanup_failed",
