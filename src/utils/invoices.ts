@@ -163,7 +163,7 @@ export function calculateInvoiceTotals(
  * @returns The derived status
  */
 export function derivePaymentStatus(
-  currentStatus: string,
+  currentStatus: InvoiceStatusType,
   amountPaid: number,
   amountDue: number,
   amountCredited = 0,

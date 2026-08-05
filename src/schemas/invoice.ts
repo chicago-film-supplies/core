@@ -44,6 +44,167 @@ import {
 export { type InvoiceStatusType } from "./common.ts";
 const InvoiceStatus: z.ZodType<InvoiceStatusType> = InvoiceStatusEnum;
 
+// ── Status contracts ────────────────────────────────────────────
+
+/**
+ * What one invoice status admits, on every axis anything in CFS asks about.
+ *
+ * Five hand-written status sets used to live in four repos, and three of them
+ * were textually identical while a fourth looked identical and was not. As
+ * columns they stop looking like duplicates of each other and start being
+ * separate answers to separate questions — which is what makes collapsing them
+ * safe where a naive merge was not.
+ */
+export interface InvoiceStatusContract {
+  /**
+   * Statuses an **operator** may move to via `PUT /invoices/{uid}`.
+   *
+   * **Not the legal transition graph**, and the distinction is load-bearing.
+   * `derivePaymentStatus` produces `issued → part_paid → paid`, and both
+   * `markInvoiceVoidedFromXero` and the CRMS void hook force `→ void` from any
+   * state; none of those appear here, and all of them are correct. Applying
+   * this column to a Xero-authoritative path would break it.
+   */
+  operator_moves: readonly InvoiceStatusType[];
+  /**
+   * Has the invoice **ever** reached Xero? `INVOICE_STATUSES \ {draft}`.
+   *
+   * `void` is a member and that is deliberate: `selectXeroInvoiceTwin` lets a
+   * void CFS invoice adopt a VOIDED Xero twin, so excluding it would strand
+   * every void invoice at `xero_id == null` and bury the exact divergence
+   * `reconcile-xero-invoice-links.ts` exists to find.
+   */
+  reached_xero: boolean;
+  /**
+   * Is the invoice **currently** live in Xero — i.e. is a Xero counterpart
+   * expected to exist and be non-VOIDED? The near-twin of `reached_xero`; the
+   * two differ only on `void`, which is the whole reason both exist.
+   */
+  live_in_xero: boolean;
+  /**
+   * Is the embedded snapshot frozen — no longer rewritten by an organization
+   * name/address cascade? Neither `reached_xero`'s nor `live_in_xero`'s
+   * complement; a third question.
+   *
+   * This column is why `"voided"` — a string that is not a member of
+   * {@link InvoiceStatusType} — silently matched nothing in three org-cascade
+   * queries and re-wrote every VOID invoice on any org edit.
+   */
+  settled: boolean;
+  /**
+   * May an operator record a further payment against it? Deliberately excludes
+   * `paid`: without that, a payment against a fully-settled invoice drives
+   * `amount_due` negative, and `derivePaymentStatus` then re-derives `paid`
+   * from it and absorbs the overpayment silently.
+   */
+  accepts_payment: boolean;
+}
+
+/**
+ * The per-status contract table.
+ *
+ * The `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces
+ * totality: a sixth status is a type error **here**, at the declaration, which
+ * forces an answer to all five questions rather than defaulting four of them.
+ * No separate parity guard — a `T extends keyof typeof TABLE` assertion beside
+ * this would read `T extends T` and could not fail.
+ *
+ * Deliberately **not** carrying an `amounts` column. Two status↔amounts rules
+ * were proposed and both were killed by paging all 962 prod invoices:
+ * `paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`
+ * fails on **75 of 98** — a bucket whose money matches Xero to the cent and
+ * whose `status` is what is stale. The arithmetic identity that did survive
+ * (`amount_paid + amount_credited + amount_due == total`, exempting `void`)
+ * ships separately as a `superRefine`, because it is the one rule that does not
+ * mention status.
+ */
+export const INVOICE_STATUS_CONTRACTS: Readonly<
+  Record<InvoiceStatusType, InvoiceStatusContract>
+> = {
+  draft: {
+    operator_moves: ["issued", "void"],
+    reached_xero: false,
+    live_in_xero: false,
+    settled: false,
+    accepts_payment: false,
+  },
+  issued: {
+    operator_moves: ["void"],
+    reached_xero: true,
+    live_in_xero: true,
+    settled: false,
+    accepts_payment: true,
+  },
+  part_paid: {
+    operator_moves: ["void"],
+    reached_xero: true,
+    live_in_xero: true,
+    settled: false,
+    accepts_payment: true,
+  },
+  paid: {
+    operator_moves: ["void"],
+    reached_xero: true,
+    live_in_xero: true,
+    settled: true,
+    accepts_payment: false,
+  },
+  void: {
+    operator_moves: [],
+    reached_xero: true,
+    live_in_xero: false,
+    settled: true,
+    accepts_payment: false,
+  },
+};
+
+/**
+ * May an operator move `from` to `to` via `PUT /invoices/{uid}`?
+ *
+ * Read this rather than the column, so the manager cannot offer a button the
+ * server will 400 — and so a status outside the vocabulary answers `false`
+ * instead of throwing on an undefined lookup.
+ */
+export function canOperatorTransition(from: string, to: string): boolean {
+  const contract = (INVOICE_STATUS_CONTRACTS as Record<string, InvoiceStatusContract | undefined>)[
+    from
+  ];
+  return contract?.operator_moves.some((s) => s === to) ?? false;
+}
+
+/** Every status whose contract answers `true` for `column`. */
+function statusesWhere(
+  column: "reached_xero" | "live_in_xero" | "settled" | "accepts_payment",
+): InvoiceStatusType[] {
+  return (Object.keys(INVOICE_STATUS_CONTRACTS) as InvoiceStatusType[])
+    .filter((s) => INVOICE_STATUS_CONTRACTS[s][column]);
+}
+
+/**
+ * Statuses whose Xero counterpart is expected to exist and be non-VOIDED.
+ *
+ * Was three textually identical copies — `lib/xeroQuoteStatus.ts`,
+ * `services/invoices.ts` and `scripts/audit-xero-quotes.ts`, the last carrying
+ * a "keep in lockstep" comment that nothing enforced.
+ */
+export const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[] = statusesWhere("live_in_xero");
+
+/**
+ * Statuses that have **ever** reached Xero. Includes `void` — see
+ * {@link InvoiceStatusContract.reached_xero}. NOT interchangeable with
+ * {@link LIVE_IN_XERO_STATUSES}, which is exactly the mistake this pair exists
+ * to prevent.
+ */
+export const REACHED_XERO_STATUSES: readonly InvoiceStatusType[] = statusesWhere("reached_xero");
+
+/** Statuses whose embedded snapshot is frozen against org-cascade rewrites. */
+export const SETTLED_STATUSES: readonly InvoiceStatusType[] = statusesWhere("settled");
+
+/** Statuses that still admit a further payment. Excludes `paid` deliberately. */
+export const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[] = statusesWhere(
+  "accepts_payment",
+);
+
 // Invoice item types are a superset of order item types — they add the "order"
 // divider. That superset had a name here (`InvoiceItemTypeType`, an alias of
 // `ITEM_TYPES`) for exactly one purpose: typing the flat input schema's

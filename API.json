@@ -8,6 +8,12 @@
       "symbols": [
         {
           "kind": "variable",
+          "name": "ACCEPTS_PAYMENT_STATUSES",
+          "declaration": "const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[];",
+          "doc": "Statuses that still admit a further payment. Excludes `paid` deliberately."
+        },
+        {
+          "kind": "variable",
           "name": "ALWAYS_ON_UTIL_NAMESPACES",
           "declaration": "const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];",
           "doc": "Utils namespaces injected for every template regardless of collection.\n\n`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every\ndocument a template renders carries money — an order, an invoice and a quote\nall need `it.money.formatCents`, so keying it to one collection would just\nmean listing it under all of them.\n\nIt also closes a gap the generated helper catalogue had already opened:\n`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so\nit has been advertising eleven `it.money.*` helpers to template authors while\nthe render path injected none of them. Documentation promising a global that\nthrows at render time is worse than no documentation.\n\n⚠️ `it.currency` (raw currency.js, see {@link TEMPLATE_LIB_GLOBALS}) stays for\nnow and is NOT superseded by this. 19 call sites in `templates/quote.eta`\nalone use `it.currency(x).format()`, and the natural replacement takes\n**cents** while template documents hold dollars — so today it would read\n`it.money.formatCents(it.money.toCents(x))` at every site, which is worse\nthan what it replaces. That trade flips when documents are cents-denominated."
@@ -1550,6 +1556,12 @@
         },
         {
           "kind": "variable",
+          "name": "INVOICE_STATUS_CONTRACTS",
+          "declaration": "const INVOICE_STATUS_CONTRACTS: Readonly<Record<InvoiceStatusType, InvoiceStatusContract>>;",
+          "doc": "The per-status contract table.\n\nThe `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces\ntotality: a sixth status is a type error **here**, at the declaration, which\nforces an answer to all five questions rather than defaulting four of them.\nNo separate parity guard — a `T extends keyof typeof TABLE` assertion beside\nthis would read `T extends T` and could not fail.\n\nDeliberately **not** carrying an `amounts` column. Two status↔amounts rules\nwere proposed and both were killed by paging all 962 prod invoices:\n`paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`\nfails on **75 of 98** — a bucket whose money matches Xero to the cent and\nwhose `status` is what is stale. The arithmetic identity that did survive\n(`amount_paid + amount_credited + amount_due == total`, exempting `void`)\nships separately as a `superRefine`, because it is the one rule that does not\nmention status."
+        },
+        {
+          "kind": "variable",
           "name": "ITEM_CONTRACTS",
           "declaration": "const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;",
           "doc": "The per-type item contract table. @see {@link ItemContract}"
@@ -1735,6 +1747,12 @@
           "doc": "Zod schema for an Invoice document."
         },
         {
+          "kind": "interface",
+          "name": "InvoiceStatusContract",
+          "declaration": "interface InvoiceStatusContract {\n  operator_moves: readonly InvoiceStatusType[];\n  reached_xero: boolean;\n  live_in_xero: boolean;\n  settled: boolean;\n  accepts_payment: boolean;\n}",
+          "doc": "What one invoice status admits, on every axis anything in CFS asks about.\n\nFive hand-written status sets used to live in four repos, and three of them\nwere textually identical while a fourth looked identical and was not. As\ncolumns they stop looking like duplicates of each other and start being\nseparate answers to separate questions — which is what makes collapsing them\nsafe where a naive merge was not."
+        },
+        {
           "kind": "variable",
           "name": "InvoiceStatusEnum",
           "declaration": "const InvoiceStatusEnum: z.ZodType<InvoiceStatusType>;",
@@ -1805,6 +1823,12 @@
           "name": "ItemUid",
           "declaration": "const ItemUid: z.ZodType<string>;",
           "doc": "Polymorphic `items[].uid` + `path[]` segment in order/invoice/fulfillment\ndocuments: a product's Firestore id, a divider UUID, or a custom-product id."
+        },
+        {
+          "kind": "variable",
+          "name": "LIVE_IN_XERO_STATUSES",
+          "declaration": "const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[];",
+          "doc": "Statuses whose Xero counterpart is expected to exist and be non-VOIDED.\n\nWas three textually identical copies — `lib/xeroQuoteStatus.ts`,\n`services/invoices.ts` and `scripts/audit-xero-quotes.ts`, the last carrying\na \"keep in lockstep\" comment that nothing enforced."
         },
         {
           "kind": "interface",
@@ -2773,6 +2797,12 @@
           "doc": "Zod schema for Quote."
         },
         {
+          "kind": "variable",
+          "name": "REACHED_XERO_STATUSES",
+          "declaration": "const REACHED_XERO_STATUSES: readonly InvoiceStatusType[];",
+          "doc": "Statuses that have **ever** reached Xero. Includes `void` — see\n{@link InvoiceStatusContract.reached_xero}. NOT interchangeable with\n{@link LIVE_IN_XERO_STATUSES}, which is exactly the mistake this pair exists\nto prevent."
+        },
+        {
           "kind": "interface",
           "name": "RateLimit",
           "declaration": "interface RateLimit {\n  attempt_count: number;\n  first_attempt_at: number;\n  expiresAt: FirestoreTimestampType;\n}",
@@ -2981,6 +3011,12 @@
           "name": "RouteMethod",
           "declaration": "type RouteMethod = \"get\" | \"post\" | \"put\" | \"delete\" | \"patch\";",
           "doc": "HTTP methods accepted by the runtime route manifest."
+        },
+        {
+          "kind": "variable",
+          "name": "SETTLED_STATUSES",
+          "declaration": "const SETTLED_STATUSES: readonly InvoiceStatusType[];",
+          "doc": "Statuses whose embedded snapshot is frozen against org-cascade rewrites."
         },
         {
           "kind": "variable",
@@ -3976,6 +4012,14 @@
             }
           ],
           "returnsTag": "Deduped namespace list, always-on first, in collection order."
+        },
+        {
+          "kind": "function",
+          "name": "canOperatorTransition",
+          "signature": "canOperatorTransition(from: string, to: string): boolean",
+          "doc": "May an operator move `from` to `to` via `PUT /invoices/{uid}`?\n\nRead this rather than the column, so the manager cannot offer a button the\nserver will 400 — and so a status outside the vocabulary answers `false`\ninstead of throwing on an undefined lookup.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "variable",
@@ -5949,6 +5993,12 @@
       "symbols": [
         {
           "kind": "variable",
+          "name": "ACCEPTS_PAYMENT_STATUSES",
+          "declaration": "const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[];",
+          "doc": "Statuses that still admit a further payment. Excludes `paid` deliberately."
+        },
+        {
+          "kind": "variable",
           "name": "CreateInvoiceInput",
           "declaration": "const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType>;",
           "doc": "Input schema for creating an invoice."
@@ -5958,6 +6008,12 @@
           "name": "CreateInvoiceInputType",
           "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
+        },
+        {
+          "kind": "variable",
+          "name": "INVOICE_STATUS_CONTRACTS",
+          "declaration": "const INVOICE_STATUS_CONTRACTS: Readonly<Record<InvoiceStatusType, InvoiceStatusContract>>;",
+          "doc": "The per-status contract table.\n\nThe `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces\ntotality: a sixth status is a type error **here**, at the declaration, which\nforces an answer to all five questions rather than defaulting four of them.\nNo separate parity guard — a `T extends keyof typeof TABLE` assertion beside\nthis would read `T extends T` and could not fail.\n\nDeliberately **not** carrying an `amounts` column. Two status↔amounts rules\nwere proposed and both were killed by paging all 962 prod invoices:\n`paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`\nfails on **75 of 98** — a bucket whose money matches Xero to the cent and\nwhose `status` is what is stale. The arithmetic identity that did survive\n(`amount_paid + amount_credited + amount_due == total`, exempting `void`)\nships separately as a `superRefine`, because it is the one rule that does not\nmention status."
         },
         {
           "kind": "interface",
@@ -6092,10 +6148,34 @@
           "doc": "Zod schema for an Invoice document."
         },
         {
+          "kind": "interface",
+          "name": "InvoiceStatusContract",
+          "declaration": "interface InvoiceStatusContract {\n  operator_moves: readonly InvoiceStatusType[];\n  reached_xero: boolean;\n  live_in_xero: boolean;\n  settled: boolean;\n  accepts_payment: boolean;\n}",
+          "doc": "What one invoice status admits, on every axis anything in CFS asks about.\n\nFive hand-written status sets used to live in four repos, and three of them\nwere textually identical while a fourth looked identical and was not. As\ncolumns they stop looking like duplicates of each other and start being\nseparate answers to separate questions — which is what makes collapsing them\nsafe where a naive merge was not."
+        },
+        {
           "kind": "typeAlias",
           "name": "InvoiceStatusType",
           "declaration": "type InvoiceStatusType = indexedAccess;",
           "doc": "Possible invoice statuses."
+        },
+        {
+          "kind": "variable",
+          "name": "LIVE_IN_XERO_STATUSES",
+          "declaration": "const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[];",
+          "doc": "Statuses whose Xero counterpart is expected to exist and be non-VOIDED.\n\nWas three textually identical copies — `lib/xeroQuoteStatus.ts`,\n`services/invoices.ts` and `scripts/audit-xero-quotes.ts`, the last carrying\na \"keep in lockstep\" comment that nothing enforced."
+        },
+        {
+          "kind": "variable",
+          "name": "REACHED_XERO_STATUSES",
+          "declaration": "const REACHED_XERO_STATUSES: readonly InvoiceStatusType[];",
+          "doc": "Statuses that have **ever** reached Xero. Includes `void` — see\n{@link InvoiceStatusContract.reached_xero}. NOT interchangeable with\n{@link LIVE_IN_XERO_STATUSES}, which is exactly the mistake this pair exists\nto prevent."
+        },
+        {
+          "kind": "variable",
+          "name": "SETTLED_STATUSES",
+          "declaration": "const SETTLED_STATUSES: readonly InvoiceStatusType[];",
+          "doc": "Statuses whose embedded snapshot is frozen against org-cascade rewrites."
         },
         {
           "kind": "variable",
@@ -6108,6 +6188,14 @@
           "name": "UpdateInvoiceInputType",
           "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
+        },
+        {
+          "kind": "function",
+          "name": "canOperatorTransition",
+          "signature": "canOperatorTransition(from: string, to: string): boolean",
+          "doc": "May an operator move `from` to `to` via `PUT /invoices/{uid}`?\n\nRead this rather than the column, so the manager cannot offer a button the\nserver will 400 — and so a status outside the vocabulary answers `false`\ninstead of throwing on an undefined lookup.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -9893,7 +9981,7 @@
         {
           "kind": "function",
           "name": "derivePaymentStatus",
-          "signature": "derivePaymentStatus(currentStatus: string, amountPaid: number, amountDue: number, _: unknown): InvoiceStatusType",
+          "signature": "derivePaymentStatus(currentStatus: InvoiceStatusType, amountPaid: number, amountDue: number, _: unknown): InvoiceStatusType",
           "doc": "Derive invoice status from settlement amounts.\nPure function — does not mutate the invoice.\n\n**No new status member is needed for a credited invoice.** `paid` already\nmeans `amount_due === 0`, not \"cash received\" — which is exactly what Xero\nsays: #1751 and #1322 are both PAID there with `AmountPaid: 0`.",
           "paramTags": [
             {

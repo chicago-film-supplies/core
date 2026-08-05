@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { CreateInvoiceInput, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
+import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
+import { derivePaymentStatus } from "../src/utils/invoices.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const invoiceBase = getInitialValues(InvoiceSchema) as Record<string, unknown>;
@@ -635,4 +636,115 @@ Deno.test("payments is REJECTED now — the strict object is what enforces the d
     InvoiceSchema.safeParse(withTotals({ total: 500, amount_paid: 500, amount_due: 0 })).success,
     true,
   );
+});
+
+// ── INVOICE_STATUS_CONTRACTS ────────────────────────────────────
+//
+// Five hand-written status sets across four repos collapse onto this table's
+// columns. The tests below assert what the `Readonly<Record<…>>` annotation
+// cannot: the annotation forces every status to answer every column, but it
+// says nothing about whether the ANSWERS are coherent.
+
+Deno.test("every operator transition table row is transcribed, not imported", () => {
+  // Deliberately a hand-written second statement of the same facts. Importing
+  // the table and deriving the expectation from it would make this test agree
+  // with the table wherever the table moved — the fixed-point trap this
+  // campaign exists to remove. It is a golden: any edit here must be a
+  // deliberate one, made in two places.
+  const expected: Record<string, string[]> = {
+    draft: ["issued", "void"],
+    issued: ["void"],
+    part_paid: ["void"],
+    paid: ["void"],
+    void: [], // terminal
+  };
+  for (const [from, tos] of Object.entries(expected)) {
+    assertEquals(
+      [...INVOICE_STATUS_CONTRACTS[from as InvoiceStatusType].operator_moves],
+      tos,
+      `operator_moves drifted for "${from}"`,
+    );
+  }
+  assertEquals(Object.keys(INVOICE_STATUS_CONTRACTS).sort(), Object.keys(expected).sort());
+});
+
+Deno.test("live in Xero implies reached Xero — and the two differ on exactly `void`", () => {
+  // The pair that looked like duplicates for as long as they were separate
+  // constants. If they ever coincide, one of them has lost its reason to exist
+  // and the collapse that was refused should be revisited deliberately.
+  const live: string[] = [];
+  const reached: string[] = [];
+  for (const [status, c] of Object.entries(INVOICE_STATUS_CONTRACTS)) {
+    if (c.live_in_xero) live.push(status);
+    if (c.reached_xero) reached.push(status);
+    assertEquals(!c.live_in_xero || c.reached_xero, true, `${status}: live but never reached`);
+  }
+  assertEquals(reached.filter((s) => !live.includes(s)), ["void"]);
+});
+
+Deno.test("a settled invoice accepts no further payment", () => {
+  // `paid` and `void` are both frozen; the failure this forbids is a payment
+  // recorded against a fully-settled invoice, which drives `amount_due`
+  // negative and lets `derivePaymentStatus` re-derive `paid` from it — the
+  // overpayment absorbed silently.
+  for (const [status, c] of Object.entries(INVOICE_STATUS_CONTRACTS)) {
+    assertEquals(!c.settled || !c.accepts_payment, true, `${status}: settled and still paying`);
+  }
+  // …and `paid` is settled while `issued`/`part_paid` are not, so the
+  // implication above is not vacuously satisfied by an all-false column.
+  assertEquals(INVOICE_STATUS_CONTRACTS.paid.settled, true);
+  assertEquals(INVOICE_STATUS_CONTRACTS.issued.settled, false);
+  assertEquals(INVOICE_STATUS_CONTRACTS.part_paid.accepts_payment, true);
+});
+
+Deno.test("`void` is terminal and nothing reaches it from itself", () => {
+  assertEquals([...INVOICE_STATUS_CONTRACTS.void.operator_moves], []);
+  assertEquals(canOperatorTransition("void", "issued"), false);
+  assertEquals(canOperatorTransition("void", "draft"), false);
+  assertEquals(canOperatorTransition("void", "paid"), false);
+  assertEquals(canOperatorTransition("void", "part_paid"), false);
+  assertEquals(canOperatorTransition("void", "void"), false);
+});
+
+Deno.test("canOperatorTransition answers false for a status outside the vocabulary", () => {
+  // The `"voided"` class: a string that is not a member of the enum must not
+  // throw on an undefined lookup, and must not read as permission either.
+  assertEquals(canOperatorTransition("voided", "void"), false);
+  assertEquals(canOperatorTransition("draft", "voided"), false);
+  assertEquals(canOperatorTransition("", ""), false);
+  // Non-vacuity: the function does say yes to something.
+  assertEquals(canOperatorTransition("draft", "issued"), true);
+});
+
+Deno.test("each derived status list matches its column and none is empty", () => {
+  const from = (col: "reached_xero" | "live_in_xero" | "settled" | "accepts_payment") =>
+    (Object.keys(INVOICE_STATUS_CONTRACTS) as InvoiceStatusType[])
+      .filter((s) => INVOICE_STATUS_CONTRACTS[s][col]).sort();
+  assertEquals([...REACHED_XERO_STATUSES].sort(), from("reached_xero"));
+  assertEquals([...LIVE_IN_XERO_STATUSES].sort(), from("live_in_xero"));
+  assertEquals([...SETTLED_STATUSES].sort(), from("settled"));
+  assertEquals([...ACCEPTS_PAYMENT_STATUSES].sort(), from("accepts_payment"));
+  // An empty list would silently disable whatever query consumes it — a
+  // `not-in []` filter matches everything, which is how the `"voided"` defect
+  // behaved. Pin the memberships that queries actually depend on.
+  assertEquals([...SETTLED_STATUSES].sort(), ["paid", "void"]);
+  assertEquals([...LIVE_IN_XERO_STATUSES].sort(), ["issued", "paid", "part_paid"]);
+  assertEquals([...ACCEPTS_PAYMENT_STATUSES].sort(), ["issued", "part_paid"]);
+  assertEquals([...REACHED_XERO_STATUSES].sort(), ["issued", "paid", "part_paid", "void"]);
+});
+
+Deno.test("derivePaymentStatus never leaves a terminal status, and never invents one", () => {
+  // The status writer that legitimately moves OUTSIDE `operator_moves` — which
+  // is why the column is named for the operator and not for legality. Pinned
+  // here so a future reader who applies `operator_moves` to this path finds a
+  // red test rather than a broken Xero void.
+  assertEquals(derivePaymentStatus("draft", 500, 0), "draft");
+  assertEquals(derivePaymentStatus("void", 0, 500), "void");
+  assertEquals(derivePaymentStatus("issued", 0, 500), "issued");
+  assertEquals(derivePaymentStatus("issued", 100, 400), "part_paid");
+  assertEquals(derivePaymentStatus("issued", 500, 0), "paid");
+  // `issued → part_paid` and `issued → paid` are BOTH absent from
+  // `operator_moves.issued`, and both are correct here.
+  assertEquals(INVOICE_STATUS_CONTRACTS.issued.operator_moves.includes("part_paid"), false);
+  assertEquals(INVOICE_STATUS_CONTRACTS.issued.operator_moves.includes("paid"), false);
 });

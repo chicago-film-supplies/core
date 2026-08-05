@@ -4,6 +4,14 @@ _Generated from source by `scripts/generate-api-docs.ts` — do not edit by hand
 
 ## `@cfs/core/schemas`
 
+### `ACCEPTS_PAYMENT_STATUSES`
+
+Statuses that still admit a further payment. Excludes `paid` deliberately.
+
+```ts
+const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[];
+```
+
 ### `ALWAYS_ON_UTIL_NAMESPACES`
 
 Utils namespaces injected for every template regardless of collection.
@@ -3050,6 +3058,29 @@ interface HorizonMaterializedData {
 }
 ```
 
+### `INVOICE_STATUS_CONTRACTS`
+
+The per-status contract table.
+
+The `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces
+totality: a sixth status is a type error **here**, at the declaration, which
+forces an answer to all five questions rather than defaulting four of them.
+No separate parity guard — a `T extends keyof typeof TABLE` assertion beside
+this would read `T extends T` and could not fail.
+
+Deliberately **not** carrying an `amounts` column. Two status↔amounts rules
+were proposed and both were killed by paging all 962 prod invoices:
+`paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`
+fails on **75 of 98** — a bucket whose money matches Xero to the cent and
+whose `status` is what is stale. The arithmetic identity that did survive
+(`amount_paid + amount_credited + amount_due == total`, exempting `void`)
+ships separately as a `superRefine`, because it is the one rule that does not
+mention status.
+
+```ts
+const INVOICE_STATUS_CONTRACTS: Readonly<Record<InvoiceStatusType, InvoiceStatusContract>>;
+```
+
 ### `ITEM_CONTRACTS`
 
 The per-type item contract table. @see {@link ItemContract}
@@ -3445,6 +3476,26 @@ Zod schema for an Invoice document.
 const InvoiceSchema: z.ZodType<Invoice>;
 ```
 
+### `InvoiceStatusContract`
+
+What one invoice status admits, on every axis anything in CFS asks about.
+
+Five hand-written status sets used to live in four repos, and three of them
+were textually identical while a fourth looked identical and was not. As
+columns they stop looking like duplicates of each other and start being
+separate answers to separate questions — which is what makes collapsing them
+safe where a naive merge was not.
+
+```ts
+interface InvoiceStatusContract {
+  operator_moves: readonly InvoiceStatusType[];
+  reached_xero: boolean;
+  live_in_xero: boolean;
+  settled: boolean;
+  accepts_payment: boolean;
+}
+```
+
 ### `InvoiceStatusEnum`
 
 Zod schema for InvoiceStatusType.
@@ -3577,6 +3628,18 @@ documents: a product's Firestore id, a divider UUID, or a custom-product id.
 
 ```ts
 const ItemUid: z.ZodType<string>;
+```
+
+### `LIVE_IN_XERO_STATUSES`
+
+Statuses whose Xero counterpart is expected to exist and be non-VOIDED.
+
+Was three textually identical copies — `lib/xeroQuoteStatus.ts`,
+`services/invoices.ts` and `scripts/audit-xero-quotes.ts`, the last carrying
+a "keep in lockstep" comment that nothing enforced.
+
+```ts
+const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[];
 ```
 
 ### `LeafPath`
@@ -5574,6 +5637,17 @@ Zod schema for Quote.
 const QuoteSchema: z.ZodType<Quote>;
 ```
 
+### `REACHED_XERO_STATUSES`
+
+Statuses that have **ever** reached Xero. Includes `void` — see
+{@link InvoiceStatusContract.reached_xero}. NOT interchangeable with
+{@link LIVE_IN_XERO_STATUSES}, which is exactly the mistake this pair exists
+to prevent.
+
+```ts
+const REACHED_XERO_STATUSES: readonly InvoiceStatusType[];
+```
+
 ### `RateLimit`
 
 ```ts
@@ -5937,6 +6011,14 @@ HTTP methods accepted by the runtime route manifest.
 
 ```ts
 type RouteMethod = "get" | "post" | "put" | "delete" | "patch";
+```
+
+### `SETTLED_STATUSES`
+
+Statuses whose embedded snapshot is frozen against org-cascade rewrites.
+
+```ts
+const SETTLED_STATUSES: readonly InvoiceStatusType[];
 ```
 
 ### `SETTLEMENT_CONTRACTS`
@@ -7916,6 +7998,14 @@ invoice-shaped data themselves.
 - `targets` — The template's target collections (single-element today).
 
 **Returns** — Deduped namespace list, always-on first, in collection order.
+
+### `canOperatorTransition(from: string, to: string): boolean`
+
+May an operator move `from` to `to` via `PUT /invoices/{uid}`?
+
+Read this rather than the column, so the manager cannot offer a button the
+server will 400 — and so a status outside the vocabulary answers `false`
+instead of throwing on an undefined lookup.
 
 ### `cardRules`
 
@@ -10978,6 +11068,14 @@ const InviteSchema: z.ZodType<Invite>;
 
 ## `@cfs/core/schemas/invoice`
 
+### `ACCEPTS_PAYMENT_STATUSES`
+
+Statuses that still admit a further payment. Excludes `paid` deliberately.
+
+```ts
+const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[];
+```
+
 ### `CreateInvoiceInput`
 
 Input schema for creating an invoice.
@@ -11005,6 +11103,29 @@ interface CreateInvoiceInputType {
   external_notes?: string;
   internal_notes?: string;
 }
+```
+
+### `INVOICE_STATUS_CONTRACTS`
+
+The per-status contract table.
+
+The `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces
+totality: a sixth status is a type error **here**, at the declaration, which
+forces an answer to all five questions rather than defaulting four of them.
+No separate parity guard — a `T extends keyof typeof TABLE` assertion beside
+this would read `T extends T` and could not fail.
+
+Deliberately **not** carrying an `amounts` column. Two status↔amounts rules
+were proposed and both were killed by paging all 962 prod invoices:
+`paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`
+fails on **75 of 98** — a bucket whose money matches Xero to the cent and
+whose `status` is what is stale. The arithmetic identity that did survive
+(`amount_paid + amount_credited + amount_due == total`, exempting `void`)
+ships separately as a `superRefine`, because it is the one rule that does not
+mention status.
+
+```ts
+const INVOICE_STATUS_CONTRACTS: Readonly<Record<InvoiceStatusType, InvoiceStatusContract>>;
 ```
 
 ### `Invoice`
@@ -11316,12 +11437,63 @@ Zod schema for an Invoice document.
 const InvoiceSchema: z.ZodType<Invoice>;
 ```
 
+### `InvoiceStatusContract`
+
+What one invoice status admits, on every axis anything in CFS asks about.
+
+Five hand-written status sets used to live in four repos, and three of them
+were textually identical while a fourth looked identical and was not. As
+columns they stop looking like duplicates of each other and start being
+separate answers to separate questions — which is what makes collapsing them
+safe where a naive merge was not.
+
+```ts
+interface InvoiceStatusContract {
+  operator_moves: readonly InvoiceStatusType[];
+  reached_xero: boolean;
+  live_in_xero: boolean;
+  settled: boolean;
+  accepts_payment: boolean;
+}
+```
+
 ### `InvoiceStatusType`
 
 Possible invoice statuses.
 
 ```ts
 type InvoiceStatusType = indexedAccess;
+```
+
+### `LIVE_IN_XERO_STATUSES`
+
+Statuses whose Xero counterpart is expected to exist and be non-VOIDED.
+
+Was three textually identical copies — `lib/xeroQuoteStatus.ts`,
+`services/invoices.ts` and `scripts/audit-xero-quotes.ts`, the last carrying
+a "keep in lockstep" comment that nothing enforced.
+
+```ts
+const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[];
+```
+
+### `REACHED_XERO_STATUSES`
+
+Statuses that have **ever** reached Xero. Includes `void` — see
+{@link InvoiceStatusContract.reached_xero}. NOT interchangeable with
+{@link LIVE_IN_XERO_STATUSES}, which is exactly the mistake this pair exists
+to prevent.
+
+```ts
+const REACHED_XERO_STATUSES: readonly InvoiceStatusType[];
+```
+
+### `SETTLED_STATUSES`
+
+Statuses whose embedded snapshot is frozen against org-cascade rewrites.
+
+```ts
+const SETTLED_STATUSES: readonly InvoiceStatusType[];
 ```
 
 ### `UpdateInvoiceInput`
@@ -11350,6 +11522,14 @@ interface UpdateInvoiceInputType {
   version: number;
 }
 ```
+
+### `canOperatorTransition(from: string, to: string): boolean`
+
+May an operator move `from` to `to` via `PUT /invoices/{uid}`?
+
+Read this rather than the column, so the manager cannot offer a button the
+server will 400 — and so a status outside the vocabulary answers `false`
+instead of throwing on an undefined lookup.
 
 ### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem`
 
@@ -19136,7 +19316,7 @@ its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
 and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
 every returned `path` is non-empty and ends in the item's own uid.
 
-### `derivePaymentStatus(currentStatus: string, amountPaid: number, amountDue: number, _: unknown): InvoiceStatusType`
+### `derivePaymentStatus(currentStatus: InvoiceStatusType, amountPaid: number, amountDue: number, _: unknown): InvoiceStatusType`
 
 Derive invoice status from settlement amounts.
 Pure function — does not mutate the invoice.
