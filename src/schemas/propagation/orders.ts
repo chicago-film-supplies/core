@@ -543,6 +543,13 @@ export const processOrderDocsRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "After the packing-list PDF is uploaded to Uploadcare, the resulting uuid is written into the `attachments[]` of every order-derived card (sources contains {collection:'orders', uid: order.uid}). One attachment per card, identified by `type === 'packing'`. Replaces in place on each regeneration; locked from picker writes (server-internal write bypasses the `attachments` lock).",
     transaction: "process-order-docs",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-card-attachments.ts",
+      clause:
+        "all four clauses — the fan-out reaching every in-scope card, the one-per-card cardinality, the mime_type/filename/locked conformance, and the reverse orphan check. `size_bytes` is excluded on purpose: the writer hard-codes 0, so asserting it would compare the implementation with itself",
+      gates: true,
+    }],
     fields: [
       { source: ["uuid"], target: ["attachments", "uid"] },
       { source: ["mime"], target: ["attachments", "mime_type"] },
