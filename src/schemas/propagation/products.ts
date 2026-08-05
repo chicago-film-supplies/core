@@ -3,8 +3,155 @@
  *
  * Traced from: api-cloudrun/src/services/products.ts
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
 import { seedStockSummaryRules } from "./stock-summaries.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+//
+// `audit-component-graph.ts` names these four rules in its own header and says
+// which clause of each it can decide, so the pointers below are its statement
+// rather than a re-derivation of it.
+
+/** Properties 1 + 2 — the two readings of the same relationship. */
+const COMPONENT_RECIPROCITY: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-component-graph.ts",
+  clause:
+    "properties 1 + 2 — `P.components ∋ C ⟺ C.component_of ∋ P`, and the flat `query_by_components` / `query_by_component_of` arrays equalling their entry sets. The two are deliberately separate: they are the same relationship read as entries and as the uid array the cascade's own fan-out query uses, so neither can certify the other. Exit 0 clean / 1 defects / 2 INCONCLUSIVE.",
+  gates: true,
+};
+
+/** Properties 3 + 4 + 5 — the unconditional half of the catalog cascade. */
+const COMPONENT_CATALOG_CASCADE: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-component-graph.ts",
+  clause:
+    "properties 3 + 4 + 5 — every entry's catalog fields (`name`, `active`, `type`, `stock_method`, `crms_id`) equal `products/{uid}`'s, `alternates[].name` likewise, and a component `path` anchors at `path[0]` with every segment resolving. The path property is asserted DIRECTLY rather than by recomputing and comparing — the fixed-point hole that let `audit-item-paths.ts` certify 79 wrong items.",
+  gates: true,
+};
+
+/**
+ * ⚠️ The BUSINESS-field half of `component-entry-to-parents` is undecidable
+ * from a snapshot, and the audit says so rather than guessing. A parent that
+ * deliberately prices its bundled component differently is indistinguishable, in
+ * stored data, from one whose cascade was missed — both read as "parent value ≠
+ * component's own value". Separating them needs the pre-update value, which
+ * nothing retains. So the audit reports those divergences as INFORMATIONAL and
+ * never fails on them, and this pointer claims only the catalog clause.
+ */
+const COMPONENT_ENTRY_CATALOG_ONLY: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-component-graph.ts",
+  clause:
+    "the CATALOG clause only. The override-aware business fields (`price`, `quantity`, `inclusion_type`, `zero_priced`, `description`) are reported INFORMATIONAL and never fail the run — no snapshot property separates a deliberate override from a missed cascade, and asserting equality would report every legitimate override as a defect (`audit-booking-prices.ts` is the cautionary case, measuring its own claim violated ~38% of the time).",
+  gates: true,
+};
+
+const COMPONENT_RECIPROCITY_TESTED: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts:556",
+  clause:
+    "the writer path — adding and removing components maintains `component_of` back-refs on the affected products, including the webshop mirror. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+/**
+ * ⚠️ COUNT ONLY. `audit-denorm-counts.ts` compares `tag.count` to
+ * `tag.products.length` — a denorm against its own sibling array. **It never
+ * reads `products`**, so a tag whose `products[]` names a product that no
+ * longer references it passes cleanly. The membership half is the pointer
+ * below, and that one cannot fail.
+ */
+const DENORM_COUNT: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-denorm-counts.ts",
+  clause:
+    "the `count display` half ONLY — stored `count` equals the length of the doc's own membership array. It reads neither `products` nor any product's tag list, so it says nothing about whether the membership itself is right.",
+  gates: true,
+};
+
+/**
+ * ⚠️ NOT A GATE. `audit-data-integrity.ts` really does check membership in both
+ * directions (its sections 2, 4 and 5: tracking-category→product stale entries,
+ * product→tag orphan refs, tag→product stale entries) — and it ends on a bare
+ * `Deno.exit()`, which is exit 0 unconditionally. It reports; it cannot fail.
+ */
+const DENORM_MEMBERSHIP: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-data-integrity.ts:104",
+  clause:
+    "the `track which products reference them` half — orphan and stale entries in both directions. But the script closes with a bare `Deno.exit()`, so it ALWAYS exits 0: read its output, never its status.",
+  gates: false,
+};
+
+/**
+ * The Xero-membership half is the one that fails silently: Xero accepts a line
+ * whose `TrackingOptionID` is unknown, returns 200, and DISCARDS the element, so
+ * the line reports as untracked revenue with nothing recording it. Shape
+ * validation cannot see that — a dead uuid is a well-formed uuid — which is why
+ * this audit checks MEMBERSHIP against the live tenant.
+ */
+const XERO_TRACKING_MEMBERSHIP: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-xero-tracking-options.ts",
+  clause:
+    "six independent assertions over the registration — `option_dead` (not a live Xero option), `option_null` (active product with none), `denorm_stale` (option ≠ its own category's), `orphan_option` (no category link, so the true value is unrecoverable), `category_option_dead`, and a three-way `count_drift` (`count` vs `products{}` size vs the real back-refs). Exit 0 / 1 / 2 INCONCLUSIVE — a quota-refused run cannot be mistaken for a passing one.",
+  gates: true,
+};
+
+/** The replacement-registration clause, asserted where it was broken. */
+const REPLACEMENT_REGISTRATION: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/products/products.test.ts:179",
+  clause:
+    "the auto-minted-replacement clause specifically — the replacement doc carries the SAME `uid_tracking_category`, `tracking_category_name` and `xero_tracking_option_id` as the Replacements category, is present in that category's `products{}` under its own uid and name, and is counted. It also asserts NEGATIVELY against the hardcoded dead option uuid that produced the 8 broken prod replacements.",
+  gates: true,
+};
+
+const TAG_CASCADE_TESTED: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts:99",
+  clause:
+    "the writer path — a tag-list change `[T1,T2] → [T2,T3]` updates the tag documents, their counts, and the webshop mirror in one write",
+  gates: true,
+};
+
+const TRACKING_CATEGORY_MOVE_TESTED: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts:206",
+  clause:
+    "all three arms of the reverse denorm — a category move rewrites BOTH `tracking_category_name` and `xero_tracking_option_id` (not just the Xero option), a `null` clear performs the two different operations the nullable/optional split requires, and a product missing its registration self-heals on the next name write",
+  gates: true,
+};
+
+const SUMMARY_BICONDITIONAL_TESTED: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts:360",
+  clause:
+    "both branches, in both directions — `bulk→none` deletes the ledger AND the summaries, `none→bulk` creates a ledger on a rental and nothing on a non-stock type, `surcharge→rental` at `stock_method:'none'` is a 200 rather than a 500, and `rental→sale` carrying `stock_method:'none'` drops the stale ledger",
+  gates: true,
+};
+
+const WEBSHOP_MIRROR_TESTED: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/products/products.test.ts:791",
+  clause:
+    "the twin's lifecycle and one field — `webshop.available` true creates the mirror, false deletes it, and a description edit reaches it; a name change reaches the mirrors of RELATED products too (updateProductPropagation.test.ts:670). Which fields are public-safe is the schema's business, not this test's.",
+  gates: true,
+};
+
+/**
+ * The public-safe SUBSET is a schema fact: `WebshopProductSchema` is a
+ * strictObject, so a field it does not name cannot be written to the twin at
+ * all.
+ */
+const WEBSHOP_SHAPE_IS_THE_SUBSET: EnforcementRef = {
+  kind: "construction",
+  ref: "core/src/schemas/webshop-product.ts:114",
+  clause:
+    "the `public-safe subset` half — the strictObject names the publishable fields, so anything outside it is a rejected write rather than a leak",
+  gates: true,
+};
 
 // ── create-product ───────────────────────────────────────────────
 
@@ -15,6 +162,7 @@ export const createProductRules: CollectionRule[] = [
     target: "tags",
     mode: "co-write",
     invariant: "Tags track which products reference them for reverse lookup and count display",
+    enforced_by: [DENORM_COUNT, DENORM_MEMBERSHIP],
     transaction: "create-product",
     fields: [
       { source: ["uid"], target: ["products", "uid"] },
@@ -29,6 +177,7 @@ export const createProductRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "Tracking categories track which products are assigned for Xero reporting. The registration covers the auto-minted replacement product too: a rental product mints `Replacement: {name}` in the same transaction, and that doc gets the SAME three tracking fields — so it must be registered in `products{}` and counted alongside its parent. For as long as it wasn't, `createReplacementDoc` hardcoded one dead option uuid and omitted the category link entirely, so every minted replacement was born with an id resolving to nothing in Xero (8 in prod) and the Replacements category's `count` under-reported by the same number.",
+    enforced_by: [REPLACEMENT_REGISTRATION, XERO_TRACKING_MEMBERSHIP, DENORM_COUNT],
     transaction: "create-product",
     fields: [
       { source: ["uid"], target: ["products", "uid"] },
@@ -47,6 +196,7 @@ export const createProductRules: CollectionRule[] = [
     target: "products",
     mode: "co-write",
     invariant: "Component products maintain a full back-reference entry in their component_of array and query_by_component_of for lookups",
+    enforced_by: [COMPONENT_RECIPROCITY, COMPONENT_RECIPROCITY_TESTED],
     transaction: "create-product",
     fields: [
       { source: ["uid", "name", "type", "stock_method", "price"], target: ["component_of"], transform: "adds full ProductComponent entry to component_of array with path" },
@@ -103,6 +253,7 @@ export const createProductRules: CollectionRule[] = [
     target: "webshop-products",
     mode: "co-write",
     invariant: "Webshop products are a public-safe subset of the product catalog for the online store",
+    enforced_by: [WEBSHOP_SHAPE_IS_THE_SUBSET, WEBSHOP_MIRROR_TESTED],
     transaction: "create-product",
     fields: [
       { source: ["uid"], target: ["uid"] },
@@ -150,6 +301,7 @@ export const updateProductRules: CollectionRule[] = [
     target: "products",
     mode: "co-write",
     invariant: "Product catalog field changes (name, active, type, stock_method, crms_id) cascade unconditionally to matching entries in other products' components/component_of arrays, looked up via query_by_components array-contains",
+    enforced_by: [COMPONENT_CATALOG_CASCADE],
     transaction: "update-product",
     fields: [
       { source: ["name"], target: ["component_of", "name"], transform: "updates name in matching entries of parent products' component_of array" },
@@ -171,6 +323,7 @@ export const updateProductRules: CollectionRule[] = [
     target: "products",
     mode: "co-write",
     invariant: "When a product's direct components are added or removed, component_of and query_by_component_of are maintained on affected component products",
+    enforced_by: [COMPONENT_RECIPROCITY, COMPONENT_RECIPROCITY_TESTED],
     transaction: "update-product",
     fields: [
       { source: [], target: ["component_of"], transform: "components removed → remove parent entry from component's component_of array" },
@@ -184,6 +337,7 @@ export const updateProductRules: CollectionRule[] = [
     target: "products",
     mode: "co-write",
     invariant: "When a product modifies a component entry, parent products (from component_of) have their matching entries updated — catalog fields always; business fields (price, qty, inclusion_type, zero_priced, description) only if parent value matches source's pre-update value (override detection via field-level diff)",
+    enforced_by: [COMPONENT_ENTRY_CATALOG_ONLY],
     transaction: "update-product",
     fields: [
       { source: ["components", "name"], target: ["components", "name"], transform: "catalog field — always update" },
@@ -258,6 +412,7 @@ export const updateProductRules: CollectionRule[] = [
     target: "webshop-products",
     mode: "co-write",
     invariant: "All public-facing product fields propagate to the webshop on every update",
+    enforced_by: [WEBSHOP_SHAPE_IS_THE_SUBSET, WEBSHOP_MIRROR_TESTED],
     transaction: "update-product",
     fields: [
       { source: ["name"], target: ["name"] },
@@ -279,6 +434,7 @@ export const updateProductRules: CollectionRule[] = [
     target: "tags",
     mode: "co-write",
     invariant: "When a product's tag list changes, old tags lose the product ref and new tags gain it",
+    enforced_by: [TAG_CASCADE_TESTED, DENORM_COUNT, DENORM_MEMBERSHIP],
     transaction: "update-product",
     fields: [
       { source: [], target: ["products"], transform: "tags removed → remove product ref, decrement count" },
@@ -292,6 +448,7 @@ export const updateProductRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "When a product's tracking category changes, old category loses the ref and new one gains it — AND the product's two denorms of that category (`tracking_category_name`, `xero_tracking_option_id`) are rewritten from the target doc in the same transaction. The reverse denorm is the half that was missing: for as long as it was absent a category move left the old name and the old Xero option id on the product, and the stale option is what ships to Xero on the next push. Clearing the category (`uid_tracking_category: null`) sets `xero_tracking_option_id: null` and unsets `tracking_category_name` — nullable vs optional differ in the storage schema, so the clear path is two different operations, not one.",
+    enforced_by: [TRACKING_CATEGORY_MOVE_TESTED, DENORM_COUNT, DENORM_MEMBERSHIP],
     transaction: "update-product",
     fields: [
       { source: [], target: ["products"], transform: "old tracking category → remove product, decrement count" },
@@ -310,6 +467,7 @@ export const updateProductRules: CollectionRule[] = [
     target: "inventory-ledgers",
     mode: "co-write",
     invariant: "Changing stock_method to 'none' deletes the ledger AND the product's stock summary and its public twin; changing away from 'none' creates all three. The summary exists if and only if the ledger does — see seedStockSummaryRules. The old rule described only the ledger, while the code also deleted summaries (and leaked their public twins).",
+    enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [
       { source: ["stock_method"], target: [], transform: "delete ledger if 'none', create empty ledger if 'bulk'/'serialized'" },
@@ -322,6 +480,7 @@ export const updateProductRules: CollectionRule[] = [
     target: "inventory-ledgers",
     mode: "co-write",
     invariant: "Changing type to service/surcharge/replacement deletes the ledger, the stock summary and its public twin — none of those types hold stock. Changing to rental/sale creates the ledger when moving from a non-stock type, and the summary is (re)seeded rather than deleted: a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. The summary's `type` field follows the product's.",
+    enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [
       { source: ["type"], target: [], transform: "delete ledger + summary + public twin for service/surcharge/replacement" },
