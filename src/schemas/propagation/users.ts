@@ -50,11 +50,21 @@ export const updateUserRules: CollectionRule[] = [
     source: "users",
     target: "*",
     mode: "fan-out",
-    invariant: "A user's display name stays in sync with every doc's created_by/updated_by/deleted_by.name (across every collection carrying an ActorRef) so activity feeds, threads, and comments never render a stale name",
+    // The wording used to enumerate created_by/updated_by/deleted_by, which was
+    // NARROWER than the code it describes. `api-cloudrun/src/lib/actorRefPaths.ts`
+    // discovers targets by walking the schema registry for nodes IDENTICAL to
+    // `ActorRef` — node identity, not a name pattern — so a new ActorRef-shaped
+    // field is cascaded the day it is added, under any name, with no edit here.
+    // Three names in the invariant invited the reader to assume the opposite,
+    // and to "complete" the list by hand when a fourth appeared. core#46.
+    invariant: "A user's display name stays in sync with EVERY ActorRef-shaped field on every document, whatever it is called — the target set is derived by walking the schema registry for nodes identical to ActorRef, not from a list of field names — so activity feeds, threads, and comments never render a stale name",
     transaction: "update-user",
-    trigger: "first_name/middle_name/last_name/pronunciation change on a user — rewrite actor.name wherever actor.uid matches",
+    trigger: "first_name/middle_name/last_name/pronunciation change on a user — rewrite actor.name wherever actor.uid matches, at every discovered ActorRef path",
     fields: [
-      { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["created_by", "name"], transform: "ActorRef.name — [first, middle, last].filter(Boolean).join(\" \") with \" (pronunciation)\" appended when pronunciation is set" },
+      // Illustrative, NOT exhaustive: these are the ActorRef nodes present at the
+      // time of writing. The two entries below them are the genuine exceptions —
+      // shapes the registry walk cannot reach on its own.
+      { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["created_by", "name"], transform: "ActorRef.name — [first, middle, last].filter(Boolean).join(\" \") with \" (pronunciation)\" appended when pronunciation is set. One example of the derived set, not a declaration of it" },
       { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["updated_by", "name"], transform: "same formula as created_by.name" },
       { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["deleted_by", "name"], transform: "same formula as created_by.name; only where deleted_by is non-null" },
       { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["pdf_versions", "created_by", "name"], transform: "invoices-only — rewrite the name on matching pdf_versions[].created_by entries" },

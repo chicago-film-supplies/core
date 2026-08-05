@@ -626,3 +626,49 @@ Deno.test("CreateStoreTransferInput is one event with both sides", () => {
     false,
   );
 });
+
+/**
+ * core#45 — the scalar quantity must equal Σ allocations at the DOOR.
+ *
+ * `CreateProductInput` has carried the identical rule since #168. This boundary
+ * did not, so a mismatched payload validated field-by-field, reached write time,
+ * and was caught by `checkMovementContract` balance rule 1 — where
+ * `assertValidForWrite` throws a bare `Error` and the client gets an opaque
+ * **500** instead of a 400 naming the field.
+ *
+ * Until this landed the CLIENT was the only real guard: the manager gates its
+ * Create button on `Σ allocations === quantity`, which is a UI courtesy rather
+ * than a contract, and anything reaching the route by another path had none.
+ */
+Deno.test("CreateTransactionInput rejects quantity ≠ Σ allocations", () => {
+  const result = CreateTransactionInput.safeParse({
+    ...validCreateInput,
+    quantity: 10,
+    allocations: [{ uid_location: LOC_A, quantity: 4 }, { uid_location: LOC_B, quantity: 3 }],
+  });
+  assertEquals(result.success, false, "7 allocated against a quantity of 10 must not validate");
+  if (!result.success) {
+    assertEquals(result.error.issues[0].path, ["quantity"], "the issue must name the field");
+  }
+});
+
+Deno.test("CreateTransactionInput accepts quantity === Σ allocations", () => {
+  assertEquals(
+    CreateTransactionInput.safeParse({
+      ...validCreateInput,
+      quantity: 7,
+      allocations: [{ uid_location: LOC_A, quantity: 4 }, { uid_location: LOC_B, quantity: 3 }],
+    }).success,
+    true,
+  );
+});
+
+/**
+ * Absent allocations is NOT a violation — it means "the server allocates",
+ * which is the documented default and the reason the field is optional. A
+ * refine that forgot this would break every create that omits them.
+ */
+Deno.test("CreateTransactionInput still accepts no allocations at all", () => {
+  const { allocations: _drop, ...noAllocs } = { ...validCreateInput, allocations: undefined };
+  assertEquals(CreateTransactionInput.safeParse(noAllocs).success, true);
+});

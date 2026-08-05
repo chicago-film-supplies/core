@@ -760,7 +760,30 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
   }).nullable().optional(),
-});
+}).refine(
+  // The scalar quantity must equal Σ per-location allocation, or the movement is
+  // born desynced. `CreateProductInput` has carried the identical rule since
+  // #168 (`schemas/product.ts`, on `transaction.quantity`); this boundary did
+  // not, so the two disagreed about the same invariant.
+  //
+  // Without it the payload passes the door — every field validates
+  // independently — and is caught only at write time by
+  // `MovementSchema.superRefine` → `checkMovementContract` balance rule 1, where
+  // `assertValidForWrite` throws a bare `Error`. The client gets an opaque
+  // **500** instead of a 400 naming the field. Until this landed the CLIENT was
+  // the only real guard: the manager gates its Create button on
+  // `Σ allocations === quantity`, which is a UI courtesy, not a contract. core#45.
+  //
+  // Absent `allocations` is explicitly NOT a violation — it means "the server
+  // allocates", which is the documented default and why the field is optional.
+  (t) =>
+    !t.allocations ||
+    t.quantity === t.allocations.reduce((sum, a) => sum + a.quantity, 0),
+  {
+    message: "quantity must equal the sum of per-location allocation quantities",
+    path: ["quantity"],
+  },
+) as z.ZodType<CreateTransactionInputType>;
 
 /**
  * Input for editing a movement's descriptive fields.
