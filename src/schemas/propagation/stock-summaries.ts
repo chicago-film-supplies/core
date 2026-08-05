@@ -16,7 +16,121 @@
  *
  * Traced from: api-cloudrun/src/lib/stockSummary.ts (`buildStockSummary`).
  */
-import type { CollectionRule } from "./types.ts";
+import type { CollectionRule, EnforcementRef } from "./types.ts";
+
+// ── What checks these four edges ────────────────────────────────────
+//
+// All four are minted per transaction, so their enforcement is minted here too
+// — one edit site, ~30 rules. Each pointer below was opened and read; the
+// `clause` records the part of the string it actually covers, which for the
+// public twin is materially less than the string claims.
+
+/**
+ * The corpus detector. `audit-stock-summaries.ts` reloads every ledger, booking
+ * and OOS record and rebuilds the expected projection from them, so its sources
+ * are independent of the summary it is checking — it is not a fixed point.
+ */
+const LEDGER_EMBED: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-stock-summaries.ts:261",
+  clause:
+    "invariant 4 — `quantity_held` and `type` equal the ledger's, corpus-wide. Says nothing about which OTHER ledger fields were copied; that half is the schema below.",
+  gates: true,
+};
+
+/**
+ * The "store_breakdown is NOT copied" half is unrepresentable rather than
+ * checked: `StockSummarySchema` is a `z.strictObject` with no such key, so a
+ * summary carrying one is rejected by `validateBeforeWrite` before it lands.
+ */
+const NO_STORE_BREAKDOWN: EnforcementRef = {
+  kind: "construction",
+  ref: "core/src/schemas/stock-summary.ts:120",
+  clause:
+    "the `store_breakdown is NOT copied` half — the strictObject has no such key, so copying it is a write rejection, not a drift",
+  gates: true,
+};
+
+const BOOKING_PROJECTION: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-stock-summaries.ts:273",
+  clause:
+    "invariant 5 — `bookings[]` is set-equal to the product's live (non-complete) bookings in BOTH directions, with per-entry interval bounds and every breakdown key compared",
+  gates: true,
+};
+
+const OOS_PROJECTION: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-stock-summaries.ts:306",
+  clause:
+    "invariant 6 — `out_of_service[]` is set-equal to the product's live (non-terminal) OOS records in BOTH directions, with interval bounds and quantity/reason/status compared",
+  gates: true,
+};
+
+/**
+ * The interval MODEL — the half of these strings that is a claim about how the
+ * stored shape is read, not about whether it is fresh. No corpus walk can see
+ * it; it is a property of `computeAvailability`, and it is asserted directly.
+ */
+const INTERVAL_MODEL: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/availability.test.ts",
+  clause:
+    "the `raw intervals, never a per-window answer` half — *a span is NOT the min over its days* (a daily rollup oversells), *an open-ended (sale) booking blocks every later window*, and *an open-ended OOS record reduces every later window*",
+  gates: true,
+};
+
+/**
+ * ⚠️ The audit's twin check is REAL but PARTIAL, and the clause says which part.
+ * It compares the stored twin against `toPublicStockSummary(summary)` — a
+ * genuinely independent source, since the internal doc is a different document —
+ * but only on `quantity_held`, `type` and `unavailable.length`. Two twins whose
+ * entries differ entry-for-entry while agreeing in count pass it.
+ */
+const PUBLIC_TWIN_PROJECTION: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-stock-summaries.ts:336",
+  clause:
+    "invariant 7, PARTIALLY — `quantity_held`, `type` and the LENGTH of `unavailable[]` match the projection of the internal doc. Entry contents are not compared, so a per-entry interval or quantity drift is invisible to it.",
+  gates: true,
+};
+
+/**
+ * The anonymization half — the reason the twin exists — is asserted directly on
+ * the projection function, not inferred from the schema alone.
+ */
+const PUBLIC_TWIN_ANONYMITY: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/availability.test.ts:277",
+  clause:
+    "the sanitization half — no `uid`, `number` or `reason` survives the projection, zero-quantity entries are dropped, and `computePublicAvailability` agrees with `computeAvailability` exactly",
+  gates: true,
+};
+
+/**
+ * And the anonymity is also unrepresentable: `PublicUnavailableEntry` is a
+ * strictObject of exactly {start, start_fs, end, end_fs, quantity}, so there is
+ * no field for a uid or a reason to be written into.
+ */
+const PUBLIC_TWIN_SHAPE: EnforcementRef = {
+  kind: "construction",
+  ref: "core/src/schemas/public-stock-summary.ts:51",
+  clause:
+    "the same sanitization half, as a write rejection — the entry strictObject has no uid/number/reason key at all",
+  gates: true,
+};
+
+/**
+ * The biconditional (`ledger ⟺ summary ⟺ public twin`, and the products leg)
+ * is what the seed/teardown pair claims, and it is the audit's invariant 1.
+ */
+const SUMMARY_BICONDITIONAL: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-stock-summaries.ts:155",
+  clause:
+    "invariant 1, all four legs — `productHoldsStock` ⟺ ledger ⟺ summary ⟺ public twin, each direction reported separately (`ledger_without_summary`, `public_twin_without_summary`, `product_without_ledger`, `ledger_without_product_stock`)",
+  gates: true,
+};
 
 /** The four edge suffixes, in the order `buildStockSummary` performs them. */
 const EDGES = [
@@ -65,6 +179,7 @@ export function seedStockSummaryRules(
       target: "stock-summaries",
       mode: "co-write",
       invariant,
+      enforced_by: [SUMMARY_BICONDITIONAL, LEDGER_EMBED],
       transaction: transactionId,
       fields: [
         { source: ["uid"], target: ["uid"], transform: "the summary's doc id IS the product uid" },
@@ -82,6 +197,7 @@ export function seedStockSummaryRules(
       mode: "derive",
       invariant:
         "The public twin is created and destroyed with its internal summary, always. Both branches of update-product previously deleted the summary and left the public twin behind — an orphan nobody could see, since only the internal doc is queried by uid_product.",
+      enforced_by: [SUMMARY_BICONDITIONAL],
       transaction: transactionId,
       fields: [
         { source: ["quantity_held"], target: ["quantity_held"] },
@@ -148,6 +264,7 @@ export function stockSummaryRules(
       mode: "fan-out",
       invariant:
         "The summary embeds the ledger's current quantity_held and product type. These are the only ledger fields availability needs — store_breakdown is NOT copied (no client reads a per-store split; the manager reads inventory-ledgers directly for that), so a store transfer, which moves stock between stores without changing quantity_held, correctly leaves the summary untouched.",
+      enforced_by: [LEDGER_EMBED, NO_STORE_BREAKDOWN],
       trigger: REBUILD_TRIGGER,
       fields: [
         { source: ["quantity_held"], target: ["quantity_held"] },
@@ -162,6 +279,7 @@ export function stockSummaryRules(
       invariant:
         trigger +
         " re-derives stock-summaries.bookings[] — every non-complete booking for the product, as an interval (start/end + their Firestore-timestamp twins) plus its breakdown. Stored as raw intervals, never as a per-window answer: quantity_booked for ANY window is Σ(reserved+prepped+out) over the entries overlapping it, so no window is privileged and none needs its own document. A sale booking carries end: null (a sold unit does not come back) and so keeps consuming stock in every later window until it completes.",
+      enforced_by: [BOOKING_PROJECTION, INTERVAL_MODEL],
       trigger: REBUILD_TRIGGER,
       fields: [
         { source: ["uid"], target: ["bookings", "uid"] },
@@ -187,6 +305,7 @@ export function stockSummaryRules(
       invariant:
         trigger +
         " re-derives stock-summaries.out_of_service[] — every non-terminal (not complete/canceled) OOS record for the product, as an interval plus its quantity/reason/status. Same interval model as bookings; an open-ended record (end: null) reduces availability in every window from its start onward.",
+      enforced_by: [OOS_PROJECTION, INTERVAL_MODEL],
       trigger: REBUILD_TRIGGER,
       fields: [
         { source: ["uid"], target: ["out_of_service", "uid"] },
@@ -206,6 +325,7 @@ export function stockSummaryRules(
       mode: "fan-out",
       invariant:
         "The public twin is written in the same transaction, via toPublicStockSummary (@cfs/core/utils/availability) — the single definition of the sanitized shape. Bookings and OOS merge into one anonymous unavailable[] interval list (no uid, no booking number, no order, no OOS reason), carrying only the consuming quantity, so an outsider cannot tell 'booked' from 'in for repair' yet still derives the exact quantity_available for any window.",
+      enforced_by: [PUBLIC_TWIN_PROJECTION, PUBLIC_TWIN_ANONYMITY, PUBLIC_TWIN_SHAPE],
       trigger: REBUILD_TRIGGER,
       fields: [
         { source: ["quantity_held"], target: ["quantity_held"] },
