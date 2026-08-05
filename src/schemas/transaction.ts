@@ -52,11 +52,7 @@ import {
   type FirestoreTimestampType,
   TimestampFields,
 } from "./common.ts";
-import {
-  BOOKING_BREAKDOWN_KEYS,
-  BookingBreakdownKeyEnum,
-  type BookingBreakdownKeyType,
-} from "./booking.ts";
+import { BookingBreakdownKeyEnum, type BookingBreakdownKeyType } from "./booking.ts";
 
 // ── Movement types ──────────────────────────────────────────────────
 
@@ -856,16 +852,12 @@ export const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType> =
   }).nullable().optional(),
 });
 
-// A movement type list and a contract table are two hand-written lists of the
-// same names; this makes a gap between them a compile error.
-type _ContractsCoverTypes = MovementTypeType extends keyof typeof MOVEMENT_CONTRACTS ? true
-  : never;
-const _contractParity: _ContractsCoverTypes = true;
-void _contractParity;
-
-// Same for the custody-place table against the breakdown keys.
-type _PlacesCoverKeys = BookingBreakdownKeyType extends keyof typeof CUSTODY_PLACE_KINDS ? true
-  : never;
-const _placeParity: _PlacesCoverKeys = true;
-void _placeParity;
-void BOOKING_BREAKDOWN_KEYS;
+// Totality of `MOVEMENT_CONTRACTS` over `MOVEMENT_TYPES`, and of
+// `CUSTODY_PLACE_KINDS` over the breakdown keys, is enforced by the
+// `Readonly<Record<…>>` annotations on the declarations themselves — an
+// incomplete literal is a type error there, and an extra key is an excess
+// property. Two `X extends keyof typeof X_TABLE` guards used to sit here
+// claiming to do that job; because the annotation already fixes `keyof` to the
+// union, both read `T extends T` and could not fail. Deleting them was verified
+// to lose nothing: an unbacked `MOVEMENT_TYPES` member still fails `deno check`
+// at the annotation, which is where the error belongs.

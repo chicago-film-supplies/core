@@ -67,10 +67,12 @@ import type { ProductDocument, ProductDocumentComponent } from "../schemas/types
 // asserted in prose — `PRODUCT_TYPES` and `DOC_LINE_ITEM_TYPES` are two
 // hand-written lists of the same six names, and `COMPONENT_TYPES` is a subset, so
 // a new product type the line vocabulary lacks becomes a compile error instead of
-// a cast that quietly lies. Same pattern as `_contractParity` in
-// `schemas/common.ts`; `MANUAL_MOVEMENT_TYPES` in `schemas/transaction.ts` is the
-// one such list in this package WITHOUT an assertion, and core#41 is exactly the
-// resulting drift. (`price.formula` has no list to compare — it is written from
+// a cast that quietly lies. Same pattern as `_itemTypeParity` / `_lineParity` in
+// `schemas/common.ts`. The load-bearing condition is that the two sides are
+// declared independently: a `T extends keyof typeof TABLE` guard over a table
+// already annotated `Record<T, …>` reads `T extends T` and cannot fail, which is
+// why three of those were deleted rather than kept as reassurance.
+// (`price.formula` has no list to compare — it is written from
 // `PriceFormulaEnum` by the product writer.)
 type _ProductTypesAreLineTypes = ProductTypeType extends DocLineItemTypeType ? true : never;
 const _productTypeParity: _ProductTypesAreLineTypes = true;

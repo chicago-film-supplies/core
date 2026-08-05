@@ -451,7 +451,8 @@ export const ItemTypeEnum: z.ZodType<ItemTypeType> = z.enum(ITEM_TYPES);
 // The derivation the list above replaces, asserted BOTH ways so the hand-written
 // members and `DOC_ITEM_TYPES + "order"` are provably the same set. Adding a
 // `DOC_ITEM_TYPES` member fails the first; inventing a member here fails the
-// second. Same shape as `_contractParity` below.
+// second. Same shape as `_lineParity` below — both compare two lists neither of
+// which is typed on the other, which is what makes them capable of failing.
 type _DerivedItemTypeType = DocItemTypeType | "order";
 type _ItemTypesCoverDerived = Exclude<_DerivedItemTypeType, ItemTypeType> extends never ? true : never;
 type _DerivedCoversItemTypes = Exclude<ItemTypeType, _DerivedItemTypeType> extends never ? true : never;
@@ -640,13 +641,14 @@ export function checkItemContract(
   }
 }
 
-// A type list and a contract table are two hand-written lists of the same names;
-// these make a gap between them a compile error. `MANUAL_MOVEMENT_TYPES` in
-// `transaction.ts` is the one such list in this package WITHOUT an assertion,
-// and core#41 is exactly the resulting drift.
-type _ContractsCoverTypes = ItemTypeType extends keyof typeof ITEM_CONTRACTS ? true : never;
-const _contractParity: _ContractsCoverTypes = true;
-void _contractParity;
+// `ITEM_CONTRACTS`' totality over `ITEM_TYPES` is enforced by the
+// `Readonly<Record<ItemTypeType, ItemContract>>` annotation at its declaration:
+// an `ITEM_CONTRACTS_INNER` missing a member fails there. An
+// `ItemTypeType extends keyof typeof ITEM_CONTRACTS` guard used to sit here
+// claiming to be that check; the annotation fixes `keyof` to the union, so it
+// read `T extends T` and could not fail. Verified by planting an unbacked
+// `ITEM_TYPES` member: the annotation reddened, `_itemTypeParity` below
+// reddened, that guard did not.
 
 // `DOC_LINE_ITEM_TYPES` must be exactly the `kind: "line"` members — checked in
 // BOTH directions, so neither adding a line type nor dropping one can drift.
