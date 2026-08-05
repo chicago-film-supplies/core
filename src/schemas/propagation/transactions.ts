@@ -25,17 +25,92 @@
  *
  * Traced from: api-cloudrun/src/services/transactions.ts
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
 import { stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
 
+// ── What checks these rules ─────────────────────────────────────────
+//
+// The applier is one function, so both transactions and both edges are checked
+// by the same three things. ⚠️ `audit-location-defaults.ts` looks like it owns
+// the locations edge and does NOT: it never reads `transactions` at all, though
+// its own header and `lib/locationIntegrity.ts` both claim it does. It is
+// deliberately not cited here.
+
+/**
+ * The fold's own suite, and it covers the ledger invariant clause for clause —
+ * including the two that read as design notes rather than behaviours (a
+ * transfer cannot touch the basis; in_service and out_of_service partition
+ * held). The cost clause rests on a 200k-draw sweep against exact rational
+ * arithmetic, with a fail-closed companion that sweeps the average-then-multiply
+ * form and asserts it DISAGREES.
+ */
+const MOVEMENT_FOLD: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/movements.test.ts",
+  clause:
+    "the whole ledger fold — conservation with no cross-line term, the weighted-average share removed on a cost-bearing decrease (`costOfUnits` over 200k random draws + its fail-closed companion), a transfer leaving the basis exactly where it was (#286), the store/location identity stamped from the documents rather than the movement (#307), and `in_service`/`out_of_service` partitioning `held`",
+  gates: true,
+};
+
+/** The reversal's own identity, asserted on the negation itself. */
+const REVERSAL_IS_THE_NEGATION: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/movements.test.ts:82",
+  clause:
+    "the `lines ARE the original's, swapped` half — `negateLines` swaps both sides and is its own inverse, and a reversal exactly cancels the original's held delta. This is what makes `applied FORWARD through the same fold` true rather than aspirational.",
+  gates: true,
+};
+
+const MOVEMENT_LOCATION_STAGING: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:176",
+  clause:
+    "the locations edge — the product row moves by the line's signed quantity, staging never rewrites name/type/default, an unknown location throws rather than being created, and two lines on one location compose into ONE staged write (#287). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const REVERSAL_LOCATIONS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/transactions/reversalLocations.test.ts:75",
+  clause:
+    "the reversal's locations clause end-to-end — every touched shelf returns to its prior count, stock may be pulled back OUT of a deactivated bin, stock may never be placed INTO one, and a uid-drifted location doc is repointed rather than wedged shut",
+  gates: true,
+};
+
+/**
+ * ⚠️ GATES ONLY UNDER `--strict` — `failed = strict && findings.length > 0`, so
+ * the default run exits 0 while printing, against a standing baseline of 39
+ * prod / 36 dev ledgers that have never reconciled.
+ */
+const LEDGER_REPLAY: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-ledger-replay.ts:238",
+  clause:
+    "the corpus half of `the ledger is a fold over the journal` — replays every product's movements through `applyMovementToLedger` into an empty ledger and diffs against what is stored. Exits non-zero ONLY with `--strict`; the default run exits 0 against a standing baseline of 39 prod / 36 dev non-reconciling ledgers.",
+  gates: false,
+};
+
+const LEDGER_NON_NEGATIVE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:232",
+  clause:
+    "the `assertLedgerNonNegative` half — the assertion rejects an oversell at every level (held, in-service, per-store, per-location)",
+  gates: true,
+};
+
 /** The ledger edge, shared by the forward and the reversing transaction. */
-function ledgerRule(transactionId: string, invariant: string): CollectionRule {
+function ledgerRule(
+  transactionId: string,
+  invariant: string,
+  enforced_by: EnforcementRef[],
+): CollectionRule {
   return {
     id: transactionId + ":transaction-to-ledger",
     source: "transactions",
     target: "inventory-ledgers",
     mode: "co-write",
     invariant,
+    enforced_by,
     transaction: transactionId,
     fields: [
       {
@@ -91,13 +166,18 @@ function ledgerRule(transactionId: string, invariant: string): CollectionRule {
 }
 
 /** The locations edge, shared by the forward and the reversing transaction. */
-function locationsRule(transactionId: string, invariant: string): CollectionRule {
+function locationsRule(
+  transactionId: string,
+  invariant: string,
+  enforced_by: EnforcementRef[],
+): CollectionRule {
   return {
     id: transactionId + ":transaction-to-locations",
     source: "transactions",
     target: "locations",
     mode: "co-write",
     invariant,
+    enforced_by,
     transaction: transactionId,
     fields: [
       { source: ["uid_product"], target: ["products", "uid"] },
@@ -124,10 +204,12 @@ export const createTransactionRules: CollectionRule[] = [
   ledgerRule(
     "create-transaction",
     "Every movement immediately folds onto the ledger: quantity from its lines, cost from its cost object. The ledger is the source of truth for current stock levels, and it is a fold over the journal rather than a separately-maintained total.",
+    [MOVEMENT_FOLD, LEDGER_NON_NEGATIVE, LEDGER_REPLAY],
   ),
   locationsRule(
     "create-transaction",
     "Locations track which products sit on which shelf. A movement writes ONLY products[]/query_by_products/updated_at — never name, active, default, uid_location_type or the capacities, which belong to createLocation/updateLocation. A movement cannot create a location either: it references one by uid, and a missing one is a 404.",
+    [MOVEMENT_LOCATION_STAGING],
   ),
   ...stockSummaryRules(
     "create-transaction",
@@ -152,10 +234,12 @@ export const reverseTransactionRules: CollectionRule[] = [
   ledgerRule(
     "reverse-transaction",
     "A reversal restores the ledger exactly, because its lines ARE the original's with `from` and `to` swapped and its cost is the basis the applier actually moved (not the number the operator typed). It is applied FORWARD through the same fold — there is no reversing code path to keep in step with the forward one.",
+    [REVERSAL_IS_THE_NEGATION, MOVEMENT_FOLD, LEDGER_REPLAY],
   ),
   locationsRule(
     "reverse-transaction",
     "The negated lines put the units back on the shelves they came from. An outbound side may name a deactivated bin: pulling stock out of a dead or mis-stored location is exactly the corrective action, so only an INBOUND side into an inactive location is rejected.",
+    [REVERSAL_LOCATIONS, MOVEMENT_LOCATION_STAGING],
   ),
   ...stockSummaryRules(
     "reverse-transaction",

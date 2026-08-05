@@ -29,7 +29,50 @@
  *
  * Traced from: api-cloudrun/src/services/storeTransfers.ts
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+
+/**
+ * "Net to ZERO by construction" is checked as construction, not as a number:
+ * every transfer line carries BOTH endpoints, so the fold's `+to −from` sums to
+ * zero for any quantity. The tests pin the two ways that could stop being true.
+ */
+const TRANSFER_NETS_TO_ZERO: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/movements.test.ts:399",
+  clause:
+    "the `neither creates nor destroys` half — a transfer leaves the basis exactly where it was (#286 defect 1) and a full-quantity transfer through `held = 0` preserves it (defect 2); upstream, a line that moves rather than enters or leaves ownership contributes nothing to the held delta",
+  gates: true,
+};
+
+const TRANSFER_PAIRS_WHOLE_LINES: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:337",
+  clause:
+    "the `every line carries both endpoints` half — the writer pairs both sides into whole lines and REJECTS an imbalance, which is what makes the net-zero structural rather than incidental. Its end-to-end twin asserts one movement carrying both endpoints and a 400 when the two sides disagree on quantity (integration/transactions/createStoreTransfer.test.ts:41).",
+  gates: true,
+};
+
+const TRANSFER_NON_NEGATIVE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:232",
+  clause:
+    "the `assertLedgerNonNegative still runs` half — the assertion rejects an oversell at every level, so a transfer drawing more than a source shelf holds is refused",
+  gates: true,
+};
+
+/**
+ * The same-location degenerate case — the one the two-document shape needed an
+ * absorb-between-legs dance for — is asserted on both sides of the fold.
+ */
+const TRANSFER_SAME_LOCATION_COMPOSES: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:217",
+  clause:
+    "the `ONE staging pass, same location composes to net zero` half — two lines on one location compose into ONE staged write (#287), and in the ledger fold two lines naming the same location sum rather than collide (core/tests/movements.test.ts:497)",
+  gates: true,
+};
 
 export const createStoreTransferRules: CollectionRule[] = [
   {
@@ -39,6 +82,7 @@ export const createStoreTransferRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "quantity_held and quantity_in_service net to ZERO by construction — every line carries both endpoints, so a transfer moves stock and can neither create nor destroy it. Only store_breakdown actually moves. assertLedgerNonNegative still runs: a transfer taking more than a source location holds is rejected, because a shelf cannot go to −4 units.",
+    enforced_by: [TRANSFER_NETS_TO_ZERO, TRANSFER_PAIRS_WHOLE_LINES, TRANSFER_NON_NEGATIVE],
     transaction: "create-store-transfer",
     fields: [
       {
@@ -66,6 +110,7 @@ export const createStoreTransferRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "Both endpoints of every line rewrite their location document's per-product quantity in ONE staging pass. A transfer whose two ends are the SAME location composes to a net zero on that document instead of the second leg overwriting the first — which is what needed the absorb-between-legs dance when the two ends were two documents.",
+    enforced_by: [TRANSFER_SAME_LOCATION_COMPOSES],
     transaction: "create-store-transfer",
     fields: [
       {

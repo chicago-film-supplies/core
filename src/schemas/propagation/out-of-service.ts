@@ -17,8 +17,51 @@
  * is NOT updated — the booking already records the loss in its own
  * breakdown.
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
 import { stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+
+/**
+ * ⚠️ The 0..N `sources` shape is asserted at its two ENDS and not in the
+ * middle. The empty (ad-hoc) case is asserted directly on a create, and the
+ * two-source case falls out of the booking path that mints records with
+ * `[bookings, orders]`. The `[orders]` manually-attached case is asserted
+ * nowhere, and nothing walks the corpus for `query_by_sources` disagreeing with
+ * `sources`.
+ */
+const OOS_SOURCES_SHAPE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/out-of-service/outOfService.test.ts:32",
+  clause:
+    "the EMPTY end — an ad-hoc create stores `sources: []` and `query_by_sources: []`, plus the derived `status`/`breakdown`/`defaultThreadId`. The two-source end comes from the booking path (bookings.test.ts:211, which cowrites two records); the one-source `[orders]` case and the sources↔query_by_sources parity are unchecked.",
+  gates: true,
+};
+
+/**
+ * The cowrite itself, asserted end-to-end on a real PUT: the movement exists
+ * exactly once, carries the right type and quantity, links back through
+ * `query_by_sources`, and draws FROM the shelf rather than from the record.
+ */
+const OOS_COWRITES_MOVEMENT: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/out-of-service/outOfService.test.ts:157",
+  clause:
+    "the WRITE-OFF arm — deriving `complete` cowrites exactly one `write_off` movement for the full quantity, linked by `query_by_sources`, drawing `from` a locations doc with `to: null`. The `return-to-service` arm of the same rule is not asserted.",
+  gates: true,
+};
+
+/**
+ * The ledger consequence is the applier's, and its own suite states this
+ * invariant almost verbatim.
+ */
+const OOS_LEDGER_PARTITION: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/movements.test.ts:515",
+  clause:
+    "the ledger half — units at an OOS record leave service without leaving ownership, returning to service restores the in-service count, and `in_service`/`out_of_service` always partition `held`",
+  gates: true,
+};
 
 export const createOutOfServiceRules: CollectionRule[] = [
   {
@@ -27,6 +70,7 @@ export const createOutOfServiceRules: CollectionRule[] = [
     target: "out-of-service",
     mode: "co-write",
     invariant: "Sources are a 0..N polymorphic list ({collection, uid, label}) — empty for ad-hoc, [orders] for manually-attached, [bookings, orders] when born from a booking PUT. query_by_sources is rebuilt from sources on every write for Firestore array-contains filtering.",
+    enforced_by: [OOS_SOURCES_SHAPE],
     transaction: "create-out-of-service-record",
     fields: [
       { source: [], target: ["sources"], transform: "from input — caller supplies up to N {collection, uid, label} entries" },
@@ -63,6 +107,7 @@ export const updateOutOfServiceRules: CollectionRule[] = [
     target: "transactions",
     mode: "co-write",
     invariant: "Once derived status === 'complete' (breakdown.returned_to_service + breakdown.written_off === quantity), cowrite an inventory transaction in the same Firestore transaction — a 'return-to-service' for breakdown.returned_to_service > 0 and/or a 'write-off' for breakdown.written_off > 0. Each cowritten transaction follows the standard create-transaction rules (ledger update + locations update + stock-summary recalc).",
+    enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "update-out-of-service-record",
     fields: [
       { source: ["uid_product"], target: ["uid_product"] },
@@ -78,6 +123,7 @@ export const updateOutOfServiceRules: CollectionRule[] = [
     target: "inventory-ledgers",
     mode: "derive",
     invariant: "Cowritten transactions cascade through the standard create-transaction:transaction-to-ledger path — applyTransactionToLedger updates quantity_held / quantity_in_service / quantity_out_of_service.",
+    enforced_by: [OOS_LEDGER_PARTITION],
     transaction: "update-out-of-service-record",
     fields: [
       { source: ["quantity"], target: ["quantity_held"], transform: "± based on transaction type multiplier" },
