@@ -19,7 +19,82 @@
  * two exception mechanisms that keep user edits stable across re-runs of
  * the materializer.
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+//
+// One suite, one named test per rule, each asserting the CARD or the RECURRENCE
+// on the other side of the fan-out. No corpus detector exists for any of them:
+// a materializer that silently stopped writing, or a prototype fan-out that
+// reached zero siblings, would be caught only by these tests.
+//
+// Two rules in this file are deliberately left UNLINKED because nothing
+// exercises them: `update-recurrence:rematerialize-future` (the rule/date change
+// path) and the `delete-card-scope-all` pair.
+
+const RECURRENCE_CREATE_MATERIALIZES: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:118",
+  clause:
+    "the synchronous first horizon — a create materializes instance cards bounded by `horizon_days`. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const HORIZON_MATERIALIZER: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:483",
+  clause:
+    "both halves of the nightly path — `materializeHorizonForRecurrence` advances `horizon_through` and writes the new cards, and the `POST /tasks/materialize-horizon` sweep covers every active recurrence (:547). The Cloud Scheduler wiring that invokes it is infrastructure, not covered here.",
+  gates: true,
+};
+
+const PROTOTYPE_FANOUT: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:161",
+  clause:
+    "the fan-out AND its exception — prototype changes reach every existing instance card, skipping fields listed in that card's `recurrence_overrides[]`. A version bump on the parent bumps the instance cards and a stale version 409s (:617).",
+  gates: true,
+};
+
+const RECURRENCE_DELETE_CASCADE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:228",
+  clause:
+    "the cascade and its two guards — every instance card is deleted, a large horizon is batched with threads + comments gone (:750), the delete FAILS CLOSED with 403 CARD_LOCKED when an instance is locked (:697), and re-deleting 404s rather than half-running (:925)",
+  gates: true,
+};
+
+const SCOPE_FOLLOWING_PATCH: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:275",
+  clause:
+    "the date-bounded fan-out — a scope=following PATCH reaches later siblings ONLY, not earlier ones. The per-sibling `recurrence_overrides` block is asserted on the scope=all path rather than this one.",
+  gates: true,
+};
+
+const SCOPE_ALL_PATCH: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:330",
+  clause:
+    "both steps of scope=all in one test — the patch back-propagates to the parent recurrence's prototype AND cascades to every sibling",
+  gates: true,
+};
+
+const SCOPE_THIS_DELETE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:381",
+  clause:
+    "the exception-date append — deleting one card appends its Chicago calendar day to the parent's `exception_dates[]`, which is what stops the nightly materializer resurrecting it",
+  gates: true,
+};
+
+const SCOPE_FOLLOWING_DELETE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:431",
+  clause:
+    "the truncation and the teardown — `active_until` is cut to the day before the deleted card's start, and each deleted sibling's thread + comments go with it (:867)",
+  gates: true,
+};
 
 // ── create-recurrence ───────────────────────────────────────────────
 
@@ -31,6 +106,7 @@ export const createRecurrenceRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "Creating a recurrence synchronously materializes the first horizon of instance cards (bounded by `horizon_days`, default 60) so the Dashboard surfaces upcoming instances immediately. Each card copies the prototype's fields + the rule-expanded `dates.start` (RRULE day at 9am Chicago) + the resolved `recurrence_parent_uid` + `recurrence_index`.",
+    enforced_by: [RECURRENCE_CREATE_MATERIALIZES],
     transaction: "create-recurrence",
     fields: [
       { source: ["uid"], target: ["recurrence_parent_uid"] },
@@ -68,6 +144,7 @@ export const materializeHorizonRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "The nightly materializer advances `recurrence.horizon_through` to `today + (horizon_days ?? 60)` for every `status == 'active'` recurrence, writing one card per RRULE-expanded date that is (a) past `horizon_through`, (b) on or before the new horizon, (c) not in `exception_dates`, and (d) does not already have a sibling card at that (parent, date) pair. Runs @ 02:00 America/Chicago via Cloud Scheduler → Cloud Tasks → `POST /tasks/materialize-horizon`.",
+    enforced_by: [HORIZON_MATERIALIZER],
     transaction: "materialize-horizon",
     trigger: "cron:nightly-02:00-america-chicago",
     fields: [
@@ -96,6 +173,7 @@ export const updateRecurrenceRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "When a recurrence's `prototype.*` fields change, every existing instance card in the series receives the new values — except for fields listed in that card's `recurrence_overrides[]`, which are pinned by the user and must not be overwritten.",
+    enforced_by: [PROTOTYPE_FANOUT],
     transaction: "update-recurrence",
     trigger: "onUpdate:recurrences",
     fields: [
@@ -137,6 +215,7 @@ export const deleteRecurrenceRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "Deleting a recurrence cascades to every instance card in the series, tearing down each card's linked thread(s) + comments as part of the same delete. This rule describes only the recurrence → cards fan-out; the thread/comment teardown is modeled by `delete-card:cascade-thread` + `delete-card:cascade-comments` in propagation/cards.ts.",
+    enforced_by: [RECURRENCE_DELETE_CASCADE],
     transaction: "delete-recurrence",
     trigger: "onDelete:recurrences",
     fields: [
@@ -162,6 +241,7 @@ export const updateCardScopeFollowingRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "`PATCH /cards/{uid}?recurrence_scope=following` applies the edit to the target card plus every sibling card in the same series (recurrence_parent_uid matches) with `dates.start >= target.dates.start` (instant-level comparison). Siblings' own `recurrence_overrides` still block per-field updates.",
+    enforced_by: [SCOPE_FOLLOWING_PATCH],
     transaction: "update-card-scope-following",
     fields: [
       { source: [], target: [], transform: "for each patched field: update siblings where recurrence_parent_uid == source.recurrence_parent_uid AND dates.start >= source.dates.start AND field ∉ sibling.recurrence_overrides" },
@@ -186,6 +266,7 @@ export const updateCardScopeAllRules: CollectionRule[] = [
     mode: "derive",
     invariant:
       "`PATCH /cards/{uid}?recurrence_scope=all` back-propagates the patched fields to the parent recurrence's prototype so that future materializations and newly-created siblings inherit the edit.",
+    enforced_by: [SCOPE_ALL_PATCH],
     transaction: "update-card-scope-all",
     fields: [
       { source: [], target: ["prototype"], transform: "merge patched fields into recurrences/{card.recurrence_parent_uid}.prototype" },
@@ -198,6 +279,7 @@ export const updateCardScopeAllRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "After updating the parent prototype, every sibling card in the series (regardless of date) receives the patched fields — except where a sibling's `recurrence_overrides` pins that field.",
+    enforced_by: [SCOPE_ALL_PATCH],
     transaction: "update-card-scope-all",
     fields: [
       { source: [], target: [], transform: "for each patched field: update siblings where recurrence_parent_uid matches AND field ∉ sibling.recurrence_overrides" },
@@ -225,6 +307,7 @@ export const deleteCardScopeThisRules: CollectionRule[] = [
     mode: "derive",
     invariant:
       "`DELETE /cards/{uid}?recurrence_scope=this` deletes the single card and appends the Chicago calendar day of its `dates.start` to the parent recurrence's `exception_dates[]` (YYYY-MM-DD strings) so the nightly materializer never resurrects that occurrence.",
+    enforced_by: [SCOPE_THIS_DELETE],
     transaction: "delete-card-scope-this",
     fields: [
       { source: ["dates", "start"], target: ["exception_dates"], transform: "append Chicago-tz YYYY-MM-DD of card.dates.start to recurrences/{card.recurrence_parent_uid}.exception_dates" },
@@ -249,6 +332,7 @@ export const deleteCardScopeFollowingRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "`DELETE /cards/{uid}?recurrence_scope=following` deletes the target card plus every sibling with `dates.start >= target.dates.start` (instant-level comparison). Each deleted card's thread + comments are torn down as part of the delete.",
+    enforced_by: [SCOPE_FOLLOWING_DELETE],
     transaction: "delete-card-scope-following",
     fields: [
       { source: ["uid"], target: [], transform: "delete cards where recurrence_parent_uid == source.recurrence_parent_uid AND dates.start >= source.dates.start" },
@@ -261,6 +345,7 @@ export const deleteCardScopeFollowingRules: CollectionRule[] = [
     mode: "derive",
     invariant:
       "After deleting the tail of a series, the parent recurrence's `active_until` is truncated to the Chicago calendar day before the deleted card's dates.start so the nightly materializer cannot re-extend the series past that point.",
+    enforced_by: [SCOPE_FOLLOWING_DELETE],
     transaction: "delete-card-scope-following",
     fields: [
       { source: ["dates", "start"], target: ["active_until"], transform: "set recurrences/{source.recurrence_parent_uid}.active_until = (Chicago-tz YYYY-MM-DD of source.dates.start) - 1 day" },
