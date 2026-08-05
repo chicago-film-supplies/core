@@ -11,7 +11,28 @@
  * Traced from:
  *   api-cloudrun/src/services/stores.ts (createStore, updateStore)
  */
-import type { CollectionRule } from "./types.ts";
+import type { CollectionRule, EnforcementRef } from "./types.ts";
+
+/**
+ * The default-flip has both a writer test and a corpus detector, and the
+ * detector is the one that matters: "exactly one" is a property of the SET, and
+ * a writer test can only ever observe the pair it created.
+ */
+const ONE_DEFAULT_STORE_TESTED: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/stores/stores.test.ts:129",
+  clause:
+    "the writer path — creating a second `default: true` store unsets the first, asserted on BOTH documents. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const STORE_DEFAULT_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-location-defaults.ts",
+  clause:
+    "check 1 (`store_default_count`) — per store, exactly one ACTIVE `default: true` location, over the whole corpus. Its rules live in `src/lib/locationIntegrity.ts`, shared verbatim with the nightly `/tasks/sweep-location-integrity` job, and are unit-tested at `tests/unit/locationIntegrity.test.ts` (zero AND two defaults both reported).",
+  gates: true,
+};
 
 export const createStoreRules: CollectionRule[] = [
   {
@@ -21,6 +42,7 @@ export const createStoreRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "Only one store can be the default — creating a store with default:true must unset default on every other active store, in the same transaction",
+    enforced_by: [ONE_DEFAULT_STORE_TESTED, STORE_DEFAULT_CORPUS],
     trigger: "create with default:true — in-transaction fan-out over active stores where default:true",
     fields: [
       { source: [], target: ["default"], transform: "set false on every other active store where default:true" },
@@ -36,6 +58,7 @@ export const updateStoreRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "Only one store can be the default — promoting a store to default:true must unset default on every other active store, in the same transaction",
+    enforced_by: [ONE_DEFAULT_STORE_TESTED, STORE_DEFAULT_CORPUS],
     trigger: "default flips false→true — in-transaction fan-out over active stores where default:true (excluding self)",
     fields: [
       { source: [], target: ["default"], transform: "set false on every other active store where default:true" },

@@ -8,7 +8,56 @@
  *   api-cloudrun/src/services/trackingCategories.ts
  *   api-cloudrun/src/services/locationTypes.ts
  */
-import type { CollectionRule } from "./types.ts";
+import type { CollectionRule, EnforcementRef } from "./types.ts";
+
+// ── What checks the rules below that are not already linked ──────────
+
+const TAG_DELETE_CASCADE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/tags/tags.test.ts:335",
+  clause:
+    "the cascade on delete — the tag's references are removed from the products carrying them. The orphan-ref sweep that would catch a MISSED cascade in the corpus is `audit-data-integrity.ts` sections 4 + 5, which always exits 0. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const LOCATION_TYPE_CAPACITIES: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/location-types/locationTypes.test.ts:301",
+  clause:
+    "both halves, as two tests — the default cascade reaches the type's locations (asserting `locationsUpdated`, `max` and `max_default`), and a location carrying a CUSTOM max keeps it (:341). The override-preservation half is the one worth having: a cascade that clobbered it would still look like a working cascade.",
+  gates: true,
+};
+
+const HOLIDAY_SNAPSHOT_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-holidays.ts",
+  clause:
+    "assertion 1 — `holiday-snapshot/current.materialized_dates` equals the sorted-unique `holiday-dates` set, corpus-wide. It also carries the two properties a snapshot check alone cannot see: horizon proximity (the monthly cron is alive) and past-immutability. Exits non-zero on any failure.",
+  gates: true,
+};
+
+const HOLIDAY_SNAPSHOT_WRITER: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:84",
+  clause:
+    "the write-time half — the snapshot is materialized from the instances a holiday create produced",
+  gates: true,
+};
+
+/**
+ * ⚠️ The INVOICE half of the holiday recompute (`holiday-change:recompute-draft-invoices`)
+ * is left UNLINKED on purpose. `draftRecompute.test.ts` says in its own header
+ * that `copyDoc` strips `query_by_invoices`, so it exercises the order-side
+ * recompute in isolation — the invoice sync is the one thing that test cannot
+ * reach, and nothing else reaches it either.
+ */
+const HOLIDAY_DRAFT_RECOMPUTE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/holidays/draftRecompute.test.ts:22",
+  clause:
+    "the ORDER side and its frozen complement — a draft order's charge days and item prices are recomputed, and a non-draft order comes back byte-unchanged. The invoice-sync half of the same cascade is NOT exercised: the fixture deliberately strips `query_by_invoices`.",
+  gates: true,
+};
 
 // ── Tag cascades ─────────────────────────────────────────────────
 
@@ -40,6 +89,7 @@ export const deleteTagRules: CollectionRule[] = [
     target: "products",
     mode: "fan-out",
     invariant: "Deleting a tag must clean up all product references to prevent orphan refs",
+    enforced_by: [TAG_DELETE_CASCADE],
     trigger: "delete — post-transaction batch",
     fields: [
       { source: ["uid"], target: ["tags"], transform: "arrayRemove tag ref" },
@@ -80,6 +130,7 @@ export const updateLocationTypeRules: CollectionRule[] = [
     target: "locations",
     mode: "fan-out",
     invariant: "Location-type capacity defaults cascade to all locations of that type — custom overrides are preserved",
+    enforced_by: [LOCATION_TYPE_CAPACITIES],
     trigger: "product_capacities change — post-transaction batch (chunks of 400)",
     fields: [
       { source: ["product_capacities", "max"], target: ["product_capacities", "max"], transform: "only if location cap matches old default; otherwise updates max_default only" },
@@ -183,6 +234,7 @@ export const rematerializeHolidaySnapshotRules: CollectionRule[] = [
     target: "holiday-snapshot",
     mode: "derive",
     invariant: "holiday-snapshot/current is the per-render hot-path read (1 doc + TTL cache); it must be recomputed from the full holiday-dates set on every holiday-dates write so getHolidayDates() never scans the instance collection",
+    enforced_by: [HOLIDAY_SNAPSHOT_CORPUS, HOLIDAY_SNAPSHOT_WRITER],
     trigger: "holiday definition create/update/soft-delete/regenerate + monthly horizon cron — post-transaction recompute-from-source",
     fields: [
       { source: ["date"], target: ["materialized_dates"], transform: "sorted-unique ISO array of every holiday-dates.date; also stamps materialized_count + materialized_year_range" },
@@ -197,6 +249,7 @@ export const recomputeHolidayDraftOrderRules: CollectionRule[] = [
     target: "orders",
     mode: "fan-out",
     invariant: "A draft order is not committed, so a holiday change must re-run its destination date/duration math (durations drive prices/totals); finalized (non-draft) orders stay frozen for historical fidelity",
+    enforced_by: [HOLIDAY_DRAFT_RECOMPUTE],
     trigger: "holiday definition create/update/soft-delete/regenerate — coalesced Cloud Task, status == 'draft' only (the monthly horizon cron does NOT enqueue — its far-future additions don't affect current drafts)",
     fields: [
       { source: [], target: ["destinations", "dates"], transform: "re-run canonicalizeDestinationDates → getDuration with the new holiday set, then syncChargeDaysToItems + recompute totals" },

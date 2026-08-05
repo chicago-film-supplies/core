@@ -7,7 +7,41 @@
  * Traced from:
  *   api-cloudrun/src/services/locations.ts
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+//
+// The store-pointer invariant is the one place in this workspace where the
+// writer test and the corpus detector are genuinely complementary: the test
+// proves the flip happens, and the detector proves the SET property ("exactly
+// one active default, and the store points at it") that no single write can
+// establish. The detector's rules live in `src/lib/locationIntegrity.ts` and are
+// shared verbatim with the nightly sweep, so the script and the job cannot
+// drift.
+
+const LOCATION_DEFAULT_POINTER: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-location-defaults.ts",
+  clause:
+    "checks 1 + 2 — exactly one ACTIVE `default: true` location per store, and `store.default_location` non-null, naming an existing location, in THIS store, flagged default, with a matching `name` denorm. Unit-tested at `tests/unit/locationIntegrity.test.ts` (dangling, cross-store, not-default and stale-name each reported separately).",
+  gates: true,
+};
+
+const LOCATION_DEFAULT_WRITER: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/locations/locations.test.ts:544",
+  clause:
+    "the writer path and its three refusals — setting `default: true` updates the store pointer and unsets the previous default; deactivating the default 409s; unsetting it is rejected; and `default:false` then `active:false` cannot orphan the pointer (:657). A rename of the default reaches `store.default_location.name` and a non-default rename does NOT (:975, :989). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const FIRST_LOCATION_IS_DEFAULT: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/locations/locations.test.ts:137",
+  clause:
+    "the first-location clause, from its complement — a SECOND location for the same store is not default, which is what makes the first one's default meaningful",
+  gates: true,
+};
 
 // ── Create location ─────────────────────────────────────────────
 
@@ -18,6 +52,7 @@ export const createLocationRules: CollectionRule[] = [
     target: "stores",
     mode: "co-write",
     invariant: "When the first active location is created for a store, it becomes the default and the store's default_location is set so clients don't need a global locations listener",
+    enforced_by: [FIRST_LOCATION_IS_DEFAULT, LOCATION_DEFAULT_POINTER],
     transaction: "create-location",
     fields: [
       { source: ["uid"], target: ["default_location", "uid"] },
@@ -43,6 +78,7 @@ export const updateLocationTransactionalRules: CollectionRule[] = [
     target: "stores",
     mode: "co-write",
     invariant: "Setting default:true on a location co-writes default_location {uid, name} to the parent store and unsets default on the previous default location",
+    enforced_by: [LOCATION_DEFAULT_WRITER, LOCATION_DEFAULT_POINTER],
     transaction: "update-location",
     fields: [
       { source: ["uid"], target: ["default_location", "uid"] },
@@ -55,6 +91,7 @@ export const updateLocationTransactionalRules: CollectionRule[] = [
     target: "locations",
     mode: "co-write",
     invariant: "Only one location per store can be default — setting a new default must unset the previous one in the same transaction",
+    enforced_by: [LOCATION_DEFAULT_WRITER, LOCATION_DEFAULT_POINTER],
     transaction: "update-location",
     fields: [
       { source: [], target: ["default"], transform: "set false on previous default location (looked up by uid_store + default:true)" },

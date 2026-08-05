@@ -17,7 +17,75 @@
  *   monotonic). `publishFromMerge.ts` must call
  *   `logTransactionPropagation("publish-template", …)` once this lands.
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+//
+// The publish path is the best-covered surface in this file, and one clause is
+// deliberately covered at the UNIT level instead: the S3 monotonic guard. Its
+// own suite header explains why — `seq` is globally monotonic, so integration
+// cannot construct the regression it defends against, and asserting on a
+// constructed one would be asserting on a state the system cannot reach.
+
+const FAMILY_REGISTER_COWRITES_THREAD: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/templates/publish.test.ts:255",
+  clause:
+    "the cowrite at register — family + version + thread land together, and the dual-uniqueness 409s that guard the family are asserted on the draft path (drafts.test.ts:108). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+/**
+ * The `uid_thread` back-embed is also unrepresentable-if-absent on the family:
+ * the schema requires it, so a family written without one is a rejected write
+ * rather than a family whose Notes tab silently has no target.
+ */
+const FAMILY_THREAD_POINTER_REQUIRED: EnforcementRef = {
+  kind: "zod",
+  ref: "core/src/schemas/template.ts:136",
+  clause:
+    "the back-embed's presence — `uid_thread` is required on the family document, so a register that failed to cowrite the thread cannot produce a valid family. Says nothing about whether the uid RESOLVES.",
+  gates: true,
+};
+
+const DRAFT_ROLLUP: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/templates/drafts.test.ts:327",
+  clause:
+    "both directions of `draft_uids[]` — abandoning archives the version AND removes it from the rollup, and a publish on a draft's branch flips the version in place and cleans the rollup (publish.test.ts:174). The component family gets the same pair (components.test.ts:189).",
+  gates: true,
+};
+
+const PUBLISH_SEQ: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/templates/publish.test.ts:322",
+  clause:
+    "the counter's forward motion and its self-heal — a second publish advances `version_count`, `seq` and `uid_active`, and a lagging counter is seeded from the max active seq rather than silently refusing the flip (:802). Concurrency is not constructed here; the counter increment is inside the publish transaction.",
+  gates: true,
+};
+
+const VERSION_FLIP: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/templates/publish.test.ts:174",
+  clause:
+    "the in-place flip and its idempotence — a publish on a draft's branch flips the SAME version doc draft→published, and a re-publish at the same sha is a no-op (:412). A metadata-only diff projects identity WITHOUT a version bump (:452) and its redelivery is also a no-op (:502).",
+  gates: true,
+};
+
+/**
+ * ⚠️ The S3 MONOTONIC clause — "repoints `uid_active` ONLY if its `seq` beats
+ * the current active version's" — is asserted at the unit level, not here, and
+ * that is the suite's stated reasoning rather than an omission: `seq` is
+ * globally monotonic, so an out-of-order delivery cannot be constructed in
+ * integration.
+ */
+const FAMILY_ROLLUP: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/templates/publish.test.ts:322",
+  clause:
+    "the rollup's fields — `uid_active` repointed, `version_count` incremented, the version dropped from `draft_uids[]`, and the archive path nulling `uid_active` while archiving the active version (:747). The S3 monotonic COMPARISON is asserted at the unit level instead; the integration suite's own header records that it cannot construct a regression because `seq` is globally monotonic.",
+  gates: true,
+};
 
 // ── create-template (family + default thread cowrite) ───────────────
 
@@ -29,6 +97,7 @@ export const createTemplateRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "Registering a template family cowrites a default thread keyed to the family uid so the family's chat/notes surface always has a target. The thread is excluded from git rebuilds (it is conversation state, not template content).",
+    enforced_by: [FAMILY_REGISTER_COWRITES_THREAD],
     transaction: "create-template",
     fields: [
       { source: ["uid"], target: ["sources", "uid"], transform: "sources[0] — the family itself" },
@@ -45,6 +114,7 @@ export const createTemplateRules: CollectionRule[] = [
     mode: "embed",
     invariant:
       "The cowritten thread's uid is embedded on the family as `uid_thread` so the detail surface resolves its default thread without a query.",
+    enforced_by: [FAMILY_THREAD_POINTER_REQUIRED, FAMILY_REGISTER_COWRITES_THREAD],
     transaction: "create-template",
     fields: [
       { source: ["uid"], target: ["uid_thread"] },
@@ -72,6 +142,7 @@ export const manageDraftRules: CollectionRule[] = [
     mode: "derive",
     invariant:
       "Creating a draft version adds its uid to the family's `draft_uids[]`; abandoning (archive) removes it. Keeps the family doc's in-flight-work rollup current without a per-family subquery.",
+    enforced_by: [DRAFT_ROLLUP],
     transaction: "manage-draft",
     fields: [
       { source: ["uid"], target: ["draft_uids"], transform: "arrayUnion on create / arrayRemove on archive" },
@@ -98,6 +169,7 @@ export const publishTemplateRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "Each publish increments `counters/templates-publish-seq` and stamps the new value as the version's monotonic `seq`. Computed inside the publish transaction so concurrent merges get distinct, ordered seqs.",
+    enforced_by: [PUBLISH_SEQ],
     transaction: "publish-template",
     fields: [
       { source: ["count"], target: ["seq"], transform: "FieldValue.increment(1) → stamped as version.seq" },
@@ -110,6 +182,7 @@ export const publishTemplateRules: CollectionRule[] = [
     mode: "derive",
     invariant:
       "A squash-merge flips the SAME version doc draft→published in place. `content` + `blob_refs` are read from the merged git SHA (never the draft doc — C1) and resolved OUTSIDE the transaction (B1); the txn body stamps `sha`/`semver`/`seq`/`commit_meta` and clears the draft branch fields. CAS on `version`.",
+    enforced_by: [VERSION_FLIP],
     transaction: "publish-template",
     fields: [
       { source: [], target: ["status"], transform: `draft → "published"` },
@@ -126,6 +199,7 @@ export const publishTemplateRules: CollectionRule[] = [
     mode: "derive",
     invariant:
       "On publish, the family repoints `uid_active` to the newly published version ONLY if its `seq` beats the current active version's seq (S3 monotonic — out-of-order webhook deliveries never regress active), increments `version_count`, sets `last_published_at`, and removes the version from `draft_uids[]`. CAS on the family `version`.",
+    enforced_by: [FAMILY_ROLLUP],
     transaction: "publish-template",
     fields: [
       { source: ["uid"], target: ["uid_active"], transform: "repoint only if newSeq > active.seq" },

@@ -5,7 +5,30 @@
  * the denormalized TaxRef / PriceModifier snapshots on products,
  * webshop-products, and incomplete orders are updated.
  */
-import type { CollectionRule } from "./types.ts";
+import type { CollectionRule, EnforcementRef } from "./types.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+//
+// ⚠️ `update-tax:to-webshop-products` is deliberately left UNLINKED. The one
+// tax-cascade test sets `webshop.available: false` on its fixture product, so
+// the webshop mirror is the one target it does NOT exercise — and nothing else
+// covers it. Pointing at that test would be a pointer at the case it excludes.
+
+const TAX_TO_PRODUCTS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/taxes/taxes.test.ts:275",
+  clause:
+    "the rename reaching a product's embedded `price.taxes[]` entry. Writer-path only; no corpus detector walks the tax denorms. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const TAX_TO_ORDERS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/taxes/taxes.test.ts:316",
+  clause:
+    "the recompute AND its fail-closed arm — a rate change reaches an incomplete order's PriceModifiers and recomputes the amounts, and the cascade REJECTS an order it would leave violating the item invariants (:380) rather than writing it",
+  gates: true,
+};
 
 export const updateTaxRules: CollectionRule[] = [
   {
@@ -14,6 +37,7 @@ export const updateTaxRules: CollectionRule[] = [
     target: "products",
     mode: "fan-out",
     invariant: "Products embed tax name/rate/type in price.taxes — must stay current",
+    enforced_by: [TAX_TO_PRODUCTS],
     trigger: "name, rate, or type change — post-transaction batch matched by tax uid",
     fields: [
       { source: ["name"], target: ["price", "taxes", "name"] },
@@ -46,6 +70,7 @@ export const updateTaxRules: CollectionRule[] = [
     target: "orders",
     mode: "fan-out",
     invariant: "Incomplete orders embed tax data as PriceModifiers — rate changes must recompute amounts and totals",
+    enforced_by: [TAX_TO_ORDERS],
     trigger: "name, rate, or type change — post-transaction batch filtered to incomplete orders, matched by tax uid",
     fields: [
       { source: ["name"], target: ["items", "price", "taxes", "name"] },
