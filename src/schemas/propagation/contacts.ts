@@ -3,7 +3,38 @@
  *
  * Traced from: api-cloudrun/src/services/contacts.ts
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+//
+// The three NAME/PHONE cascades already carry their pointers inline (they are
+// rows in `audit-denorm-freshness.ts`, two of them measured VACUOUS). What
+// follows covers the membership and linking rules, which have no corpus
+// detector at all — only the writer path.
+
+const CONTACT_ORG_BACKREF: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/contacts/contacts.test.ts:560",
+  clause:
+    "the org-list diff, all three shapes — removing an org strips the contact back-ref, adding one pushes it, and swapping in a single call does both. A nonexistent org 404s rather than silently linking. No corpus detector covers the resulting membership. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const CONTACT_ORG_BACKREF_AT_CREATE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/contacts/contacts.test.ts:182",
+  clause:
+    "the same membership at CREATE — a contact created with an organization cross-reference appears on the org side too",
+  gates: true,
+};
+
+const CONTACT_NAME_TO_USER: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/contacts/contacts.test.ts:535",
+  clause:
+    "the rename reaching the linked user's `name`. Writer-path only — `audit-actor-ref-names.ts` audits the ActorRef denorms fanned out FROM a user, not the contact→user edge feeding it.",
+  gates: true,
+};
 
 // ── create-contact ───────────────────────────────────────────────
 
@@ -14,6 +45,7 @@ export const createContactRules: CollectionRule[] = [
     target: "organizations",
     mode: "co-write",
     invariant: "Organizations maintain a list of contacts for bidirectional navigation",
+    enforced_by: [CONTACT_ORG_BACKREF_AT_CREATE],
     transaction: "create-contact",
     fields: [
       { source: ["uid"], target: ["contacts", "uid"] },
@@ -124,6 +156,7 @@ export const updateContactRules: CollectionRule[] = [
     target: "organizations",
     mode: "co-write",
     invariant: "When a contact's org list changes, added/removed orgs update their contact back-references",
+    enforced_by: [CONTACT_ORG_BACKREF],
     transaction: "update-contact",
     fields: [
       { source: [], target: ["contacts"], transform: "orgs added → add contact ref {uid, first_name, middle_name, last_name, pronunciation, roles: []}" },
@@ -138,6 +171,7 @@ export const updateContactRules: CollectionRule[] = [
     target: "users",
     mode: "fan-out",
     invariant: "A contact's name stays in sync with its linked user's name",
+    enforced_by: [CONTACT_NAME_TO_USER],
     transaction: "update-contact",
     trigger: "first_name/middle_name/last_name/pronunciation change on a contact with uid_user set",
     fields: [

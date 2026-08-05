@@ -3,7 +3,68 @@
  *
  * Traced from: api-cloudrun/src/services/organizations.ts
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+//
+// Every rule in this file has a dedicated step in the org suite that asserts the
+// TARGET document after the write, which is the difference that matters: a
+// cascade reaching zero targets is indistinguishable from one with nothing to
+// do unless something reads the other side.
+//
+// ⚠️ None of them has a CORPUS detector. `audit-denorm-freshness.ts` holds
+// twelve embedded-name rows and none is organizations→{orders, invoices,
+// contacts}, though the table is exactly the shape that would hold them — so a
+// cascade that stops firing in production is caught by nothing until someone
+// reads a stale name on screen.
+
+const ORG_CONTACT_BACKREF: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:327",
+  clause:
+    "the membership half in both directions — adding a contact cross-references it, removing one cleans the cross-reference, an inline `newContacts` entry is created and linked, and an unknown uid is created rather than rejected. No corpus detector covers the back-reference. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const ORG_NAME_TO_CONTACTS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:727",
+  clause:
+    "the rename reaching the linked contacts' embedded org entry. Writer-path only — no corpus walk exists for this denorm.",
+  gates: true,
+};
+
+const ORG_NAME_TO_ORDERS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:767",
+  clause:
+    "the rename reaching an ACTIVE order's `organization.name`. Writer-path only; `audit-denorm-freshness.ts` has no organizations→orders row, so corpus staleness is undetected.",
+  gates: true,
+};
+
+const ORG_BILLING_TO_ORDERS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:676",
+  clause:
+    "the billing-address change reaching an active order's embedded snapshot. Writer-path only.",
+  gates: true,
+};
+
+const ORG_NAME_TO_INVOICES: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:806",
+  clause:
+    "the rename reaching an active invoice's `organization.name`. Writer-path only.",
+  gates: true,
+};
+
+const ORG_BILLING_TO_INVOICES: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:832",
+  clause:
+    "the billing-address change reaching an active invoice. Writer-path only.",
+  gates: true,
+};
 
 // ── create-organization ──────────────────────────────────────────
 
@@ -14,6 +75,7 @@ export const createOrganizationRules: CollectionRule[] = [
     target: "contacts",
     mode: "co-write",
     invariant: "Contacts maintain a list of orgs they belong to for bidirectional navigation",
+    enforced_by: [ORG_CONTACT_BACKREF],
     transaction: "create-organization",
     fields: [
       { source: ["uid"], target: ["organizations", "uid"] },
@@ -42,6 +104,7 @@ export const updateOrganizationRules: CollectionRule[] = [
     target: "contacts",
     mode: "fan-out",
     invariant: "Contacts display their org names — must stay current when org is renamed",
+    enforced_by: [ORG_NAME_TO_CONTACTS],
     transaction: "update-organization",
     fields: [
       { source: ["name"], target: ["organizations", "name"] },
@@ -53,6 +116,7 @@ export const updateOrganizationRules: CollectionRule[] = [
     target: "orders",
     mode: "fan-out",
     invariant: "Active orders carry a denormalized org name that must stay current",
+    enforced_by: [ORG_NAME_TO_ORDERS],
     transaction: "update-organization",
     trigger: "name change — targets active orders (not complete/canceled)",
     fields: [
@@ -65,6 +129,7 @@ export const updateOrganizationRules: CollectionRule[] = [
     target: "orders",
     mode: "fan-out",
     invariant: "Active orders carry the org billing address for quote/invoice generation",
+    enforced_by: [ORG_BILLING_TO_ORDERS],
     transaction: "update-organization",
     trigger: "billing_address change — targets active orders",
     fields: [
@@ -77,6 +142,7 @@ export const updateOrganizationRules: CollectionRule[] = [
     target: "invoices",
     mode: "fan-out",
     invariant: "Active invoices display the org name",
+    enforced_by: [ORG_NAME_TO_INVOICES],
     transaction: "update-organization",
     trigger: "name change — targets active invoices (not paid/void)",
     fields: [
@@ -89,6 +155,7 @@ export const updateOrganizationRules: CollectionRule[] = [
     target: "invoices",
     mode: "fan-out",
     invariant: "Active invoices carry the org billing address",
+    enforced_by: [ORG_BILLING_TO_INVOICES],
     transaction: "update-organization",
     trigger: "billing_address change — targets active invoices",
     fields: [
@@ -101,6 +168,7 @@ export const updateOrganizationRules: CollectionRule[] = [
     target: "contacts",
     mode: "co-write",
     invariant: "When an org's contact list changes, added/removed contacts update their org back-references",
+    enforced_by: [ORG_CONTACT_BACKREF],
     transaction: "update-organization",
     fields: [
       { source: [], target: ["organizations"], transform: "contacts added → add org ref {uid, name}" },

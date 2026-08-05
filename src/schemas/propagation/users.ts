@@ -3,7 +3,34 @@
  *
  * Traced from: api-cloudrun/src/services/users.ts
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+
+/**
+ * The ActorRef fan-out is the one rule here with a corpus detector, and it is
+ * the campaign's model for what a detector should look like: two INDEPENDENT
+ * assertions rather than one fixed point, and a target set DERIVED from the
+ * schema registry rather than listed — so it covers the two ActorRefs the
+ * rule's own wording misses (`templates-versions.commit_meta.author` and
+ * `.written_by`). Until this campaign the rule had no production call site at
+ * all while being published at `/docs` as a guarantee.
+ */
+const ACTOR_REF_NAMES: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-actor-ref-names.ts",
+  clause:
+    "both assertions — `name_stale` (an ActorRef whose uid names a real user carries a different name) and, checked first, `source_stale` (`users/{uid}.name` disagreeing with `deriveName(parts)`, which no cascade would fix and which makes every name_stale count untrustworthy). Actor uids naming no user (`crms-bot`, historical emails) are counted, not failed.",
+  gates: true,
+};
+
+const USER_LINKED_TO_CONTACT_AT_REGISTER: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/auth/auth.test.ts:1100",
+  clause:
+    "the register path — a new user whose email matches an existing contact links to it. The reverse direction (a CONTACT created against an existing user) is asserted nowhere. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
 
 // ── create-user ───────────────────────────────────────────────────
 
@@ -14,6 +41,7 @@ export const createUserRules: CollectionRule[] = [
     target: "contacts",
     mode: "co-write",
     invariant: "A new user with an email matching an existing contact links bidirectionally",
+    enforced_by: [USER_LINKED_TO_CONTACT_AT_REGISTER],
     transaction: "create-user",
     fields: [
       { source: ["uid"], target: ["uid_user"] },
@@ -58,6 +86,7 @@ export const updateUserRules: CollectionRule[] = [
     // Three names in the invariant invited the reader to assume the opposite,
     // and to "complete" the list by hand when a fourth appeared. core#46.
     invariant: "A user's display name stays in sync with EVERY ActorRef-shaped field on every document, whatever it is called — the target set is derived by walking the schema registry for nodes identical to ActorRef, not from a list of field names — so activity feeds, threads, and comments never render a stale name",
+    enforced_by: [ACTOR_REF_NAMES],
     transaction: "update-user",
     trigger: "first_name/middle_name/last_name/pronunciation change on a user — rewrite actor.name wherever actor.uid matches, at every discovered ActorRef path",
     fields: [
