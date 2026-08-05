@@ -3,8 +3,205 @@
  *
  * Traced from: api-cloudrun/src/services/orders.ts
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
 import { stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
+
+// ── What checks these rules ─────────────────────────────────────────
+//
+// Shared because create-order and update-order assert the same things about the
+// same edges. Each was opened and read; where the enforcement covers less than
+// the string claims, the `clause` says so rather than the pointer implying
+// coverage it does not have.
+
+/**
+ * "Denormalized org snapshot" and "computed server-side to prevent client
+ * tampering" are the same mechanism seen from two ends: the INPUT schema has no
+ * channel for either. `CreateOrderInput`/`UpdateOrderInput` accept
+ * `organization: { uid }` and nothing else, and carry no `totals`, `number`,
+ * `query_by_*` or `bookings_breakdown` key at all — and they are `z.object()`,
+ * so a client that sends one has it stripped before the service runs.
+ */
+const ORDER_INPUT_HAS_NO_CHANNEL: EnforcementRef = {
+  kind: "construction",
+  ref: "core/src/schemas/order.ts:573",
+  clause:
+    "the `server-side, not client-supplied` half — the input schema exposes no key for the derived values, so tampering is unrepresentable rather than rejected",
+  gates: true,
+};
+
+/**
+ * ⚠️ PARTIAL, and the gap is worth naming: the test asserts `uid` and `name`
+ * refresh when the reference changes, and nothing asserts `crms_id`, `xero_id`
+ * or `billing_address`. No corpus detector covers any of them either —
+ * `audit-denorm-freshness.ts` holds twelve embedded-name rows and an
+ * organizations→orders row is not one of them, though the table is exactly the
+ * shape that would hold it.
+ */
+const ORG_SNAPSHOT_REFRESH: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:1220",
+  clause:
+    "2 of the snapshot's 5 fields — `organization.uid` and `.name` are re-read when the reference changes. `crms_id`, `xero_id` and `billing_address` are asserted nowhere, and no corpus detector covers their freshness. Runs in `deno task test` (pre-push), not in CI.",
+  gates: true,
+};
+
+const ORDER_TOTALS_MATH: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/orders.test.ts:737",
+  clause:
+    "the `totals` half — six `calculateOrderTotals` cases including the two-pass transaction fee off `subtotal_discounted`, over a `calculateItemSubtotal` verified against exact rational arithmetic on 300k random lines",
+  gates: true,
+};
+
+/**
+ * The order NUMBER half has its own suite, and it is the strong one: gap-free
+ * and duplicate-free under overlapping creates, the counter read from the last
+ * slot, no gap when a create throws after allocating, and a dry-run that
+ * reports a number without advancing.
+ */
+const ORDER_NUMBER_COUNTER: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:1472",
+  clause:
+    "the `order number` half only — allocation is gap-free and duplicate-free under concurrent creates. Says nothing about totals or the query arrays.",
+  gates: true,
+};
+
+/**
+ * The one-booking-per-(product, destination) cardinality is not policed; it is
+ * unrepresentable. `bookings.uid` IS the composite `{order}:{item}:{dest}`,
+ * `BookingId` is a template-literal type over that shape, and
+ * `assertValidForWrite` rejects any write whose `uid` differs from its doc id —
+ * so a second booking for the same triple is the SAME document.
+ */
+const BOOKING_ID_IS_THE_CARDINALITY: EnforcementRef = {
+  kind: "construction",
+  ref: "core/src/schemas/_uid.ts:70",
+  clause:
+    "the `one booking per consolidated product per destination` half — the doc id is the triple, so a duplicate is an overwrite rather than a second row",
+  gates: true,
+};
+
+const BOOKING_DIFF_TESTS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:1001",
+  clause:
+    "the diff half — items recalculated, a destination uid change deleting orphan bookings, a destination-only edit rebuilding at the new uid, and cancel deleting EVERY booking including non-item-matched ones",
+  gates: true,
+};
+
+/** The "and their stock summaries zeroed" half, from the other side. */
+const ORPHAN_BOOKING_LEAVES_NO_SUMMARY: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-stock-summaries.ts:300",
+  clause:
+    "the `stock summaries zeroed` half — `booking_stale_in_summary` fires on any summary still naming a booking that is no longer live, which is exactly what an un-zeroed orphan looks like",
+  gates: true,
+};
+
+/**
+ * ⚠️ NOT A GATE, and its own header says otherwise. `audit-unsourceable-bookings.ts`
+ * opens with *"That makes this audit a gate, not a report"* and contains no
+ * exit-code path at all — it prints its findings and returns 0. Measured on prod
+ * 2026-07-28 before repair: 274 of 513 live bookings carried no allocated
+ * location. So it is a diagnostic that reads as a guarantee.
+ */
+const BOOKING_ALLOCATION_DIAGNOSTIC: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-unsourceable-bookings.ts",
+  clause:
+    "reports bookings whose units cannot be traced to a shelf — but it has NO exit-code path, so it cannot fail, despite its own header calling itself a gate. Read the output; do not rely on the exit status.",
+  gates: false,
+};
+
+/**
+ * The fulfillment view's "stripped of …" clause is a schema fact, not a
+ * behaviour: `FulfillmentSchema` is a strictObject with no `totals`,
+ * `invoices`, `tax_profile`, `notes`, `crms_id` or `xero_id` key, and
+ * `FULFILLMENT_LINE_ITEM_TYPES` omits `transaction_fee`, so a fee line fails
+ * the discriminated union. A leak is a rejected write.
+ */
+const FULFILLMENT_SHAPE_STRIPS: EnforcementRef = {
+  kind: "construction",
+  ref: "core/src/schemas/fulfillment.ts:187",
+  clause:
+    "every `stripped` clause — the strictObject has no key for the financial fields and `FULFILLMENT_LINE_ITEM_TYPES` has no `transaction_fee` member, so both the field strip and the item drop are write rejections",
+  gates: true,
+};
+
+const FULFILLMENT_STRIP_ASSERTED: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:194",
+  clause:
+    "the same strip, asserted positively on a real create — `totals`/`invoices`/`tax_profile`/`notes` absent from the projection and `price` absent from its line item",
+  gates: true,
+};
+
+/**
+ * The journal's own detector, and the strongest thing pointed at in this file:
+ * it folds each booking's events back through the same identity the writer
+ * claims (`net[k] = Σ to − Σ from`) and diffs against the stored breakdown.
+ * Independent by construction — the events are a different collection.
+ */
+const CUSTODY_REPLAY: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-custody-replay.ts",
+  clause:
+    "the `one movement per type per booking, idempotent under replay` half — every booking with a log is reproduced by folding it, over the five FULFILLMENT keys. `quoted`/`reserved` are deliberately out of scope (they follow order status, not a physical event). Exits 1 on any divergence.",
+  gates: true,
+};
+
+/**
+ * ⚠️ GATES ONLY UNDER `--strict`. `audit-ledger-replay.ts` computes
+ * `failed = strict && findings.length > 0`, so a default run exits 0 while
+ * printing findings — deliberately, because it carries a standing baseline of
+ * 39 prod / 36 dev ledgers that have never reconciled. A pointer at the default
+ * invocation is a pointer at something that cannot fail.
+ */
+const LEDGER_REPLAY: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-ledger-replay.ts:238",
+  clause:
+    "the `ledger is a fold over the journal` half — replays every product's movements through `applyMovementToLedger` into an empty ledger and diffs. Exits non-zero ONLY with `--strict`; the default run exits 0 against a standing baseline of 39 prod / 36 dev non-reconciling ledgers.",
+  gates: false,
+};
+
+/**
+ * The applier's own unit suite covers this invariant almost clause for clause —
+ * including the two that read as caveats rather than behaviours (the store is
+ * read from the location; a negative row warns and does not throw).
+ */
+const MOVEMENT_APPLIER: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/movementApplier.test.ts",
+  clause:
+    "the location-staging clauses — the product row moves by the line's signed quantity, staging never rewrites name/type/default, the store is READ from the location (#307), an unknown location throws rather than being created, stock may leave an inactive bin but never enter one, two lines on one location compose into ONE write, and a negative row warns without throwing. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const LEDGER_NON_NEGATIVE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:232",
+  clause:
+    "the `assertLedgerNonNegative runs on the FINAL state` half — the assertion rejects an oversell at every level, so an intermediate leg may dip without tripping it",
+  gates: true,
+};
+
+const CARD_STATUS_MATH: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/cards.test.ts",
+  clause:
+    "the status + action arithmetic, exhaustively — both sides' thresholds, `blocked`/`canceled` preservation, and every exclusion the string names (sale-only destinations, service and surcharge lines) as its own case. Does NOT cover the sibling QUERY that feeds it, only the function applied to the siblings.",
+  gates: true,
+};
+
+const ORDER_ROLLUP_DELTA: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/bookings/bookings.test.ts:189",
+  clause:
+    "the delta + auto-complete half — a partial return moves `order.bookings_breakdown` by exactly the delta and does not complete; a return + loss + damage closes every quantity and DOES auto-complete. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
 
 // ── create-order ─────────────────────────────────────────────────
 
@@ -15,6 +212,7 @@ export const createOrderRules: CollectionRule[] = [
     target: "orders",
     mode: "embed",
     invariant: "Orders carry a denormalized org snapshot so the UI never needs a join to display org name/billing",
+    enforced_by: [ORDER_INPUT_HAS_NO_CHANNEL, ORG_SNAPSHOT_REFRESH],
     transaction: "create-order",
     fields: [
       { source: ["uid"], target: ["organization", "uid"] },
@@ -46,6 +244,7 @@ export const createOrderRules: CollectionRule[] = [
     target: "orders",
     mode: "derive",
     invariant: "Totals, query arrays, and order number are computed server-side to prevent client tampering",
+    enforced_by: [ORDER_INPUT_HAS_NO_CHANNEL, ORDER_TOTALS_MATH, ORDER_NUMBER_COUNTER],
     transaction: "create-order",
     fields: [
       { source: ["items"], target: ["totals"], transform: "calculateOrderTotals(items, taxes) → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}. Two-pass: computes pre-tax items first, then transaction fees from subtotal_discounted. transaction_fee items excluded from bookings/stock." },
@@ -63,6 +262,7 @@ export const createOrderRules: CollectionRule[] = [
     target: "bookings",
     mode: "co-write",
     invariant: "One booking per consolidated product per destination — tracks per-product stock lifecycle",
+    enforced_by: [BOOKING_ID_IS_THE_CARDINALITY],
     transaction: "create-order",
     fields: [
       { source: ["uid"], target: ["uid_order"] },
@@ -94,6 +294,7 @@ export const createOrderRules: CollectionRule[] = [
     target: "bookings",
     mode: "embed",
     invariant: "Bookings get store allocation from the inventory ledger to track where stock is drawn from",
+    enforced_by: [BOOKING_ALLOCATION_DIAGNOSTIC],
     transaction: "create-order",
     fields: [
       { source: ["store_breakdown"], target: ["stores"], transform: "allocateBookingToStores() — draws quantity from default store first, then alphabetical" },
@@ -132,6 +333,7 @@ export const createOrderRules: CollectionRule[] = [
     target: "fulfillments",
     mode: "co-write",
     invariant: "Fulfillment clients see a sanitized order view — pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items are stripped",
+    enforced_by: [FULFILLMENT_SHAPE_STRIPS, FULFILLMENT_STRIP_ASSERTED],
     transaction: "create-order",
     fields: [
       { source: ["uid"], target: ["uid"] },
@@ -178,6 +380,7 @@ export const updateOrderRules: CollectionRule[] = [
     target: "orders",
     mode: "embed",
     invariant: "When the order's org reference changes, fetch fresh org data to keep the denormalized snapshot current",
+    enforced_by: [ORDER_INPUT_HAS_NO_CHANNEL, ORG_SNAPSHOT_REFRESH],
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["organization", "uid"] },
@@ -193,6 +396,7 @@ export const updateOrderRules: CollectionRule[] = [
     target: "orders",
     mode: "derive",
     invariant: "Totals, query arrays, and date timestamps recomputed on every update",
+    enforced_by: [ORDER_INPUT_HAS_NO_CHANNEL, ORDER_TOTALS_MATH],
     transaction: "update-order",
     fields: [
       { source: ["items"], target: ["totals"], transform: "calculateOrderTotals(items, taxes) → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}" },
@@ -208,6 +412,7 @@ export const updateOrderRules: CollectionRule[] = [
     target: "bookings",
     mode: "co-write",
     invariant: "Bookings are diffed — created, updated, or deleted based on item/status/date/destination changes. Orphan bookings (bookings whose {order,product,destination} composite id no longer appears in the order) are deleted and their stock summaries zeroed.",
+    enforced_by: [BOOKING_ID_IS_THE_CARDINALITY, BOOKING_DIFF_TESTS, ORPHAN_BOOKING_LEAVES_NO_SUMMARY],
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["uid_order"] },
@@ -230,6 +435,7 @@ export const updateOrderRules: CollectionRule[] = [
     target: "bookings",
     mode: "embed",
     invariant: "Store allocation re-read from ledger on every booking update",
+    enforced_by: [BOOKING_ALLOCATION_DIAGNOSTIC],
     transaction: "update-order",
     fields: [
       { source: ["store_breakdown"], target: ["stores"], transform: "allocateBookingToStores() — only for part-prepped/prepped/active status" },
@@ -269,6 +475,7 @@ export const updateOrderRules: CollectionRule[] = [
     target: "fulfillments",
     mode: "co-write",
     invariant: "Fulfillment view mirrors the order on every update — stripped of pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items",
+    enforced_by: [FULFILLMENT_SHAPE_STRIPS, FULFILLMENT_STRIP_ASSERTED],
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["uid"] },
@@ -369,6 +576,7 @@ export const updateBookingRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "A breakdown change appends movement events. The picker sends an ABSOLUTE breakdown; `deriveCustodyTransitions` translates the delta into at most one movement PER TYPE per booking — `prep`, then `check_out` (rental) or `sale`, or `check_in` / `sale_return` / `mark_damaged` / `mark_lost` on the way back. Each event's document id is the derived `{uid_session}|{type}|{booking uid}`, which is what makes the append idempotent under the client's retry: a replay resolves onto the same documents and is accepted when its content hash matches, rejected 409 when it does not. An un-prepped check-out is normalized as an implicit `prep` followed by a `check_out` so neither type occurs twice in one session. A sale's units lost or damaged in transit emit NOTHING — ownership dropped at the sale, so placing them at an out-of-service record would drive quantity_in_service negative. Only the fulfillment ladder emits: `orders`/`opportunity` writers project a breakdown from order STATUS, and quoted→reserved→prepped all sit at a locations doc, so nothing moves.",
+    enforced_by: [CUSTODY_REPLAY],
     transaction: "update-booking",
     fields: [
       { source: ["uid_product"], target: ["uid_product"] },
@@ -387,6 +595,7 @@ export const updateBookingRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "Each emitted movement is folded onto its product's ledger by the ONE applier, threading the ledger across rows so a second booking of the same product allocates against the shelf the first already drew from (which is why chunks are grouped by product). A rental check-out moves units locations→bookings and leaves `quantity_held` untouched; a `sale` is one-sided (locations→outside) and drops it, removing the weighted-average share of the basis rather than the operator's number; `mark_lost`/`mark_damaged` move bookings→out-of-service, which is what finally makes `quantity_out_of_service` and `out_of_service_breakdown` non-zero. The ledger is written only for products a movement actually moved. `assertLedgerNonNegative` runs on the FINAL state, so an intermediate leg may dip.",
+    enforced_by: [LEDGER_REPLAY, LEDGER_NON_NEGATIVE],
     transaction: "update-booking",
     fields: [
       { source: ["lines"], target: ["quantity_held"], transform: "Σ (to ? +q : 0) + (from ? −q : 0) — conservation is structural" },
@@ -404,6 +613,7 @@ export const updateBookingRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "The same fold stages the location documents, so a shelf count finally means units physically present rather than units owned — the defect that made `locations` overstate by whatever was out on jobs. Touches `products[].quantity`, `query_by_products` and `updated_at` only; name, active, default, type and capacities belong to createLocation/updateLocation. A line names only a location and its store is READ from the location document, so a cross-store placement is inexpressible rather than guarded (#307). A negative row is logged, never clamped and never thrown on — the authoritative guard is the ledger assertion, and throwing here would wedge future edits shut on exactly the drifted docs a resync must repair.",
+    enforced_by: [MOVEMENT_APPLIER],
     transaction: "update-booking",
     fields: [
       { source: ["lines"], target: ["products"], transform: "quantity += (to ? +q : 0) + (from ? −q : 0) for the movement's product" },
@@ -416,6 +626,7 @@ export const updateBookingRules: CollectionRule[] = [
     target: "orders",
     mode: "co-write",
     invariant: "Every booking update applies a delta to order.bookings_breakdown ('+= next.breakdown[k] - prev.breakdown[k]' for each key). Same transaction may also flip order.status: (a) reserved → active when the post-delta bookings_breakdown.out > 0 and order.status === 'reserved' (one-way; out returning to 0 does NOT revert to reserved), (b) active/reserved → complete when bookings_breakdown.quoted + reserved + prepped + out === 0 (every quantity has reached a terminal state). Single order read + write per booking PUT — no sibling-bookings query.",
+    enforced_by: [ORDER_ROLLUP_DELTA],
     transaction: "update-booking",
     fields: [
       { source: ["breakdown"], target: ["bookings_breakdown"], transform: "delta-applied roll-up across all bookings on this order" },
@@ -428,6 +639,7 @@ export const updateBookingRules: CollectionRule[] = [
     target: "cards",
     mode: "co-write",
     invariant: "Per-destination event card status follows pick progress. For each destination touched by a booking write, query sibling bookings for that destination per side (delivery for `:start` cards, collection for `:end` cards) and recompute status: start: pre_delivery=Σ(quoted+reserved+prepped); pre_delivery===0 → complete; out>0 → active; else planned. end: terminal=Σ(returned+lost+damaged); terminal===Σquantity → complete; (terminal>0 || still_out>0) → active; else planned. Manual `blocked` status is preserved (pick-progress writes never overwrite blocked unless the parent order itself transitions to canceled, which lives on update-order). `canceled` status is sourced exclusively from order.status. Sale-only destinations exclude their bookings from the end-side roll-up so the end card stays planned↔complete based on rental siblings only. Card writes bump version and validate via CardSchema; the lock value `status_auto` permits this server-internal write while still rejecting external PATCH attempts to change `status` to anything other than `blocked`.",
+    enforced_by: [CARD_STATUS_MATH],
     transaction: "update-booking",
     fields: [
       { source: ["breakdown"], target: ["status"], transform: "computeCardStatusFromBookings(side, siblings, current) — see invariant" },
