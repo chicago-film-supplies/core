@@ -2,7 +2,7 @@
  * Order schemas — Firestore collection: orders
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid } from "./_uid.ts";
+import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import {
@@ -941,7 +941,7 @@ export interface Order {
   subject?: string;
   reference?: string | null;
   xero_id?: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -980,7 +980,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   subject: z.string().default(""),
   reference: z.string().max(255).nullable().default(null),
   xero_id: z.uuid().nullable().default(null),
-  defaultThreadId: z.string().optional(),
+  uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   ...TimestampFields,
 }).meta({

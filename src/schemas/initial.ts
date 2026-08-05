@@ -93,11 +93,30 @@ function resolveField(schema: any): unknown {
  * recurse, an annotation on the leaf is found through `.optional()` and
  * `.transform()` pipes too. Use it when the form seed and the parse-time
  * default must differ (see the note in `resolveField`).
+ *
+ * ## The return is `Partial`, and that is not conservatism — it is the truth
+ *
+ * The result is missing required fields, so `z.output<S>` would be a lie.
+ * Three separate holes put it there, and each is visible above:
+ *
+ * - **`custom` nodes are omitted entirely** (`SKIP`). `FirestoreTimestamp` is
+ *   `z.custom`, and `TimestampFields` puts `created_at`/`updated_at` on
+ *   essentially every document schema — so *every* document's initial value is
+ *   missing at least two required fields. `tests/initial.test.ts` asserts
+ *   `"created_at" in result === false`, so this is pinned, not incidental.
+ * - **A `union` collapses to its first resolvable arm**, so reading a property
+ *   that only exists on another arm is a type error the `Partial` correctly
+ *   reports rather than hides.
+ * - **The partial is shallow.** Nested objects are partial in fact but typed
+ *   complete, because the walk recurses while the type does not.
+ *
+ * `pipe` resolving the *input* side is a fourth, currently latent: both live
+ * transforms are `z.ZodType<string, string>`, so In ≡ Out today.
  */
-export function getInitialValues(schema: z.ZodType): Record<string, unknown> {
+export function getInitialValues<S extends z.ZodType>(schema: S): Partial<z.output<S>> {
   const result = resolveField(schema);
   if (typeof result !== "object" || result === null || Array.isArray(result)) {
     throw new Error("getInitialValues requires an object schema");
   }
-  return result as Record<string, unknown>;
+  return result as Partial<z.output<S>>;
 }

@@ -2,7 +2,7 @@
  * Threads & comments propagation rules.
  *
  * On every create-<X> transaction we cowrite a default `threads` doc for the
- * parent and embed the thread's `uid` back onto the parent as `defaultThreadId`.
+ * parent and embed the thread's `uid` back onto the parent as `uid_thread`.
  * Event cards (see propagation/cards.ts) get two sources (the card + its parent order) so the
  * thread surfaces on both detail pages.
  *
@@ -30,7 +30,7 @@ interface ThreadCowriteConfig {
  * All 14 cowrite rules share one detector, so the pointer lives here rather than
  * being repeated per entity — one edit site, 14 rules.
  *
- * `defaultThreadId` is `.optional()` on every carrier schema, so
+ * `uid_thread` is `.optional()` on every carrier schema, so
  * `validateBeforeWrite` cannot see a doc that simply lacks one and a corpus walk
  * is the ONLY enforcement available. That is why `kind: "audit"` here is not a
  * weaker choice than `"zod"` — it is the only one on offer.
@@ -77,7 +77,7 @@ function cowriteRulesFor({ collection, transaction }: ThreadCowriteConfig): Coll
       transaction,
       enforced_by: [THREAD_REVERSE],
       fields: [
-        { source: ["uid"], target: ["defaultThreadId"] },
+        { source: ["uid"], target: ["uid_thread"] },
       ],
     },
   ];

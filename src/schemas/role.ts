@@ -7,6 +7,7 @@
  */
 import { z } from "zod";
 import { type FirestoreTimestampType, TimestampFields } from "./common.ts";
+import { ThreadId } from "./_uid.ts";
 
 /** A role document in Firestore. */
 export interface Role {
@@ -14,7 +15,7 @@ export interface Role {
   label: string;
   permissions: string[];
   description?: string;
-  defaultThreadId?: string;
+  uid_thread?: string;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -27,7 +28,7 @@ export const RoleSchema: z.ZodType<Role> = z.strictObject({
   label: z.string().min(1).max(128).meta({ pii: "none" }),
   permissions: z.array(z.string()).default([]),
   description: z.string().max(500).optional(),
-  defaultThreadId: z.string().optional(),
+  uid_thread: ThreadId.optional(),
   ...TimestampFields,
 }).meta({
   title: "Role",

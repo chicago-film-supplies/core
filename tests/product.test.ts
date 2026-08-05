@@ -3,7 +3,11 @@ import { AuthoredComponentSchema, ComponentSchema, CreateProductInput, derivePro
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
-const base = getInitialValues(ProductSchema);
+// `uid_thread` is a branded `ThreadId`, and the schema walk seeds every string
+// leaf as `""` — which `ThreadId` correctly rejects. An optional branded id has
+// no meaningful zero value, so the fixture supplies a real one, as every prod
+// doc does (2,970/2,970 carry a conforming id).
+const base = { ...getInitialValues(ProductSchema), uid_thread: "testthread0000000001" };
 const actor = { uid: "testuser100000000000", name: "Test User" };
 const validProduct = {
   ...base,
@@ -11,7 +15,7 @@ const validProduct = {
   name: "Canon C300",
   active: true,
   crms_id: 100,
-  price: { ...(base.price as Record<string, unknown>), base: 500, replacement: 5000, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
+  price: { ...base.price, base: 500, replacement: 5000, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
   tags: [{ uid: "testt100000000000000", name: "Camera" }],
   webshop: { available: true },
   created_by: actor,
@@ -139,6 +143,28 @@ Deno.test("ProductSchema rejects missing required fields", () => {
 Deno.test("ProductSchema rejects additional properties", () => {
   const doc = { ...validProduct, bogus: true };
   assertEquals(ProductSchema.safeParse(doc).success, false);
+});
+
+Deno.test("ProductSchema uid_thread is a ThreadId, not a bare string", () => {
+  // The field was `defaultThreadId: z.string().optional()` — any string at all,
+  // including "". It is now `ThreadId`, the same validator `cards`/`comments`
+  // already used, which admits a Firestore auto-id or an EventCardId composite.
+  // Probed before tightening: 2,970/2,970 prod docs and 3,011/3,011 dev docs
+  // across all eight carriers already conform, so this rejects nothing stored.
+  const accepts = (v: unknown) => ProductSchema.safeParse({ ...validProduct, uid_thread: v }).success;
+
+  assertEquals(accepts("testthread0000000001"), true); // Firestore auto-id
+  assertEquals(accepts("testorder00000000001:testdest000000000001:start"), true); // EventCardId
+
+  assertEquals(accepts(""), false); // the walk's zero value — the reason fixtures override it
+  assertEquals(accepts("too-short"), false);
+  assertEquals(accepts("testthread0000000001:bogus"), false); // half a composite
+  assertEquals(accepts(42), false);
+
+  // Still optional — absence is legal and is what makes the corpus audit the
+  // only forward enforcement (see propagation/threads.ts).
+  const { uid_thread: _omitted, ...withoutThread } = validProduct;
+  assertEquals(ProductSchema.safeParse(withoutThread).success, true);
 });
 
 const validCreateInput = {

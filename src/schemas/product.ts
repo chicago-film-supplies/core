@@ -2,7 +2,7 @@
  * Product document schema — Firestore collection: products
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
 import { MovementAllocationInput, type MovementAllocationInputType } from "./transaction.ts";
@@ -235,7 +235,7 @@ export interface Product {
    */
   xero_code?: string | null;
   xero_tracking_option_id: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -378,7 +378,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   // validate unchanged before the backfill lands.
   xero_code: z.string().min(1).nullable().optional(),
   xero_tracking_option_id: z.uuid().nullable(),
-  defaultThreadId: z.string().optional(),
+  uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,

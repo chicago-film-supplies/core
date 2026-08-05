@@ -31,7 +31,7 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid } from "./_uid.ts";
+import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import {
   ActorRef,
@@ -336,7 +336,7 @@ export interface CreditNote {
   sources: DocSourceType[];
   query_by_sources: string[];
   xero_credit_note_id: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -417,7 +417,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   sources: z.array(DocSource).default([]),
   query_by_sources: z.array(z.string()).default([]),
   xero_credit_note_id: z.uuid().nullable().default(null),
-  defaultThreadId: z.string().optional(),
+  uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,

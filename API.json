@@ -86,12 +86,6 @@
         },
         {
           "kind": "variable",
-          "name": "BOOKING_BREAKDOWN_OPEN_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_OPEN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\"[];",
-          "doc": "Keys representing items that are still in flight (pre-terminal)."
-        },
-        {
-          "kind": "variable",
           "name": "BOOKING_BREAKDOWN_TERMINAL_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\"[];",
           "doc": "Keys representing items that have reached a terminal state."
@@ -639,7 +633,7 @@
         {
           "kind": "interface",
           "name": "Contact",
-          "declaration": "interface Contact {\n  uid: string;\n  name: string;\n  crms_id?: number;\n  emails: string[];\n  phones: string[];\n  organizations: ContactOrganizationType[];\n  query_by_organizations: string[];\n  uid_user?: string;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Contact {\n  uid: string;\n  name: string;\n  crms_id?: number;\n  emails: string[];\n  phones: string[];\n  organizations: ContactOrganizationType[];\n  query_by_organizations: string[];\n  uid_user?: string;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full contact document schema (Firestore document shape)."
         },
         {
@@ -963,7 +957,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -1611,7 +1605,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -2277,7 +2271,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -2481,7 +2475,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -2517,7 +2511,7 @@
         {
           "kind": "interface",
           "name": "OutOfService",
-          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  transactions?: OOSTransaction[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  transactions?: OOSTransaction[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An out-of-service record tracking inventory removed from active service."
         },
         {
@@ -2637,7 +2631,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -2985,7 +2979,7 @@
         {
           "kind": "interface",
           "name": "Role",
-          "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  defaultThreadId?: string;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  uid_thread?: string;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A role document in Firestore."
         },
         {
@@ -3472,7 +3466,7 @@
           "kind": "variable",
           "name": "ThreadId",
           "declaration": "const ThreadId: z.ZodType<string>;",
-          "doc": "`threads.uid` (and the `uid_thread` references on `cards` + `comments`) —\neither a Firestore auto-id (the default-thread cowrite for most entities) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
+          "doc": "`threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the\neight default-thread carriers (`orders`, `invoices`, `products`, `roles`,\n`contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is\n`.optional()`) — either a Firestore auto-id (the default-thread cowrite) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
         },
         {
           "kind": "variable",
@@ -4328,8 +4322,8 @@
         {
           "kind": "function",
           "name": "getInitialValues",
-          "signature": "getInitialValues(schema: z.ZodType): Record<string, unknown>",
-          "doc": "Walk a Zod schema and produce an initial/blank object for form binding.\n\nDerives values from schema structure: `\"\"` for strings, `0` for numbers,\n`false` for booleans, `[]` for arrays, `{}` for records, `null` for\nnullables, first value for enums, and recursion for objects.\nFields with `.default()` use the default value.\nCustom types (e.g. FirestoreTimestamp) are omitted.\n\nA field annotated `.meta({ initial: <value> })` uses that value instead, at\nany level — it is checked before the type switch, and because wrapper nodes\nrecurse, an annotation on the leaf is found through `.optional()` and\n`.transform()` pipes too. Use it when the form seed and the parse-time\ndefault must differ (see the note in `resolveField`).",
+          "signature": "getInitialValues(schema: S): Partial<z.output<S>>",
+          "doc": "Walk a Zod schema and produce an initial/blank object for form binding.\n\nDerives values from schema structure: `\"\"` for strings, `0` for numbers,\n`false` for booleans, `[]` for arrays, `{}` for records, `null` for\nnullables, first value for enums, and recursion for objects.\nFields with `.default()` use the default value.\nCustom types (e.g. FirestoreTimestamp) are omitted.\n\nA field annotated `.meta({ initial: <value> })` uses that value instead, at\nany level — it is checked before the type switch, and because wrapper nodes\nrecurse, an annotation on the leaf is found through `.optional()` and\n`.transform()` pipes too. Use it when the form seed and the parse-time\ndefault must differ (see the note in `resolveField`).\n\n## The return is `Partial`, and that is not conservatism — it is the truth\n\nThe result is missing required fields, so `z.output<S>` would be a lie.\nThree separate holes put it there, and each is visible above:\n\n- **`custom` nodes are omitted entirely** (`SKIP`). `FirestoreTimestamp` is\n  `z.custom`, and `TimestampFields` puts `created_at`/`updated_at` on\n  essentially every document schema — so *every* document's initial value is\n  missing at least two required fields. `tests/initial.test.ts` asserts\n  `\"created_at\" in result === false`, so this is pinned, not incidental.\n- **A `union` collapses to its first resolvable arm**, so reading a property\n  that only exists on another arm is a type error the `Partial` correctly\n  reports rather than hides.\n- **The partial is shallow.** Nested objects are partial in fact but typed\n  complete, because the walk recurses while the type does not.\n\n`pipe` resolving the *input* side is a fourth, currently latent: both live\ntransforms are `z.ZodType<string, string>`, so In ≡ Out today.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5245,7 +5239,7 @@
           "kind": "variable",
           "name": "ThreadId",
           "declaration": "const ThreadId: z.ZodType<string>;",
-          "doc": "`threads.uid` (and the `uid_thread` references on `cards` + `comments`) —\neither a Firestore auto-id (the default-thread cowrite for most entities) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
+          "doc": "`threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the\neight default-thread carriers (`orders`, `invoices`, `products`, `roles`,\n`contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is\n`.optional()`) — either a Firestore auto-id (the default-thread cowrite) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
         },
         {
           "kind": "variable",
@@ -5348,12 +5342,6 @@
           "name": "BOOKING_BREAKDOWN_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
           "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports all three, so existing importers are unaffected."
-        },
-        {
-          "kind": "variable",
-          "name": "BOOKING_BREAKDOWN_OPEN_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_OPEN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\"[];",
-          "doc": "Keys representing items that are still in flight (pre-terminal)."
         },
         {
           "kind": "variable",
@@ -5712,7 +5700,7 @@
         {
           "kind": "interface",
           "name": "Contact",
-          "declaration": "interface Contact {\n  uid: string;\n  name: string;\n  crms_id?: number;\n  emails: string[];\n  phones: string[];\n  organizations: ContactOrganizationType[];\n  query_by_organizations: string[];\n  uid_user?: string;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Contact {\n  uid: string;\n  name: string;\n  crms_id?: number;\n  emails: string[];\n  phones: string[];\n  organizations: ContactOrganizationType[];\n  query_by_organizations: string[];\n  uid_user?: string;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full contact document schema (Firestore document shape)."
         },
         {
@@ -6018,7 +6006,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  uploadcare_files?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -6526,7 +6514,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -6858,7 +6846,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -6972,7 +6960,7 @@
         {
           "kind": "interface",
           "name": "OutOfService",
-          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  transactions?: OOSTransaction[];\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  transactions?: OOSTransaction[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An out-of-service record tracking inventory removed from active service."
         },
         {
@@ -7050,7 +7038,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description?: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  uid_tracking_category?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -7262,7 +7250,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  defaultThreadId?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -9197,7 +9185,7 @@
         {
           "kind": "interface",
           "name": "Role",
-          "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  defaultThreadId?: string;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Role {\n  name: string;\n  label: string;\n  permissions: string[];\n  description?: string;\n  uid_thread?: string;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A role document in Firestore."
         },
         {
@@ -9424,12 +9412,6 @@
         },
         {
           "kind": "variable",
-          "name": "BOOKING_BREAKDOWN_OPEN_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_OPEN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\"[];",
-          "doc": "Keys representing items that are still in flight (pre-terminal)."
-        },
-        {
-          "kind": "variable",
           "name": "BOOKING_BREAKDOWN_TERMINAL_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\"[];",
           "doc": "Keys representing items that have reached a terminal state."
@@ -9457,8 +9439,8 @@
         {
           "kind": "function",
           "name": "calculateBookingBreakdown",
-          "signature": "calculateBookingBreakdown(status: string, type: string, quantity: number, existingBreakdown?: indexedAccess): indexedAccess",
-          "doc": "Project a booking's breakdown for a given order status, item type, and\ntotal quantity. Pure sync — no I/O.\n\nThe new bucket (`quoted` for status `quoted`, `reserved` for `reserved`/\n`active`, `returned`/`out` for `complete`) is computed as\n`quantity - (carried-over progress)` so the resulting breakdown always\nsums to `quantity`. The carry-over set is `prepped + out + returned + lost\n+ damaged` — the previous `quoted` and `reserved` values are intentionally\ndropped, which is what fixes the \"two open buckets after a status flip\"\ndata corruption that surfaced in opportunity webhook ingestion.\n\nStatus rules:\n  draft / canceled  → all zeros (cleared on cancel/draft)\n  quoted            → quoted = quantity − carry; preserves prepped/out/terminals\n  reserved / active → reserved = quantity − carry; preserves prepped/out/terminals\n  complete + rental → returned = quantity − (lost + damaged); zero everything else\n  complete + sale   → out = quantity; zero everything else\n  anything else     → all zeros",
+          "signature": "calculateBookingBreakdown(status: OrderStatusType, type: ComponentTypeType, quantity: number, existingBreakdown?: indexedAccess): indexedAccess",
+          "doc": "Project a booking's breakdown for a given **order** status, item type, and\ntotal quantity. Pure sync — no I/O.\n\n⚠️ `status` is an `OrderStatusType`, **not** a `BookingStatusType`. The two\nvocabularies overlap but are not the same set: an order can be `canceled`\n(a booking cannot) and a booking can be `part-prepped`/`prepped` (an order\ncannot). The projection is driven by the parent order, so a caller holding a\n`booking.status` must read through to the order rather than pass it here —\nthat mismatch is what the narrowing exists to make a compile error.\n\nStatus rules:\n  draft / canceled  → all zeros (cleared on cancel/draft)\n  quoted            → quoted = quantity − carry; preserves prepped/out/terminals\n  reserved / active → reserved = quantity − carry; preserves prepped/out/terminals\n  complete + rental → returned = quantity − (lost + damaged); zero everything else\n  complete + sale   → out = quantity; zero everything else\n  complete + service / surcharge → all zeros",
           "paramTags": [],
           "returnsTag": null
         },

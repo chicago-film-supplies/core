@@ -2,7 +2,7 @@
  * Contact document schema — Firestore collection: contacts
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, ThreadId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -43,7 +43,7 @@ export interface Contact extends NameParts {
   organizations: ContactOrganizationType[];
   query_by_organizations: string[];
   uid_user?: string;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -64,7 +64,7 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   organizations: z.array(ContactOrganization).default([]),
   query_by_organizations: z.array(z.string()).default([]),
   uid_user: FirestoreId.optional(),
-  defaultThreadId: z.string().optional(),
+  uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,

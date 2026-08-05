@@ -4,7 +4,9 @@ import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, IN
 import { derivePaymentStatus } from "../src/utils/invoices.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
-const invoiceBase = getInitialValues(InvoiceSchema) as Record<string, unknown>;
+// `uid_thread` is a branded `ThreadId`; the schema walk seeds string leaves as
+// `""`, which it rejects. Supply a real id, as every prod doc carries one.
+const invoiceBase = { ...getInitialValues(InvoiceSchema), uid_thread: "testthread0000000001" } as Record<string, unknown>;
 const totalsBase = invoiceBase.totals as Record<string, unknown>;
 const lineItemBase = getInitialValues(InvoiceDocLineItemSchema) as Record<string, unknown>;
 const priceBase = (lineItemBase as { price: Record<string, unknown> }).price;

@@ -34,7 +34,7 @@ const OOS_SOURCES_SHAPE: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/out-of-service/outOfService.test.ts:32",
   clause:
-    "the EMPTY end — an ad-hoc create stores `sources: []` and `query_by_sources: []`, plus the derived `status`/`breakdown`/`defaultThreadId`. The two-source end comes from the booking path (bookings.test.ts:211, which cowrites two records); the one-source `[orders]` case and the sources↔query_by_sources parity are unchecked.",
+    "the EMPTY end — an ad-hoc create stores `sources: []` and `query_by_sources: []`, plus the derived `status`/`breakdown`/`uid_thread`. The two-source end comes from the booking path (bookings.test.ts:211, which cowrites two records); the one-source `[orders]` case and the sources↔query_by_sources parity are unchecked.",
   gates: true,
 };
 

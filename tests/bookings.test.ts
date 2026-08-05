@@ -9,7 +9,7 @@ import {
   sumBookingBreakdown,
   sumBookingsBreakdown,
 } from "../src/utils/bookings.ts";
-import type { Booking } from "../src/schemas/mod.ts";
+import type { Booking, OrderStatusType } from "../src/schemas/mod.ts";
 
 const sample = (overrides: Partial<Booking["breakdown"]> = {}): Booking["breakdown"] => ({
   quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0,
@@ -214,6 +214,36 @@ Deno.test("calculateBookingBreakdown: complete sale → all qty in out", () => {
   const prev = sample({ reserved: 5 });
   const next = calculateBookingBreakdown("complete", "sale", 5, prev);
   assertEquals(next, sample({ out: 5 }));
+});
+
+Deno.test("calculateBookingBreakdown: complete service/surcharge → all zeros, NOT quantity", () => {
+  // Load-bearing, and until this test existed nothing pinned it despite ~439
+  // prod bookings riding the branch. `complete-stale-bookings.ts` computes
+  // `expectedSum = isService ? 0 : quantity` and THROWS when the projection
+  // disagrees — so a `complete` arm that gave service the rental or sale
+  // treatment would brick that script on every service booking.
+  const prev = sample({ reserved: 4 });
+  assertEquals(calculateBookingBreakdown("complete", "service", 4, prev), emptyBookingsBreakdown());
+  assertEquals(calculateBookingBreakdown("complete", "surcharge", 4, prev), emptyBookingsBreakdown());
+  assertEquals(sumBookingBreakdown(calculateBookingBreakdown("complete", "service", 4, prev)), 0);
+});
+
+Deno.test("calculateBookingBreakdown: an out-of-vocabulary status returns zeros, never undefined", () => {
+  // `template-helpers.generated.ts` exposes this to Eta templates, which pass
+  // runtime-unchecked arguments — so the lookup is indexed defensively. The cast
+  // is the point of the test: it reproduces what an Eta caller can actually do.
+  const bogus = "part-prepped" as OrderStatusType; // a BOOKING status, not an order one
+  assertEquals(calculateBookingBreakdown(bogus, "rental", 10, sample({ reserved: 10 })), emptyBookingsBreakdown());
+});
+
+Deno.test("calculateBookingBreakdown: each call returns a fresh object", () => {
+  // `applyBookingBreakdownDelta` mutates its target in place, so a shared frozen
+  // `base` behind the zero-returning arms would be a cross-booking aliasing bug.
+  const a = calculateBookingBreakdown("draft", "rental", 10);
+  const b = calculateBookingBreakdown("draft", "rental", 10);
+  assertEquals(a, b);
+  a.reserved = 99;
+  assertEquals(b.reserved, 0);
 });
 
 Deno.test("calculateBookingBreakdown: repairs corrupt double-bucket from buggy webhook", () => {

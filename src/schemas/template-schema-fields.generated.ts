@@ -183,7 +183,7 @@ export const templateSchemaFields: Partial<
     { path: "subject", type: "string" },
     { path: "reference", type: "string | null" },
     { path: "xero_id", type: "string | null" },
-    { path: "defaultThreadId", type: "string?" },
+    { path: "uid_thread", type: "union?" },
     { path: "version", type: "number" },
   ],
   "invoices": [
@@ -364,7 +364,7 @@ export const templateSchemaFields: Partial<
     { path: "uploadcare_files[].created_at", type: "Timestamp" },
     { path: "crms_id", type: "number? | null" },
     { path: "crms_opportunity_ids", type: "number[]?" },
-    { path: "defaultThreadId", type: "string?" },
+    { path: "uid_thread", type: "union?" },
     { path: "version", type: "number" },
     { path: "created_by", type: "object" },
     { path: "created_by.uid", type: "string" },

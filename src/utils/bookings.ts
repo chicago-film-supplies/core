@@ -14,7 +14,7 @@
  *
  * @module
  */
-import type { Booking, Order } from "../schemas/mod.ts";
+import type { Booking, ComponentTypeType, Order, OrderStatusType } from "../schemas/mod.ts";
 
 /**
  * The breakdown key constants now live beside `BookingBreakdownSchema` in
@@ -25,7 +25,6 @@ import type { Booking, Order } from "../schemas/mod.ts";
  */
 export {
   BOOKING_BREAKDOWN_KEYS,
-  BOOKING_BREAKDOWN_OPEN_KEYS,
   BOOKING_BREAKDOWN_TERMINAL_KEYS,
   BookingBreakdownKeyEnum,
   type BookingBreakdownKeyType,
@@ -126,16 +125,90 @@ export function applyBookingBreakdownDelta(
 }
 
 /**
- * Project a booking's breakdown for a given order status, item type, and
+ * Carry the in-flight and terminal progress forward, and put the remainder in
+ * one open bucket. The carry set is `prepped + out + returned + lost + damaged`
+ * — the previous `quoted` and `reserved` values are intentionally dropped, which
+ * is what fixes the "two open buckets after a status flip" data corruption that
+ * surfaced in opportunity webhook ingestion.
+ */
+function openBucket(
+  key: "quoted" | "reserved",
+  quantity: number,
+  prev: Booking["breakdown"],
+): Booking["breakdown"] {
+  const carry = prev.prepped + prev.out + prev.returned + prev.lost + prev.damaged;
+  const open = quantity - carry;
+  return {
+    ...emptyBookingsBreakdown(),
+    prepped: prev.prepped,
+    out: prev.out,
+    returned: prev.returned,
+    lost: prev.lost,
+    damaged: prev.damaged,
+    quoted: key === "quoted" ? open : 0,
+    reserved: key === "reserved" ? open : 0,
+  };
+}
+
+/**
+ * How a `complete` order settles a booking, per item type.
+ *
+ * **`service` and `surcharge` settle to all-zeros, and that is load-bearing** —
+ * `api-cloudrun/scripts/complete-stale-bookings.ts` computes
+ * `expectedSum = isService ? 0 : quantity` and throws when the projection
+ * disagrees. Prod holds ~439 service/surcharge bookings. The `Record` annotation
+ * is what stops a new `ComponentTypeType` member from silently acquiring the
+ * rental treatment.
+ */
+const COMPLETE_BY_TYPE: Readonly<
+  Record<ComponentTypeType, (quantity: number, prev: Booking["breakdown"]) => Booking["breakdown"]>
+> = {
+  rental: (quantity, prev) => ({
+    ...emptyBookingsBreakdown(),
+    returned: quantity - (prev.lost + prev.damaged),
+    lost: prev.lost,
+    damaged: prev.damaged,
+  }),
+  sale: (quantity) => ({ ...emptyBookingsBreakdown(), out: quantity }),
+  service: () => emptyBookingsBreakdown(),
+  surcharge: () => emptyBookingsBreakdown(),
+};
+
+/**
+ * The projection rule, one entry per **order** status.
+ *
+ * Same shape as `MOVEMENT_CONTRACTS` (`schemas/transaction.ts`): the
+ * `Record<OrderStatusType, …>` annotation makes an incomplete literal a compile
+ * error at the declaration, so a new `ORDER_STATUSES` member cannot silently
+ * fall through to an all-zero breakdown the way the previous if-chain let it.
+ *
+ * The values are projector functions rather than plain data because the arms
+ * need `prev`, `quantity` and — for `complete` — the item `type`.
+ */
+const BREAKDOWN_PROJECTIONS: Readonly<
+  Record<
+    OrderStatusType,
+    (quantity: number, prev: Booking["breakdown"], type: ComponentTypeType) => Booking["breakdown"]
+  >
+> = {
+  draft: () => emptyBookingsBreakdown(),
+  canceled: () => emptyBookingsBreakdown(),
+  quoted: (quantity, prev) => openBucket("quoted", quantity, prev),
+  reserved: (quantity, prev) => openBucket("reserved", quantity, prev),
+  active: (quantity, prev) => openBucket("reserved", quantity, prev),
+  complete: (quantity, prev, type) => COMPLETE_BY_TYPE[type]?.(quantity, prev) ?? emptyBookingsBreakdown(),
+};
+
+/**
+ * Project a booking's breakdown for a given **order** status, item type, and
  * total quantity. Pure sync — no I/O.
  *
- * The new bucket (`quoted` for status `quoted`, `reserved` for `reserved`/
- * `active`, `returned`/`out` for `complete`) is computed as
- * `quantity - (carried-over progress)` so the resulting breakdown always
- * sums to `quantity`. The carry-over set is `prepped + out + returned + lost
- * + damaged` — the previous `quoted` and `reserved` values are intentionally
- * dropped, which is what fixes the "two open buckets after a status flip"
- * data corruption that surfaced in opportunity webhook ingestion.
+ * ⚠️ `status` is an `OrderStatusType`, **not** a `BookingStatusType`. The two
+ * vocabularies overlap but are not the same set: an order can be `canceled`
+ * (a booking cannot) and a booking can be `part-prepped`/`prepped` (an order
+ * cannot). The projection is driven by the parent order, so a caller holding a
+ * `booking.status` must read through to the order rather than pass it here —
+ * that mismatch is what the narrowing exists to make a compile error.
  *
  * Status rules:
  *   draft / canceled  → all zeros (cleared on cancel/draft)
@@ -143,62 +216,20 @@ export function applyBookingBreakdownDelta(
  *   reserved / active → reserved = quantity − carry; preserves prepped/out/terminals
  *   complete + rental → returned = quantity − (lost + damaged); zero everything else
  *   complete + sale   → out = quantity; zero everything else
- *   anything else     → all zeros
+ *   complete + service / surcharge → all zeros
  */
 export function calculateBookingBreakdown(
-  status: string,
-  type: string,
+  status: OrderStatusType,
+  type: ComponentTypeType,
   quantity: number,
   existingBreakdown?: Booking["breakdown"],
 ): Booking["breakdown"] {
-  const base = emptyBookingsBreakdown();
-  const prev = existingBreakdown ?? base;
-
-  if (status === "canceled" || status === "draft") {
-    return base;
-  }
-
-  const carry = prev.prepped + prev.out + prev.returned + prev.lost + prev.damaged;
-
-  if (status === "quoted") {
-    return {
-      ...base,
-      prepped: prev.prepped,
-      out: prev.out,
-      returned: prev.returned,
-      lost: prev.lost,
-      damaged: prev.damaged,
-      quoted: quantity - carry,
-    };
-  }
-
-  if (status === "reserved" || status === "active") {
-    return {
-      ...base,
-      prepped: prev.prepped,
-      out: prev.out,
-      returned: prev.returned,
-      lost: prev.lost,
-      damaged: prev.damaged,
-      reserved: quantity - carry,
-    };
-  }
-
-  if (status === "complete") {
-    if (type === "rental") {
-      return {
-        ...base,
-        returned: quantity - (prev.lost + prev.damaged),
-        lost: prev.lost,
-        damaged: prev.damaged,
-      };
-    }
-    if (type === "sale") {
-      return { ...base, out: quantity };
-    }
-  }
-
-  return base;
+  const prev = existingBreakdown ?? emptyBookingsBreakdown();
+  // Indexed defensively, not as `TABLE[status](…)`: `template-helpers.generated.ts`
+  // exposes this function to Eta templates with runtime-unchecked arguments, so an
+  // out-of-vocabulary status must keep returning `base` rather than start throwing
+  // on `undefined` in the PDF render path.
+  return BREAKDOWN_PROJECTIONS[status]?.(quantity, prev, type) ?? emptyBookingsBreakdown();
 }
 
 /**

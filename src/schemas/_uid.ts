@@ -129,8 +129,10 @@ export const EventCardId: z.ZodType<string> = z.templateLiteral([
 export const CardId: z.ZodType<string> = z.union([firestoreId, EventCardId]);
 
 /**
- * `threads.uid` (and the `uid_thread` references on `cards` + `comments`) —
- * either a Firestore auto-id (the default-thread cowrite for most entities) or
+ * `threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the
+ * eight default-thread carriers (`orders`, `invoices`, `products`, `roles`,
+ * `contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is
+ * `.optional()`) — either a Firestore auto-id (the default-thread cowrite) or
  * an `EventCardId` composite. Event-card threads are minted at a **deterministic
  * id equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so
  * the delete→recreate churn of a CRMS opportunity-webhook burst reuses the one

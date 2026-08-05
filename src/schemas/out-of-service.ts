@@ -16,7 +16,7 @@
  * booking-detail lookups without sub-object equality issues.
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -153,7 +153,7 @@ export interface OutOfService {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   transactions?: OOSTransaction[];
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -221,7 +221,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   query_by_uid_store: z.array(FirestoreId).default([]),
   query_by_uid_location: z.array(FirestoreId).default([]),
   transactions: z.array(OOSTransactionSchema).optional(),
-  defaultThreadId: z.string().optional(),
+  uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,

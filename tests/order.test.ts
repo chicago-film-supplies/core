@@ -3,7 +3,9 @@ import { getInitialValues } from "../src/schemas/initial.ts";
 import { CreateOrderInput, Discount, DiscountInput, DocDestination, isLineItem, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderItem, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
-const orderBase = getInitialValues(OrderSchema) as Record<string, unknown>;
+// `uid_thread` is a branded `ThreadId`; the schema walk seeds string leaves as
+// `""`, which it rejects. Supply a real id, as every prod doc carries one.
+const orderBase = { ...getInitialValues(OrderSchema), uid_thread: "testthread0000000001" } as Record<string, unknown>;
 const totalsBase = orderBase.totals as Record<string, unknown>;
 const datesBase = getInitialValues(OrderDocDates) as Record<string, unknown>;
 const destBase = getInitialValues(DocDestination) as Record<string, unknown>;

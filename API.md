@@ -204,14 +204,6 @@ the movement journal needs the key union to type a custody transition.
 const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
 ```
 
-### `BOOKING_BREAKDOWN_OPEN_KEYS`
-
-Keys representing items that are still in flight (pre-terminal).
-
-```ts
-const BOOKING_BREAKDOWN_OPEN_KEYS: "quoted" | "reserved" | "prepped" | "out"[];
-```
-
 ### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
 
 Keys representing items that have reached a terminal state.
@@ -1252,7 +1244,7 @@ interface Contact {
   organizations: ContactOrganizationType[];
   query_by_organizations: string[];
   uid_user?: string;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -1894,7 +1886,7 @@ interface CreditNote {
   sources: DocSourceType[];
   query_by_sources: string[];
   xero_credit_note_id: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -3201,7 +3193,7 @@ interface Invoice {
   uploadcare_files?: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -4567,7 +4559,7 @@ interface Order {
   subject?: string;
   reference?: string | null;
   xero_id?: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -5004,7 +4996,7 @@ interface Organization {
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
   last_order?: FirestoreTimestampType | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -5078,7 +5070,7 @@ interface OutOfService {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   transactions?: OOSTransaction[];
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -5320,7 +5312,7 @@ interface Product {
   xero_id: string | null;
   xero_code?: string | null;
   xero_tracking_option_id: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -5967,7 +5959,7 @@ interface Role {
   label: string;
   permissions: string[];
   description?: string;
-  defaultThreadId?: string;
+  uid_thread?: string;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -6895,8 +6887,10 @@ type ThreadCreated = EventEnvelope<Thread> & typeLiteral;
 
 ### `ThreadId`
 
-`threads.uid` (and the `uid_thread` references on `cards` + `comments`) —
-either a Firestore auto-id (the default-thread cowrite for most entities) or
+`threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the
+eight default-thread carriers (`orders`, `invoices`, `products`, `roles`,
+`contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is
+`.optional()`) — either a Firestore auto-id (the default-thread cowrite) or
 an `EventCardId` composite. Event-card threads are minted at a **deterministic
 id equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so
 the delete→recreate churn of a CRMS opportunity-webhook burst reuses the one
@@ -8442,7 +8436,7 @@ nothing; offering a rejected one is a dead end in the UI.
 When `increaseOnly` is true, returns only types that add stock — for the first
 transaction on a product.
 
-### `getInitialValues(schema: z.ZodType): Record<string, unknown>`
+### `getInitialValues(schema: S): Partial<z.output<S>>`
 
 Walk a Zod schema and produce an initial/blank object for form binding.
 
@@ -8457,6 +8451,25 @@ any level — it is checked before the type switch, and because wrapper nodes
 recurse, an annotation on the leaf is found through `.optional()` and
 `.transform()` pipes too. Use it when the form seed and the parse-time
 default must differ (see the note in `resolveField`).
+
+## The return is `Partial`, and that is not conservatism — it is the truth
+
+The result is missing required fields, so `z.output<S>` would be a lie.
+Three separate holes put it there, and each is visible above:
+
+- **`custom` nodes are omitted entirely** (`SKIP`). `FirestoreTimestamp` is
+  `z.custom`, and `TimestampFields` puts `created_at`/`updated_at` on
+  essentially every document schema — so *every* document's initial value is
+  missing at least two required fields. `tests/initial.test.ts` asserts
+  `"created_at" in result === false`, so this is pinned, not incidental.
+- **A `union` collapses to its first resolvable arm**, so reading a property
+  that only exists on another arm is a type error the `Partial` correctly
+  reports rather than hides.
+- **The partial is shallow.** Nested objects are partial in fact but typed
+  complete, because the walk recurses while the type does not.
+
+`pipe` resolving the *input* side is a fourth, currently latent: both live
+transforms are `z.ZodType<string, string>`, so In ≡ Out today.
 
 ### `getNodeMeta(node: z.ZodType): Record<string, unknown> | null`
 
@@ -9753,8 +9766,10 @@ type TaxProfileType = indexedAccess;
 
 ### `ThreadId`
 
-`threads.uid` (and the `uid_thread` references on `cards` + `comments`) —
-either a Firestore auto-id (the default-thread cowrite for most entities) or
+`threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the
+eight default-thread carriers (`orders`, `invoices`, `products`, `roles`,
+`contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is
+`.optional()`) — either a Firestore auto-id (the default-thread cowrite) or
 an `EventCardId` composite. Event-card threads are minted at a **deterministic
 id equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so
 the delete→recreate churn of a CRMS opportunity-webhook burst reuses the one
@@ -9909,14 +9924,6 @@ the movement journal needs the key union to type a custody transition.
 
 ```ts
 const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
-```
-
-### `BOOKING_BREAKDOWN_OPEN_KEYS`
-
-Keys representing items that are still in flight (pre-terminal).
-
-```ts
-const BOOKING_BREAKDOWN_OPEN_KEYS: "quoted" | "reserved" | "prepped" | "out"[];
 ```
 
 ### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
@@ -10619,7 +10626,7 @@ interface Contact {
   organizations: ContactOrganizationType[];
   query_by_organizations: string[];
   uid_user?: string;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -11180,7 +11187,7 @@ interface Invoice {
   uploadcare_files?: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -12172,7 +12179,7 @@ interface Order {
   subject?: string;
   reference?: string | null;
   xero_id?: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -12836,7 +12843,7 @@ interface Organization {
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
   last_order?: FirestoreTimestampType | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -13073,7 +13080,7 @@ interface OutOfService {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   transactions?: OOSTransaction[];
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -13291,7 +13298,7 @@ interface Product {
   xero_id: string | null;
   xero_code?: string | null;
   xero_tracking_option_id: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -13782,7 +13789,7 @@ interface CreditNote {
   sources: DocSourceType[];
   query_by_sources: string[];
   xero_credit_note_id: string | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -18008,7 +18015,7 @@ interface Role {
   label: string;
   permissions: string[];
   description?: string;
-  defaultThreadId?: string;
+  uid_thread?: string;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -18412,14 +18419,6 @@ the movement journal needs the key union to type a custody transition.
 const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
 ```
 
-### `BOOKING_BREAKDOWN_OPEN_KEYS`
-
-Keys representing items that are still in flight (pre-terminal).
-
-```ts
-const BOOKING_BREAKDOWN_OPEN_KEYS: "quoted" | "reserved" | "prepped" | "out"[];
-```
-
 ### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
 
 Keys representing items that have reached a terminal state.
@@ -18454,18 +18453,17 @@ Given a booking's previous and next breakdown, mutate the order roll-up by
 booking) and client-side (where the manager can apply the same delta
 locally for instant feedback).
 
-### `calculateBookingBreakdown(status: string, type: string, quantity: number, existingBreakdown?: indexedAccess): indexedAccess`
+### `calculateBookingBreakdown(status: OrderStatusType, type: ComponentTypeType, quantity: number, existingBreakdown?: indexedAccess): indexedAccess`
 
-Project a booking's breakdown for a given order status, item type, and
+Project a booking's breakdown for a given **order** status, item type, and
 total quantity. Pure sync — no I/O.
 
-The new bucket (`quoted` for status `quoted`, `reserved` for `reserved`/
-`active`, `returned`/`out` for `complete`) is computed as
-`quantity - (carried-over progress)` so the resulting breakdown always
-sums to `quantity`. The carry-over set is `prepped + out + returned + lost
-+ damaged` — the previous `quoted` and `reserved` values are intentionally
-dropped, which is what fixes the "two open buckets after a status flip"
-data corruption that surfaced in opportunity webhook ingestion.
+⚠️ `status` is an `OrderStatusType`, **not** a `BookingStatusType`. The two
+vocabularies overlap but are not the same set: an order can be `canceled`
+(a booking cannot) and a booking can be `part-prepped`/`prepped` (an order
+cannot). The projection is driven by the parent order, so a caller holding a
+`booking.status` must read through to the order rather than pass it here —
+that mismatch is what the narrowing exists to make a compile error.
 
 Status rules:
   draft / canceled  → all zeros (cleared on cancel/draft)
@@ -18473,7 +18471,7 @@ Status rules:
   reserved / active → reserved = quantity − carry; preserves prepped/out/terminals
   complete + rental → returned = quantity − (lost + damaged); zero everything else
   complete + sale   → out = quantity; zero everything else
-  anything else     → all zeros
+  complete + service / surcharge → all zeros
 
 ### `emptyBookingsBreakdown(): indexedAccess`
 

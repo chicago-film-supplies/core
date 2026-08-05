@@ -60,9 +60,6 @@ export const BOOKING_BREAKDOWN_KEYS = [
   "quoted", "reserved", "prepped", "out", "returned", "lost", "damaged",
 ] as const;
 
-/** Keys representing items that are still in flight (pre-terminal). */
-export const BOOKING_BREAKDOWN_OPEN_KEYS = ["quoted", "reserved", "prepped", "out"] as const;
-
 /** Keys representing items that have reached a terminal state. */
 export const BOOKING_BREAKDOWN_TERMINAL_KEYS = ["returned", "lost", "damaged"] as const;
 

@@ -2,7 +2,7 @@
  * Organization document schema — Firestore collection: organizations
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, ThreadId } from "./_uid.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -54,7 +54,7 @@ export interface Organization {
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
   last_order?: FirestoreTimestampType | null;
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -80,7 +80,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   contacts: z.array(OrganizationContact),
   query_by_contacts: z.array(z.string()).default([]),
   last_order: FirestoreTimestamp.nullable().optional(),
-  defaultThreadId: z.string().optional(),
+  uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef,
   updated_by: ActorRef,

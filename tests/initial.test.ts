@@ -16,6 +16,7 @@ import {
   WebshopProductSchema,
   DestinationEndpoint,
   OrderItem,
+  type OrderItemLineType,
   OrderDocDestinationItem,
   getInitialValues,
 } from "../src/schemas/mod.ts";
@@ -116,18 +117,25 @@ Deno.test("getInitialValues — template enums use first value", () => {
 });
 
 Deno.test("getInitialValues — product price has correct structure", () => {
-  const result = getInitialValues(ProductSchema);
-  const price = result.price as Record<string, unknown>;
-  assertEquals(price.base, 0);
-  assertEquals(price.formula, "five_day_week");
-  assertEquals(price.taxes, []);
-  assertEquals(price.discountable, true);
+  // No cast: the return is typed now, so `price` is `ProductPrice | undefined`
+  // and `?.` is the honest read — the partial genuinely may not carry it.
+  const price = getInitialValues(ProductSchema).price;
+  assertEquals(price?.base, 0);
+  assertEquals(price?.formula, "five_day_week");
+  assertEquals(price?.taxes, []);
+  assertEquals(price?.discountable, true);
   // COA revenue codes are numeric — JS sorts object keys numerically, so first is 2210
-  assertEquals(price.coa_revenue, 2210);
+  assertEquals(price?.coa_revenue, 2210);
 });
 
 Deno.test("getInitialValues — order item input schema works", () => {
-  const result = getInitialValues(OrderItem);
+  // `OrderItem` is a discriminated union and the walk collapses it to its FIRST
+  // resolvable arm — the line arm, whose position is load-bearing and documented
+  // at its declaration. The type system cannot know which arm the walk picked, so
+  // naming it here is the honest form; that erasure is precisely what the
+  // `Partial<z.output<S>>` return type now surfaces instead of hiding behind
+  // `Record<string, unknown>`.
+  const result = getInitialValues(OrderItem) as Partial<OrderItemLineType>;
   assertEquals(result.uid, "");
   assertEquals(result.type, "rental");
   assertEquals(result.stock_method, "bulk");

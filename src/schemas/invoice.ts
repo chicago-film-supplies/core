@@ -2,7 +2,7 @@
  * Invoice document schema — Firestore collection: invoices
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid } from "./_uid.ts";
+import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
@@ -498,7 +498,7 @@ export interface Invoice {
   crms_id?: number | null;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   crms_opportunity_ids?: number[];
-  defaultThreadId?: string;
+  uid_thread?: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -559,7 +559,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   })).optional(),
   crms_id: z.number().nullable().optional(),
   crms_opportunity_ids: z.array(z.number()).optional(),
-  defaultThreadId: z.string().optional(),
+  uid_thread: ThreadId.optional(),
   /** Optimistic-concurrency if-match token — bumped on every whole-doc write, not a revision pointer (mirrors orders/orgs/contacts). */
   version: z.int().min(0).default(0),
   created_by: ActorRef,

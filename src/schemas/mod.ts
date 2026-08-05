@@ -555,7 +555,6 @@ export {
   type BookingStatusType,
   BookingBreakdownSchema,
   BOOKING_BREAKDOWN_KEYS,
-  BOOKING_BREAKDOWN_OPEN_KEYS,
   BOOKING_BREAKDOWN_TERMINAL_KEYS,
   BookingBreakdownKeyEnum,
   type BookingBreakdownKeyType,

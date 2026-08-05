@@ -29,7 +29,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "bookings": [
     { name: "applyBookingBreakdownDelta", expr: "it.bookings.applyBookingBreakdownDelta(orderBreakdown, prev, next)", desc: "Apply a per-key delta to an order's bookings_breakdown roll-up in place.", returns: "void" },
-    { name: "calculateBookingBreakdown", expr: "it.bookings.calculateBookingBreakdown(status, type, quantity, existingBreakdown)", desc: "Project a booking's breakdown for a given order status, item type, and total quantity. Pure sync — no I/O.", returns: "indexedAccess" },
+    { name: "calculateBookingBreakdown", expr: "it.bookings.calculateBookingBreakdown(status, type, quantity, existingBreakdown)", desc: "Project a booking's breakdown for a given **order** status, item type, and total quantity. Pure sync — no I/O.", returns: "indexedAccess" },
     { name: "emptyBookingsBreakdown", expr: "it.bookings.emptyBookingsBreakdown()", desc: "The empty breakdown shape — all seven keys at zero.", returns: "indexedAccess" },
     { name: "isBookingClosed", expr: "it.bookings.isBookingClosed(b)", desc: "Per-booking closure rule.", returns: "boolean" },
     { name: "isOrderBookingsClosed", expr: "it.bookings.isOrderBookingsClosed(bookings)", desc: "Predicate: is the order fully closed?", returns: "boolean" },
