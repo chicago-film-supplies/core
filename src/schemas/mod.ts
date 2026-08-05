@@ -1010,6 +1010,8 @@ import type { PasswordReset } from "./password-reset.ts";
 import type { Product } from "./product.ts";
 import type { Quote } from "./quote.ts";
 import type { Template } from "./template.ts";
+import type { TemplateComponent } from "./template-component.ts";
+import type { TemplateVersion } from "./template-version.ts";
 import type { PublicStockSummary } from "./public-stock-summary.ts";
 import type { RateLimit } from "./rate-limit.ts";
 import type { Session } from "./session.ts";
@@ -1037,12 +1039,35 @@ import type {
   McpOAuthToken,
 } from "./mcp-oauth.ts";
 
-/** Union of all Firestore document types. Use with validateBeforeWrite. */
+/**
+ * Union of all Firestore document types. Use with validateBeforeWrite.
+ *
+ * **`TemplateVersion` and `TemplateComponent` were the only two schema-backed
+ * document types missing from this union**, and their absence was the whole
+ * reason for 43 `as unknown as SchemaDocType` casts in `api-cloudrun`. The
+ * proof it was the union and not the pattern: `Template` IS a member and writes
+ * uncast, while its sibling `TemplateComponent` was not and writes cast — same
+ * three-collection family, different treatment, no stated reason.
+ *
+ * Widening is safe by construction rather than by review: there is no
+ * discriminant to switch on (these types share no common `type` tag, so a
+ * discriminated union over `SchemaDocType` is not expressible), and a
+ * workspace-wide grep finds no `Extract<SchemaDocType…>`, no
+ * `keyof SchemaDocType` and no exhaustive switch. Every one of the 126
+ * references lives in `api-cloudrun`; `manager` and `templates` have none.
+ *
+ * The one thing it gives up is real and was never a guarantee: `tx.set(ref,
+ * templateVersionDoc)` used to be a compile error absent a cast. That caught
+ * nothing 51 of 53 doc types were not already free to do, and the runtime guard
+ * in `validateBeforeWrite` still rejects every doc/collection mismatch with a
+ * `collection/id` label.
+ */
 export type SchemaDocType =
   | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
   | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
   | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
+  | TemplateComponent | TemplateVersion
   | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User
   | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState
   | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
