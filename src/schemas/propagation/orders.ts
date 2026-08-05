@@ -315,8 +315,29 @@ export const updateBookingRules: CollectionRule[] = [
     source: "bookings",
     target: "bookings",
     mode: "co-write",
-    invariant: "Status and breakdown rewritten with optimistic version bump. When status flips to 'complete', the API enforces breakdown.returned + breakdown.lost + breakdown.damaged === booking.quantity.",
+    // The completion identity here used to omit `out`, and that is not a
+    // rounding-off — it is the opposite answer for every non-rental booking. A
+    // sold unit does not come back, so checkout IS its terminal state; requiring
+    // it to be `returned` would make every sale booking uncloseable. The code's
+    // own error message says "returned + lost + damaged + out", so the string was
+    // in verbatim contradiction with the guard it described, at `/docs`.
+    //
+    // It also omitted the two guards that run on EVERY write rather than only at
+    // completion — the breakdown sum and the monotonic lost/damaged floor. Those
+    // are the ones an operator actually hits.
+    //
+    // `sale` semantics are load-bearing across stock-summaries.ts:126, :135 and
+    // orders.ts:349; a reader who took this string literally would have
+    // contradicted all three.
+    invariant:
+      "Status and breakdown rewritten with an optimistic version bump. Three guards, and only the last is about completion: (1) breakdown must always sum to booking.quantity; (2) breakdown.lost and breakdown.damaged may never DECREASE through this endpoint — reduce the OOS record instead; (3) when status flips to 'complete', the terminal count must equal quantity, where terminal is returned + lost + damaged for a RENTAL and returned + lost + damaged + out for every non-rental type (sale, service, surcharge), because a sold unit does not come back and checkout is its terminal state.",
     transaction: "update-booking",
+    enforced_by: [{
+      kind: "assertion",
+      ref: "api-cloudrun/src/services/bookings.ts:591",
+      clause: "all three guards, at the single write path — ValidationError on each",
+      gates: true,
+    }],
     fields: [
       { source: [], target: ["status"], transform: "from input.status (defaults to current)" },
       { source: [], target: ["breakdown"], transform: "merge of input.breakdown over current; deltas must be ≥ 0 for lost/damaged" },

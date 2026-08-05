@@ -58,8 +58,35 @@ export const createProductRules: CollectionRule[] = [
     source: "products",
     target: "inventory-ledgers",
     mode: "co-write",
-    invariant: "Products with tracked stock (bulk/serialized) need an inventory ledger from day one",
+    // "bulk/serialized" named only `stock_method` and was therefore a FOURTH
+    // spelling of a predicate that already has one. `productHoldsStock`
+    // (`api-cloudrun/src/lib/productStock.ts:37`) is `type ∈ {rental, sale} &&
+    // stock_method !== "none"` — the `type` half is missing above, so a
+    // `service` product with stock_method "bulk" reads as needing a ledger and
+    // does not get one.
+    //
+    // That file's header exists specifically to record that `services/products.ts`
+    // once carried three inconsistent spellings of this and that "adding a fourth
+    // answer is how the drift in #310 recurs". This string was the fourth answer,
+    // published to /docs.
+    invariant:
+      "A product needs an inventory ledger from day one exactly when it can physically hold units — type is 'rental' or 'sale' AND stock_method is not 'none' (the `productHoldsStock` predicate). Neither half alone decides it: a service product is never stocked whatever its stock_method, and a rental with stock_method 'none' is not tracked.",
     transaction: "create-product",
+    enforced_by: [
+      {
+        kind: "audit",
+        ref: "api-cloudrun/scripts/audit-stock-summaries.ts:201",
+        clause:
+          "the whole predicate against the corpus — it imports productHoldsStock itself and reports `product_without_ledger` in both directions, so this covers the invariant rather than a clause of it (exit 1 on any violation)",
+        gates: true,
+      },
+      {
+        kind: "test",
+        ref: "api-cloudrun/tests/unit/productStock.test.ts",
+        clause: "the predicate's own truth table, including the type half that the old wording dropped",
+        gates: true,
+      },
+    ],
     fields: [
       { source: ["uid"], target: ["uid"] },
       { source: ["type"], target: ["type"] },
