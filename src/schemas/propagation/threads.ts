@@ -15,7 +15,7 @@
  * the thread cascade (remove the source from `thread.sources[]`; if empty,
  * hard-delete thread + comments). Transactional with the parent delete.
  */
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
 
 // ── Cowrite helper ──────────────────────────────────────────────────
 
@@ -25,6 +25,29 @@ interface ThreadCowriteConfig {
   /** Transaction id in which the cowrite fires. */
   transaction: string;
 }
+
+/**
+ * All 14 cowrite rules share one detector, so the pointer lives here rather than
+ * being repeated per entity — one edit site, 14 rules.
+ *
+ * `defaultThreadId` is `.optional()` on every carrier schema, so
+ * `validateBeforeWrite` cannot see a doc that simply lacks one and a corpus walk
+ * is the ONLY enforcement available. That is why `kind: "audit"` here is not a
+ * weaker choice than `"zod"` — it is the only one on offer.
+ */
+const THREAD_FORWARD: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-default-threads.ts",
+  clause: "property 1 (FORWARD) — the parent's pointer resolves to a thread whose sources[] names it",
+  gates: true,
+};
+
+const THREAD_REVERSE: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-default-threads.ts",
+  clause: "property 2 (REVERSE) — the thread's sources[0] parent points back at it",
+  gates: true,
+};
 
 /** Build the cowrite-thread + back-embed rules for one source entity. */
 function cowriteRulesFor({ collection, transaction }: ThreadCowriteConfig): CollectionRule[] {
@@ -36,6 +59,7 @@ function cowriteRulesFor({ collection, transaction }: ThreadCowriteConfig): Coll
       mode: "co-write",
       invariant: `Every ${collection} doc gets a default thread cowritten on creation so the manager's Notes tab always has a target`,
       transaction,
+      enforced_by: [THREAD_FORWARD],
       fields: [
         { source: ["uid"], target: ["sources", "uid"] },
         { source: [], target: ["sources", "collection"], transform: `literal "${collection}"` },
@@ -51,6 +75,7 @@ function cowriteRulesFor({ collection, transaction }: ThreadCowriteConfig): Coll
       mode: "embed",
       invariant: `The cowritten thread's uid is embedded on the parent ${collection} doc so the detail view can resolve its default thread without a query`,
       transaction,
+      enforced_by: [THREAD_REVERSE],
       fields: [
         { source: ["uid"], target: ["defaultThreadId"] },
       ],
@@ -144,6 +169,13 @@ export const createCommentRules: CollectionRule[] = [
     mode: "embed",
     invariant: "Comments carry a denormalized copy of the parent thread's sources so they can be queried by source doc without a thread join (for Typesense and direct Firestore queries)",
     transaction: "create-comment",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-default-threads.ts",
+      clause:
+        "property 3 (MIRROR) — the comment's denormalized sources[] still equals its thread's, and its uid_thread resolves",
+      gates: true,
+    }],
     fields: [
       { source: ["sources"], target: ["sources"], transform: "full copy of thread.sources[] — {collection, uid} entries" },
     ],

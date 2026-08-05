@@ -58,6 +58,13 @@ export const updateContactRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "Organizations display contact names in their contacts list",
     transaction: "update-contact",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `organizations←contacts` — all four name parts AND the derived `name`, compared against contacts/{uid} rather than against the ref's own fields",
+      gates: true,
+    }],
     fields: [
       { source: ["first_name"], target: ["contacts", "first_name"] },
       { source: ["middle_name"], target: ["contacts", "middle_name"] },
@@ -73,6 +80,13 @@ export const updateContactRules: CollectionRule[] = [
     invariant: "Active orders embed delivery/collection contact names in destinations",
     transaction: "update-contact",
     trigger: "name change — targets active orders (not canceled/complete)",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `orders←contacts`. VACUOUS TODAY: all 1,940 stored destination legs carry contact:null in both envs, so this compares nothing — the cascade is real but has never had a target",
+      gates: false,
+    }],
     fields: [
       { source: ["first_name"], target: ["destinations", "delivery", "contact", "first_name"] },
       { source: ["middle_name"], target: ["destinations", "delivery", "contact", "middle_name"] },
@@ -92,6 +106,13 @@ export const updateContactRules: CollectionRule[] = [
     invariant: "Active orders embed delivery/collection contact phones for logistics",
     transaction: "update-contact",
     trigger: "phones change — targets active orders",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `orders←contacts` (phones). VACUOUS TODAY for the same reason as the name row above",
+      gates: false,
+    }],
     fields: [
       { source: ["phones"], target: ["destinations", "delivery", "contact", "phones"] },
       { source: ["phones"], target: ["destinations", "collection", "contact", "phones"] },

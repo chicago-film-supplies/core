@@ -543,7 +543,7 @@
         {
           "kind": "interface",
           "name": "CollectionRule",
-          "declaration": "interface CollectionRule {\n  id: string;\n  source: string;\n  target: string;\n  mode: PropagationMode;\n  invariant?: string;\n  transaction?: string;\n  trigger?: string;\n  fields: FieldMapping[];\n}",
+          "declaration": "interface CollectionRule {\n  id: string;\n  source: string;\n  target: string;\n  mode: PropagationMode;\n  invariant?: string;\n  enforced_by?: EnforcementRef[];\n  transaction?: string;\n  trigger?: string;\n  fields: FieldMapping[];\n}",
           "doc": "One edge in the propagation graph — describes data flow between two collections."
         },
         {

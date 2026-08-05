@@ -178,6 +178,13 @@ export const updateProductRules: CollectionRule[] = [
     mode: "co-write",
     invariant: "Location product lists show product names — must stay current",
     transaction: "update-product",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `locations←products` — the NAME clause only; this rule copies no other field",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["products", "name"] },
     ],
@@ -189,6 +196,13 @@ export const updateProductRules: CollectionRule[] = [
     mode: "co-write",
     invariant: "Tags display product names in their product list",
     transaction: "update-product",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `tags←products` — every tags.products[].name vs products/{uid}.name",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["products", "name"] },
     ],
@@ -200,6 +214,13 @@ export const updateProductRules: CollectionRule[] = [
     mode: "co-write",
     invariant: "Tracking categories display product names",
     transaction: "update-product",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `tracking-categories←products` — the products{} record is keyed by uid, so each entry is compared by key",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["products", "name"] },
     ],

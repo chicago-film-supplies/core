@@ -1076,6 +1076,7 @@ interface CollectionRule {
   target: string;
   mode: PropagationMode;
   invariant?: string;
+  enforced_by?: EnforcementRef[];
   transaction?: string;
   trigger?: string;
   fields: FieldMapping[];

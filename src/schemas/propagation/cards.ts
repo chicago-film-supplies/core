@@ -22,6 +22,27 @@ export const createCardRules: CollectionRule[] = [
     invariant:
       "Every card cowrites a default thread on creation so the detail surface's Notes tab always has a target. The cowritten thread carries the card itself plus any extra `sources[]` from the create input (e.g. an event card references its parent order), so the thread surfaces on all linked detail views.",
     transaction: "create-card",
+    enforced_by: [
+      {
+        kind: "audit",
+        ref: "api-cloudrun/scripts/audit-default-threads.ts",
+        clause: "property 1 (FORWARD) — the card's uid_thread resolves to a thread whose sources[] names it",
+        gates: true,
+      },
+      {
+        kind: "audit",
+        ref: "api-cloudrun/scripts/audit-default-threads.ts",
+        clause:
+          "property 4 (RESOLVE) — the EXTRA sources[] entries also name live docs; property 2 keys on sources[0] and cannot see them",
+        gates: true,
+      },
+      {
+        kind: "zod",
+        ref: "core/src/schemas/card.ts:210",
+        clause: "`uid_thread` is required, so a card with no pointer at all cannot be written",
+        gates: true,
+      },
+    ],
     fields: [
       { source: ["uid"], target: ["sources", "uid"], transform: `sources[0] — the card itself` },
       { source: [], target: ["sources", "collection"], transform: `sources[0].collection — literal "cards"` },
@@ -39,6 +60,12 @@ export const createCardRules: CollectionRule[] = [
     invariant:
       "The cowritten thread's uid is embedded on the card as `uid_thread` so the detail view can resolve its default thread without a query.",
     transaction: "create-card",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-default-threads.ts",
+      clause: "property 2 (REVERSE) — the thread's sources[0] card points back at it via uid_thread",
+      gates: true,
+    }],
     fields: [
       { source: ["uid"], target: ["uid_thread"] },
     ],

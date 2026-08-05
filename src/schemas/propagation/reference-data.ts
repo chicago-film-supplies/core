@@ -20,6 +20,13 @@ export const updateTagRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "Products embed tag names — a tag rename must cascade to all tagged products",
     trigger: "name change — post-transaction two-pass batch (arrayRemove old, arrayUnion new)",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `products←tags` — every products.tags[].name is compared against tags/{uid}.name",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["tags", "name"], transform: "two-pass idempotent: pass 1 removes {uid, oldName}, pass 2 adds {uid, newName}" },
     ],
@@ -51,6 +58,13 @@ export const updateTrackingCategoryRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "Products store tracking category name for display — must cascade on rename",
     trigger: "name change — post-transaction batch with existence check",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `products←tracking-categories` — products.tracking_category_name vs tracking-categories/{uid}.name",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["tracking_category_name"] },
     ],
@@ -85,6 +99,13 @@ export const updateLocationRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "Inventory ledgers embed location names in store_breakdown — a location rename must cascade to all ledgers containing that location",
     trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `inventory-ledgers←locations` — every store_breakdown[].locations[].name vs locations/{uid}.name",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["store_breakdown", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
     ],
@@ -104,6 +125,13 @@ export const updateLocationRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "Bookings embed location names in stores — a location rename must cascade to all non-complete bookings containing that location",
     trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition, filtered to status != 'complete'",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `bookings←locations`, applying this rule's own status != complete filter; completed bookings are counted separately and never fail",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["stores", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
     ],
@@ -115,6 +143,13 @@ export const updateLocationRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "Out-of-service records embed location names in stores — a location rename must cascade to every OOS record containing that location, including terminal (complete/canceled) ones, so list views and detail pages stay consistent",
     trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `out-of-service←locations`, unfiltered by status as this invariant requires. NOT EXERCISED on either env today (2 prod / 8 dev OOS records, none carrying a store)",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["stores", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
     ],
@@ -126,6 +161,13 @@ export const updateLocationRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "If the default location is renamed, Eventarc cascades the new name to the store's default_location",
     trigger: "name change on default location — Eventarc on location write, only if location.default === true",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `stores←locations` — stores.default_location.name vs locations/{uid}.name",
+      gates: true,
+    }],
     fields: [
       { source: ["name"], target: ["default_location", "name"] },
     ],
