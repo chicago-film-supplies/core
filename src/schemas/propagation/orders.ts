@@ -138,6 +138,37 @@ const FULFILLMENT_STRIP_ASSERTED: EnforcementRef = {
 };
 
 /**
+ * The card rebuild's semantics live in the reconciler, and its unit suite is
+ * where they are actually decided — including every clause that reads as a
+ * caveat: which statuses force onto the card and which do not, manual `blocked`
+ * surviving a self-heal, and the sale/service exclusions on the end side.
+ */
+const EVENT_CARD_RECONCILE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/eventCardReconcile.test.ts",
+  clause:
+    "the rebuild's decision table — a reserved order emits start + end cards carrying `locked:['card']`; a draft order deletes all cards and their orphan threads; cards whose order lost every booking are deleted; stale status self-heals from bookings while a manual `blocked` survives it; a service line does not block end completion; and an unchanged upsert is SKIPPED rather than rewritten (#230). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+/** The preservation half, end-to-end against real Firestore. */
+const EVENT_CARD_PRESERVED_ON_UPDATE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:503",
+  clause:
+    "the `preserves user-editable fields` half at its hardest case — a subject-only PUT leaves the booking rebuild EMPTY, and the cards and their deterministic threads must survive it rather than being torn down (#227). Does not cover the per-field preservation of body/attachments/assignees individually.",
+  gates: true,
+};
+
+const OOS_COWRITTEN_FROM_BOOKING: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/bookings/bookings.test.ts:211",
+  clause:
+    "the CREATE branch — one PUT returning 1, losing 1 and damaging 1 cowrites TWO OOS records, one per reason. The GROW branch (an existing non-complete record for the same (booking, reason) having its quantity raised by the delta) is not exercised.",
+  gates: true,
+};
+
+/**
  * The journal's own detector, and the strongest thing pointed at in this file:
  * it folds each booking's events back through the same identity the writer
  * claims (`net[k] = Σ to − Σ from`) and diffs against the stored breakdown.
@@ -309,6 +340,7 @@ export const createOrderRules: CollectionRule[] = [
     target: "cards",
     mode: "co-write",
     invariant: "Schedule projection — one event card per destination per position (start/end) drives the Dashboard's list/kanban/calendar/map views",
+    enforced_by: [EVENT_CARD_RECONCILE],
     transaction: "create-order",
     fields: [
       { source: ["uid"], target: ["sources"], transform: "[{collection:'orders', uid}] — event card links back to its parent order" },
@@ -453,6 +485,7 @@ export const updateOrderRules: CollectionRule[] = [
     target: "cards",
     mode: "co-write",
     invariant: "Event cards are rebuilt on every update — cards for removed destinations are deleted (and their threads cascade), cards for existing destinations are upserted in place. Preserves each card's user-editable fields (body, attachments, assignees) AND any progress-derived status (planned/active/complete/blocked) — order.status is only forced onto the card when the order transitions to draft or canceled (terminal). Active/reserved/quoted/complete order statuses don't clobber the card's per-pick auto-computed status (see update-booking:booking-to-cards).",
+    enforced_by: [EVENT_CARD_RECONCILE, EVENT_CARD_PRESERVED_ON_UPDATE],
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["sources"], transform: "[{collection:'orders', uid}] — regenerated event cards link back to the parent order" },
@@ -558,6 +591,7 @@ export const updateBookingRules: CollectionRule[] = [
     target: "out-of-service",
     mode: "co-write",
     invariant: "Non-zero increase in breakdown.lost or breakdown.damaged writes one OOS record per (booking, reason). If a non-complete OOS already exists for that pair (located via where('query_by_sources', 'array-contains', 'bookings:' + booking.uid) filtered by reason), its quantity is grown by the delta and a row appended to transactions[]. Otherwise a new OOS doc is cowritten with sources=[bookings, orders] and its default thread.",
+    enforced_by: [OOS_COWRITTEN_FROM_BOOKING],
     transaction: "update-booking",
     fields: [
       { source: [], target: ["sources"], transform: "[{collection:'bookings', uid: booking.uid, label: 'Booking #' + booking.number}, {collection:'orders', uid: booking.uid_order, label: 'Order #' + order.number}]" },
