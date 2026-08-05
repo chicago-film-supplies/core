@@ -101,6 +101,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // disagree with the doc it renders — the same trap as `allocation` above.
     "calculateTransactionFeeAmount", // fee arithmetic — totals pass only
     "costTransactionFees", // fee arithmetic over an array — totals pass only
+    // The six-field fold shared by calculateOrderTotals and
+    // calculateInvoiceTotals. Same argument as the two above, one level up: a
+    // rendered document reads its STORED `totals`, and recomputing at render
+    // time is precisely how a document comes to disagree with the doc it
+    // renders. `calculateOrderTotals` / `calculateInvoiceTotals` stay visible
+    // because a template legitimately re-totals a subset (a per-destination
+    // block); this one only ever reproduces what those two already returned.
+    "sumDocumentTotals",
+    "validatePathsAgainst", // path machinery, parameterised — write-path only
     // `isPreTaxItem` at the PricingItem surface — the guard the three pricing
     // entry points use so a writer can price an order-INPUT item. A template
     // renders stored items and has `isPreTaxItem` for them; this one exists for

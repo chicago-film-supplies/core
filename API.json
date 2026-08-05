@@ -9792,7 +9792,7 @@
           "kind": "function",
           "name": "calculateInvoiceTotals",
           "signature": "calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], settlements?: readonly typeLiteral[]): InvoiceTotals",
-          "doc": "Calculate aggregated pricing totals for an invoice.\n\nComposes from the same atomic building blocks as orders (calculateItemSubtotal,\ngetTaxTotals, etc.) but assembled independently — shared per-item math,\nindependent aggregation. This avoids business logic drift if invoices need\ndifferent totals logic in the future (credit notes, partial billing, etc.).",
+          "doc": "Calculate aggregated pricing totals for an invoice.\n\nThe six-field arithmetic core is {@link sumDocumentTotals}, shared with\n`calculateOrderTotals` — it was ~35 byte-identical lines in each, and\n\"assembled independently so invoices can diverge later\" was a licence for\nsilent drift, not an insurance policy. What genuinely differs is here: the\n`flattenForXero` prefilter (inert on the arithmetic — see\n`sumDocumentTotals`) and the settlement projection below, which is what a\ncredit note or a partial billing actually changes.",
           "paramTags": [
             {
               "name": "items",
@@ -10584,6 +10584,12 @@
           "doc": ""
         },
         {
+          "kind": "interface",
+          "name": "DocumentTotalsCore",
+          "declaration": "interface DocumentTotalsCore {\n  discount_amount: number;\n  subtotal: number;\n  subtotal_discounted: number;\n  taxes: PriceModifier[];\n  transaction_fees: PriceModifier[];\n  total: number;\n}",
+          "doc": "The six totals fields an order and an invoice compute identically.\n\nDeliberately the **intersection**, not a superset: both document totals are\n`z.strictObject`s embedded in schemas `assertValidPatch` enforces at write\ntime, so an order doc carrying `amount_paid` — or an invoice doc carrying\n`replacement_total` — fails validation. Each caller appends its own tail."
+        },
+        {
           "kind": "typeAlias",
           "name": "GroupPath",
           "declaration": "type GroupPath = GroupPathType;",
@@ -11029,6 +11035,14 @@
         },
         {
           "kind": "function",
+          "name": "sumDocumentTotals",
+          "signature": "sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTotalsCore",
+          "doc": "The two-pass totals fold shared by {@link calculateOrderTotals} and\n`calculateInvoiceTotals`: pre-tax subtotals first, then transaction fees\ncosted against `subtotal_discounted`.\n\nIt was ~35 byte-identical lines in both, which is the drift shape this\npackage exists to remove — but the two wrappers are NOT collapsible past\nthis point, and the differences are load-bearing rather than incidental:\n\n- **`calculateOrderTotals` keeps its `Array.isArray` throw.** Leading this\n  helper with the invoice path's `flattenForXero` would turn a clear\n  `Error(\"items must be an array\")` into a bare `TypeError` at the call site.\n- **`replacement_total` stays outside**, because\n  {@link calculateReplacementTotals} reads the **unfiltered** items and is\n  order-only.\n- **The invoice path pre-filters `flattenForXero(items)` and this one does\n  not**, which is safe because that filter is arithmetically inert here: it\n  keeps `itemContract(type).kind === \"line\"`, every `kind: \"divider\"` member\n  has `pricing: \"none\"` (pinned both directions at compile time by\n  `_lineParity` in `schemas/common.ts`), and every predicate below gates on\n  `pricing`. An unrecognised type is dropped by both. `filter` preserves\n  order, and currency.js accumulates in integer cents, so no float\n  associativity hazard exists even if it did not.\n\nNot exported to templates — a rendered document reads its **stored**\n`totals`, and recomputing at render time is how a document comes to disagree\nwith the doc it renders.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "syncChargeDaysToItems",
           "signature": "syncChargeDaysToItems(items: LineItem[], previousDefault: number | null, newDefault: number | null): void",
           "doc": "Update chargeable_days on line items that still match the previous default.\nSkips structural items, items without a price, and manual overrides.",
@@ -11064,6 +11078,14 @@
           "name": "validateItemUniqueness",
           "signature": "validateItemUniqueness(items: T[]): ItemUniquenessIssue[]",
           "doc": "Assert that within each items array, no two entries share the same `uid`\nAND the same immediate structural parent. The immediate structural parent\nis the second-to-last `path` segment (or `null` for items whose path is\njust `[self.uid]`).\n\nThis is the uniqueness invariant orders/invoices rely on so that path-based\nline identity is unambiguous. Violations indicate a duplicate that should\nbe merged — `mergeStagedIntoOrder` and the migration script consolidate.\n\nReturns `[]` when uniqueness holds.\n\nNOTE: assumes the self-INCLUDED `path` convention. Product `components`\nexclude self from `path` — use {@link validateComponentUniqueness} for them.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "validatePathsAgainst",
+          "signature": "validatePathsAgainst(items: T[], recompute: fnOrConstructor): ItemPathIssue[]",
+          "doc": "The fixed-point comparison behind {@link validateItemPaths} and\n`validateInvoiceItemPaths`, parameterised on the recompute.\n\n**Call the named wrappers, not this.** The workspace rule that invoice items\nmust go through `computeInvoiceItemPaths` *by name* exists because handing\ninvoice items the order hierarchy silently drops every `order` divider out of\nevery path — and a `recompute` parameter is exactly the shape that lets that\nhappen at a call site rather than at a definition. This exists so the two\nwrappers cannot drift, not to make the recompute a caller's choice.\n\nIt is also a **fixed-point** check, and therefore cannot be the only guard:\nit agrees with whatever `recompute` produces, so it inherits every hole in\nit. Pair it with a property that holds independently — `validateItemParentage`\nagainst the contract table, and the direct `path.length >= 1` /\n`path.at(-1) === uid` assertions in `api-cloudrun/src/lib/validate.ts`.",
           "paramTags": [],
           "returnsTag": null
         }

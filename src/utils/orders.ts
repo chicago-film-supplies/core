@@ -1018,17 +1018,51 @@ export function costTransactionFees(items: LineItem[], basis: number): LineItem[
 }
 
 /**
- * Calculate aggregated pricing totals for an entire order.
- * Owns the two-pass computation: pre-tax items first, then transaction fees.
+ * The six totals fields an order and an invoice compute identically.
+ *
+ * Deliberately the **intersection**, not a superset: both document totals are
+ * `z.strictObject`s embedded in schemas `assertValidPatch` enforces at write
+ * time, so an order doc carrying `amount_paid` — or an invoice doc carrying
+ * `replacement_total` — fails validation. Each caller appends its own tail.
  */
-export function calculateOrderTotals(
-  items: LineItem[],
-  taxes: Tax[],
-): OrderTotals {
-  if (!Array.isArray(items)) {
-    throw new Error("items must be an array");
-  }
+export interface DocumentTotalsCore {
+  discount_amount: number;
+  subtotal: number;
+  subtotal_discounted: number;
+  taxes: PriceModifier[];
+  transaction_fees: PriceModifier[];
+  total: number;
+}
 
+/**
+ * The two-pass totals fold shared by {@link calculateOrderTotals} and
+ * `calculateInvoiceTotals`: pre-tax subtotals first, then transaction fees
+ * costed against `subtotal_discounted`.
+ *
+ * It was ~35 byte-identical lines in both, which is the drift shape this
+ * package exists to remove — but the two wrappers are NOT collapsible past
+ * this point, and the differences are load-bearing rather than incidental:
+ *
+ * - **`calculateOrderTotals` keeps its `Array.isArray` throw.** Leading this
+ *   helper with the invoice path's `flattenForXero` would turn a clear
+ *   `Error("items must be an array")` into a bare `TypeError` at the call site.
+ * - **`replacement_total` stays outside**, because
+ *   {@link calculateReplacementTotals} reads the **unfiltered** items and is
+ *   order-only.
+ * - **The invoice path pre-filters `flattenForXero(items)` and this one does
+ *   not**, which is safe because that filter is arithmetically inert here: it
+ *   keeps `itemContract(type).kind === "line"`, every `kind: "divider"` member
+ *   has `pricing: "none"` (pinned both directions at compile time by
+ *   `_lineParity` in `schemas/common.ts`), and every predicate below gates on
+ *   `pricing`. An unrecognised type is dropped by both. `filter` preserves
+ *   order, and currency.js accumulates in integer cents, so no float
+ *   associativity hazard exists even if it did not.
+ *
+ * Not exported to templates — a rendered document reads its **stored**
+ * `totals`, and recomputing at render time is how a document comes to disagree
+ * with the doc it renders.
+ */
+export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTotalsCore {
   // Pass 1: compute subtotals from pre-tax items
   let subtotal = currency(0);
   let subtotal_discounted = currency(0);
@@ -1058,8 +1092,6 @@ export function calculateOrderTotals(
     feeSum = feeSum.add(entry.amount);
   }
 
-  const replacement = calculateReplacementTotals(items, taxes);
-
   return {
     discount_amount,
     subtotal: subtotal.value,
@@ -1067,8 +1099,25 @@ export function calculateOrderTotals(
     taxes: taxTotals,
     transaction_fees,
     total: currency(subtotal_discounted).add(taxSum).add(feeSum).value,
-    replacement_total: replacement.total,
   };
+}
+
+/**
+ * Calculate aggregated pricing totals for an entire order.
+ * Owns the two-pass computation: pre-tax items first, then transaction fees.
+ */
+export function calculateOrderTotals(
+  items: LineItem[],
+  taxes: Tax[],
+): OrderTotals {
+  if (!Array.isArray(items)) {
+    throw new Error("items must be an array");
+  }
+
+  const core = sumDocumentTotals(items, taxes);
+  const replacement = calculateReplacementTotals(items, taxes);
+
+  return { ...core, replacement_total: replacement.total };
 }
 
 // ── Order inspection helpers ─────────────────────────────────────
@@ -1273,7 +1322,31 @@ export interface ItemPathIssue {
  * Returns `[]` when every path is clean and order is canonical.
  */
 export function validateItemPaths<T extends LineItem>(items: T[]): ItemPathIssue[] {
-  const recomputed = computeItemPaths(items);
+  return validatePathsAgainst(items, computeItemPaths);
+}
+
+/**
+ * The fixed-point comparison behind {@link validateItemPaths} and
+ * `validateInvoiceItemPaths`, parameterised on the recompute.
+ *
+ * **Call the named wrappers, not this.** The workspace rule that invoice items
+ * must go through `computeInvoiceItemPaths` *by name* exists because handing
+ * invoice items the order hierarchy silently drops every `order` divider out of
+ * every path — and a `recompute` parameter is exactly the shape that lets that
+ * happen at a call site rather than at a definition. This exists so the two
+ * wrappers cannot drift, not to make the recompute a caller's choice.
+ *
+ * It is also a **fixed-point** check, and therefore cannot be the only guard:
+ * it agrees with whatever `recompute` produces, so it inherits every hole in
+ * it. Pair it with a property that holds independently — `validateItemParentage`
+ * against the contract table, and the direct `path.length >= 1` /
+ * `path.at(-1) === uid` assertions in `api-cloudrun/src/lib/validate.ts`.
+ */
+export function validatePathsAgainst<T extends LineItem>(
+  items: T[],
+  recompute: (items: T[]) => { uid: string; path: string[] }[],
+): ItemPathIssue[] {
+  const recomputed = recompute(items);
   const issues: ItemPathIssue[] = [];
   for (let i = 0; i < items.length; i++) {
     const original = items[i].path ?? [];

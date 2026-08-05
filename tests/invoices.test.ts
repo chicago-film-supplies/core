@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues, InvoiceDocLineItemSchema, InvoiceDocOrderItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
+import { calculateOrderTotals, sumDocumentTotals, validateItemPaths } from "../src/utils/orders.ts";
 import {
   buildInvoiceDestinationDivider,
   buildOrderScopedItems,
@@ -1394,4 +1395,180 @@ Deno.test("resyncInvoiceLines: leaves other order dividers' scopes untouched", (
   const l3 = result.find((i) => i.uid === ITEM_3)!;
   assertEquals(l3.quantity, 1);
   assertEquals(l3.path, [ORDER_DIV_2, ITEM_3]);
+});
+
+// ── Item 2: the shared totals fold ──────────────────────────────
+//
+// `calculateOrderTotals` and `calculateInvoiceTotals` were ~35 byte-identical
+// lines each; both now delegate to `sumDocumentTotals`. The extraction is only
+// output-identical if the ONE structural difference between the two bodies —
+// the invoice path's `flattenForXero` prefilter — is arithmetically inert.
+//
+// That was argued in prose (dividers are `kind: "divider"`, every divider has
+// `pricing: "none"`, every predicate in the fold gates on `pricing`) and
+// nothing ran it. Prose is exactly the shape this campaign keeps finding
+// wrong, so it runs now.
+
+interface SweepDoc {
+  items: InvoiceItem[];
+  dividers: number;
+}
+
+/** Seeded LCG — same generator as `orders.test.ts`, so runs are reproducible. */
+function sweepDocs(count: number): SweepDoc[] {
+  let seed = 424_242_424;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    // High bits, not low: this LCG's low bit strictly alternates, so `% n` on
+    // an even `n` freezes the parity of every same-position draw.
+    return (seed >>> 8) % n;
+  };
+  const PRE_TAX = ["rental", "sale", "service", "surcharge"] as const;
+  const TAX_UIDS = ["chi-rental-tax", "chi-sales-tax"] as const;
+
+  const docs: SweepDoc[] = [];
+  for (let d = 0; d < count; d++) {
+    const items: InvoiceItem[] = [];
+    let dividers = 0;
+    // Every doc opens with an order divider, so the prefilter always has
+    // something to drop and the two paths are never trivially equal.
+    items.push({ uid: `o-${d}`, type: "order", name: `Order ${d}`, path: [] } as InvoiceItem);
+    dividers++;
+    const lines = 1 + rand(6);
+    for (let i = 0; i < lines; i++) {
+      if (rand(4) === 0) {
+        items.push({
+          uid: `dv-${d}-${i}`,
+          type: rand(2) === 0 ? "destination" : "group",
+          name: "Divider",
+          path: [],
+        } as InvoiceItem);
+        dividers++;
+        continue;
+      }
+      if (rand(8) === 0) {
+        items.push(makeItem({ uid: `f-${d}-${i}`, type: "transaction_fee", quantity: 1 }, {
+          formula: "percent_of_total",
+          base: rand(600) / 100,
+        }));
+        continue;
+      }
+      const withDiscount = rand(3) !== 0;
+      items.push(makeItem({ uid: `l-${d}-${i}`, type: PRE_TAX[rand(4)], quantity: 1 + rand(9) }, {
+        base: rand(200_000) / 100,
+        chargeable_days: rand(40),
+        formula: rand(2) === 0 ? "five_day_week" : "fixed",
+        taxes: rand(2) === 0 ? [] : [{ uid: TAX_UIDS[rand(2)] }],
+        ...(withDiscount
+          ? {
+            discount: rand(2) === 0
+              ? { type: "percent", rate: rand(1_000_000) / 10_000, amount: 0 }
+              : { type: "flat", rate: rand(20_000) / 100, amount: 0 },
+          }
+          : {}),
+      }));
+    }
+    docs.push({ items, dividers });
+  }
+  return docs;
+}
+
+const DOC_SWEEP = sweepDocs(20_000);
+
+/** The six fields both documents compute identically. */
+const core = (t: Record<string, unknown>) =>
+  JSON.stringify([
+    t.discount_amount,
+    t.subtotal,
+    t.subtotal_discounted,
+    t.taxes,
+    t.transaction_fees,
+    t.total,
+  ]);
+
+Deno.test("order and invoice totals agree on their six shared fields over 20k random documents", () => {
+  let disagreements = 0;
+  let first: string | null = null;
+  for (const doc of DOC_SWEEP) {
+    const fromOrder = core(calculateOrderTotals(doc.items, TAXES) as unknown as Record<string, unknown>);
+    const fromInvoice = core(calculateInvoiceTotals(doc.items, TAXES) as unknown as Record<string, unknown>);
+    const fromCore = core(sumDocumentTotals(doc.items, TAXES) as unknown as Record<string, unknown>);
+    if (fromOrder !== fromInvoice || fromOrder !== fromCore) {
+      disagreements++;
+      first ??= `order ${fromOrder}\ninvoice ${fromInvoice}\ncore ${fromCore}`;
+    }
+  }
+  assertEquals(disagreements, 0, first ?? "");
+});
+
+Deno.test("…and the sweep is not vacuous — dividers, discounts, taxes, fees and money are all present", () => {
+  // A corpus of empty documents would satisfy the equality above and prove
+  // nothing. Each of these is a precondition of the claim being tested, so each
+  // is asserted rather than assumed.
+  let dropped = 0;
+  let discounted = 0;
+  let taxed = 0;
+  let feed = 0;
+  let nonZero = 0;
+  for (const doc of DOC_SWEEP) {
+    if (flattenForXero(doc.items).length < doc.items.length) dropped++;
+    const t = calculateInvoiceTotals(doc.items, TAXES);
+    if (t.discount_amount !== 0) discounted++;
+    if (t.taxes.length > 0) taxed++;
+    if (t.transaction_fees.length > 0) feed++;
+    if (t.total !== 0) nonZero++;
+  }
+  assertEquals(dropped, DOC_SWEEP.length, "every doc must have a divider for the prefilter to drop");
+  assertEquals(discounted > 0, true, "no discounted document in the corpus");
+  assertEquals(taxed > 0, true, "no taxed document in the corpus");
+  assertEquals(feed > 0, true, "no transaction-fee document in the corpus");
+  assertEquals(nonZero > 0, true, "every document totalled zero");
+  console.log(
+    `  ${DOC_SWEEP.length} docs: ${discounted} discounted, ${taxed} taxed, ` +
+      `${feed} with fees, ${nonZero} non-zero`,
+  );
+});
+
+Deno.test("…and a prefilter that drops a PRICEABLE type DOES disagree — the equality can fail", () => {
+  // Fail-closed companion. The equality above holds because `flattenForXero`
+  // only removes `pricing: "none"` members; a filter that reaches one line
+  // further must break it. Without this, a `flattenForXero` that had quietly
+  // started dropping billable lines would still pass the test above on a corpus
+  // that happened to contain none.
+  let disagreements = 0;
+  for (const doc of DOC_SWEEP) {
+    const overFiltered = doc.items.filter((i) => i.type !== "service");
+    if (
+      core(sumDocumentTotals(doc.items, TAXES) as unknown as Record<string, unknown>) !==
+        core(sumDocumentTotals(overFiltered, TAXES) as unknown as Record<string, unknown>)
+    ) disagreements++;
+  }
+  assertEquals(
+    disagreements > 0,
+    true,
+    "dropping every `service` line changed no document's totals — the corpus has stopped discriminating",
+  );
+  console.log(`  over-filtering changes ${disagreements} of ${DOC_SWEEP.length} documents`);
+});
+
+Deno.test("validateInvoiceItemPaths still recomputes at INVOICE depth after the collapse", () => {
+  // `validateItemPaths` and `validateInvoiceItemPaths` now share one body
+  // parameterised on the recompute — which is precisely the shape that could
+  // hand invoice items the ORDER hierarchy and silently drop every `order`
+  // divider from every path. A doc whose paths are correct at invoice depth and
+  // WRONG at order depth is what tells the two apart.
+  const items: InvoiceItem[] = [
+    { ...orderDivider, path: [ORDER_DIV_1] } as InvoiceItem,
+    { ...destItem, path: [ORDER_DIV_1, DEST_1] } as InvoiceItem,
+    makeItem({ uid: ITEM_1, type: "rental", path: [ORDER_DIV_1, DEST_1, ITEM_1] }),
+  ];
+  assertEquals(validateInvoiceItemPaths(items), []);
+  // The same array judged at ORDER depth: `order` is not one of
+  // `ORDER_ITEM_LEVELS`, so the divider opens no level and every row beneath it
+  // loses that leading segment. Asserted on the expected path rather than an
+  // issue count — a count says only "something differs", and what matters is
+  // WHICH segment goes missing.
+  const atOrderDepth = validateItemPaths(items);
+  assertEquals(atOrderDepth.length > 0, true, "order depth agreed with invoice depth");
+  assertEquals(atOrderDepth.find((i) => i.uid === ITEM_1)?.expected, [DEST_1, ITEM_1]);
 });

@@ -55,19 +55,15 @@ import {
 } from "../schemas/mod.ts";
 import { fromCents, fromCentsBig, roundDivHalfAwayFromZero, toCentsBig } from "./money.ts";
 import {
-  calculateItemSubtotal,
   computeItemPaths,
-  costTransactionFees,
-  getTotalDiscount,
-  getTaxTotals,
-  getTransactionFeeTotals,
-  isPreTaxItem,
   type ItemPathIssue,
   type ItemUniquenessIssue,
   type LineItem,
   type PriceObject,
+  sumDocumentTotals,
   type Tax,
   validateItemUniqueness,
+  validatePathsAgainst,
 } from "./orders.ts";
 
 // ── Structural helpers ──────────────────────────────────────────
@@ -113,10 +109,13 @@ export type InvoiceTotals = InvoiceDocTotals;
 /**
  * Calculate aggregated pricing totals for an invoice.
  *
- * Composes from the same atomic building blocks as orders (calculateItemSubtotal,
- * getTaxTotals, etc.) but assembled independently — shared per-item math,
- * independent aggregation. This avoids business logic drift if invoices need
- * different totals logic in the future (credit notes, partial billing, etc.).
+ * The six-field arithmetic core is {@link sumDocumentTotals}, shared with
+ * `calculateOrderTotals` — it was ~35 byte-identical lines in each, and
+ * "assembled independently so invoices can diverge later" was a licence for
+ * silent drift, not an insurance policy. What genuinely differs is here: the
+ * `flattenForXero` prefilter (inert on the arithmetic — see
+ * `sumDocumentTotals`) and the settlement projection below, which is what a
+ * credit note or a partial billing actually changes.
  *
  * @param items - Full invoice items array (structural items are filtered out)
  * @param taxes - Tax definitions for tax calculation
@@ -136,56 +135,15 @@ export function calculateInvoiceTotals(
     amount_cents: number;
   }[],
 ): InvoiceTotals {
-  const billable = flattenForXero(items);
-
-  // Pass 1: pre-tax items — subtotals, discount, taxes
-  let subtotal = currency(0);
-  let subtotal_discounted = currency(0);
-
-  for (const item of billable) {
-    if (!isPreTaxItem(item)) continue;
-    const result = calculateItemSubtotal(item);
-    subtotal = subtotal.add(result.subtotal);
-    subtotal_discounted = subtotal_discounted.add(result.subtotal_discounted);
-  }
-
-  const discount_amount = getTotalDiscount(billable);
-  const taxTotals = getTaxTotals(billable, taxes);
-
-  let taxSum = currency(0);
-  for (const entry of taxTotals) {
-    taxSum = taxSum.add(entry.amount);
-  }
-
-  // Pass 2: transaction fees — computed from subtotal_discounted
-  const transaction_fees = getTransactionFeeTotals(
-    costTransactionFees(billable, subtotal_discounted.value),
-  );
-
-  let feeSum = currency(0);
-  for (const entry of transaction_fees) {
-    feeSum = feeSum.add(entry.amount);
-  }
-
-  const total = currency(subtotal_discounted).add(taxSum).add(feeSum).value;
+  const core = sumDocumentTotals(flattenForXero(items), taxes);
 
   // Settlement accounting — the projection of the journal onto this document.
   const { amount_paid, amount_credited, amount_due } = recomputeSettlementTotals(
-    total,
+    core.total,
     settlements ?? [],
   );
 
-  return {
-    discount_amount,
-    subtotal: subtotal.value,
-    subtotal_discounted: subtotal_discounted.value,
-    taxes: taxTotals,
-    transaction_fees,
-    total,
-    amount_paid,
-    amount_credited,
-    amount_due,
-  };
+  return { ...core, amount_paid, amount_credited, amount_due };
 }
 
 // ── Payment helpers ─────────────────────────────────────────────
@@ -681,21 +639,7 @@ export function computeInvoiceItemPaths<T extends InvoiceItem>(items: T[]): T[] 
  * Returns `[]` when every path is clean and order is canonical.
  */
 export function validateInvoiceItemPaths<T extends InvoiceItem>(items: T[]): ItemPathIssue[] {
-  const recomputed = computeInvoiceItemPaths(items);
-  const issues: ItemPathIssue[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const original = items[i].path ?? [];
-    const expected = recomputed[i].path;
-    const orderMismatch = items[i].uid !== recomputed[i].uid;
-    if (
-      orderMismatch ||
-      original.length !== expected.length ||
-      original.some((seg, j) => seg !== expected[j])
-    ) {
-      issues.push({ index: i, uid: items[i].uid, path: original, expected });
-    }
-  }
-  return issues;
+  return validatePathsAgainst(items, computeInvoiceItemPaths);
 }
 
 /**
