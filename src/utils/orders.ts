@@ -511,6 +511,13 @@ export function isPreTaxItem(item: LineItem): item is PreTaxLineItem {
   if (!item || typeof item !== "object") return false;
   if (itemContract(item.type)?.pricing !== "pre_tax") return false;
   if (!item.price || typeof item.price !== "object") return false;
+  // `PreTaxLineItem` DECLARES `quantity: number`, so not checking it made the
+  // predicate lie, and the lie was quiet rather than loud: `currency(NaN).value`
+  // is `null`, not `NaN`, so `calculateReplacementTotals` returned
+  // `{subtotal: null, tax: 0, total: null}` against a declared `subtotal: number`.
+  // A blank or $0.00 replacement value is what a loss-liability figure is read
+  // off — the wrong direction to fail in. core#49.
+  if (typeof item.quantity !== "number") return false;
   return true;
 }
 
@@ -524,6 +531,14 @@ export function isPreTaxPricingItem(item: PricingItem): item is PreTaxPricingIte
   if (!item || typeof item !== "object") return false;
   if (itemContract(item.type)?.pricing !== "pre_tax") return false;
   if (!item.price || typeof item.price !== "object") return false;
+  // Same unsoundness as `isPreTaxItem`, and this is the one that guards the
+  // MONEY path — `calculateItemSubtotal` narrows through here before
+  // `perUnitSubtotal` multiplies by `item.quantity`. `PricingItem.quantity` is
+  // `?: number` while `PreTaxPricingItem` intersects `{quantity: number}`, so
+  // the cast was unchecked in exactly the place it matters most. core#49 named
+  // only `isPreTaxItem`; fixing one and not the other would have left the
+  // subtotal path lying while making the replacement path honest.
+  if (typeof item.quantity !== "number") return false;
   return true;
 }
 

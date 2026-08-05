@@ -487,6 +487,20 @@ Deno.test("getDisplayTransactionTypes(true) offers only stock-adding types", () 
   }
 });
 
+/**
+ * The invariant the sibling tests above could not see (core#41).
+ *
+ * They enumerate which types must be hidden — a list that stays green while the
+ * picker offers something the API refuses, because "is `sale_return` hidden?"
+ * was never one of the questions asked. The relationship that actually matters
+ * is **⊆**: every type the manager renders must be one `CreateTransactionInput`
+ * accepts. Asserted by running the real schema rather than by comparing against
+ * a second copy of the list, so it cannot drift into a restatement.
+ *
+ * `sale_return` was the live instance: it has no *required* booking, so it
+ * passed the old `MOVEMENT_CONTRACTS`-derived filter and reached the picker,
+ * while `MANUAL_MOVEMENT_TYPES` refused it — an operator picking it got a 400.
+ */
 // ── input schemas ───────────────────────────────────────────────────
 
 const validCreateInput = {
@@ -498,6 +512,41 @@ const validCreateInput = {
   reference: "PO-001",
   uid_session: SESSION,
 };
+
+Deno.test("every displayed transaction type is one CreateTransactionInput accepts", () => {
+  for (const type of getDisplayTransactionTypes()) {
+    const parsed = CreateTransactionInput.safeParse({ ...validCreateInput, type });
+    assertEquals(
+      parsed.success,
+      true,
+      `the picker offers "${type}" but CreateTransactionInput rejects it — an operator ` +
+        `choosing it gets a 400. Either add it to MANUAL_MOVEMENT_TYPES or stop displaying it.`,
+    );
+  }
+});
+
+/** The same relation for the first-transaction subset. */
+Deno.test("every increaseOnly transaction type is one CreateTransactionInput accepts", () => {
+  for (const type of getDisplayTransactionTypes(true)) {
+    const parsed = CreateTransactionInput.safeParse({ ...validCreateInput, type });
+    assertEquals(parsed.success, true, `increaseOnly offers "${type}" but the input rejects it`);
+  }
+});
+
+/**
+ * The deliberate asymmetry, pinned so it is not "tidied" into symmetry.
+ * `opening_balance` is ACCEPTED by the input and hidden from the picker, because
+ * it is minted at product creation rather than keyed. Hiding an accepted type
+ * costs nothing; offering a rejected one is a dead end in the UI.
+ */
+Deno.test("opening_balance is accepted by the input but deliberately not displayed", () => {
+  assertEquals(
+    CreateTransactionInput.safeParse({ ...validCreateInput, type: "opening_balance" }).success,
+    true,
+  );
+  assertEquals(getDisplayTransactionTypes().includes("opening_balance"), false);
+});
+
 
 Deno.test("CreateTransactionInput accepts an event with no allocations (server allocates)", () => {
   assertEquals(CreateTransactionInput.safeParse(validCreateInput).success, true);

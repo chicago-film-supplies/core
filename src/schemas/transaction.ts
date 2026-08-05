@@ -322,16 +322,26 @@ export function hasCosts(type: MovementTypeType): boolean {
 }
 
 /**
- * Movement types suitable for the manual transaction form. Excludes the
- * booking-scoped fulfillment events (the picker writes those, never a form) and
- * `transfer` (which has its own transfer UI). When `increaseOnly` is true,
- * returns only types that add stock — for the first transaction on a product.
+ * Movement types suitable for the manual transaction form.
+ *
+ * **Derived from {@link MANUAL_MOVEMENT_TYPES}, which is what
+ * `CreateTransactionInput` validates against — so the picker cannot offer a type
+ * the API rejects.** It used to re-derive the set independently from
+ * `MOVEMENT_CONTRACTS`, and the two disagreed: `sale_return` has no *required*
+ * booking, so it passed that filter and reached the manager's type picker, while
+ * the input schema refused it. An operator picking it got a 400. (core#41)
+ *
+ * The one remaining asymmetry is deliberate and runs the safe way:
+ * `opening_balance` is *accepted* by the input but hidden here, because it is
+ * minted at product creation rather than keyed. Hiding an accepted type costs
+ * nothing; offering a rejected one is a dead end in the UI.
+ *
+ * When `increaseOnly` is true, returns only types that add stock — for the first
+ * transaction on a product.
  */
 export function getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[] {
   if (increaseOnly) return ["purchase", "make", "find"];
-  return MOVEMENT_TYPES.filter((t) =>
-    MOVEMENT_CONTRACTS[t].booking !== "required" && t !== "transfer" && t !== "opening_balance"
-  );
+  return MANUAL_MOVEMENT_TYPES.filter((t) => t !== "opening_balance");
 }
 
 // ── Line, custody and cost ──────────────────────────────────────────

@@ -49,6 +49,7 @@ import {
   groupByDestination,
   isPriceableItem,
   isPreTaxItem,
+  isPreTaxPricingItem,
   isTransactionFeeItem,
   isSameAsDeliveryDates,
   isSameAsDeliveryDestination,
@@ -161,6 +162,55 @@ Deno.test("isPreTaxItem returns false for transaction fee", () => {
 
 Deno.test("isPreTaxItem returns false for destination", () => {
   assertEquals(isPreTaxItem({ type: "destination" } as LineItem), false);
+});
+
+/**
+ * core#49 — the predicate DECLARED `quantity: number` and never checked it.
+ *
+ * The failure was quiet rather than loud, which is what made it worth a test
+ * rather than a comment: `currency(NaN).value` is **null, not NaN**, so
+ * `calculateReplacementTotals` returned `{subtotal: null, tax: 0, total: null}`
+ * against a declared `subtotal: number` — a blank or $0.00 replacement value
+ * beside a `tax: 0` that reads like a real answer. A replacement figure is what
+ * a loss-liability number is read off, so reading zero is the wrong direction to
+ * fail in.
+ *
+ * Measured before changing it: **0 quantity-less pre_tax lines across 18,492 in
+ * prod** (orders + invoices + quotes), so tightening the predicate skips nothing
+ * the corpus actually contains.
+ */
+Deno.test("isPreTaxItem returns false when quantity is absent — the type asserts it", () => {
+  const noQty = { ...makeItem() } as Record<string, unknown>;
+  delete noQty.quantity;
+  assertEquals(isPreTaxItem(noQty as unknown as LineItem), false);
+});
+
+Deno.test("isPreTaxItem returns false when quantity is not a number", () => {
+  assertEquals(isPreTaxItem({ ...makeItem(), quantity: "2" } as unknown as LineItem), false);
+  assertEquals(isPreTaxItem({ ...makeItem(), quantity: null } as unknown as LineItem), false);
+});
+
+/**
+ * The same hole in the twin, and this is the one that guards the MONEY path —
+ * `calculateItemSubtotal` narrows through `isPreTaxPricingItem` before
+ * `perUnitSubtotal` multiplies by `item.quantity`. core#49 named only
+ * `isPreTaxItem`; fixing one and not the other would have left the subtotal path
+ * lying while making the replacement path honest.
+ */
+Deno.test("isPreTaxPricingItem returns false when quantity is absent", () => {
+  const noQty = { ...makeItem() } as Record<string, unknown>;
+  delete noQty.quantity;
+  assertEquals(isPreTaxPricingItem(noQty as unknown as PricingItem), false);
+});
+
+Deno.test("calculateItemSubtotal refuses a quantity-less line instead of returning null money", () => {
+  const noQty = { ...makeItem() } as Record<string, unknown>;
+  delete noQty.quantity;
+  assertThrows(
+    () => calculateItemSubtotal(noQty as unknown as PricingItem),
+    Error,
+    "not priceable",
+  );
 });
 
 // ── calculateItemSubtotal ────────────────────────────────────────

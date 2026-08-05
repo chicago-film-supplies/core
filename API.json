@@ -4277,7 +4277,7 @@
           "kind": "function",
           "name": "getDisplayTransactionTypes",
           "signature": "getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[]",
-          "doc": "Movement types suitable for the manual transaction form. Excludes the\nbooking-scoped fulfillment events (the picker writes those, never a form) and\n`transfer` (which has its own transfer UI). When `increaseOnly` is true,\nreturns only types that add stock — for the first transaction on a product.",
+          "doc": "Movement types suitable for the manual transaction form.\n\n**Derived from {@link MANUAL_MOVEMENT_TYPES}, which is what\n`CreateTransactionInput` validates against — so the picker cannot offer a type\nthe API rejects.** It used to re-derive the set independently from\n`MOVEMENT_CONTRACTS`, and the two disagreed: `sale_return` has no *required*\nbooking, so it passed that filter and reached the manager's type picker, while\nthe input schema refused it. An operator picking it got a 400. (core#41)\n\nThe one remaining asymmetry is deliberate and runs the safe way:\n`opening_balance` is *accepted* by the input but hidden here, because it is\nminted at product creation rather than keyed. Hiding an accepted type costs\nnothing; offering a rejected one is a dead end in the UI.\n\nWhen `increaseOnly` is true, returns only types that add stock — for the first\ntransaction on a product.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7597,7 +7597,7 @@
           "kind": "function",
           "name": "getDisplayTransactionTypes",
           "signature": "getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[]",
-          "doc": "Movement types suitable for the manual transaction form. Excludes the\nbooking-scoped fulfillment events (the picker writes those, never a form) and\n`transfer` (which has its own transfer UI). When `increaseOnly` is true,\nreturns only types that add stock — for the first transaction on a product.",
+          "doc": "Movement types suitable for the manual transaction form.\n\n**Derived from {@link MANUAL_MOVEMENT_TYPES}, which is what\n`CreateTransactionInput` validates against — so the picker cannot offer a type\nthe API rejects.** It used to re-derive the set independently from\n`MOVEMENT_CONTRACTS`, and the two disagreed: `sale_return` has no *required*\nbooking, so it passed that filter and reached the manager's type picker, while\nthe input schema refused it. An operator picking it got a 400. (core#41)\n\nThe one remaining asymmetry is deliberate and runs the safe way:\n`opening_balance` is *accepted* by the input but hidden here, because it is\nminted at product creation rather than keyed. Hiding an accepted type costs\nnothing; offering a rejected one is a dead end in the UI.\n\nWhen `increaseOnly` is true, returns only types that add stock — for the first\ntransaction on a product.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -159,11 +159,17 @@ const HARD_BANNED_RE = /\.(?:divide|distribute)\(/;
  */
 const INTEGER_MULTIPLY_ALLOWED = new Map<string, string>([
   [
-    "src/utils/orders.ts:1116",
+    "src/utils/orders.ts:1131",
     "calculateReplacementTotals: `replacement × quantity`. `LineItem.quantity` is " +
     "`z.int().optional()`, so the multiplicand is a whole unit count and the product is " +
     "representable at the cent — closed, and exact. This is the site that makes a blanket " +
-    "multiply ban wrong.",
+    "multiply ban wrong. " +
+    "The `.optional()` used to be a real hole rather than a footnote: `isPreTaxItem` " +
+    "asserted `quantity: number` without checking it, so an absent quantity reached this " +
+    "multiply and `currency(NaN).value` returned **null, not NaN** — a replacement total of " +
+    "`null` with `tax: 0` beside it, which reads as an answer. Closed in core#49 by checking " +
+    "`quantity` in the predicate (and in `isPreTaxPricingItem`, which guards the subtotal " +
+    "path). Measured first: 0 quantity-less pre_tax lines across 18,492 in prod.",
   ],
 ]);
 
