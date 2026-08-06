@@ -518,7 +518,7 @@ Deno.test("calculateItemSubtotal fixed with quantity and percent discount", () =
 
 Deno.test("calculateItemSubtotal throws for non-priceable", () => {
   assertThrows(
-    () => calculateItemSubtotal({ type: "destination" } as LineItem),
+    () => calculateItemSubtotal({ type: "destination" }),
     Error,
     "not priceable",
   );
