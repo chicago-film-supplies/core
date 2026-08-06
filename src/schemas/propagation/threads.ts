@@ -125,6 +125,22 @@ export const threadOutOfServiceRules: CollectionRule[] = cowriteRulesFor({
   transaction: "create-out-of-service-record",
 });
 
+/**
+ * Credit notes DO cowrite a thread, unlike movements.
+ *
+ * The distinction is the one drawn above: a movement is an event whose
+ * narrative belongs on the order or OOS record it references, whereas a credit
+ * note is a *document* an operator issues, disputes and explains. It is also the
+ * one place the corpus already demanded it — the four historic Xero miscodings
+ * (CN-1007, CN-1010/1011/1012) each carry a comment recording why CFS stores a
+ * different posting account than Xero does, and that comment has nowhere else to
+ * live.
+ */
+export const threadCreditNoteRules: CollectionRule[] = cowriteRulesFor({
+  collection: "credit-notes",
+  transaction: "create-credit-note",
+});
+
 // ── Role transaction (new — role creation is promoted to a transaction) ─
 
 export const threadRoleRules: CollectionRule[] = cowriteRulesFor({
@@ -157,6 +173,7 @@ export const threadCowriteRules: CollectionRule[] = [
   ...threadProductRules,
   ...threadRoleRules,
   ...threadOutOfServiceRules,
+  ...threadCreditNoteRules,
 ];
 
 // ── create-comment transaction ──────────────────────────────────────

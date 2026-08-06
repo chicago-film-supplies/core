@@ -151,6 +151,17 @@ export {
 
 export { seedStockSummaryRules, stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
 
+// ── Credit-note rules ────────────────────────────────────────────────
+
+export {
+  createCreditNoteRules,
+  createCreditNoteTransaction,
+  allocateCreditNoteRules,
+  allocateCreditNoteTransaction,
+  voidCreditNoteRules,
+  voidCreditNoteTransaction,
+} from "./credit-notes.ts";
+
 // ── Threads & comments rules ─────────────────────────────────────────
 
 export {
@@ -162,6 +173,7 @@ export {
   threadProductRules,
   threadRoleRules,
   threadOutOfServiceRules,
+  threadCreditNoteRules,
   createRoleTransaction,
   createCommentRules,
   createCommentTransaction,
@@ -244,6 +256,14 @@ import { createUserRules, createUserTransaction, updateUserRules, updateUserTran
 import { createLocationRules, createLocationTransaction, updateLocationTransactionalRules, updateLocationTransaction } from "./locations.ts";
 import { createInvoiceRules, createInvoiceTransaction, updateInvoiceOrderRules, updateInvoiceTransaction, updateOrderInvoiceRules } from "./invoices.ts";
 import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
+import {
+  createCreditNoteRules,
+  createCreditNoteTransaction,
+  allocateCreditNoteRules,
+  allocateCreditNoteTransaction,
+  voidCreditNoteRules,
+  voidCreditNoteTransaction,
+} from "./credit-notes.ts";
 import { updateTaxRules } from "./taxes.ts";
 import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
 import { createStoreRules, updateStoreRules } from "./stores.ts";
@@ -307,6 +327,9 @@ export const transactions: TransactionDefinition[] = [
   updateLocationTransaction,
   createInvoiceTransaction,
   updateInvoiceTransaction,
+  createCreditNoteTransaction,
+  allocateCreditNoteTransaction,
+  voidCreditNoteTransaction,
   updateFulfillmentItemsTransaction,
   createRoleTransaction,
   createCommentTransaction,
@@ -350,6 +373,9 @@ export const rules: CollectionRule[] = [
   ...createInvoiceRules,
   ...updateInvoiceOrderRules,
   ...updateOrderInvoiceRules,
+  ...createCreditNoteRules,
+  ...allocateCreditNoteRules,
+  ...voidCreditNoteRules,
   ...updateFulfillmentItemsRules,
   ...updateTaxRules,
   ...updateTagRules,
