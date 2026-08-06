@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { getInitialValues, InvoiceDocLineItemSchema, InvoiceDocOrderItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
+import { getInitialValues, InvoiceDocLineItemSchema, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
 import { calculateOrderTotals, sumDocumentTotals, validateItemPaths } from "../src/utils/orders.ts";
 import {
   buildInvoiceDestinationDivider,
@@ -29,6 +29,7 @@ import {
   validateInvoiceItemUniqueness,
 } from "../src/utils/invoices.ts";
 import type {
+  InvoiceDocItemType,
   FirestoreTimestampType,
   OrderDocDatesType,
   SettlementReasonType,
@@ -60,9 +61,26 @@ const NO_DOC_DATES: OrderDocDatesType = {
 
 // ── Schema bases ────────────────────────────────────────────────
 
-const lineItemBase = getInitialValues(InvoiceDocLineItemSchema) as Record<string, unknown>;
-const priceBase = (lineItemBase as { price: Record<string, unknown> }).price;
-const orderDividerBase = getInitialValues(InvoiceDocOrderItem) as Record<string, unknown>;
+const lineItemBase = getInitialValues(InvoiceDocLineItemSchema);
+const priceBase = lineItemBase.price;
+const orderDividerBase = getInitialValues(InvoiceDocOrderItem);
+const destBase = getInitialValues(OrderDocDestinationItem);
+
+/**
+ * Narrow a doc item to its billable-line arm.
+ *
+ * These tests read line-only fields — `quantity`, `price`, `coa_revenue`,
+ * `xero_id` — off results now typed as the full `InvoiceDocItemType` union, and
+ * a divider carries none of them. The throw IS the assertion: a divider
+ * arriving at one of these reads is a test failure, not something to
+ * optional-chain past.
+ */
+function asLine(item: InvoiceDocItemType) {
+  if (!isInvoiceLineItem(item)) {
+    throw new Error(`expected a billable line item, got type "${item.type}"`);
+  }
+  return item;
+}
 
 function makeItem(
   overrides: Partial<InvoiceItem> = {},
@@ -114,23 +132,24 @@ const ITEM_NEW = "ItemNew0000000000001";
 
 // ── Test data ───────────────────────────────────────────────────
 
-const orderDivider: InvoiceItem = {
+const orderDivider: InvoiceDocItemType = {
   ...orderDividerBase,
   uid: ORDER_DIV_1,
   name: "Order #1001",
   uid_order: ORDER_ID_1,
-} as InvoiceItem;
+} as InvoiceDocItemType;
 
-const destItem: InvoiceItem = {
+const destItem: InvoiceDocItemType = {
+  ...destBase,
   uid: DEST_1,
   type: "destination",
   name: "Main Venue",
   uid_delivery: DEL_1,
   uid_collection: null,
   path: [ORDER_DIV_1, DEST_1],
-};
+} as InvoiceDocItemType;
 
-const lineItem1: InvoiceItem = {
+const lineItem1: InvoiceDocItemType = {
   ...lineItemBase,
   uid: ITEM_1,
   type: "rental",
@@ -147,9 +166,9 @@ const lineItem1: InvoiceItem = {
   path: [ORDER_DIV_1, DEST_1, ITEM_1],
   coa_revenue: 4100,
   tracking_category: "rentals",
-} as InvoiceItem;
+} as InvoiceDocItemType;
 
-const lineItem2: InvoiceItem = {
+const lineItem2: InvoiceDocItemType = {
   ...lineItemBase,
   uid: ITEM_2,
   type: "sale",
@@ -165,16 +184,16 @@ const lineItem2: InvoiceItem = {
   },
   path: [ORDER_DIV_1, DEST_1, ITEM_2],
   xero_id: "00000000-0000-4000-8000-000000000123",
-} as InvoiceItem;
+} as InvoiceDocItemType;
 
-const orderDivider2: InvoiceItem = {
+const orderDivider2: InvoiceDocItemType = {
   ...orderDividerBase,
   uid: ORDER_DIV_2,
   name: "Order #1002",
   uid_order: ORDER_ID_2,
-} as InvoiceItem;
+} as InvoiceDocItemType;
 
-const lineItem3: InvoiceItem = {
+const lineItem3: InvoiceDocItemType = {
   ...lineItemBase,
   uid: ITEM_3,
   type: "rental",
@@ -189,9 +208,9 @@ const lineItem3: InvoiceItem = {
     total: 500,
   },
   path: [ORDER_DIV_2, ITEM_3],
-} as InvoiceItem;
+} as InvoiceDocItemType;
 
-const multiOrderInvoiceItems: InvoiceItem[] = [
+const multiOrderInvoiceItems: InvoiceDocItemType[] = [
   orderDivider,
   destItem,
   lineItem1,
@@ -353,20 +372,22 @@ Deno.test("buildOrderScopedItems preserves group shape via OrderDocGroupItem", (
 // ── carryForwardOverrides ───────────────────────────────────────
 
 Deno.test("carryForwardOverrides preserves coa_revenue and xero_id from existing items", () => {
-  const rebuilt: InvoiceItem[] = [
-    { uid: "item-1", type: "rental", name: "Light Updated", quantity: 3, path: [] },
-    { uid: "item-new", type: "sale", name: "New Item", quantity: 1, path: [] },
-  ];
+  const rebuilt: InvoiceDocItemType[] = [
+    { ...lineItemBase, uid: "item-1", type: "rental", name: "Light Updated", quantity: 3, path: [] },
+    { ...lineItemBase, uid: "item-new", type: "sale", name: "New Item", quantity: 1, path: [] },
+  ] as InvoiceDocItemType[];
   const existing: InvoiceItem[] = [
     { uid: "item-1", type: "rental", name: "Light", coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000001", path: [] },
     { uid: "item-removed", type: "sale", name: "Gone", coa_revenue: 4200, path: [] },
   ];
   const result = carryForwardOverrides(rebuilt, existing);
   assertEquals(result[0].name, "Light Updated"); // rebuilt field
-  assertEquals(result[0].quantity, 3); // rebuilt field
-  assertEquals(result[0].coa_revenue, 4100); // carried forward
-  assertEquals(result[0].xero_id, "00000000-0000-4000-8000-000000000001"); // carried forward
-  assertEquals(result[1].coa_revenue, undefined); // new item, no override
+  assertEquals(asLine(result[0]).quantity, 3); // rebuilt field
+  assertEquals(asLine(result[0]).coa_revenue, 4100); // carried forward
+  assertEquals(asLine(result[0]).xero_id, "00000000-0000-4000-8000-000000000001"); // carried forward
+  assertEquals(asLine(result[1]).coa_revenue, null); // new item, no override
+  // `null`, not `undefined`: a real invoice line carries the schema default, and
+  // the old `undefined` was an artifact of a fixture built without one.
 });
 
 // ── syncOrderItems ──────────────────────────────────────────────
@@ -390,7 +411,7 @@ Deno.test("syncOrderItems replaces scoped items and carries forward overrides", 
 
   assertEquals(result[2].path, [ORDER_DIV_1, DEST_1, ITEM_1]);
   assertEquals(result[2].name, "Spot Light v2");
-  assertEquals(result[2].quantity, 5);
+  assertEquals(asLine(result[2]).quantity, 5);
   assertEquals((result[2] as InvoiceItem).coa_revenue, 4100); // carried forward
 
   assertEquals(result[3].path, [ORDER_DIV_1, DEST_1, ITEM_NEW]);
@@ -407,7 +428,7 @@ Deno.test("syncOrderItems replaces scoped items and carries forward overrides", 
 
 Deno.test("syncOrderItems projects order-only fields off new items (strict schema passes)", () => {
   // Invoice has a clean divider but no scoped items yet — sync will take the "new item" path.
-  const invoiceItems: InvoiceItem[] = [orderDivider];
+  const invoiceItems: InvoiceDocItemType[] = [orderDivider];
   const orderItems: LineItem[] = [
     {
       uid: DEST_1,
@@ -444,9 +465,9 @@ Deno.test("syncOrderItems projects order-only fields off new items (strict schem
 });
 
 Deno.test("syncOrderItems preserves order when divider not found (appends)", () => {
-  const items: InvoiceItem[] = [
-    { uid: "existing", type: "rental", name: "Existing Item", quantity: 1, path: ["existing"] },
-  ];
+  const items: InvoiceDocItemType[] = [
+    { ...lineItemBase, uid: "existing", type: "rental", name: "Existing Item", quantity: 1, path: ["existing"] },
+  ] as InvoiceDocItemType[];
   const orderItems: LineItem[] = [
     { uid: "new-item", type: "sale", name: "New", quantity: 1, path: ["new-item"] },
   ];
@@ -497,12 +518,16 @@ Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward
       subtotal: 100, subtotal_discounted: 100, discount: null, taxes: [], total: 100,
     } as unknown as LineItem["price"],
   };
-  const invoiceItem: InvoiceItem = {
+  // Deliberately a bare spread of `prevItem`: `isItemSynced` compares the two
+  // field by field, so padding this out with the schema base would introduce
+  // differences and push the test down the "overridden" branch it is not
+  // testing.
+  const invoiceItem: InvoiceDocItemType = {
     ...prevItem,
     path: [ORDER_DIV_1, DEST_1, ITEM_1],
     coa_revenue: 4100,
     xero_id: "00000000-0000-4000-8000-000000000001",
-  } as InvoiceItem;
+  } as InvoiceDocItemType;
   const newItem: LineItem = {
     ...prevItem,
     name: "Light v2",
@@ -519,7 +544,7 @@ Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward
 
   // New values from projected order item
   assertEquals(out.name, "Light v2");
-  assertEquals(out.quantity, 3);
+  assertEquals(asLine(out).quantity, 3);
   // Carried forward from the overridden invoice item
   assertEquals((out as InvoiceItem).coa_revenue, 4100);
   assertEquals((out as InvoiceItem).xero_id, "00000000-0000-4000-8000-000000000001");
@@ -1305,7 +1330,7 @@ const KEY_A = [ORDER_DIV_1, DEST_1, ITEM_1].join("/");
 const KEY_B = [ORDER_DIV_1, DEST_1, ITEM_2].join("/");
 
 // In-sync invoice baseline: order divider + the exact projection of the order.
-function baselineInvoice(): InvoiceItem[] {
+function baselineInvoice(): InvoiceDocItemType[] {
   return [orderDivider, ...buildOrderScopedItems(RESYNC_ORDER_ITEMS, ORDER_DIV_1)];
 }
 
@@ -1355,17 +1380,17 @@ Deno.test("resyncInvoiceLines per-line: re-projects only the targeted line, sibl
   const result = resyncInvoiceLines(baselineInvoice(), changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
   const a = result.find((i) => i.uid === ITEM_1)!;
   const b = result.find((i) => i.uid === ITEM_2)!;
-  assertEquals(a.quantity, 9); // snapped to the order
-  assertEquals(b.quantity, 1); // sibling untouched
-  assertEquals((a.price as { subtotal: number }).subtotal, 900);
+  assertEquals(asLine(a).quantity, 9); // snapped to the order
+  assertEquals(asLine(b).quantity, 1); // sibling untouched
+  assertEquals((asLine(a).price as { subtotal: number }).subtotal, 900);
 });
 
 Deno.test("resyncInvoiceLines per-line: carries forward invoice-only override fields", () => {
   const inv = baselineInvoice().map((it) =>
-    it.uid === ITEM_1 ? ({ ...it, coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceItem) : it
+    it.uid === ITEM_1 ? ({ ...it, coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceDocItemType) : it
   );
   const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
-  const a = result.find((i) => i.uid === ITEM_1) as InvoiceItem;
+  const a = asLine(result.find((i) => i.uid === ITEM_1)!);
   assertEquals(a.quantity, 9); // body snapped to the order
   assertEquals(a.coa_revenue, 4100); // override preserved
   assertEquals(a.xero_id, "00000000-0000-4000-8000-000000000abc");
@@ -1374,7 +1399,7 @@ Deno.test("resyncInvoiceLines per-line: carries forward invoice-only override fi
 Deno.test("resyncInvoiceLines per-line: an untargeted overridden line is left as-is", () => {
   const inv = baselineInvoice().map((it) => (it.uid === ITEM_2 ? { ...it, quantity: 7 } : it));
   const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
-  assertEquals(result.find((i) => i.uid === ITEM_2)!.quantity, 7); // override kept
+  assertEquals(asLine(result.find((i) => i.uid === ITEM_2)!).quantity, 7); // override kept
 });
 
 Deno.test("resyncInvoiceLines per-line: a target the order dropped is left untouched (not removed)", () => {
@@ -1385,15 +1410,15 @@ Deno.test("resyncInvoiceLines per-line: a target the order dropped is left untou
 Deno.test("resyncInvoiceLines whole: snaps every scoped line back to the order, discarding overrides", () => {
   const inv = baselineInvoice().map((it) => (it.uid === ITEM_2 ? { ...it, quantity: 7 } : it));
   const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1);
-  assertEquals(result.find((i) => i.uid === ITEM_1)!.quantity, 9); // order value
-  assertEquals(result.find((i) => i.uid === ITEM_2)!.quantity, 1); // override discarded
+  assertEquals(asLine(result.find((i) => i.uid === ITEM_1)!).quantity, 9); // order value
+  assertEquals(asLine(result.find((i) => i.uid === ITEM_2)!).quantity, 1); // override discarded
 });
 
 Deno.test("resyncInvoiceLines: leaves other order dividers' scopes untouched", () => {
   const inv = [...baselineInvoice(), orderDivider2, lineItem3];
   const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
   const l3 = result.find((i) => i.uid === ITEM_3)!;
-  assertEquals(l3.quantity, 1);
+  assertEquals(asLine(l3).quantity, 1);
   assertEquals(l3.path, [ORDER_DIV_2, ITEM_3]);
 });
 

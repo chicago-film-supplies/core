@@ -19166,7 +19166,7 @@ webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.
 afterward (the webhook + backfill) get positional path assignment; the
 order-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.
 
-### `buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceItem[]`
+### `buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceDocItemType[]`
 
 Build invoice items from an order's items, scoped under an order divider.
 Projects each order item to its invoice-item shape and prepends the order
@@ -19227,7 +19227,7 @@ A `transaction_fee` reports its stored `price.total`: it is priced from the
 document, so the only correct value is the one the totals pass already wrote.
 Recomputing it here would need a basis this function does not have.
 
-### `carryForwardOverrides(rebuiltItems: InvoiceItem[], existingItems: InvoiceItem[]): InvoiceItem[]`
+### `carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[]`
 
 Carry forward invoice-specific overrides from existing items to rebuilt items.
 Matches by uid — if a rebuilt item has the same uid as an existing invoice item,
@@ -19547,7 +19547,7 @@ starts with the order divider's uid removed.
 
 **Returns** — Items with the order scope removed
 
-### `resyncInvoiceLines(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string, targetPaths?: string[][]): InvoiceItem[]`
+### `resyncInvoiceLines(currentInvoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string, targetPaths?: string[][]): InvoiceDocItemType[]`
 
 Re-project an order's lines into an invoice, on demand.
 
@@ -19606,7 +19606,7 @@ Policy per pair:
 
 **Returns** — Updated full invoice destinations array
 
-### `syncOrderItems(invoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): InvoiceItem[]`
+### `syncOrderItems(invoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string): InvoiceDocItemType[]`
 
 Sync a single order's items into an invoice's items array.
 Replaces all items scoped to the order divider with rebuilt items from the order,
@@ -19620,7 +19620,7 @@ carrying forward invoice-specific overrides on matched uids.
 
 **Returns** — Updated invoice items array
 
-### `syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceItem[], orderDividerUid: string): InvoiceItem[]`
+### `syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceDocItemType[], orderDividerUid: string): InvoiceDocItemType[]`
 
 Selectively sync order items into an invoice, respecting invoice-side overrides.
 

@@ -9844,7 +9844,7 @@
         {
           "kind": "function",
           "name": "buildOrderScopedItems",
-          "signature": "buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceItem[]",
+          "signature": "buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceDocItemType[]",
           "doc": "Build invoice items from an order's items, scoped under an order divider.\nProjects each order item to its invoice-item shape and prepends the order\ndivider uid to its path.",
           "paramTags": [
             {
@@ -9922,7 +9922,7 @@
         {
           "kind": "function",
           "name": "carryForwardOverrides",
-          "signature": "carryForwardOverrides(rebuiltItems: InvoiceItem[], existingItems: InvoiceItem[]): InvoiceItem[]",
+          "signature": "carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[]",
           "doc": "Carry forward invoice-specific overrides from existing items to rebuilt items.\nMatches by uid — if a rebuilt item has the same uid as an existing invoice item,\nthe invoice-specific fields (coa_revenue, tracking_category, xero_id,\nxero_tracking_option_id) are preserved from the existing item.",
           "paramTags": [
             {
@@ -10170,7 +10170,7 @@
         {
           "kind": "function",
           "name": "resyncInvoiceLines",
-          "signature": "resyncInvoiceLines(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string, targetPaths?: string[][]): InvoiceItem[]",
+          "signature": "resyncInvoiceLines(currentInvoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string, targetPaths?: string[][]): InvoiceDocItemType[]",
           "doc": "Re-project an order's lines into an invoice, on demand.\n\nThe automatic `syncOrderToInvoiceSelective` (inside `updateOrder`) keeps\nnon-overridden lines current as the order changes. This is the operator's\nmanual trigger to either snap a whole order's scope back to the order after\nedits, or re-pull individual lines by `path` — the escape hatch for a line\nthat was overridden on the invoice and should now track the order again.\n\nPure: returns a fresh items array; the input is not mutated. Scoped to one\n**order divider** — a multi-order invoice loops its linked orders. Invoice-only\noverride fields (`coa_revenue`, `tracking_category`, `xero_id`,\n`xero_tracking_option_id`) are always carried forward.\n\n- `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from\n  the order — a hard snap-to-order, so price overrides are discarded and lines\n  the order dropped are removed. Delegates to {@link syncOrderItems}.\n- `targetPaths` given → **per-line**: only lines at those full, divider-scoped\n  paths are replaced with a fresh projection of the matching order line; every\n  other line — siblings and untargeted overrides — is left untouched. A target\n  path the order no longer has is left as-is (use a whole resync to drop\n  removed lines); a target path not on the invoice is a no-op.\n\nThe caller re-linearizes paths via {@link computeInvoiceItemPaths} and\nrecomputes `totals` via {@link calculateInvoiceTotals} before writing.",
           "paramTags": [],
           "returnsTag": null
@@ -10211,7 +10211,7 @@
         {
           "kind": "function",
           "name": "syncOrderItems",
-          "signature": "syncOrderItems(invoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): InvoiceItem[]",
+          "signature": "syncOrderItems(invoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string): InvoiceDocItemType[]",
           "doc": "Sync a single order's items into an invoice's items array.\nReplaces all items scoped to the order divider with rebuilt items from the order,\ncarrying forward invoice-specific overrides on matched uids.",
           "paramTags": [
             {
@@ -10232,7 +10232,7 @@
         {
           "kind": "function",
           "name": "syncOrderToInvoiceSelective",
-          "signature": "syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceItem[], orderDividerUid: string): InvoiceItem[]",
+          "signature": "syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceDocItemType[], orderDividerUid: string): InvoiceDocItemType[]",
           "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden",
           "paramTags": [
             {

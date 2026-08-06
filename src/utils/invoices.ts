@@ -435,11 +435,24 @@ function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string):
 }
 
 /**
+ * The four fields an invoice line may override against its source order line —
+ * the type-level twin of {@link INVOICE_ONLY_ITEM_FIELDS}.
+ *
+ * Named as its own type because the return of {@link pickInvoiceOnlyFields} is
+ * SPREAD over a projected item. `Partial<InvoiceItem>` would let that spread
+ * legally overwrite `type`, `uid` or `path` — the row's identity — so the wide
+ * type was a licence the function never wanted and does not use.
+ */
+type InvoiceOnlyOverrides = Partial<
+  Pick<InvoiceItem, "coa_revenue" | "tracking_category" | "xero_id" | "xero_tracking_option_id">
+>;
+
+/**
  * Pick only invoice-only override fields from an invoice item.
  * Used to carry forward overrides when replacing an item with updated order data.
  */
-function pickInvoiceOnlyFields(item: InvoiceItem): Partial<InvoiceItem> {
-  const result: Partial<InvoiceItem> = {};
+function pickInvoiceOnlyFields(item: InvoiceItem): InvoiceOnlyOverrides {
+  const result: InvoiceOnlyOverrides = {};
   if (item.coa_revenue !== undefined) result.coa_revenue = item.coa_revenue;
   if (item.tracking_category !== undefined) result.tracking_category = item.tracking_category;
   if (item.xero_id !== undefined) result.xero_id = item.xero_id;
@@ -522,9 +535,9 @@ export function isItemSynced(
 export function syncOrderToInvoiceSelective(
   prevOrderItems: LineItem[],
   newOrderItems: LineItem[],
-  currentInvoiceItems: InvoiceItem[],
+  currentInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
-): InvoiceItem[] {
+): InvoiceDocItemType[] {
   // Index prev order items by path key
   const prevByPath = new Map<string, LineItem>();
   for (const item of prevOrderItems) {
@@ -532,13 +545,13 @@ export function syncOrderToInvoiceSelective(
   }
 
   // Index current invoice items by order-relative path key
-  const invoiceByPath = new Map<string, InvoiceItem>();
+  const invoiceByPath = new Map<string, InvoiceDocItemType>();
   for (const item of currentInvoiceItems) {
     const relPath = stripOrderPrefix(item.path, orderDividerUid);
     invoiceByPath.set(itemPathKey(relPath), item);
   }
 
-  const result: InvoiceItem[] = [];
+  const result: InvoiceDocItemType[] = [];
   const processedInvoicePaths = new Set<string>();
 
   // Process new order items in order
@@ -706,7 +719,7 @@ export function removeOrderScopedItems<T extends InvoiceItem>(items: T[], orderD
  * @param orderDividerUid - The uid of the order divider these items belong under
  * @returns Items projected to invoice shape with path prepended by orderDividerUid
  */
-export function buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceItem[] {
+export function buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceDocItemType[] {
   return orderItems.map((item) => projectOrderItemToInvoiceItem(item, orderDividerUid));
 }
 
@@ -720,7 +733,7 @@ export function buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: s
  * @param existingItems - Current invoice items (to carry forward overrides from)
  * @returns Rebuilt items with invoice-specific overrides applied
  */
-export function carryForwardOverrides(rebuiltItems: InvoiceItem[], existingItems: InvoiceItem[]): InvoiceItem[] {
+export function carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[] {
   const existingByUid = new Map<string, InvoiceItem>();
   for (const item of existingItems) {
     if (item.uid) existingByUid.set(item.uid, item);
@@ -752,10 +765,10 @@ export function carryForwardOverrides(rebuiltItems: InvoiceItem[], existingItems
  * @returns Updated invoice items array
  */
 export function syncOrderItems(
-  invoiceItems: InvoiceItem[],
+  invoiceItems: InvoiceDocItemType[],
   orderItems: LineItem[],
   orderDividerUid: string,
-): InvoiceItem[] {
+): InvoiceDocItemType[] {
   // Capture existing items under this order scope for override carryforward
   const existingScoped = getOrderScopedItems(invoiceItems, orderDividerUid);
 
@@ -854,11 +867,11 @@ function invoiceProjectionMatches(expected: InvoiceItem, current: InvoiceItem): 
  * recomputes `totals` via {@link calculateInvoiceTotals} before writing.
  */
 export function resyncInvoiceLines(
-  currentInvoiceItems: InvoiceItem[],
+  currentInvoiceItems: InvoiceDocItemType[],
   orderItems: LineItem[],
   orderDividerUid: string,
   targetPaths?: string[][],
-): InvoiceItem[] {
+): InvoiceDocItemType[] {
   // Whole snap-to-order: rebuild the divider's entire scope from the order.
   if (!targetPaths) {
     return syncOrderItems(currentInvoiceItems, orderItems, orderDividerUid);
