@@ -91,31 +91,29 @@ const show = (hits: Hit[]) =>
 const CURRENCY_IMPORT_RE = /from\s+"currency\.js"/;
 
 /**
- * The four modules permitted to import currency.js, and what each does with it.
+ * The ONE module permitted to import currency.js, and what it does with it.
  *
- * Three of them are **summing only** — closed operations, exact today, and they
- * retire *natively* when money is stored as integer cents, because addition is
- * closed in cents by construction. They are not technical debt; they are the
- * shape a dollar-float representation forces.
- *
- * `utils/money.ts` is the one permanent entry, and deliberately so.
+ * **This set held four entries until Phase 11, and losing three of them is the
+ * migration succeeding rather than the ratchet weakening.** `utils/orders.ts`,
+ * `utils/invoices.ts` and `utils/taxes.ts` were all *summing only* — closed
+ * operations, exact, and exactly the shape a dollar-float representation
+ * forces. With money stored as integer cents, addition is closed by
+ * construction: `a + b` over two exact cent counts has nothing for a decimal
+ * type to protect, and routing integers through one would only re-introduce the
+ * float it was guarding. They did not need converting; they needed deleting.
  */
 const CURRENCY_FILES = new Set<string>([
-  // PERMANENT. `parseMoney` / `parseRate` wrap currency.js rather than
-  // reimplementing it, and that asymmetry with `distributeCents` (which IS
-  // reimplemented) is a decision, not an inconsistency: distributing in
-  // integers is ~5 lines that outsource no subtlety, while parsing outsources a
-  // great deal — separator, symbol, sign and epsilon handling is precisely the
-  // hand-rolled-money-code class this campaign exists to delete. This is the
-  // one place currency.js survives after the cents migration.
+  // PERMANENT, and the only entry. `parseMoney` / `parseRate` wrap currency.js
+  // rather than reimplementing it, and that asymmetry with `distributeCents`
+  // (which IS reimplemented) is a decision, not an inconsistency: distributing
+  // in integers is ~5 lines that outsource no subtlety, while parsing
+  // outsources a great deal — separator, symbol, sign and epsilon handling is
+  // precisely the hand-rolled-money-code class this campaign exists to delete.
+  //
+  // Note the parse direction survives the migration untouched: an external
+  // string ("$1,234.56", a CRMS rate) is still text, and turning text into a
+  // number is the same problem whatever the number is denominated in.
   "src/utils/money.ts",
-  // Summing line subtotals, discounts, taxes and fees into order totals — plus
-  // the one catalogued integer multiply (Ratchet B).
-  "src/utils/orders.ts",
-  // Summing invoice totals.
-  "src/utils/invoices.ts",
-  // Summing tax amounts.
-  "src/utils/taxes.ts",
 ]);
 
 Deno.test("moneyArithmeticCoverage — every currency.js importer in core is catalogued", async () => {
@@ -153,27 +151,25 @@ Deno.test("moneyArithmeticCoverage — every currency.js importer in core is cat
 const HARD_BANNED_RE = /\.(?:divide|distribute)\(/;
 
 /**
- * `.multiply` is allowed **only** where the multiplicand is an integer, and
- * each site names the reason. `file:line` keys, so moving the call re-opens the
- * question rather than inheriting the exemption.
+ * `.multiply` was allowed where the multiplicand was an integer, keyed
+ * `file:line` so moving the call re-opened the question.
+ *
+ * **The catalogue is now empty, and the arm that read it is gone with it.** Its
+ * one entry was `calculateReplacementTotals`'s `replacement × quantity`, which
+ * no longer goes through currency.js at all: `replacement_cents × quantity` is
+ * integer arithmetic and the function applies it as `× qty ÷ QTY_SCALE` like
+ * every other factor in the module.
+ *
+ * Retiring the entry and the assertion together is deliberate. The plan for
+ * this phase flagged that the `file:line` key would shift the moment anything
+ * above line 1180 moved — which is *before* the multiply itself disappeared —
+ * so a half-done retirement would have failed for a reason that had nothing to
+ * do with the multiply, and the obvious fix would have been to re-key the entry
+ * and carry a dead exemption forward. There is no reachable currency.js
+ * multiply left in core; `HARD_BANNED_RE` below is what still runs.
  */
-const INTEGER_MULTIPLY_ALLOWED = new Map<string, string>([
-  [
-    "src/utils/orders.ts:1180",
-    "calculateReplacementTotals: `replacement × quantity`. `LineItem.quantity` is " +
-    "`z.int().optional()`, so the multiplicand is a whole unit count and the product is " +
-    "representable at the cent — closed, and exact. This is the site that makes a blanket " +
-    "multiply ban wrong. " +
-    "The `.optional()` used to be a real hole rather than a footnote: `isPreTaxItem` " +
-    "asserted `quantity: number` without checking it, so an absent quantity reached this " +
-    "multiply and `currency(NaN).value` returned **null, not NaN** — a replacement total of " +
-    "`null` with `tax: 0` beside it, which reads as an answer. Closed in core#49 by checking " +
-    "`quantity` in the predicate (and in `isPreTaxPricingItem`, which guards the subtotal " +
-    "path). Measured first: 0 quantity-less pre_tax lines across 18,492 in prod.",
-  ],
-]);
 
-Deno.test("moneyArithmeticCoverage — no divide or distribute, and every multiply is by an integer", async () => {
+Deno.test("moneyArithmeticCoverage — no divide or distribute anywhere in core", async () => {
   const banned = await grep(HARD_BANNED_RE);
   assertEquals(
     show(banned),
@@ -184,29 +180,6 @@ Deno.test("moneyArithmeticCoverage — no divide or distribute, and every multip
       "divide-first 185,372. Use roundDivHalfUp / roundDivHalfAwayFromZero / distributeCents " +
       "from utils/money.ts, with the divide LAST, and ship a property sweep plus a " +
       "fail-closed companion:\n" + show(banned),
-  );
-
-  const multiplies = await grep(/\.multiply\(/);
-  const uncatalogued = multiplies.filter(
-    (h) => !INTEGER_MULTIPLY_ALLOWED.has(`${h.file}:${h.line}`),
-  );
-  assertEquals(
-    show(uncatalogued),
-    "",
-    "Un-catalogued currency.js multiply. Multiplying money by an INTEGER is closed and " +
-      "exact, so this is a catalogue rather than a ban — but the entry has to say WHY the " +
-      "multiplicand is integral. Multiplying by a fraction is not closed and belongs in " +
-      "integer cents:\n" + show(uncatalogued),
-  );
-
-  const staleMultiply = [...INTEGER_MULTIPLY_ALLOWED.keys()]
-    .filter((k) => !multiplies.some((h) => `${h.file}:${h.line}` === k)).sort();
-  assertEquals(
-    staleMultiply,
-    [],
-    "Catalogued multiply site(s) no longer exist at that line. The key is `file:line` on " +
-      "purpose — moving the call should re-open the question, not carry the exemption " +
-      "along:\n" + staleMultiply.map((k) => `  - ${k}`).join("\n"),
   );
 });
 
@@ -247,39 +220,25 @@ Deno.test("moneyArithmeticCoverage — utils/money.ts is the only definition of 
 const FLOAT_EPSILON_RE = /(?<![.\d])0\.0(?:05|1)(?![\d])/;
 
 /**
- * Schema refinements still comparing money with a float epsilon, and what
- * retires each.
+ * **EMPTY, and it stays empty.** Both entries retired in Phase 11 together with
+ * the epsilons they described:
  *
- * `0.005` is neither half a cent nor a cent — it is a threshold chosen so float
- * noise on 2dp values lands under it, which is a property of the *encoding*,
- * not of the ledger. api-cloudrun's arm has an EMPTY allowlist here because
- * `src/lib/moneyCompare.ts` took every site; core's three are still open, and
- * they are listed rather than quietly excluded so the gap is visible.
+ * - `src/schemas/invoice.ts` — `amount_paid + amount_credited + amount_due ===
+ *   total` "within half a cent". All four operands are `z.int()` counts of
+ *   cents now, so the comparison is exact and a half-cent gap is not a
+ *   representable state.
+ * - `src/schemas/credit-note.ts` — `remaining_credit` exhaustion and its upper
+ *   bound. An earlier version of that entry claimed it was convertible ahead of
+ *   Phase 11, on the reasoning that credit notes were "already cents-denominated
+ *   in the settlements journal". The journal was; the credit-note DOCUMENT was
+ *   not, and `CreditNoteDocTotals` said so in as many words. It is now, so both
+ *   comparisons are integer.
  *
- * They are not converted in the same change for a stated reason: a refinement
- * is validation *behaviour*, so touching one cuts a new `@cfs/core` beta and
- * forces a lockstep bump of all three consumers. On 2dp values the integer form
- * is equivalent, so this is scheduling, not disagreement — see the money
- * campaign's Phase 11, which removes the question entirely by making a third
- * decimal unrepresentable.
+ * Deleting the entries in the same commit as the epsilons is what the stale-entry
+ * assertion below exists to force: an allowlist entry that outlives its subject
+ * is a standing exemption nobody is watching.
  */
-const FLOAT_EPSILON_ALLOWED = new Map<string, string>([
-  [
-    "src/schemas/invoice.ts",
-    "amount_paid + amount_credited + amount_due === total, within half a cent. Retires with " +
-    "cents-denominated totals (campaign Phase 11) — `z.int()` fields compare exactly.",
-  ],
-  [
-    "src/schemas/credit-note.ts",
-    "`remaining_credit` exhaustion and its upper bound. NOT convertible ahead of Phase 11 — " +
-    "an earlier version of this entry said it was, reasoning that credit notes are 'already " +
-    "cents-denominated in the settlements journal'. The journal is (`amount_cents: z.int()`); " +
-    "the credit-note DOCUMENT is not. Both operands here — `remaining_credit` and " +
-    "`totals.total` — are dollar `z.number()`s, and `CreditNoteDocTotals` says so: 'Dollars, " +
-    "not cents ... The cents boundary is the settlements journal.' Retires with Phase 11 " +
-    "exactly like the invoice entry above, not before it.",
-  ],
-]);
+const FLOAT_EPSILON_ALLOWED = new Map<string, string>([]);
 
 Deno.test("moneyArithmeticCoverage — float money epsilons are catalogued, and the list only shrinks", async () => {
   const hits = await grep(FLOAT_EPSILON_RE);
@@ -312,18 +271,35 @@ Deno.test("moneyArithmeticCoverage — the scans bite (non-vacuity)", async () =
   for await (const { relPath } of walk(SRC_DIR)) files.push(relPath);
   assertEquals(files.length > 100, true, `The src/ walker found only ${files.length} files.`);
 
+  // Ratchet A's floor is **1, not 4**, and the three it lost are gone for good.
+  // Before Phase 11 four modules imported currency.js; three of them only
+  // summed money, which is closed in integer cents, so they retired natively
+  // with the storage change. `utils/money.ts` is the permanent one, so 1 is the
+  // floor a working scan must still reach — a 0 means the walker or the regex
+  // broke, not that the last importer left.
   const importers = new Set((await grep(CURRENCY_IMPORT_RE)).map((h) => h.file)).size;
   assertEquals(
-    importers >= 4,
+    importers >= 1,
     true,
-    `Ratchet A found ${importers} currency.js importers. If it is genuinely gone from core, ` +
-      `delete Ratchet A rather than leaving it green over nothing.`,
+    `Ratchet A found ${importers} currency.js importers and there must be at least one ` +
+      `(utils/money.ts, permanently — parseMoney/parseRate wrap the library rather than ` +
+      `reimplementing it). Zero means the scan is inert, not that the import is gone.`,
   );
+  // ⚠️ **Ratchet B's multiply floor is DELETED, not lowered**, and it had to go
+  // in the same commit as the arm it guarded. `INTEGER_MULTIPLY_ALLOWED` held
+  // exactly one entry — `calculateReplacementTotals`'s `replacement × quantity`
+  // — and that multiply no longer exists in any form: the function works in
+  // integer cents and applies the quantity as `× qty ÷ QTY_SCALE`. A floor
+  // asserting "at least one currency.js multiply exists" would now be asserting
+  // that the migration had NOT happened.
   assertEquals(
-    (await grep(/\.multiply\(/)).length >= 1,
-    true,
-    "Ratchet B's multiply catalogue is measuring an empty set — the scan is broken, or the " +
-      "last integer multiply went away and INTEGER_MULTIPLY_ALLOWED should be deleted.",
+    (await grep(/\.multiply\(/)).length,
+    0,
+    "A currency.js multiply reappeared in core. Multiplying money by an integer is closed " +
+      "and was legitimate while money was a dollar float, but with integer cents there is " +
+      "nothing left for currency.js to do that plain integer arithmetic does not do exactly. " +
+      "If a real need returns, restore INTEGER_MULTIPLY_ALLOWED and its assertion together " +
+      "with a why-comment naming the multiplicand — do not simply delete this line.",
   );
 
   assertEquals(HARD_BANNED_RE.test("currency(a).divide(b)"), true, "HARD_BANNED_RE stopped matching");

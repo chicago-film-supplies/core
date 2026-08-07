@@ -32,8 +32,8 @@ export interface WebshopProductComponent {
   quantity: number;
   zero_priced?: boolean;
   price: {
-    base: number;
-    replacement?: number | null;
+    base_cents: number;
+    replacement_cents?: number | null;
     taxes: TaxRefType[];
     formula: PriceFormulaType;
     discountable: boolean;
@@ -67,8 +67,8 @@ export interface WebshopProduct {
   eligible_shipping_ground: boolean;
   eligible_shipping_air: boolean;
   price: {
-    base: number;
-    replacement?: number | null;
+    base_cents: number;
+    replacement_cents?: number | null;
     taxes: TaxRefType[];
     formula: PriceFormulaType;
     discountable: boolean;
@@ -102,8 +102,8 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
   quantity: z.number(),
   zero_priced: z.boolean().optional(),
   price: z.strictObject({
-    base: z.number(),
-    replacement: z.number().nullable().optional(),
+    base_cents: z.int(),
+    replacement_cents: z.int().nullable().optional(),
     taxes: z.array(TaxRef).default([]),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
@@ -125,8 +125,8 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
   eligible_shipping_ground: z.boolean(),
   eligible_shipping_air: z.boolean(),
   price: z.strictObject({
-    base: z.number(),
-    replacement: z.number().nullable().optional(),
+    base_cents: z.int(),
+    replacement_cents: z.int().nullable().optional(),
     taxes: z.array(TaxRef).default([]),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),

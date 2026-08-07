@@ -82,7 +82,7 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     type,
     quantity: 2,
     custody: custodyNeeded ? custodyFor[type] ?? null : null,
-    cost: contract.cost === "required" ? { amount: -400, unit_cost: 200, unit_costs: [200, 200] } : null,
+    cost: contract.cost === "required" ? { amount_cents: -40000, unit_cost: 200, unit_costs_cents: [200, 200] } : null,
     lines,
     date: "2026-03-01T00:00:00Z",
     date_fs: mockTimestamp,
@@ -255,7 +255,7 @@ Deno.test("a type that requires cost rejects its absence", () => {
 Deno.test("a type that forbids cost rejects its presence", () => {
   for (const type of MOVEMENT_TYPES) {
     if (hasCosts(type)) continue;
-    const stray = { cost: { amount: -400, unit_cost: 200, unit_costs: [200, 200] } };
+    const stray = { cost: { amount_cents: -40000, unit_cost: 200, unit_costs_cents: [200, 200] } };
     assertEquals(
       MovementSchema.safeParse(movement(type, stray)).success,
       false,
@@ -273,7 +273,7 @@ Deno.test("a transfer has no cost object to mis-gate (#286)", () => {
 });
 
 Deno.test("a no-refund sale_return is cost 0, not cost absent — the zero is the decision", () => {
-  const doc = movement("sale_return", { cost: { amount: 0, unit_cost: 0, unit_costs: [] } });
+  const doc = movement("sale_return", { cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } });
   assertEquals(MovementSchema.safeParse(doc).success, true);
   assertEquals(MovementSchema.safeParse(movement("sale_return", { cost: null })).success, false);
 });
@@ -507,7 +507,7 @@ const validCreateInput = {
   uid_product: PRODUCT,
   type: "purchase",
   quantity: 10,
-  total_cost: 2500,
+  total_cost_cents: 250000,
   date: "2026-03-01T00:00:00Z",
   reference: "PO-001",
   uid_session: SESSION,
@@ -596,7 +596,7 @@ Deno.test("CreateTransactionInput rejects booking-scoped types — the picker wr
 
 Deno.test("UpdateTransactionInput carries no balance-affecting field", () => {
   assertEquals(UpdateTransactionInput.safeParse({ reference: "note", version: 3 }).success, true);
-  for (const balance of [{ quantity: 5 }, { type: "sale" }, { total_cost: 10 }, { date: "2026-03-01T00:00:00Z" }]) {
+  for (const balance of [{ quantity: 5 }, { type: "sale" }, { total_cost_cents: 1000 }, { date: "2026-03-01T00:00:00Z" }]) {
     const result = UpdateTransactionInput.safeParse({ reference: "note", version: 3, ...balance });
     assertEquals(result.success, true, "unknown keys are stripped, not accepted");
     assertEquals(
@@ -620,7 +620,7 @@ Deno.test("CreateStoreTransferInput is one event with both sides", () => {
   assertEquals(CreateStoreTransferInput.safeParse(input).success, true);
   assertEquals(CreateStoreTransferInput.safeParse({ ...input, to: [] }).success, false);
   // No total_cost: a transfer nets to zero on ownership.
-  const costed = CreateStoreTransferInput.safeParse({ ...input, total_cost: 100 });
+  const costed = CreateStoreTransferInput.safeParse({ ...input, total_cost_cents: 10000 });
   assertEquals(
     Object.keys(costed.success ? costed.data : {}).includes("total_cost"),
     false,

@@ -604,12 +604,23 @@ export function checkItemPriceFormula(
  * invoice arm: an invoice line drops `stock_method` and `price.replacement`
  * together, so an absent `stock_method` there means "this shape has no answer",
  * not "unknown" — and running it would reject all 7,076 invoice rentals in prod.
+ *
+ * ⚠️ **This function takes a STRUCTURAL BOUND, not a schema, so the compiler
+ * cannot tell you when a field it reads has been renamed away.** During the
+ * dollars→cents migration `price.replacement` became `price.replacement_cents`
+ * everywhere; had the bound below not moved with it, `deno check` would have
+ * stayed green while `item.price?.replacement` read `undefined` forever — the
+ * `forbidden` arm permanently vacuous (a transaction_fee could carry a
+ * replacement price) and the `required_when_stocked` arm firing on every
+ * stocked rental. Any future rename of a field named here must edit this
+ * signature; `tests/common.test.ts` pins both arms against a live shape so a
+ * vacuous bound fails rather than passes.
  */
 export function checkItemContract(
   item: {
     type: string;
     stock_method?: string | null;
-    price?: { formula?: string; replacement?: number | null } | null;
+    price?: { formula?: string; replacement_cents?: number | null } | null;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -619,24 +630,88 @@ export function checkItemContract(
 
   // Deliberately NOT gated on `price` being present: a rental with no price at
   // all cannot state a replacement value either, and the hand-written refine
-  // this replaced rejected that case too (`item.price?.replacement != null`).
+  // this replaced rejected that case too (`item.price?.replacement_cents != null`).
   // Both callers require `price` outright now, so — as with `stock_method`
   // above — this is defence on a structural bound, not a reachable branch.
   if (
     contract.replacement === "required_when_stocked" &&
-    item.stock_method !== "none" && item.price?.replacement == null
+    item.stock_method !== "none" && item.price?.replacement_cents == null
   ) {
     ctx.addIssue({
       code: "custom",
-      path: ["price", "replacement"],
-      message: `price.replacement is required for ${item.type} items`,
+      path: ["price", "replacement_cents"],
+      message: `price.replacement_cents is required for ${item.type} items`,
     });
   }
-  if (contract.replacement === "forbidden" && item.price?.replacement != null) {
+  if (contract.replacement === "forbidden" && item.price?.replacement_cents != null) {
     ctx.addIssue({
       code: "custom",
-      path: ["price", "replacement"],
-      message: `"${item.type}" has no replacement value; price.replacement must be absent`,
+      path: ["price", "replacement_cents"],
+      message: `"${item.type}" has no replacement value; price.replacement_cents must be absent`,
+    });
+  }
+}
+
+/**
+ * The unit half of a line's price: which of `base_cents` / `base_percent` a
+ * `formula` is allowed to carry.
+ *
+ * **This exists because `price.base` used to carry two units.** On a
+ * `transaction_fee` line with `formula === "percent_of_total"`, `base` was a
+ * *percentage* of the document's `subtotal_discounted`; on every other line it
+ * was a per-unit dollar amount. One field, two units, discriminated only by a
+ * sibling — so a reader that did not consult `formula` first multiplied a 2.9%
+ * card fee as if it were $2.90, and integer cents would have made 2.9%
+ * unrepresentable outright.
+ *
+ * The split puts the unit in the NAME: `base_cents` is money (integer cents),
+ * `base_percent` is a percentage stored at 4dp — the quantum Xero's
+ * `DiscountRate` holds, and deliberately NOT the `RATE_SCALE = 1_000_000n`
+ * widening `utils/orders.ts` uses to *apply* a rate exactly. Conflating those
+ * two would store six decimals Xero cannot carry.
+ *
+ * **The rule is exactly-one-of, in the only form a `.default(0)` leaves
+ * checkable.** `base_cents` keeps its default, so it is materialized by the
+ * parse before any object-level refinement runs and can never be observed
+ * "absent" here; asserting it is *zero* on the fee arm is the same guarantee
+ * against the same failure, and it is the half that can actually fail. The
+ * `base_percent` half is asserted in both directions.
+ */
+export function checkPriceBaseUnit(
+  price: {
+    formula?: string;
+    base_cents?: number;
+    base_percent?: number | null;
+  } | null | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  if (price == null) return;
+
+  if (price.formula === "percent_of_total") {
+    if (price.base_percent == null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["base_percent"],
+        message: `"percent_of_total" prices from a percentage of the document total; base_percent is required`,
+      });
+    }
+    if (price.base_cents) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["base_cents"],
+        message:
+          `"percent_of_total" carries its rate in base_percent; base_cents must be 0, got ${price.base_cents}`,
+      });
+    }
+    return;
+  }
+
+  if (price.base_percent != null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["base_percent"],
+      message:
+        `base_percent is only meaningful on a "percent_of_total" price; this one is "${price.formula}"`,
     });
   }
 }
@@ -842,8 +917,19 @@ export interface SettlementContract {
   reasons: readonly SettlementReasonType[];
   /** Which external-id field this type may carry; `null` ⇒ neither. */
   xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
-  /** Which invoice total this type feeds. */
-  sums_into: "amount_paid" | "amount_credited";
+  /**
+   * Which invoice total this type feeds — **the storage key, deliberately, not
+   * the semantic name.**
+   *
+   * The `_cents` suffix is not decoration that drifted in from the migration:
+   * these literals must keep matching a real field on `InvoiceDocTotals`, and
+   * "renaming them back to the semantic name" is precisely how a literal comes
+   * to name a field that no longer exists. Verified when the suffix landed —
+   * every consumer compares this as a literal (`=== "amount_paid_cents"`) and
+   * nothing indexes `totals[sums_into]` anywhere, so a half-done rename is
+   * TS2367 at each site rather than a silent runtime mis-route.
+   */
+  sums_into: "amount_paid_cents" | "amount_credited_cents";
   /** Whether `reverses` must or must not be set. */
   reverses: "required" | "forbidden";
 }
@@ -866,13 +952,13 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   payment: {
     reasons: ["payment_received", "correction", "unspecified"],
     xero_id_field: "xero_payment_id",
-    sums_into: "amount_paid",
+    sums_into: "amount_paid_cents",
     reverses: "forbidden",
   },
   payment_reversal: {
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
-    sums_into: "amount_paid",
+    sums_into: "amount_paid_cents",
     reverses: "required",
   },
   credit: {
@@ -885,13 +971,13 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
       "unspecified",
     ],
     xero_id_field: "xero_credit_note_id",
-    sums_into: "amount_credited",
+    sums_into: "amount_credited_cents",
     reverses: "forbidden",
   },
   credit_reversal: {
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
-    sums_into: "amount_credited",
+    sums_into: "amount_credited_cents",
     reverses: "required",
   },
 };

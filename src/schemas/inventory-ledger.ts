@@ -25,8 +25,9 @@ export interface InventoryLedger {
   quantity_held: number;
   quantity_in_service: number;
   quantity_out_of_service: number;
+  /** A per-unit RATE at 4dp — dollars, NOT cents. See {@link MovementCostType.unit_cost}. */
   average_unit_cost: number;
-  total_cost_basis: number;
+  total_cost_basis_cents: number;
   out_of_service_breakdown: {
     cleaning: number;
     damaged: number;
@@ -54,8 +55,10 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
   quantity_held: z.number().min(0),
   quantity_in_service: z.number().min(0),
   quantity_out_of_service: z.number().min(0),
+  // 4dp DOLLARS, deliberately not `_cents` — the beta.117 regression was
+  // exactly this field quantized to the cent. Its neighbour below is cents.
   average_unit_cost: z.number().min(0),
-  total_cost_basis: z.number().min(0),
+  total_cost_basis_cents: z.int().min(0),
   out_of_service_breakdown: z.strictObject({
     cleaning: z.number(),
     damaged: z.number(),

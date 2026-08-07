@@ -503,8 +503,8 @@ export const updateProductOrderRules: CollectionRule[] = [
     fields: [
       { source: ["type"], target: ["items", "type"], transform: "patch matching items where status = draft and item.uid matches product uid" },
       { source: ["stock_method"], target: ["items", "stock_method"] },
-      { source: ["price", "base"], target: ["items", "price", "base"] },
-      { source: ["price", "replacement"], target: ["items", "price", "replacement"] },
+      { source: ["price", "base_cents"], target: ["items", "price", "base_cents"] },
+      { source: ["price", "replacement_cents"], target: ["items", "price", "replacement_cents"] },
       { source: ["price", "taxes"], target: ["items", "price", "taxes"], transform: "denormalized TaxRef[] from product catalog" },
       { source: ["name"], target: ["items", "name"] },
     ],

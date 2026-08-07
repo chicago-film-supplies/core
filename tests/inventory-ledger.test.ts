@@ -11,7 +11,7 @@ const validLedger = {
   quantity_in_service: 18,
   quantity_out_of_service: 2,
   average_unit_cost: 250.50,
-  total_cost_basis: 5010,
+  total_cost_basis_cents: 501000,
   out_of_service_breakdown: {
     cleaning: 0,
     damaged: 1,

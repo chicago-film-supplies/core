@@ -62,19 +62,19 @@ const validInvoice = {
     quantity: 1,
     price: {
       ...priceBase,
-      base: 500,
+      base_cents: 50000,
       chargeable_days: 5,
-      subtotal: 500,
-      subtotal_discounted: 500,
-      total: 500,
+      subtotal_cents: 50000,
+      subtotal_discounted_cents: 50000,
+      total_cents: 50000,
     },
   }],
   totals: {
     ...totalsBase,
-    subtotal: 500,
-    subtotal_discounted: 500,
-    total: 500,
-    amount_due: 500,
+    subtotal_cents: 50000,
+    subtotal_discounted_cents: 50000,
+    total_cents: 50000,
+    amount_due_cents: 50000,
   },
   created_by: { uid: "testuser100000000000", name: "Test User" },
   updated_by: { uid: "testuser100000000000", name: "Test User" },
@@ -166,8 +166,8 @@ Deno.test("InvoiceSchema carries settlement totals without a payments array", ()
     status: "part_paid",
     totals: {
       ...validInvoice.totals,
-      amount_paid: 250,
-      amount_due: 250,
+      amount_paid_cents: 25000,
+      amount_due_cents: 25000,
     },
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
@@ -260,10 +260,10 @@ Deno.test("InvoiceSchema accepts transaction_fees in totals", () => {
         name: "Credit Card Fee",
         rate: 3,
         type: "percent",
-        amount: 15,
+        amount_cents: 1500,
       }],
-      total: 515,
-      amount_due: 515,
+      total_cents: 51500,
+      amount_due_cents: 51500,
     },
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
@@ -402,11 +402,11 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         quantity: 2,
         price: {
           ...priceBase,
-          base: 200,
+          base_cents: 20000,
           formula: "fixed",
-          subtotal: 400,
-          subtotal_discounted: 400,
-          total: 400,
+          subtotal_cents: 40000,
+          subtotal_discounted_cents: 40000,
+          total_cents: 40000,
         },
         path: ["550e8400-e29b-41d4-a716-446655440020"],
       },
@@ -468,7 +468,7 @@ Deno.test("CreateInvoiceInput: a divider cannot carry a price or a quantity", ()
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
     tax_profile: "tax_applied",
-    items: [{ uid: "order100000000000000", type: "order", name: "Order #1", quantity: 2, price: { base: 10 } }],
+    items: [{ uid: "order100000000000000", type: "order", name: "Order #1", quantity: 2, price: { base_cents: 1000 } }],
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].code, "unrecognized_keys");
@@ -485,7 +485,7 @@ Deno.test("UpdateInvoiceInput: a line ships back with its stored extras", () => 
       name: "Spot Light",
       quantity: 1,
       path: ["order100000000000000"],
-      price: { base: 100, subtotal: 100, total: 109 },
+      price: { base_cents: 10000, subtotal_cents: 10000, total_cents: 10900 },
       xero_id: "550e8400-e29b-41d4-a716-446655440099",
       crms_id: 4021,
     }],
@@ -495,13 +495,13 @@ Deno.test("UpdateInvoiceInput: a line ships back with its stored extras", () => 
   assertEquals(item.xero_id, undefined);
   assertEquals(item.crms_id, undefined);
   // The computed half of the price is stripped too — this path recomputes.
-  assertEquals((item.price as Record<string, unknown>).subtotal, undefined);
+  assertEquals((item.price as Record<string, unknown>).subtotal_cents, undefined);
 });
 
 Deno.test("UpdateInvoiceInput: percent_of_total is inexpressible on an input line", () => {
   const bad = UpdateInvoiceInput.safeParse({
     version: 1,
-    items: [{ uid: "item1000000000000000", type: "rental", price: { base: 10, formula: "percent_of_total" } }],
+    items: [{ uid: "item1000000000000000", type: "rental", price: { base_percent: 3, formula: "percent_of_total" } }],
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["items", 0, "price", "formula"]);
@@ -537,17 +537,17 @@ const withTotals = (t: Record<string, number>) => ({
 
 Deno.test("the identity refine rejects a three-term violation", () => {
   const bad = InvoiceSchema.safeParse(
-    withTotals({ total: 1000, amount_paid: 400, amount_credited: 100, amount_due: 400 }),
+    withTotals({ total_cents: 100000, amount_paid_cents: 40000, amount_credited_cents: 10000, amount_due_cents: 40000 }),
   );
   assertEquals(bad.success, false);
-  assertEquals(bad.error?.issues[0].path, ["totals", "amount_due"]);
+  assertEquals(bad.error?.issues[0].path, ["totals", "amount_due_cents"]);
 });
 
 Deno.test("the identity refine accepts a fully-credited invoice", () => {
   // #1301's shape: billed 18,196 / collected 16,000 / wrote off 2,196.
   assertEquals(
     InvoiceSchema.safeParse(
-      withTotals({ total: 18_196, amount_paid: 16_000, amount_credited: 2_196, amount_due: 0 }),
+      withTotals({ total_cents: 1_819_600, amount_paid_cents: 1_600_000, amount_credited_cents: 219_600, amount_due_cents: 0 }),
     ).success,
     true,
   );
@@ -556,22 +556,47 @@ Deno.test("the identity refine accepts a fully-credited invoice", () => {
 Deno.test("the identity refine accepts a credit with ZERO cash — #1322's shape", () => {
   assertEquals(
     InvoiceSchema.safeParse(
-      withTotals({ total: 4_495.62, amount_paid: 0, amount_credited: 4_495.62, amount_due: 0 }),
+      withTotals({ total_cents: 449_562, amount_paid_cents: 0, amount_credited_cents: 449_562, amount_due_cents: 0 }),
     ).success,
     true,
   );
 });
 
-Deno.test("the identity refine tolerates a half-cent, not a whole one", () => {
+Deno.test("the identity refine is EXACT — there is no tolerance left to tolerate", () => {
+  // ⚠️ **This test replaces one that could not survive the migration**, and
+  // deleting rather than converting it is the point.
+  //
+  // It used to read *"tolerates a half-cent, not a whole one"* and asserted
+  // that `amount_paid_cents: 100_000` against a `total_cents: 100_000` parsed clean, because
+  // the refine allowed `<= 0.005`. Scaled by 100 that fixture is 99,999.6
+  // cents — not an integer, so it is unrepresentable as an `amount_paid_cents`
+  // and `z.int()` rejects it before the refine is ever reached. A mechanical
+  // ×100 pass would have produced a test that still passed, for a reason with
+  // nothing to do with the identity it claims to check.
+  //
+  // The half-cent gap it was written to permit is now unrepresentable by
+  // construction, so what is left to assert is the identity itself: exact, and
+  // a one-cent gap — the smallest gap that can still exist — is rejected.
   assertEquals(
-    InvoiceSchema.safeParse(withTotals({ total: 1000, amount_paid: 999.996, amount_due: 0 }))
-      .success,
+    InvoiceSchema.safeParse(
+      withTotals({ total_cents: 100_000, amount_paid_cents: 100_000, amount_due_cents: 0 }),
+    ).success,
     true,
   );
   assertEquals(
-    InvoiceSchema.safeParse(withTotals({ total: 1000, amount_paid: 999.98, amount_due: 0 }))
-      .success,
+    InvoiceSchema.safeParse(
+      withTotals({ total_cents: 100_000, amount_paid_cents: 99_999, amount_due_cents: 0 }),
+    ).success,
     false,
+    "a one-cent gap is a real projection defect and must not parse",
+  );
+  // And a non-integer cent count cannot even reach the refine.
+  assertEquals(
+    InvoiceSchema.safeParse(
+      withTotals({ total_cents: 100_000, amount_paid_cents: 99_999.6, amount_due_cents: 0 }),
+    ).success,
+    false,
+    "amount_paid_cents is z.int() — a fractional cent is not a representable amount",
   );
 });
 
@@ -580,7 +605,7 @@ Deno.test("VOID is exempt, and that exemption is load-bearing", () => {
   // stops the exemption being removed later as "an obviously wrong special case".
   assertEquals(
     InvoiceSchema.safeParse({
-      ...withTotals({ total: 2_470, amount_paid: 0, amount_credited: 0, amount_due: 0 }),
+      ...withTotals({ total_cents: 247_000, amount_paid_cents: 0, amount_credited_cents: 0, amount_due_cents: 0 }),
       status: "void",
     }).success,
     true,
@@ -589,7 +614,7 @@ Deno.test("VOID is exempt, and that exemption is load-bearing", () => {
   // exemption is narrow rather than a hole.
   assertEquals(
     InvoiceSchema.safeParse({
-      ...withTotals({ total: 2_470, amount_paid: 0, amount_credited: 0, amount_due: 0 }),
+      ...withTotals({ total_cents: 247_000, amount_paid_cents: 0, amount_credited_cents: 0, amount_due_cents: 0 }),
       status: "issued",
     }).success,
     false,
@@ -597,12 +622,12 @@ Deno.test("VOID is exempt, and that exemption is load-bearing", () => {
 });
 
 Deno.test("amount_credited is OPTIONAL, so the 962 pre-migration invoices still parse", () => {
-  const { amount_credited: _drop, ...totalsWithout } = {
+  const { amount_credited_cents: _drop, ...totalsWithout } = {
     ...validInvoice.totals,
-    total: 1000,
-    amount_paid: 600,
-    amount_due: 400,
-    amount_credited: undefined,
+    total_cents: 100000,
+    amount_paid_cents: 60000,
+    amount_due_cents: 40000,
+    amount_credited_cents: undefined,
   };
   assertEquals(
     InvoiceSchema.safeParse({ ...validInvoice, totals: totalsWithout }).success,
@@ -620,12 +645,12 @@ Deno.test("payments is REJECTED now — the strict object is what enforces the d
   // settlement ledger.
   assertEquals(
     InvoiceSchema.safeParse({
-      ...withTotals({ total: 500, amount_paid: 500, amount_due: 0 }),
+      ...withTotals({ total_cents: 50000, amount_paid_cents: 50000, amount_due_cents: 0 }),
       payments: [{
         uid: "0195f3a1-0000-7000-8000-000000000002",
         xero_payment_id: "xp-1",
         date: "2026-03-01T00:00:00.000-06:00",
-        amount: 500,
+        amount_cents: 50000,
         reference: null,
         status: "active",
       }],
@@ -635,7 +660,7 @@ Deno.test("payments is REJECTED now — the strict object is what enforces the d
   // …and the same document without it still parses, so the rejection is about
   // `payments` and not about the fixture drifting.
   assertEquals(
-    InvoiceSchema.safeParse(withTotals({ total: 500, amount_paid: 500, amount_due: 0 })).success,
+    InvoiceSchema.safeParse(withTotals({ total_cents: 50000, amount_paid_cents: 50000, amount_due_cents: 0 })).success,
     true,
   );
 });

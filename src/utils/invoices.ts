@@ -12,11 +12,11 @@
  */
 
 export {
-  calculateItemDiscount,
+  calculateItemDiscountCents,
   calculateItemPrice,
   calculateItemSubtotal,
   calculateItemTax,
-  calculateItemTotal,
+  calculateItemTotalCents,
   computeItemPaths,
   getItemSubtreeRange,
   getParentProductUid,
@@ -45,7 +45,6 @@ export {
   validateItemUniqueness,
 } from "./orders.ts";
 
-import currency from "currency.js";
 import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, InvoiceStatusType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
@@ -53,7 +52,7 @@ import {
   isLineItemType,
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
-import { fromCents, fromCentsBig, roundDivHalfAwayFromZero, toCentsBig } from "./money.ts";
+import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
 import {
   computeItemPaths,
   type ItemPathIssue,
@@ -125,10 +124,10 @@ export function calculateInvoiceTotals(
   items: InvoiceItem[],
   taxes: Tax[],
   // BREAKING, deliberately. An optional param means any un-updated call site
-  // silently computes `amount_credited: 0` and re-inflates `amount_due` — the
-  // exact class that flipped 14 invoices in #409. Renaming the parameter and
-  // changing its element shape turns every one of the 11 call sites into a
-  // compile error instead.
+  // silently computes `amount_credited_cents: 0` and re-inflates
+  // `amount_due_cents` — the exact class that flipped 14 invoices in #409.
+  // Renaming the parameter and changing its element shape turns every one of
+  // the 11 call sites into a compile error instead.
   settlements?: readonly {
     type: SettlementTypeType;
     reason: SettlementReasonType;
@@ -138,12 +137,12 @@ export function calculateInvoiceTotals(
   const core = sumDocumentTotals(flattenForXero(items), taxes);
 
   // Settlement accounting — the projection of the journal onto this document.
-  const { amount_paid, amount_credited, amount_due } = recomputeSettlementTotals(
-    core.total,
+  const { amount_paid_cents, amount_credited_cents, amount_due_cents } = recomputeSettlementTotals(
+    core.total_cents,
     settlements ?? [],
   );
 
-  return { ...core, amount_paid, amount_credited, amount_due };
+  return { ...core, amount_paid_cents, amount_credited_cents, amount_due_cents };
 }
 
 // ── Payment helpers ─────────────────────────────────────────────
@@ -153,37 +152,46 @@ export function calculateInvoiceTotals(
  * Pure function — does not mutate the invoice.
  *
  * **No new status member is needed for a credited invoice.** `paid` already
- * means `amount_due === 0`, not "cash received" — which is exactly what Xero
+ * means `amount_due_cents === 0`, not "cash received" — which is exactly what Xero
  * says: #1751 and #1322 are both PAID there with `AmountPaid: 0`.
  *
  * @param currentStatus - Current invoice status
- * @param amountPaid - Total settled in cash
- * @param amountDue - Total still outstanding
- * @param amountCredited - Total settled by credit note
+ * @param amountPaidCents - Total settled in cash, in integer cents
+ * @param amountDueCents - Total still outstanding, in integer cents
+ * @param amountCreditedCents - Total settled by credit note, in integer cents
  * @returns The derived status
  */
 export function derivePaymentStatus(
   currentStatus: InvoiceStatusType,
-  amountPaid: number,
-  amountDue: number,
-  amountCredited = 0,
+  amountPaidCents: number,
+  amountDueCents: number,
+  amountCreditedCents = 0,
 ): InvoiceStatusType {
   if (currentStatus === "draft" || currentStatus === "void") return currentStatus;
-  if (currency(amountDue).value <= 0) return "paid";
+  // Bare integer comparisons. The `currency(x).value` wrappers this replaced
+  // were quantizing a float before comparing it to zero; an exact cent count
+  // needs neither step.
+  if (amountDueCents <= 0) return "paid";
   // A partially-credited invoice is as much "part paid" as a partially-paid one
   // — the operator's question is "has anything settled this yet?"
-  if (currency(amountPaid).value > 0 || currency(amountCredited).value > 0) return "part_paid";
+  if (amountPaidCents > 0 || amountCreditedCents > 0) return "part_paid";
   return "issued";
 }
 
 /**
  * Turn the settlements journal into the invoice's stored totals.
  *
- * **This is the one function that produces `amount_paid`, `amount_credited` and
- * `amount_due`**, and the one place the cents↔dollars boundary is crossed. It
- * runs inside the api's co-write transaction and again in manager's optimistic
- * recompute, so the two cannot disagree — the property `computeAvailability`
- * already provides for stock.
+ * **This is the one function that produces `amount_paid_cents`,
+ * `amount_credited_cents` and `amount_due_cents`.** It runs inside the api's
+ * co-write transaction and again in manager's optimistic recompute, so the two
+ * cannot disagree — the property `computeAvailability` already provides for
+ * stock.
+ *
+ * It used to be "the one place the cents↔dollars boundary is crossed": the
+ * journal has always stored minor units while the invoice's `total` was
+ * dollars, so this fold converted at the end. With `total_cents` the two sides
+ * are the same unit and the boundary is gone — the function is now integer in,
+ * integer out, with nothing to convert and nothing to round.
  *
  * **A straight signed fold over EVERY row, with no filtering.** A reversal is
  * simply a settlement whose contract multiplier is −1, so a do/undo pair nets to
@@ -204,21 +212,21 @@ export function derivePaymentStatus(
  * must stay negative, exactly as availability preserves an oversold product's
  * negative. Clamping hides the defect this exists to find.
  *
- * @param total - Invoice total, in dollars, from `items[]`
+ * @param totalCents - Invoice total, in integer cents, from `items[]`
  * @param settlements - Every settlement against the invoice, reversals included
- * @returns The three projected totals plus a per-reason breakdown, in dollars
+ * @returns The three projected totals plus a per-reason breakdown, in cents
  */
 export function recomputeSettlementTotals(
-  total: number,
+  totalCents: number,
   settlements: readonly {
     type: SettlementTypeType;
     reason: SettlementReasonType;
     amount_cents: number;
   }[],
 ): {
-  amount_paid: number;
-  amount_credited: number;
-  amount_due: number;
+  amount_paid_cents: number;
+  amount_credited_cents: number;
+  amount_due_cents: number;
   breakdown: Partial<Record<SettlementReasonType, number>>;
 } {
   let paidCents = 0;
@@ -227,35 +235,27 @@ export function recomputeSettlementTotals(
 
   for (const s of settlements) {
     const signed = s.amount_cents * getSettlementMultiplier(s.type);
-    if (SETTLEMENT_CONTRACTS[s.type].sums_into === "amount_paid") paidCents += signed;
+    if (SETTLEMENT_CONTRACTS[s.type].sums_into === "amount_paid_cents") paidCents += signed;
     else creditedCents += signed;
     breakdownCents[s.reason] = (breakdownCents[s.reason] ?? 0) + signed;
   }
 
-  // The ONE conversion boundary, crossed once, at the end.
-  const amount_paid = fromCents(paidCents);
-  const amount_credited = fromCents(creditedCents);
-
-  const breakdown: Partial<Record<SettlementReasonType, number>> = {};
-  for (const [reason, cents] of Object.entries(breakdownCents)) {
-    breakdown[reason as SettlementReasonType] = fromCents(cents);
-  }
-
   return {
-    amount_paid,
-    amount_credited,
-    // currency.js appears only here, where the dollar-denominated `total` (from
-    // `items[]`) meets the converted figures. Money minus money is exactly what
-    // it is for.
-    amount_due: currency(total).subtract(amount_paid).subtract(amount_credited).value,
-    breakdown,
+    amount_paid_cents: paidCents,
+    amount_credited_cents: creditedCents,
+    // Integer subtraction over three exact cent counts. This line used to be the
+    // one currency.js call in the module, because a dollar-denominated `total`
+    // met two converted figures here; with every operand in the same unit there
+    // is nothing left for a decimal type to reconcile.
+    amount_due_cents: totalCents - paidCents - creditedCents,
+    breakdown: breakdownCents,
   };
 }
 
 // ── Xero helpers ────────────────────────────────────────────────
 
 /**
- * Quantity widening for {@link getXeroUnitAmount}, matching `QTY_SCALE` in
+ * Quantity widening for {@link getXeroUnitAmountFromCents}, matching `QTY_SCALE` in
  * `utils/orders.ts`. Four decimal places of quantity, so the division is exact
  * integers all the way down and a fractional quantity cannot reach `BigInt()`.
  */
@@ -270,10 +270,11 @@ const XERO_QTY_SCALE = 10_000n;
  *
  * Xero recomputes `LineAmount = UnitAmount × Quantity` on its own side, so the
  * remainder this division discards is **real money in someone else's ledger** —
- * unlike the booking `unit_price` denorm, whose residual is discarded on
+ * unlike the booking `unit_price_cents` denorm, whose residual is discarded on
  * purpose because nothing ever multiplies it back.
  *
- * `getXeroUnitAmount(100, 3)` is `33.33`, and Xero will bill `99.99`. **Rounding
+ * `getXeroUnitAmountFromCents(10000, 3)` is `33.33`, and Xero will bill
+ * `99.99`. **Rounding
  * better does not fix this**: `10000 ÷ 3` is `3333` cents too, and `× 3` is
  * `9999` cents regardless of the arithmetic. The gap is bounded by
  * `quantity − 1` cents on a line and is absorbed through the discount channel
@@ -289,15 +290,30 @@ const XERO_QTY_SCALE = 10_000n;
  * a negative numerator toward zero. Symmetry means a credit and its matching
  * charge cannot differ in magnitude.
  *
- * @param subtotal - Pre-discount subtotal (base × days × formula × quantity)
+ * ## Cents in, DOLLARS out — and the asymmetry is the point
+ *
+ * The input is CFS storage, which is integer cents. The return is Xero's wire
+ * format, which is dollars and does not change because CFS's storage did. So
+ * this is the one function in the package that deliberately straddles the two
+ * units, and the name says which side each is on.
+ *
+ * ⚠️ **The body moved with the name, and had to.** Its first act used to be
+ * `toCentsBig(subtotal)`. Feeding cents to that unedited body is a clean 100×
+ * that type-checks perfectly — same signature, same types, silently wrong
+ * invoice on a single-env production Xero tenant with no dev twin. The rename
+ * exists so every call site fails to compile and the pairing cannot be
+ * half-done.
+ *
+ * @param subtotalCents - Pre-discount subtotal in integer cents
+ *   (base_cents × days × formula × quantity)
  * @param quantity - Item quantity. May be fractional; scaled rather than
  *   narrowed, so a non-integer cannot throw on the Xero push path.
- * @returns Per-unit amount for Xero, or 0 if quantity is 0
+ * @returns Per-unit amount for Xero **in dollars**, or 0 if quantity is 0
  */
-export function getXeroUnitAmount(subtotal: number, quantity: number): number {
+export function getXeroUnitAmountFromCents(subtotalCents: number, quantity: number): number {
   if (!quantity) return 0;
   return fromCentsBig(roundDivHalfAwayFromZero(
-    toCentsBig(subtotal) * XERO_QTY_SCALE,
+    BigInt(subtotalCents) * XERO_QTY_SCALE,
     BigInt(Math.round(quantity * Number(XERO_QTY_SCALE))),
   ));
 }
@@ -421,14 +437,17 @@ function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string):
     description: item.description ?? "",
     quantity: item.quantity ?? 0,
     price: {
-      base: p.base ?? 0,
+      base_cents: p.base_cents ?? 0,
+      // Carried across so a `percent_of_total` fee line keeps its rate; the
+      // exactly-one-of refinement rejects the projection otherwise.
+      base_percent: p.base_percent ?? null,
       chargeable_days: p.chargeable_days ?? null,
       formula: (p.formula ?? "five_day_week") as PriceFormulaType,
-      subtotal: p.subtotal ?? 0,
-      subtotal_discounted: p.subtotal_discounted ?? 0,
+      subtotal_cents: p.subtotal_cents ?? 0,
+      subtotal_discounted_cents: p.subtotal_discounted_cents ?? 0,
       discount: p.discount ?? null,
       taxes: p.taxes ?? [],
-      total: p.total ?? 0,
+      total_cents: p.total_cents ?? 0,
     },
     path,
   };

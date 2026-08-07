@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for invoices. */
 export const invoices: TypesenseCollectionConfig = {
   alias: "invoices",
-  version: 9,
+  version: 10,
   firestoreCollection: "invoices",
-  collectionName: "invoices_v9",
+  collectionName: "invoices_v10",
   schema: {
-    name: "invoices_v9",
+    name: "invoices_v10",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -49,16 +49,16 @@ export const invoices: TypesenseCollectionConfig = {
       { name: "items.quantity", type: "int32[]", optional: true },
       { name: "items.type", type: "string[]", facet: true, optional: true },
       { name: "totals", type: "object", optional: true },
-      { name: "totals.total", type: "float", sort: true, optional: true, money: true },
-      { name: "totals.total_str", type: "string", index: true, sort: false, facet: false, optional: true },
-      { name: "totals.amount_paid", type: "float", sort: true, optional: true, money: true },
-      { name: "totals.amount_paid_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      { name: "totals.total_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "totals.total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      { name: "totals.amount_paid_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "totals.amount_paid_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       // v9: the credit half of settlement. `_str` companions are auto-derived by
       // api-cloudrun's `lib/typesenseTranslate.ts`, so only the float is declared.
-      { name: "totals.amount_credited", type: "float", sort: true, optional: true, money: true },
-      { name: "totals.amount_credited_str", type: "string", index: true, sort: false, facet: false, optional: true },
-      { name: "totals.amount_due", type: "float", sort: true, optional: true, money: true },
-      { name: "totals.amount_due_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      { name: "totals.amount_credited_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "totals.amount_credited_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      { name: "totals.amount_due_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "totals.amount_due_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "crms_id", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "crms_id_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "crms_opportunity_ids", type: "int64[]", optional: true },

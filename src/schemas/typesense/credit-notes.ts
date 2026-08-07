@@ -15,9 +15,9 @@ import { typesenseAddressFields } from "./types.ts";
  */
 export const creditNotes: TypesenseCollectionConfig = {
   alias: "credit-notes",
-  version: 1,
+  version: 2,
   firestoreCollection: "credit-notes",
-  collectionName: "credit-notes_v1",
+  collectionName: "credit-notes_v2",
   // ENABLED 2026-08-07. This was `false` with a note saying "flip in Phase 6,
   // alongside the search UI", and it is worth recording why that instruction was
   // superseded rather than simply followed: **its stated reason had expired.**
@@ -46,7 +46,7 @@ export const creditNotes: TypesenseCollectionConfig = {
   // that did not exist when it ran.
   enabled: true,
   schema: {
-    name: "credit-notes_v1",
+    name: "credit-notes_v2",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -76,10 +76,10 @@ export const creditNotes: TypesenseCollectionConfig = {
       { name: "items.type", type: "string[]", facet: true, optional: true },
       { name: "items.coa_revenue", type: "int32[]", facet: true, optional: true },
       { name: "totals", type: "object", optional: true },
-      { name: "totals.total", type: "float", sort: true, optional: true, money: true },
-      { name: "totals.total_str", type: "string", index: true, sort: false, facet: false, optional: true },
-      { name: "remaining_credit", type: "float", sort: true, optional: true, money: true },
-      { name: "remaining_credit_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      { name: "totals.total_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "totals.total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      { name: "remaining_credit_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "remaining_credit_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "query_by_sources", type: "string[]", facet: false, optional: true },
       { name: "xero_credit_note_id", type: "string", optional: true },
       { name: "created_by", type: "object", optional: true },
@@ -96,7 +96,14 @@ export const creditNotes: TypesenseCollectionConfig = {
   },
   synonyms: [],
   displayDefaults: {
-    columns: ["number", "date_fs", "organization.name", "reason", "totals.total", "remaining_credit"],
+    columns: [
+      "number",
+      "date_fs",
+      "organization.name",
+      "reason",
+      "totals.total_cents",
+      "remaining_credit_cents",
+    ],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
     group: null,

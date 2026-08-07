@@ -9,10 +9,9 @@
  * @module
  */
 
-import currency from "currency.js";
 import type { TaxProfileType } from "../schemas/mod.ts";
 import {
-  computeItemTaxAmount,
+  computeItemTaxAmountCents,
   isPreTaxItem,
   isTaxableCoa,
   type LineItem,
@@ -24,10 +23,10 @@ import {
 // Re-export the pure per-item tax formula so consumers can import everything
 // tax-related from `@cfs/core/utils/taxes` (it lives in orders.ts to avoid a
 // taxes ↔ orders import cycle).
-export { computeItemTaxAmount, type Tax };
+export { computeItemTaxAmountCents, type Tax };
 
 // The line-taxability rule lives in `orders.ts` for the same reason
-// `computeItemTaxAmount` does — `taxes.ts` depends one-way on `orders.ts`, and
+// `computeItemTaxAmountCents` does — `taxes.ts` depends one-way on `orders.ts`, and
 // the pricing engine there needs the gate. Re-exported so consumers can import
 // everything tax-related from `@cfs/core/utils/taxes`.
 export { isTaxableCoa, TAXABLE_REVENUE_COAS };
@@ -117,9 +116,9 @@ export function getEffectiveProfileTax(
 /**
  * Materialize a doc-level `tax_profile` override onto each priceable item's
  * `price.taxes` (single mode — mutates in place):
- * - `tax_exempt` → `taxes = []`, `total = subtotal_discounted`.
+ * - `tax_exempt` → `taxes = []`, `total_cents = subtotal_discounted_cents`.
  * - `tax_rantoul` / `tax_frankfort` → `taxes = [<resolved tax>]` with amount
- *   computed from the item's **existing** `subtotal_discounted` + `total`
+ *   computed from the item's **existing** `subtotal_discounted_cents` + `total_cents`
  *   refreshed. (Orders re-run `calculateItemPrice` after, which recomputes both
  *   from the rewritten uid; the CRMS invoice webhook keeps the amounts computed
  *   here on its `charge_total`-authoritative subtotal.)
@@ -144,7 +143,7 @@ export function overrideItemTaxesForProfile(
 
   for (const item of items) {
     if (!isPreTaxItem(item)) continue;
-    const subtotalDiscounted = item.price.subtotal_discounted ?? 0;
+    const subtotalDiscountedCents = item.price.subtotal_discounted_cents ?? 0;
 
     // A non-revenue line is not taxable under ANY profile. Without this clause
     // the location overrides re-taxed exactly the lines the Xero push then
@@ -155,19 +154,19 @@ export function overrideItemTaxesForProfile(
     // path now removes.
     if (!isTaxableCoa(item.coa_revenue)) {
       item.price.taxes = [];
-      item.price.total = subtotalDiscounted;
+      item.price.total_cents = subtotalDiscountedCents;
       continue;
     }
 
     if (effective === "exempt") {
       item.price.taxes = [];
-      item.price.total = subtotalDiscounted;
+      item.price.total_cents = subtotalDiscountedCents;
       continue;
     }
 
-    const amount = computeItemTaxAmount(
+    const amountCents = computeItemTaxAmountCents(
       effective,
-      subtotalDiscounted,
+      subtotalDiscountedCents,
       item.quantity,
     );
     const modifier: PriceModifier = {
@@ -175,9 +174,9 @@ export function overrideItemTaxesForProfile(
       name: effective.name,
       rate: effective.rate,
       type: effective.type,
-      amount,
+      amount_cents: amountCents,
     };
     item.price.taxes = [modifier];
-    item.price.total = currency(subtotalDiscounted).add(amount).value;
+    item.price.total_cents = subtotalDiscountedCents + amountCents;
   }
 }

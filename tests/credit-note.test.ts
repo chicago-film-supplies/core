@@ -45,14 +45,14 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
       description: "",
       quantity: 1,
       price: {
-        base: 2196,
+        base_cents: 219600,
         chargeable_days: null,
         formula: "fixed",
-        subtotal: 2196,
-        subtotal_discounted: 2196,
+        subtotal_cents: 219600,
+        subtotal_discounted_cents: 219600,
         discount: null,
         taxes: [],
-        total: 2196,
+        total_cents: 219600,
       },
       coa_revenue: 4000,
       coa_posting: 4000,
@@ -62,13 +62,13 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
       uid_invoice_item: null,
     }],
     totals: {
-      subtotal: 2196,
-      subtotal_discounted: 2196,
-      discount_amount: 0,
+      subtotal_cents: 219600,
+      subtotal_discounted_cents: 219600,
+      discount_amount_cents: 0,
       taxes: [],
-      total: 2196,
+      total_cents: 219600,
     },
-    remaining_credit: 0,
+    remaining_credit_cents: 0,
     sources: [],
     query_by_sources: [],
     xero_credit_note_id: null,
@@ -107,16 +107,16 @@ Deno.test("status is a materialized derivation of remaining_credit, and must agr
   // `applied` asserting a balance it does not have is a contradiction, not a
   // preference — so the schema reports it rather than every consumer restating it.
   assertEquals(
-    CreditNoteSchema.safeParse(makeCreditNote({ status: "applied", remaining_credit: 500 }))
+    CreditNoteSchema.safeParse(makeCreditNote({ status: "applied", remaining_credit_cents: 50000 }))
       .success,
     false,
   );
   assertEquals(
-    CreditNoteSchema.safeParse(makeCreditNote({ status: "issued", remaining_credit: 0 })).success,
+    CreditNoteSchema.safeParse(makeCreditNote({ status: "issued", remaining_credit_cents: 0 })).success,
     false,
   );
   assertEquals(
-    CreditNoteSchema.safeParse(makeCreditNote({ status: "issued", remaining_credit: 2196 }))
+    CreditNoteSchema.safeParse(makeCreditNote({ status: "issued", remaining_credit_cents: 219600 }))
       .success,
     true,
   );
@@ -130,13 +130,13 @@ Deno.test("CN-1008's shape: VOID strands the balance rather than consuming it", 
     CreditNoteSchema.safeParse(makeCreditNote({
       number: 1008,
       status: "void",
-      remaining_credit: 2195.97,
+      remaining_credit_cents: 219597,
       totals: {
-        subtotal: 2195.97,
-        subtotal_discounted: 2195.97,
-        discount_amount: 0,
+        subtotal_cents: 219597,
+        subtotal_discounted_cents: 219597,
+        discount_amount_cents: 0,
         taxes: [],
-        total: 2195.97,
+        total_cents: 219597,
       },
       items: [],
     })).success,
@@ -154,7 +154,7 @@ Deno.test("a cash refund is applied with zero allocations — CN-1013's shape", 
       status: "applied",
       reason: "order_adjustment",
       reference: "L&D Refund",
-      remaining_credit: 0,
+      remaining_credit_cents: 0,
     })).success,
     true,
   );
@@ -162,7 +162,7 @@ Deno.test("a cash refund is applied with zero allocations — CN-1013's shape", 
 
 Deno.test("remaining_credit cannot exceed the note's total", () => {
   assertEquals(
-    CreditNoteSchema.safeParse(makeCreditNote({ status: "issued", remaining_credit: 3000 }))
+    CreditNoteSchema.safeParse(makeCreditNote({ status: "issued", remaining_credit_cents: 300000 }))
       .success,
     false,
   );

@@ -28,7 +28,6 @@
  * @module
  */
 
-import currency from "currency.js";
 import type {
   DiscountType,
   PriceModifierType,
@@ -51,7 +50,7 @@ import type {
 import { itemContract } from "../schemas/mod.ts";
 import { getDuration, toChicagoYmd } from "./dates.ts";
 import {
-  fromCentsBig,
+  fromCents,
   roundDivHalfAwayFromZero,
   roundDivHalfUp,
   toCentsBig,
@@ -157,9 +156,10 @@ export type PriceableLineItem = PreTaxLineItem | TransactionFeeLineItem;
  * The price fields the pricing pipeline actually READS — deliberately narrower
  * than the stored {@link PriceObject}.
  *
- * `taxes` needs only a `uid`, because the name/rate/type/amount are what
- * `calculateItemTax` resolves and computes; `subtotal`, `subtotal_discounted`,
- * `total` and `taxes_base` are pricing's OUTPUT and are never read as input.
+ * `taxes` needs only a `uid`, because the name/rate/type/amount_cents are what
+ * `calculateItemTax` resolves and computes; `subtotal_cents`,
+ * `subtotal_discounted_cents`, `total_cents` and `taxes_base` are pricing's
+ * OUTPUT and are never read as input.
  *
  * That is not a convenience: it is the shape an order-input item genuinely
  * arrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is
@@ -169,9 +169,13 @@ export type PriceableLineItem = PreTaxLineItem | TransactionFeeLineItem;
  * which is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path.
  */
 export interface PricingPrice {
-  base?: number;
+  /** Integer cents. Meaningless (and asserted 0) on a `percent_of_total` line. */
+  base_cents?: number;
+  /** The `percent_of_total` percentage at 4dp — see {@link checkPriceBaseUnit}. */
+  base_percent?: number | null;
   formula?: PriceFormulaType;
   chargeable_days?: number | null;
+  /** `rate` is 4dp DOLLARS on the `flat` arm and a percentage on `percent`. */
   discount?: { rate: number; type: RateType } | null;
   taxes?: readonly { uid: string }[];
 }
@@ -577,7 +581,7 @@ const RATE_SCALE = 1_000_000n;
  */
 export function calculateItemSubtotal(
   item: PricingItem,
-): { subtotal: number; subtotal_discounted: number } {
+): { subtotal_cents: number; subtotal_discounted_cents: number } {
   if (!isPreTaxPricingItem(item)) {
     throw new Error(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
@@ -594,13 +598,13 @@ export function calculateItemSubtotal(
 function perUnitSubtotal(
   price: PricingPrice,
   itemQuantity: number,
-): { subtotal: number; subtotal_discounted: number } {
-  const { base = 0, formula, chargeable_days = null, discount } = price;
+): { subtotal_cents: number; subtotal_discounted_cents: number } {
+  const { base_cents = 0, formula, chargeable_days = null, discount } = price;
   if (formula === "percent_of_total") {
-    // Not a per-unit price: `base` is a percentage of the DOCUMENT's
-    // subtotal_discounted, which this function cannot see. Only a
-    // `transaction_fee` may be priced this way, and it is costed by
-    // `calculateTransactionFeeAmount` in the totals pass instead.
+    // Not a per-unit price: the rate lives in `base_percent` and is a
+    // percentage of the DOCUMENT's subtotal_discounted, which this function
+    // cannot see. Only a `transaction_fee` may be priced this way, and it is
+    // costed by `calculateTransactionFeeAmount` in the totals pass instead.
     throw new Error(
       "percent_of_total prices from the document total, not the line: use calculateTransactionFeeAmount",
     );
@@ -615,7 +619,10 @@ function perUnitSubtotal(
   // only above the one-week floor. At exactly 5 days it is 1, as is `fixed`.
   const useDays = formula === "five_day_week" && days > 5;
 
-  let num = toCentsBig(base) * quantity;
+  // `base_cents` is ALREADY an integer count of cents, so this is a widening
+  // and not a conversion — the `toCentsBig(base)` this replaced was the one
+  // dollars→cents step in the line path, and it is now the storage form.
+  let num = BigInt(base_cents) * quantity;
   let den = QTY_SCALE;
   if (useDays) {
     num *= BigInt(days);
@@ -624,8 +631,7 @@ function perUnitSubtotal(
   const subtotalCents = roundDivHalfUp(num, den);
 
   if (!discount) {
-    const v = fromCentsBig(subtotalCents);
-    return { subtotal: v, subtotal_discounted: v };
+    return { subtotal_cents: Number(subtotalCents), subtotal_discounted_cents: Number(subtotalCents) };
   }
 
   let discountedCents: bigint;
@@ -635,7 +641,17 @@ function perUnitSubtotal(
     const scale = 100n * RATE_SCALE;
     discountedCents = roundDivHalfUp(subtotalCents * (scale - rate), scale);
   } else {
-    // `flat`: rate is dollars per unit, per pricing factor — not a line total.
+    // `flat`: rate is DOLLARS per unit, per pricing factor — not a line total,
+    // and NOT cents.
+    //
+    // ⚠️ `toCentsBig` survives here on purpose, and it is the only surviving
+    // dollars→cents conversion in this function. `Discount.rate` keeps its
+    // dollar denomination through the cents migration because Xero's
+    // `DiscountRate` holds 4dp and is a line's only discount channel; storing
+    // it as an integer count of cents would quantize it, which is the
+    // beta.117 regression. So the money beside it is cents and this is
+    // dollars, deliberately — deleting this call to "finish the migration"
+    // divides every flat discount by 100.
     let dNum = toCentsBig(discount.rate) * quantity;
     let dDen = QTY_SCALE;
     if (useDays) {
@@ -648,8 +664,8 @@ function perUnitSubtotal(
   }
 
   return {
-    subtotal: fromCentsBig(subtotalCents),
-    subtotal_discounted: fromCentsBig(discountedCents),
+    subtotal_cents: Number(subtotalCents),
+    subtotal_discounted_cents: Number(discountedCents),
   };
 }
 
@@ -661,9 +677,9 @@ function perUnitSubtotal(
  * `subtotal_discounted` (pre-tax, post-discount — the same base the fee has
  * always been computed against).
  *
- * - `percent_of_total` → `basis × base / 100`.
- * - anything else → the ordinary per-unit subtotal, `base × quantity`, so a
- *   flat processing charge stays expressible without a second formula.
+ * - `percent_of_total` → `basisCents × base_percent / 100`.
+ * - anything else → the ordinary per-unit subtotal, `base_cents × quantity`, so
+ *   a flat processing charge stays expressible without a second formula.
  *
  * Exact: the percentage is applied as `× rate ÷ 100` over integer cents rather
  * than as a pre-divided float factor, and rounds half-up exactly once.
@@ -679,28 +695,34 @@ function perUnitSubtotal(
  * run by the fail-closed companion in `tests/orders.test.ts` — the assertion
  * pins divide-first, the benign form is reported.
  */
-export function calculateTransactionFeeAmount(item: LineItem, basis: number): number {
+export function calculateTransactionFeeAmountCents(item: LineItem, basisCents: number): number {
   if (!isTransactionFeeItem(item)) {
     throw new Error("Item is not a transaction fee: missing price object or wrong type");
   }
   if (item.price.formula !== "percent_of_total") {
-    return perUnitSubtotal(item.price, item.quantity).subtotal_discounted;
+    return perUnitSubtotal(item.price, item.quantity).subtotal_discounted_cents;
   }
+  // The percentage now lives in its own named field. Reading `base_cents` here
+  // is exactly the 100× D1 exists to prevent, and it no longer type-checks as
+  // the same thing.
+  //
   // Non-negative on both sides — `roundDivHalfUp` truncates toward zero, so a
   // negative numerator would round the wrong way. A negative fee rate or a
   // negative document total is not a thing either side of this expresses.
-  const rate = BigInt(Math.round(Math.max(item.price.base ?? 0, 0) * Number(RATE_SCALE)));
+  const rate = BigInt(Math.round(Math.max(item.price.base_percent ?? 0, 0) * Number(RATE_SCALE)));
   const scale = 100n * RATE_SCALE;
-  const cents = roundDivHalfUp(toCentsBig(Math.max(basis, 0)) * rate, scale);
-  return fromCentsBig(cents);
+  return Number(roundDivHalfUp(BigInt(Math.max(basisCents, 0)) * rate, scale));
 }
 
 /**
- * Calculate the discount dollar amount for a single line item.
+ * Calculate the discount amount, in cents, for a single line item.
+ *
+ * Plain integer subtraction: both operands are exact counts of cents, so there
+ * is nothing for currency.js to be careful about.
  */
-export function calculateItemDiscount(item: LineItem): number {
-  const { subtotal, subtotal_discounted } = calculateItemSubtotal(item);
-  return currency(subtotal).subtract(subtotal_discounted).value;
+export function calculateItemDiscountCents(item: LineItem): number {
+  const { subtotal_cents, subtotal_discounted_cents } = calculateItemSubtotal(item);
+  return subtotal_cents - subtotal_discounted_cents;
 }
 
 /**
@@ -786,24 +808,25 @@ export function isTaxableCoa(coaRevenue: number | null | undefined): boolean {
  * from zero* and the tax carries the subtotal's sign, exactly as the currency.js
  * form did.
  */
-export function computeItemTaxAmount(
+export function computeItemTaxAmountCents(
   tax: Pick<Tax, "rate" | "type">,
-  subtotalDiscounted: number,
+  subtotalDiscountedCents: number,
   quantity: number,
 ): number {
   if (tax.type === "percent") {
     // subtotal × rate ÷ 100, as cents × (rate·RATE_SCALE) / (100·RATE_SCALE).
     const rate = BigInt(Math.round(tax.rate * Number(RATE_SCALE)));
-    const cents = roundDivHalfAwayFromZero(
-      toCentsBig(subtotalDiscounted) * rate,
+    return Number(roundDivHalfAwayFromZero(
+      BigInt(subtotalDiscountedCents) * rate,
       100n * RATE_SCALE,
-    );
-    return fromCentsBig(cents);
+    ));
   }
-  // `flat`: dollars per unit. Invoice quantities are not `z.int()`, so the
-  // quantity is a factor too and gets the same treatment.
+  // `flat`: DOLLARS per unit — `Tax.rate` is a rate and keeps its dollar
+  // denomination, so `toCentsBig` stays here for the same reason it stays on
+  // the flat-discount arm of `perUnitSubtotal`. Invoice quantities are not
+  // `z.int()`, so the quantity is a factor too and gets the same treatment.
   const qty = BigInt(Math.round(quantity * Number(QTY_SCALE)));
-  return fromCentsBig(roundDivHalfAwayFromZero(toCentsBig(tax.rate) * qty, QTY_SCALE));
+  return Number(roundDivHalfAwayFromZero(toCentsBig(tax.rate) * qty, QTY_SCALE));
 }
 
 /**
@@ -825,7 +848,7 @@ export function calculateItemTax(
   // CFS computing a tax it then tells Xero not to charge.
   if (!isTaxableCoa(item.coa_revenue)) return [];
 
-  const { subtotal_discounted } = calculateItemSubtotal(item);
+  const { subtotal_discounted_cents } = calculateItemSubtotal(item);
   const quantity = item.quantity;
 
   return (item.price.taxes ?? []).map((itemTax) => {
@@ -839,7 +862,7 @@ export function calculateItemTax(
       name: taxDoc.name,
       rate: taxDoc.rate,
       type: taxDoc.type,
-      amount: computeItemTaxAmount(taxDoc, subtotal_discounted, quantity),
+      amount_cents: computeItemTaxAmountCents(taxDoc, subtotal_discounted_cents, quantity),
     };
   });
 }
@@ -851,19 +874,27 @@ export function calculateItemTax(
 export function calculateItemPrice(
   item: PricingItem,
   taxes: Tax[],
-): { subtotal: number; subtotal_discounted: number; discount: Discount | null; taxes: PriceModifier[]; total: number } {
+): {
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
+  discount: Discount | null;
+  taxes: PriceModifier[];
+  total_cents: number;
+} {
   if (!isPreTaxPricingItem(item)) {
     throw new Error(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
   }
 
-  const { subtotal, subtotal_discounted } = calculateItemSubtotal(item);
+  const { subtotal_cents, subtotal_discounted_cents } = calculateItemSubtotal(item);
   const itemTaxes = calculateItemTax(item, taxes);
 
-  let taxSum = currency(0);
+  // Integer addition over exact cent counts — currency.js has nothing left to
+  // protect here, and summing through it would only re-introduce a float.
+  let taxSumCents = 0;
   for (const t of itemTaxes) {
-    taxSum = taxSum.add(t.amount);
+    taxSumCents += t.amount_cents;
   }
 
   let discount: Discount | null = null;
@@ -871,27 +902,27 @@ export function calculateItemPrice(
     discount = {
       rate: item.price.discount.rate,
       type: item.price.discount.type,
-      amount: currency(subtotal).subtract(subtotal_discounted).value,
+      amount_cents: subtotal_cents - subtotal_discounted_cents,
     };
   }
 
   return {
-    subtotal,
-    subtotal_discounted,
+    subtotal_cents,
+    subtotal_discounted_cents,
     discount,
     taxes: itemTaxes,
-    total: currency(subtotal_discounted).add(taxSum).value,
+    total_cents: subtotal_discounted_cents + taxSumCents,
   };
 }
 
 /**
  * Calculate the total (subtotal_discounted + taxes) for a single line item.
  *
- * A `transaction_fee` reports its stored `price.total`: it is priced from the
- * document, so the only correct value is the one the totals pass already wrote.
- * Recomputing it here would need a basis this function does not have.
+ * A `transaction_fee` reports its stored `price.total_cents`: it is priced from
+ * the document, so the only correct value is the one the totals pass already
+ * wrote. Recomputing it here would need a basis this function does not have.
  */
-export function calculateItemTotal(
+export function calculateItemTotalCents(
   item: LineItem,
   taxes: Tax[],
 ): number {
@@ -902,30 +933,30 @@ export function calculateItemTotal(
   }
 
   if (isTransactionFeeItem(item)) {
-    return item.price.total;
+    return item.price.total_cents;
   }
 
-  const { total } = calculateItemPrice(item, taxes);
-  return total;
+  const { total_cents } = calculateItemPrice(item, taxes);
+  return total_cents;
 }
 
 // ── Aggregation functions ────────────────────────────────────────
 
 /**
- * Calculate the total discount amount across all pre-tax items.
+ * Calculate the total discount amount, in cents, across all pre-tax items.
  */
-export function getTotalDiscount(items: LineItem[]): number {
+export function getTotalDiscountCents(items: LineItem[]): number {
   if (!Array.isArray(items)) {
     throw new Error("items must be an array");
   }
 
-  let total = currency(0);
+  let totalCents = 0;
   for (const item of items) {
     if (!isPreTaxItem(item)) continue;
-    total = total.add(calculateItemDiscount(item));
+    totalCents += calculateItemDiscountCents(item);
   }
 
-  return total.value;
+  return totalCents;
 }
 
 /**
@@ -939,24 +970,31 @@ export function getTaxTotals(
     throw new Error("items must be an array");
   }
 
-  const totals: Record<string, { uid: string; rate: number; type: "percent" | "flat"; amount: currency }> = {};
+  const totals: Record<
+    string,
+    { uid: string; rate: number; type: "percent" | "flat"; amount_cents: number }
+  > = {};
 
   for (const item of items) {
     if (!isPreTaxItem(item)) continue;
 
     const itemTaxes = calculateItemTax(item, taxes);
     for (const tax of itemTaxes) {
-      if (tax.amount === 0) continue;
+      if (tax.amount_cents === 0) continue;
 
       if (!totals[tax.name]) {
-        totals[tax.name] = { uid: tax.uid, rate: tax.rate, type: tax.type, amount: currency(0) };
+        totals[tax.name] = { uid: tax.uid, rate: tax.rate, type: tax.type, amount_cents: 0 };
       }
-      totals[tax.name].amount = totals[tax.name].amount.add(tax.amount);
+      totals[tax.name].amount_cents += tax.amount_cents;
     }
   }
 
-  return Object.entries(totals).map(([name, { uid, rate, type, amount }]) => ({
-    uid, name, rate, type, amount: amount.value,
+  return Object.entries(totals).map(([name, { uid, rate, type, amount_cents }]) => ({
+    uid,
+    name,
+    rate,
+    type,
+    amount_cents,
   }));
 }
 
@@ -972,27 +1010,40 @@ export function getTaxTotals(
  * `price.uid` held.
  */
 export function getTransactionFeeTotals(items: LineItem[]): PriceModifier[] {
-  const totals: Record<string, { uid: string; rate: number; type: "percent" | "flat"; amount: currency }> = {};
+  const totals: Record<
+    string,
+    { uid: string; rate: number; type: "percent" | "flat"; amount_cents: number }
+  > = {};
 
   for (const item of items) {
     if (!isTransactionFeeItem(item)) continue;
 
-    const amount = item.price.total;
-    if (amount === 0) continue;
+    const amountCents = item.price.total_cents;
+    if (amountCents === 0) continue;
 
     if (!totals[item.name]) {
+      const isPercent = item.price.formula === "percent_of_total";
       totals[item.name] = {
         uid: item.uid,
-        rate: item.price.base,
-        type: item.price.formula === "percent_of_total" ? "percent" : "flat",
-        amount: currency(0),
+        // `PriceModifier.rate` is DOLLARS on the flat arm and a PERCENTAGE on
+        // the percent arm — the same discriminated contract as `Discount.rate`
+        // — so the two arms read different source fields. This single line is
+        // what `price.base`'s two units used to hide: it read one field and
+        // relabelled it `rate` regardless of which unit was in it.
+        rate: isPercent ? (item.price.base_percent ?? 0) : fromCents(item.price.base_cents),
+        type: isPercent ? "percent" : "flat",
+        amount_cents: 0,
       };
     }
-    totals[item.name].amount = totals[item.name].amount.add(amount);
+    totals[item.name].amount_cents += amountCents;
   }
 
-  return Object.entries(totals).map(([name, { uid, rate, type, amount }]) => ({
-    uid, name, rate, type, amount: amount.value,
+  return Object.entries(totals).map(([name, { uid, rate, type, amount_cents }]) => ({
+    uid,
+    name,
+    rate,
+    type,
+    amount_cents,
   }));
 }
 
@@ -1004,14 +1055,19 @@ export function getTransactionFeeTotals(items: LineItem[]): PriceModifier[] {
  * two byte-identical loops, and the invoice copy was reading `price.rate` /
  * `price.type` off a shape invoice line items have never had.
  */
-export function costTransactionFees(items: LineItem[], basis: number): LineItem[] {
+export function costTransactionFees(items: LineItem[], basisCents: number): LineItem[] {
   const costed: LineItem[] = [];
   for (const item of items) {
     if (!isTransactionFeeItem(item)) continue;
-    const amount = calculateTransactionFeeAmount(item, basis);
+    const amountCents = calculateTransactionFeeAmountCents(item, basisCents);
     costed.push({
       ...item,
-      price: { ...item.price, subtotal: amount, subtotal_discounted: amount, total: amount },
+      price: {
+        ...item.price,
+        subtotal_cents: amountCents,
+        subtotal_discounted_cents: amountCents,
+        total_cents: amountCents,
+      },
     });
   }
   return costed;
@@ -1022,16 +1078,23 @@ export function costTransactionFees(items: LineItem[], basis: number): LineItem[
  *
  * Deliberately the **intersection**, not a superset: both document totals are
  * `z.strictObject`s embedded in schemas `assertValidPatch` enforces at write
- * time, so an order doc carrying `amount_paid` — or an invoice doc carrying
- * `replacement_total` — fails validation. Each caller appends its own tail.
+ * time, so an order doc carrying `amount_paid_cents` — or an invoice doc
+ * carrying `replacement_total_cents` — fails validation. Each caller appends
+ * its own tail.
+ *
+ * **Hand-declared as the intersection of two schema-derived shapes**, so it is
+ * one of the places a rename does NOT arrive as a compile error automatically:
+ * it must be edited in the same commit as `OrderDocTotalsType` and
+ * `InvoiceDocTotals`, which is one of the three reasons Phase 11's core change
+ * is a single commit rather than a series.
  */
 export interface DocumentTotalsCore {
-  discount_amount: number;
-  subtotal: number;
-  subtotal_discounted: number;
+  discount_amount_cents: number;
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
   taxes: PriceModifier[];
   transaction_fees: PriceModifier[];
-  total: number;
+  total_cents: number;
 }
 
 /**
@@ -1055,7 +1118,7 @@ export interface DocumentTotalsCore {
  *   has `pricing: "none"` (pinned both directions at compile time by
  *   `_lineParity` in `schemas/common.ts`), and every predicate below gates on
  *   `pricing`. An unrecognised type is dropped by both. `filter` preserves
- *   order, and currency.js accumulates in integer cents, so no float
+ *   order, and the fold accumulates in integer cents, so no float
  *   associativity hazard exists even if it did not.
  *
  * Not exported to templates — a rendered document reads its **stored**
@@ -1063,42 +1126,47 @@ export interface DocumentTotalsCore {
  * with the doc it renders.
  */
 export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTotalsCore {
-  // Pass 1: compute subtotals from pre-tax items
-  let subtotal = currency(0);
-  let subtotal_discounted = currency(0);
+  // Pass 1: compute subtotals from pre-tax items.
+  //
+  // Plain `+=` over integer cents. currency.js was here to make summing money
+  // safe against float associativity; with every addend an exact integer count
+  // of cents there is nothing left for it to protect, and routing integers
+  // through a decimal type would only re-introduce the float it was guarding.
+  let subtotalCents = 0;
+  let subtotalDiscountedCents = 0;
 
   for (const item of items) {
     if (!isPreTaxItem(item)) continue;
     const result = calculateItemSubtotal(item);
-    subtotal = subtotal.add(result.subtotal);
-    subtotal_discounted = subtotal_discounted.add(result.subtotal_discounted);
+    subtotalCents += result.subtotal_cents;
+    subtotalDiscountedCents += result.subtotal_discounted_cents;
   }
 
-  const discount_amount = getTotalDiscount(items);
+  const discount_amount_cents = getTotalDiscountCents(items);
   const taxTotals = getTaxTotals(items, taxes);
 
-  let taxSum = currency(0);
+  let taxSumCents = 0;
   for (const entry of taxTotals) {
-    taxSum = taxSum.add(entry.amount);
+    taxSumCents += entry.amount_cents;
   }
 
   // Pass 2: compute transaction fee amounts from the pre-tax subtotal
   const transaction_fees = getTransactionFeeTotals(
-    costTransactionFees(items, subtotal_discounted.value),
+    costTransactionFees(items, subtotalDiscountedCents),
   );
 
-  let feeSum = currency(0);
+  let feeSumCents = 0;
   for (const entry of transaction_fees) {
-    feeSum = feeSum.add(entry.amount);
+    feeSumCents += entry.amount_cents;
   }
 
   return {
-    discount_amount,
-    subtotal: subtotal.value,
-    subtotal_discounted: subtotal_discounted.value,
+    discount_amount_cents,
+    subtotal_cents: subtotalCents,
+    subtotal_discounted_cents: subtotalDiscountedCents,
     taxes: taxTotals,
     transaction_fees,
-    total: currency(subtotal_discounted).add(taxSum).add(feeSum).value,
+    total_cents: subtotalDiscountedCents + taxSumCents + feeSumCents,
   };
 }
 
@@ -1117,7 +1185,7 @@ export function calculateOrderTotals(
   const core = sumDocumentTotals(items, taxes);
   const replacement = calculateReplacementTotals(items, taxes);
 
-  return { ...core, replacement_total: replacement.total };
+  return { ...core, replacement_total_cents: replacement.total_cents };
 }
 
 // ── Order inspection helpers ─────────────────────────────────────
@@ -1148,17 +1216,24 @@ export function orderHasTax(items: LineItem[]): boolean {
 
 /** Replacement cost totals for an order, with and without tax. */
 export interface ReplacementTotals {
-  subtotal: number;
-  tax: number;
-  total: number;
+  subtotal_cents: number;
+  tax_cents: number;
+  total_cents: number;
 }
 
 /**
  * Calculate the total replacement cost across all pre-tax items that have
  * a replacement value on their price object.
  *
- * Returns `subtotal` (sum of replacement × quantity), `tax` (taxes applied
- * to that subtotal), and `total` (subtotal + tax).
+ * Returns `subtotal_cents` (sum of replacement × quantity), `tax_cents` (taxes
+ * applied to that subtotal), and `total_cents` (subtotal + tax).
+ *
+ * **Multiply-then-round, per line.** The per-line product is rounded once, at
+ * the line, and the rounded lines are summed — which is not the same number as
+ * rounding a per-unit figure first and multiplying it. `quote.eta` in the
+ * `templates` repo hand-rolls the opposite order, and under integer cents the
+ * two diverge systematically rather than coincidentally; that divergence is
+ * tracked as Phase C3 work, and this function is the side that is right.
  */
 export function calculateReplacementTotals(
   items: LineItem[],
@@ -1168,37 +1243,45 @@ export function calculateReplacementTotals(
     throw new Error("items must be an array");
   }
 
-  let subtotal = currency(0);
-  let taxTotal = currency(0);
+  let subtotalCents = 0;
+  let taxTotalCents = 0;
 
   for (const item of items) {
     if (!isPreTaxItem(item)) continue;
 
-    if (item.price.replacement == null) continue;
+    if (item.price.replacement_cents == null) continue;
 
     const quantity = item.quantity;
-    const itemReplacementSubtotal = currency(item.price.replacement).multiply(quantity);
-    subtotal = subtotal.add(itemReplacementSubtotal);
+    // `× qty ÷ QTY_SCALE`, matching `perUnitSubtotal` — an order quantity is
+    // `z.int()` today, so the scale is a no-op there, but the fold is written
+    // once for a possibly-fractional quantity rather than assuming.
+    const qty = BigInt(Math.round(quantity * Number(QTY_SCALE)));
+    const itemReplacementSubtotalCents = Number(
+      roundDivHalfUp(BigInt(item.price.replacement_cents) * qty, QTY_SCALE),
+    );
+    subtotalCents += itemReplacementSubtotalCents;
 
     for (const itemTax of item.price.taxes) {
       const taxDoc = taxes.find((t) => t.uid === itemTax.uid);
       if (!taxDoc) continue;
 
       // Delegated rather than repeated. This WAS a second, independent copy of
-      // the percent/flat branch — so core#47's fix to `computeItemTaxAmount`
+      // the percent/flat branch — so core#47's fix to `computeItemTaxAmountCents`
       // would not have reached it, and the replacement path would have kept the
       // float ratio the rest of the module had migrated off. One formula, one
       // place to be wrong.
-      taxTotal = taxTotal.add(
-        computeItemTaxAmount(taxDoc, itemReplacementSubtotal.value, quantity),
+      taxTotalCents += computeItemTaxAmountCents(
+        taxDoc,
+        itemReplacementSubtotalCents,
+        quantity,
       );
     }
   }
 
   return {
-    subtotal: subtotal.value,
-    tax: taxTotal.value,
-    total: subtotal.add(taxTotal).value,
+    subtotal_cents: subtotalCents,
+    tax_cents: taxTotalCents,
+    total_cents: subtotalCents + taxTotalCents,
   };
 }
 
@@ -1765,11 +1848,11 @@ export function getGroupPath(items: LineItem[], index: number): GroupPath {
  * fact table — sortable, filterable, "show me every line over $500/unit" — and
  * for that a single representative per-unit figure is exactly right. It is
  * never summed and never reconciled against; anything that multiplies it back
- * to recover a total should read `total_price` instead. The four money÷quantity
+ * to recover a total should read `total_price_cents` instead. The four money÷quantity
  * sites in CFS have four different residual contracts, and this is the
  * stored-denorm one: **the residual is discarded on purpose.**
  *
- * (Contrast `getXeroUnitAmount`, whose residual is real money because Xero
+ * (Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero
  * recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
  */
 export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
@@ -1784,7 +1867,7 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
       name: string;
       type: string;
       quantity: number;
-      total_price: currency;
+      total_price_cents: number;
       stock_method: string;
     }
   > = {};
@@ -1793,18 +1876,20 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
     if (NON_PRODUCT_TYPES.has(item.type)) continue;
     if (!item.uid) continue;
 
-    const total = item.price && "total" in item.price ? (item.price.total || 0) : 0;
+    const totalCents = item.price && "total_cents" in item.price
+      ? (item.price.total_cents || 0)
+      : 0;
 
     if (map[item.uid]) {
       map[item.uid].quantity += item.quantity || 0;
-      map[item.uid].total_price = map[item.uid].total_price.add(total);
+      map[item.uid].total_price_cents += totalCents;
     } else {
       map[item.uid] = {
         uid: item.uid,
         name: item.name || "",
         type: item.type || "",
         quantity: item.quantity || 0,
-        total_price: currency(total),
+        total_price_cents: totalCents,
         stock_method: item.stock_method || "none",
       };
     }
@@ -1815,10 +1900,11 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
     name: entry.name,
     type: entry.type,
     quantity: entry.quantity,
-    total_price: entry.total_price.value,
+    total_price_cents: entry.total_price_cents,
     // `× QTY_SCALE ÷ scaledQuantity` over integer cents: one rounding, at the
-    // end, on exact integers. `total_price` stays the currency.js sum above —
-    // summing money is what currency.js is for; dividing it is not.
+    // end, on exact integers. `total_price_cents` stays the plain integer sum
+    // above — with every addend an exact cent count there is nothing for a
+    // decimal type to protect, and dividing money was never its job anyway.
     //
     // `QTY_SCALE` rather than a bare `BigInt(quantity)` for the same reason
     // `perUnitSubtotal` uses it: `LineItem.quantity` is `number` in the type
@@ -1826,12 +1912,13 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
     // — turning a data anomaly into a failed order write inside a transaction.
     //
     // Half **away from zero**, not plain half-up: a flat discount larger than
-    // its line gives a negative `price.total`, which `calculateItemSubtotal`
-    // deliberately does not clamp, and `roundDivHalfUp` rounds a negative
-    // numerator toward zero rather than half-up.
-    unit_price: entry.quantity > 0
-      ? fromCentsBig(roundDivHalfAwayFromZero(
-        toCentsBig(entry.total_price.value) * QTY_SCALE,
+    // its line gives a negative `price.total_cents`, which
+    // `calculateItemSubtotal` deliberately does not clamp, and
+    // `roundDivHalfUp` rounds a negative numerator toward zero rather than
+    // half-up.
+    unit_price_cents: entry.quantity > 0
+      ? Number(roundDivHalfAwayFromZero(
+        BigInt(entry.total_price_cents) * QTY_SCALE,
         BigInt(Math.round(entry.quantity * Number(QTY_SCALE))),
       ))
       : 0,
@@ -2000,9 +2087,9 @@ export function getRemovalIndices(items: LineItem[], index: number): number[] {
 /** Count and pricing totals for a collapsed destination or group section. */
 export interface GroupTotalsResult {
   count: number;
-  subtotal: number;
-  subtotal_discounted: number;
-  total: number;
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
+  total_cents: number;
 }
 
 /**
@@ -2014,10 +2101,15 @@ export function getGroupTotals(
   taxes: Tax[],
 ): GroupTotalsResult {
   const children = getGroupItems(items, index);
-  if (children.length === 0) return { count: 0, subtotal: 0, subtotal_discounted: 0, total: 0 };
+  if (children.length === 0) {
+    return { count: 0, subtotal_cents: 0, subtotal_discounted_cents: 0, total_cents: 0 };
+  }
 
-  const { subtotal, subtotal_discounted, total } = calculateOrderTotals(children, taxes);
-  return { count: children.length, subtotal, subtotal_discounted, total };
+  const { subtotal_cents, subtotal_discounted_cents, total_cents } = calculateOrderTotals(
+    children,
+    taxes,
+  );
+  return { count: children.length, subtotal_cents, subtotal_discounted_cents, total_cents };
 }
 
 /** An expanded packing list entry preserving group context. */

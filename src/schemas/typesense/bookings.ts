@@ -4,12 +4,12 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for bookings. */
 export const bookings: TypesenseCollectionConfig = {
   alias: "bookings",
-  version: 4,
+  version: 5,
   firestoreCollection: "bookings",
-  collectionName: "bookings_v4",
+  collectionName: "bookings_v5",
   enabled: false,
   schema: {
-    name: "bookings_v4",
+    name: "bookings_v5",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -40,8 +40,8 @@ export const bookings: TypesenseCollectionConfig = {
       { name: "breakdown.damaged", type: "int32", sort: true, index: true, facet: false },
       { name: "quantity", type: "int32", sort: true, index: true, facet: false },
       { name: "shortage", type: "int32", sort: true, index: true, facet: false, optional: true },
-      { name: "total_price", type: "float", sort: true, index: true, facet: false, optional: true, money: true },
-      { name: "unit_price", type: "float", sort: true, index: true, facet: false, optional: true, money: true },
+      { name: "total_price_cents", type: "int64", sort: true, index: true, facet: false, optional: true, money: true },
+      { name: "unit_price_cents", type: "int64", sort: true, index: true, facet: false, optional: true, money: true },
       { name: "dates", type: "object" },
       { name: "dates.start_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "dates.end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },

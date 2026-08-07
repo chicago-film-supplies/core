@@ -51,7 +51,7 @@ function ledger(over: Partial<InventoryLedger> = {}): InventoryLedger {
     quantity_in_service: 0,
     quantity_out_of_service: 0,
     average_unit_cost: 0,
-    total_cost_basis: 0,
+    total_cost_basis_cents: 0,
     out_of_service_breakdown: { cleaning: 0, damaged: 0, maintenance: 0, lost: 0 },
     store_breakdown: [],
     query_by_uid_store: [],
@@ -264,21 +264,21 @@ Deno.test("costOfUnits is zero for degenerate inputs rather than NaN or Infinity
 // ── The fold ────────────────────────────────────────────────────────
 
 Deno.test("a purchase adds basis and units, and lands them on the shelf", () => {
-  const { ledger: next, costApplied } = applyMovementToLedger(
+  const { ledger: next, costAppliedCents } = applyMovementToLedger(
     ledger(),
     {
       type: "purchase",
       quantity: 10,
       lines: [line(10, null, at(LOC_A))],
-      cost: { amount: 4000, unit_cost: 400, unit_costs: [] },
+      cost: { amount_cents: 400000, unit_cost: 400, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
   );
   assertEquals(next.quantity_held, 10);
-  assertEquals(next.total_cost_basis, 4000);
+  assertEquals(next.total_cost_basis_cents, 400000);
   assertEquals(next.average_unit_cost, 400);
-  assertEquals(costApplied, 4000);
+  assertEquals(costAppliedCents, 400000);
   assertEquals(next.store_breakdown[0].locations[0].quantity, 10);
   assertEquals(next.store_breakdown[0].quantity, 10);
   assertEquals(next.query_by_uid_location, [LOC_A]);
@@ -289,13 +289,13 @@ Deno.test("a purchase reports its unit cost as a 4dp RATE, not cent-quantized mo
   // divided evenly, so the applier could switch between the cent form and the
   // 4dp form with nothing going red. 100 units for $6.39 is $0.0639/unit, and
   // reporting $0.06 is a 6% error on a figure that is only ever displayed.
-  const { ledger: next, unitCost, costApplied } = applyMovementToLedger(
+  const { ledger: next, unitCost, costAppliedCents } = applyMovementToLedger(
     ledger(),
     {
       type: "purchase",
       quantity: 100,
       lines: [line(100, null, at(LOC_A))],
-      cost: { amount: 6.39, unit_cost: 0, unit_costs: [] },
+      cost: { amount_cents: 639, unit_cost: 0, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
@@ -304,22 +304,22 @@ Deno.test("a purchase reports its unit cost as a 4dp RATE, not cent-quantized mo
   assertEquals(next.average_unit_cost, 0.0639);
   // The BASIS is money and stays at the cent — the rate got finer, the money
   // did not move.
-  assertEquals(costApplied, 6.39);
-  assertEquals(next.total_cost_basis, 6.39);
+  assertEquals(costAppliedCents, 639);
+  assertEquals(next.total_cost_basis_cents, 639);
   assertEquals(next.quantity_held, 100);
 });
 
 Deno.test("a cost-bearing decrease reports its unit cost at 4dp too", () => {
   // The out-leg reads the weighted-average share, so it has the same rounding
   // decision and must make it the same way.
-  const start = ledger({ quantity_held: 100, total_cost_basis: 6.39, average_unit_cost: 0.0639 });
+  const start = ledger({ quantity_held: 100, total_cost_basis_cents: 639, average_unit_cost: 0.0639 });
   const { ledger: next, unitCost } = applyMovementToLedger(
     start,
     {
       type: "sale",
       quantity: 30,
       lines: [line(30, at(LOC_A), null)],
-      cost: { amount: 0, unit_cost: 0, unit_costs: [] },
+      cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
@@ -328,7 +328,7 @@ Deno.test("a cost-bearing decrease reports its unit cost at 4dp too", () => {
   assertEquals(unitCost, 0.064);
   assertEquals(next.quantity_held, 70);
   // Basis still money: $6.39 − $1.92.
-  assertEquals(next.total_cost_basis, 4.47);
+  assertEquals(next.total_cost_basis_cents, 447);
   // And the ledger's average follows the same rule: 447 / 70 = $0.0639.
   assertEquals(next.average_unit_cost, 0.0639);
 });
@@ -340,7 +340,7 @@ Deno.test("a placement stamps the store's and the location's identity, on create
   // and the ledger is the only place those flags are denormalized.
   const { ledger: created } = applyMovementToLedger(
     ledger(),
-    { type: "purchase", quantity: 4, lines: [line(4, null, at(LOC_A))], cost: { amount: 0, unit_cost: 0, unit_costs: [] } },
+    { type: "purchase", quantity: 4, lines: [line(4, null, at(LOC_A))], cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } },
     placements,
     mockTimestamp,
   );
@@ -378,35 +378,35 @@ Deno.test("a placement stamps the store's and the location's identity, on create
 Deno.test("a sale removes the weighted-average share, not the caller's number", () => {
   // The caller's `amount` here is revenue-shaped ($900 for 2 units bought at
   // $400). Trusting it is what let the basis drift from the quantity.
-  const start = ledger({ quantity_held: 10, total_cost_basis: 4000, average_unit_cost: 400 });
-  const { ledger: next, costApplied } = applyMovementToLedger(
+  const start = ledger({ quantity_held: 10, total_cost_basis_cents: 400000, average_unit_cost: 400 });
+  const { ledger: next, costAppliedCents } = applyMovementToLedger(
     start,
     {
       type: "sale",
       quantity: 2,
       lines: [line(2, at(LOC_A), null)],
-      cost: { amount: 900, unit_cost: 450, unit_costs: [] },
+      cost: { amount_cents: 90000, unit_cost: 450, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
   );
   assertEquals(next.quantity_held, 8);
-  assertEquals(next.total_cost_basis, 3200, "2 × $400 of basis left, not $900");
-  assertEquals(costApplied, -800);
+  assertEquals(next.total_cost_basis_cents, 320000, "2 × $400 of basis left, not $900");
+  assertEquals(costAppliedCents, -80000);
   assertEquals(next.average_unit_cost, 400);
 });
 
 Deno.test("a transfer leaves the basis exactly where it was (#286 defect 1)", () => {
-  const start = ledger({ quantity_held: 4, total_cost_basis: 1600, average_unit_cost: 400 });
-  const { ledger: next, costApplied } = applyMovementToLedger(
+  const start = ledger({ quantity_held: 4, total_cost_basis_cents: 160000, average_unit_cost: 400 });
+  const { ledger: next, costAppliedCents } = applyMovementToLedger(
     start,
     { type: "transfer", quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
     placements,
     mockTimestamp,
   );
-  assertEquals(next.total_cost_basis, 1600);
+  assertEquals(next.total_cost_basis_cents, 160000);
   assertEquals(next.average_unit_cost, 400);
-  assertEquals(costApplied, 0);
+  assertEquals(costAppliedCents, 0);
   assertEquals(next.quantity_held, 4);
 });
 
@@ -430,38 +430,38 @@ function ledgerAtShelfA(n: number, over: Partial<InventoryLedger> = {}): Invento
 Deno.test("a full-quantity transfer through held=0 preserves the basis (#286 defect 2)", () => {
   // Zeroing on held===0 permanently destroyed the basis. A placement-only
   // movement cannot reach the zeroing branch at all now.
-  const start = ledgerAtShelfA(4, { total_cost_basis: 1600, average_unit_cost: 400 });
+  const start = ledgerAtShelfA(4, { total_cost_basis_cents: 160000, average_unit_cost: 400 });
   const { ledger: mid } = applyMovementToLedger(
     start,
     { type: "transfer", quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
     placements,
     mockTimestamp,
   );
-  assertEquals(mid.total_cost_basis, 1600);
+  assertEquals(mid.total_cost_basis_cents, 160000);
   assertEquals(mid.store_breakdown[0].locations.find((l) => l.uid_location === LOC_A)?.quantity, 0);
   assertEquals(mid.store_breakdown[0].locations.find((l) => l.uid_location === LOC_B)?.quantity, 4);
 });
 
 Deno.test("selling the last unit zeroes both basis and average", () => {
-  const start = ledger({ quantity_held: 1, total_cost_basis: 400, average_unit_cost: 400 });
+  const start = ledger({ quantity_held: 1, total_cost_basis_cents: 40000, average_unit_cost: 400 });
   const { ledger: next } = applyMovementToLedger(
     start,
     {
       type: "sale",
       quantity: 1,
       lines: [line(1, at(LOC_A), null)],
-      cost: { amount: 0, unit_cost: 0, unit_costs: [] },
+      cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
   );
   assertEquals(next.quantity_held, 0);
-  assertEquals(next.total_cost_basis, 0, "a residue would corrupt the next purchase's average");
+  assertEquals(next.total_cost_basis_cents, 0, "a residue would corrupt the next purchase's average");
   assertEquals(next.average_unit_cost, 0);
 });
 
 Deno.test("the fold never mutates its input ledger", () => {
-  const start = ledger({ quantity_held: 10, total_cost_basis: 4000, average_unit_cost: 400 });
+  const start = ledger({ quantity_held: 10, total_cost_basis_cents: 400000, average_unit_cost: 400 });
   const snapshot = JSON.stringify(start);
   applyMovementToLedger(
     start,
@@ -469,7 +469,7 @@ Deno.test("the fold never mutates its input ledger", () => {
       type: "sale",
       quantity: 2,
       lines: [line(2, at(LOC_A), null)],
-      cost: { amount: 900, unit_cost: 450, unit_costs: [] },
+      cost: { amount_cents: 90000, unit_cost: 450, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
@@ -485,7 +485,7 @@ Deno.test("a movement into a never-held store creates the entry (#294)", () => {
       type: "purchase",
       quantity: 5,
       lines: [line(5, null, at(LOC_B))],
-      cost: { amount: 500, unit_cost: 100, unit_costs: [] },
+      cost: { amount_cents: 50000, unit_cost: 100, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
@@ -501,7 +501,7 @@ Deno.test("two lines naming the same location sum rather than collide (#287)", (
       type: "purchase",
       quantity: 5,
       lines: [line(3, null, at(LOC_A)), line(2, null, at(LOC_A))],
-      cost: { amount: 500, unit_cost: 100, unit_costs: [] },
+      cost: { amount_cents: 50000, unit_cost: 100, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
@@ -544,12 +544,12 @@ Deno.test("in_service and out_of_service always partition held", () => {
 
 Deno.test("a write-off removes ownership and clears the out-of-service count", () => {
   const { ledger: next } = applyMovementToLedger(
-    ledger({ quantity_held: 10, quantity_in_service: 6, quantity_out_of_service: 4, total_cost_basis: 4000 }),
+    ledger({ quantity_held: 10, quantity_in_service: 6, quantity_out_of_service: 4, total_cost_basis_cents: 400000 }),
     {
       type: "write_off",
       quantity: 4,
       lines: [line(4, atOos, null)],
-      cost: { amount: 0, unit_cost: 0, unit_costs: [] },
+      cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] },
     },
     placements,
     mockTimestamp,
@@ -557,7 +557,7 @@ Deno.test("a write-off removes ownership and clears the out-of-service count", (
   assertEquals(next.quantity_held, 6);
   assertEquals(next.quantity_out_of_service, 0);
   assertEquals(next.quantity_in_service, 6);
-  assertEquals(next.total_cost_basis, 2400, "4 units of basis written off at $400");
+  assertEquals(next.total_cost_basis_cents, 240000, "4 units of basis written off at $400");
 });
 
 Deno.test("applyOutOfServiceReason clamps at zero and leaves other reasons alone", () => {

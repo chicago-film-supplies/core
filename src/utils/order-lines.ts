@@ -87,7 +87,7 @@ void _componentTypeParity;
  * pricing: bare `{ uid }`.
  *
  * `OrderDocItemPrice.taxes` declares `PriceModifierType[]` (uid + name + rate +
- * type + amount), and only `calculateItemPrice` can fill the other four in — it
+ * type + amount_cents), and only `calculateItemPrice` can fill the other four in — it
  * needs the live tax docs, which a catalog row does not carry. So this one field
  * is genuinely looser than the declared type, and narrowing exactly it is the
  * honest statement of that gap.
@@ -163,15 +163,15 @@ export function buildOrderLineFromProduct(
     inclusion_type: null,
     zero_priced: null,
     price: {
-      base: doc.price?.base ?? 0,
-      replacement: doc.price?.replacement ?? null,
+      base_cents: doc.price?.base_cents ?? 0,
+      replacement_cents: doc.price?.replacement_cents ?? null,
       chargeable_days: isRental ? opts.chargeDays : null,
       formula: (doc.price?.formula as PriceFormulaType | undefined) ?? "five_day_week",
       discount: null,
-      subtotal: 0,
-      subtotal_discounted: 0,
+      subtotal_cents: 0,
+      subtotal_discounted_cents: 0,
       taxes: unpricedTaxRefs(doc.price?.taxes),
-      total: 0,
+      total_cents: 0,
     },
   };
 }
@@ -188,7 +188,7 @@ export interface CustomLineBuildOptions {
   type: DocLineItemTypeType;
   name?: string;
   quantity?: number;
-  base?: number;
+  base_cents?: number;
   formula?: PriceFormulaType;
   chargeDays: number | null;
   taxes: ReadonlyArray<{ uid: string; name: string; rate: number; type: RateType }>;
@@ -218,17 +218,17 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
     inclusion_type: null,
     zero_priced: null,
     price: {
-      base: opts.base ?? 0,
-      replacement: isRental ? 0 : null,
+      base_cents: opts.base_cents ?? 0,
+      replacement_cents: isRental ? 0 : null,
       chargeable_days: isRental ? opts.chargeDays : null,
       formula: opts.formula ?? (isRental ? "five_day_week" : "fixed"),
       discount: null,
-      subtotal: 0,
-      subtotal_discounted: 0,
+      subtotal_cents: 0,
+      subtotal_discounted_cents: 0,
       // Already complete `PriceModifier`s — the caller resolved them — so unlike
       // the catalog path these need no narrowing.
-      taxes: opts.taxes.map((t) => ({ ...t, amount: 0 })),
-      total: 0,
+      taxes: opts.taxes.map((t) => ({ ...t, amount_cents: 0 })),
+      total_cents: 0,
     },
   };
 }
@@ -238,7 +238,7 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
  *
  * An invoice line is a strictly smaller shape than an order line: no
  * `stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`/
- * `zero_priced`, and no `price.replacement` — an invoice does not track
+ * `zero_priced`, and no `price.replacement_cents` — an invoice does not track
  * replacement value. This used to claim it "strips order-only fields" while the
  * `initial` spread put `stock_method: "bulk"`, `order_number: 0` and
  * `uid_order: ""` straight back in; constructing the object outright is what
@@ -256,14 +256,14 @@ export function buildCustomInvoiceLine(
     quantity: opts.quantity ?? 1,
     path: [],
     price: {
-      base: opts.base ?? 0,
+      base_cents: opts.base_cents ?? 0,
       chargeable_days: isRental ? opts.chargeDays : null,
       formula: opts.formula ?? (isRental ? "five_day_week" : "fixed"),
       discount: null,
-      subtotal: 0,
-      subtotal_discounted: 0,
-      taxes: opts.taxes.map((t) => ({ ...t, amount: 0 })),
-      total: 0,
+      subtotal_cents: 0,
+      subtotal_discounted_cents: 0,
+      taxes: opts.taxes.map((t) => ({ ...t, amount_cents: 0 })),
+      total_cents: 0,
     },
   };
 }
@@ -399,15 +399,15 @@ export function buildOrderComponentLines(
         inclusion_type: comp.inclusion_type as OrderDocLineItemType["inclusion_type"],
         zero_priced: comp.zero_priced ?? null,
         price: {
-          base: comp.zero_priced ? 0 : (comp.price?.base ?? 0),
-          replacement: comp.price?.replacement ?? null,
+          base_cents: comp.zero_priced ? 0 : (comp.price?.base_cents ?? 0),
+          replacement_cents: comp.price?.replacement_cents ?? null,
           chargeable_days: isRental ? opts.chargeDays : null,
           formula: (comp.price?.formula as PriceFormulaType | undefined) ?? "five_day_week",
           discount: null,
-          subtotal: 0,
-          subtotal_discounted: 0,
+          subtotal_cents: 0,
+          subtotal_discounted_cents: 0,
           taxes: unpricedTaxRefs(comp.price?.taxes),
-          total: 0,
+          total_cents: 0,
         },
       });
 

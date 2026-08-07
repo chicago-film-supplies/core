@@ -82,14 +82,14 @@ Deno.test("every settlement type routes to exactly one invoice total", () => {
   // `sums_into` is load-bearing, not documentation: `calculateInvoiceTotals`
   // takes its settlement argument structurally, so without a declared target a
   // credit row would be silently summed into `amount_paid`.
-  assertEquals(SETTLEMENT_CONTRACTS.payment.sums_into, "amount_paid");
-  assertEquals(SETTLEMENT_CONTRACTS.payment_reversal.sums_into, "amount_paid");
-  assertEquals(SETTLEMENT_CONTRACTS.credit.sums_into, "amount_credited");
-  assertEquals(SETTLEMENT_CONTRACTS.credit_reversal.sums_into, "amount_credited");
+  assertEquals(SETTLEMENT_CONTRACTS.payment.sums_into, "amount_paid_cents");
+  assertEquals(SETTLEMENT_CONTRACTS.payment_reversal.sums_into, "amount_paid_cents");
+  assertEquals(SETTLEMENT_CONTRACTS.credit.sums_into, "amount_credited_cents");
+  assertEquals(SETTLEMENT_CONTRACTS.credit_reversal.sums_into, "amount_credited_cents");
 });
 
 Deno.test("settlementContract tolerates an unknown type rather than throwing", () => {
-  assertEquals(settlementContract("payment")?.sums_into, "amount_paid");
+  assertEquals(settlementContract("payment")?.sums_into, "amount_paid_cents");
   assertEquals(settlementContract("refund"), undefined);
   assertEquals(settlementContract(""), undefined);
 });
@@ -185,12 +185,12 @@ Deno.test("date is a Chicago INSTANT, not a start-of-day", () => {
 // ── The signed fold ──────────────────────────────────────────────
 
 Deno.test("a do/undo pair nets to zero ARITHMETICALLY, not by filtering", () => {
-  const r = recomputeSettlementTotals(1000, [
+  const r = recomputeSettlementTotals(100_000, [
     S({ amount_cents: 500_00 }),
     S({ type: "payment_reversal", reason: "source_retracted", amount_cents: 500_00 }),
   ]);
-  assertEquals(r.amount_paid, 0);
-  assertEquals(r.amount_due, 1000);
+  assertEquals(r.amount_paid_cents, 0);
+  assertEquals(r.amount_due_cents, 100_000);
 });
 
 Deno.test("R2 → R1 → S1: the chain that vanished money under a liveness derivation", () => {
@@ -202,10 +202,10 @@ Deno.test("R2 → R1 → S1: the chain that vanished money under a liveness deri
     S({ type: "payment_reversal", reason: "correction", amount_cents: 500_00 }),
     S({ reason: "correction", amount_cents: 500_00 }),
   ];
-  assertEquals(recomputeSettlementTotals(1000, rows.slice(0, 1)).amount_paid, 500);
-  assertEquals(recomputeSettlementTotals(1000, rows.slice(0, 2)).amount_paid, 0);
-  assertEquals(recomputeSettlementTotals(1000, rows).amount_paid, 500);
-  assertEquals(recomputeSettlementTotals(1000, rows).amount_due, 500);
+  assertEquals(recomputeSettlementTotals(100_000, rows.slice(0, 1)).amount_paid_cents, 50_000);
+  assertEquals(recomputeSettlementTotals(100_000, rows.slice(0, 2)).amount_paid_cents, 0);
+  assertEquals(recomputeSettlementTotals(100_000, rows).amount_paid_cents, 50_000);
+  assertEquals(recomputeSettlementTotals(100_000, rows).amount_due_cents, 50_000);
 });
 
 Deno.test("the fold is order-independent — no second pass, no sequencing", () => {
@@ -215,77 +215,77 @@ Deno.test("the fold is order-independent — no second pass, no sequencing", () 
     S({ type: "credit", reason: "bad_debt", amount_cents: 250_00 }),
     S({ amount_cents: 700_00 }),
   ];
-  const forward = recomputeSettlementTotals(1000, rows);
-  const reversed = recomputeSettlementTotals(1000, [...rows].reverse());
-  assertEquals(forward.amount_paid, reversed.amount_paid);
-  assertEquals(forward.amount_credited, reversed.amount_credited);
-  assertEquals(forward.amount_due, reversed.amount_due);
+  const forward = recomputeSettlementTotals(100_000, rows);
+  const reversed = recomputeSettlementTotals(100_000, [...rows].reverse());
+  assertEquals(forward.amount_paid_cents, reversed.amount_paid_cents);
+  assertEquals(forward.amount_credited_cents, reversed.amount_credited_cents);
+  assertEquals(forward.amount_due_cents, reversed.amount_due_cents);
 });
 
 Deno.test("credits route to amount_credited and never reduce total", () => {
   // #1301's shape: billed 18,196 / collected 16,000 / wrote off 2,196.
-  const r = recomputeSettlementTotals(18_196, [
+  const r = recomputeSettlementTotals(1_819_600, [
     S({ amount_cents: 16_000_00 }),
     S({ type: "credit", reason: "bad_debt", amount_cents: 2_196_00 }),
   ]);
-  assertEquals(r.amount_paid, 16_000);
-  assertEquals(r.amount_credited, 2_196);
-  assertEquals(r.amount_due, 0);
+  assertEquals(r.amount_paid_cents, 1_600_000);
+  assertEquals(r.amount_credited_cents, 219_600);
+  assertEquals(r.amount_due_cents, 0);
 });
 
 Deno.test("#1322: fully credited with ZERO cash collected", () => {
   // CFS recorded $4,495.62 as cash that was never collected. Both systems agreed
   // the invoice was settled and nothing was due — the one thing they disagreed
   // about was *how*, and that was the one thing CFS had no field for.
-  const r = recomputeSettlementTotals(4_495.62, [
+  const r = recomputeSettlementTotals(449_562, [
     S({ type: "credit", reason: "unspecified", amount_cents: 449_562 }),
   ]);
-  assertEquals(r.amount_paid, 0);
-  assertEquals(r.amount_credited, 4_495.62);
-  assertEquals(r.amount_due, 0);
-  assertEquals(derivePaymentStatus("issued", r.amount_paid, r.amount_due, r.amount_credited), "paid");
+  assertEquals(r.amount_paid_cents, 0);
+  assertEquals(r.amount_credited_cents, 449_562);
+  assertEquals(r.amount_due_cents, 0);
+  assertEquals(derivePaymentStatus("issued", r.amount_paid_cents, r.amount_due_cents, r.amount_credited_cents), "paid");
 });
 
 Deno.test("an over-credited invoice stays NEGATIVE — clamping hides the defect", () => {
-  const r = recomputeSettlementTotals(100, [
+  const r = recomputeSettlementTotals(10_000, [
     S({ type: "credit", reason: "goodwill", amount_cents: 150_00 }),
   ]);
-  assertEquals(r.amount_credited, 150);
-  assertEquals(r.amount_due, -50);
+  assertEquals(r.amount_credited_cents, 15_000);
+  assertEquals(r.amount_due_cents, -5_000);
 });
 
 Deno.test("integer cents are exact where a float fold would drift", () => {
   // 300 rows of $0.07. In dollars-as-float this accumulates visible error;
   // summing integers has nothing to round.
   const rows = Array.from({ length: 300 }, () => S({ amount_cents: 7 }));
-  const r = recomputeSettlementTotals(21, rows);
-  assertEquals(r.amount_paid, 21);
-  assertEquals(r.amount_due, 0);
+  const r = recomputeSettlementTotals(2_100, rows);
+  assertEquals(r.amount_paid_cents, 2_100);
+  assertEquals(r.amount_due_cents, 0);
 });
 
 Deno.test("the per-reason breakdown is free and answers the reporting question", () => {
   // Mirrors availability's `out_of_service_breakdown[o.reason] += o.quantity`.
   // "How much did we credit for early returns last quarter" becomes client-side
   // arithmetic over settlements manager already subscribes to — no query, no index.
-  const r = recomputeSettlementTotals(1000, [
+  const r = recomputeSettlementTotals(100_000, [
     S({ amount_cents: 400_00 }),
     S({ type: "credit", reason: "early_return", amount_cents: 100_00 }),
     S({ type: "credit", reason: "early_return", amount_cents: 50_00 }),
     S({ type: "credit", reason: "goodwill", amount_cents: 25_00 }),
   ]);
-  assertEquals(r.breakdown.payment_received, 400);
-  assertEquals(r.breakdown.early_return, 150);
-  assertEquals(r.breakdown.goodwill, 25);
+  assertEquals(r.breakdown.payment_received, 40_000);
+  assertEquals(r.breakdown.early_return, 15_000);
+  assertEquals(r.breakdown.goodwill, 2_500);
   assertEquals(r.breakdown.bad_debt, undefined);
 });
 
 Deno.test("a reversal subtracts from its reason's breakdown too", () => {
-  const r = recomputeSettlementTotals(1000, [
+  const r = recomputeSettlementTotals(100_000, [
     S({ amount_cents: 500_00 }),
     S({ type: "payment_reversal", reason: "source_retracted", amount_cents: 500_00 }),
   ]);
-  assertEquals(r.breakdown.payment_received, 500);
-  assertEquals(r.breakdown.source_retracted, -500);
+  assertEquals(r.breakdown.payment_received, 50_000);
+  assertEquals(r.breakdown.source_retracted, -50_000);
 });
 
 // ── derivePaymentStatus ──────────────────────────────────────────

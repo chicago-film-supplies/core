@@ -9,7 +9,7 @@ const validWebshopProduct = {
   uid: "testwp10000000000000",
   name: "Canon C300",
   active: true,
-  price: { ...(base.price as Record<string, unknown>), base: 500, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
+  price: { ...(base.price as Record<string, unknown>), base_cents: 50000, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
   webshop: { available: true, description: "Great camera" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,

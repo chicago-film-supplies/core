@@ -30,26 +30,38 @@ export interface TypesenseField {
   index?: boolean;
   optional?: boolean;
   /**
-   * This numeric field carries **money**, so its `_str` search mirror must be
-   * rendered rather than stringified.
+   * This numeric field carries **money as an integer count of cents**, so its
+   * `_str` search mirror must be rendered rather than stringified.
    *
    * `addStringMirrors` writes `String(value)`, which is right for an identifier
-   * and wrong for money: a `$1,500.00` total is stored as the float `1500` and
-   * mirrors as `"1500"`, one token. The query `1500.00` tokenizes to
-   * `1500` + `00`, fails to match, and typo tolerance hands back **$15,000 and
-   * $10,000 instead** — measured against the live index 2026-08-01. The pattern
-   * only ever worked where the float happened to render with two decimals.
+   * and catastrophic for cents: a `$1,500.00` total is stored as the int64
+   * `150000` and would mirror as `"150000"` — an operator searching `1500.00`
+   * matches nothing, and typo tolerance offers unrelated numbers instead. Even
+   * before the cents migration this was wrong in a subtler way: the float
+   * `1500` mirrored as `"1500"`, the query `1500.00` tokenized to `1500` + `00`,
+   * and the index handed back **$15,000 and $10,000** — measured against the
+   * live index 2026-08-01.
    *
-   * A money mirror renders at the precision the field is denominated in — 2,
-   * because every money `_str` today is a total. **4dp would be worse, not
-   * merely redundant**: `"1500.0000"` tokenizes to `1500` + `0000`, and
-   * matching `00` against `0000` costs two edits, exactly the default
-   * `num_typos` boundary.
+   * ⚠️ **The contract INVERTED with Phase 11 and this is the load-bearing
+   * sentence.** The mirror renderer used to take dollars and format them;
+   * `moneyMirrorString` now takes **cents** and formats them, with no
+   * `toCents` step. A surviving dollars-taking copy of that expression renders
+   * every money mirror 100× while the index imports perfectly cleanly and
+   * nothing errors — which is why the expression was hoisted into exactly one
+   * file (`src/lib/moneyMirrorString.ts` in api-cloudrun) and pinned there by
+   * Ratchet G before this flag's meaning changed.
    *
-   * **Not for rates.** `Discount.rate`, `TaxRef.rate` and friends are `float`
-   * and sit right beside the amounts, but a rate is not money — it holds 4dp to
-   * match Xero's `DiscountRate`, and nobody searches for one. Marking a rate
-   * here would coarsen it in the mirror and buy nothing.
+   * A money mirror renders at 2dp, the precision money is denominated in.
+   * **4dp would be worse, not merely redundant**: `"1500.0000"` tokenizes to
+   * `1500` + `0000`, and matching `00` against `0000` costs two edits, exactly
+   * the default `num_typos` boundary.
+   *
+   * **Not for rates.** `Discount.rate`, `TaxRef.rate`, `cost.unit_cost` and
+   * `average_unit_cost` are `float` and sit right beside the `int64` amounts,
+   * but a rate is not money — it holds 4dp to match Xero's `DiscountRate`, and
+   * nobody searches for one. Marking a rate here would coarsen it in the mirror
+   * and buy nothing; worse, a rate is NOT in cents, so the renderer would
+   * divide it by 100.
    *
    * The numeric field still owns every facet, sort and range filter; the mirror
    * is purely a `query_by` text target and is always `facet: false, sort: false`

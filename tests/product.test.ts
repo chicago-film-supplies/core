@@ -15,7 +15,7 @@ const validProduct = {
   name: "Canon C300",
   active: true,
   crms_id: 100,
-  price: { ...base.price, base: 500, replacement: 5000, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
+  price: { ...base.price, base_cents: 50000, replacement_cents: 500000, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
   tags: [{ uid: "testt100000000000000", name: "Camera" }],
   webshop: { available: true },
   created_by: actor,
@@ -57,8 +57,8 @@ Deno.test("ProductSchema validates with components", () => {
         crms_id: 200,
         quantity: 2,
         price: {
-          base: 0,
-          replacement: 100,
+          base_cents: 0,
+          replacement_cents: 10000,
           taxes: [{ uid: "testtaxnone000000000", name: "No Tax", rate: 0, type: "percent" }],
           formula: "fixed",
           discountable: false,
@@ -69,24 +69,24 @@ Deno.test("ProductSchema validates with components", () => {
   assertEquals(ProductSchema.safeParse(doc).success, true);
 });
 
-Deno.test("ProductSchema rejects rental without price.replacement", () => {
+Deno.test("ProductSchema rejects rental without price.replacement_cents", () => {
   const doc = {
     ...validProduct,
-    price: { ...(validProduct.price as Record<string, unknown>), replacement: undefined },
+    price: { ...(validProduct.price as Record<string, unknown>), replacement_cents: undefined },
   };
   assertEquals(ProductSchema.safeParse(doc).success, false);
 });
 
-Deno.test("ProductSchema accepts rental with stock_method none and no price.replacement", () => {
+Deno.test("ProductSchema accepts rental with stock_method none and no price.replacement_cents", () => {
   const doc = {
     ...validProduct,
     stock_method: "none",
-    price: { ...(validProduct.price as Record<string, unknown>), replacement: undefined },
+    price: { ...(validProduct.price as Record<string, unknown>), replacement_cents: undefined },
   };
   assertEquals(ProductSchema.safeParse(doc).success, true);
 });
 
-Deno.test("ProductSchema rejects rental component without price.replacement", () => {
+Deno.test("ProductSchema rejects rental component without price.replacement_cents", () => {
   const doc = {
     ...validProduct,
     components: [
@@ -99,14 +99,14 @@ Deno.test("ProductSchema rejects rental component without price.replacement", ()
         stock_method: "bulk",
         crms_id: 200,
         quantity: 2,
-        price: { base: 0, taxes: [], formula: "fixed", discountable: false },
+        price: { base_cents: 0, taxes: [], formula: "fixed", discountable: false },
       },
     ],
   };
   assertEquals(ProductSchema.safeParse(doc).success, false);
 });
 
-Deno.test("ProductSchema accepts rental component with stock_method none and no price.replacement", () => {
+Deno.test("ProductSchema accepts rental component with stock_method none and no price.replacement_cents", () => {
   const doc = {
     ...validProduct,
     components: [
@@ -119,7 +119,7 @@ Deno.test("ProductSchema accepts rental component with stock_method none and no 
         stock_method: "none",
         crms_id: 200,
         quantity: 1,
-        price: { base: 0, taxes: [], formula: "fixed", discountable: false },
+        price: { base_cents: 0, taxes: [], formula: "fixed", discountable: false },
       },
     ],
   };
@@ -180,8 +180,8 @@ const validCreateInput = {
   eligible_shipping_ground: false,
   eligible_shipping_air: false,
   price: {
-    base: 500,
-    replacement: 5000,
+    base_cents: 50000,
+    replacement_cents: 500000,
     taxes: [],
     formula: "five_day_week" as const,
     discountable: true,
@@ -189,15 +189,15 @@ const validCreateInput = {
   webshop: { available: false },
 };
 
-Deno.test("CreateProductInput requires price.replacement for rental products", () => {
-  const input = { ...validCreateInput, price: { ...validCreateInput.price, replacement: undefined } };
+Deno.test("CreateProductInput requires price.replacement_cents for rental products", () => {
+  const input = { ...validCreateInput, price: { ...validCreateInput.price, replacement_cents: undefined } };
   assertEquals(CreateProductInput.safeParse(input).success, false);
   assertEquals(CreateProductInput.safeParse(validCreateInput).success, true);
   assertEquals(CreateProductInput.safeParse({ ...input, type: "sale" }).success, true);
   assertEquals(CreateProductInput.safeParse({ ...input, stock_method: "none" }).success, true);
 });
 
-Deno.test("CreateProductInput requires price.replacement for rental components", () => {
+Deno.test("CreateProductInput requires price.replacement_cents for rental components", () => {
   const rentalComponent = {
     uid: "testcomp100000000000",
     path: ["testproduct100000000"],
@@ -208,7 +208,7 @@ Deno.test("CreateProductInput requires price.replacement for rental components",
     crms_id: 200,
     quantity: 2,
     price: {
-      base: 0,
+      base_cents: 0,
       taxes: [],
       formula: "fixed" as const,
       discountable: false,
@@ -218,7 +218,7 @@ Deno.test("CreateProductInput requires price.replacement for rental components",
   assertEquals(
     CreateProductInput.safeParse({
       ...validCreateInput,
-      components: [{ ...rentalComponent, price: { ...rentalComponent.price, replacement: 100 } }],
+      components: [{ ...rentalComponent, price: { ...rentalComponent.price, replacement_cents: 10000 } }],
     }).success,
     true,
   );
@@ -389,7 +389,7 @@ Deno.test("components require inclusion_type; component_of does not", () => {
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { base: 0, replacement: 100, taxes: [], formula: "fixed", discountable: false },
+    price: { base_cents: 0, replacement_cents: 10000, taxes: [], formula: "fixed", discountable: false },
   };
 
   assertEquals(ComponentSchema.safeParse(backRef).success, true);

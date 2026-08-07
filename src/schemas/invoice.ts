@@ -12,6 +12,7 @@ import {
   Address,
   type AddressType,
   checkItemPriceFormula,
+  checkPriceBaseUnit,
   COARevenueEnum,
   type COARevenueType,
   DOC_LINE_ITEM_TYPES,
@@ -239,29 +240,36 @@ export const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[] = statusesWh
 
 /** Pricing breakdown for a single invoice line item. */
 export interface InvoiceDocItemPrice {
-  base: number;
+  base_cents: number;
+  /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
+  base_percent?: number | null;
   chargeable_days: number | null;
   formula: PriceFormulaType;
-  subtotal: number;
-  subtotal_discounted: number;
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
-  total: number;
-  /** @deprecated Legacy CRMS field — not set on new invoices. */
+  total_cents: number;
+  /**
+   * @deprecated Legacy CRMS field — not set on new invoices.
+   *
+   * A PERCENT, not money — no `_cents` suffix, and it must not acquire one.
+   */
   discount_percent?: number;
 }
 
 const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject({
-  base: z.number().default(0),
+  base_cents: z.int().default(0),
+  base_percent: z.number().nullable().optional(),
   chargeable_days: z.number().nullable().default(null),
   formula: PriceFormulaEnum.default("five_day_week"),
-  subtotal: z.number().default(0),
-  subtotal_discounted: z.number().default(0),
+  subtotal_cents: z.int().default(0),
+  subtotal_discounted_cents: z.int().default(0),
   discount: Discount.nullable().default(null),
   taxes: z.array(PriceModifier).default([]),
-  total: z.number().default(0),
+  total_cents: z.int().default(0),
   discount_percent: z.number().optional(),
-});
+}).superRefine(checkPriceBaseUnit);
 
 // ── Line items ───────────────────────────────────────────────────
 
@@ -383,13 +391,13 @@ export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocL
  * without re-pricing anything.
  */
 export interface InvoiceDocTotals {
-  subtotal: number;
-  subtotal_discounted: number;
-  discount_amount: number;
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
+  discount_amount_cents: number;
   taxes: PriceModifierType[];
   transaction_fees: PriceModifierType[];
-  total: number;
-  amount_paid: number;
+  total_cents: number;
+  amount_paid_cents: number;
   /**
    * Value settled by credit note rather than cash. **Sits beside `total` and
    * never reduces it** — keeping "billed 18,196 / collected 16,000 / wrote off
@@ -398,20 +406,25 @@ export interface InvoiceDocTotals {
    * Optional so the compiler forces `?? 0` at every read until the migration has
    * stamped the ~962 pre-existing invoices.
    */
-  amount_credited?: number;
-  amount_due: number;
+  amount_credited_cents?: number;
+  amount_due_cents: number;
 }
 
 const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
-  subtotal: z.number().default(0),
-  subtotal_discounted: z.number().default(0),
-  discount_amount: z.number().default(0),
+  subtotal_cents: z.int().default(0),
+  subtotal_discounted_cents: z.int().default(0),
+  discount_amount_cents: z.int().default(0),
   taxes: z.array(PriceModifier).default([]),
   transaction_fees: z.array(PriceModifier).default([]),
-  total: z.number().default(0),
-  amount_paid: z.number().default(0),
-  amount_credited: z.number().optional(),
-  amount_due: z.number().default(0),
+  total_cents: z.int().default(0),
+  amount_paid_cents: z.int().default(0),
+  // Bare `.optional()` with NO default, deliberately: ~962 prod invoices
+  // predate the field, and `validateBeforeWrite` persists the RAW doc, so a
+  // schema default would never materialize anyway — it would only hide the
+  // absence from the compiler at every read.
+  amount_credited_cents: z.int().optional(),
+  // Unbounded on purpose: an over-credited invoice must stay negative.
+  amount_due_cents: z.int().default(0),
 });
 
 // ── Destinations ────────────────────────────────────────────────
@@ -569,16 +582,21 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   (inv) => inv.query_by_orders.length === 0 || inv.destinations.length >= 1,
   { message: "destinations must be provided when the invoice is linked to at least one source order", path: ["destinations"] },
 ).refine(
+  // EXACT, not a tolerance. Every operand is an integer count of cents, so
+  // there is no representation error left to absorb and "within half a cent"
+  // no longer describes anything — a half-cent gap is now unrepresentable, and
+  // a one-cent gap is a real projection defect that the old epsilon would have
+  // caught too. The `void` exemption survives: Xero closes a voided invoice's
+  // balance without moving the settlement journal, so the identity genuinely
+  // does not hold there (api-cloudrun#436).
   (inv) =>
     inv.status === "void" ||
-    Math.abs(
-      inv.totals.amount_paid + (inv.totals.amount_credited ?? 0) + inv.totals.amount_due -
-        inv.totals.total,
-    ) <= 0.005,
+    inv.totals.amount_paid_cents + (inv.totals.amount_credited_cents ?? 0) +
+          inv.totals.amount_due_cents === inv.totals.total_cents,
   {
     message:
-      "amount_paid + amount_credited + amount_due must equal total (within half a cent)",
-    path: ["totals", "amount_due"],
+      "amount_paid_cents + amount_credited_cents + amount_due_cents must equal total_cents exactly",
+    path: ["totals", "amount_due_cents"],
   },
 ).meta({
   title: "Invoice",
@@ -594,7 +612,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
 
 /** Item price input — partial, server computes the rest. */
 export interface InvoiceItemInputPrice {
-  base?: number;
+  base_cents?: number;
+  base_percent?: number | null;
   chargeable_days?: number | null;
   formula?: PriceFormulaType;
   discount?: DiscountInputType | null;
@@ -602,12 +621,13 @@ export interface InvoiceItemInputPrice {
 }
 
 const InvoiceItemInputPriceSchema: z.ZodType<InvoiceItemInputPrice> = z.object({
-  base: z.number().optional(),
+  base_cents: z.int().optional(),
+  base_percent: z.number().nullable().optional(),
   chargeable_days: z.number().nullable().optional(),
   formula: PriceFormulaEnum.optional(),
   discount: DiscountInput.nullable().optional(),
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),
-});
+}).superRefine(checkPriceBaseUnit);
 
 /**
  * A billable invoice line as a client sends it — the input mirror of

@@ -26,7 +26,7 @@ import type {
   StoreBreakdownLocation,
 } from "../schemas/mod.ts";
 import { MOVEMENT_CONTRACTS } from "../schemas/mod.ts";
-import { fromCentsBig, perUnitCostAt4dp, roundDivHalfUp, toCentsBig } from "./money.ts";
+import { perUnitCostAt4dp, roundDivHalfUp } from "./money.ts";
 
 // ── Money ───────────────────────────────────────────────────────────
 
@@ -117,8 +117,16 @@ export interface LedgerFoldResult {
    * mutated `transaction.total_cost` in place, which made the applier's output
    * depend on the caller remembering to persist its input.
    */
-  costApplied: number;
-  /** The per-unit basis this movement consumed or added, at 2dp. */
+  costAppliedCents: number;
+  /**
+   * The per-unit basis this movement consumed or added, **at 4dp DOLLARS**.
+   *
+   * Not cents, and not 2dp — this docstring said "at 2dp" for months while
+   * `perUnitCostAt4dp` produced four, which is the kind of comment a reader
+   * trusts and then quantizes a rate on. It is the same rate family as
+   * `cost.unit_cost` and `average_unit_cost`, and forcing it to the cent is the
+   * beta.117 regression: a 100-unit $6.39 purchase reporting $0.06/unit.
+   */
   unitCost: number;
 }
 
@@ -243,21 +251,21 @@ export function applyMovementToLedger(
   // see `perUnitCostAt4dp`. Both are derived from the same integer cents, so the
   // pair cannot disagree about how much moved — only about how finely the
   // per-unit figure is reported.
-  let costApplied = 0;
+  let costAppliedCents = 0;
   let unitCost = 0;
   if (carriesCost) {
-    const basisCents = toCentsBig(next.total_cost_basis);
+    const basisCents = BigInt(next.total_cost_basis_cents);
     if (delta > 0) {
-      const addCents = toCentsBig(movement.cost?.amount ?? 0);
-      costApplied = fromCentsBig(addCents);
+      const addCents = BigInt(movement.cost?.amount_cents ?? 0);
+      costAppliedCents = Number(addCents);
       unitCost = perUnitCostAt4dp(addCents, BigInt(delta));
-      next.total_cost_basis = fromCentsBig(basisCents + addCents);
+      next.total_cost_basis_cents = Number(basisCents + addCents);
     } else if (delta < 0) {
       const units = -delta;
       const outCents = costOfUnits(basisCents, next.quantity_held, units);
-      costApplied = -fromCentsBig(outCents);
+      costAppliedCents = -Number(outCents);
       unitCost = perUnitCostAt4dp(outCents, BigInt(units));
-      next.total_cost_basis = fromCentsBig(basisCents - outCents);
+      next.total_cost_basis_cents = Number(basisCents - outCents);
     }
   }
 
@@ -265,7 +273,7 @@ export function applyMovementToLedger(
 
   if (next.quantity_held > 0) {
     next.average_unit_cost = perUnitCostAt4dp(
-      toCentsBig(next.total_cost_basis),
+      BigInt(next.total_cost_basis_cents),
       BigInt(next.quantity_held),
     );
   } else if (carriesCost) {
@@ -273,7 +281,7 @@ export function applyMovementToLedger(
     // carrying cost. Zero both, so a residual basis cannot corrupt the average of
     // the next purchase — held→0 then buy 1 must not inherit.
     next.average_unit_cost = 0;
-    next.total_cost_basis = 0;
+    next.total_cost_basis_cents = 0;
   }
   // else: a placement-only movement drove held transiently to 0 (#286 defect 2).
   // Leave basis and average untouched; zeroing here PERMANENTLY destroyed the
@@ -311,7 +319,7 @@ export function applyMovementToLedger(
   );
   next.updated_at = now;
 
-  return { ledger: next, costApplied, unitCost };
+  return { ledger: next, costAppliedCents, unitCost };
 }
 
 /**

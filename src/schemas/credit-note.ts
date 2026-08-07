@@ -39,6 +39,7 @@ import {
   Address,
   type AddressType,
   checkItemPriceFormula,
+  checkPriceBaseUnit,
   COARevenueEnum,
   type COARevenueType,
   DOC_LINE_ITEM_TYPES,
@@ -115,7 +116,7 @@ export function deriveCreditPostingAccount(
  * Credit-note lifecycle.
  *
  * **Deliberately three live states, with no `part_applied`.** The distinction a
- * partial member would draw is already carried by `remaining_credit`, more
+ * partial member would draw is already carried by `remaining_credit_cents`, more
  * informatively — and adding it would invert the operator's primary query:
  * *"does this note still have credit I can allocate?"* is exactly
  * `status === "issued"` here, but would become `issued OR part_applied`.
@@ -126,7 +127,7 @@ export function deriveCreditPostingAccount(
  * balance reaches zero. Even CN-1015, split across #1751 and #1767, landed both
  * allocations at once.
  *
- * `applied` means **`remaining_credit === 0`, however it got there** — by
+ * `applied` means **`remaining_credit_cents === 0`, however it got there** — by
  * allocation *or* by cash refund. CN-1013 and CN-1016 are PAID in Xero with a
  * Payment attached and zero allocations, and a cash refund IS a credit note
  * settled by cash rather than by allocation.
@@ -155,26 +156,29 @@ export const CREDIT_NOTE_REASONS: readonly SettlementReasonType[] =
 
 /** Pricing breakdown for a single credit-note line. */
 export interface CreditNoteDocItemPrice {
-  base: number;
+  base_cents: number;
+  /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
+  base_percent?: number | null;
   chargeable_days: number | null;
   formula: PriceFormulaType;
-  subtotal: number;
-  subtotal_discounted: number;
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
-  total: number;
+  total_cents: number;
 }
 
 const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strictObject({
-  base: z.number().default(0),
+  base_cents: z.int().default(0),
+  base_percent: z.number().nullable().optional(),
   chargeable_days: z.number().nullable().default(null),
   formula: PriceFormulaEnum.default("fixed"),
-  subtotal: z.number().default(0),
-  subtotal_discounted: z.number().default(0),
+  subtotal_cents: z.int().default(0),
+  subtotal_discounted_cents: z.int().default(0),
   discount: Discount.nullable().default(null),
   taxes: z.array(PriceModifier).default([]),
-  total: z.number().default(0),
-});
+  total_cents: z.int().default(0),
+}).superRefine(checkPriceBaseUnit);
 
 // ── Line items ───────────────────────────────────────────────────
 
@@ -262,29 +266,30 @@ export const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem> = CreditNot
 /**
  * Credit-note totals.
  *
- * Dollars, not cents — they sit beside `items[]` priced in dollars, and a
- * document that mixed both internally would be worse than either. The cents
- * boundary is the `settlements` journal; `total` here is what an allocation
- * draws *from*.
+ * Integer cents, matching `items[]` and matching the `settlements` journal the
+ * allocations are drawn into. **This document used to be dollars end to end**
+ * while the journal beside it was already cents — a split that was recorded as
+ * an intentional boundary and was in fact just drift, and which meant the 2dp
+ * census had never evaluated this corpus at all.
  *
  * **No `transaction_fees`.** A card-processing fee is charged when money is
  * taken, not when it is given back; crediting one is an `order_adjustment` line,
  * not a fee row.
  */
 export interface CreditNoteDocTotals {
-  subtotal: number;
-  subtotal_discounted: number;
-  discount_amount: number;
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
+  discount_amount_cents: number;
   taxes: PriceModifierType[];
-  total: number;
+  total_cents: number;
 }
 
 const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals> = z.strictObject({
-  subtotal: z.number().default(0),
-  subtotal_discounted: z.number().default(0),
-  discount_amount: z.number().default(0),
+  subtotal_cents: z.int().default(0),
+  subtotal_discounted_cents: z.int().default(0),
+  discount_amount_cents: z.int().default(0),
   taxes: z.array(PriceModifier).default([]),
-  total: z.number().default(0),
+  total_cents: z.int().default(0),
 });
 
 // ── Document ─────────────────────────────────────────────────────
@@ -325,14 +330,14 @@ export interface CreditNote {
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
   /**
-   * Value not yet consumed, in dollars. `total` minus every unreversed
-   * allocation minus any cash refunded.
+   * Value not yet consumed, in integer cents. `total_cents` minus every
+   * unreversed allocation minus any cash refunded.
    *
    * A stored projection of the settlements that name this note, exactly as the
-   * invoice's `amount_credited` is — co-written in the same transaction, and
-   * rebuildable from the journal.
+   * invoice's `amount_credited_cents` is — co-written in the same transaction,
+   * and rebuildable from the journal.
    */
-  remaining_credit: number;
+  remaining_credit_cents: number;
   sources: DocSourceType[];
   query_by_sources: string[];
   xero_credit_note_id: string | null;
@@ -354,21 +359,24 @@ function checkCreditNote(cn: CreditNote, ctx: z.RefinementCtx): void {
     });
   }
 
-  // `applied` IS `remaining_credit === 0` — the status is a materialized
+  // `applied` IS `remaining_credit_cents === 0` — the status is a materialized
   // derivation, so a document asserting one and storing the other is a
   // contradiction rather than a preference. A voided note is exempt: voiding
   // strands the balance rather than consuming it, which is exactly what the
   // three VOIDED notes in the live tenant look like (remaining == total).
   if (cn.status !== "void") {
-    const exhausted = Math.abs(cn.remaining_credit) <= 0.005;
+    // Exactly zero. Both operands are integer cents, so the half-cent tolerance
+    // this replaced no longer names a reachable state — and "exhausted" was
+    // always meant to be exact anyway: `applied` IS `remaining === 0`.
+    const exhausted = cn.remaining_credit_cents === 0;
     if (cn.status === "applied" && !exhausted) {
       ctx.addIssue({
         code: "custom",
-        path: ["remaining_credit"],
+        path: ["remaining_credit_cents"],
         message: "an applied credit note has no remaining credit",
       });
     }
-    if (cn.status === "issued" && exhausted && cn.totals.total !== 0) {
+    if (cn.status === "issued" && exhausted && cn.totals.total_cents !== 0) {
       ctx.addIssue({
         code: "custom",
         path: ["status"],
@@ -377,11 +385,11 @@ function checkCreditNote(cn: CreditNote, ctx: z.RefinementCtx): void {
     }
   }
 
-  if (cn.remaining_credit > cn.totals.total + 0.005) {
+  if (cn.remaining_credit_cents > cn.totals.total_cents) {
     ctx.addIssue({
       code: "custom",
-      path: ["remaining_credit"],
-      message: "remaining_credit cannot exceed the credit note's total",
+      path: ["remaining_credit_cents"],
+      message: "remaining_credit_cents cannot exceed the credit note's total_cents",
     });
   }
 }
@@ -413,7 +421,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   tax_profile: TaxProfileEnum,
   items: z.array(CreditNoteDocLineItem).default([]),
   totals: CreditNoteDocTotalsSchema,
-  remaining_credit: z.number().default(0),
+  remaining_credit_cents: z.int().default(0),
   sources: z.array(DocSource).default([]),
   query_by_sources: z.array(z.string()).default([]),
   xero_credit_note_id: z.uuid().nullable().default(null),
@@ -426,7 +434,14 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   title: "Credit Note",
   collection: "credit-notes",
   displayDefaults: {
-    columns: ["number", "date", "organization.name", "reason", "totals.total", "remaining_credit"],
+    columns: [
+      "number",
+      "date",
+      "organization.name",
+      "reason",
+      "totals.total_cents",
+      "remaining_credit_cents",
+    ],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
     groupBy: [

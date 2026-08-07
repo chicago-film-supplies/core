@@ -28,7 +28,7 @@ function comp(
     stock_method: "bulk",
     inclusion_type: "default",
     zero_priced: false,
-    price: { base: 10, formula: "five_day_week", taxes: [{ uid: "tax1" }] },
+    price: { base_cents: 1000, formula: "five_day_week", taxes: [{ uid: "tax1" }] },
     ...over,
   };
 }
@@ -43,7 +43,7 @@ function product(over: Partial<ProductDocument> = {}): ProductDocument {
     active: true,
     component_only: false,
     updated_at: 0,
-    price: { base: 100, replacement: 500, formula: "five_day_week", taxes: [{ uid: "tax1" }] },
+    price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week", taxes: [{ uid: "tax1" }] },
     ...over,
   };
 }
@@ -69,7 +69,7 @@ const REAL_TAX_UID = "Tax1AAAAAAAAAAAAAAAA";
 
 Deno.test("buildOrderLineFromProduct emits a schema-valid line, ancestry-only path", () => {
   const line = buildOrderLineFromProduct(
-    product({ uid: REAL_PRODUCT_UID, price: { base: 100, replacement: 500, formula: "five_day_week", taxes: [{ uid: REAL_TAX_UID }] } }),
+    product({ uid: REAL_PRODUCT_UID, price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week", taxes: [{ uid: REAL_TAX_UID }] } }),
     { ...OPTS, quantity: 3, uidOrder: REAL_ORDER_UID },
   );
 
@@ -84,19 +84,19 @@ Deno.test("buildOrderLineFromProduct emits a schema-valid line, ancestry-only pa
   assertEquals(line.path, []);
   assertEquals(line.inclusion_type, null);
   assertEquals(line.zero_priced, null);
-  assertEquals(line.price.base, 100);
-  assertEquals(line.price.replacement, 500);
+  assertEquals(line.price.base_cents, 10000);
+  assertEquals(line.price.replacement_cents, 50000);
   assertEquals(line.price.chargeable_days, 5);
   // Money fields are zero and taxes are bare uid refs until `calculateItemPrice`
   // runs — the documented contract of this module.
-  assertEquals(line.price.subtotal, 0);
-  assertEquals(line.price.total, 0);
+  assertEquals(line.price.subtotal_cents, 0);
+  assertEquals(line.price.total_cents, 0);
   assertEquals(line.price.taxes, [{ uid: REAL_TAX_UID }] as typeof line.price.taxes);
 
   // Structurally a line item, modulo the unpriced taxes the contract allows.
   const parsed = OrderDocLineItem.safeParse({
     ...line,
-    price: { ...line.price, taxes: [{ uid: REAL_TAX_UID, name: "T", rate: 0, type: "percent", amount: 0 }] },
+    price: { ...line.price, taxes: [{ uid: REAL_TAX_UID, name: "T", rate: 0, type: "percent", amount_cents: 0 }] },
   });
   assert(parsed.success, JSON.stringify(parsed.error?.issues));
 });
@@ -273,9 +273,9 @@ Deno.test("zero-priced components precede priced ones within a parent block", ()
 
 Deno.test("a zero-priced component prices at 0 regardless of its catalog base", () => {
   const doc = product({
-    components: [comp("F", ["A"], { zero_priced: true, price: { base: 99 } })],
+    components: [comp("F", ["A"], { zero_priced: true, price: { base_cents: 9900 } })],
   });
-  assertEquals(buildOrderComponentLines(doc, OPTS)[0].price.base, 0);
+  assertEquals(buildOrderComponentLines(doc, OPTS)[0].price.base_cents, 0);
 });
 
 // ── buildOrderComponentLines: fields the seed used to invent ────────
@@ -318,9 +318,9 @@ Deno.test("emitted items share no mutable references", () => {
   // guarantee.
   const doc = product({ components: [comp("B", ["A"]), comp("C", ["A"])] });
   const [first, second] = buildOrderComponentLines(doc, OPTS);
-  first.price.base = 12345;
+  first.price.base_cents = 12345;
   first.path.push("mutated");
-  assert(second.price.base !== 12345);
+  assert(second.price.base_cents !== 12345);
   assert(!second.path.includes("mutated"));
 });
 
@@ -369,16 +369,16 @@ Deno.test("buildCustomOrderLine stamps the custom- uid prefix", () => {
   assertEquals(line.crms_id, null);
   assertEquals(line.uid_order, "order1");
   assertEquals(line.price.formula, "five_day_week");
-  assertEquals(line.price.replacement, 0);
+  assertEquals(line.price.replacement_cents, 0);
   assertEquals(line.price.chargeable_days, 5);
   // Fully-formed modifiers — the caller resolved them.
-  assertEquals(line.price.taxes, [{ uid: "tax1", name: "IL", rate: 10, type: "percent", amount: 0 }]);
+  assertEquals(line.price.taxes, [{ uid: "tax1", name: "IL", rate: 10, type: "percent", amount_cents: 0 }]);
 });
 
 Deno.test("buildCustomOrderLine defaults formula and replacement by type", () => {
   const sale = buildCustomOrderLine({ type: "sale", chargeDays: 5, taxes: [] });
   assertEquals(sale.price.formula, "fixed");
-  assertEquals(sale.price.replacement, null);
+  assertEquals(sale.price.replacement_cents, null);
   assertEquals(sale.price.chargeable_days, null);
 
   const explicit = buildCustomOrderLine({ type: "sale", chargeDays: null, taxes: [], formula: "five_day_week" });

@@ -172,14 +172,14 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
   }
 
   // Derived from `sums_into` rather than declared as a fifth contract axis: a
-  // row that feeds `amount_paid` is cash, and cash has no credit note.
-  if (contract.sums_into === "amount_paid") {
+  // row that feeds `amount_paid_cents` is cash, and cash has no credit note.
+  if (contract.sums_into === "amount_paid_cents") {
     for (const field of ["uid_credit_note", "number_credit_note"] as const) {
       if (s[field] !== null) {
         ctx.addIssue({
           code: "custom",
           path: [field],
-          message: `a "${s.type}" feeds amount_paid and cannot reference a credit note`,
+          message: `a "${s.type}" feeds amount_paid_cents and cannot reference a credit note`,
         });
       }
     }

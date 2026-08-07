@@ -11,6 +11,8 @@
  */
 import { assert, assertEquals, assertExists, assertGreater } from "@std/assert";
 
+import * as allocationUtils from "../src/utils/allocation.ts";
+import * as availabilityUtils from "../src/utils/availability.ts";
 import * as bookingUtils from "../src/utils/bookings.ts";
 import * as cardUtils from "../src/utils/cards.ts";
 import * as contactNameUtils from "../src/utils/contact-name.ts";
@@ -18,6 +20,8 @@ import * as dateUtils from "../src/utils/dates.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as locationUtils from "../src/utils/locations.ts";
 import * as moneyUtils from "../src/utils/money.ts";
+import * as movementUtils from "../src/utils/movements.ts";
+import * as orderLineUtils from "../src/utils/order-lines.ts";
 import * as orderUtils from "../src/utils/orders.ts";
 import * as productUtils from "../src/utils/products.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
@@ -32,7 +36,15 @@ import {
 import { TEMPLATE_HELPER_DENYLIST } from "../scripts/template-helper-denylist.ts";
 
 /** Every `./utils/*` entrypoint, keyed by the namespace the generator emits. */
+// ⚠️ **All FIFTEEN injectable namespaces, not the eleven this held before.**
+// `allocation`, `availability`, `movements` and `order-lines` emit zero helpers
+// (every export is denylisted), and their absence here meant the drift guard
+// below skipped them entirely — a new export in any of the four was neither
+// emitted nor denylisted nor reported. It also made the denylist staleness
+// guard blind to the ~14 entries filed under them.
 const UTIL_MODULES: Record<string, Record<string, unknown>> = {
+  allocation: allocationUtils,
+  availability: availabilityUtils,
   bookings: bookingUtils,
   cards: cardUtils,
   "contact-name": contactNameUtils,
@@ -40,6 +52,8 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,
+  movements: movementUtils,
+  "order-lines": orderLineUtils,
   orders: orderUtils,
   products: productUtils,
   taxes: taxUtils,
@@ -121,6 +135,36 @@ Deno.test("every export is emitted or explicitly denylisted (no silent drift)", 
   }
 });
 
+Deno.test("every denylist entry names a symbol that still exists", () => {
+  // ⚠️ **The direction the drift test above cannot see.** It walks real exports
+  // and asks whether each is accounted for; a denylist entry naming a function
+  // that no longer exists accounts for nothing and is invisible to it.
+  //
+  // That is not hypothetical. `recomputePaymentTotals` sat in the `invoices`
+  // denylist for months after the function was deleted, and nothing said so —
+  // the entries are plain strings, so a rename or a deletion leaves a dead one
+  // behind with no compile error and no failing test. Phase 11 renamed three
+  // more in one commit (`computeItemTaxAmount`, `calculateTransactionFeeAmount`,
+  // `getXeroUnitAmount`), which would have rotted the same way.
+  //
+  // A name may live in a namespace it does not originate in — `isDenied`
+  // deliberately honours a cross-namespace entry for a re-export — so an entry
+  // is valid if it resolves as a function under ANY injectable namespace.
+  const everyExport = new Set(
+    Object.values(UTIL_MODULES).flatMap((mod) => fnExports(mod)),
+  );
+  for (const [namespace, denied] of Object.entries(TEMPLATE_HELPER_DENYLIST)) {
+    const dead = denied.filter((n) => !everyExport.has(n));
+    assertEquals(
+      dead,
+      [],
+      `it.${namespace}.* denylist names ${dead.length} symbol(s) that no longer exist: ` +
+        `${dead.join(", ")}. A dead entry silences the drift guard for a name nothing ` +
+        `exports — delete it, or fix the spelling if the function was renamed.`,
+    );
+  }
+});
+
 Deno.test("denylisted names are never emitted", () => {
   for (const [namespace, denied] of Object.entries(TEMPLATE_HELPER_DENYLIST)) {
     const emitted = new Set((templateHelpers[namespace] ?? []).map((h) => h.name));
@@ -159,11 +203,11 @@ const ORDER_WRITE_PATH_REEXPORTS = [
 ];
 
 const RENDER_USEFUL_REEXPORTS = [
-  "calculateItemDiscount",
+  "calculateItemDiscountCents",
   "calculateItemPrice",
   "calculateItemSubtotal",
   "calculateItemTax",
-  "calculateItemTotal",
+  "calculateItemTotalCents",
   "isPriceableItem",
   "isPreTaxItem",
   "isTransactionFeeItem",

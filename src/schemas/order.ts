@@ -10,6 +10,7 @@ import {
   type AddressType,
   checkItemContract,
   checkItemPriceFormula,
+  checkPriceBaseUnit,
   COARevenueEnum,
   type COARevenueType,
   DOC_LINE_ITEM_TYPES,
@@ -287,17 +288,25 @@ export interface PriceModifierType {
   name: string;
   rate: number;
   type: RateType;
-  amount: number;
+  amount_cents: number;
 }
 
-/** Zod schema for a rate-based price modifier (tax or transaction fee). */
+/**
+ * Zod schema for a rate-based price modifier (tax or transaction fee).
+ *
+ * `rate` and `amount_cents` are deliberately DIFFERENT units and the names say
+ * so: `rate` stays a 4dp dollars-or-percent rate discriminated on `type` (see
+ * {@link DiscountType}), while `amount_cents` is the computed money in integer
+ * cents. A sweep that "converts every number in this object" restores exactly
+ * the rate/amount confusion the suffix exists to prevent.
+ */
 export const PriceModifier: z.ZodType<PriceModifierType> = z.strictObject({
   uid: FirestoreId,
   // Tax or fee label ("IL Sales Tax") — see `OrderDocLineItem.name`.
   name: z.string().meta({ pii: "none" }),
   rate: z.number(),
   type: RateTypeEnum,
-  amount: z.number(),
+  amount_cents: z.int(),
 });
 
 /**
@@ -327,7 +336,7 @@ export const TaxRef: z.ZodType<TaxRefType> = z.strictObject({
 export interface DiscountType {
   rate: number;
   type: RateType;
-  amount: number;
+  amount_cents: number;
 }
 
 /**
@@ -338,11 +347,19 @@ export interface DiscountType {
  *   would otherwise produce a `subtotal_discounted` above the subtotal (rate < 0)
  *   or below zero (rate > 100).
  * - `flat` → dollars **per unit, per pricing factor**
- *   (`rate × quantity × pricingFactor === amount`), so it has no upper bound —
- *   a $150/unit discount on a $200/unit line is legal — but it cannot be negative.
+ *   (`rate × quantity × pricingFactor === amount_cents / 100`), so it has no
+ *   upper bound — a $150/unit discount on a $200/unit line is legal — but it
+ *   cannot be negative.
  *
  * A single `.min(0).max(100)` on `rate` would therefore be wrong: it silently
  * forbids most flat discounts.
+ *
+ * ⚠️ **`rate` stays DOLLARS on the `flat` arm and is NOT renamed `_cents`.**
+ * It sits one line above `amount_cents`, which is integer cents, and that
+ * adjacency is the whole hazard: Xero's `DiscountRate` holds 4 decimal places
+ * and is a line's only discount channel, so CFS stores the rate at 4dp to
+ * match. Quantizing it to the cent is the `@cfs/core@10.0.0-beta.117`
+ * regression in a second location.
  */
 function checkDiscountRate(
   d: { rate: number; type: RateType },
@@ -368,7 +385,7 @@ function checkDiscountRate(
 export const Discount: z.ZodType<DiscountType> = z.strictObject({
   rate: z.number(),
   type: RateTypeEnum,
-  amount: z.number().min(0),
+  amount_cents: z.int().min(0),
 }).superRefine(checkDiscountRate);
 
 /** Discount input — rate and type only. Amount is computed by calculateItemPrice. */
@@ -389,27 +406,29 @@ export const DiscountInput: z.ZodType<DiscountInputType> = z.object({
  * Price breakdown for an order item (input — client sends partial data, server computes the rest).
  */
 export interface ItemPriceType {
-  base?: number;
-  replacement?: number | null;
+  base_cents?: number;
+  base_percent?: number | null;
+  replacement_cents?: number | null;
   chargeable_days?: number | null;
   formula?: PriceFormulaType;
-  subtotal?: number;
+  subtotal_cents?: number;
   discount?: DiscountInputType | null;
   taxes?: Array<{ uid: string }>;
-  total?: number;
+  total_cents?: number;
 }
 
 /** Zod schema for item price breakdown (input). */
 export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
-  base: z.number().optional(),
-  replacement: z.number().nullable().optional(),
+  base_cents: z.int().optional(),
+  base_percent: z.number().nullable().optional(),
+  replacement_cents: z.int().nullable().optional(),
   chargeable_days: z.int().nullable().optional(),
   formula: PriceFormulaEnum.optional(),
-  subtotal: z.number().optional(),
+  subtotal_cents: z.int().optional(),
   discount: DiscountInput.nullable().optional(),
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),
-  total: z.number().optional(),
-});
+  total_cents: z.int().optional(),
+}).superRefine(checkPriceBaseUnit);
 
 /**
  * A billable order line as a client sends it — the input mirror of
@@ -628,12 +647,18 @@ export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
  * total = subtotal_discounted + sum(taxes[].amount).
  */
 export interface OrderDocItemPriceType {
-  base: number;
-  replacement?: number | null;
+  base_cents: number;
+  /**
+   * The `percent_of_total` percentage, at 4dp — present on exactly the lines
+   * where `base_cents` is meaningless, and absent everywhere else. See
+   * {@link checkPriceBaseUnit}, which enforces the biconditional.
+   */
+  base_percent?: number | null;
+  replacement_cents?: number | null;
   chargeable_days: number | null;
   formula: PriceFormulaType;
-  subtotal: number;
-  subtotal_discounted: number;
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   /**
@@ -646,21 +671,25 @@ export interface OrderDocItemPriceType {
    * revert path falls back to a batched product read for those).
    */
   taxes_base?: TaxRefType[];
-  total: number;
+  total_cents: number;
 }
 
 export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObject({
-  base: z.number().default(0),
-  replacement: z.number().nullable().optional(),
+  base_cents: z.int().default(0),
+  base_percent: z.number().nullable().optional(),
+  // `.nullable().optional()` and NOT defaulted: a null replacement means "this
+  // line has no replacement value", which is not the fact `0` states, and
+  // `checkItemContract`'s `forbidden` arm reads the difference.
+  replacement_cents: z.int().nullable().optional(),
   chargeable_days: z.number().int().nullable().default(null),
   formula: PriceFormulaEnum.default("five_day_week"),
-  subtotal: z.number().default(0),
-  subtotal_discounted: z.number().default(0),
+  subtotal_cents: z.int().default(0),
+  subtotal_discounted_cents: z.int().default(0),
   discount: Discount.nullable().default(null),
   taxes: z.array(PriceModifier).default([]),
   taxes_base: z.array(TaxRef).optional(),
-  total: z.number().default(0),
-});
+  total_cents: z.int().default(0),
+}).superRefine(checkPriceBaseUnit);
 
 /**
  * Line item in the full order document.
@@ -873,23 +902,23 @@ const OrderDocOrganization = z.strictObject({
 
 /** Order totals. */
 export interface OrderDocTotalsType {
-  discount_amount: number;
-  subtotal: number;
-  subtotal_discounted: number;
+  discount_amount_cents: number;
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
   taxes: PriceModifierType[];
   transaction_fees: PriceModifierType[];
-  total: number;
-  replacement_total: number;
+  total_cents: number;
+  replacement_total_cents: number;
 }
 
 const OrderDocTotals: z.ZodType<OrderDocTotalsType> = z.strictObject({
-  discount_amount: z.number().default(0),
-  subtotal: z.number().default(0),
-  subtotal_discounted: z.number().default(0),
+  discount_amount_cents: z.int().default(0),
+  subtotal_cents: z.int().default(0),
+  subtotal_discounted_cents: z.int().default(0),
   taxes: z.array(PriceModifier).default([]),
   transaction_fees: z.array(PriceModifier).default([]),
-  total: z.number().default(0),
-  replacement_total: z.number().default(0),
+  total_cents: z.int().default(0),
+  replacement_total_cents: z.int().default(0),
 });
 
 /**
@@ -1004,8 +1033,15 @@ export interface ConsolidatedItemType {
   name: string;
   type: string;
   quantity: number;
-  total_price: number;
-  unit_price: number;
+  total_price_cents: number;
+  /**
+   * A LOSSY per-unit denorm of `total_price_cents` — `unit_price_cents ×
+   * quantity` does not in general equal `total_price_cents`, and that residual
+   * is discarded on purpose because nothing multiplies it back. Contrast
+   * `getXeroUnitAmountFromCents`, whose residual is real money in someone
+   * else's ledger and is absorbed through `DiscountRate`.
+   */
+  unit_price_cents: number;
   stock_method: string;
 }
 

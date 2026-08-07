@@ -317,7 +317,7 @@ Deno.test("CreateOrderInput accepts item with discount and taxes", () => {
         type: "rental",
         path: ["dest1000000000000000"],
         price: {
-          base: 100,
+          base_cents: 10000,
           discount: { rate: 20, type: "percent" },
           taxes: [{ uid: "testchirentaltax0000" }],
         },
@@ -431,9 +431,9 @@ const minimalDoc = {
   destinations: [validDocDestination],
   totals: {
     ...totalsBase,
-    subtotal: 100,
-    subtotal_discounted: 100,
-    total: 100,
+    subtotal_cents: 10000,
+    subtotal_discounted_cents: 10000,
+    total_cents: 10000,
   },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
@@ -470,19 +470,19 @@ Deno.test("OrderSchema validates a complete document", () => {
         quantity: 2,
         price: {
           ...priceBase,
-          base: 100,
-          replacement: 5000,
+          base_cents: 10000,
+          replacement_cents: 500000,
           chargeable_days: 5,
-          subtotal: 200,
-          subtotal_discounted: 200,
+          subtotal_cents: 20000,
+          subtotal_discounted_cents: 20000,
           taxes: [{
             uid: "testchirentaltax0000",
             name: "Chicago Rental Tax",
             rate: 15,
             type: "percent",
-            amount: 30,
+            amount_cents: 3000,
           }],
-          total: 230,
+          total_cents: 23000,
         },
         stock_method: "bulk",
       },
@@ -500,12 +500,12 @@ Deno.test("OrderSchema validates a complete document", () => {
 Deno.test("OrderDocItemPrice round-trips an optional taxes_base snapshot", () => {
   const parsed = OrderDocItemPrice.parse({
     ...priceBase,
-    base: 100,
-    subtotal: 100,
-    subtotal_discounted: 100,
-    taxes: [{ uid: "testfrankforttax0000", name: "Frankfort Sales Tax", rate: 8, type: "percent", amount: 8 }],
+    base_cents: 10000,
+    subtotal_cents: 10000,
+    subtotal_discounted_cents: 10000,
+    taxes: [{ uid: "testfrankforttax0000", name: "Frankfort Sales Tax", rate: 8, type: "percent", amount_cents: 800 }],
     taxes_base: [{ uid: "testchisalestax00000", name: "Chicago Sales Tax", rate: 10.25, type: "percent" }],
-    total: 108,
+    total_cents: 10800,
   });
   assertEquals(parsed.taxes_base?.length, 1);
   assertEquals(parsed.taxes_base?.[0].uid, "testchisalestax00000");
@@ -524,7 +524,7 @@ Deno.test("OrderDocItemPrice accepts a price without taxes_base (optional, back-
 Deno.test("OrderDocItemPrice rejects an amount on a taxes_base entry (strict TaxRef)", () => {
   const result = OrderDocItemPrice.safeParse({
     ...priceBase,
-    taxes_base: [{ uid: "testchisalestax00000", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount: 10 }],
+    taxes_base: [{ uid: "testchisalestax00000", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount_cents: 1000 }],
   });
   assertEquals(result.success, false);
 });
@@ -550,7 +550,7 @@ Deno.test("OrderSchema rejects additional properties on organization", () => {
 Deno.test("OrderSchema rejects additional properties on totals", () => {
   const doc = {
     ...minimalDoc,
-    totals: { discount_amount: 0, subtotal: 0, subtotal_discounted: 0, taxes: [], transaction_fees: [], total: 0, extra: 1 },
+    totals: { discount_amount_cents: 0, subtotal_cents: 0, subtotal_discounted_cents: 0, taxes: [], transaction_fees: [], total_cents: 0, extra: 1 },
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -627,20 +627,20 @@ Deno.test("OrderSchema requires price and stock_method on a stored line item", (
   }
 });
 
-Deno.test("OrderSchema rejects rental without price.replacement", () => {
+Deno.test("OrderSchema rejects rental without price.replacement_cents", () => {
   const doc = { ...minimalDoc, items: [docLine({ stock_method: "bulk" })] };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
-Deno.test("OrderSchema rejects rental with null price.replacement", () => {
+Deno.test("OrderSchema rejects rental with null price.replacement_cents", () => {
   const doc = {
     ...minimalDoc,
-    items: [docLine({ stock_method: "bulk", price: { ...priceBase, replacement: null } })],
+    items: [docLine({ stock_method: "bulk", price: { ...priceBase, replacement_cents: null } })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
-Deno.test("OrderSchema accepts rental with stock_method none and no price.replacement", () => {
+Deno.test("OrderSchema accepts rental with stock_method none and no price.replacement_cents", () => {
   const doc = { ...minimalDoc, items: [docLine({ name: "Service Fee" })] };
   assertEquals(OrderSchema.safeParse(doc).success, true);
 });
@@ -659,11 +659,11 @@ Deno.test("OrderSchema rejects float chargeable_days in price", () => {
     items: [docLine({
       price: {
         ...priceBase,
-        base: 100,
+        base_cents: 10000,
         chargeable_days: 3.5,
-        subtotal: 100,
-        subtotal_discounted: 100,
-        total: 100,
+        subtotal_cents: 10000,
+        subtotal_discounted_cents: 10000,
+        total_cents: 10000,
       },
     })],
   };
@@ -676,11 +676,11 @@ Deno.test("OrderSchema rejects invalid price formula", () => {
     items: [docLine({
       price: {
         ...priceBase,
-        base: 100,
+        base_cents: 10000,
         formula: "daily",
-        subtotal: 100,
-        subtotal_discounted: 100,
-        total: 100,
+        subtotal_cents: 10000,
+        subtotal_discounted_cents: 10000,
+        total_cents: 10000,
       },
     })],
   };
@@ -693,12 +693,12 @@ Deno.test("OrderSchema rejects invalid discount type", () => {
     items: [docLine({
       price: {
         ...priceBase,
-        base: 100,
+        base_cents: 10000,
         formula: "fixed",
-        subtotal: 100,
-        subtotal_discounted: 90,
-        discount: { rate: 10, type: "invalid", amount: 10 },
-        total: 90,
+        subtotal_cents: 10000,
+        subtotal_discounted_cents: 9000,
+        discount: { rate: 10, type: "invalid", amount_cents: 1000 },
+        total_cents: 9000,
       },
     })],
   };
@@ -805,11 +805,11 @@ Deno.test("OrderSchema rejects extra properties on line item price", () => {
     items: [docLine({
       price: {
         ...priceBase,
-        base: 100,
+        base_cents: 10000,
         formula: "fixed",
-        subtotal: 100,
-        subtotal_discounted: 100,
-        total: 100,
+        subtotal_cents: 10000,
+        subtotal_discounted_cents: 10000,
+        total_cents: 10000,
         extra: true,
       },
     })],
@@ -905,22 +905,22 @@ Deno.test("isValidOrderStatusTransition allows manual transitions between user s
 // (`rate × quantity × pricingFactor === amount`), so it is unbounded above.
 
 Deno.test("Discount: percent rate must be within [0, 100]", () => {
-  assertEquals(Discount.safeParse({ type: "percent", rate: 0, amount: 0 }).success, true);
-  assertEquals(Discount.safeParse({ type: "percent", rate: 50, amount: 10 }).success, true);
-  assertEquals(Discount.safeParse({ type: "percent", rate: 100, amount: 10 }).success, true);
-  assertEquals(Discount.safeParse({ type: "percent", rate: 100.01, amount: 10 }).success, false);
-  assertEquals(Discount.safeParse({ type: "percent", rate: -0.01, amount: 10 }).success, false);
+  assertEquals(Discount.safeParse({ type: "percent", rate: 0, amount_cents: 0 }).success, true);
+  assertEquals(Discount.safeParse({ type: "percent", rate: 50, amount_cents: 1000 }).success, true);
+  assertEquals(Discount.safeParse({ type: "percent", rate: 100, amount_cents: 1000 }).success, true);
+  assertEquals(Discount.safeParse({ type: "percent", rate: 100.01, amount_cents: 1000 }).success, false);
+  assertEquals(Discount.safeParse({ type: "percent", rate: -0.01, amount_cents: 1000 }).success, false);
 });
 
 Deno.test("Discount: flat rate is per-unit dollars — unbounded above, never negative", () => {
   // A $150/unit discount on a $200/unit line is legal; capping at 100 would ban it.
-  assertEquals(Discount.safeParse({ type: "flat", rate: 150, amount: 300 }).success, true);
-  assertEquals(Discount.safeParse({ type: "flat", rate: 0, amount: 0 }).success, true);
-  assertEquals(Discount.safeParse({ type: "flat", rate: -1, amount: 0 }).success, false);
+  assertEquals(Discount.safeParse({ type: "flat", rate: 150, amount_cents: 30000 }).success, true);
+  assertEquals(Discount.safeParse({ type: "flat", rate: 0, amount_cents: 0 }).success, true);
+  assertEquals(Discount.safeParse({ type: "flat", rate: -1, amount_cents: 0 }).success, false);
 });
 
 Deno.test("Discount: computed amount is never negative", () => {
-  assertEquals(Discount.safeParse({ type: "percent", rate: 10, amount: -1 }).success, false);
+  assertEquals(Discount.safeParse({ type: "percent", rate: 10, amount_cents: -100 }).success, false);
 });
 
 Deno.test("DiscountInput: same rate bounds as the stored discount", () => {
@@ -932,7 +932,7 @@ Deno.test("DiscountInput: same rate bounds as the stored discount", () => {
 });
 
 Deno.test("Discount: the rate error names the field, not the object", () => {
-  const r = Discount.safeParse({ type: "percent", rate: 120, amount: 10 });
+  const r = Discount.safeParse({ type: "percent", rate: 120, amount_cents: 1000 });
   assertEquals(r.success, false);
   if (!r.success) assertEquals(r.error.issues[0].path, ["rate"]);
 });
@@ -949,7 +949,10 @@ const feeLine = {
   // A fee holds no stock, and W5 requires every line type to say so rather than
   // exempting the fee with a contract axis. `"none"` is the honest value.
   stock_method: "none",
-  price: { ...priceBase, base: 3, formula: "percent_of_total" },
+  // A `percent_of_total` fee carries its rate in `base_percent` (a 4dp
+  // percentage), never in `base_cents` — D1's split, enforced by
+  // `checkPriceBaseUnit`. 3% here, not $3.00.
+  price: { ...priceBase, base_cents: 0, base_percent: 3, formula: "percent_of_total" },
 };
 
 Deno.test("OrderDocItem: a transaction_fee is an ordinary line item", () => {
@@ -964,7 +967,7 @@ Deno.test("OrderDocItem: the old PriceModifier fee price is now unrepresentable"
   // `price.taxes[0]` off it. There is one claimant now, so this is a 400.
   const r = OrderDocItem.safeParse({
     ...feeLine,
-    price: { uid: "77LKBYcC09u1PZFhxmDJ", name: "Card Fee", rate: 3, type: "percent", amount: 0 },
+    price: { uid: "77LKBYcC09u1PZFhxmDJ", name: "Card Fee", rate: 3, type: "percent", amount_cents: 0 },
   });
   assertEquals(r.success, false);
 });
@@ -973,9 +976,9 @@ Deno.test("OrderDocItem: a wrong field lands on the field, not the whole item", 
   // The reason to discriminate at all: an undiscriminated union reports
   // `items.N: Invalid input` because every arm failed. A DU picks the arm off
   // `type` first, so the issue names the field the author actually got wrong.
-  const r = OrderDocItem.safeParse({ ...feeLine, price: { ...priceBase, base: "three" } });
+  const r = OrderDocItem.safeParse({ ...feeLine, price: { ...priceBase, base_cents: "three" } });
   assertEquals(r.success, false);
-  if (!r.success) assertEquals(r.error.issues[0].path, ["price", "base"]);
+  if (!r.success) assertEquals(r.error.issues[0].path, ["price", "base_cents"]);
 });
 
 Deno.test("OrderDocItem: a divider carrying a price is rejected on the divider arm", () => {
@@ -1004,10 +1007,10 @@ Deno.test("OrderDocLineItem: the rental replacement refine still fires inside th
     ...feeLine,
     type: "rental",
     stock_method: "bulk",
-    price: { ...priceBase, base: 10, formula: "fixed" },
+    price: { ...priceBase, base_cents: 1000, formula: "fixed" },
   });
   assertEquals(r.success, false);
-  if (!r.success) assertEquals(r.error.issues[0].path, ["price", "replacement"]);
+  if (!r.success) assertEquals(r.error.issues[0].path, ["price", "replacement_cents"]);
 });
 
 Deno.test("isLineItem narrows a transaction_fee to the one line-item shape", () => {
@@ -1024,7 +1027,14 @@ Deno.test("percent_of_total is inexpressible on a non-fee line", () => {
   // It used to be merely THROWN ON, at runtime, inside `perUnitSubtotal` —
   // reachable only once the totals pass ran. The contract makes it unwritable.
   const bad = OrderDocItem.safeParse(
-    docLine({ type: "sale", name: "Gel Pack", price: { ...priceBase, formula: "percent_of_total" } }),
+    docLine({
+      type: "sale",
+      name: "Gel Pack",
+      // `base_percent` supplied so this fixture is wrong in exactly ONE way.
+      // Without it `checkPriceBaseUnit` also fires and issues[0] becomes
+      // ["price","base_percent"] — a true issue, but not the one under test.
+      price: { ...priceBase, base_cents: 0, base_percent: 3, formula: "percent_of_total" },
+    }),
   );
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["price", "formula"]);
@@ -1035,7 +1045,7 @@ Deno.test("percent_of_total is inexpressible on a non-fee line", () => {
       uid: "testfee1000000000000",
       type: "transaction_fee",
       name: "Card Fee",
-      price: { ...priceBase, formula: "percent_of_total" },
+      price: { ...priceBase, base_cents: 0, base_percent: 3, formula: "percent_of_total" },
     })).success,
     true,
   );
@@ -1051,29 +1061,29 @@ Deno.test("percent_of_total is inexpressible on a non-fee line", () => {
   );
 });
 
-Deno.test("a transaction_fee cannot carry price.replacement", () => {
+Deno.test("a transaction_fee cannot carry price.replacement_cents", () => {
   const bad = OrderDocItem.safeParse(docLine({
     uid: "testfee1000000000000",
     type: "transaction_fee",
     name: "Card Fee",
-    price: { ...priceBase, replacement: 100 },
+    price: { ...priceBase, replacement_cents: 10000 },
   }));
   assertEquals(bad.success, false);
-  assertEquals(bad.error?.issues[0].path, ["price", "replacement"]);
+  assertEquals(bad.error?.issues[0].path, ["price", "replacement_cents"]);
 });
 
 Deno.test("the contract check still reports at its declared path inside the union", () => {
   // `.superRefine` replaced a hand-written `.refine`; a DU arm's check must
-  // still emit at ["price","replacement"] rather than at the union root.
+  // still emit at ["price","replacement_cents"] rather than at the union root.
   const bad = OrderDocItem.safeParse({
     uid: "testprod100000000000",
     type: "rental",
     name: "Camera",
     stock_method: "bulk",
-    price: { ...priceBase, replacement: null },
+    price: { ...priceBase, replacement_cents: null },
   });
   assertEquals(bad.success, false);
-  assertEquals(bad.error?.issues[0].path, ["price", "replacement"]);
+  assertEquals(bad.error?.issues[0].path, ["price", "replacement_cents"]);
 
   // Unchanged escape hatch: a rental holding no stock needs no replacement value.
   assertEquals(
@@ -1082,7 +1092,7 @@ Deno.test("the contract check still reports at its declared path inside the unio
       type: "rental",
       name: "Camera",
       stock_method: "none",
-      price: { ...priceBase, replacement: null },
+      price: { ...priceBase, replacement_cents: null },
     }).success,
     true,
   );
@@ -1100,7 +1110,7 @@ Deno.test("OrderItem: a divider cannot carry a price or a quantity", () => {
     name: "Chicago",
     path: [],
     quantity: 3,
-    price: { base: 100 },
+    price: { base_cents: 10000 },
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].code, "unrecognized_keys");
@@ -1126,7 +1136,7 @@ Deno.test("OrderItem: a line item still ships back with its stored extras", () =
     name: "Camera",
     quantity: 2,
     path: ["dest1000000000000000"],
-    price: { base: 100, subtotal: 200, total: 220, taxes: [{ uid: "tax10000000000000000" }] },
+    price: { base_cents: 10000, subtotal_cents: 20000, total_cents: 22000, taxes: [{ uid: "tax10000000000000000" }] },
     crms_id: 4021,
     taxes_base: [{ uid: "tax10000000000000000", name: "Chicago", rate: 9, type: "percent" }],
   });
@@ -1142,7 +1152,7 @@ Deno.test("OrderItem: percent_of_total is inexpressible on an input line too", (
     type: "rental",
     name: "Camera",
     path: [],
-    price: { base: 100, formula: "percent_of_total" },
+    price: { base_percent: 3, formula: "percent_of_total" },
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["price", "formula"]);
@@ -1153,7 +1163,7 @@ Deno.test("OrderItem: percent_of_total is inexpressible on an input line too", (
       type: "transaction_fee",
       name: "Card Fee",
       path: [],
-      price: { base: 0, formula: "percent_of_total" },
+      price: { base_percent: 3, formula: "percent_of_total" },
     }).success,
     true,
   );
@@ -1169,7 +1179,7 @@ Deno.test("OrderItem: the input does NOT enforce the replacement axis", () => {
       type: "rental",
       name: "Camera",
       path: [],
-      price: { base: 100 },
+      price: { base_cents: 10000 },
     }).success,
     true,
   );

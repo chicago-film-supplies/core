@@ -47,17 +47,17 @@ function makeItem(
     ...overrides,
     price: {
       ...priceBase,
-      base: 100,
+      base_cents: 10000,
       chargeable_days: 5,
-      subtotal: 100,
-      subtotal_discounted: 100,
-      total: 115,
+      subtotal_cents: 10000,
+      subtotal_discounted_cents: 10000,
+      total_cents: 11500,
       taxes: [{
         uid: "chi-rental-tax",
         name: "Chicago Rental Tax",
         rate: 15,
         type: "percent",
-        amount: 15,
+        amount_cents: 1500,
       }],
       ...priceOverrides,
     },
@@ -113,8 +113,8 @@ Deno.test("getEffectiveProfileTax: tax_applied → null (no override)", () => {
 // LineItem.price is a union (priceable vs transaction-fee); narrow for asserts.
 const px = (it: LineItem) =>
   it.price as {
-    taxes: Array<{ uid: string; name: string; rate: number; type: string; amount: number }>;
-    total: number;
+    taxes: Array<{ uid: string; name: string; rate: number; type: string; amount_cents: number }>;
+    total_cents: number;
   };
 
 Deno.test("override tax_frankfort replaces item tax with 8% Frankfort + updates total", () => {
@@ -125,23 +125,23 @@ Deno.test("override tax_frankfort replaces item tax with 8% Frankfort + updates 
     name: "Frankfort Sales Tax",
     rate: 8,
     type: "percent",
-    amount: 8,
+    amount_cents: 800,
   }]);
-  assertEquals(px(items[0]).total, 108);
+  assertEquals(px(items[0]).total_cents, 10800);
 });
 
 Deno.test("override tax_exempt empties taxes and sets total to subtotal_discounted", () => {
   const items = [makeItem()];
   overrideItemTaxesForProfile(items, "tax_exempt", "tax_applied", CATALOG, AS_OF);
   assertEquals(px(items[0]).taxes, []);
-  assertEquals(px(items[0]).total, 100);
+  assertEquals(px(items[0]).total_cents, 10000);
 });
 
 Deno.test("override tax_applied leaves the item untouched (Chicago default kept)", () => {
   const items = [makeItem()];
   overrideItemTaxesForProfile(items, "tax_applied", "tax_applied", CATALOG, AS_OF);
   assertEquals(px(items[0]).taxes[0].uid, "chi-rental-tax");
-  assertEquals(px(items[0]).total, 115);
+  assertEquals(px(items[0]).total_cents, 11500);
 });
 
 Deno.test("override skips non-priceable (group) items", () => {
@@ -164,7 +164,7 @@ Deno.test("override does NOT re-tax a non-revenue COA under a location profile",
   const items = [makeItem({ coa_revenue: 4100 })];
   overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
   assertEquals(px(items[0]).taxes, []);
-  assertEquals(px(items[0]).total, 100, "total is the untaxed subtotal");
+  assertEquals(px(items[0]).total_cents, 10000, "total is the untaxed subtotal");
 });
 
 Deno.test("override still applies the location profile on a revenue COA", () => {
@@ -173,7 +173,7 @@ Deno.test("override still applies the location profile on a revenue COA", () => 
   const items = [makeItem({ coa_revenue: 4000 })];
   overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
   assertEquals(px(items[0]).taxes.length, 1);
-  assertEquals(px(items[0]).total, 108);
+  assertEquals(px(items[0]).total_cents, 10800);
 });
 
 Deno.test("override leaves an absent COA taxable (order lines carry none)", () => {

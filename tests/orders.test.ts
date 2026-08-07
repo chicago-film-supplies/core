@@ -2,6 +2,9 @@ import { assertEquals, assertThrows } from "@std/assert";
 // Real currency.js, not a model of it — the fail-closed companions measure the
 // forms the docstrings quote rather than reconstructing them.
 import currency from "currency.js";
+// The two fail-closed companions model DOLLAR-denominated predecessors, so they
+// need the cents->dollars direction. Via the core export, never a bare / 100.
+import { fromCents } from "../src/utils/money.ts";
 import {
   DOC_LINE_ITEM_TYPES,
   FULFILLMENT_LINE_ITEM_TYPES,
@@ -16,15 +19,15 @@ import {
   OrderDocLineItem,
 } from "../src/schemas/mod.ts";
 import {
-  calculateItemDiscount,
+  calculateItemDiscountCents,
   calculateItemPrice,
   calculateItemSubtotal,
   calculateItemTax,
-  computeItemTaxAmount,
+  computeItemTaxAmountCents,
   isTaxableCoa,
   TAXABLE_REVENUE_COAS,
-  calculateItemTotal,
-  calculateTransactionFeeAmount,
+  calculateItemTotalCents,
+  calculateTransactionFeeAmountCents,
   calculateOrderTotals,
   calculateReplacementTotals,
   buildPackingList,
@@ -45,7 +48,7 @@ import {
   getStructuralUids,
   getTransactionFeeTotals,
   getTaxTotals,
-  getTotalDiscount,
+  getTotalDiscountCents,
   groupByDestination,
   isPriceableItem,
   isPreTaxItem,
@@ -92,7 +95,7 @@ function makeItem(
     ...overrides,
     price: {
       ...priceBase,
-      base: 100,
+      base_cents: 10000,
       chargeable_days: 5,
       ...priceOverrides,
     },
@@ -112,7 +115,7 @@ function makeFeeItem(
     price: {
       ...priceBase,
       formula: "percent_of_total",
-      base: 3,
+      base_percent: 3,
       ...feeOverrides,
     },
   } as LineItem;
@@ -169,9 +172,9 @@ Deno.test("isPreTaxItem returns false for destination", () => {
  *
  * The failure was quiet rather than loud, which is what made it worth a test
  * rather than a comment: `currency(NaN).value` is **null, not NaN**, so
- * `calculateReplacementTotals` returned `{subtotal: null, tax: 0, total: null}`
+ * `calculateReplacementTotals` returned `{subtotal_cents: null, tax_cents: 0, total_cents: null}`
  * against a declared `subtotal: number` — a blank or $0.00 replacement value
- * beside a `tax: 0` that reads like a real answer. A replacement figure is what
+ * beside a `tax_cents: 0` that reads like a real answer. A replacement figure is what
  * a loss-liability number is read off, so reading zero is the wrong direction to
  * fail in.
  *
@@ -226,25 +229,25 @@ Deno.test("calculateItemSubtotal: percent discount rounds by the exact rational,
   // Was: currency(3342.41).multiply(11) → 36766.51, then .multiply((100 - 89.1914)/100)
   //   = .multiply(0.10808600000000006) → 3973.95. The exact value is 3973.9449…,
   // which rounds to 3973.94. The float factor pushed it over the .005 boundary.
-  const item = makeItem({ quantity: 11 }, { base: 3342.41, chargeable_days: 4, discount: { type: "percent", rate: 89.1914, amount: 0 } });
+  const item = makeItem({ quantity: 11 }, { base_cents: 334241, chargeable_days: 4, discount: { type: "percent", rate: 89.1914, amount_cents: 0 } });
   const r = calculateItemSubtotal(item);
-  assertEquals(r.subtotal, 36766.51); // 4 days → below the one-week floor → factor 1
-  assertEquals(r.subtotal_discounted, 3973.94);
+  assertEquals(r.subtotal_cents, 3676651); // 4 days → below the one-week floor → factor 1
+  assertEquals(r.subtotal_discounted_cents, 397394);
 });
 
 Deno.test("calculateItemSubtotal: a second exact-rounding case, with the day factor engaged", () => {
   // base 4109.19 × qty 25 × (31/5) = 636,924.45; × (1 - 0.722409) = 176,804.49…
-  const item = makeItem({ quantity: 25 }, { base: 4109.19, chargeable_days: 31, discount: { type: "percent", rate: 72.2409, amount: 0 } });
+  const item = makeItem({ quantity: 25 }, { base_cents: 410919, chargeable_days: 31, discount: { type: "percent", rate: 72.2409, amount_cents: 0 } });
   const r = calculateItemSubtotal(item);
-  assertEquals(r.subtotal, 636924.45);
-  assertEquals(r.subtotal_discounted, 176804.49);
+  assertEquals(r.subtotal_cents, 63692445);
+  assertEquals(r.subtotal_discounted_cents, 17680449);
 });
 
 Deno.test("calculateItemSubtotal: the day factor is applied as × days ÷ 5, exactly", () => {
   // 23/5 = 4.6 is not exact in binary. base 60 × qty 6 × 23 ÷ 5 = 1656 exactly.
-  const r = calculateItemSubtotal(makeItem({ quantity: 6 }, { base: 60, chargeable_days: 23 }));
-  assertEquals(r.subtotal, 1656);
-  assertEquals(r.subtotal_discounted, 1656);
+  const r = calculateItemSubtotal(makeItem({ quantity: 6 }, { base_cents: 6000, chargeable_days: 23 }));
+  assertEquals(r.subtotal_cents, 165600);
+  assertEquals(r.subtotal_discounted_cents, 165600);
 });
 
 // ── The sweep the three CLAUDE.md files claim ────────────────────
@@ -282,7 +285,8 @@ function gcd(a: bigint, b: bigint): bigint {
 }
 
 interface SweepLine {
-  base: number;
+  /** Integer cents, matching storage — the draw below is already cent-grained. */
+  baseCents: number;
   quantity: number;
   chargeableDays: number;
   formula: "five_day_week" | "fixed";
@@ -292,14 +296,14 @@ interface SweepLine {
 /**
  * The true mathematical value of a line, in cents, as one exact rational.
  *
- * `subtotal = base × quantity × max(days/5, 1)` (the floor bites only above 5
+ * `subtotal = base_cents × quantity × max(days/5, 1)` (the floor bites only above 5
  * chargeable days, and `fixed` never engages it), then the discount:
  * `percent` scales the subtotal by `(100 − rate)/100`; `flat` is dollars per
  * unit **per pricing factor**, so it carries the same quantity and day factor
  * as the price it discounts.
  */
 function exactLineCents(line: SweepLine): { subtotal: bigint; discounted: bigint } {
-  const baseCents = BigInt(Math.round(line.base * 100));
+  const baseCents = BigInt(line.baseCents);
   const qty = BigInt(Math.round(line.quantity * 10_000));
   const useDays = line.formula === "five_day_week" && line.chargeableDays > 5;
   const factorNum = useDays ? BigInt(line.chargeableDays) : 1n;
@@ -338,7 +342,7 @@ function divideFirstLine(line: SweepLine, precision = 4): { subtotal: number; di
   const q = 10 ** precision;
   const useDays = line.formula === "five_day_week" && line.chargeableDays > 5;
   const factor = useDays ? line.chargeableDays / 5 : 1;
-  const subtotal = Math.round(line.base * line.quantity * factor * 100) / 100;
+  const subtotal = Math.round(fromCents(line.baseCents) * line.quantity * factor * 100) / 100;
   if (!line.discount) return { subtotal, discounted: subtotal };
   if (line.discount.type === "percent") {
     const ratio = Math.round(((100 - line.discount.rate) / 100) * q) / q; // ← the quantized ratio
@@ -363,7 +367,12 @@ function sweepLines(count: number): SweepLine[] {
     // exactly that, and an integer-only sweep would never reach it.
     const withDiscount = rand(4) !== 0;
     lines.push({
-      base: rand(500_000) / 100,
+      // Cents, drawn directly. The pre-migration form was `rand(500_000) / 100`
+      // — the same numbers expressed as dollars and immediately re-multiplied by
+      // the oracle. Drawing cents removes that round trip from the oracle, which
+      // is the side that must not share an arithmetic step with the
+      // implementation it checks.
+      baseCents: rand(500_000),
       quantity: rand(200_000) / 10_000,
       chargeableDays: rand(40),
       formula: rand(2) === 0 ? "five_day_week" : "fixed",
@@ -379,10 +388,10 @@ const SWEEP = sweepLines(300_000);
 
 const lineToItem = (line: SweepLine) =>
   makeItem({ quantity: line.quantity }, {
-    base: line.base,
+    base_cents: line.baseCents,
     chargeable_days: line.chargeableDays,
     formula: line.formula,
-    ...(line.discount ? { discount: { ...line.discount, amount: 0 } } : {}),
+    ...(line.discount ? { discount: { ...line.discount, amount_cents: 0 } } : {}),
   });
 
 Deno.test("calculateItemSubtotal matches exact rational arithmetic over 300k random lines", () => {
@@ -391,9 +400,12 @@ Deno.test("calculateItemSubtotal matches exact rational arithmetic over 300k ran
   for (const line of SWEEP) {
     const got = calculateItemSubtotal(lineToItem(line));
     const want = exactLineCents(line);
+    // Both sides are integer cents now, so the comparison is direct. The
+    // `Math.round(x * 100)` this replaced existed only to get the
+    // dollar-valued implementation onto the oracle's scale.
     if (
-      BigInt(Math.round(got.subtotal * 100)) !== want.subtotal ||
-      BigInt(Math.round(got.subtotal_discounted * 100)) !== want.discounted
+      BigInt(got.subtotal_cents) !== want.subtotal ||
+      BigInt(got.subtotal_discounted_cents) !== want.discounted
     ) {
       disagreements++;
       first ??= `${JSON.stringify(line)} → got ${JSON.stringify(got)}, want ` +
@@ -408,37 +420,66 @@ Deno.test("…and a divide-first implementation DOES disagree — the sweep can 
   // sweep whose oracle had drifted into a restatement of the implementation
   // would pass forever and prove nothing — the `SETTLED_INVOICE_STATUSES`
   // lesson, one level up: a guard never seen to fail is not known to be a guard.
-  let disagreements = 0;
+  //
+  // ⚠️ **The two arms are counted SEPARATELY, and that is load-bearing.** They
+  // used to share one counter, which was safe only while both could fail. With
+  // `base_cents` integral, the subtotal arm's `base × qty × factor` is exact
+  // for every `fixed` line and for every `five_day_week` line at or below the
+  // one-week floor — so a merged counter would still be comfortably non-zero on
+  // the discount arm alone while the subtotal arm quietly stopped
+  // discriminating, and nothing would say so. Asserting each arm is what keeps
+  // "this guard can fail" a measured fact per arm rather than an aggregate.
+  let subtotalDisagreements = 0;
+  let discountDisagreements = 0;
   for (const line of SWEEP) {
     const want = exactLineCents(line);
     const bad = divideFirstLine(line);
-    if (
-      BigInt(Math.round(bad.subtotal * 100)) !== want.subtotal ||
-      BigInt(Math.round(bad.discounted * 100)) !== want.discounted
-    ) disagreements++;
+    if (BigInt(Math.round(bad.subtotal * 100)) !== want.subtotal) subtotalDisagreements++;
+    if (BigInt(Math.round(bad.discounted * 100)) !== want.discounted) discountDisagreements++;
   }
   assertEquals(
-    disagreements > 0,
+    discountDisagreements > 0,
     true,
-    "the divide-first form agreed on all 300k lines — the oracle has stopped discriminating",
+    "the divide-first DISCOUNT form agreed on all 300k lines — the oracle has stopped discriminating",
   );
+  // The SUBTOTAL arm is REPORTED, not asserted, and the reason is a measurement
+  // rather than a preference — the same posture the tax companion below takes
+  // toward its multiply-first form.
+  //
+  // Splitting this counter was expected to show the subtotal arm weakening once
+  // `base_cents` became integral. It showed something stronger: **the arm was
+  // already vacuous before the migration and always had been.** Re-running the
+  // pre-migration dollar draw (`base: rand(500_000) / 100`) through the
+  // pre-migration `divideFirstLine` gives 0 subtotal disagreements and 1,150
+  // discount disagreements — so the single merged counter this replaced, whose
+  // 1,150 is quoted in three CLAUDE.md files as evidence the sweep can fail, was
+  // carried *entirely* by the discount arm. One arm was doing all the work and
+  // the aggregate said "the guard bites".
+  //
+  // That is consistent with what the module's own comments have said all along:
+  // the subtotal path tolerated float and "never flipped a rounding tie", while
+  // the discount path mis-rounded 14 lines in 300k. `divideFirstLine`'s subtotal
+  // is not a divide-first form at all — its only pre-divided quotient is
+  // `days / 5`, which is the benign one. So a zero here is the correct answer,
+  // not a broken guard, and asserting a floor on it would mean tuning the draw
+  // until a form we have measured as harmless looks harmful.
   console.log(
-    `  divide-first mis-rounds ${disagreements} of ${SWEEP.length} lines ` +
-      `(1 in ${Math.round(SWEEP.length / disagreements)})`,
+    `  divide-first mis-rounds ${subtotalDisagreements} subtotals (expected 0 — the day factor ` +
+      `is the benign quotient) and ${discountDisagreements} discounts of ${SWEEP.length} lines`,
   );
 });
 
 Deno.test("calculateItemSubtotal: flat discount is per-unit, per pricing factor", () => {
   // rate 10/unit × qty 2 × (10/5) = 40 off a 100 × 2 × 2 = 400 subtotal.
-  const item = makeItem({ quantity: 2 }, { base: 100, chargeable_days: 10, discount: { type: "flat", rate: 10, amount: 0 } });
+  const item = makeItem({ quantity: 2 }, { base_cents: 10000, chargeable_days: 10, discount: { type: "flat", rate: 10, amount_cents: 0 } });
   const r = calculateItemSubtotal(item);
-  assertEquals(r.subtotal, 400);
-  assertEquals(r.subtotal_discounted, 360);
+  assertEquals(r.subtotal_cents, 40000);
+  assertEquals(r.subtotal_discounted_cents, 36000);
 });
 
 Deno.test("calculateItemSubtotal: a flat discount larger than the line goes negative, not clamped", () => {
-  const item = makeItem({ quantity: 1 }, { base: 10, chargeable_days: 5, discount: { type: "flat", rate: 25, amount: 0 } });
-  assertEquals(calculateItemSubtotal(item).subtotal_discounted, -15);
+  const item = makeItem({ quantity: 1 }, { base_cents: 1000, chargeable_days: 5, discount: { type: "flat", rate: 25, amount_cents: 0 } });
+  assertEquals(calculateItemSubtotal(item).subtotal_discounted_cents, -1500);
 });
 
 Deno.test("calculateItemSubtotal: rejects an unknown formula", () => {
@@ -450,70 +491,70 @@ Deno.test("calculateItemSubtotal: rejects an unknown formula", () => {
 
 Deno.test("calculateItemSubtotal five_day_week 1 week", () => {
   const result = calculateItemSubtotal(makeItem());
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.subtotal_discounted, 100);
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.subtotal_discounted_cents, 10000);
 });
 
 Deno.test("calculateItemSubtotal five_day_week 2 weeks", () => {
   const result = calculateItemSubtotal(makeItem({}, { chargeable_days: 10 }));
-  assertEquals(result.subtotal, 200);
-  assertEquals(result.subtotal_discounted, 200);
+  assertEquals(result.subtotal_cents, 20000);
+  assertEquals(result.subtotal_discounted_cents, 20000);
 });
 
 Deno.test("calculateItemSubtotal five_day_week 3 days (min 1 week)", () => {
   const result = calculateItemSubtotal(makeItem({}, { chargeable_days: 3 }));
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.subtotal_discounted, 100);
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.subtotal_discounted_cents, 10000);
 });
 
 Deno.test("calculateItemSubtotal with percent discount", () => {
   const result = calculateItemSubtotal(makeItem({}, {
-    discount: { rate: 10, type: "percent", amount: 0 },
+    discount: { rate: 10, type: "percent", amount_cents: 0 },
   }));
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.subtotal_discounted, 90);
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.subtotal_discounted_cents, 9000);
 });
 
 Deno.test("calculateItemSubtotal with flat discount", () => {
   const result = calculateItemSubtotal(makeItem({ quantity: 2 }, {
     chargeable_days: 5,
-    discount: { rate: 10, type: "flat", amount: 0 },
+    discount: { rate: 10, type: "flat", amount_cents: 0 },
   }));
   // subtotal = 100 * 2 * 1 = 200
   // flat discount = 10 * 2 * 1 = 20
-  assertEquals(result.subtotal, 200);
-  assertEquals(result.subtotal_discounted, 180);
+  assertEquals(result.subtotal_cents, 20000);
+  assertEquals(result.subtotal_discounted_cents, 18000);
 });
 
 Deno.test("calculateItemSubtotal flat discount scales with days", () => {
   const result = calculateItemSubtotal(makeItem({ quantity: 1 }, {
     chargeable_days: 10,
-    discount: { rate: 5, type: "flat", amount: 0 },
+    discount: { rate: 5, type: "flat", amount_cents: 0 },
   }));
   // subtotal = 100 * 1 * 2 = 200
   // flat discount = 5 * 1 * 2 = 10
-  assertEquals(result.subtotal, 200);
-  assertEquals(result.subtotal_discounted, 190);
+  assertEquals(result.subtotal_cents, 20000);
+  assertEquals(result.subtotal_discounted_cents, 19000);
 });
 
 Deno.test("calculateItemSubtotal with quantity", () => {
   const result = calculateItemSubtotal(makeItem({ quantity: 3 }));
-  assertEquals(result.subtotal, 300);
-  assertEquals(result.subtotal_discounted, 300);
+  assertEquals(result.subtotal_cents, 30000);
+  assertEquals(result.subtotal_discounted_cents, 30000);
 });
 
 Deno.test("calculateItemSubtotal fixed formula", () => {
-  const result = calculateItemSubtotal(makeItem({}, { formula: "fixed", base: 50 }));
-  assertEquals(result.subtotal, 50);
-  assertEquals(result.subtotal_discounted, 50);
+  const result = calculateItemSubtotal(makeItem({}, { formula: "fixed", base_cents: 5000 }));
+  assertEquals(result.subtotal_cents, 5000);
+  assertEquals(result.subtotal_discounted_cents, 5000);
 });
 
 Deno.test("calculateItemSubtotal fixed with quantity and percent discount", () => {
   const result = calculateItemSubtotal(
-    makeItem({ quantity: 2 }, { formula: "fixed", base: 100, discount: { rate: 25, type: "percent", amount: 0 } }),
+    makeItem({ quantity: 2 }, { formula: "fixed", base_cents: 10000, discount: { rate: 25, type: "percent", amount_cents: 0 } }),
   );
-  assertEquals(result.subtotal, 200);
-  assertEquals(result.subtotal_discounted, 150);
+  assertEquals(result.subtotal_cents, 20000);
+  assertEquals(result.subtotal_discounted_cents, 15000);
 });
 
 Deno.test("calculateItemSubtotal throws for non-priceable", () => {
@@ -543,41 +584,41 @@ Deno.test("calculateItemTax with percent tax", () => {
   const result = calculateItemTax(item, TAXES);
   assertEquals(result.length, 1);
   assertEquals(result[0].name, "Chicago Sales Tax");
-  assertEquals(result[0].amount, 10.25);
+  assertEquals(result[0].amount_cents, 1025);
 });
 
 Deno.test("calculateItemTax with rental tax", () => {
   const item = makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] });
   const result = calculateItemTax(item, TAXES);
   assertEquals(result.length, 1);
-  assertEquals(result[0].amount, 15);
+  assertEquals(result[0].amount_cents, 1500);
 });
 
 Deno.test("calculateItemTax with flat tax", () => {
   const item = makeItem({ quantity: 24 }, {
     formula: "fixed",
-    base: 1,
+    base_cents: 100,
     taxes: [{ uid: "water-bottle-tax" }],
   });
   const result = calculateItemTax(item, TAXES);
   assertEquals(result.length, 1);
   assertEquals(result[0].name, "Water Bottle Tax");
   assertEquals(result[0].type, "flat");
-  assertEquals(result[0].amount, 1.20);
+  assertEquals(result[0].amount_cents, 120);
 });
 
 Deno.test("calculateItemTax multi-tax per item", () => {
   const item = makeItem({ quantity: 24 }, {
     formula: "fixed",
-    base: 1,
+    base_cents: 100,
     taxes: [{ uid: "chi-sales-tax" }, { uid: "water-bottle-tax" }],
   });
   const result = calculateItemTax(item, TAXES);
   assertEquals(result.length, 2);
   assertEquals(result[0].name, "Chicago Sales Tax");
-  assertEquals(result[0].amount, 2.46); // 24 * 0.1025
+  assertEquals(result[0].amount_cents, 246); // 24 * 0.1025
   assertEquals(result[1].name, "Water Bottle Tax");
-  assertEquals(result[1].amount, 1.20); // 0.05 * 24
+  assertEquals(result[1].amount_cents, 120); // 0.05 * 24
 });
 
 Deno.test("calculateItemTax throws for unknown tax uid", () => {
@@ -591,115 +632,115 @@ Deno.test("calculateItemTax throws for unknown tax uid", () => {
 
 Deno.test("calculateItemTax applies to subtotal_discounted", () => {
   const item = makeItem({}, {
-    discount: { rate: 20, type: "percent", amount: 0 },
+    discount: { rate: 20, type: "percent", amount_cents: 0 },
     taxes: [{ uid: "chi-rental-tax" }],
   });
   // subtotal_discounted = 100 * 0.8 = 80
   // tax = 80 * 0.15 = 12
   const result = calculateItemTax(item, TAXES);
-  assertEquals(result[0].amount, 12);
+  assertEquals(result[0].amount_cents, 1200);
 });
 
 // ── calculateItemPrice ───────────────────────────────────────────
 
 Deno.test("calculateItemPrice computes full pipeline", () => {
   const item = makeItem({}, {
-    discount: { rate: 20, type: "percent", amount: 0 },
+    discount: { rate: 20, type: "percent", amount_cents: 0 },
     taxes: [{ uid: "chi-rental-tax" }],
   });
   const result = calculateItemPrice(item, TAXES);
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.subtotal_discounted, 80);
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.subtotal_discounted_cents, 8000);
   assertEquals(result.discount!.rate, 20);
   assertEquals(result.discount!.type, "percent");
-  assertEquals(result.discount!.amount, 20);
-  assertEquals(result.taxes[0].amount, 12); // 80 * 0.15
-  assertEquals(result.total, 92); // 80 + 12
+  assertEquals(result.discount!.amount_cents, 2000);
+  assertEquals(result.taxes[0].amount_cents, 1200); // 80 * 0.15
+  assertEquals(result.total_cents, 9200); // 80 + 12
 });
 
 Deno.test("calculateItemPrice with no discount", () => {
   const item = makeItem({}, { taxes: [{ uid: "chi-sales-tax" }] });
   const result = calculateItemPrice(item, TAXES);
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.subtotal_discounted, 100);
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.subtotal_discounted_cents, 10000);
   assertEquals(result.discount, null);
-  assertEquals(result.total, 110.25);
+  assertEquals(result.total_cents, 11025);
 });
 
-// ── calculateItemTotal ───────────────────────────────────────────
+// ── calculateItemTotalCents ───────────────────────────────────────────
 
-Deno.test("calculateItemTotal no tax", () => {
-  assertEquals(calculateItemTotal(makeItem(), TAXES), 100);
+Deno.test("calculateItemTotalCents no tax", () => {
+  assertEquals(calculateItemTotalCents(makeItem(), TAXES), 10000);
 });
 
-Deno.test("calculateItemTotal with tax", () => {
+Deno.test("calculateItemTotalCents with tax", () => {
   assertEquals(
-    calculateItemTotal(makeItem({}, { taxes: [{ uid: "chi-sales-tax" }] }), TAXES),
-    110.25,
+    calculateItemTotalCents(makeItem({}, { taxes: [{ uid: "chi-sales-tax" }] }), TAXES),
+    11025,
   );
 });
 
-Deno.test("calculateItemTotal for transaction fee item reports the stored total", () => {
+Deno.test("calculateItemTotalCents for transaction fee item reports the stored total", () => {
   // A fee is priced from the DOCUMENT, so the only correct value here is the one
   // the totals pass already wrote — there is no basis to recompute from.
-  const fee = makeFeeItem({}, { total: 42.50 });
-  assertEquals(calculateItemTotal(fee, TAXES), 42.50);
+  const fee = makeFeeItem({}, { total_cents: 4250 });
+  assertEquals(calculateItemTotalCents(fee, TAXES), 4250);
 });
 
-// ── calculateItemDiscount ────────────────────────────────────────
+// ── calculateItemDiscountCents ────────────────────────────────────────
 
-Deno.test("calculateItemDiscount returns 0 for no discount", () => {
-  assertEquals(calculateItemDiscount(makeItem()), 0);
+Deno.test("calculateItemDiscountCents returns 0 for no discount", () => {
+  assertEquals(calculateItemDiscountCents(makeItem()), 0);
 });
 
-Deno.test("calculateItemDiscount calculates 10% discount", () => {
-  assertEquals(calculateItemDiscount(makeItem({}, {
-    discount: { rate: 10, type: "percent", amount: 0 },
-  })), 10);
+Deno.test("calculateItemDiscountCents calculates 10% discount", () => {
+  assertEquals(calculateItemDiscountCents(makeItem({}, {
+    discount: { rate: 10, type: "percent", amount_cents: 0 },
+  })), 1000);
 });
 
-Deno.test("calculateItemDiscount fixed formula", () => {
+Deno.test("calculateItemDiscountCents fixed formula", () => {
   assertEquals(
-    calculateItemDiscount(
-      makeItem({}, { formula: "fixed", base: 100, discount: { rate: 20, type: "percent", amount: 0 } }),
+    calculateItemDiscountCents(
+      makeItem({}, { formula: "fixed", base_cents: 10000, discount: { rate: 20, type: "percent", amount_cents: 0 } }),
     ),
-    20,
+    2000,
   );
 });
 
-Deno.test("calculateItemDiscount flat discount", () => {
+Deno.test("calculateItemDiscountCents flat discount", () => {
   assertEquals(
-    calculateItemDiscount(
-      makeItem({ quantity: 3 }, { discount: { rate: 5, type: "flat", amount: 0 } }),
+    calculateItemDiscountCents(
+      makeItem({ quantity: 3 }, { discount: { rate: 5, type: "flat", amount_cents: 0 } }),
     ),
-    15, // 5 * 3 * (5/5)
+    1500, // 5 * 3 * (5/5)
   );
 });
 
-// ── getTotalDiscount ─────────────────────────────────────────────
+// ── getTotalDiscountCents ─────────────────────────────────────────────
 
-Deno.test("getTotalDiscount sums all item discounts", () => {
+Deno.test("getTotalDiscountCents sums all item discounts", () => {
   const items = [
-    makeItem({}, { discount: { rate: 10, type: "percent", amount: 0 } }),
-    makeItem({}, { discount: { rate: 20, type: "percent", amount: 0 } }),
+    makeItem({}, { discount: { rate: 10, type: "percent", amount_cents: 0 } }),
+    makeItem({}, { discount: { rate: 20, type: "percent", amount_cents: 0 } }),
   ];
-  assertEquals(getTotalDiscount(items), 30);
+  assertEquals(getTotalDiscountCents(items), 3000);
 });
 
-Deno.test("getTotalDiscount skips non-priceable items", () => {
+Deno.test("getTotalDiscountCents skips non-priceable items", () => {
   const items = [
-    makeItem({}, { discount: { rate: 10, type: "percent", amount: 0 } }),
+    makeItem({}, { discount: { rate: 10, type: "percent", amount_cents: 0 } }),
     { type: "destination" } as LineItem,
   ];
-  assertEquals(getTotalDiscount(items), 10);
+  assertEquals(getTotalDiscountCents(items), 1000);
 });
 
-Deno.test("getTotalDiscount skips transaction fee items", () => {
+Deno.test("getTotalDiscountCents skips transaction fee items", () => {
   const items = [
-    makeItem({}, { discount: { rate: 10, type: "percent", amount: 0 } }),
+    makeItem({}, { discount: { rate: 10, type: "percent", amount_cents: 0 } }),
     makeFeeItem(),
   ];
-  assertEquals(getTotalDiscount(items), 10);
+  assertEquals(getTotalDiscountCents(items), 1000);
 });
 
 // ── getTaxTotals ─────────────────────────────────────────────────
@@ -714,8 +755,8 @@ Deno.test("getTaxTotals groups by tax name", () => {
   const result = getTaxTotals(items, TAXES);
   const salesTax = result.find((t) => t.name === "Chicago Sales Tax");
   const rentalTax = result.find((t) => t.name === "Chicago Rental Tax");
-  assertEquals(salesTax?.amount, 20.50);
-  assertEquals(rentalTax?.amount, 15);
+  assertEquals(salesTax?.amount_cents, 2050);
+  assertEquals(rentalTax?.amount_cents, 1500);
   assertEquals(result.length, 2); // tax_none excluded (zero amount)
 });
 
@@ -723,93 +764,93 @@ Deno.test("getTaxTotals groups by tax name", () => {
 
 Deno.test("getTransactionFeeTotals aggregates fee items", () => {
   const items = [
-    makeFeeItem({}, { total: 10 }),
-    makeFeeItem({}, { total: 5 }),
+    makeFeeItem({}, { total_cents: 1000 }),
+    makeFeeItem({}, { total_cents: 500 }),
   ];
   const result = getTransactionFeeTotals(items);
   assertEquals(result.length, 1);
   assertEquals(result[0].name, "Credit Card Processing Fee");
-  assertEquals(result[0].amount, 15);
+  assertEquals(result[0].amount_cents, 1500);
 });
 
 // ── calculateOrderTotals ─────────────────────────────────────────
 
 Deno.test("calculateOrderTotals computes all totals", () => {
   const items = [
-    makeItem({}, { taxes: [{ uid: "chi-sales-tax" }], discount: { rate: 10, type: "percent", amount: 0 } }),
-    makeItem({}, { formula: "fixed", base: 50 }),
+    makeItem({}, { taxes: [{ uid: "chi-sales-tax" }], discount: { rate: 10, type: "percent", amount_cents: 0 } }),
+    makeItem({}, { formula: "fixed", base_cents: 5000 }),
   ];
   const result = calculateOrderTotals(items, TAXES);
-  assertEquals(result.subtotal, 150); // 100 + 50
-  assertEquals(result.subtotal_discounted, 140); // 90 + 50
-  assertEquals(result.discount_amount, 10);
-  assertEquals(result.taxes.find((t) => t.name === "Chicago Sales Tax")?.amount, 9.23); // 90 * 0.1025
-  assertEquals(result.total, 149.23); // 140 + 9.23
+  assertEquals(result.subtotal_cents, 15000); // 100 + 50
+  assertEquals(result.subtotal_discounted_cents, 14000); // 90 + 50
+  assertEquals(result.discount_amount_cents, 1000);
+  assertEquals(result.taxes.find((t) => t.name === "Chicago Sales Tax")?.amount_cents, 923); // 90 * 0.1025
+  assertEquals(result.total_cents, 14923); // 140 + 9.23
 });
 
 Deno.test("calculateOrderTotals two-pass with transaction fee", () => {
   const items = [
     makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
-    makeFeeItem({}, { base: 3, formula: "percent_of_total" }),
+    makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" }),
   ];
   const result = calculateOrderTotals(items, TAXES);
   // subtotal = 100, subtotal_discounted = 100
   // tax = 100 * 0.15 = 15
   // fee = 100 * 0.03 = 3
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.subtotal_discounted, 100);
-  assertEquals(result.taxes[0].amount, 15);
-  assertEquals(result.transaction_fees[0].amount, 3);
-  assertEquals(result.total, 118); // 100 + 15 + 3
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.subtotal_discounted_cents, 10000);
+  assertEquals(result.taxes[0].amount_cents, 1500);
+  assertEquals(result.transaction_fees[0].amount_cents, 300);
+  assertEquals(result.total_cents, 11800); // 100 + 15 + 3
 });
 
 Deno.test("calculateOrderTotals fee based on subtotal_discounted", () => {
   const items = [
     makeItem({}, {
-      discount: { rate: 20, type: "percent", amount: 0 },
+      discount: { rate: 20, type: "percent", amount_cents: 0 },
       taxes: [{ uid: "chi-rental-tax" }],
     }),
-    makeFeeItem({}, { base: 3, formula: "percent_of_total" }),
+    makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" }),
   ];
   const result = calculateOrderTotals(items, TAXES);
   // subtotal = 100, subtotal_discounted = 80
   // tax = 80 * 0.15 = 12
   // fee = 80 * 0.03 = 2.40
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.subtotal_discounted, 80);
-  assertEquals(result.discount_amount, 20);
-  assertEquals(result.taxes[0].amount, 12);
-  assertEquals(result.transaction_fees[0].amount, 2.40);
-  assertEquals(result.total, 94.40); // 80 + 12 + 2.40
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.subtotal_discounted_cents, 8000);
+  assertEquals(result.discount_amount_cents, 2000);
+  assertEquals(result.taxes[0].amount_cents, 1200);
+  assertEquals(result.transaction_fees[0].amount_cents, 240);
+  assertEquals(result.total_cents, 9440); // 80 + 12 + 2.40
 });
 
 Deno.test("calculateOrderTotals flat transaction fee", () => {
   const items = [
     makeItem(),
-    makeFeeItem({ quantity: 2 }, { base: 5, formula: "fixed" }),
+    makeFeeItem({ quantity: 2 }, { base_cents: 500, base_percent: null, formula: "fixed" }),
   ];
   const result = calculateOrderTotals(items, TAXES);
   // fee = 5 * 2 = 10
-  assertEquals(result.transaction_fees[0].amount, 10);
-  assertEquals(result.total, 110); // 100 + 0 + 10
+  assertEquals(result.transaction_fees[0].amount_cents, 1000);
+  assertEquals(result.total_cents, 11000); // 100 + 0 + 10
 });
 
 Deno.test("calculateOrderTotals includes replacement_total", () => {
   const items = [
-    makeItem({ quantity: 1 }, { replacement: 500, taxes: [{ uid: "chi-sales-tax" }] }),
-    makeItem({ quantity: 2 }, { replacement: 300 }),
+    makeItem({ quantity: 1 }, { replacement_cents: 50000, taxes: [{ uid: "chi-sales-tax" }] }),
+    makeItem({ quantity: 2 }, { replacement_cents: 30000 }),
   ];
   const result = calculateOrderTotals(items, TAXES);
   // replacement subtotal = 500 + 600 = 1100
   // replacement tax = 500 * 0.1025 = 51.25
   // replacement total = 1100 + 51.25 = 1151.25
-  assertEquals(result.replacement_total, 1151.25);
+  assertEquals(result.replacement_total_cents, 115125);
 });
 
 Deno.test("calculateOrderTotals replacement_total is 0 when no replacement values", () => {
   const items = [makeItem(), makeItem()];
   const result = calculateOrderTotals(items, TAXES);
-  assertEquals(result.replacement_total, 0);
+  assertEquals(result.replacement_total_cents, 0);
 });
 
 // ── Order inspection helpers ─────────────────────────────────────
@@ -821,7 +862,7 @@ Deno.test("orderHasRentals detects rental items", () => {
 
 Deno.test("orderHasDiscount detects discounted items", () => {
   assertEquals(orderHasDiscount([makeItem({}, {
-    discount: { rate: 10, type: "percent", amount: 0 },
+    discount: { rate: 10, type: "percent", amount_cents: 0 },
   })]), true);
   assertEquals(orderHasDiscount([makeItem()]), false);
 });
@@ -839,77 +880,77 @@ Deno.test("orderHasTax detects taxed items", () => {
 Deno.test("calculateReplacementTotals returns zeros when no replacement values", () => {
   const items = [makeItem(), makeItem()];
   const result = calculateReplacementTotals(items, TAXES);
-  assertEquals(result.subtotal, 0);
-  assertEquals(result.tax, 0);
-  assertEquals(result.total, 0);
+  assertEquals(result.subtotal_cents, 0);
+  assertEquals(result.tax_cents, 0);
+  assertEquals(result.total_cents, 0);
 });
 
 Deno.test("calculateReplacementTotals sums replacement values across items", () => {
   const items = [
-    makeItem({ quantity: 1 }, { replacement: 500 }),
-    makeItem({ quantity: 2 }, { replacement: 300 }),
+    makeItem({ quantity: 1 }, { replacement_cents: 50000 }),
+    makeItem({ quantity: 2 }, { replacement_cents: 30000 }),
   ];
   const result = calculateReplacementTotals(items, TAXES);
   // 500 * 1 + 300 * 2 = 1100
-  assertEquals(result.subtotal, 1100);
-  assertEquals(result.tax, 0);
-  assertEquals(result.total, 1100);
+  assertEquals(result.subtotal_cents, 110000);
+  assertEquals(result.tax_cents, 0);
+  assertEquals(result.total_cents, 110000);
 });
 
 Deno.test("calculateReplacementTotals applies percent tax to replacement subtotal", () => {
   const items = [
-    makeItem({ quantity: 1 }, { replacement: 1000, taxes: [{ uid: "chi-sales-tax" }] }),
+    makeItem({ quantity: 1 }, { replacement_cents: 100000, taxes: [{ uid: "chi-sales-tax" }] }),
   ];
   const result = calculateReplacementTotals(items, TAXES);
   // subtotal = 1000, tax = 1000 * 0.1025 = 102.50
-  assertEquals(result.subtotal, 1000);
-  assertEquals(result.tax, 102.50);
-  assertEquals(result.total, 1102.50);
+  assertEquals(result.subtotal_cents, 100000);
+  assertEquals(result.tax_cents, 10250);
+  assertEquals(result.total_cents, 110250);
 });
 
 Deno.test("calculateReplacementTotals applies flat tax per unit", () => {
   const items = [
-    makeItem({ quantity: 10 }, { replacement: 50, formula: "fixed", taxes: [{ uid: "water-bottle-tax" }] }),
+    makeItem({ quantity: 10 }, { replacement_cents: 5000, formula: "fixed", taxes: [{ uid: "water-bottle-tax" }] }),
   ];
   const result = calculateReplacementTotals(items, TAXES);
   // subtotal = 50 * 10 = 500, tax = 0.05 * 10 = 0.50
-  assertEquals(result.subtotal, 500);
-  assertEquals(result.tax, 0.50);
-  assertEquals(result.total, 500.50);
+  assertEquals(result.subtotal_cents, 50000);
+  assertEquals(result.tax_cents, 50);
+  assertEquals(result.total_cents, 50050);
 });
 
 Deno.test("calculateReplacementTotals skips items with null replacement", () => {
   const items = [
-    makeItem({ quantity: 1 }, { replacement: 500 }),
-    makeItem({ quantity: 1 }, { replacement: null }),
+    makeItem({ quantity: 1 }, { replacement_cents: 50000 }),
+    makeItem({ quantity: 1 }, { replacement_cents: null }),
   ];
   const result = calculateReplacementTotals(items, TAXES);
-  assertEquals(result.subtotal, 500);
-  assertEquals(result.total, 500);
+  assertEquals(result.subtotal_cents, 50000);
+  assertEquals(result.total_cents, 50000);
 });
 
 Deno.test("calculateReplacementTotals skips non-priceable items", () => {
   const items: LineItem[] = [
-    makeItem({ quantity: 1 }, { replacement: 500 }),
+    makeItem({ quantity: 1 }, { replacement_cents: 50000 }),
     { type: "destination", uid: "d1", name: "", path: [] },
   ];
   const result = calculateReplacementTotals(items, TAXES);
-  assertEquals(result.subtotal, 500);
+  assertEquals(result.subtotal_cents, 50000);
 });
 
 Deno.test("calculateReplacementTotals skips transaction fee items", () => {
   const items = [
-    makeItem({ quantity: 1 }, { replacement: 500 }),
+    makeItem({ quantity: 1 }, { replacement_cents: 50000 }),
     makeFeeItem(),
   ];
   const result = calculateReplacementTotals(items, TAXES);
-  assertEquals(result.subtotal, 500);
+  assertEquals(result.subtotal_cents, 50000);
 });
 
 Deno.test("calculateReplacementTotals multi-tax on replacement", () => {
   const items = [
     makeItem({ quantity: 2 }, {
-      replacement: 200,
+      replacement_cents: 20000,
       taxes: [{ uid: "chi-sales-tax" }, { uid: "chi-rental-tax" }],
     }),
   ];
@@ -917,9 +958,9 @@ Deno.test("calculateReplacementTotals multi-tax on replacement", () => {
   // subtotal = 200 * 2 = 400
   // sales tax = 400 * 0.1025 = 41
   // rental tax = 400 * 0.15 = 60
-  assertEquals(result.subtotal, 400);
-  assertEquals(result.tax, 101);
-  assertEquals(result.total, 501);
+  assertEquals(result.subtotal_cents, 40000);
+  assertEquals(result.tax_cents, 10100);
+  assertEquals(result.total_cents, 50100);
 });
 
 // ── getGroupPath ─────────────────────────────────────────────────
@@ -959,16 +1000,16 @@ Deno.test("getGroupPath returns nulls when no headers", () => {
 
 Deno.test("consolidateItems deduplicates by uid", () => {
   const items = [
-    makeItem({ uid: "p1", quantity: 2 }, { total: 200 }),
-    makeItem({ uid: "p1", quantity: 1 }, { total: 100 }),
-    makeItem({ uid: "p2", quantity: 1 }, { total: 50 }),
+    makeItem({ uid: "p1", quantity: 2 }, { total_cents: 20000 }),
+    makeItem({ uid: "p1", quantity: 1 }, { total_cents: 10000 }),
+    makeItem({ uid: "p2", quantity: 1 }, { total_cents: 5000 }),
   ];
   const result = consolidateItems(items);
   assertEquals(result.length, 2);
   const p1 = result.find((r) => r.uid === "p1")!;
   assertEquals(p1.quantity, 3);
-  assertEquals(p1.total_price, 300);
-  assertEquals(p1.unit_price, 100);
+  assertEquals(p1.total_price_cents, 30000);
+  assertEquals(p1.unit_price_cents, 10000);
 });
 
 Deno.test("consolidateItems skips structural items", () => {
@@ -997,44 +1038,51 @@ Deno.test("consolidateItems: unit_price × quantity does NOT recover total_price
   // booking fact table wants one representative per-unit figure to sort and
   // filter on; total_price is the authoritative money and is a currency.js sum,
   // which is exact.
-  const result = consolidateItems([makeItem({ uid: "p1", quantity: 3 }, { total: 100 })]);
-  assertEquals(result[0].total_price, 100);
-  assertEquals(result[0].unit_price, 33.33);
-  assertEquals(result[0].unit_price * result[0].quantity, 99.99);
+  const result = consolidateItems([makeItem({ uid: "p1", quantity: 3 }, { total_cents: 10_000 })]);
+  assertEquals(result[0].total_price_cents, 10_000);
+  // 10,000 ÷ 3 = 3,333.33… cents, which rounds to 3,333 — and 3,333 × 3 is
+  // 9,999, a cent short of the 10,000 the line actually costs. Re-derived from
+  // the cents form rather than scaled from the old `33.33 / 99.99` dollar
+  // literals: the residual is a property of the division, so it has to be read
+  // off the division that now happens.
+  assertEquals(result[0].unit_price_cents, 3_333);
+  assertEquals(result[0].unit_price_cents * result[0].quantity, 9_999);
 });
 
 Deno.test("consolidateItems rounds unit_price away from zero on a negative total", () => {
-  // A flat discount larger than its line gives a negative price.total, which
+  // A flat discount larger than its line gives a negative price.total_cents, which
   // calculateItemSubtotal deliberately does not clamp. `roundDivHalfUp` would
   // round that toward zero; the sign must not change a magnitude.
-  const negative = consolidateItems([makeItem({ uid: "p1", quantity: 2 }, { total: -0.05 })]);
-  const positive = consolidateItems([makeItem({ uid: "p1", quantity: 2 }, { total: 0.05 })]);
-  assertEquals(negative[0].unit_price, -0.03);
-  assertEquals(positive[0].unit_price, 0.03);
-  assertEquals(negative[0].unit_price, -positive[0].unit_price);
+  // 5 cents over 2 units is an exact half-cent tie — the case that separates
+  // half-away-from-zero from half-up, and the only reason this test discriminates.
+  const negative = consolidateItems([makeItem({ uid: "p1", quantity: 2 }, { total_cents: -5 })]);
+  const positive = consolidateItems([makeItem({ uid: "p1", quantity: 2 }, { total_cents: 5 })]);
+  assertEquals(negative[0].unit_price_cents, -3);
+  assertEquals(positive[0].unit_price_cents, 3);
+  assertEquals(negative[0].unit_price_cents, -positive[0].unit_price_cents);
 });
 
 Deno.test("consolidateItems tolerates a fractional quantity rather than throwing", () => {
   // `LineItem.quantity` is `number` in the TS type even though the schema
   // constrains it to an int, and this runs inside the order-write transaction.
   // `BigInt(1.5)` throws — turning a data anomaly into a failed write.
-  const result = consolidateItems([makeItem({ uid: "p1", quantity: 2.5 }, { total: 100 })]);
+  const result = consolidateItems([makeItem({ uid: "p1", quantity: 2.5 }, { total_cents: 10_000 })]);
   assertEquals(result[0].quantity, 2.5);
-  assertEquals(result[0].unit_price, 40);
+  assertEquals(result[0].unit_price_cents, 4_000);
 });
 
 Deno.test("consolidateItems unit_price matches exact rational arithmetic over 200k lines", () => {
   // Structurally distinct oracle: one reduced fraction, rounded by the
   // definition (floor + doubled remainder) rather than the implementation's
   // (2n+d)/2d identity.
-  const exact = (total: number, quantity: number): number => {
-    const num = BigInt(Math.round(total * 100)) * 10_000n;
+  const exact = (totalCents: number, quantity: number): number => {
+    const num = BigInt(totalCents) * 10_000n;
     const den = BigInt(Math.round(quantity * 10_000));
     const negative = num < 0n;
     const magnitude = negative ? -num : num;
     const floor = magnitude / den;
     const rounded = 2n * (magnitude % den) >= den ? floor + 1n : floor;
-    return Number(negative ? -rounded : rounded) / 100;
+    return Number(negative ? -rounded : rounded);
   };
 
   // High bits, not low: this LCG's low bit strictly alternates, so `% evenN`
@@ -1049,13 +1097,14 @@ Deno.test("consolidateItems unit_price matches exact rational arithmetic over 20
   let checked = 0, oddCents = 0, ties = 0, negatives = 0, wrong = 0;
   for (let i = 0; i < 200_000; i++) {
     const cents = rand(4_000_000) - 2_000_000;
-    const total = cents / 100;
     const quantity = rand(30) + 1;
     if (cents % 2 !== 0) oddCents++;
     if (cents < 0) negatives++;
     if (2 * (Math.abs(cents) % quantity) === quantity) ties++;
-    const got = consolidateItems([makeItem({ uid: "p1", quantity }, { total })])[0].unit_price;
-    if (got !== exact(total, quantity)) wrong++;
+    const got = consolidateItems(
+      [makeItem({ uid: "p1", quantity }, { total_cents: cents })],
+    )[0].unit_price_cents;
+    if (got !== exact(cents, quantity)) wrong++;
     checked++;
   }
   assertEquals(checked, 200_000, "the sweep must actually have run");
@@ -1145,9 +1194,9 @@ Deno.test("getGroupTotals returns count and pricing", () => {
   ];
   const result = getGroupTotals(items, 0, TAXES);
   assertEquals(result.count, 2);
-  assertEquals(result.subtotal, 200);
-  assertEquals(result.subtotal_discounted, 200);
-  assertEquals(result.total, 200);
+  assertEquals(result.subtotal_cents, 20000);
+  assertEquals(result.subtotal_discounted_cents, 20000);
+  assertEquals(result.total_cents, 20000);
 });
 
 Deno.test("getGroupTotals returns zeros for empty group", () => {
@@ -1157,9 +1206,9 @@ Deno.test("getGroupTotals returns zeros for empty group", () => {
   ];
   const result = getGroupTotals(items, 0, TAXES);
   assertEquals(result.count, 0);
-  assertEquals(result.subtotal, 0);
-  assertEquals(result.subtotal_discounted, 0);
-  assertEquals(result.total, 0);
+  assertEquals(result.subtotal_cents, 0);
+  assertEquals(result.subtotal_discounted_cents, 0);
+  assertEquals(result.total_cents, 0);
 });
 
 // ── buildPackingList ────────────────────────────────────────────
@@ -2334,29 +2383,33 @@ Deno.test("buildQueryByDates: keys on the Chicago calendar day across the UTC mi
   assertEquals(buildQueryByDates([{ dates: d }]), ["2026-03-01"]);
 });
 
-// ── calculateTransactionFeeAmount ────────────────────────────────
+// ── calculateTransactionFeeAmountCents ────────────────────────────────
 
-Deno.test("calculateTransactionFeeAmount: percent_of_total reads base as a percentage", () => {
-  assertEquals(calculateTransactionFeeAmount(makeFeeItem({}, { base: 3 }), 100), 3);
-  assertEquals(calculateTransactionFeeAmount(makeFeeItem({}, { base: 2.9 }), 1234.56), 35.80);
+Deno.test("calculateTransactionFeeAmountCents: percent_of_total reads base as a percentage", () => {
+  // 3% of $100.00 → 300 cents; 2.9% of $1,234.56 → 3,580.224 → 3,580 cents.
+  assertEquals(calculateTransactionFeeAmountCents(makeFeeItem({}, { base_percent: 3 }), 10_000), 300);
+  assertEquals(
+    calculateTransactionFeeAmountCents(makeFeeItem({}, { base_percent: 2.9 }), 123_456),
+    3_580,
+  );
 });
 
-Deno.test("calculateTransactionFeeAmount: any other formula is per-unit", () => {
-  const flat = makeFeeItem({ quantity: 3 }, { base: 5, formula: "fixed" });
+Deno.test("calculateTransactionFeeAmountCents: any other formula is per-unit", () => {
+  const flat = makeFeeItem({ quantity: 3 }, { base_cents: 500, base_percent: null, formula: "fixed" });
   // The basis is irrelevant to a flat fee — 5 × 3, whatever the document totals.
-  assertEquals(calculateTransactionFeeAmount(flat, 100), 15);
-  assertEquals(calculateTransactionFeeAmount(flat, 999_999), 15);
+  assertEquals(calculateTransactionFeeAmountCents(flat, 10_000), 1_500);
+  assertEquals(calculateTransactionFeeAmountCents(flat, 99_999_900), 1_500);
 });
 
-Deno.test("calculateTransactionFeeAmount rejects a non-fee item", () => {
-  assertThrows(() => calculateTransactionFeeAmount(makeItem(), 100));
+Deno.test("calculateTransactionFeeAmountCents rejects a non-fee item", () => {
+  assertThrows(() => calculateTransactionFeeAmountCents(makeItem(), 100));
 });
 
 Deno.test("calculateItemSubtotal refuses percent_of_total — it cannot see the basis", () => {
   // A fee is priced from the DOCUMENT. Reaching here means a caller tried to
   // cost one in isolation, which silently produced base × quantity before.
   assertThrows(
-    () => calculateItemSubtotal(makeItem({ type: "sale" }, { formula: "percent_of_total", base: 3 })),
+    () => calculateItemSubtotal(makeItem({ type: "sale" }, { formula: "percent_of_total", base_percent: 3 })),
     Error,
     "percent_of_total",
   );
@@ -2382,16 +2435,20 @@ const FEE_SWEEP: { basisCents: bigint; rate: number }[] = (() => {
   return pairs;
 })();
 
-Deno.test("calculateTransactionFeeAmount is exact — matches a BigInt rational reference", () => {
+Deno.test("calculateTransactionFeeAmountCents is exact — matches a BigInt rational reference", () => {
   // The form this replaced was `currency(basis).multiply(rate / 100)`, which
   // pre-divides into a float and lets currency.js quantize the RATIO. Sweep
   // basis × rate pairs against an exact integer-cents reference; 0 disagreements.
   for (const { basisCents, rate } of FEE_SWEEP) {
     const rateMilli = BigInt(Math.round(rate * 1_000_000));
-    const expected = Number(feeReferenceCents(basisCents, rateMilli)) / 100;
-    const actual = calculateTransactionFeeAmount(
-      makeFeeItem({}, { base: rate }),
-      Number(basisCents) / 100,
+    // Both sides in cents: the reference already produces them, and the
+    // implementation now consumes and returns them. The `/ 100` and `* 100`
+    // that used to bracket this comparison were pure scale-matching against a
+    // dollar-valued implementation and are gone with it.
+    const expected = Number(feeReferenceCents(basisCents, rateMilli));
+    const actual = calculateTransactionFeeAmountCents(
+      makeFeeItem({}, { base_percent: rate }),
+      Number(basisCents),
     );
     assertEquals(actual, expected, `basis=${basisCents}c rate=${rate}`);
   }
@@ -2404,7 +2461,7 @@ Deno.test("…and the divide-first fee form DOES disagree — the fee sweep can 
   // below are measured on every run instead of remembered in a comment.
   //
   // **The two forms are not equally wrong, and conflating them is why the
-  // docstring on `calculateTransactionFeeAmount` was overstated.**
+  // docstring on `calculateTransactionFeeAmountCents` was overstated.**
   //
   //   - `multiply(rate / 100)` — the ACTUAL predecessor (git a4b231c:272).
   //     `multiply` takes a plain JS number and never wraps it, so nothing
@@ -2449,15 +2506,15 @@ Deno.test("…and the divide-first fee form DOES disagree — the fee sweep can 
 
 Deno.test("getTransactionFeeTotals derives rate/type from the price, identity from the item", () => {
   const totals = getTransactionFeeTotals([
-    makeFeeItem({ uid: "cc-fee-product", name: "Card Fee" }, { base: 3, total: 30 }),
-    makeFeeItem({ uid: "flat-fee-product", name: "Handling" }, { base: 5, formula: "fixed", total: 5 }),
+    makeFeeItem({ uid: "cc-fee-product", name: "Card Fee" }, { base_cents: 300, total_cents: 3000 }),
+    makeFeeItem({ uid: "flat-fee-product", name: "Handling" }, { base_cents: 500, formula: "fixed", total_cents: 500 }),
   ]);
   assertEquals(totals.length, 2);
   const card = totals.find((t) => t.name === "Card Fee");
   assertEquals(card?.uid, "cc-fee-product");
   assertEquals(card?.rate, 3);
   assertEquals(card?.type, "percent");
-  assertEquals(card?.amount, 30);
+  assertEquals(card?.amount_cents, 3000);
 
   const handling = totals.find((t) => t.name === "Handling");
   assertEquals(handling?.type, "flat");
@@ -2527,15 +2584,15 @@ Deno.test("the pricing entry points take an order-INPUT price, not only a stored
   const input: PricingItem = {
     type: "rental",
     quantity: 2,
-    price: { base: 100, formula: "fixed", chargeable_days: null, discount: null, taxes: [{ uid: "t1" }] },
+    price: { base_cents: 10000, formula: "fixed", chargeable_days: null, discount: null, taxes: [{ uid: "t1" }] },
   };
 
   const computed = calculateItemPrice(input, taxes);
-  assertEquals(computed.subtotal, 200);
-  assertEquals(computed.subtotal_discounted, 200);
+  assertEquals(computed.subtotal_cents, 20000);
+  assertEquals(computed.subtotal_discounted_cents, 20000);
   assertEquals(computed.taxes.length, 1);
-  assertEquals(computed.taxes[0].amount, 18);
-  assertEquals(computed.total, 218);
+  assertEquals(computed.taxes[0].amount_cents, 1800);
+  assertEquals(computed.total_cents, 21800);
 
   // A stored line item still prices identically through the same entry point —
   // the surface was widened, not swapped.
@@ -2546,14 +2603,14 @@ Deno.test("the pricing entry points take an order-INPUT price, not only a stored
     path: ["u"],
     quantity: 2,
     price: {
-      base: 100,
+      base_cents: 10000,
       formula: "fixed",
       chargeable_days: null,
       discount: null,
-      taxes: [{ uid: "t1", name: "Chicago Rental", rate: 9, type: "percent", amount: 18 }],
-      subtotal: 200,
-      subtotal_discounted: 200,
-      total: 218,
+      taxes: [{ uid: "t1", name: "Chicago Rental", rate: 9, type: "percent", amount_cents: 1800 }],
+      subtotal_cents: 20000,
+      subtotal_discounted_cents: 20000,
+      total_cents: 21800,
     },
   };
   assertEquals(calculateItemPrice(stored, taxes), computed);
@@ -2575,7 +2632,7 @@ Deno.test("PreTaxItemType and FromTotalItemType are the contract's pricing axis,
 });
 
 Deno.test("the three pricing predicates read the contract, not their own type lists", () => {
-  const price = { base: 10, formula: "fixed", chargeable_days: null, subtotal: 10, subtotal_discounted: 10, discount: null, taxes: [], total: 10 } as unknown as PriceObject;
+  const price = { base_cents: 1000, formula: "fixed", chargeable_days: null, subtotal_cents: 1000, subtotal_discounted_cents: 1000, discount: null, taxes: [], total_cents: 1000 } as unknown as PriceObject;
   const at = (type: ItemTypeType): LineItem => ({ uid: "u", name: "n", type, path: ["u"], quantity: 1, price });
 
   for (const type of ["rental", "replacement", "sale", "service", "surcharge"] as const) {
@@ -2711,7 +2768,7 @@ Deno.test("isTaxableCoa: an UNKNOWN coa is taxable — the asymmetry with the Xe
   assertEquals(isTaxableCoa(null), true);
 });
 
-// ── computeItemTaxAmount: the sweep core#47 shipped without ──────
+// ── computeItemTaxAmountCents: the sweep core#47 shipped without ──────
 //
 // This was the one percent-of-money path that never migrated to integer cents.
 // Inside a single `calculateItemPrice` call the discount on a line was already
@@ -2724,7 +2781,7 @@ Deno.test("isTaxableCoa: an UNKNOWN coa is taxable — the asymmetry with the Xe
 // definition, and a companion asserting a wrong form disagrees.
 
 /** The true tax in cents, as one exact rational, rounded half away from zero. */
-function exactTaxCents(rate: number, type: "percent" | "flat", subtotal: number, qty: number) {
+function exactTaxCents(rate: number, type: "percent" | "flat", subtotalCents: number, qty: number) {
   const round = (num: bigint, den: bigint) => {
     const neg = num < 0n;
     const n = neg ? -num : num;
@@ -2735,12 +2792,27 @@ function exactTaxCents(rate: number, type: "percent" | "flat", subtotal: number,
   };
   if (type === "percent") {
     const rateMilli = BigInt(Math.round(rate * 1_000_000));
-    return round(BigInt(Math.round(subtotal * 100)) * rateMilli, 100n * 1_000_000n);
+    return round(BigInt(subtotalCents) * rateMilli, 100n * 1_000_000n);
   }
   return round(BigInt(Math.round(rate * 100)) * BigInt(Math.round(qty * 10_000)), 10_000n);
 }
 
-const TAX_SWEEP: { rate: number; type: "percent" | "flat"; subtotal: number; qty: number }[] =
+const TAX_SWEEP: {
+  rate: number;
+  type: "percent" | "flat";
+  /** Integer cents — what the implementation takes. */
+  subtotalCents: number;
+  /**
+   * The same value in dollars, carried ONLY for the fail-closed companion.
+   *
+   * The two wrong forms it measures are `currency.js` expressions that took
+   * DOLLARS; cents-ifying them would model a predecessor that never existed
+   * and the companion would stop describing anything real. So the wrong forms
+   * stay in dollars and only their RESULTS are converted for comparison.
+   */
+  subtotal: number;
+  qty: number;
+}[] =
   (() => {
     let seed = 55_555;
     const rand = (n: number) => {
@@ -2758,28 +2830,29 @@ const TAX_SWEEP: { rate: number; type: "percent" | "flat"; subtotal: number; qty
       // line produces one, and `calculateItemSubtotal` deliberately does not
       // clamp it. A sweep over non-negative subtotals only would never reach
       // the sign path.
-      const subtotal = (rand(20_000_000) - 2_000_000) / 100;
+      const subtotalCents = rand(20_000_000) - 2_000_000;
       rows.push({
         rate: percent
           ? (rand(6) === 0 ? live[rand(live.length)] : rand(3_000_000) / 10_000)
           : rand(2_000) / 100,
         type: (percent ? "percent" : "flat") as "percent" | "flat",
-        subtotal,
+        subtotalCents,
+        subtotal: fromCents(subtotalCents),
         qty: rand(200_000) / 10_000,
       });
     }
     return rows;
   })();
 
-Deno.test("computeItemTaxAmount matches exact rational arithmetic over 200k random taxes", () => {
+Deno.test("computeItemTaxAmountCents matches exact rational arithmetic over 200k random taxes", () => {
   let disagreements = 0;
   let first: string | null = null;
   for (const r of TAX_SWEEP) {
-    const got = computeItemTaxAmount({ rate: r.rate, type: r.type }, r.subtotal, r.qty);
-    const want = exactTaxCents(r.rate, r.type, r.subtotal, r.qty);
-    if (BigInt(Math.round(got * 100)) !== want) {
+    const got = computeItemTaxAmountCents({ rate: r.rate, type: r.type }, r.subtotalCents, r.qty);
+    const want = exactTaxCents(r.rate, r.type, r.subtotalCents, r.qty);
+    if (BigInt(got) !== want) {
       disagreements++;
-      first ??= `${JSON.stringify(r)} → got ${got}, want ${Number(want) / 100}`;
+      first ??= `${JSON.stringify(r)} → got ${got}, want ${want} cents`;
     }
   }
   assertEquals(disagreements, 0, first ?? "");
@@ -2802,8 +2875,10 @@ Deno.test("…and the divide-first tax form DOES disagree — the tax sweep can 
   let worstCents = 0n;
   for (const r of TAX_SWEEP) {
     if (r.type !== "percent") continue;
-    const want = exactTaxCents(r.rate, r.type, r.subtotal, r.qty);
+    const want = exactTaxCents(r.rate, r.type, r.subtotalCents, r.qty);
 
+    // Both wrong forms stay in DOLLARS — see `TAX_SWEEP.subtotal`. Only the
+    // result crosses to cents, which is the one step the comparison needs.
     if (BigInt(Math.round(currency(r.subtotal).multiply(r.rate / 100).value * 100)) !== want) {
       multiplyFirst++;
     }
@@ -2827,19 +2902,32 @@ Deno.test("…and the divide-first tax form DOES disagree — the tax sweep can 
   );
 });
 
-Deno.test("computeItemTaxAmount carries the subtotal's sign — a negative line is not clamped", () => {
+Deno.test("computeItemTaxAmountCents carries the subtotal's sign — a negative line is not clamped", () => {
   // `calculateItemSubtotal` lets a flat discount exceed its line ("the caller's
   // problem to surface, not ours to clamp"), so a negative subtotal reaches here
   // and must produce negative tax. Clamping would silently drop it, and the
   // rounding must be symmetric: f(-x) === -f(x).
   const tax = { rate: 15, type: "percent" as const };
-  assertEquals(computeItemTaxAmount(tax, -100, 1), -15);
-  assertEquals(computeItemTaxAmount(tax, 100, 1), 15);
-  for (const subtotal of [0.03, 1.115, 33.335, 999.995, 12_345.67]) {
+  assertEquals(computeItemTaxAmountCents(tax, -10_000, 1), -1_500);
+  assertEquals(computeItemTaxAmountCents(tax, 10_000, 1), 1_500);
+  // ⚠️ **RE-DERIVED, not multiplied by 100.** The pre-migration list was
+  // `[0.03, 1.115, 33.335, 999.995, 12_345.67]`, and three of those were chosen
+  // because 15% of them lands exactly on a half-cent — which is the only reason
+  // this test discriminates at all, since half-away-from-zero and half-toward-
+  // zero agree everywhere else. Scaling them gives 111.5 / 3333.5 / 99999.5
+  // cents, which are not integers and so are unrepresentable as a subtotal: the
+  // ties would have been silently rounded away and the test would have gone on
+  // passing while checking nothing.
+  //
+  // A subtotal in whole cents ties at 15% exactly when `3·cents ≡ 10 (mod 20)`,
+  // i.e. `cents ≡ 10 (mod 20)`. The first four below satisfy it (1.5, 4.5,
+  // 502.5 and 14,998.5 cents of tax); the last two are ordinary non-tie values
+  // kept so the sweep is not made entirely of edge cases.
+  for (const subtotalCents of [10, 30, 3_350, 99_990, 3, 1_234_567]) {
     assertEquals(
-      computeItemTaxAmount(tax, -subtotal, 1),
-      -computeItemTaxAmount(tax, subtotal, 1),
-      `asymmetric at ${subtotal}`,
+      computeItemTaxAmountCents(tax, -subtotalCents, 1),
+      -computeItemTaxAmountCents(tax, subtotalCents, 1),
+      `asymmetric at ${subtotalCents} cents`,
     );
   }
 });
@@ -2849,22 +2937,25 @@ Deno.test("calculateReplacementTotals shares ONE tax formula with the order path
   // core#47's fix would not have reached it. Pinning the equality is what stops
   // the copy growing back.
   const item = makeItem({ quantity: 3 }, {
-    base: 100,
-    replacement: 250.55,
+    base_cents: 10000,
+    replacement_cents: 25055,
     taxes: [{ uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.25, type: "percent" }],
   });
   const totals = calculateReplacementTotals([item], TAXES);
-  assertEquals(totals.subtotal, 751.65);
+  assertEquals(totals.subtotal_cents, 75_165);
   assertEquals(
-    totals.tax,
-    computeItemTaxAmount({ rate: 10.25, type: "percent" }, 751.65, 3),
-    "the replacement path diverged from computeItemTaxAmount",
+    totals.tax_cents,
+    computeItemTaxAmountCents({ rate: 10.25, type: "percent" }, 75_165, 3),
+    "the replacement path diverged from computeItemTaxAmountCents",
   );
-  // Written as `751.65 + totals.tax` first, which fails at 828.6899999999999 —
-  // float addition on two 2dp values. The implementation is right and the
-  // assertion was wrong, which is the whole campaign in miniature.
-  assertEquals(totals.tax, 77.04);
-  assertEquals(totals.total, 828.69);
+  assertEquals(totals.tax_cents, 7_704);
+  // The pre-migration version of this line was first written as
+  // `751.65 + totals.tax` and failed at 828.6899999999999 — float addition on
+  // two 2dp values, with the implementation right and the assertion wrong.
+  // In cents the sum is just 75,165 + 7,704, and there is nothing left to get
+  // wrong; the note is kept because the failure it records is the campaign in
+  // miniature.
+  assertEquals(totals.total_cents, 82_869);
 });
 
 Deno.test("calculateItemTax: a non-revenue COA yields no tax", () => {
@@ -2878,7 +2969,7 @@ Deno.test("calculateItemTax: the SAME line taxes normally on a revenue COA", () 
   const item = makeItem({ coa_revenue: 4000 }, { taxes: [{ uid: "chi-rental-tax" }] });
   const result = calculateItemTax(item, TAXES);
   assertEquals(result.length, 1);
-  assertEquals(result[0].amount, 15);
+  assertEquals(result[0].amount_cents, 1500);
 });
 
 Deno.test("calculateItemTax: an absent COA still taxes (order lines carry none)", () => {
@@ -2898,7 +2989,7 @@ Deno.test("calculateItemPrice: a non-revenue COA drops tax out of the total", ()
     makeItem({ coa_revenue: 4100 }, { taxes: [{ uid: "chi-rental-tax" }] }),
     TAXES,
   );
-  assertEquals(taxed.total, 115);
-  assertEquals(gated.total, 100);
-  assertEquals(gated.total, gated.subtotal_discounted, "total is the untaxed subtotal");
+  assertEquals(taxed.total_cents, 11500);
+  assertEquals(gated.total_cents, 10000);
+  assertEquals(gated.total_cents, gated.subtotal_discounted_cents, "total is the untaxed subtotal");
 });

@@ -108,8 +108,19 @@ export interface Booking {
   quantity: number;
   shortage: number;
   subject: string;
-  unit_price: number;
-  total_price: number;
+  /**
+   * A **lossy** per-unit denorm of `total_price_cents`, in integer cents:
+   * `unit_price_cents × quantity` does NOT in general equal
+   * `total_price_cents`, by construction. The residual is discarded on purpose
+   * because nothing ever multiplies it back — contrast
+   * `getXeroUnitAmountFromCents`, whose residual is real money in someone
+   * else's ledger and is absorbed through `DiscountRate`. Same arithmetic
+   * shape, opposite contracts; neither may be swept into the other, and
+   * `audit-booking-prices.ts` must not grow a `unit × qty === total`
+   * assertion, which would be false by design.
+   */
+  unit_price_cents: number;
+  total_price_cents: number;
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
@@ -304,8 +315,8 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   quantity: z.number().meta({ serverSortVia: "quantity" }),
   shortage: z.number(),
   subject: z.string(),
-  unit_price: z.number(),
-  total_price: z.number(),
+  unit_price_cents: z.int(),
+  total_price_cents: z.int(),
   // crms_id and crms_product_id are written back post-transaction by CRMS sync
   crms_id: z.number().nullable().optional(),
   crms_product_id: z.number().nullable().optional(),

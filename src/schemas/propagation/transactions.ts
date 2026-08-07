@@ -135,15 +135,15 @@ function ledgerRule(
         transform: "keyed by the OOS record's reason, supplied by the caller",
       },
       {
-        source: ["cost", "amount"],
-        target: ["total_cost_basis"],
+        source: ["cost", "amount_cents"],
+        target: ["total_cost_basis_cents"],
         transform:
           "an increase adds the supplied acquisition cost; a cost-bearing decrease removes the weighted-average share captured BEFORE the quantity moves, in integer cents. A type whose contract forbids cost never touches the basis — which is why a transfer cannot corrupt it (#286)",
       },
       {
-        source: ["cost", "amount"],
+        source: ["cost", "amount_cents"],
         target: ["average_unit_cost"],
-        transform: "total_cost_basis ÷ quantity_held, rounded half-up once, at the end",
+        transform: "total_cost_basis_cents ÷ quantity_held, rounded half-up once, at the end — a 4dp RATE, not cents",
       },
       {
         source: ["lines", "location"],

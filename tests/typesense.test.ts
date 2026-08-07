@@ -195,40 +195,40 @@ Deno.test("the money marker names exactly the amount fields — pinned, not scat
   ).sort();
 
   assertEquals(marked, [
-    "bookings:total_price",
-    "bookings:unit_price",
-    "credit-notes:remaining_credit",
-    "credit-notes:totals.total",
-    "invoices:totals.amount_credited",
-    "invoices:totals.amount_due",
-    "invoices:totals.amount_paid",
-    "invoices:totals.total",
-    "orders:items.price.base",
-    "orders:items.price.discount.amount",
-    "orders:items.price.replacement",
-    "orders:items.price.subtotal",
-    "orders:items.price.subtotal_discounted",
-    "orders:items.price.taxes.amount",
-    "orders:items.price.total",
-    "orders:items.total_price",
-    "orders:totals.discount_amount",
-    "orders:totals.subtotal",
-    "orders:totals.subtotal_discounted",
-    "orders:totals.taxes.amount",
-    "orders:totals.total",
-    "orders:totals.transaction_fees.amount",
-    "products:component_of.price.base",
-    "products:component_of.price.replacement",
-    "products:components.price.base",
-    "products:components.price.replacement",
-    "products:price.base",
-    "products:price.replacement",
-    "webshop-products:component_of.price.base",
-    "webshop-products:component_of.price.replacement",
-    "webshop-products:components.price.base",
-    "webshop-products:components.price.replacement",
-    "webshop-products:price.base",
-    "webshop-products:price.replacement",
+    "bookings:total_price_cents",
+    "bookings:unit_price_cents",
+    "credit-notes:remaining_credit_cents",
+    "credit-notes:totals.total_cents",
+    "invoices:totals.amount_credited_cents",
+    "invoices:totals.amount_due_cents",
+    "invoices:totals.amount_paid_cents",
+    "invoices:totals.total_cents",
+    "orders:items.price.base_cents",
+    "orders:items.price.discount.amount_cents",
+    "orders:items.price.replacement_cents",
+    "orders:items.price.subtotal_cents",
+    "orders:items.price.subtotal_discounted_cents",
+    "orders:items.price.taxes.amount_cents",
+    "orders:items.price.total_cents",
+    "orders:items.total_price_cents",
+    "orders:totals.discount_amount_cents",
+    "orders:totals.subtotal_cents",
+    "orders:totals.subtotal_discounted_cents",
+    "orders:totals.taxes.amount_cents",
+    "orders:totals.total_cents",
+    "orders:totals.transaction_fees.amount_cents",
+    "products:component_of.price.base_cents",
+    "products:component_of.price.replacement_cents",
+    "products:components.price.base_cents",
+    "products:components.price.replacement_cents",
+    "products:price.base_cents",
+    "products:price.replacement_cents",
+    "webshop-products:component_of.price.base_cents",
+    "webshop-products:component_of.price.replacement_cents",
+    "webshop-products:components.price.base_cents",
+    "webshop-products:components.price.replacement_cents",
+    "webshop-products:price.base_cents",
+    "webshop-products:price.replacement_cents",
   ]);
 });
 
@@ -267,27 +267,27 @@ Deno.test("every declared money _str mirror has a money-marked source", () => {
   // numeric source is unmarked keeps getting `String(value)` and stays
   // unsearchable. Catches a mirror added later without its marker.
   //
-  // ⚠️ **This guard FAILS OPEN, and the list below is why.** Every `_str` field
-  // whose stripped leaf is not one of these five is `continue`d past, so a leaf
-  // spelled any other way is simply not checked — the loop body does not run
-  // and the test passes. That is invisible from a green run, which is the whole
-  // problem with a filter-then-assert shape.
+  // ⚠️ **This guard USED TO FAIL OPEN, and the repair is structural.**
   //
-  // Phase 11 turns it from a latent hole into a live one: every money leaf
-  // becomes `total_cents`, `amount_paid_cents`, … so NOTHING matches, the test
-  // passes over an EMPTY set, and the guard between a money field and an
-  // unsearchable index silently stops existing. Hence the `checked` counter
-  // below — it is not decoration, it is the only thing that can tell "all clear"
-  // apart from "never looked".
+  // It filtered `_str` fields against a hard-coded list of five money leaves
+  // (`total`, `amount_paid`, `amount_credited`, `amount_due`,
+  // `remaining_credit`) and `continue`d past everything else — so a leaf spelled
+  // any other way was simply not checked, the loop body did not run, and the
+  // test passed. Invisible from a green run, which is the whole problem with a
+  // filter-then-assert shape.
   //
-  // When Phase 11 lands, extend the list rather than deleting the counter.
-  const MONEY_MIRROR_ROOTS = [
-    "total",
-    "amount_paid",
-    "amount_credited",
-    "amount_due",
-    "remaining_credit",
-  ];
+  // Phase 11 proved it live rather than latent. Suffixing every money leaf with
+  // `_cents` left the list matching 4 of the 7 real mirrors: the three
+  // `totals.total_cents_str` fields fell straight through the filter and this
+  // test went green while checking none of them.
+  //
+  // So the list is GONE. The predicate is now total by construction — after
+  // Phase 11 a money field IS one whose name ends in `_cents`, so there is no
+  // list to fall out of date and no leaf that can be spelled past the filter.
+  // The `checked` counter stays, and is now an EXACT count rather than a
+  // non-zero floor: a mirror silently dropped is as much a defect as a mirror
+  // added without its marker, and only an exact count catches both.
+  const isMoneyLeaf = (leaf: string) => leaf.endsWith("_cents");
   let checked = 0;
   for (const config of allConfigs) {
     const byName = new Map(config.schema.fields.map((f) => [f.name, f]));
@@ -295,21 +295,31 @@ Deno.test("every declared money _str mirror has a money-marked source", () => {
       if (!field.name.endsWith("_str")) continue;
       const source = field.name.slice(0, -"_str".length);
       const leaf = source.split(".").at(-1)!;
-      if (!MONEY_MIRROR_ROOTS.includes(leaf)) continue;
+      if (!isMoneyLeaf(leaf)) continue;
       const sourceField = byName.get(source);
-      assertEquals(sourceField !== undefined, true, `${config.alias}: ${field.name} has no source field ${source}`);
-      assertEquals(sourceField?.money, true, `${config.alias}.${source}: has a money mirror but is not marked money`);
+      assertEquals(
+        sourceField !== undefined,
+        true,
+        `${config.alias}: ${field.name} has no source field ${source}`,
+      );
+      assertEquals(
+        sourceField?.money,
+        true,
+        `${config.alias}.${source}: has a money mirror but is not marked money`,
+      );
       checked++;
     }
   }
 
   assertEquals(
-    checked > 0,
-    true,
-    "MONEY_MIRROR_ROOTS matched NOTHING, so every assertion above ran zero times and this " +
-      "test proved nothing. Either the money mirrors were renamed (Phase 11 suffixes every " +
-      "leaf with `_cents`) or the `_str` convention changed. Extend MONEY_MIRROR_ROOTS — do " +
-      "not delete this check.",
+    checked,
+    7,
+    `expected exactly 7 money _str mirrors (orders totals.total_cents; invoices total_cents + ` +
+      `amount_paid_cents + amount_credited_cents + amount_due_cents; credit-notes total_cents + ` +
+      `remaining_credit_cents) but walked ${checked}. A LOWER number means a mirror was dropped ` +
+      `or renamed out of the _cents convention and is no longer checked; a HIGHER one means a ` +
+      `new mirror landed and should be added to this count deliberately. Do not relax this to ` +
+      `"> 0" — that is the fail-open shape this replaced.`,
   );
 });
 

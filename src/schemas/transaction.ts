@@ -397,21 +397,31 @@ export const MovementCustody: z.ZodType<MovementCustodyType> = z.strictObject({
 );
 
 /**
- * The carrying-value change this event records. `amount` is signed: negative
- * removes basis, positive adds it. `unit_costs[]` carries the per-unit basis
- * actually consumed or added, which the weighted-average cost fold reads.
+ * The carrying-value change this event records. `amount_cents` is signed:
+ * negative removes basis, positive adds it. `unit_costs_cents[]` carries the
+ * per-unit basis actually consumed or added, which the weighted-average cost
+ * fold reads.
+ *
+ * ⚠️ **`unit_cost` sits between two `_cents` fields and is NOT one of them.**
+ * It is a per-unit **rate** at 4dp, and quantizing it to the cent is a measured
+ * regression, not a hypothetical: `@cfs/core@10.0.0-beta.117` emitted it
+ * through `fromCentsBig` and a 100-unit $6.39 purchase reported $0.06/unit — a
+ * 6% error that went a week undetected because every movement written in that
+ * window happened to divide evenly at the cent. A mechanical "convert every
+ * money field in this object" pass restores it exactly.
  */
 export interface MovementCostType {
-  amount: number;
+  amount_cents: number;
+  /** A per-unit RATE at 4dp — dollars, not cents. See the type docblock. */
   unit_cost: number;
-  unit_costs: number[];
+  unit_costs_cents: number[];
 }
 
 /** Zod schema for a cost change. */
 export const MovementCost: z.ZodType<MovementCostType> = z.strictObject({
-  amount: z.number(),
+  amount_cents: z.int(),
   unit_cost: z.number(),
-  unit_costs: z.array(z.number()).default([]),
+  unit_costs_cents: z.array(z.int()).default([]),
 });
 
 // ── The document ────────────────────────────────────────────────────
@@ -728,7 +738,7 @@ export interface CreateTransactionInputType {
   uid_product: string;
   type: typeof MANUAL_MOVEMENT_TYPES[number];
   quantity: number;
-  total_cost: number;
+  total_cost_cents: number;
   date: string;
   reference: string;
   uid_session: string;
@@ -747,7 +757,7 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
   uid_product: FirestoreId,
   type: z.enum(MANUAL_MOVEMENT_TYPES),
   quantity: z.number().int().positive(),
-  total_cost: z.number().min(0),
+  total_cost_cents: z.int().min(0),
   date: chicagoInstant(),
   reference: z.string(),
   uid_session: z.uuid(),

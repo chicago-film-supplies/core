@@ -11,7 +11,7 @@ import {
   derivePaymentStatus,
   flattenForXero,
   getOrderScopedItems,
-  getXeroUnitAmount,
+  getXeroUnitAmountFromCents,
   type InvoiceDestinationPair,
   type InvoiceItem,
   type LineItem,
@@ -157,11 +157,11 @@ const lineItem1: InvoiceDocItemType = {
   quantity: 2,
   price: {
     ...priceBase,
-    base: 100,
+    base_cents: 10000,
     chargeable_days: 5,
-    subtotal: 200,
-    subtotal_discounted: 200,
-    total: 200,
+    subtotal_cents: 20000,
+    subtotal_discounted_cents: 20000,
+    total_cents: 20000,
   },
   path: [ORDER_DIV_1, DEST_1, ITEM_1],
   coa_revenue: 4100,
@@ -176,11 +176,11 @@ const lineItem2: InvoiceDocItemType = {
   quantity: 1,
   price: {
     ...priceBase,
-    base: 300,
+    base_cents: 30000,
     formula: "fixed",
-    subtotal: 300,
-    subtotal_discounted: 300,
-    total: 300,
+    subtotal_cents: 30000,
+    subtotal_discounted_cents: 30000,
+    total_cents: 30000,
   },
   path: [ORDER_DIV_1, DEST_1, ITEM_2],
   xero_id: "00000000-0000-4000-8000-000000000123",
@@ -201,11 +201,11 @@ const lineItem3: InvoiceDocItemType = {
   quantity: 1,
   price: {
     ...priceBase,
-    base: 500,
+    base_cents: 50000,
     chargeable_days: 5,
-    subtotal: 500,
-    subtotal_discounted: 500,
-    total: 500,
+    subtotal_cents: 50000,
+    subtotal_discounted_cents: 50000,
+    total_cents: 50000,
   },
   path: [ORDER_DIV_2, ITEM_3],
 } as InvoiceDocItemType;
@@ -304,15 +304,15 @@ Deno.test("buildOrderScopedItems projects order-only fields off line items", () 
       // @ts-expect-error — inclusion_type not on LineItem type, but exists at runtime on OrderDocLineItem
       inclusion_type: "mandatory",
       price: {
-        base: 100,
+        base_cents: 10000,
         chargeable_days: 5,
         formula: "five_day_week",
-        subtotal: 200,
-        subtotal_discounted: 200,
+        subtotal_cents: 20000,
+        subtotal_discounted_cents: 20000,
         discount: null,
         taxes: [],
-        total: 200,
-        replacement: 5000,
+        total_cents: 20000,
+        replacement_cents: 500000,
       },
     },
   ];
@@ -332,7 +332,7 @@ Deno.test("buildOrderScopedItems projects order-only fields off line items", () 
     `leaked keys present: ${keys.join(", ")}`,
   );
   const priceKeys = Object.keys((projected as unknown as { price: Record<string, unknown> }).price);
-  assertEquals(priceKeys.includes("replacement"), false, `leaked price.replacement: ${priceKeys.join(", ")}`);
+  assertEquals(priceKeys.includes("replacement"), false, `leaked price.replacement_cents: ${priceKeys.join(", ")}`);
 });
 
 Deno.test("buildOrderScopedItems preserves destination shape via OrderDocDestinationItem", () => {
@@ -452,9 +452,9 @@ Deno.test("syncOrderItems projects order-only fields off new items (strict schem
       // @ts-expect-error — inclusion_type not on LineItem type
       inclusion_type: "mandatory",
       price: {
-        base: 100, chargeable_days: 5, formula: "five_day_week",
-        subtotal: 100, subtotal_discounted: 100, discount: null, taxes: [], total: 100,
-        replacement: 5000,
+        base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
+        subtotal_cents: 10000, subtotal_discounted_cents: 10000, discount: null, taxes: [], total_cents: 10000,
+        replacement_cents: 500000,
       },
     },
   ];
@@ -493,9 +493,9 @@ Deno.test("syncOrderToInvoiceSelective projects new items to invoice-line-item s
       uid_order: ORDER_ID_1,
       zero_priced: false,
       price: {
-        base: 100, chargeable_days: 5, formula: "five_day_week",
-        subtotal: 100, subtotal_discounted: 100, discount: null, taxes: [], total: 100,
-        replacement: 5000,
+        base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
+        subtotal_cents: 10000, subtotal_discounted_cents: 10000, discount: null, taxes: [], total_cents: 10000,
+        replacement_cents: 500000,
       },
     },
   ];
@@ -514,8 +514,8 @@ Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward
     quantity: 1,
     path: [DEST_1, ITEM_1],
     price: {
-      base: 100, chargeable_days: 5, formula: "five_day_week",
-      subtotal: 100, subtotal_discounted: 100, discount: null, taxes: [], total: 100,
+      base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
+      subtotal_cents: 10000, subtotal_discounted_cents: 10000, discount: null, taxes: [], total_cents: 10000,
     } as unknown as LineItem["price"],
   };
   // Deliberately a bare spread of `prevItem`: `isItemSynced` compares the two
@@ -567,21 +567,21 @@ Deno.test("calculateInvoiceTotals computes totals from billable items only", () 
     { uid: "group", type: "group", name: "Lighting", path: [] },
     makeItem(
       { uid: "item-1", type: "rental", name: "Spot Light", quantity: 2 },
-      { base: 100, chargeable_days: 5, subtotal: 200, subtotal_discounted: 200, total: 200 },
+      { base_cents: 10000, chargeable_days: 5, subtotal_cents: 20000, subtotal_discounted_cents: 20000, total_cents: 20000 },
     ),
     makeItem(
       { uid: "item-2", type: "sale", name: "Tripod", quantity: 1 },
-      { base: 300, formula: "fixed", subtotal: 300, subtotal_discounted: 300, total: 300 },
+      { base_cents: 30000, formula: "fixed", subtotal_cents: 30000, subtotal_discounted_cents: 30000, total_cents: 30000 },
     ),
   ];
 
   const result = calculateInvoiceTotals(items, []);
-  assertEquals(result.subtotal, 500);
-  assertEquals(result.subtotal_discounted, 500);
-  assertEquals(result.discount_amount, 0);
-  assertEquals(result.total, 500);
-  assertEquals(result.amount_paid, 0);
-  assertEquals(result.amount_due, 500);
+  assertEquals(result.subtotal_cents, 50000);
+  assertEquals(result.subtotal_discounted_cents, 50000);
+  assertEquals(result.discount_amount_cents, 0);
+  assertEquals(result.total_cents, 50000);
+  assertEquals(result.amount_paid_cents, 0);
+  assertEquals(result.amount_due_cents, 50000);
   assertEquals(result.taxes, []);
   assertEquals(result.transaction_fees, []);
 });
@@ -590,36 +590,36 @@ Deno.test("calculateInvoiceTotals applies discount", () => {
   const items: InvoiceItem[] = [
     makeItem(
       { uid: "item-1", type: "rental", name: "Light" },
-      { base: 100, chargeable_days: 5, discount: { type: "percent", rate: 10, amount: 10 }, subtotal: 100, subtotal_discounted: 90, total: 90 },
+      { base_cents: 10000, chargeable_days: 5, discount: { type: "percent", rate: 10, amount_cents: 1000 }, subtotal_cents: 10000, subtotal_discounted_cents: 9000, total_cents: 9000 },
     ),
   ];
   const result = calculateInvoiceTotals(items, []);
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.subtotal_discounted, 90);
-  assertEquals(result.discount_amount, 10);
-  assertEquals(result.total, 90);
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.subtotal_discounted_cents, 9000);
+  assertEquals(result.discount_amount_cents, 1000);
+  assertEquals(result.total_cents, 9000);
 });
 
 Deno.test("calculateInvoiceTotals with taxes", () => {
   const items: InvoiceItem[] = [
     makeItem(
       { uid: "item-1", type: "rental", name: "Light" },
-      { base: 100, chargeable_days: 5, taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount: 15 }], subtotal: 100, subtotal_discounted: 100, total: 115 },
+      { base_cents: 10000, chargeable_days: 5, taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 1500 }], subtotal_cents: 10000, subtotal_discounted_cents: 10000, total_cents: 11500 },
     ),
   ];
   const result = calculateInvoiceTotals(items, TAXES);
-  assertEquals(result.subtotal, 100);
-  assertEquals(result.total, 115);
+  assertEquals(result.subtotal_cents, 10000);
+  assertEquals(result.total_cents, 11500);
   assertEquals(result.taxes.length, 1);
   assertEquals(result.taxes[0].name, "Chicago Rental Tax");
-  assertEquals(result.taxes[0].amount, 15);
+  assertEquals(result.taxes[0].amount_cents, 1500);
 });
 
 Deno.test("calculateInvoiceTotals with payments reduces amount_due", () => {
   const items: InvoiceItem[] = [
     makeItem(
       { uid: "item-1", type: "rental", name: "Light" },
-      { base: 1000, formula: "fixed", subtotal: 1000, subtotal_discounted: 1000, total: 1000 },
+      { base_cents: 100000, formula: "fixed", subtotal_cents: 100000, subtotal_discounted_cents: 100000, total_cents: 100000 },
     ),
   ];
   // The "deleted" row is now an appended reverser rather than a status flag, so
@@ -631,40 +631,40 @@ Deno.test("calculateInvoiceTotals with payments reduces amount_due", () => {
     S({ amount_cents: 200_00 }),
   ];
   const result = calculateInvoiceTotals(items, [], settlements);
-  assertEquals(result.total, 1000);
-  assertEquals(result.amount_paid, 600);
-  assertEquals(result.amount_credited, 0);
-  assertEquals(result.amount_due, 400);
+  assertEquals(result.total_cents, 100000);
+  assertEquals(result.amount_paid_cents, 60000);
+  assertEquals(result.amount_credited_cents, 0);
+  assertEquals(result.amount_due_cents, 40000);
 });
 
 Deno.test("calculateInvoiceTotals with empty items returns zeros", () => {
   const result = calculateInvoiceTotals([], []);
-  assertEquals(result.subtotal, 0);
-  assertEquals(result.subtotal_discounted, 0);
-  assertEquals(result.discount_amount, 0);
-  assertEquals(result.total, 0);
-  assertEquals(result.amount_paid, 0);
-  assertEquals(result.amount_due, 0);
+  assertEquals(result.subtotal_cents, 0);
+  assertEquals(result.subtotal_discounted_cents, 0);
+  assertEquals(result.discount_amount_cents, 0);
+  assertEquals(result.total_cents, 0);
+  assertEquals(result.amount_paid_cents, 0);
+  assertEquals(result.amount_due_cents, 0);
 });
 
 Deno.test("calculateInvoiceTotals with transaction fee", () => {
   const items: InvoiceItem[] = [
     makeItem(
       { uid: "item-1", type: "rental", name: "Light" },
-      { base: 100, formula: "fixed", subtotal: 100, subtotal_discounted: 100, total: 100 },
+      { base_cents: 10000, formula: "fixed", subtotal_cents: 10000, subtotal_discounted_cents: 10000, total_cents: 10000 },
     ),
     // An ordinary line item — `percent_of_total` is what makes it a fee.
     makeItem(
       { uid: "fee-1", type: "transaction_fee", name: "Credit Card Fee" },
-      { base: 3, formula: "percent_of_total" },
+      { base_cents: 0, base_percent: 3, formula: "percent_of_total" },
     ),
   ];
   const result = calculateInvoiceTotals(items, []);
-  assertEquals(result.subtotal, 100);
+  assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.transaction_fees.length, 1);
   assertEquals(result.transaction_fees[0].name, "Credit Card Fee");
-  assertEquals(result.transaction_fees[0].amount, 3);
-  assertEquals(result.total, 103);
+  assertEquals(result.transaction_fees[0].amount_cents, 300);
+  assertEquals(result.total_cents, 10300);
 });
 
 // ── derivePaymentStatus ─────────────────────────────────────────
@@ -695,66 +695,81 @@ Deno.test("derivePaymentStatus returns issued when nothing paid", () => {
 // of each is visible.
 
 Deno.test("recomputeSettlementTotals nets a reversal pair to zero", () => {
-  const result = recomputeSettlementTotals(1000, [
+  const result = recomputeSettlementTotals(100_000, [
     S({ amount_cents: 400_00 }),
     S({ amount_cents: 100_00 }),
     S({ type: "payment_reversal", reason: "source_retracted", amount_cents: 100_00 }),
     S({ amount_cents: 200_00 }),
   ]);
-  assertEquals(result.amount_paid, 600);
-  assertEquals(result.amount_due, 400);
+  assertEquals(result.amount_paid_cents, 60000);
+  assertEquals(result.amount_due_cents, 40000);
 });
 
 Deno.test("recomputeSettlementTotals with no settlements", () => {
-  const result = recomputeSettlementTotals(500, []);
-  assertEquals(result.amount_paid, 0);
-  assertEquals(result.amount_credited, 0);
-  assertEquals(result.amount_due, 500);
+  const result = recomputeSettlementTotals(50_000, []);
+  assertEquals(result.amount_paid_cents, 0);
+  assertEquals(result.amount_credited_cents, 0);
+  assertEquals(result.amount_due_cents, 50000);
 });
 
 Deno.test("recomputeSettlementTotals with zero total goes negative, not clamped", () => {
   const result = recomputeSettlementTotals(0, [S({ amount_cents: 50_00 })]);
-  assertEquals(result.amount_paid, 50);
-  assertEquals(result.amount_due, -50);
+  assertEquals(result.amount_paid_cents, 5000);
+  assertEquals(result.amount_due_cents, -5000);
 });
 
-// ── getXeroUnitAmount ─────────────────────────────���────────────
+// ── getXeroUnitAmountFromCents ─────────────────────────────���────────────
 
-Deno.test("getXeroUnitAmount divides subtotal by quantity", () => {
-  assertEquals(getXeroUnitAmount(500, 2), 250);
+// ⚠️ **CENTS IN, DOLLARS OUT.** The parameter is CFS storage (integer cents);
+// the return is Xero's wire format, which did not change when CFS's storage
+// did. Every fixture below therefore scales its FIRST argument by 100 and
+// leaves its expectation alone — the opposite of every other conversion in this
+// file, and exactly why the function was renamed rather than edited in place.
+
+Deno.test("getXeroUnitAmountFromCents divides subtotal by quantity", () => {
+  assertEquals(getXeroUnitAmountFromCents(50_000, 2), 250);
 });
 
-Deno.test("getXeroUnitAmount returns 0 for zero quantity", () => {
-  assertEquals(getXeroUnitAmount(500, 0), 0);
+Deno.test("getXeroUnitAmountFromCents returns 0 for zero quantity", () => {
+  assertEquals(getXeroUnitAmountFromCents(50_000, 0), 0);
 });
 
-Deno.test("getXeroUnitAmount handles fractional result", () => {
-  assertEquals(getXeroUnitAmount(100, 3), 33.33);
+Deno.test("getXeroUnitAmountFromCents handles fractional result", () => {
+  // $100.00 over 3 units is $33.33/unit, and Xero will bill $99.99. The residual
+  // is real money in someone else's ledger and is absorbed through DiscountRate.
+  assertEquals(getXeroUnitAmountFromCents(10_000, 3), 33.33);
 });
 
-Deno.test("getXeroUnitAmount rounds a negative tie AWAY from zero, unlike the divide it replaced", () => {
+Deno.test("getXeroUnitAmountFromCents rounds a negative tie AWAY from zero, unlike the divide it replaced", () => {
   // `currency(-0.05).divide(2)` is -0.02: JS `Math.round(-2.5)` goes toward +∞,
   // so the magnitude shrinks. A credit and its matching charge then differ by a
   // cent, which is the asymmetry `roundDivHalfAwayFromZero` exists to prevent.
-  assertEquals(getXeroUnitAmount(-0.05, 2), -0.03);
-  assertEquals(getXeroUnitAmount(0.05, 2), 0.03);
-  assertEquals(getXeroUnitAmount(-100.01, 2), -50.01);
-  assertEquals(getXeroUnitAmount(-0.01, 2), -0.01);
+  assertEquals(getXeroUnitAmountFromCents(-5, 2), -0.03);
+  assertEquals(getXeroUnitAmountFromCents(5, 2), 0.03);
+  assertEquals(getXeroUnitAmountFromCents(-10_001, 2), -50.01);
+  assertEquals(getXeroUnitAmountFromCents(-1, 2), -0.01);
   // Symmetry as a property, not three examples.
-  for (const [s, q] of [[0.05, 2], [100.01, 2], [0.25, 2], [19181.15, 10]] as const) {
-    assertEquals(getXeroUnitAmount(-s, q), -getXeroUnitAmount(s, q), `${s}/${q}`);
+  for (const [c, q] of [[5, 2], [10_001, 2], [25, 2], [1_918_115, 10]] as const) {
+    assertEquals(
+      getXeroUnitAmountFromCents(-c, q),
+      -getXeroUnitAmountFromCents(c, q),
+      `${c}c/${q}`,
+    );
   }
 });
 
-Deno.test("getXeroUnitAmount matches exact rational arithmetic over 500k lines", () => {
+Deno.test("getXeroUnitAmountFromCents matches exact rational arithmetic over 500k lines", () => {
   // The oracle is structurally distinct from the implementation: a single
   // reduced fraction, rounded by the DEFINITION (floor, then compare the
   // doubled remainder) rather than by the `(2n+d)/2d` identity the
   // implementation uses. A BigInt oracle that mirrors the implementation's own
   // decomposition can only ever agree with it — core#48.
-  const exact = (subtotal: number, quantity: number): number => {
+  //
+  // The oracle takes CENTS and returns DOLLARS, matching the function under
+  // test on both sides of the boundary.
+  const exact = (subtotalCents: number, quantity: number): number => {
     if (!quantity) return 0;
-    const num = BigInt(Math.round(subtotal * 100)) * 10_000n;
+    const num = BigInt(subtotalCents) * 10_000n;
     const den = BigInt(Math.round(quantity * 10_000));
     const negative = num < 0n;
     const magnitude = negative ? -num : num;
@@ -779,11 +794,10 @@ Deno.test("getXeroUnitAmount matches exact rational arithmetic over 500k lines",
   let checked = 0, oddCents = 0, ties = 0, wrong = 0;
   for (let i = 0; i < 500_000; i++) {
     const cents = rand(20_000_000) - 10_000_000;
-    const subtotal = cents / 100;
     const quantity = rand(50) + 1;
     if (cents % 2 !== 0) oddCents++;
     if (2 * (Math.abs(cents) % quantity) === quantity) ties++;
-    if (getXeroUnitAmount(subtotal, quantity) !== exact(subtotal, quantity)) wrong++;
+    if (getXeroUnitAmountFromCents(cents, quantity) !== exact(cents, quantity)) wrong++;
     checked++;
   }
   assertEquals(checked, 500_000, "the sweep must actually have run");
@@ -1311,16 +1325,16 @@ const RESYNC_LINE_A: LineItem = {
   uid: ITEM_1, type: "rental", name: "Spot Light", quantity: 2, path: [DEST_1, ITEM_1],
   stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
   price: {
-    base: 100, chargeable_days: 5, formula: "five_day_week",
-    subtotal: 200, subtotal_discounted: 200, discount: null, taxes: [], total: 200, replacement: 5000,
+    base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
+    subtotal_cents: 20000, subtotal_discounted_cents: 20000, discount: null, taxes: [], total_cents: 20000, replacement_cents: 500000,
   },
 } as unknown as LineItem;
 const RESYNC_LINE_B: LineItem = {
   uid: ITEM_2, type: "sale", name: "Tripod", quantity: 1, path: [DEST_1, ITEM_2],
   stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
   price: {
-    base: 300, chargeable_days: null, formula: "fixed",
-    subtotal: 300, subtotal_discounted: 300, discount: null, taxes: [], total: 300, replacement: 0,
+    base_cents: 30000, chargeable_days: null, formula: "fixed",
+    subtotal_cents: 30000, subtotal_discounted_cents: 30000, discount: null, taxes: [], total_cents: 30000, replacement_cents: 0,
   },
 } as unknown as LineItem;
 const RESYNC_ORDER_ITEMS: LineItem[] = [RESYNC_DEST, RESYNC_LINE_A, RESYNC_LINE_B];
@@ -1339,7 +1353,7 @@ function changedOrderItems(): LineItem[] {
   const priceA = (RESYNC_LINE_A as unknown as { price: Record<string, unknown> }).price;
   return [
     RESYNC_DEST,
-    { ...RESYNC_LINE_A, quantity: 9, price: { ...priceA, subtotal: 900, subtotal_discounted: 900, total: 900 } } as unknown as LineItem,
+    { ...RESYNC_LINE_A, quantity: 9, price: { ...priceA, subtotal_cents: 90000, subtotal_discounted_cents: 90000, total_cents: 90000 } } as unknown as LineItem,
     RESYNC_LINE_B,
   ];
 }
@@ -1382,7 +1396,7 @@ Deno.test("resyncInvoiceLines per-line: re-projects only the targeted line, sibl
   const b = result.find((i) => i.uid === ITEM_2)!;
   assertEquals(asLine(a).quantity, 9); // snapped to the order
   assertEquals(asLine(b).quantity, 1); // sibling untouched
-  assertEquals((asLine(a).price as { subtotal: number }).subtotal, 900);
+  assertEquals((asLine(a).price as { subtotal_cents: number }).subtotal_cents, 90000);
 });
 
 Deno.test("resyncInvoiceLines per-line: carries forward invoice-only override fields", () => {
@@ -1474,21 +1488,25 @@ function sweepDocs(count: number): SweepDoc[] {
       if (rand(8) === 0) {
         items.push(makeItem({ uid: `f-${d}-${i}`, type: "transaction_fee", quantity: 1 }, {
           formula: "percent_of_total",
-          base: rand(600) / 100,
+          // A PERCENTAGE (0–6%), in its own field. Drawing this into
+          // `base_cents` is the 100× D1 exists to prevent, and it would make
+          // every fee in the corpus a dollar amount instead of a rate.
+          base_cents: 0,
+          base_percent: rand(600) / 100,
         }));
         continue;
       }
       const withDiscount = rand(3) !== 0;
       items.push(makeItem({ uid: `l-${d}-${i}`, type: PRE_TAX[rand(4)], quantity: 1 + rand(9) }, {
-        base: rand(200_000) / 100,
+        base_cents: rand(200_000),
         chargeable_days: rand(40),
         formula: rand(2) === 0 ? "five_day_week" : "fixed",
         taxes: rand(2) === 0 ? [] : [{ uid: TAX_UIDS[rand(2)] }],
         ...(withDiscount
           ? {
             discount: rand(2) === 0
-              ? { type: "percent", rate: rand(1_000_000) / 10_000, amount: 0 }
-              : { type: "flat", rate: rand(20_000) / 100, amount: 0 },
+              ? { type: "percent", rate: rand(1_000_000) / 10_000, amount_cents: 0 }
+              : { type: "flat", rate: rand(20_000) / 100, amount_cents: 0 },
           }
           : {}),
       }));
@@ -1503,12 +1521,12 @@ const DOC_SWEEP = sweepDocs(20_000);
 /** The six fields both documents compute identically. */
 const core = (t: Record<string, unknown>) =>
   JSON.stringify([
-    t.discount_amount,
-    t.subtotal,
-    t.subtotal_discounted,
+    t.discount_amount_cents,
+    t.subtotal_cents,
+    t.subtotal_discounted_cents,
     t.taxes,
     t.transaction_fees,
-    t.total,
+    t.total_cents,
   ]);
 
 Deno.test("order and invoice totals agree on their six shared fields over 20k random documents", () => {
@@ -1538,10 +1556,10 @@ Deno.test("…and the sweep is not vacuous — dividers, discounts, taxes, fees 
   for (const doc of DOC_SWEEP) {
     if (flattenForXero(doc.items).length < doc.items.length) dropped++;
     const t = calculateInvoiceTotals(doc.items, TAXES);
-    if (t.discount_amount !== 0) discounted++;
+    if (t.discount_amount_cents !== 0) discounted++;
     if (t.taxes.length > 0) taxed++;
     if (t.transaction_fees.length > 0) feed++;
-    if (t.total !== 0) nonZero++;
+    if (t.total_cents !== 0) nonZero++;
   }
   assertEquals(dropped, DOC_SWEEP.length, "every doc must have a divider for the prefilter to drop");
   assertEquals(discounted > 0, true, "no discounted document in the corpus");

@@ -68,8 +68,8 @@ export interface BookingDocument {
   };
   quantity: number;
   shortage?: number;
-  total_price?: number;
-  unit_price?: number;
+  total_price_cents?: number;
+  unit_price_cents?: number;
   dates: {
     start_fs?: number;
     end_fs?: number;
@@ -221,14 +221,14 @@ export interface InvoiceDocument {
     type?: string;
   }>;
   totals?: {
-    total?: number;
-    total_str?: string;
-    amount_paid?: number;
-    amount_paid_str?: string;
-    amount_credited?: number;
-    amount_credited_str?: string;
-    amount_due?: number;
-    amount_due_str?: string;
+    total_cents?: number;
+    total_cents_str?: string;
+    amount_paid_cents?: number;
+    amount_paid_cents_str?: string;
+    amount_credited_cents?: number;
+    amount_credited_cents_str?: string;
+    amount_due_cents?: number;
+    amount_due_cents_str?: string;
   };
   crms_opportunity_ids?: number[];
   xero_id?: string;
@@ -271,11 +271,11 @@ export interface CreditNoteDocument {
     coa_revenue?: number;
   }>;
   totals?: {
-    total?: number;
-    total_str?: string;
+    total_cents?: number;
+    total_cents_str?: string;
   };
-  remaining_credit?: number;
-  remaining_credit_str?: string;
+  remaining_credit_cents?: number;
+  remaining_credit_cents_str?: string;
   query_by_sources?: string[];
   xero_credit_note_id?: string;
   created_by?: TypesenseActorRef;
@@ -380,13 +380,13 @@ export interface OrderDocument {
     };
   }>;
   totals: {
-    discount_amount?: number;
-    subtotal?: number;
-    subtotal_discounted?: number;
+    discount_amount_cents?: number;
+    subtotal_cents?: number;
+    subtotal_discounted_cents?: number;
     taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string; amount?: number }>;
     transaction_fees?: Array<{ uid?: string; name?: string; rate?: number; type?: string; amount?: number }>;
-    total?: number;
-    total_str?: string;
+    total_cents?: number;
+    total_cents_str?: string;
   };
   items?: Array<{
     uid?: string;
@@ -402,13 +402,13 @@ export interface OrderDocument {
     path?: string[];
     uid_delivery?: string;
     uid_collection?: string;
-    total_price?: number;
+    total_price_cents?: number;
     price?: {
-      base?: number;
-      replacement?: number;
-      subtotal?: number;
-      subtotal_discounted?: number;
-      total?: number;
+      base_cents?: number;
+      replacement_cents?: number;
+      subtotal_cents?: number;
+      subtotal_discounted_cents?: number;
+      total_cents?: number;
       discount?: { rate?: number; type?: string; amount?: number };
       taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string; amount?: number }>;
       chargeable_days?: number;
@@ -580,8 +580,8 @@ export interface ProductDocumentComponent {
   inclusion_type?: string;
   zero_priced?: boolean;
   price?: {
-    base?: number;
-    replacement?: number;
+    base_cents?: number;
+    replacement_cents?: number;
     coa_revenue?: number;
     taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string }>;
     formula?: string;
@@ -605,8 +605,8 @@ export interface ProductDocument {
   eligible_shipping_ground?: boolean;
   eligible_shipping_air?: boolean;
   price?: {
-    base?: number;
-    replacement?: number;
+    base_cents?: number;
+    replacement_cents?: number;
     coa_revenue?: number;
     taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string }>;
     formula?: string;
@@ -762,8 +762,8 @@ export interface WebshopProductDocumentComponent {
   inclusion_type?: string;
   zero_priced?: boolean;
   price?: {
-    base?: number;
-    replacement?: number;
+    base_cents?: number;
+    replacement_cents?: number;
     taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string }>;
     formula?: string;
     discountable?: boolean;
@@ -785,8 +785,8 @@ export interface WebshopProductDocument {
   eligible_shipping_ground?: boolean;
   eligible_shipping_air?: boolean;
   price: {
-    base?: number;
-    replacement?: number;
+    base_cents?: number;
+    replacement_cents?: number;
     taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string }>;
     formula?: string;
     discountable?: boolean;

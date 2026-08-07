@@ -92,14 +92,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "syncChargeDaysToItems", // mutates items in place — write-path only
     "deriveOrderDateEnvelope", // superseded by per-destination dates; not for rendering
     "buildQueryByDates", // Typesense projection helper
-    "computeItemTaxAmount", // single-tax building block used by calculateItemTax — not a render helper
+    "computeItemTaxAmountCents", // single-tax building block used by calculateItemTax — not a render helper
     // The transaction-fee pass of calculateOrderTotals/calculateInvoiceTotals.
     // Both need the DOCUMENT's subtotal_discounted as a basis, and both answer a
     // question the render context already has an answer to: the fee's amount is
-    // stored on the line (`price.total`) and rolled up in
+    // stored on the line (`price.total_cents`) and rolled up in
     // `totals.transaction_fees`. Recomputing at render time would let a document
     // disagree with the doc it renders — the same trap as `allocation` above.
-    "calculateTransactionFeeAmount", // fee arithmetic — totals pass only
+    "calculateTransactionFeeAmountCents", // fee arithmetic — totals pass only
     "costTransactionFees", // fee arithmetic over an array — totals pass only
     // The six-field fold shared by calculateOrderTotals and
     // calculateInvoiceTotals. Same argument as the two above, one level up: a
@@ -119,9 +119,13 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   invoices: [
     // ── Xero integration ──
     "flattenForXero", // Xero line projection — write-path only
-    "getXeroUnitAmount", // bakes duration into a per-unit price for Xero
+    "getXeroUnitAmountFromCents", // bakes duration into a per-unit price for Xero
     // ── Payment / totals internals ──
-    "recomputePaymentTotals", // payment accounting building block used by calculateInvoiceTotals
+    // `recomputePaymentTotals` sat here for months after the function was
+    // deleted — a dead string nothing could see, because this file names its
+    // targets as text. `tests/template-helpers.test.ts` now asserts every
+    // entry resolves to a real export, so a rename breaks the build instead.
+    "recomputeSettlementTotals", // settlement projection — a template reads STORED totals
     // ── Path + uniqueness machinery (invoice variants of the order ones above) ──
     "computeInvoiceItemPaths", // canonical path computation — write-path only
     "validateInvoiceItemPaths", // invariant assertion — write-path only

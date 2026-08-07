@@ -21,7 +21,7 @@
  * 1. **An allocation IS a settlement document.** There is no `allocations[]`
  *    mirror on the note, so the edge from note to invoice runs *through* the
  *    journal. `where("uid_credit_note","==",uid)` is an ordinary query.
- * 2. **`remaining_credit` is a projection, not a ledger.** It is co-written from
+ * 2. **`remaining_credit_cents` is a projection, not a ledger.** It is co-written from
  *    the same settlements that move the invoices, so the note and the invoices
  *    can never disagree about how much of the note has been consumed.
  * 3. **The allocation date is neither document's date.** See
@@ -49,7 +49,7 @@ const SETTLEMENT_TOTALS_FOLD: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-settlement-totals.ts",
   clause:
-    "the projection clause only — stored totals equal the signed fold over the invoice's settlements, corpus-wide. Says NOTHING about whether a credit note's `remaining_credit` agrees with the same rows, and nothing about the allocation date.",
+    "the projection clause only — stored totals equal the signed fold over the invoice's settlements, corpus-wide. Says NOTHING about whether a credit note's `remaining_credit_cents` agrees with the same rows, and nothing about the allocation date.",
   gates: true,
 };
 
@@ -85,7 +85,7 @@ const CREDIT_NOTE_NUMBER_AHEAD: EnforcementRef = {
 };
 
 /**
- * The status↔`remaining_credit` biconditional, enforced at write time by the
+ * The status↔`remaining_credit_cents` biconditional, enforced at write time by the
  * schema itself rather than by an audit.
  *
  * `construction` because a document asserting `applied` while holding credit
@@ -95,7 +95,7 @@ const CREDIT_NOTE_STATUS_REFINE: EnforcementRef = {
   kind: "zod",
   ref: "core/src/schemas/credit-note.ts:347",
   clause:
-    "`applied` ⟺ `remaining_credit === 0` (void exempt), and `remaining_credit <= totals.total`. Says nothing about whether the stored `remaining_credit` matches the settlements that produced it.",
+    "`applied` ⟺ `remaining_credit_cents === 0` (void exempt), and `remaining_credit_cents <= totals.total_cents`. Says nothing about whether the stored `remaining_credit_cents` matches the settlements that produced it.",
   gates: true,
 };
 
@@ -201,13 +201,13 @@ export const allocateCreditNoteRules: CollectionRule[] = [
     fields: [
       {
         source: ["amount_cents"],
-        target: ["totals", "amount_credited"],
+        target: ["totals", "amount_credited_cents"],
         transform:
           "applied as a DELTA against the invoice read by CAS, never an absolute — two writers that each recomputed an absolute from their own read would clobber each other, and the invoice document is the transaction's only conflict point",
       },
       {
         source: ["amount_cents"],
-        target: ["totals", "amount_due"],
+        target: ["totals", "amount_due_cents"],
         transform: "recomputeSettlementTotals(total, rows) — total − paid − credited",
       },
       {
@@ -224,19 +224,19 @@ export const allocateCreditNoteRules: CollectionRule[] = [
     target: "credit-notes",
     mode: "co-write",
     invariant:
-      "The note's `remaining_credit` is a projection of the same settlements that moved the invoices, co-written in the same transaction — so the note and its invoices can never disagree about how much of it has been consumed. `applied` means remaining_credit === 0 HOWEVER it got there, by allocation or by cash refund.",
+      "The note's `remaining_credit_cents` is a projection of the same settlements that moved the invoices, co-written in the same transaction — so the note and its invoices can never disagree about how much of it has been consumed. `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
     enforced_by: [CREDIT_NOTE_STATUS_REFINE],
     transaction: "allocate-credit-note",
     fields: [
       {
         source: ["amount_cents"],
-        target: ["remaining_credit"],
+        target: ["remaining_credit_cents"],
         transform: "total minus every unreversed allocation minus any cash refunded",
       },
       {
         source: [],
         target: ["status"],
-        transform: "issued → applied when remaining_credit reaches 0",
+        transform: "issued → applied when remaining_credit_cents reaches 0",
       },
     ],
   },
@@ -285,7 +285,7 @@ export const voidCreditNoteRules: CollectionRule[] = [
     target: "credit-notes",
     mode: "derive",
     invariant:
-      "A voided note keeps its number and strands its balance rather than consuming it — which is why `void` is exempt from the applied ⟺ remaining_credit === 0 refine. The number is never reissued, even though Xero frees it.",
+      "A voided note keeps its number and strands its balance rather than consuming it — which is why `void` is exempt from the applied ⟺ remaining_credit_cents === 0 refine. The number is never reissued, even though Xero frees it.",
     enforced_by: [CREDIT_NOTE_STATUS_REFINE, CREDIT_NOTE_NUMBER_AHEAD],
     transaction: "void-credit-note",
     fields: [

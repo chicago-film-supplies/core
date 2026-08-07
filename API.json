@@ -117,7 +117,7 @@
         {
           "kind": "interface",
           "name": "Booking",
-          "declaration": "interface Booking {\n  uid: string;\n  uid_order: string;\n  uid_product: string;\n  name: string;\n  number: number;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  shortage: number;\n  subject: string;\n  unit_price: number;\n  total_price: number;\n  crms_id?: number | null;\n  crms_product_id?: number | null;\n  breakdown: BookingBreakdown;\n  dates: typeLiteral;\n  destinations: typeLiteral;\n  organization: typeLiteral;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Booking {\n  uid: string;\n  uid_order: string;\n  uid_product: string;\n  name: string;\n  number: number;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  shortage: number;\n  subject: string;\n  unit_price_cents: number;\n  total_price_cents: number;\n  crms_id?: number | null;\n  crms_product_id?: number | null;\n  breakdown: BookingBreakdown;\n  dates: typeLiteral;\n  destinations: typeLiteral;\n  organization: typeLiteral;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a booking (a single product line within an order)."
         },
         {
@@ -610,7 +610,7 @@
           "kind": "variable",
           "name": "ComponentSchema",
           "declaration": "const ComponentSchema: z.ZodType<ProductComponent>;",
-          "doc": "Schema for a `component_of` back-reference. `inclusion_type` is optional here\nbecause the parent authors it — see {@link ProductComponent}.\n\nA catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset\nof `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),\nand every component that survives expansion becomes an order line of the same\n`type`. So it answers to the same contract, and the rental ⇒\n`price.replacement` rule is stated once rather than a third time here."
+          "doc": "Schema for a `component_of` back-reference. `inclusion_type` is optional here\nbecause the parent authors it — see {@link ProductComponent}.\n\nA catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset\nof `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),\nand every component that survives expansion becomes an order line of the same\n`type`. So it answers to the same contract, and the rental ⇒\n`price.replacement_cents` rule is stated once rather than a third time here."
         },
         {
           "kind": "variable",
@@ -627,7 +627,7 @@
         {
           "kind": "interface",
           "name": "ConsolidatedItemType",
-          "declaration": "interface ConsolidatedItemType {\n  uid: string;\n  name: string;\n  type: string;\n  quantity: number;\n  total_price: number;\n  unit_price: number;\n  stock_method: string;\n}",
+          "declaration": "interface ConsolidatedItemType {\n  uid: string;\n  name: string;\n  type: string;\n  quantity: number;\n  total_price_cents: number;\n  unit_price_cents: number;\n  stock_method: string;\n}",
           "doc": "A consolidated line item — aggregated quantity and price for display.\nUsed by consolidateItems() in utilities and the manager app."
         },
         {
@@ -933,7 +933,7 @@
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {
@@ -957,13 +957,13 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
           "kind": "interface",
           "name": "CreditNoteDocItemPrice",
-          "declaration": "interface CreditNoteDocItemPrice {\n  base: number;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total: number;\n}",
+          "declaration": "interface CreditNoteDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single credit-note line."
         },
         {
@@ -993,8 +993,8 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocTotals",
-          "declaration": "interface CreditNoteDocTotals {\n  subtotal: number;\n  subtotal_discounted: number;\n  discount_amount: number;\n  taxes: PriceModifierType[];\n  total: number;\n}",
-          "doc": "Credit-note totals.\n\nDollars, not cents — they sit beside `items[]` priced in dollars, and a\ndocument that mixed both internally would be worse than either. The cents\nboundary is the `settlements` journal; `total` here is what an allocation\ndraws *from*.\n\n**No `transaction_fees`.** A card-processing fee is charged when money is\ntaken, not when it is given back; crediting one is an `order_adjustment` line,\nnot a fee row."
+          "declaration": "interface CreditNoteDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
+          "doc": "Credit-note totals.\n\nInteger cents, matching `items[]` and matching the `settlements` journal the\nallocations are drawn into. **This document used to be dollars end to end**\nwhile the journal beside it was already cents — a split that was recorded as\nan intentional boundary and was in fact just drift, and which meant the 2dp\ncensus had never evaluated this corpus at all.\n\n**No `transaction_fees`.** A card-processing fee is charged when money is\ntaken, not when it is given back; crediting one is an `order_adjustment` line,\nnot a fee row."
         },
         {
           "kind": "variable",
@@ -1113,7 +1113,7 @@
         {
           "kind": "interface",
           "name": "DiscountType",
-          "declaration": "interface DiscountType {\n  rate: number;\n  type: RateType;\n  amount: number;\n}",
+          "declaration": "interface DiscountType {\n  rate: number;\n  type: RateType;\n  amount_cents: number;\n}",
           "doc": "Discount applied to an item price. Nullable — null means no discount.\nrate is per-unit for flat discounts (rate × quantity × days_factor = amount)."
         },
         {
@@ -1575,7 +1575,7 @@
         {
           "kind": "interface",
           "name": "InventoryLedger",
-          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number;\n  quantity_in_service: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number;\n  quantity_in_service: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An inventory ledger document tracking stock quantities and costs per product."
         },
         {
@@ -1635,7 +1635,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPrice",
-          "declaration": "interface InvoiceDocItemPrice {\n  base: number;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total: number;\n  discount_percent?: number;\n}",
+          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n  discount_percent?: number;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -1671,7 +1671,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocTotals",
-          "declaration": "interface InvoiceDocTotals {\n  subtotal: number;\n  subtotal_discounted: number;\n  discount_amount: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total: number;\n  amount_paid: number;\n  amount_credited?: number;\n  amount_due: number;\n}",
+          "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_due_cents: number;\n}",
           "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock-summaries` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
         },
         {
@@ -1785,7 +1785,7 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  base?: number;\n  replacement?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  subtotal?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total?: number;\n}",
+          "declaration": "interface ItemPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
         },
         {
@@ -2085,8 +2085,8 @@
         {
           "kind": "interface",
           "name": "MovementCostType",
-          "declaration": "interface MovementCostType {\n  amount: number;\n  unit_cost: number;\n  unit_costs: number[];\n}",
-          "doc": "The carrying-value change this event records. `amount` is signed: negative\nremoves basis, positive adds it. `unit_costs[]` carries the per-unit basis\nactually consumed or added, which the weighted-average cost fold reads."
+          "declaration": "interface MovementCostType {\n  amount_cents: number;\n  unit_cost: number;\n  unit_costs_cents: number[];\n}",
+          "doc": "The carrying-value change this event records. `amount_cents` is signed:\nnegative removes basis, positive adds it. `unit_costs_cents[]` carries the\nper-unit basis actually consumed or added, which the weighted-average cost\nfold reads.\n\n⚠️ **`unit_cost` sits between two `_cents` fields and is NOT one of them.**\nIt is a per-unit **rate** at 4dp, and quantizing it to the cent is a measured\nregression, not a hypothetical: `@cfs/core@10.0.0-beta.117` emitted it\nthrough `fromCentsBig` and a 100-unit $6.39 purchase reported $0.06/unit — a\n6% error that went a week undetected because every movement written in that\nwindow happened to divide evenly at the cent. A mechanical \"convert every\nmoney field in this object\" pass restores it exactly."
         },
         {
           "kind": "variable",
@@ -2355,7 +2355,7 @@
         {
           "kind": "interface",
           "name": "OrderDocItemPriceType",
-          "declaration": "interface OrderDocItemPriceType {\n  base: number;\n  replacement?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total: number;\n}",
+          "declaration": "interface OrderDocItemPriceType {\n  base_cents: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
           "doc": "Line item price in the full order document (all fields required after server compute).\nsubtotal = pre-discount (base × qty × days_factor).\nsubtotal_discounted = post-discount.\ntotal = subtotal_discounted + sum(taxes[].amount)."
         },
         {
@@ -2379,7 +2379,7 @@
         {
           "kind": "interface",
           "name": "OrderDocTotalsType",
-          "declaration": "interface OrderDocTotalsType {\n  discount_amount: number;\n  subtotal: number;\n  subtotal_discounted: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total: number;\n  replacement_total: number;\n}",
+          "declaration": "interface OrderDocTotalsType {\n  discount_amount_cents: number;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  replacement_total_cents: number;\n}",
           "doc": "Order totals."
         },
         {
@@ -2620,12 +2620,12 @@
           "kind": "variable",
           "name": "PriceModifier",
           "declaration": "const PriceModifier: z.ZodType<PriceModifierType>;",
-          "doc": "Zod schema for a rate-based price modifier (tax or transaction fee)."
+          "doc": "Zod schema for a rate-based price modifier (tax or transaction fee).\n\n`rate` and `amount_cents` are deliberately DIFFERENT units and the names say\nso: `rate` stays a 4dp dollars-or-percent rate discriminated on `type` (see\n{@link DiscountType}), while `amount_cents` is the computed money in integer\ncents. A sweep that \"converts every number in this object\" restores exactly\nthe rate/amount confusion the suffix exists to prevent."
         },
         {
           "kind": "interface",
           "name": "PriceModifierType",
-          "declaration": "interface PriceModifierType {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  amount: number;\n}",
+          "declaration": "interface PriceModifierType {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  amount_cents: number;\n}",
           "doc": "A rate-based charge applied to an item or order (tax or transaction fee).\nuid references a tax doc (for taxes) or a product doc (for transaction fees)."
         },
         {
@@ -2661,7 +2661,7 @@
         {
           "kind": "interface",
           "name": "ProductPrice",
-          "declaration": "interface ProductPrice {\n  base: number;\n  replacement?: number | null;\n  coa_revenue?: COARevenueType;\n  taxes: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
+          "declaration": "interface ProductPrice {\n  base_cents: number;\n  replacement_cents?: number | null;\n  coa_revenue?: COARevenueType;\n  taxes: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
           "doc": "Pricing details for a product."
         },
         {
@@ -3063,7 +3063,7 @@
         {
           "kind": "interface",
           "name": "SettlementContract",
-          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid\" | \"amount_credited\";\n  reverses: \"required\" | \"forbidden\";\n}",
+          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\";\n  reverses: \"required\" | \"forbidden\";\n}",
           "doc": "How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}"
         },
         {
@@ -4025,7 +4025,7 @@
           "kind": "function",
           "name": "checkItemContract",
           "signature": "checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void",
-          "doc": "The full per-item contract check — {@link checkItemPriceFormula} plus the\n`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,\nthe one item shape whose price carries a `replacement` channel. The direct\nanalogue of `checkMovementContract` in `transaction.ts`.\n\n`required_when_stocked` treats a MISSING `stock_method` as stocked — the\nconservative reading, and the one the hand-written refine this replaced always\nenforced. **Both callers now make the field required** (`OrderDocLineItemInner`\nas of W5, `ComponentObject` from the start), so that branch is unreachable\nthrough either one; it is kept because a refinement is not a parse and this\nfunction takes a structural bound, not a schema.\n\nThe `stock_method` requirement is also why the axis does not run on the\ninvoice arm: an invoice line drops `stock_method` and `price.replacement`\ntogether, so an absent `stock_method` there means \"this shape has no answer\",\nnot \"unknown\" — and running it would reject all 7,076 invoice rentals in prod.",
+          "doc": "The full per-item contract check — {@link checkItemPriceFormula} plus the\n`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,\nthe one item shape whose price carries a `replacement` channel. The direct\nanalogue of `checkMovementContract` in `transaction.ts`.\n\n`required_when_stocked` treats a MISSING `stock_method` as stocked — the\nconservative reading, and the one the hand-written refine this replaced always\nenforced. **Both callers now make the field required** (`OrderDocLineItemInner`\nas of W5, `ComponentObject` from the start), so that branch is unreachable\nthrough either one; it is kept because a refinement is not a parse and this\nfunction takes a structural bound, not a schema.\n\nThe `stock_method` requirement is also why the axis does not run on the\ninvoice arm: an invoice line drops `stock_method` and `price.replacement`\ntogether, so an absent `stock_method` there means \"this shape has no answer\",\nnot \"unknown\" — and running it would reject all 7,076 invoice rentals in prod.\n\n⚠️ **This function takes a STRUCTURAL BOUND, not a schema, so the compiler\ncannot tell you when a field it reads has been renamed away.** During the\ndollars→cents migration `price.replacement` became `price.replacement_cents`\neverywhere; had the bound below not moved with it, `deno check` would have\nstayed green while `item.price?.replacement` read `undefined` forever — the\n`forbidden` arm permanently vacuous (a transaction_fee could carry a\nreplacement price) and the `required_when_stocked` arm firing on every\nstocked rental. Any future rename of a field named here must edit this\nsignature; `tests/common.test.ts` pins both arms against a live shape so a\nvacuous bound fails rather than passes.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5160,7 +5160,7 @@
         {
           "kind": "interface",
           "name": "SettlementContract",
-          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid\" | \"amount_credited\";\n  reverses: \"required\" | \"forbidden\";\n}",
+          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\";\n  reverses: \"required\" | \"forbidden\";\n}",
           "doc": "How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}"
         },
         {
@@ -5263,7 +5263,7 @@
           "kind": "function",
           "name": "checkItemContract",
           "signature": "checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void",
-          "doc": "The full per-item contract check — {@link checkItemPriceFormula} plus the\n`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,\nthe one item shape whose price carries a `replacement` channel. The direct\nanalogue of `checkMovementContract` in `transaction.ts`.\n\n`required_when_stocked` treats a MISSING `stock_method` as stocked — the\nconservative reading, and the one the hand-written refine this replaced always\nenforced. **Both callers now make the field required** (`OrderDocLineItemInner`\nas of W5, `ComponentObject` from the start), so that branch is unreachable\nthrough either one; it is kept because a refinement is not a parse and this\nfunction takes a structural bound, not a schema.\n\nThe `stock_method` requirement is also why the axis does not run on the\ninvoice arm: an invoice line drops `stock_method` and `price.replacement`\ntogether, so an absent `stock_method` there means \"this shape has no answer\",\nnot \"unknown\" — and running it would reject all 7,076 invoice rentals in prod.",
+          "doc": "The full per-item contract check — {@link checkItemPriceFormula} plus the\n`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,\nthe one item shape whose price carries a `replacement` channel. The direct\nanalogue of `checkMovementContract` in `transaction.ts`.\n\n`required_when_stocked` treats a MISSING `stock_method` as stocked — the\nconservative reading, and the one the hand-written refine this replaced always\nenforced. **Both callers now make the field required** (`OrderDocLineItemInner`\nas of W5, `ComponentObject` from the start), so that branch is unreachable\nthrough either one; it is kept because a refinement is not a parse and this\nfunction takes a structural bound, not a schema.\n\nThe `stock_method` requirement is also why the axis does not run on the\ninvoice arm: an invoice line drops `stock_method` and `price.replacement`\ntogether, so an absent `stock_method` there means \"this shape has no answer\",\nnot \"unknown\" — and running it would reject all 7,076 invoice rentals in prod.\n\n⚠️ **This function takes a STRUCTURAL BOUND, not a schema, so the compiler\ncannot tell you when a field it reads has been renamed away.** During the\ndollars→cents migration `price.replacement` became `price.replacement_cents`\neverywhere; had the bound below not moved with it, `deno check` would have\nstayed green while `item.price?.replacement` read `undefined` forever — the\n`forbidden` arm permanently vacuous (a transaction_fee could carry a\nreplacement price) and the `required_when_stocked` arm firing on every\nstocked rental. Any future rename of a field named here must edit this\nsignature; `tests/common.test.ts` pins both arms against a live shape so a\nvacuous bound fails rather than passes.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5272,6 +5272,14 @@
           "name": "checkItemPriceFormula",
           "signature": "checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void",
           "doc": "The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is\nlegal only where the contract says the line is priced FROM the document total.\n\nApplies to every price shape in the package, so it is the check the invoice\narm attaches on its own — an invoice line has no `stock_method` and its price\nhas no `replacement` key, which leaves this as the only axis it can express.\n\n`percent_of_total` prices a line from the DOCUMENT total, which only\n`calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`\nthrows on it. Before this axis the combination was merely thrown on at\nruntime, deep in `perUnitSubtotal`; here it is unwritable. The converse is\ndeliberately NOT asserted: a flat-amount fee is legitimate, and\n`calculateTransactionFeeAmount` prices one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkPriceBaseUnit",
+          "signature": "checkPriceBaseUnit(price: typeLiteral | null | undefined, ctx: z.RefinementCtx): void",
+          "doc": "The unit half of a line's price: which of `base_cents` / `base_percent` a\n`formula` is allowed to carry.\n\n**This exists because `price.base` used to carry two units.** On a\n`transaction_fee` line with `formula === \"percent_of_total\"`, `base` was a\n*percentage* of the document's `subtotal_discounted`; on every other line it\nwas a per-unit dollar amount. One field, two units, discriminated only by a\nsibling — so a reader that did not consult `formula` first multiplied a 2.9%\ncard fee as if it were $2.90, and integer cents would have made 2.9%\nunrepresentable outright.\n\nThe split puts the unit in the NAME: `base_cents` is money (integer cents),\n`base_percent` is a percentage stored at 4dp — the quantum Xero's\n`DiscountRate` holds, and deliberately NOT the `RATE_SCALE = 1_000_000n`\nwidening `utils/orders.ts` uses to *apply* a rate exactly. Conflating those\ntwo would store six decimals Xero cannot carry.\n\n**The rule is exactly-one-of, in the only form a `.default(0)` leaves\ncheckable.** `base_cents` keeps its default, so it is materialized by the\nparse before any object-level refinement runs and can never be observed\n\"absent\" here; asserting it is *zero* on the fee arm is the same guarantee\nagainst the same failure, and it is the half that can actually fail. The\n`base_percent` half is asserted in both directions.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5358,7 +5366,7 @@
         {
           "kind": "interface",
           "name": "Booking",
-          "declaration": "interface Booking {\n  uid: string;\n  uid_order: string;\n  uid_product: string;\n  name: string;\n  number: number;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  shortage: number;\n  subject: string;\n  unit_price: number;\n  total_price: number;\n  crms_id?: number | null;\n  crms_product_id?: number | null;\n  breakdown: BookingBreakdown;\n  dates: typeLiteral;\n  destinations: typeLiteral;\n  organization: typeLiteral;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Booking {\n  uid: string;\n  uid_order: string;\n  uid_product: string;\n  name: string;\n  number: number;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  shortage: number;\n  subject: string;\n  unit_price_cents: number;\n  total_price_cents: number;\n  crms_id?: number | null;\n  crms_product_id?: number | null;\n  breakdown: BookingBreakdown;\n  dates: typeLiteral;\n  destinations: typeLiteral;\n  organization: typeLiteral;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a booking (a single product line within an order)."
         },
         {
@@ -5922,7 +5930,7 @@
         {
           "kind": "interface",
           "name": "InventoryLedger",
-          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number;\n  quantity_in_service: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number;\n  quantity_in_service: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An inventory ledger document tracking stock quantities and costs per product."
         },
         {
@@ -6030,7 +6038,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPrice",
-          "declaration": "interface InvoiceDocItemPrice {\n  base: number;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total: number;\n  discount_percent?: number;\n}",
+          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n  discount_percent?: number;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -6066,7 +6074,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocTotals",
-          "declaration": "interface InvoiceDocTotals {\n  subtotal: number;\n  subtotal_discounted: number;\n  discount_amount: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total: number;\n  amount_paid: number;\n  amount_credited?: number;\n  amount_due: number;\n}",
+          "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_due_cents: number;\n}",
           "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock-summaries` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
         },
         {
@@ -6120,7 +6128,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputPrice",
-          "declaration": "interface InvoiceItemInputPrice {\n  base?: number;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
+          "declaration": "interface InvoiceItemInputPrice {\n  base_cents?: number;\n  base_percent?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
           "doc": "Item price input — partial, server computes the rest."
         },
         {
@@ -6364,7 +6372,7 @@
         {
           "kind": "interface",
           "name": "ConsolidatedItemType",
-          "declaration": "interface ConsolidatedItemType {\n  uid: string;\n  name: string;\n  type: string;\n  quantity: number;\n  total_price: number;\n  unit_price: number;\n  stock_method: string;\n}",
+          "declaration": "interface ConsolidatedItemType {\n  uid: string;\n  name: string;\n  type: string;\n  quantity: number;\n  total_price_cents: number;\n  unit_price_cents: number;\n  stock_method: string;\n}",
           "doc": "A consolidated line item — aggregated quantity and price for display.\nUsed by consolidateItems() in utilities and the manager app."
         },
         {
@@ -6436,7 +6444,7 @@
         {
           "kind": "interface",
           "name": "DiscountType",
-          "declaration": "interface DiscountType {\n  rate: number;\n  type: RateType;\n  amount: number;\n}",
+          "declaration": "interface DiscountType {\n  rate: number;\n  type: RateType;\n  amount_cents: number;\n}",
           "doc": "Discount applied to an item price. Nullable — null means no discount.\nrate is per-unit for flat discounts (rate × quantity × days_factor = amount)."
         },
         {
@@ -6490,7 +6498,7 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  base?: number;\n  replacement?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  subtotal?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total?: number;\n}",
+          "declaration": "interface ItemPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
         },
         {
@@ -6586,7 +6594,7 @@
         {
           "kind": "interface",
           "name": "OrderDocItemPriceType",
-          "declaration": "interface OrderDocItemPriceType {\n  base: number;\n  replacement?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total: number;\n}",
+          "declaration": "interface OrderDocItemPriceType {\n  base_cents: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
           "doc": "Line item price in the full order document (all fields required after server compute).\nsubtotal = pre-discount (base × qty × days_factor).\nsubtotal_discounted = post-discount.\ntotal = subtotal_discounted + sum(taxes[].amount)."
         },
         {
@@ -6610,7 +6618,7 @@
         {
           "kind": "interface",
           "name": "OrderDocTotalsType",
-          "declaration": "interface OrderDocTotalsType {\n  discount_amount: number;\n  subtotal: number;\n  subtotal_discounted: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total: number;\n  replacement_total: number;\n}",
+          "declaration": "interface OrderDocTotalsType {\n  discount_amount_cents: number;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  replacement_total_cents: number;\n}",
           "doc": "Order totals."
         },
         {
@@ -6683,12 +6691,12 @@
           "kind": "variable",
           "name": "PriceModifier",
           "declaration": "const PriceModifier: z.ZodType<PriceModifierType>;",
-          "doc": "Zod schema for a rate-based price modifier (tax or transaction fee)."
+          "doc": "Zod schema for a rate-based price modifier (tax or transaction fee).\n\n`rate` and `amount_cents` are deliberately DIFFERENT units and the names say\nso: `rate` stays a 4dp dollars-or-percent rate discriminated on `type` (see\n{@link DiscountType}), while `amount_cents` is the computed money in integer\ncents. A sweep that \"converts every number in this object\" restores exactly\nthe rate/amount confusion the suffix exists to prevent."
         },
         {
           "kind": "interface",
           "name": "PriceModifierType",
-          "declaration": "interface PriceModifierType {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  amount: number;\n}",
+          "declaration": "interface PriceModifierType {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  amount_cents: number;\n}",
           "doc": "A rate-based charge applied to an item or order (tax or transaction fee).\nuid references a tax doc (for taxes) or a product doc (for transaction fees)."
         },
         {
@@ -7021,7 +7029,7 @@
           "kind": "variable",
           "name": "ComponentSchema",
           "declaration": "const ComponentSchema: z.ZodType<ProductComponent>;",
-          "doc": "Schema for a `component_of` back-reference. `inclusion_type` is optional here\nbecause the parent authors it — see {@link ProductComponent}.\n\nA catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset\nof `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),\nand every component that survives expansion becomes an order line of the same\n`type`. So it answers to the same contract, and the rental ⇒\n`price.replacement` rule is stated once rather than a third time here."
+          "doc": "Schema for a `component_of` back-reference. `inclusion_type` is optional here\nbecause the parent authors it — see {@link ProductComponent}.\n\nA catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset\nof `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),\nand every component that survives expansion becomes an order line of the same\n`type`. So it answers to the same contract, and the rental ⇒\n`price.replacement_cents` rule is stated once rather than a third time here."
         },
         {
           "kind": "variable",
@@ -7062,7 +7070,7 @@
         {
           "kind": "interface",
           "name": "ProductPrice",
-          "declaration": "interface ProductPrice {\n  base: number;\n  replacement?: number | null;\n  coa_revenue?: COARevenueType;\n  taxes: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
+          "declaration": "interface ProductPrice {\n  base_cents: number;\n  replacement_cents?: number | null;\n  coa_revenue?: COARevenueType;\n  taxes: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
           "doc": "Pricing details for a product."
         },
         {
@@ -7250,13 +7258,13 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
           "kind": "interface",
           "name": "CreditNoteDocItemPrice",
-          "declaration": "interface CreditNoteDocItemPrice {\n  base: number;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal: number;\n  subtotal_discounted: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total: number;\n}",
+          "declaration": "interface CreditNoteDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single credit-note line."
         },
         {
@@ -7274,8 +7282,8 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocTotals",
-          "declaration": "interface CreditNoteDocTotals {\n  subtotal: number;\n  subtotal_discounted: number;\n  discount_amount: number;\n  taxes: PriceModifierType[];\n  total: number;\n}",
-          "doc": "Credit-note totals.\n\nDollars, not cents — they sit beside `items[]` priced in dollars, and a\ndocument that mixed both internally would be worse than either. The cents\nboundary is the `settlements` journal; `total` here is what an allocation\ndraws *from*.\n\n**No `transaction_fees`.** A card-processing fee is charged when money is\ntaken, not when it is given back; crediting one is an `order_adjustment` line,\nnot a fee row."
+          "declaration": "interface CreditNoteDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
+          "doc": "Credit-note totals.\n\nInteger cents, matching `items[]` and matching the `settlements` journal the\nallocations are drawn into. **This document used to be dollars end to end**\nwhile the journal beside it was already cents — a split that was recorded as\nan intentional boundary and was in fact just drift, and which meant the 2dp\ncensus had never evaluated this corpus at all.\n\n**No `transaction_fees`.** A card-processing fee is charged when money is\ntaken, not when it is given back; crediting one is an `order_adjustment` line,\nnot a fee row."
         },
         {
           "kind": "variable",
@@ -7540,7 +7548,7 @@
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {
@@ -7588,8 +7596,8 @@
         {
           "kind": "interface",
           "name": "MovementCostType",
-          "declaration": "interface MovementCostType {\n  amount: number;\n  unit_cost: number;\n  unit_costs: number[];\n}",
-          "doc": "The carrying-value change this event records. `amount` is signed: negative\nremoves basis, positive adds it. `unit_costs[]` carries the per-unit basis\nactually consumed or added, which the weighted-average cost fold reads."
+          "declaration": "interface MovementCostType {\n  amount_cents: number;\n  unit_cost: number;\n  unit_costs_cents: number[];\n}",
+          "doc": "The carrying-value change this event records. `amount_cents` is signed:\nnegative removes basis, positive adds it. `unit_costs_cents[]` carries the\nper-unit basis actually consumed or added, which the weighted-average cost\nfold reads.\n\n⚠️ **`unit_cost` sits between two `_cents` fields and is NOT one of them.**\nIt is a per-unit **rate** at 4dp, and quantizing it to the cent is a measured\nregression, not a hypothetical: `@cfs/core@10.0.0-beta.117` emitted it\nthrough `fromCentsBig` and a 100-unit $6.39 purchase reported $0.06/unit — a\n6% error that went a week undetected because every movement written in that\nwindow happened to divide evenly at the cent. A mechanical \"convert every\nmoney field in this object\" pass restores it exactly."
         },
         {
           "kind": "variable",
@@ -7792,7 +7800,7 @@
         {
           "kind": "interface",
           "name": "BookingDocument",
-          "declaration": "interface BookingDocument {\n  id: string;\n  uid: string;\n  uid_product: string;\n  uid_order: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  crms_product_id?: number;\n  crms_product_id_str?: string;\n  status: string;\n  type: string;\n  name: string;\n  subject?: string;\n  organization: typeLiteral;\n  breakdown: typeLiteral;\n  quantity: number;\n  shortage?: number;\n  total_price?: number;\n  unit_price?: number;\n  dates: typeLiteral;\n  destinations?: typeLiteral;\n  stores?: Array<typeLiteral>;\n  uid_destination_delivery?: string;\n  uid_destination_collection?: string;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface BookingDocument {\n  id: string;\n  uid: string;\n  uid_product: string;\n  uid_order: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  crms_product_id?: number;\n  crms_product_id_str?: string;\n  status: string;\n  type: string;\n  name: string;\n  subject?: string;\n  organization: typeLiteral;\n  breakdown: typeLiteral;\n  quantity: number;\n  shortage?: number;\n  total_price_cents?: number;\n  unit_price_cents?: number;\n  dates: typeLiteral;\n  destinations?: typeLiteral;\n  stores?: Array<typeLiteral>;\n  uid_destination_delivery?: string;\n  uid_destination_collection?: string;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for bookings."
         },
         {
@@ -7816,7 +7824,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocument",
-          "declaration": "interface CreditNoteDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  reason: string;\n  tax_profile: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  remaining_credit?: number;\n  remaining_credit_str?: string;\n  query_by_sources?: string[];\n  xero_credit_note_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface CreditNoteDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  reason: string;\n  tax_profile: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  remaining_credit_cents?: number;\n  remaining_credit_cents_str?: string;\n  query_by_sources?: string[];\n  xero_credit_note_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "Typesense document type for credit notes."
         },
         {
@@ -9812,8 +9820,8 @@
         {
           "kind": "interface",
           "name": "PricingPrice",
-          "declaration": "interface PricingPrice {\n  base?: number;\n  formula?: PriceFormulaType;\n  chargeable_days?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n}",
-          "doc": "The price fields the pricing pipeline actually READS — deliberately narrower\nthan the stored {@link PriceObject}.\n\n`taxes` needs only a `uid`, because the name/rate/type/amount are what\n`calculateItemTax` resolves and computes; `subtotal`, `subtotal_discounted`,\n`total` and `taxes_base` are pricing's OUTPUT and are never read as input.\n\nThat is not a convenience: it is the shape an order-input item genuinely\narrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is\n`{ uid }[]`). Typing the pricing entry points here is what lets a writer price\nan item it has not built yet, instead of casting the input through\n`as unknown as LineItem` and claiming a stored price it does not have —\nwhich is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path."
+          "declaration": "interface PricingPrice {\n  base_cents?: number;\n  base_percent?: number | null;\n  formula?: PriceFormulaType;\n  chargeable_days?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n}",
+          "doc": "The price fields the pricing pipeline actually READS — deliberately narrower\nthan the stored {@link PriceObject}.\n\n`taxes` needs only a `uid`, because the name/rate/type/amount_cents are what\n`calculateItemTax` resolves and computes; `subtotal_cents`,\n`subtotal_discounted_cents`, `total_cents` and `taxes_base` are pricing's\nOUTPUT and are never read as input.\n\nThat is not a convenience: it is the shape an order-input item genuinely\narrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is\n`{ uid }[]`). Typing the pricing entry points here is what lets a writer price\nan item it has not built yet, instead of casting the input through\n`as unknown as LineItem` and claiming a stored price it does not have —\nwhich is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path."
         },
         {
           "kind": "interface",
@@ -9881,9 +9889,9 @@
         },
         {
           "kind": "function",
-          "name": "calculateItemDiscount",
-          "signature": "calculateItemDiscount(item: LineItem): number",
-          "doc": "Calculate the discount dollar amount for a single line item.",
+          "name": "calculateItemDiscountCents",
+          "signature": "calculateItemDiscountCents(item: LineItem): number",
+          "doc": "Calculate the discount amount, in cents, for a single line item.\n\nPlain integer subtraction: both operands are exact counts of cents, so there\nis nothing for currency.js to be careful about.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9913,9 +9921,9 @@
         },
         {
           "kind": "function",
-          "name": "calculateItemTotal",
-          "signature": "calculateItemTotal(item: LineItem, taxes: Tax[]): number",
-          "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\n\nA `transaction_fee` reports its stored `price.total`: it is priced from the\ndocument, so the only correct value is the one the totals pass already wrote.\nRecomputing it here would need a basis this function does not have.",
+          "name": "calculateItemTotalCents",
+          "signature": "calculateItemTotalCents(item: LineItem, taxes: Tax[]): number",
+          "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\n\nA `transaction_fee` reports its stored `price.total_cents`: it is priced from\nthe document, so the only correct value is the one the totals pass already\nwrote. Recomputing it here would need a basis this function does not have.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9963,24 +9971,24 @@
         {
           "kind": "function",
           "name": "derivePaymentStatus",
-          "signature": "derivePaymentStatus(currentStatus: InvoiceStatusType, amountPaid: number, amountDue: number, _: unknown): InvoiceStatusType",
-          "doc": "Derive invoice status from settlement amounts.\nPure function — does not mutate the invoice.\n\n**No new status member is needed for a credited invoice.** `paid` already\nmeans `amount_due === 0`, not \"cash received\" — which is exactly what Xero\nsays: #1751 and #1322 are both PAID there with `AmountPaid: 0`.",
+          "signature": "derivePaymentStatus(currentStatus: InvoiceStatusType, amountPaidCents: number, amountDueCents: number, _: unknown): InvoiceStatusType",
+          "doc": "Derive invoice status from settlement amounts.\nPure function — does not mutate the invoice.\n\n**No new status member is needed for a credited invoice.** `paid` already\nmeans `amount_due_cents === 0`, not \"cash received\" — which is exactly what Xero\nsays: #1751 and #1322 are both PAID there with `AmountPaid: 0`.",
           "paramTags": [
             {
               "name": "currentStatus",
               "doc": "Current invoice status"
             },
             {
-              "name": "amountPaid",
-              "doc": "Total settled in cash"
+              "name": "amountPaidCents",
+              "doc": "Total settled in cash, in integer cents"
             },
             {
-              "name": "amountDue",
-              "doc": "Total still outstanding"
+              "name": "amountDueCents",
+              "doc": "Total still outstanding, in integer cents"
             },
             {
-              "name": "amountCredited",
-              "doc": "Total settled by credit note"
+              "name": "amountCreditedCents",
+              "doc": "Total settled by credit note, in integer cents"
             }
           ],
           "returnsTag": "The derived status"
@@ -10057,20 +10065,20 @@
         },
         {
           "kind": "function",
-          "name": "getXeroUnitAmount",
-          "signature": "getXeroUnitAmount(subtotal: number, quantity: number): number",
-          "doc": "Compute the Xero unit amount from subtotal and quantity.\nBakes duration (chargeable_days × formula) into per-unit price,\nsince Xero has no concept of rental duration.\n\n## The round trip does not close, and that is a property, not a bug\n\nXero recomputes `LineAmount = UnitAmount × Quantity` on its own side, so the\nremainder this division discards is **real money in someone else's ledger** —\nunlike the booking `unit_price` denorm, whose residual is discarded on\npurpose because nothing ever multiplies it back.\n\n`getXeroUnitAmount(100, 3)` is `33.33`, and Xero will bill `99.99`. **Rounding\nbetter does not fix this**: `10000 ÷ 3` is `3333` cents too, and `× 3` is\n`9999` cents regardless of the arithmetic. The gap is bounded by\n`quantity − 1` cents on a line and is absorbed through the discount channel\n(`DiscountRate` at 4dp), which is the only per-line lever Xero gives us.\n\nSo the exactness this function buys is not a closed round trip — it is that\nthe residual is **at most one cent per unit and never grows**. The float form\nit replaced could quantize the quotient and then have that error scale with\nthe line.\n\nHalf away from zero rather than plain half-up: a line's `subtotal_discounted`\nmay be negative when a flat discount exceeds it, and `roundDivHalfUp` rounds\na negative numerator toward zero. Symmetry means a credit and its matching\ncharge cannot differ in magnitude.",
+          "name": "getXeroUnitAmountFromCents",
+          "signature": "getXeroUnitAmountFromCents(subtotalCents: number, quantity: number): number",
+          "doc": "Compute the Xero unit amount from subtotal and quantity.\nBakes duration (chargeable_days × formula) into per-unit price,\nsince Xero has no concept of rental duration.\n\n## The round trip does not close, and that is a property, not a bug\n\nXero recomputes `LineAmount = UnitAmount × Quantity` on its own side, so the\nremainder this division discards is **real money in someone else's ledger** —\nunlike the booking `unit_price_cents` denorm, whose residual is discarded on\npurpose because nothing ever multiplies it back.\n\n`getXeroUnitAmountFromCents(10000, 3)` is `33.33`, and Xero will bill\n`99.99`. **Rounding\nbetter does not fix this**: `10000 ÷ 3` is `3333` cents too, and `× 3` is\n`9999` cents regardless of the arithmetic. The gap is bounded by\n`quantity − 1` cents on a line and is absorbed through the discount channel\n(`DiscountRate` at 4dp), which is the only per-line lever Xero gives us.\n\nSo the exactness this function buys is not a closed round trip — it is that\nthe residual is **at most one cent per unit and never grows**. The float form\nit replaced could quantize the quotient and then have that error scale with\nthe line.\n\nHalf away from zero rather than plain half-up: a line's `subtotal_discounted`\nmay be negative when a flat discount exceeds it, and `roundDivHalfUp` rounds\na negative numerator toward zero. Symmetry means a credit and its matching\ncharge cannot differ in magnitude.\n\n## Cents in, DOLLARS out — and the asymmetry is the point\n\nThe input is CFS storage, which is integer cents. The return is Xero's wire\nformat, which is dollars and does not change because CFS's storage did. So\nthis is the one function in the package that deliberately straddles the two\nunits, and the name says which side each is on.\n\n⚠️ **The body moved with the name, and had to.** Its first act used to be\n`toCentsBig(subtotal)`. Feeding cents to that unedited body is a clean 100×\nthat type-checks perfectly — same signature, same types, silently wrong\ninvoice on a single-env production Xero tenant with no dev twin. The rename\nexists so every call site fails to compile and the pairing cannot be\nhalf-done.",
           "paramTags": [
             {
-              "name": "subtotal",
-              "doc": "Pre-discount subtotal (base × days × formula × quantity)"
+              "name": "subtotalCents",
+              "doc": "Pre-discount subtotal in integer cents\n(base_cents × days × formula × quantity)"
             },
             {
               "name": "quantity",
               "doc": "Item quantity. May be fractional; scaled rather than\nnarrowed, so a non-integer cannot throw on the Xero push path."
             }
           ],
-          "returnsTag": "Per-unit amount for Xero, or 0 if quantity is 0"
+          "returnsTag": "Per-unit amount for Xero **in dollars**, or 0 if quantity is 0"
         },
         {
           "kind": "function",
@@ -10128,19 +10136,19 @@
         {
           "kind": "function",
           "name": "recomputeSettlementTotals",
-          "signature": "recomputeSettlementTotals(total: number, settlements: readonly typeLiteral[]): typeLiteral",
-          "doc": "Turn the settlements journal into the invoice's stored totals.\n\n**This is the one function that produces `amount_paid`, `amount_credited` and\n`amount_due`**, and the one place the cents↔dollars boundary is crossed. It\nruns inside the api's co-write transaction and again in manager's optimistic\nrecompute, so the two cannot disagree — the property `computeAvailability`\nalready provides for stock.\n\n**A straight signed fold over EVERY row, with no filtering.** A reversal is\nsimply a settlement whose contract multiplier is −1, so a do/undo pair nets to\nzero arithmetically rather than by being excluded, and an invoice's\nsettlements can do and undo each other perpetually with the totals correct\nafter every single append. That deletes the liveness derivation entirely —\nalong with the `R2 → R1 → S1` chain that silently vanished money when the\ntrichotomy got it wrong, which under the fold is just `+500 −500 +500 = +500`,\ncorrect at every step. `reverses` is provenance for the UI and for audit; it\ncontributes nothing to the sum.\n\nInteger sums are exact by construction — nothing to round, no ordering to get\nwrong — which is the whole reason the journal stores minor units.\n`Number.MAX_SAFE_INTEGER` is ~$90 trillion in cents, so plain integers are\nsafe here without BigInt.\n\n**Negative results are preserved, never clamped.** An over-credited invoice\nmust stay negative, exactly as availability preserves an oversold product's\nnegative. Clamping hides the defect this exists to find.",
+          "signature": "recomputeSettlementTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral",
+          "doc": "Turn the settlements journal into the invoice's stored totals.\n\n**This is the one function that produces `amount_paid_cents`,\n`amount_credited_cents` and `amount_due_cents`.** It runs inside the api's\nco-write transaction and again in manager's optimistic recompute, so the two\ncannot disagree — the property `computeAvailability` already provides for\nstock.\n\nIt used to be \"the one place the cents↔dollars boundary is crossed\": the\njournal has always stored minor units while the invoice's `total` was\ndollars, so this fold converted at the end. With `total_cents` the two sides\nare the same unit and the boundary is gone — the function is now integer in,\ninteger out, with nothing to convert and nothing to round.\n\n**A straight signed fold over EVERY row, with no filtering.** A reversal is\nsimply a settlement whose contract multiplier is −1, so a do/undo pair nets to\nzero arithmetically rather than by being excluded, and an invoice's\nsettlements can do and undo each other perpetually with the totals correct\nafter every single append. That deletes the liveness derivation entirely —\nalong with the `R2 → R1 → S1` chain that silently vanished money when the\ntrichotomy got it wrong, which under the fold is just `+500 −500 +500 = +500`,\ncorrect at every step. `reverses` is provenance for the UI and for audit; it\ncontributes nothing to the sum.\n\nInteger sums are exact by construction — nothing to round, no ordering to get\nwrong — which is the whole reason the journal stores minor units.\n`Number.MAX_SAFE_INTEGER` is ~$90 trillion in cents, so plain integers are\nsafe here without BigInt.\n\n**Negative results are preserved, never clamped.** An over-credited invoice\nmust stay negative, exactly as availability preserves an oversold product's\nnegative. Clamping hides the defect this exists to find.",
           "paramTags": [
             {
-              "name": "total",
-              "doc": "Invoice total, in dollars, from `items[]`"
+              "name": "totalCents",
+              "doc": "Invoice total, in integer cents, from `items[]`"
             },
             {
               "name": "settlements",
               "doc": "Every settlement against the invoice, reversals included"
             }
           ],
-          "returnsTag": "The three projected totals plus a per-reason breakdown, in dollars"
+          "returnsTag": "The three projected totals plus a per-reason breakdown, in cents"
         },
         {
           "kind": "function",
@@ -10506,7 +10514,7 @@
         {
           "kind": "interface",
           "name": "LedgerFoldResult",
-          "declaration": "interface LedgerFoldResult {\n  ledger: InventoryLedger;\n  costApplied: number;\n  unitCost: number;\n}",
+          "declaration": "interface LedgerFoldResult {\n  ledger: InventoryLedger;\n  costAppliedCents: number;\n  unitCost: number;\n}",
           "doc": "What a movement did to a ledger, and the cost it actually consumed."
         },
         {
@@ -10588,7 +10596,7 @@
         {
           "kind": "interface",
           "name": "CustomLineBuildOptions",
-          "declaration": "interface CustomLineBuildOptions {\n  type: DocLineItemTypeType;\n  name?: string;\n  quantity?: number;\n  base?: number;\n  formula?: PriceFormulaType;\n  chargeDays: number | null;\n  taxes: ReadonlyArray<typeLiteral>;\n  uidOrder?: string;\n}",
+          "declaration": "interface CustomLineBuildOptions {\n  type: DocLineItemTypeType;\n  name?: string;\n  quantity?: number;\n  base_cents?: number;\n  formula?: PriceFormulaType;\n  chargeDays: number | null;\n  taxes: ReadonlyArray<typeLiteral>;\n  uidOrder?: string;\n}",
           "doc": "Options for a one-off \"custom\" line with no product catalog entry behind it —\nthe orders/invoices \"Add Custom Item\" flow.\n\n`taxes` is the line's own resolved tax set (already carrying name/rate/type),\nnot the tax catalog: a custom line has no product to read tax references off,\nso the caller resolves them."
         },
         {
@@ -10601,7 +10609,7 @@
           "kind": "function",
           "name": "buildCustomInvoiceLine",
           "signature": "buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, \"uidOrder\">): InvoiceDocLineItem",
-          "doc": "Build a custom (no-product) invoice line item.\n\nAn invoice line is a strictly smaller shape than an order line: no\n`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`/\n`zero_priced`, and no `price.replacement` — an invoice does not track\nreplacement value. This used to claim it \"strips order-only fields\" while the\n`initial` spread put `stock_method: \"bulk\"`, `order_number: 0` and\n`uid_order: \"\"` straight back in; constructing the object outright is what\nmakes the docblock true.",
+          "doc": "Build a custom (no-product) invoice line item.\n\nAn invoice line is a strictly smaller shape than an order line: no\n`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`/\n`zero_priced`, and no `price.replacement_cents` — an invoice does not track\nreplacement value. This used to claim it \"strips order-only fields\" while the\n`initial` spread put `stock_method: \"bulk\"`, `order_number: 0` and\n`uid_order: \"\"` straight back in; constructing the object outright is what\nmakes the docblock true.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10656,8 +10664,8 @@
         {
           "kind": "interface",
           "name": "DocumentTotalsCore",
-          "declaration": "interface DocumentTotalsCore {\n  discount_amount: number;\n  subtotal: number;\n  subtotal_discounted: number;\n  taxes: PriceModifier[];\n  transaction_fees: PriceModifier[];\n  total: number;\n}",
-          "doc": "The six totals fields an order and an invoice compute identically.\n\nDeliberately the **intersection**, not a superset: both document totals are\n`z.strictObject`s embedded in schemas `assertValidPatch` enforces at write\ntime, so an order doc carrying `amount_paid` — or an invoice doc carrying\n`replacement_total` — fails validation. Each caller appends its own tail."
+          "declaration": "interface DocumentTotalsCore {\n  discount_amount_cents: number;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  taxes: PriceModifier[];\n  transaction_fees: PriceModifier[];\n  total_cents: number;\n}",
+          "doc": "The six totals fields an order and an invoice compute identically.\n\nDeliberately the **intersection**, not a superset: both document totals are\n`z.strictObject`s embedded in schemas `assertValidPatch` enforces at write\ntime, so an order doc carrying `amount_paid_cents` — or an invoice doc\ncarrying `replacement_total_cents` — fails validation. Each caller appends\nits own tail.\n\n**Hand-declared as the intersection of two schema-derived shapes**, so it is\none of the places a rename does NOT arrive as a compile error automatically:\nit must be edited in the same commit as `OrderDocTotalsType` and\n`InvoiceDocTotals`, which is one of the three reasons Phase 11's core change\nis a single commit rather than a series."
         },
         {
           "kind": "typeAlias",
@@ -10668,7 +10676,7 @@
         {
           "kind": "interface",
           "name": "GroupTotalsResult",
-          "declaration": "interface GroupTotalsResult {\n  count: number;\n  subtotal: number;\n  subtotal_discounted: number;\n  total: number;\n}",
+          "declaration": "interface GroupTotalsResult {\n  count: number;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  total_cents: number;\n}",
           "doc": "Count and pricing totals for a collapsed destination or group section."
         },
         {
@@ -10758,13 +10766,13 @@
         {
           "kind": "interface",
           "name": "PricingPrice",
-          "declaration": "interface PricingPrice {\n  base?: number;\n  formula?: PriceFormulaType;\n  chargeable_days?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n}",
-          "doc": "The price fields the pricing pipeline actually READS — deliberately narrower\nthan the stored {@link PriceObject}.\n\n`taxes` needs only a `uid`, because the name/rate/type/amount are what\n`calculateItemTax` resolves and computes; `subtotal`, `subtotal_discounted`,\n`total` and `taxes_base` are pricing's OUTPUT and are never read as input.\n\nThat is not a convenience: it is the shape an order-input item genuinely\narrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is\n`{ uid }[]`). Typing the pricing entry points here is what lets a writer price\nan item it has not built yet, instead of casting the input through\n`as unknown as LineItem` and claiming a stored price it does not have —\nwhich is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path."
+          "declaration": "interface PricingPrice {\n  base_cents?: number;\n  base_percent?: number | null;\n  formula?: PriceFormulaType;\n  chargeable_days?: number | null;\n  discount?: typeLiteral | null;\n  taxes?: readonly typeLiteral[];\n}",
+          "doc": "The price fields the pricing pipeline actually READS — deliberately narrower\nthan the stored {@link PriceObject}.\n\n`taxes` needs only a `uid`, because the name/rate/type/amount_cents are what\n`calculateItemTax` resolves and computes; `subtotal_cents`,\n`subtotal_discounted_cents`, `total_cents` and `taxes_base` are pricing's\nOUTPUT and are never read as input.\n\nThat is not a convenience: it is the shape an order-input item genuinely\narrives in (`ItemPriceType` in `@cfs/core/schemas`, whose `taxes` is\n`{ uid }[]`). Typing the pricing entry points here is what lets a writer price\nan item it has not built yet, instead of casting the input through\n`as unknown as LineItem` and claiming a stored price it does not have —\nwhich is what `api-cloudrun`'s `buildLineItem` did, twice, on the money path."
         },
         {
           "kind": "interface",
           "name": "ReplacementTotals",
-          "declaration": "interface ReplacementTotals {\n  subtotal: number;\n  tax: number;\n  total: number;\n}",
+          "declaration": "interface ReplacementTotals {\n  subtotal_cents: number;\n  tax_cents: number;\n  total_cents: number;\n}",
           "doc": "Replacement cost totals for an order, with and without tax."
         },
         {
@@ -10809,9 +10817,9 @@
         },
         {
           "kind": "function",
-          "name": "calculateItemDiscount",
-          "signature": "calculateItemDiscount(item: LineItem): number",
-          "doc": "Calculate the discount dollar amount for a single line item.",
+          "name": "calculateItemDiscountCents",
+          "signature": "calculateItemDiscountCents(item: LineItem): number",
+          "doc": "Calculate the discount amount, in cents, for a single line item.\n\nPlain integer subtraction: both operands are exact counts of cents, so there\nis nothing for currency.js to be careful about.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10841,9 +10849,9 @@
         },
         {
           "kind": "function",
-          "name": "calculateItemTotal",
-          "signature": "calculateItemTotal(item: LineItem, taxes: Tax[]): number",
-          "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\n\nA `transaction_fee` reports its stored `price.total`: it is priced from the\ndocument, so the only correct value is the one the totals pass already wrote.\nRecomputing it here would need a basis this function does not have.",
+          "name": "calculateItemTotalCents",
+          "signature": "calculateItemTotalCents(item: LineItem, taxes: Tax[]): number",
+          "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\n\nA `transaction_fee` reports its stored `price.total_cents`: it is priced from\nthe document, so the only correct value is the one the totals pass already\nwrote. Recomputing it here would need a basis this function does not have.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10859,15 +10867,15 @@
           "kind": "function",
           "name": "calculateReplacementTotals",
           "signature": "calculateReplacementTotals(items: LineItem[], taxes: Tax[]): ReplacementTotals",
-          "doc": "Calculate the total replacement cost across all pre-tax items that have\na replacement value on their price object.\n\nReturns `subtotal` (sum of replacement × quantity), `tax` (taxes applied\nto that subtotal), and `total` (subtotal + tax).",
+          "doc": "Calculate the total replacement cost across all pre-tax items that have\na replacement value on their price object.\n\nReturns `subtotal_cents` (sum of replacement × quantity), `tax_cents` (taxes\napplied to that subtotal), and `total_cents` (subtotal + tax).\n\n**Multiply-then-round, per line.** The per-line product is rounded once, at\nthe line, and the rounded lines are summed — which is not the same number as\nrounding a per-unit figure first and multiplying it. `quote.eta` in the\n`templates` repo hand-rolls the opposite order, and under integer cents the\ntwo diverge systematically rather than coincidentally; that divergence is\ntracked as Phase C3 work, and this function is the side that is right.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
-          "name": "calculateTransactionFeeAmount",
-          "signature": "calculateTransactionFeeAmount(item: LineItem, basis: number): number",
-          "doc": "The dollar amount a `transaction_fee` line contributes to a document.\n\nA fee is priced from the document, not from itself, so it needs the one input\n`calculateItemSubtotal` cannot see: `basis`, the document's\n`subtotal_discounted` (pre-tax, post-discount — the same base the fee has\nalways been computed against).\n\n- `percent_of_total` → `basis × base / 100`.\n- anything else → the ordinary per-unit subtotal, `base × quantity`, so a\n  flat processing charge stays expressible without a second formula.\n\nExact: the percentage is applied as `× rate ÷ 100` over integer cents rather\nthan as a pre-divided float factor, and rounds half-up exactly once.\n\nThe form this replaced was `currency(basis).multiply(rate / 100)`. That is the\n*benign* float form, and an earlier version of this docstring was wrong about\nwhy — `multiply` takes a plain JS number and never wraps it, so nothing\nquantizes the ratio; it carries only the ~1e-18 representation error in\n`rate / 100`, which flips a tie so rarely that it mis-costs **0** of the fee\nsweep's pairs. The form that genuinely loses money is **divide-first**,\n`currency(rate).divide(100)`, which does re-enter the constructor and\nquantizes: `currency(12.345).divide(100) === 0.12`. Both are measured on every\nrun by the fail-closed companion in `tests/orders.test.ts` — the assertion\npins divide-first, the benign form is reported.",
+          "name": "calculateTransactionFeeAmountCents",
+          "signature": "calculateTransactionFeeAmountCents(item: LineItem, basisCents: number): number",
+          "doc": "The dollar amount a `transaction_fee` line contributes to a document.\n\nA fee is priced from the document, not from itself, so it needs the one input\n`calculateItemSubtotal` cannot see: `basis`, the document's\n`subtotal_discounted` (pre-tax, post-discount — the same base the fee has\nalways been computed against).\n\n- `percent_of_total` → `basisCents × base_percent / 100`.\n- anything else → the ordinary per-unit subtotal, `base_cents × quantity`, so\n  a flat processing charge stays expressible without a second formula.\n\nExact: the percentage is applied as `× rate ÷ 100` over integer cents rather\nthan as a pre-divided float factor, and rounds half-up exactly once.\n\nThe form this replaced was `currency(basis).multiply(rate / 100)`. That is the\n*benign* float form, and an earlier version of this docstring was wrong about\nwhy — `multiply` takes a plain JS number and never wraps it, so nothing\nquantizes the ratio; it carries only the ~1e-18 representation error in\n`rate / 100`, which flips a tie so rarely that it mis-costs **0** of the fee\nsweep's pairs. The form that genuinely loses money is **divide-first**,\n`currency(rate).divide(100)`, which does re-enter the constructor and\nquantizes: `currency(12.345).divide(100) === 0.12`. Both are measured on every\nrun by the fail-closed companion in `tests/orders.test.ts` — the assertion\npins divide-first, the benign form is reported.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10881,8 +10889,8 @@
         },
         {
           "kind": "function",
-          "name": "computeItemTaxAmount",
-          "signature": "computeItemTaxAmount(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscounted: number, quantity: number): number",
+          "name": "computeItemTaxAmountCents",
+          "signature": "computeItemTaxAmountCents(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscountedCents: number, quantity: number): number",
           "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.\n\nExact: both factors are applied as `× n ÷ d` over integer cents and rounded\nhalf-up exactly once (core#47). The form this replaced was\n`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float\nratio, and **the one percent-of-money path that never migrated to integer\ncents**: inside a single `calculateItemPrice` call the discount on a line was\nalready exact BigInt while the tax on that same line was not. It was measured\nbenign across CFS's six live rates, which is precisely why it survived; the\nsweep in `tests/orders.test.ts` is what makes a future rate or magnitude\nunable to change that silently.\n\nA negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat\ndiscount exceed its line rather than clamping — so the rounding is half *away\nfrom zero* and the tax carries the subtotal's sign, exactly as the currency.js\nform did.",
           "paramTags": [],
           "returnsTag": null
@@ -10891,14 +10899,14 @@
           "kind": "function",
           "name": "consolidateItems",
           "signature": "consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]",
-          "doc": "Deduplicate line items by product UID and sum quantities.\n\n## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`\n\n`total_price` is the authoritative figure — it is a sum of line totals, and\nsumming money is exact. `unit_price` is derived from it by a division that\nusually has a remainder, so the two are related by *rounding*, not by\nmultiplication: 3 units totalling $100 give `unit_price` $33.33, and\n`33.33 × 3` is $99.99.\n\n**That is correct, and it is written down here because it does not look\ncorrect.** The field exists so `bookings` can be queried as a flat per-line\nfact table — sortable, filterable, \"show me every line over $500/unit\" — and\nfor that a single representative per-unit figure is exactly right. It is\nnever summed and never reconciled against; anything that multiplies it back\nto recover a total should read `total_price` instead. The four money÷quantity\nsites in CFS have four different residual contracts, and this is the\nstored-denorm one: **the residual is discarded on purpose.**\n\n(Contrast `getXeroUnitAmount`, whose residual is real money because Xero\nrecomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)",
+          "doc": "Deduplicate line items by product UID and sum quantities.\n\n## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`\n\n`total_price` is the authoritative figure — it is a sum of line totals, and\nsumming money is exact. `unit_price` is derived from it by a division that\nusually has a remainder, so the two are related by *rounding*, not by\nmultiplication: 3 units totalling $100 give `unit_price` $33.33, and\n`33.33 × 3` is $99.99.\n\n**That is correct, and it is written down here because it does not look\ncorrect.** The field exists so `bookings` can be queried as a flat per-line\nfact table — sortable, filterable, \"show me every line over $500/unit\" — and\nfor that a single representative per-unit figure is exactly right. It is\nnever summed and never reconciled against; anything that multiplies it back\nto recover a total should read `total_price_cents` instead. The four money÷quantity\nsites in CFS have four different residual contracts, and this is the\nstored-denorm one: **the residual is discarded on purpose.**\n\n(Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero\nrecomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "costTransactionFees",
-          "signature": "costTransactionFees(items: LineItem[], basis: number): LineItem[]",
+          "signature": "costTransactionFees(items: LineItem[], basisCents: number): LineItem[]",
           "doc": "Cost every `transaction_fee` line against a document subtotal, returning\ncopies with the computed amount written into `price`.\n\nShared by the order and invoice totals so the two cannot drift — they were\ntwo byte-identical loops, and the invoice copy was reading `price.rate` /\n`price.type` off a shape invoice line items have never had.",
           "paramTags": [],
           "returnsTag": null
@@ -11001,9 +11009,9 @@
         },
         {
           "kind": "function",
-          "name": "getTotalDiscount",
-          "signature": "getTotalDiscount(items: LineItem[]): number",
-          "doc": "Calculate the total discount amount across all pre-tax items.",
+          "name": "getTotalDiscountCents",
+          "signature": "getTotalDiscountCents(items: LineItem[]): number",
+          "doc": "Calculate the total discount amount, in cents, across all pre-tax items.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11107,7 +11115,7 @@
           "kind": "function",
           "name": "sumDocumentTotals",
           "signature": "sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTotalsCore",
-          "doc": "The two-pass totals fold shared by {@link calculateOrderTotals} and\n`calculateInvoiceTotals`: pre-tax subtotals first, then transaction fees\ncosted against `subtotal_discounted`.\n\nIt was ~35 byte-identical lines in both, which is the drift shape this\npackage exists to remove — but the two wrappers are NOT collapsible past\nthis point, and the differences are load-bearing rather than incidental:\n\n- **`calculateOrderTotals` keeps its `Array.isArray` throw.** Leading this\n  helper with the invoice path's `flattenForXero` would turn a clear\n  `Error(\"items must be an array\")` into a bare `TypeError` at the call site.\n- **`replacement_total` stays outside**, because\n  {@link calculateReplacementTotals} reads the **unfiltered** items and is\n  order-only.\n- **The invoice path pre-filters `flattenForXero(items)` and this one does\n  not**, which is safe because that filter is arithmetically inert here: it\n  keeps `itemContract(type).kind === \"line\"`, every `kind: \"divider\"` member\n  has `pricing: \"none\"` (pinned both directions at compile time by\n  `_lineParity` in `schemas/common.ts`), and every predicate below gates on\n  `pricing`. An unrecognised type is dropped by both. `filter` preserves\n  order, and currency.js accumulates in integer cents, so no float\n  associativity hazard exists even if it did not.\n\nNot exported to templates — a rendered document reads its **stored**\n`totals`, and recomputing at render time is how a document comes to disagree\nwith the doc it renders.",
+          "doc": "The two-pass totals fold shared by {@link calculateOrderTotals} and\n`calculateInvoiceTotals`: pre-tax subtotals first, then transaction fees\ncosted against `subtotal_discounted`.\n\nIt was ~35 byte-identical lines in both, which is the drift shape this\npackage exists to remove — but the two wrappers are NOT collapsible past\nthis point, and the differences are load-bearing rather than incidental:\n\n- **`calculateOrderTotals` keeps its `Array.isArray` throw.** Leading this\n  helper with the invoice path's `flattenForXero` would turn a clear\n  `Error(\"items must be an array\")` into a bare `TypeError` at the call site.\n- **`replacement_total` stays outside**, because\n  {@link calculateReplacementTotals} reads the **unfiltered** items and is\n  order-only.\n- **The invoice path pre-filters `flattenForXero(items)` and this one does\n  not**, which is safe because that filter is arithmetically inert here: it\n  keeps `itemContract(type).kind === \"line\"`, every `kind: \"divider\"` member\n  has `pricing: \"none\"` (pinned both directions at compile time by\n  `_lineParity` in `schemas/common.ts`), and every predicate below gates on\n  `pricing`. An unrecognised type is dropped by both. `filter` preserves\n  order, and the fold accumulates in integer cents, so no float\n  associativity hazard exists even if it did not.\n\nNot exported to templates — a rendered document reads its **stored**\n`totals`, and recomputing at render time is how a document comes to disagree\nwith the doc it renders.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11241,8 +11249,8 @@
         },
         {
           "kind": "function",
-          "name": "computeItemTaxAmount",
-          "signature": "computeItemTaxAmount(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscounted: number, quantity: number): number",
+          "name": "computeItemTaxAmountCents",
+          "signature": "computeItemTaxAmountCents(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscountedCents: number, quantity: number): number",
           "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.\n\nExact: both factors are applied as `× n ÷ d` over integer cents and rounded\nhalf-up exactly once (core#47). The form this replaced was\n`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float\nratio, and **the one percent-of-money path that never migrated to integer\ncents**: inside a single `calculateItemPrice` call the discount on a line was\nalready exact BigInt while the tax on that same line was not. It was measured\nbenign across CFS's six live rates, which is precisely why it survived; the\nsweep in `tests/orders.test.ts` is what makes a future rate or magnitude\nunable to change that silently.\n\nA negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat\ndiscount exceed its line rather than clamping — so the rounding is half *away\nfrom zero* and the tax carries the subtotal's sign, exactly as the currency.js\nform did.",
           "paramTags": [],
           "returnsTag": null
@@ -11275,7 +11283,7 @@
           "kind": "function",
           "name": "overrideItemTaxesForProfile",
           "signature": "overrideItemTaxesForProfile(items: LineItem[], orgProfile: string, docProfile: string, taxCatalog: Tax[], asOf: string): void",
-          "doc": "Materialize a doc-level `tax_profile` override onto each priceable item's\n`price.taxes` (single mode — mutates in place):\n- `tax_exempt` → `taxes = []`, `total = subtotal_discounted`.\n- `tax_rantoul` / `tax_frankfort` → `taxes = [<resolved tax>]` with amount\n  computed from the item's **existing** `subtotal_discounted` + `total`\n  refreshed. (Orders re-run `calculateItemPrice` after, which recomputes both\n  from the rewritten uid; the CRMS invoice webhook keeps the amounts computed\n  here on its `charge_total`-authoritative subtotal.)\n- `tax_applied` / no active override doc → item left untouched.\n\nNon-priceable items (destination/group/transaction_fee) are skipped.",
+          "doc": "Materialize a doc-level `tax_profile` override onto each priceable item's\n`price.taxes` (single mode — mutates in place):\n- `tax_exempt` → `taxes = []`, `total_cents = subtotal_discounted_cents`.\n- `tax_rantoul` / `tax_frankfort` → `taxes = [<resolved tax>]` with amount\n  computed from the item's **existing** `subtotal_discounted_cents` + `total_cents`\n  refreshed. (Orders re-run `calculateItemPrice` after, which recomputes both\n  from the rewritten uid; the CRMS invoice webhook keeps the amounts computed\n  here on its `charge_total`-authoritative subtotal.)\n- `tax_applied` / no active override doc → item left untouched.\n\nNon-priceable items (destination/group/transaction_fee) are skipped.",
           "paramTags": [],
           "returnsTag": null
         }

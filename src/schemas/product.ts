@@ -62,8 +62,8 @@ export interface ProductComponent {
   quantity: number;
   zero_priced?: boolean;
   price: {
-    base: number;
-    replacement?: number | null;
+    base_cents: number;
+    replacement_cents?: number | null;
     coa_revenue?: COARevenueType;
     taxes: TaxRefType[];
     formula: PriceFormulaType;
@@ -98,8 +98,8 @@ export interface AuthoredProductComponent extends ProductComponent {
 
 /** Pricing details for a product. */
 export interface ProductPrice {
-  base: number;
-  replacement?: number | null;
+  base_cents: number;
+  replacement_cents?: number | null;
   coa_revenue?: COARevenueType;
   taxes: TaxRefType[];
   formula: PriceFormulaType;
@@ -257,8 +257,8 @@ const ComponentObject = z.strictObject({
   quantity: z.number(),
   zero_priced: z.boolean().optional(),
   price: z.strictObject({
-    base: z.number(),
-    replacement: z.number().nullable().optional(),
+    base_cents: z.int(),
+    replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum.optional(),
     taxes: z.array(TaxRef).default([]),
     formula: PriceFormulaEnum,
@@ -274,7 +274,7 @@ const ComponentObject = z.strictObject({
  * of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),
  * and every component that survives expansion becomes an order line of the same
  * `type`. So it answers to the same contract, and the rental ⇒
- * `price.replacement` rule is stated once rather than a third time here.
+ * `price.replacement_cents` rule is stated once rather than a third time here.
  */
 export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
   .superRefine(checkItemContract);
@@ -324,8 +324,8 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   eligible_shipping_ground: z.boolean(),
   eligible_shipping_air: z.boolean(),
   price: z.strictObject({
-    base: z.number(),
-    replacement: z.number().nullable().optional(),
+    base_cents: z.int(),
+    replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum.optional(),
     taxes: z.array(TaxRef).default([]),
     formula: PriceFormulaEnum,
@@ -384,8 +384,11 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   updated_by: ActorRef,
   ...TimestampFields,
 }).refine(
-  (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement != null,
-  { message: "price.replacement is required for rental products", path: ["price", "replacement"] },
+  (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement_cents != null,
+  {
+    message: "price.replacement_cents is required for rental products",
+    path: ["price", "replacement_cents"],
+  },
 ).refine(
   (p) => {
     // Skip only when BOTH are absent — that is the ~531 pre-images product
@@ -442,8 +445,8 @@ export interface CreateProductInputType {
   eligible_shipping_ground: boolean;
   eligible_shipping_air: boolean;
   price: {
-    base: number;
-    replacement?: number | null;
+    base_cents: number;
+    replacement_cents?: number | null;
     coa_revenue?: COARevenueType;
     taxes: TaxRefType[];
     formula: PriceFormulaType;
@@ -478,7 +481,7 @@ export interface CreateProductInputType {
   transaction?: {
     type: "purchase" | "make" | "find";
     quantity: number;
-    total_cost: number;
+    total_cost_cents: number;
     date: string;
     reference: string;
     uid_session: string;
@@ -500,8 +503,8 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   eligible_shipping_ground: z.boolean(),
   eligible_shipping_air: z.boolean(),
   price: z.object({
-    base: z.number(),
-    replacement: z.number().nullable().optional(),
+    base_cents: z.int(),
+    replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum.optional(),
     taxes: z.array(TaxRef).default([]),
     formula: PriceFormulaEnum,
@@ -532,15 +535,18 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   transaction: z.object({
     type: z.enum(["purchase", "make", "find"]),
     quantity: z.number().int().nonnegative(),
-    total_cost: z.number(),
+    total_cost_cents: z.int(),
     date: chicagoInstant(),
     reference: z.string(),
     uid_session: z.uuid(),
     allocations: z.array(MovementAllocationInput).min(1),
   }).optional(),
 }).refine(
-  (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement != null,
-  { message: "price.replacement is required for rental products", path: ["price", "replacement"] },
+  (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement_cents != null,
+  {
+    message: "price.replacement_cents is required for rental products",
+    path: ["price", "replacement_cents"],
+  },
 ).refine(
   // Opening-balance scalar quantity must equal Σ per-location allocation, or the
   // ledger is born desynced (quantity_held != Σ store_breakdown). Backstop behind
@@ -570,8 +576,8 @@ export interface UpdateProductInputType {
   eligible_shipping_ground?: boolean;
   eligible_shipping_air?: boolean;
   price?: {
-    base: number;
-    replacement?: number | null;
+    base_cents: number;
+    replacement_cents?: number | null;
     coa_revenue?: COARevenueType;
     taxes: TaxRefType[];
     formula: PriceFormulaType;
@@ -620,8 +626,8 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
   eligible_shipping_ground: z.boolean().optional(),
   eligible_shipping_air: z.boolean().optional(),
   price: z.object({
-    base: z.number(),
-    replacement: z.number().nullable().optional(),
+    base_cents: z.int(),
+    replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum.optional(),
     taxes: z.array(TaxRef).default([]),
     formula: PriceFormulaEnum,
