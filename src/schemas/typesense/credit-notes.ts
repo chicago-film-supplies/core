@@ -18,14 +18,33 @@ export const creditNotes: TypesenseCollectionConfig = {
   version: 1,
   firestoreCollection: "credit-notes",
   collectionName: "credit-notes_v1",
-  // Registered but NOT provisioned. The collection holds no documents until the
-  // bootstrap imports the 12 existing Xero notes, and no UI reaches it until
-  // credit-note origination ships — so an eventarc sync trigger and a minted
-  // search key would both be infrastructure for an empty index. Same posture as
-  // `bookings`. Flip to enabled in Phase 6, alongside the search UI, and add
-  // "credit-notes" to `local.typesense_collections` in `infra/main.tf` in the
-  // same change — `typesenseTriggerCoverage` pins the two lists together.
-  enabled: false,
+  // ENABLED 2026-08-07. This was `false` with a note saying "flip in Phase 6,
+  // alongside the search UI", and it is worth recording why that instruction was
+  // superseded rather than simply followed: **its stated reason had expired.**
+  //
+  // The reason given was that a trigger and a search key would be "infrastructure
+  // for an empty index", because the collection "holds no documents until the
+  // bootstrap imports the 12 existing Xero notes". That bootstrap has since run —
+  // measured 2026-08-07, `credit-notes` holds **12 documents in BOTH envs**. So
+  // the index is not empty, and the condition the note was waiting on is met.
+  //
+  // The manager search UI is still unbuilt, which is the half of that note still
+  // true. Enabling ahead of it is deliberate and is the cheaper order: the
+  // eventarc trigger keeps the index correct from now on, so the UI arrives to a
+  // warm, already-synced index instead of needing a backfill on the day it ships.
+  //
+  // ⚠️ Enabling is NOT a one-line change — it has two hard consumers, and both go
+  // red if they are not updated in the same lockstep bump:
+  //   1. `infra/main.tf` → `local.typesense_collections` must gain "credit-notes"
+  //      (api-cloudrun's `typesenseTriggerCoverage` pins the two lists together).
+  //   2. `creditNotes.search` must come OUT of `UNUSED_PERMISSIONS` in
+  //      api-cloudrun's `permissionCoverage.test.ts` — `SEARCHABLE_COLLECTIONS`
+  //      filters on `enabled !== false`, so flipping this registers the search
+  //      route and the permission stops being unused.
+  // And operationally: a NEW collection needs a cold-start reindex, and THEN a
+  // re-run of search-key provisioning — deploy-time provisioning skips an alias
+  // that did not exist when it ran.
+  enabled: true,
   schema: {
     name: "credit-notes_v1",
     enable_nested_fields: true,
