@@ -256,25 +256,29 @@ export const allocateCreditNoteTransaction: TransactionDefinition = {
 
 // ── void-credit-note ────────────────────────────────────────────────
 
+// NOTE: there is deliberately no `void-credit-note:reverse-allocations` rule.
+//
+// It existed here until beta.133 and described a void that appended a
+// `credit_reversal` per live allocation. **CFS no longer does that, and the rule
+// outlived the code by one release.** Voiding a note with any unreversed
+// allocation is now refused unconditionally with a 409
+// (`VOID_BLOCKED_BY_ALLOCATION`), because Xero refuses to void an allocated note
+// and clearing an allocation needs `DELETE /CreditNotes/{id}/Allocations/{id}` —
+// so the one-call path completed the CFS half, re-opened every affected invoice's
+// balance, and then failed the Xero half. A ledger divergence produced by using a
+// documented feature.
+//
+// It is worth recording HOW this was caught, because the rule shipped published
+// to JSR in beta.132 while the code implementing it was already gone: the
+// consumer's `propagationCoverage` ratchet asserts every rule id defined here is
+// referenced in api-cloudrun service source, and this was the one id that was
+// not. A propagation rule renders into `/openapi.json` as published API
+// documentation, so an orphaned one is not dead code — it is a live claim that
+// CFS behaves a way it does not.
+//
+// The operator path is `POST /settlements/{uid}/reverse` per allocation (already
+// live, already idempotent per row), then void.
 export const voidCreditNoteRules: CollectionRule[] = [
-  {
-    id: "void-credit-note:reverse-allocations",
-    source: "credit-notes",
-    target: "settlements",
-    mode: "co-write",
-    invariant:
-      "Voiding a note with live allocations appends a `credit_reversal` per allocation rather than deleting anything — the journal is append-only and the totals are a signed fold, so the do/undo pair nets to zero arithmetically. There is no `status` column to filter on, deliberately.",
-    enforced_by: [SETTLEMENT_TOTALS_FOLD],
-    transaction: "void-credit-note",
-    fields: [
-      {
-        source: ["uid"],
-        target: ["reverses"],
-        transform:
-          "one reversal per unreversed allocation, its document id DERIVED from the settlement it retracts — which makes 'one retraction per row' structural rather than a query",
-      },
-    ],
-  },
   {
     id: "void-credit-note:status",
     source: "credit-notes",
@@ -293,11 +297,8 @@ export const voidCreditNoteRules: CollectionRule[] = [
 export const voidCreditNoteTransaction: TransactionDefinition = {
   id: "void-credit-note",
   description:
-    "Voids a credit note, appending a reversal for every live allocation so each affected invoice's balance re-opens by the same arithmetic that closed it. Refused locally with a 409 when an allocation is unreversed and the caller did not ask to retract it — Xero locks both ends of an allocation, so pushing first would fail later and less legibly.",
+    "Voids a credit note. Refused with a 409 (`VOID_BLOCKED_BY_ALLOCATION`) when ANY allocation is unreversed — unconditionally, with no flag to override it, because Xero locks both ends of an allocation and CFS must not complete a retraction it cannot mirror. So a void that proceeds touches exactly ONE document: the note's own status. It moves no invoice balance and cascades to no order, because a note with no live allocation has no invoice to affect. Retract allocations first with `POST /settlements/{uid}/reverse`, then void.",
   steps: [
-    "void-credit-note:reverse-allocations",
     "void-credit-note:status",
-    "allocate-credit-note:settlements-to-invoices",
-    "update-invoice:status-to-orders",
   ],
 };
