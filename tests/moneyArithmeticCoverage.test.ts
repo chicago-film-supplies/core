@@ -271,9 +271,13 @@ const FLOAT_EPSILON_ALLOWED = new Map<string, string>([
   ],
   [
     "src/schemas/credit-note.ts",
-    "`remaining_credit` exhaustion and its upper bound. NOTE: credit notes are ALREADY " +
-    "cents-denominated in the settlements journal, so this one is convertible today and is " +
-    "the first that should go.",
+    "`remaining_credit` exhaustion and its upper bound. NOT convertible ahead of Phase 11 — " +
+    "an earlier version of this entry said it was, reasoning that credit notes are 'already " +
+    "cents-denominated in the settlements journal'. The journal is (`amount_cents: z.int()`); " +
+    "the credit-note DOCUMENT is not. Both operands here — `remaining_credit` and " +
+    "`totals.total` — are dollar `z.number()`s, and `CreditNoteDocTotals` says so: 'Dollars, " +
+    "not cents ... The cents boundary is the settlements journal.' Retires with Phase 11 " +
+    "exactly like the invoice entry above, not before it.",
   ],
 ]);
 
