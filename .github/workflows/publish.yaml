@@ -8,6 +8,27 @@ on:
       - pre-*
       - beta-*
 
+  # Manual trigger, because a lost run used to cost a junk commit.
+  #
+  # `push` was the only trigger, so whenever a run was lost the only way to get a
+  # publish was to invent a commit — and `285c50f` is exactly that: an empty
+  # `feat(propagation):` whose entire content is "re-trigger the publish". It
+  # didn't even work; the 2026-08-06 GitHub Actions outage was what had eaten the
+  # run, and the outage then ate the re-trigger too.
+  #
+  # `gh run rerun` is NOT a substitute. It only works on a *completed* run, and
+  # the outage left run 31127279580 in a state where both verbs refused it:
+  # `rerun` said "cannot be rerun; its workflow file may be broken" while
+  # `cancel` said "cannot cancel a workflow run that is completed" — on a run the
+  # API reported as `queued`. Inconsistent, and not self-healing.
+  #
+  # Safe to fire at will: semantic-release derives the version from the commits
+  # since the last tag, so a dispatch with nothing releasable is a no-op rather
+  # than a duplicate or an empty version bump.
+  #
+  #   gh workflow run "Release & Publish" --ref beta -R chicago-film-supplies/core
+  workflow_dispatch:
+
 jobs:
   ci:
     runs-on: ubuntu-latest
