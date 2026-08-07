@@ -266,7 +266,29 @@ Deno.test("every declared money _str mirror has a money-marked source", () => {
   // The direction that actually breaks search today: a `_str` field whose
   // numeric source is unmarked keeps getting `String(value)` and stays
   // unsearchable. Catches a mirror added later without its marker.
-  const MONEY_MIRROR_ROOTS = ["total", "amount_paid", "amount_credited", "amount_due", "remaining_credit"];
+  //
+  // ⚠️ **This guard FAILS OPEN, and the list below is why.** Every `_str` field
+  // whose stripped leaf is not one of these five is `continue`d past, so a leaf
+  // spelled any other way is simply not checked — the loop body does not run
+  // and the test passes. That is invisible from a green run, which is the whole
+  // problem with a filter-then-assert shape.
+  //
+  // Phase 11 turns it from a latent hole into a live one: every money leaf
+  // becomes `total_cents`, `amount_paid_cents`, … so NOTHING matches, the test
+  // passes over an EMPTY set, and the guard between a money field and an
+  // unsearchable index silently stops existing. Hence the `checked` counter
+  // below — it is not decoration, it is the only thing that can tell "all clear"
+  // apart from "never looked".
+  //
+  // When Phase 11 lands, extend the list rather than deleting the counter.
+  const MONEY_MIRROR_ROOTS = [
+    "total",
+    "amount_paid",
+    "amount_credited",
+    "amount_due",
+    "remaining_credit",
+  ];
+  let checked = 0;
   for (const config of allConfigs) {
     const byName = new Map(config.schema.fields.map((f) => [f.name, f]));
     for (const field of config.schema.fields) {
@@ -277,8 +299,18 @@ Deno.test("every declared money _str mirror has a money-marked source", () => {
       const sourceField = byName.get(source);
       assertEquals(sourceField !== undefined, true, `${config.alias}: ${field.name} has no source field ${source}`);
       assertEquals(sourceField?.money, true, `${config.alias}.${source}: has a money mirror but is not marked money`);
+      checked++;
     }
   }
+
+  assertEquals(
+    checked > 0,
+    true,
+    "MONEY_MIRROR_ROOTS matched NOTHING, so every assertion above ran zero times and this " +
+      "test proved nothing. Either the money mirrors were renamed (Phase 11 suffixes every " +
+      "leaf with `_cents`) or the `_str` convention changed. Extend MONEY_MIRROR_ROOTS — do " +
+      "not delete this check.",
+  );
 });
 
 Deno.test("toWireSchema strips the CFS annotation, so nothing unknown reaches Typesense", () => {
