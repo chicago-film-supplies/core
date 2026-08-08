@@ -62,11 +62,13 @@ Any commit that removes a field, renames an export, or changes validation in a w
 
 ### Money arithmetic — never a float factor
 
-`currency.js` is the money type; **BigInt integer cents is the arithmetic whenever a factor or ratio is applied to money.** currency.js quantizes *every* intermediate at its `precision`, so a pre-divided float factor rides its representation error straight into the cents. `precision` is configurable, so precision is rarely the objection — **operation order** is.
+**Stored money is integer cents, and the rule is closure under that quantum.** An operation is *closed* when its result is representable at the quantum — then no rounding decision exists and any correctly-quantized type is exact. It is *not closed* when a rounding decision is forced, and the only question is whether that decision is made explicitly or supplied silently by a default.
 
-- Apply factors as `× n ÷ d`, never `× (n / d)`. Neither `chargeable_days / 5` nor `(100 − rate) / 100` is representable in binary.
-- Never `currency(a).divide(b)` to get a ratio: it quantizes the *ratio*, leaving only `precision − 2` decimals once you scale to a percent, and a ratio near 1 collapses to exactly 1.
-- Round **once**, at the end, half-up.
+- **Closed — add, subtract, multiply by an INTEGER.** Measured 0 of 200,000 against an exact BigInt reference (`tests/money.test.ts` → *"closure: add, subtract and multiply-by-INTEGER are exact"*). The multiply ban is deliberately narrow: `replacement × quantity` is exact because `quantity` is `z.int()`.
+- **Not closed — divide, or multiply by a fraction.** Make the rounding explicit: integer cents, `roundDivHalfUp`, `distributeCents`. Round **once**, at the end, half-up.
+- **Never `currency(a).divide(b)` to get a ratio.** It quantizes the *ratio* at `precision`, discarding the rate's decimals before they are applied — 199,829 of 200,000 wrong, worst $373.53. A ratio near 1 collapses to exactly 1.
+
+⚠️ **`× n ÷ d` is a rule about INTEGER arithmetic, not advice about a currency.js chain.** Measured 2026-08-08: staging the multiply and divide as two currency.js operations quantizes the intermediate at 2dp and is wrong 1,016 times in 200,000, while a single raw-float multiply is exact. On a chain where every step rounds, fewer steps beat a better order. The defect the ban names is quantizing the ratio — not "a float touched the money". Full table: `tests/money.test.ts` → *"closure: the non-closed forms"*, and the `cfs-money` skill.
 
 ```ts
 const toCents = (money: number) => BigInt(Math.round(money * 100)); // inputs are 2dp → lossless
@@ -81,7 +83,7 @@ const roundDivHalfUp = (num: bigint, den: bigint) => (2n * num + den) / (2n * de
 
 **Since Phase 11, `currency.js` is NOT used for summing** — money is stored as integer cents, and addition is closed in cents by construction, so `a + b` over two exact cent counts has nothing for a decimal type to protect. `utils/money.ts` is the one remaining importer (`parseMoney` / `parseRate` wrap the library rather than reimplementing string parsing), and `tests/moneyArithmeticCoverage.test.ts` pins that at exactly one.
 
-`Discount.rate` means two things: for `percent` it is a percentage bounded `[0, 100]`; for `flat` it is **dollars per unit, per pricing factor** (`rate × quantity × pricingFactor === amount_cents / 100`), unbounded above, never negative. `RateType` is `["percent", "flat"]` — there is no `"amount"` member. **`rate` stays 4dp DOLLARS through the cents migration** and sits directly beside `amount_cents`; so do `cost.unit_cost` and `average_unit_cost`. Quantizing one to the cent is the `10.0.0-beta.117` regression (a 100-unit $6.39 purchase reporting $0.06/unit). Full cross-repo rule: workspace `CLAUDE.md` → "Money arithmetic (authoritative)".
+`Discount.rate` means two things: for `percent` it is a percentage bounded `[0, 100]`; for `flat` it is **dollars per unit, per pricing factor** (`rate × quantity × pricingFactor === amount_cents / 100`), unbounded above, never negative. `RateType` is `["percent", "flat"]` — there is no `"amount"` member. **`rate` stays 4dp DOLLARS through the cents migration** and sits directly beside `amount_cents`; so do `cost.unit_cost` and `average_unit_cost`. Quantizing one to the cent is the `10.0.0-beta.117` regression (a 100-unit $6.39 purchase reporting $0.06/unit). Full cross-repo rule: the **`cfs-money` skill** (`cfs-skills` plugin) — org-shared, so it is reachable from every machine and every cloud agent. The workspace `~/cfs/CLAUDE.md` carries the same rule but is untracked and machine-local (verified 2026-08-08), so cite the skill rather than the path.
 
 ### Stored money is integer cents
 
