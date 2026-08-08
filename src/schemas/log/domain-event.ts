@@ -39,6 +39,18 @@ export const DOMAIN_EVENT_MSGS = [
   "receive_opportunity_hook_failed",
   "receive_quarantine_hook_failed",
   "item_path_invariant_failed",
+  // An `order.invoices[]` entry disagreed with the invoice document and was
+  // converged. `source:"writer"` = a CFS service write repaired a ref a
+  // *change*-gated fan-out would have skipped; `source:"backstop"` = the
+  // eventarc reconciler repaired one, which in steady state means something
+  // wrote `invoice.status` outside a CFS service (a `scripts/repair-*.ts`) or
+  // `createSettlement` crashed between its invoice CAS and its order fan-out.
+  // Steady-state `backstop` volume IS the bug report — alerted on in
+  // `infra/observability/vmalert/rules-vlogs.yml`. `{ order_uid, invoice_uid,
+  // source, status_from, status_to, number_changed }`. Emitted from
+  // `src/lib/orderInvoiceMirror.ts`'s two callers in api-cloudrun
+  // (`services/orderInvoiceMirror.ts`, `services/invoices.ts`). api#453.
+  "order_invoice_mirror_repaired",
   "location_cascade_skip",
   // updateTransaction / updateStoreTransfer reversing the previous version out
   // of a location doc found the doc or its product row missing, or repointed a

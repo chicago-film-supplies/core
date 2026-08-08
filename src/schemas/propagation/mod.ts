@@ -103,6 +103,19 @@ export {
   updateOrderInvoiceRules,
 } from "./invoices.ts";
 
+// ── Settlement rules ────────────────────────────────────────────────
+
+export {
+  createSettlementRules,
+  createSettlementTransaction,
+  reverseSettlementRules,
+  reverseSettlementTransaction,
+  syncXeroSettlementRules,
+  syncXeroSettlementTransaction,
+  voidInvoiceFromXeroRules,
+  voidInvoiceFromXeroTransaction,
+} from "./settlements.ts";
+
 // ── Fulfillment rules ───────────────────────────────────────────────
 
 export {
@@ -255,6 +268,16 @@ import { createContactRules, createContactTransaction, updateContactRules, updat
 import { createUserRules, createUserTransaction, updateUserRules, updateUserTransaction, deleteUserRules, deleteUserTransaction } from "./users.ts";
 import { createLocationRules, createLocationTransaction, updateLocationTransactionalRules, updateLocationTransaction } from "./locations.ts";
 import { createInvoiceRules, createInvoiceTransaction, updateInvoiceOrderRules, updateInvoiceTransaction, updateOrderInvoiceRules } from "./invoices.ts";
+import {
+  createSettlementRules,
+  createSettlementTransaction,
+  reverseSettlementRules,
+  reverseSettlementTransaction,
+  syncXeroSettlementRules,
+  syncXeroSettlementTransaction,
+  voidInvoiceFromXeroRules,
+  voidInvoiceFromXeroTransaction,
+} from "./settlements.ts";
 import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
 import {
   createCreditNoteRules,
@@ -327,6 +350,10 @@ export const transactions: TransactionDefinition[] = [
   updateLocationTransaction,
   createInvoiceTransaction,
   updateInvoiceTransaction,
+  createSettlementTransaction,
+  reverseSettlementTransaction,
+  syncXeroSettlementTransaction,
+  voidInvoiceFromXeroTransaction,
   createCreditNoteTransaction,
   allocateCreditNoteTransaction,
   voidCreditNoteTransaction,
@@ -373,6 +400,10 @@ export const rules: CollectionRule[] = [
   ...createInvoiceRules,
   ...updateInvoiceOrderRules,
   ...updateOrderInvoiceRules,
+  ...createSettlementRules,
+  ...reverseSettlementRules,
+  ...syncXeroSettlementRules,
+  ...voidInvoiceFromXeroRules,
   ...createCreditNoteRules,
   ...allocateCreditNoteRules,
   ...voidCreditNoteRules,

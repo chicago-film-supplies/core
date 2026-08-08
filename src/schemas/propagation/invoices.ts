@@ -4,8 +4,10 @@
  * 1. create-invoice: co-writes invoice summary (uid, number, status) to each
  *    referenced order's `invoices` array and `query_by_invoices`.
  *
- * 2. update-invoice: co-writes status changes back to each order's `invoices`
- *    array entry when an invoice's status changes (e.g. issued → paid).
+ * 2. update-invoice: CONVERGES each order's `invoices` array entry on the
+ *    invoice document — on every invoice write, not only when the status moved.
+ *    The cash-settlement writers declare their own transactions in
+ *    `./settlements.ts`; they used to borrow this one.
  *
  * 3. update-order → invoices: when an order's items, destinations, subject,
  *    reference, or organization change, unsettled invoices (no unreversed
@@ -35,11 +37,61 @@ const INVOICE_BACKREF_CREATED: EnforcementRef = {
   gates: true,
 };
 
+/**
+ * The mirror merge itself, as a pure function over typed inputs.
+ *
+ * Deliberately a **unit** test on `convergeInvoiceRefs` rather than an
+ * integration assertion on one writer's happy path — mirroring how the reverse
+ * (order→invoice) direction enforces on pure functions in
+ * `core/tests/invoices.test.ts`. An integration pointer certifies the path it
+ * drives and nothing else, which is exactly how EIGHT writers came to share one
+ * pointer that admitted in its own `clause` that it covered a single transition
+ * (api-cloudrun#453). "Has a pointer" and "is enforced" are different
+ * predicates, and only the first is checked mechanically.
+ */
+const MIRROR_CONVERGES: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/orderInvoiceMirror.test.ts:42",
+  clause:
+    "the merge, writer-independently — the named entry is rewritten when (and only when) it disagrees, the INPUT ARRAY IDENTITY comes back when it agrees (the no-write contract every caller gates on), no ref is added or removed, and `number` converges without reporting a status change. Hermetic, in `deno task gate`. Says nothing about whether any given writer calls it — that is what `MIRROR_HAS_ONE_AUTHOR` is for.",
+  gates: true,
+};
+
+/**
+ * That every writer routes through the one merge, rather than spelling it again.
+ *
+ * ⚠️ A **location** ratchet, and on its own that is not enough: Ratchet G pinned
+ * the money `_str` renderer to exactly one file, stayed green, and that one file
+ * was wrong — every money mirror in both environments rendered 100× until
+ * 2026-08-08. A single source of truth guarantees ONE implementation, never a
+ * correct one. It is listed here only ALONGSIDE `MIRROR_CONVERGES`.
+ */
+const MIRROR_HAS_ONE_AUTHOR: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/orderInvoiceMirrorCoverage.test.ts",
+  clause:
+    "the one-author clause — no second copy of the mirror merge in `src/`, every `src/` file writing the `invoices:` key onto an order is catalogued, and every `scripts/` file writing `invoices/` is catalogued with the note that its mirror converges via the backstop. Structural only: says nothing about what the merge produces.",
+  gates: true,
+};
+
 const INVOICE_BACKREF_STATUS_FOLLOWS: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/invoices/invoices.test.ts:1053",
   clause:
-    "the status half — settling an issued invoice flips it to `paid` AND the order's `invoices[0].status` follows in the same request. Covers the settlement path specifically, not every status transition.",
+    "one writer end-to-end — settling an issued invoice flips it to `paid` AND the order's `invoices[0].status` follows in the same request. The settlement path specifically; the other seven writers are covered by `MIRROR_CONVERGES` + `MIRROR_HAS_ONE_AUTHOR` rather than by this.",
+  gates: true,
+};
+
+/**
+ * That the mirror converges when it has ALREADY drifted — the property no
+ * change-gated writer can have, and the one whose absence made api-cloudrun#453
+ * permanent rather than transient.
+ */
+const MIRROR_CONVERGES_WHEN_STALE: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/invoices/orderInvoiceMirror.test.ts",
+  clause:
+    "the convergence clause end-to-end — a stale mirror is repaired by an invoice write that does NOT move status; an invoice write that changes nothing writes no order document; and the post-crash state of `createSettlement` (invoice CAS'd to `paid`, mirror left at `issued`) converges. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
@@ -102,18 +154,43 @@ export const updateInvoiceOrderRules: CollectionRule[] = [
     source: "invoices",
     target: "orders",
     mode: "co-write",
-    invariant: "Order invoice summaries stay current — when an invoice status changes (e.g. draft→issued, issued→paid), each order's invoices[] entry is updated atomically",
-    enforced_by: [INVOICE_BACKREF_STATUS_FOLLOWS],
-    trigger: "invoice status changes — targets orders referenced in query_by_orders",
+    invariant:
+      "Every order's `invoices[]` entry CONVERGES on the invoice document — each writer rewrites the entry whenever it disagrees, not merely when the invoice's own status moved, and an eventarc reconciler repairs whatever was written outside a CFS service. This is a convergence guarantee, NOT an atomic one: `createSettlement` splits its invoice CAS from its order fan-out across two commits by design, so there is a real window in which the two disagree. Stating it as atomic (as this rule did until api-cloudrun#453) asserts an impossibility and hides the seam the backstop exists to close.",
+    enforced_by: [
+      MIRROR_CONVERGES,
+      MIRROR_CONVERGES_WHEN_STALE,
+      MIRROR_HAS_ONE_AUTHOR,
+      INVOICE_BACKREF_STATUS_FOLLOWS,
+    ],
+    trigger:
+      "any invoice write — targets orders referenced in query_by_orders. Deliberately NOT gated on the status having changed: a change-gate means a mirror that has already drifted can never be repaired, however many times the invoice is settled, resynced or webhook-updated, which is why all 86 stale prod refs survived a week of ordinary traffic.",
     fields: [
-      { source: ["status"], target: ["invoices", "status"], transform: "find matching entry in orders.invoices[] by uid, update its status" },
+      {
+        source: ["status"],
+        target: ["invoices", "status"],
+        transform:
+          "convergeInvoiceRefs — find the entry in orders.invoices[] by uid and rewrite it IF it disagrees; the input array's identity is returned when it agrees, so no order document is written. `uid` is the match key and is never rewritten.",
+      },
+      {
+        source: ["number"],
+        target: ["invoices", "number"],
+        transform:
+          "converged by the same merge. Free: `invoiceSig` inside `xeroQuoteContentHash` reads `uid:status` only, so a number repair cannot move the Xero quote hash — which is what makes it safe to fold api-cloudrun#451's drift class in here rather than needing its own pass.",
+      },
+      {
+        source: [],
+        target: ["version"],
+        transform:
+          "HELD, deliberately. A version bump's only job is to 409 a concurrent editor, and there is no edit to defend: `updateOrder` cloneDeeps a fresh in-transaction read and transaction.sets it without ever assigning `invoices`, so a stale client physically cannot revert a mirror repair.",
+      },
     ],
   },
 ];
 
 export const updateInvoiceTransaction: TransactionDefinition = {
   id: "update-invoice",
-  description: "Updates invoice status and co-writes status change to referenced orders",
+  description:
+    "Updates an invoice's own fields and converges the invoices[] mirror on every referenced order. Fired by `updateInvoice` and by the CRMS void webhook. The settlement writers used to borrow this id and now declare their own — see `propagation/settlements.ts` for why that matters to the drift check.",
   steps: ["update-invoice:status-to-orders"],
 };
 
