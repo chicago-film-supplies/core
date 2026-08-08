@@ -52,21 +52,35 @@ export const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, s
  * the render path injected none of them. Documentation promising a global that
  * throws at render time is worse than no documentation.
  *
- * ⚠️ `it.currency` (raw currency.js, see {@link TEMPLATE_LIB_GLOBALS}) stays for
- * now and is NOT superseded by this. 19 call sites in `templates/quote.eta`
- * alone use `it.currency(x).format()`, and the natural replacement takes
- * **cents** while template documents hold dollars — so today it would read
- * `it.money.formatCents(it.money.toCents(x))` at every site, which is worse
- * than what it replaces. That trade flips when documents are cents-denominated.
+ * ✅ `it.currency` (raw currency.js) **is gone as of Phase 11 Phase E**, and
+ * `it.money` is what replaced it. It survived this long because the natural
+ * replacement takes **cents** while template documents held **dollars**, so
+ * every one of the 19 call sites in `templates/quote.eta` would have read
+ * `it.money.formatCents(it.money.toCents(x))` — worse than what it replaced.
+ * Documents are cents-denominated now, `it.money.formatCents(doc.total_cents)`
+ * is the natural form, and the trade flipped exactly as predicted.
  */
 export const ALWAYS_ON_UTIL_NAMESPACES: readonly string[] = ["dates", "money"];
 
 /**
  * Third-party libraries injected as `it.*` globals for every template
- * (`it.currency`, `it.dateFns`, `it.tz`). Not `@cfs/core` utils — documented
- * here so the render context has one authoritative inventory.
+ * (`it.dateFns`, `it.tz`). Not `@cfs/core` utils — documented here so the
+ * render context has one authoritative inventory.
+ *
+ * **This list IS the contract, not a description of one.** `api-cloudrun`'s
+ * money Ratchet E asserts the render context's raw injections against it
+ * directly, so adding a name here is what permits a new raw library into every
+ * template — there is no second copy to keep in sync.
+ *
+ * ⚠️ **A money library must never come back.** `currency` lived here until
+ * Phase 11 Phase E and was the one unguarded money surface templates had:
+ * `it.currency(x).divide(y)` is a real, working call that makes a silent
+ * rounding decision, and no ratchet in `api-cloudrun` or `core` can see what an
+ * `.eta` file does with it — template content is canonical in the `templates`
+ * repo, not here. Money reaches templates through `it.money` (see
+ * {@link ALWAYS_ON_UTIL_NAMESPACES}), which is swept.
  */
-export const TEMPLATE_LIB_GLOBALS: readonly string[] = ["currency", "dateFns", "tz"];
+export const TEMPLATE_LIB_GLOBALS: readonly string[] = ["dateFns", "tz"];
 
 /**
  * Per-render scalars injected as `it.*` globals for every template. `it.doc` is
