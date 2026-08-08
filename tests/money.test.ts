@@ -447,3 +447,218 @@ Deno.test("PAYMENT_MATCH_TOLERANCE_CENTS is one cent, and lives in core because 
   assertEquals(PAYMENT_MATCH_TOLERANCE_CENTS, 1);
   assertEquals(Number.isInteger(PAYMENT_MATCH_TOLERANCE_CENTS), true);
 });
+
+// ── Closure under the storage quantum — the doctrine, executed ───────
+
+/**
+ * **The line the money doctrine actually draws, measured rather than asserted.**
+ *
+ * Every CLAUDE.md in this workspace, and `tests/moneyArithmeticCoverage.test.ts`
+ * directly above these sweeps, states the closure rule and quotes numbers for
+ * it — *"0 disagreements over 200,000 random 2dp pairs"*, and a four-form table
+ * for the non-closed case. **Until this block existed, nothing ran any of them.**
+ * They were measured once by hand on 2026-08-02, written into prose, and quoted
+ * onward from the prose.
+ *
+ * That is the exact defect this campaign was built to eliminate — a stated
+ * guarantee with no executing test — sitting inside the doctrine that names it.
+ * The doctrine now quotes what this test prints.
+ *
+ * ## The rule
+ *
+ * An operation is **closed** at the storage quantum when its result is
+ * representable there. Then no rounding decision exists, and any correctly
+ * quantized type is exact. It is **not closed** when a rounding decision is
+ * forced — and then the only question is whether that decision is made
+ * explicitly or supplied silently by a library default.
+ *
+ * currency.js is not the villain and integer cents is not magic. currency.js
+ * quantizes every intermediate at its `precision`; that is exactly right for a
+ * closed operation and is a silent, invisible rounding policy for an open one.
+ */
+
+/** Seeded LCG — deterministic, never `Math.random()`. */
+function lcg(seed: number): () => number {
+  let s = seed;
+  return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+}
+
+Deno.test("closure: add, subtract and multiply-by-INTEGER are exact — 200k pairs", () => {
+  const rand = lcg(20260802);
+  let addWrong = 0, subWrong = 0, mulWrong = 0, checked = 0;
+
+  for (let i = 0; i < 200_000; i++) {
+    // Two 2dp dollar values and an integer quantity.
+    const a = Math.round(rand() * 1_000_000) / 100;
+    const b = Math.round(rand() * 1_000_000) / 100;
+    const n = 1 + Math.floor(rand() * 500);
+
+    const ac = toCentsBig(a), bc = toCentsBig(b);
+
+    if (toCentsBig(currency(a).add(b).value) !== ac + bc) addWrong++;
+    if (toCentsBig(currency(a).subtract(b).value) !== ac - bc) subWrong++;
+    if (toCentsBig(currency(a).multiply(n).value) !== ac * BigInt(n)) mulWrong++;
+    checked++;
+  }
+
+  assertEquals(checked, 200_000, "the sweep must actually have run");
+  assertEquals(addWrong, 0, "currency.js add disagreed with exact integer cents");
+  assertEquals(subWrong, 0, "currency.js subtract disagreed with exact integer cents");
+  assertEquals(
+    mulWrong,
+    0,
+    "currency.js multiply-by-integer disagreed with exact integer cents. This is the " +
+      "measurement that justifies NARROWING the multiply ban: a blanket 'never multiply " +
+      "money' forbids an exact operation and buys nothing.",
+  );
+});
+
+/**
+ * The four forms of the non-closed case, over one shape: a line subtotal
+ * `price × qty × (100 − rate) ÷ 100`, with `rate` at 4dp.
+ *
+ * **D is asserted exact and B is asserted to disagree** — B is the fail-closed
+ * companion, and a corpus on which it went quiet would mean this sweep proves
+ * nothing about the choice it defends. **A and C are reported, not asserted.**
+ *
+ * ⚠️ This sweep replaced a hand-measured table that had been quoted through
+ * prose since 2026-08-02, and it disagreed with it in two ways worth keeping:
+ *
+ * 1. That table carried "divide-first" and "precomputed factor `.value`" as two
+ *    rows with two different counts. They are **one form** — `.value` of a
+ *    `currency(n).divide(d)` *is* the quantized ratio — and measure identical.
+ * 2. It implied a raw float factor was the worst case. Measured, it is the
+ *    **best** of the three currency.js forms (0 here), while the `× n ÷ d`
+ *    ordering every CLAUDE.md prescribes is wrong ~1,000 times in 200,000.
+ *    See the note on the assertions below for why.
+ */
+Deno.test("closure: the non-closed forms — the quantized ratio is the defect, integer cents is exact", () => {
+  const rand = lcg(20260803);
+  let aWrong = 0, bWrong = 0, cWrong = 0, dWrong = 0;
+  let aWorst = 0, bWorst = 0, cWorst = 0;
+  let discounted = 0;
+
+  for (let i = 0; i < 200_000; i++) {
+    const price = Math.round(rand() * 200_000) / 100; // up to $2,000.00, 2dp
+    const qty = 1 + Math.floor(rand() * 40);
+    const rate = Math.round(rand() * 1_000_000) / 10_000; // 0–100%, 4dp
+    if (rate > 0) discounted++;
+
+    // Exact reference: one BigInt rational, reduced — deliberately NOT staged
+    // the way any implementation stages it, so it cannot mirror one.
+    const priceC = toCentsBig(price);
+    const rateScaled = BigInt(Math.round(rate * 10_000)); // rate × 1e4
+    const num = priceC * BigInt(qty) * (1_000_000n - rateScaled);
+    const den = 1_000_000n;
+    const exact = roundDivHalfUp(num, den);
+
+    // A — multiply first, divide LAST. The house form before integer cents.
+    const a = currency(price).multiply(qty).multiply(100 - rate).divide(100).value;
+    // B — the RATIO is quantized at `precision` before it is applied. Note that
+    //     "divide-first" and "a precomputed factor taken with `.value`" are the
+    //     SAME form — `.value` of a `currency(n).divide(d)` IS the quantized
+    //     ratio. The doctrine carried them as two rows with two different
+    //     counts until this sweep measured them identical (2026-08-08).
+    const b = currency(price).multiply(qty).multiply(currency(100 - rate).divide(100).value).value;
+    // C — a raw IEEE-754 factor that never touches currency.js. Distinct from
+    //     B: it keeps full float precision instead of being quantized to 2dp,
+    //     so it is *better* than the quantized ratio and still not exact.
+    const c = currency(price).multiply(qty).multiply((100 - rate) / 100).value;
+    // D — integer cents, one rounding decision, at the end.
+    const d = exact;
+
+    if (toCentsBig(a) !== exact) { aWrong++; aWorst = Math.max(aWorst, Math.abs(a - fromCentsBig(exact))); }
+    if (toCentsBig(b) !== exact) { bWrong++; bWorst = Math.max(bWorst, Math.abs(b - fromCentsBig(exact))); }
+    if (toCentsBig(c) !== exact) { cWrong++; cWorst = Math.max(cWorst, Math.abs(c - fromCentsBig(exact))); }
+    if (d !== exact) dWrong++;
+  }
+
+  // Domain coverage, asserted separately from correctness: a draw that stopped
+  // producing discounts would make every form agree and every count go quiet.
+  if (discounted < 190_000) {
+    throw new Error(`corpus went vacuous: only ${discounted} discounted lines`);
+  }
+
+  console.log(
+    `  A multiply-first, divide last  : ${aWrong} of 200,000 (worst $${aWorst.toFixed(2)})\n` +
+      `  B quantized ratio / .value factor: ${bWrong} of 200,000 (worst $${bWorst.toFixed(2)})\n` +
+      `  C raw float factor             : ${cWrong} of 200,000 (worst $${cWorst.toFixed(2)})\n` +
+      `  D integer cents                : ${dWrong} of 200,000`,
+  );
+
+  assertEquals(dWrong, 0, "integer cents disagreed with the exact rational reference");
+
+  // Fail-closed: B is the form the doctrine bans, and it must be SEEN to be
+  // bad. The floor is order-of-magnitude and far below the measured count, so
+  // it asserts "this sweep discriminates" without pinning a number the corpus
+  // could be tuned to reproduce.
+  if (bWrong < 1_000) {
+    throw new Error(`the quantized-ratio form went quiet (${bWrong}) — the sweep is not discriminating`);
+  }
+  // B is the worst by MAGNITUDE, and that ordering — not any count — is the
+  // doctrine's actual claim. Counts move with the draw; this does not.
+  if (bWorst <= aWorst) throw new Error(`B ($${bWorst}) was not worse than A ($${aWorst}) — re-check the forms`);
+  if (bWorst <= cWorst) throw new Error(`B ($${bWorst}) was not worse than C ($${cWorst}) — re-check the forms`);
+
+  // A and C carry NO floor, deliberately, and C is the reason the doctrine
+  // needed re-measuring rather than re-typing.
+  //
+  // ⚠️ **C is not a wrong form on this shape — it measures 0.** A raw IEEE-754
+  // factor, applied in ONE currency.js multiply, rounds once and lands exactly
+  // where the integer reference does. Meanwhile A — the `× n ÷ d` form every
+  // CLAUDE.md in this workspace prescribes — is wrong ~1,000 times in 200,000,
+  // because staging the multiply and the divide as two currency.js operations
+  // quantizes the INTERMEDIATE at 2dp.
+  //
+  // So `× n ÷ d` is a rule about INTEGER arithmetic, where nothing rounds in
+  // between. Read as advice about a currency.js chain it is actively wrong:
+  // there, each step is a rounding, and fewer steps beat a better order. The
+  // defect B names is not "a float touched the money" — it is **quantizing the
+  // ratio to the money's own precision**, which throws away the rate's
+  // decimals before they are ever applied.
+  //
+  // Asserting a floor on either would mean tuning the draw until a form
+  // measured as harmless looked harmful.
+});
+
+/**
+ * **Precision rescues the bad forms — and that is the argument FOR integer
+ * cents, not against them.**
+ *
+ * The objection this sweep answers is "just raise `precision`". It works, which
+ * is precisely the problem: correctness then rests on a per-call-site option
+ * with a default, that nothing type-checks and no reviewer sees. Integer cents
+ * is exact with nothing to tune.
+ */
+Deno.test("closure: raising `precision` rescues the bad form, which is why the form is the defect", () => {
+  const rand = lcg(20260804);
+  let atDefault = 0, atSix = 0, checked = 0;
+
+  for (let i = 0; i < 50_000; i++) {
+    const price = Math.round(rand() * 200_000) / 100;
+    const qty = 1 + Math.floor(rand() * 40);
+    const rate = Math.round(rand() * 1_000_000) / 10_000;
+
+    const exact = roundDivHalfUp(
+      toCentsBig(price) * BigInt(qty) * (1_000_000n - BigInt(Math.round(rate * 10_000))),
+      1_000_000n,
+    );
+
+    const fDefault = currency(100).subtract(rate).divide(100).value;
+    if (toCentsBig(currency(price).multiply(qty).multiply(fDefault).value) !== exact) atDefault++;
+
+    const P = { precision: 6 };
+    const fSix = currency(100, P).subtract(rate).divide(100).value;
+    if (toCentsBig(currency(price, P).multiply(qty).multiply(fSix).value) !== exact) atSix++;
+    checked++;
+  }
+
+  assertEquals(checked, 50_000, "the sweep must actually have run");
+  console.log(`  precomputed factor: ${atDefault} wrong at default precision, ${atSix} at precision 6`);
+  if (atSix >= atDefault) {
+    throw new Error(
+      `precision did not help (${atDefault} → ${atSix}). If this ever inverts, the ` +
+        "doctrine's claim that precision rescues the bad forms needs rewriting.",
+    );
+  }
+});
