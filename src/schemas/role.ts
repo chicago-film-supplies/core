@@ -62,10 +62,10 @@ export interface Role {
  */
 /** Zod schema for Role. */
 export const RoleSchema: z.ZodType<Role> = z.strictObject({
-  name: z.string().regex(/^[a-z][a-z0-9_-]*$/, "Must be lowercase alphanumerics, hyphens, or underscores").min(1).max(64).meta({ pii: "none" }),
-  label: z.string().min(1).max(128).meta({ pii: "none" }),
-  permissions: z.array(z.string()).default([]),
-  description: z.string().max(500).optional(),
+  name: z.string().regex(/^[a-z][a-z0-9_-]*$/, "Must be lowercase alphanumerics, hyphens, or underscores").min(1).max(64).meta({ pii: "none", column: true, label: "Name" }),
+  label: z.string().min(1).max(128).meta({ pii: "none", column: true, label: "Label" }),
+  permissions: z.array(z.string()).default([]).meta({ column: true, label: "Permissions" }),
+  description: z.string().max(500).optional().meta({ column: true, label: "Description" }),
   uid_thread: ThreadId.optional(),
   ...TimestampFields,
 }).meta({

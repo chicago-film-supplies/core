@@ -17,7 +17,7 @@ export interface PasswordReset {
 export const PasswordResetSchema: z.ZodType<PasswordReset> = z.strictObject({
   // Internal Firestore uid, not customer data — same call as `log/base.ts`.
   user_id: z.string().min(1).meta({ pii: "none" }),
-  email: Email,
+  email: Email.meta({ column: true, label: "Email" }),
   expiresAt: FirestoreTimestamp,
   created_at: z.number(),
 }).meta({

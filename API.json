@@ -469,6 +469,12 @@
           "doc": ""
         },
         {
+          "kind": "typeAlias",
+          "name": "CellKind",
+          "declaration": "type CellKind = \"link\" | \"email\" | \"phone\" | \"date\" | \"address\" | \"name\" | \"bool\" | \"enum\" | \"plain\";",
+          "doc": "How a cell should render a column's value, derived from the annotated node's\n*type* rather than from its name.\n\nThe predecessor guessed from the path — `includes(\"email\")`, `includes(\"phone\")`,\n`includes(\"address\")` — which is why `z.email()` fields never got a `mailto:`\n(in Zod 4 `z.email() instanceof z.ZodString` is **false**, so the walker that\nfed the picker never even offered them) and why a column named `city` under an\n`address` parent rendered the whole multi-line block.\n\n`plain` is the honest default: money and rate formatting is decided by the\ncell from the storage convention (`*_cents`) and the `unit` annotation, both\nof which are value-level facts a column kind cannot carry."
+        },
+        {
           "kind": "variable",
           "name": "CfsSourceCollectionEnum",
           "declaration": "const CfsSourceCollectionEnum: z.ZodType<CfsSourceCollectionType>;",
@@ -527,6 +533,12 @@
           "name": "ClientLogEntrySchema",
           "declaration": "const ClientLogEntrySchema: z.ZodType<ClientLogEntry>;",
           "doc": "Zod schema for {@link ClientLogEntry}.\n\nThe `data` field is capped at 20 top-level keys + 4 KB stringified to\ndefend against runaway client-side payloads. Manager logs in practice\ncarry ≤5 keys and <500 bytes per entry, so this cap is far above the\nlegitimate ceiling."
+        },
+        {
+          "kind": "interface",
+          "name": "CollectDisplayColumnsResult",
+          "declaration": "interface CollectDisplayColumnsResult {\n  columns: DisplayColumn[];\n  unhandled: Array<typeLiteral>;\n}",
+          "doc": "Result of {@link collectDisplayColumns}. `unhandled` MUST be empty."
         },
         {
           "kind": "interface",
@@ -1118,9 +1130,21 @@
         },
         {
           "kind": "interface",
+          "name": "DisplayColumn",
+          "declaration": "interface DisplayColumn {\n  path: string;\n  label: string;\n  node: z.ZodType;\n  type: string;\n  format?: string;\n  meta: Record<string, unknown>;\n}",
+          "doc": "A display column declared on a schema with `.meta({ column: true })`."
+        },
+        {
+          "kind": "interface",
           "name": "DisplaySort",
           "declaration": "interface DisplaySort {\n  column: string | null;\n  direction: \"asc\" | \"desc\";\n}",
           "doc": "Sort configuration for a display preference (column + direction)."
+        },
+        {
+          "kind": "interface",
+          "name": "DisplayTableColumn",
+          "declaration": "interface DisplayTableColumn {\n  key: string;\n  label: string;\n  sortable: boolean;\n  serverSort?: typeLiteral;\n  cell: CellKind;\n  meta: Record<string, unknown>;\n}",
+          "doc": "A column offered to a table surface."
         },
         {
           "kind": "typeAlias",
@@ -1324,7 +1348,7 @@
           "kind": "variable",
           "name": "FirestoreTimestamp",
           "declaration": "const FirestoreTimestamp: z.ZodType<FirestoreTimestampType>;",
-          "doc": "Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.\n\nTight on purpose: rejects `undefined`, `null`, plain objects, and\n`FieldValue` write-time sentinels (which only carry `isEqual`). Writers\nmust stamp a real `Timestamp` (e.g. `Timestamp.now()` from\n`firebase-admin/firestore`) — `validateBeforeWrite` strips `FieldValue`\nsentinels before validation, so a sentinel-stamped timestamp would\nsurface here as `undefined` and fail loudly.\n\nThe accepted union still includes `FirestoreFieldValue` for back-compat\nwith consumers that type fields against the union (e.g. user-facing\n`cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces\nthe real-Timestamp contract."
+          "doc": "Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.\n\nTight on purpose: rejects `undefined`, `null`, plain objects, and\n`FieldValue` write-time sentinels (which only carry `isEqual`). Writers\nmust stamp a real `Timestamp` (e.g. `Timestamp.now()` from\n`firebase-admin/firestore`) — `validateBeforeWrite` strips `FieldValue`\nsentinels before validation, so a sentinel-stamped timestamp would\nsurface here as `undefined` and fail loudly.\n\nThe accepted union still includes `FirestoreFieldValue` for back-compat\nwith consumers that type fields against the union (e.g. user-facing\n`cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces\nthe real-Timestamp contract.\n\nCarries {@link FIRESTORE_TIMESTAMP_META} so it stays recognisable **through a\n`.meta()` clone** — see that constant."
         },
         {
           "kind": "typeAlias",
@@ -2572,7 +2596,7 @@
           "kind": "variable",
           "name": "Phone",
           "declaration": "const Phone: z.ZodType<string>;",
-          "doc": "Phone string with length constraints."
+          "doc": "Phone string with length constraints.\n\nCarries `cell: \"phone\"` because a phone number is the one display type Zod\ncannot discriminate — it is a `z.string()` with a regex, structurally\nidentical to a subject line. Declared once, here, rather than recovered per\ncolumn by testing whether the path `includes(\"phone\")`. (An email needs no\nsuch marker: `z.email()` has its own `format`.)"
         },
         {
           "kind": "typeAlias",
@@ -3247,6 +3271,12 @@
           "doc": "Lifecycle status of a template version (mirrors the git lifecycle)."
         },
         {
+          "kind": "variable",
+          "name": "TYPESENSE_ROLLUP_COLUMNS",
+          "declaration": "const TYPESENSE_ROLLUP_COLUMNS: Record<string, Record<string, typeLiteral>>;",
+          "doc": "Typesense fields **computed at index time**, which therefore have no Firestore\nfield to hang a label on.\n\nKeyed `\"<alias>:<field>\"`, exactly like `DERIVED_FIELDS` in\n`tests/typesenseFieldCoverage.test.ts` — and pinned against the real configs\nby `tests/display-columns.test.ts`, so an entry naming a field the collection\ndoes not declare fails rather than sitting here as a column that renders\nnothing.\n\nThe root `dates.*` envelope is here because **Typesense cannot sort or filter\non a value inside an array**: orders and fulfillments stopped persisting a\ntop-level `dates`, and `deriveOrderDateEnvelope` synthesizes a flat min/max\nacross `destinations[]` purely so the index has something to order by.\n`deliveries` / `pickups` / `has_conflicts` are `postProcess` predicates over\nthe same array.\n\n**`_str` mirrors never appear here.** They are search mirrors that let a\nnumber be *found* as text — `facet: false, sort: false` by construction — not\ndisplay columns. Under an opt-in model they are excluded by simply never\nbeing annotated, so no suffix rule is needed anywhere."
+        },
+        {
           "kind": "interface",
           "name": "Tag",
           "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -3484,7 +3514,7 @@
           "kind": "variable",
           "name": "TimestampFields",
           "declaration": "const TimestampFields: typeLiteral;",
-          "doc": "Standard timestamp fields present on most documents."
+          "doc": "Standard timestamp fields present on most documents.\n\nBoth are declared display columns here rather than at each of the ~30 sites\nthat spread this object — the heading is the same everywhere because the\nmeaning is. `.meta()` clones, so these two are distinct instances of\n`FirestoreTimestamp` and the base stays unannotated."
         },
         {
           "kind": "interface",
@@ -4039,6 +4069,14 @@
         },
         {
           "kind": "function",
+          "name": "collectDisplayColumns",
+          "signature": "collectDisplayColumns(schema: z.ZodType, opts?: typeLiteral): CollectDisplayColumnsResult",
+          "doc": "Collect every column a schema **declares** for display.\n\nThis is the replacement for generating the column universe by enumerating a\nschema and then generating a label for each entry with structural regexes.\nNobody chose those columns and nobody wrote those headings, so both drifted on\nevery rename — a money migration turned `total` into `total_cents` and the\nheading became \"Totals - Total Cents\", and `date_fs` degenerated to the\ntwo-letter heading **\"Fs\"**. Declaring is opt-in: a new field cannot surface a\nbroken column by existing, and a rename carries its annotation with it.\n\n## What is emitted\n\nAny node tagged `column: true` — **object nodes included**. A contact ref and\nan address are single columns rendered from the whole object (joined name,\nmulti-line block), not one column per part, so the annotation has to be able\nto land above the scalars. The walk continues past an emitted object, so a\nparent and a child can both be columns.\n\n## The label composes down the key path\n\nThe heading is the `label` of **every key traversed**, root→leaf, joined with\na space and with consecutive repeats collapsed. So `full` inside the shared\n`Address` schema is labelled `\"Address\"` exactly once and yields\n\"Delivery Address\" under `destinations[].delivery`, \"Collection Address\" under\n`destinations[].collection`, and a bare \"Address\" where nothing above it is\nlabelled.\n\nThe composition source is the sequence of **keys traversed**, not the terminal\nnode — which is what lets one shared schema carry one label and still read\ncorrectly at ten sites. Two keys holding the *same* schema instance get\ndistinct labels because **`.meta()` clones**: `Leg.meta({ label: \"Delivery\" })\n!== Leg`, and the base schema stays unannotated.\n\nA `label` with no `column` is a pure prefix — that is the normal state of an\nintermediate key like `delivery` or `organization`.\n\n## Fails closed, like {@link collectLeafPaths}\n\nA node type the walker does not recognise lands in `unhandled` rather than\nbeing skipped silently, because skipping it would drop its whole subtree and\nmake every column under it vanish from the picker with nothing to notice.\n\nUnion members are visited at the same path and deduped by (path, node), so a\ndiscriminated `items[]` contributes each arm's columns once. Where two arms\nannotate the same path, the first wins — they are the same column.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "collectLeafPaths",
           "signature": "collectLeafPaths(schema: z.ZodType, opts?: typeLiteral): CollectLeafPathsResult",
           "doc": "Walk a schema and collect every scalar leaf with its dotted path and merged\nmeta. Backs the Uploadcare authoring lint (`schemas/uploadcare/`) — a third\nmeta-collecting walker alongside `applyPii` and `getServerSortableColumns`,\nneither of which is reusable here (the latter is depth-capped at 1 and skips\narrays entirely).\n\n**It fails CLOSED.** A walker that emits unrecognised nodes as leaves would\nsilently swallow their subtree — a field named `attachments` typed\n`z.tuple([...])` would vanish from the walk and be invisible to every\nassertion built on it. So the type allowlist is two-sided: descend the known\ncontainers, emit the known scalars, and push everything else into\n`unhandled`, which callers are expected to assert is empty.\n\nTraversal:\n- **transparent wrappers** (`optional`, `default`, `nullable`, `prefault`,\n  `catch`, `readonly`, `nonoptional`) and **pipes** (`def.in` — the input side\n  of `chicagoInstant()` et al) are walked through, merging meta at each level;\n- **object** → each field, `path.key`;\n- **array** → the element, `path[]`;\n- **record** → the value type, `path.<key>` (dynamic keys aren't enumerable);\n- **union / discriminatedUnion** → every member at the *same* path, deduped by\n  (path, node identity) so shared nodes are visited once.\n\nMeta does **not** cross a container boundary by default: an object's\nschema-level `.meta({ title, collection })` must not leak onto its fields, and\nby symmetry an annotation on an array node does not reach its element.\nAnnotate the leaf.\n\n`opts.inherit` names the meta keys that DO cross, for annotations whose whole\npoint is to cover a subtree. `pii` is the motivating case: `Address` is tagged\n`.nullable().meta({ pii: \"mask\" })` on the object, and the runtime walker\n(`pii/walker.ts` `applyTagged`) pushes that tag down to every leaf, with a\nchild's own tag winning and `pii: \"none\"` opting back out — exactly the\n`{...inherited, ...own}` merge this function already performs through\nwrappers. Without it, the PII lint would report every leaf under a correctly\ntagged `Address` as a violation (measured: 213 of them).\n\nDefault `[]` — no key crosses, so every existing caller is bit-identical.\n\n`maxDepth` defaults to **24**. Wrappers are nodes, so depth counts them: the\ndeepest chain in core today measures 11, and an obvious-looking 12 would have\nbeen one `.optional().nullable()` away from silently truncating. Hitting the\ncap pushes a `__depth_cap__` entry into `unhandled` rather than returning\nquietly.",
@@ -4321,6 +4359,14 @@
         },
         {
           "kind": "function",
+          "name": "getFirestoreColumns",
+          "signature": "getFirestoreColumns(collection: string): DisplayTableColumn[]",
+          "doc": "Columns a Firestore document surface offers for `collection` — every field\nthe schema annotates `column: true`. `[]` for an unregistered collection.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "getInitialValues",
           "signature": "getInitialValues(schema: S): Partial<z.output<S>>",
           "doc": "Walk a Zod schema and produce an initial/blank object for form binding.\n\nDerives values from schema structure: `\"\"` for strings, `0` for numbers,\n`false` for booleans, `[]` for arrays, `{}` for records, `null` for\nnullables, first value for enums, and recursion for objects.\nFields with `.default()` use the default value.\nCustom types (e.g. FirestoreTimestamp) are omitted.\n\nA field annotated `.meta({ initial: <value> })` uses that value instead, at\nany level — it is checked before the type switch, and because wrapper nodes\nrecurse, an annotation on the leaf is found through `.optional()` and\n`.transform()` pipes too. Use it when the form seed and the parse-time\ndefault must differ (see the note in `resolveField`).\n\n## The return is `Partial`, and that is not conservatism — it is the truth\n\nThe result is missing required fields, so `z.output<S>` would be a lie.\nThree separate holes put it there, and each is visible above:\n\n- **`custom` nodes are omitted entirely** (`SKIP`). `FirestoreTimestamp` is\n  `z.custom`, and `TimestampFields` puts `created_at`/`updated_at` on\n  essentially every document schema — so *every* document's initial value is\n  missing at least two required fields. `tests/initial.test.ts` asserts\n  `\"created_at\" in result === false`, so this is pinned, not incidental.\n- **A `union` collapses to its first resolvable arm**, so reading a property\n  that only exists on another arm is a type error the `Partial` correctly\n  reports rather than hides.\n- **The partial is shallow.** Nested objects are partial in fact but typed\n  complete, because the walk recurses while the type does not.\n\n`pipe` resolving the *input* side is a fourth, currently latent: both live\ntransforms are `z.ZodType<string, string>`, so In ≡ Out today.",
@@ -4364,6 +4410,14 @@
           "name": "getTransactionMultiplier",
           "signature": "getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0",
           "doc": "Returns +1 for movements that increase owned quantity, -1 for those that\ndecrease it, and 0 for those that leave it untouched (a `transfer`, a\ncustody-only fulfillment step, a cost-only adjustment).\n\n**Total** — it cannot throw. The financial-only types that used to make it\npartial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it\ncannot drift from it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getTypesenseColumns",
+          "signature": "getTypesenseColumns(alias: string): DisplayTableColumn[]",
+          "doc": "Columns a Typesense surface offers for `alias` — the annotated set\nintersected with the fields that collection actually indexes, plus its\ncomputed rollups. `[]` for an unknown alias.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -4937,6 +4991,12 @@
         },
         {
           "kind": "variable",
+          "name": "FIRESTORE_TIMESTAMP_META",
+          "declaration": "const FIRESTORE_TIMESTAMP_META: \"firestoreTimestamp\";",
+          "doc": "Meta key marking a node as the {@link FirestoreTimestamp} custom type.\n\n`isDateLikeNode` used to recognise it by **instance identity** — the only\nhandle a `z.custom()` offers, since its `def.type` is the uninformative\n`\"custom\"`. That was safe exactly as long as nobody annotated a timestamp\nfield, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a\ndifferent instance, the identity test fails, and a `created_at` column\nsilently stops rendering as a date and starts printing a raw epoch. Declaring\ndisplay columns means annotating `created_at` / `updated_at` / `last_order`,\nso the identity test had to go.\n\nA meta marker survives the clone because `.meta()` **merges**: the clone\ncarries both this key and whatever the annotation added."
+        },
+        {
+          "kind": "variable",
           "name": "FULFILLMENT_LINE_ITEM_TYPES",
           "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\"[];",
           "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee` is excluded because a fee has no stock and is never picked\noff a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}\nwaiting to be collapsed into it; the exclusion IS the contract.\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
@@ -4957,7 +5017,7 @@
           "kind": "variable",
           "name": "FirestoreTimestamp",
           "declaration": "const FirestoreTimestamp: z.ZodType<FirestoreTimestampType>;",
-          "doc": "Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.\n\nTight on purpose: rejects `undefined`, `null`, plain objects, and\n`FieldValue` write-time sentinels (which only carry `isEqual`). Writers\nmust stamp a real `Timestamp` (e.g. `Timestamp.now()` from\n`firebase-admin/firestore`) — `validateBeforeWrite` strips `FieldValue`\nsentinels before validation, so a sentinel-stamped timestamp would\nsurface here as `undefined` and fail loudly.\n\nThe accepted union still includes `FirestoreFieldValue` for back-compat\nwith consumers that type fields against the union (e.g. user-facing\n`cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces\nthe real-Timestamp contract."
+          "doc": "Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.\n\nTight on purpose: rejects `undefined`, `null`, plain objects, and\n`FieldValue` write-time sentinels (which only carry `isEqual`). Writers\nmust stamp a real `Timestamp` (e.g. `Timestamp.now()` from\n`firebase-admin/firestore`) — `validateBeforeWrite` strips `FieldValue`\nsentinels before validation, so a sentinel-stamped timestamp would\nsurface here as `undefined` and fail loudly.\n\nThe accepted union still includes `FirestoreFieldValue` for back-compat\nwith consumers that type fields against the union (e.g. user-facing\n`cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces\nthe real-Timestamp contract.\n\nCarries {@link FIRESTORE_TIMESTAMP_META} so it stays recognisable **through a\n`.meta()` clone** — see that constant."
         },
         {
           "kind": "typeAlias",
@@ -5101,7 +5161,7 @@
           "kind": "variable",
           "name": "Phone",
           "declaration": "const Phone: z.ZodType<string>;",
-          "doc": "Phone string with length constraints."
+          "doc": "Phone string with length constraints.\n\nCarries `cell: \"phone\"` because a phone number is the one display type Zod\ncannot discriminate — it is a `z.string()` with a regex, structurally\nidentical to a subject line. Declared once, here, rather than recovered per\ncolumn by testing whether the path `includes(\"phone\")`. (An email needs no\nsuch marker: `z.email()` has its own `format`.)"
         },
         {
           "kind": "typeAlias",
@@ -5245,7 +5305,7 @@
           "kind": "variable",
           "name": "TimestampFields",
           "declaration": "const TimestampFields: typeLiteral;",
-          "doc": "Standard timestamp fields present on most documents."
+          "doc": "Standard timestamp fields present on most documents.\n\nBoth are declared display columns here rather than at each of the ~30 sites\nthat spread this object — the heading is the same everywhere because the\nmeaning is. `.meta()` clones, so these two are distinct instances of\n`FirestoreTimestamp` and the base stays unannotated."
         },
         {
           "kind": "variable",
@@ -10401,7 +10461,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/money",
-      "moduleDoc": "Money as integer minor units — the dollars↔cents boundary, the exact-division\nprimitive that factor arithmetic is built on, and a float-free formatter.\n\n```ts\nimport { formatCents, roundDivHalfUp, toCents } from \"@cfs/core/utils/money\";\n\ntoCents(19.99); // 1999\nformatCents(-4495_62); // \"-$4,495.62\"\nroundDivHalfUp(1000n * 33n, 100n); // 330n  — × n ÷ d, never × (n/d)\n```\n\n**Never let a float carry a money value or a factor applied to one.** The trap\nis operation order, not precision: `× (n / d)` bakes an unrepresentable\nquotient into the money before it is ever scaled, while `× n ÷ d` over integer\ncents rounds exactly once, at the end. Measured over a 500k-pair corpus,\ndivide-first is wrong 496,088 times and integer cents 0.\n\n## Two numeric flavours, and which to reach for\n\n- **`number`** — `toCents` / `fromCents` / `formatCents`. The storage and\n  display boundary: a `*_cents` field, a wire payload, a rendered row. Safe\n  because `Number.MAX_SAFE_INTEGER` is 9.007e15 cents ≈ **$90 trillion**, so a\n  cent value and a sum of cent values never approach it.\n- **`bigint`** — `toCentsBig` / `fromCentsBig` / `roundDivHalfUp`. Applying a\n  *factor* to money, where the intermediate is the problem rather than the\n  result: `calculateItemSubtotal` scales cents by `100 × RATE_SCALE` = 1e8, so\n  a $1M line reaches 1e16 and overflows 2^53 before any division happens.\n\nSums of cents need neither — integer addition is exact by construction, which\nis the whole reason journals store minor units.\n\n## currency.js appears here, once, on purpose\n\n{@linkcode parseMoney} and {@linkcode parseRate} **wrap** currency.js rather\nthan reimplementing it, and they are the only place in CFS that should.\nSeparator, symbol, sign and epsilon handling is exactly the hand-rolled money\ncode this module exists to delete — `\"$1,583.505\"` has three ways to go wrong\nbefore it is ever a number. {@linkcode distributeCents} takes the opposite\ncall and reimplements, because in integers it is five lines that outsource no\nsubtlety at all.",
+      "moduleDoc": "Money as integer minor units — the dollars↔cents boundary, the exact-division\nprimitive that factor arithmetic is built on, and a float-free formatter.\n\n```ts\nimport { formatCents, roundDivHalfUp, toCents } from \"@cfs/core/utils/money\";\n\ntoCents(19.99); // 1999\nformatCents(-4495_62); // \"-$4,495.62\"\nroundDivHalfUp(1000n * 33n, 100n); // 330n  — × n ÷ d, never × (n/d)\n```\n\n**Never let a float carry a money value or a factor applied to one.** The trap\nis operation order, not precision: `× (n / d)` bakes an unrepresentable\nquotient into the money before it is ever scaled, while `× n ÷ d` over integer\ncents rounds exactly once, at the end. Measured over a 500k-pair corpus,\ndivide-first is wrong 496,088 times and integer cents 0.\n\n## Two numeric flavours, and which to reach for\n\n- **`number`** — `toCents` / `fromCents` / `formatCents`. The storage and\n  display boundary: a `*_cents` field, a wire payload, a rendered row. Safe\n  because `Number.MAX_SAFE_INTEGER` is 9.007e15 cents ≈ **$90 trillion**, so a\n  cent value and a sum of cent values never approach it.\n- **`bigint`** — `toCentsBig` / `fromCentsBig` / `roundDivHalfUp`. Applying a\n  *factor* to money, where the intermediate is the problem rather than the\n  result: `calculateItemSubtotal` scales cents by `100 × RATE_SCALE` = 1e8, so\n  a $1M line reaches 1e16 and overflows 2^53 before any division happens.\n\nSums of cents need neither — integer addition is exact by construction, which\nis the whole reason journals store minor units.\n\n## currency.js appears here, once, on purpose\n\n{@linkcode parseMoney} and {@linkcode parseRate} **wrap** currency.js rather\nthan reimplementing it, and they are the only place in CFS that should.\nSeparator, symbol, sign and epsilon handling is exactly the hand-rolled money\ncode this module exists to delete — `\"$1,583.505\"` has three ways to go wrong\nbefore it is ever a number. {@linkcode distributeCents} takes the opposite\ncall and reimplements, because in integers it is five lines that outsource no\nsubtlety at all.\n\n## The rate boundary is a parallel set, not an option on the money one\n\n`perUnitCostAt4dp` / {@linkcode parseRate} / {@linkcode formatRate} produce,\nparse and render a **4dp rate**; `roundDivHalfUp` / {@linkcode parseMoney} /\n{@linkcode formatCents} do the same for **integer cents**. They are twins\nrather than one family with a `precision` argument because a rate is not an\namount: `Discount.rate`, `PriceModifier.rate`, `Tax.rate` and\n`transactions:cost.unit_cost` hold four decimals to match Xero's\n`DiscountRate`, and putting either through the other's function is a measured\nregression in both directions — 2dp renders `$0.0639/unit` as **`$0.00`**,\nand a rate is not in cents so a cents renderer is 100× out.",
       "symbols": [
         {
           "kind": "variable",
@@ -10443,6 +10503,27 @@
             {
               "name": "options.group",
               "doc": "Thousands separators. `false` for a search mirror."
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "formatRate",
+          "signature": "formatRate(value: number, _: unknown): string",
+          "doc": "Render a **rate** for display — {@linkcode formatCents}'s twin at the other\nboundary, and the direction the rate pair was missing.\n\nThe rate boundary already had a producer ({@linkcode perUnitCostAt4dp}) and a\nparser ({@linkcode parseRate}); with no formatter, a collection table printed\na bare `0.0639` for a unit cost. It had previously printed **`$0.00`**,\nbecause a name heuristic claimed `cost.unit_cost` for the money formatter —\n\"not money\" turns out to be necessary and not sufficient, since a 2dp\nformatter destroys a 4dp rate either way.\n\n**Not `formatCents` with a `dp` option.** `formatCents` takes *integer cents*\nand its minor part is literally `abs % 100`; adding a precision knob would put\na 4dp rate through a function whose whole contract is integer minor units, and\nwould make correctness depend on a per-call-site option with a default. Same\nargument that keeps `parseRate` separate from `parseMoney`.\n\n```ts\nformatRate(0.0639, { symbol: \"$\" });  // \"$0.0639\"\nformatRate(10.25);                    // \"10.25\"     — trailing zeros trimmed\nformatRate(10.25, { symbol: \"%\" });   // \"10.25%\"    — a percent trails its number\n```\n\nTrailing zeros are trimmed because a rate's precision is a *ceiling*, not a\ndenomination: `$6.39` should not read `$6.3900`. Money is the opposite and\npads to exactly 2, which is why these are two functions.",
+          "paramTags": [
+            {
+              "name": "value",
+              "doc": "The rate, in whatever unit the field declares. NOT cents."
+            },
+            {
+              "name": "options.dp",
+              "doc": "Maximum decimal places. 4 — Xero's `DiscountRate` width."
+            },
+            {
+              "name": "options.symbol",
+              "doc": "`\"$\"` prefixes; `\"%\"` suffixes; `\"\"` (default) neither."
             }
           ],
           "returnsTag": null

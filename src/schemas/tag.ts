@@ -22,13 +22,13 @@ export interface Tag {
 /** Zod schema for Tag. */
 export const TagSchema: z.ZodType<Tag> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1).max(100),
-  count: z.union([z.record(z.string(), z.custom<FirestoreFieldValue>()), z.number()]).optional(),
-  products: z.array(UidNameRef).default([]).optional(),
+  name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
+  count: z.union([z.record(z.string(), z.custom<FirestoreFieldValue>()), z.number()]).optional().meta({ column: true, label: "Count" }),
+  products: z.array(UidNameRef).default([]).optional().meta({ label: "Products" }),
   query_by_products: z.array(z.string()).default([]).optional(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Tag",

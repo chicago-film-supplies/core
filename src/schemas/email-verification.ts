@@ -17,8 +17,8 @@ export interface EmailVerification {
 export const EmailVerificationSchema: z.ZodType<EmailVerification> = z.strictObject({
   // Internal Firestore uid, not customer data — same call as `log/base.ts`.
   user_id: z.string().min(1).meta({ pii: "none" }),
-  email: Email,
-  expiresAt: FirestoreTimestamp,
+  email: Email.meta({ column: true, label: "Email" }),
+  expiresAt: FirestoreTimestamp.meta({ column: true, label: "Expires" }),
   created_at: z.number(),
 }).meta({
   title: "Email Verification",

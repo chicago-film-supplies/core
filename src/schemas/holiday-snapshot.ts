@@ -30,12 +30,12 @@ export interface HolidaySnapshot {
 export const HolidaySnapshotSchema: z.ZodType<HolidaySnapshot> = z.strictObject({
   uid: z.literal("current"),
   materialized_dates: z.array(z.iso.date()).default([]),
-  materialized_count: z.int().min(0),
+  materialized_count: z.int().min(0).meta({ column: true, label: "Materialized Count" }),
   materialized_year_range: z.strictObject({
     from: z.int(),
     to: z.int(),
   }),
-  materialized_at: FirestoreTimestamp,
+  materialized_at: FirestoreTimestamp.meta({ column: true, label: "Materialized" }),
 }).meta({
   title: "Holiday Snapshot",
   collection: "holiday-snapshot",

@@ -121,7 +121,7 @@ export interface RecurrenceRuleType {
 
 /** Zod schema for a recurrence rule. */
 export const RecurrenceRule: z.ZodType<RecurrenceRuleType> = z.strictObject({
-  freq: RecurrenceFreqEnum,
+  freq: RecurrenceFreqEnum.meta({ column: true, label: "Frequency" }),
   interval: z.int().min(1),
   byweekday: z.array(RecurrenceWeekdayEnum).nullable(),
   bymonthday: z.array(z.int().min(-31).max(31).refine((n) => n !== 0)).nullable(),
@@ -164,7 +164,7 @@ export interface RecurrencePrototypeType {
 /** Zod schema for the recurrence prototype. */
 export const RecurrencePrototype: z.ZodType<RecurrencePrototypeType> = z
   .strictObject({
-    subject: z.string().min(1).max(200).meta({ pii: "mask" }),
+    subject: z.string().min(1).max(200).meta({ pii: "mask", column: true, label: "Subject" }),
     body: CommentBody.nullable(),
     body_text: z.string().max(20000).meta({ pii: "mask" }).default(""),
     status: CardStatusEnum,
@@ -218,17 +218,17 @@ export interface Recurrence {
 export const RecurrenceSchema: z.ZodType<Recurrence> = z.strictObject({
   uid: FirestoreId,
   uid_list: ListId,
-  status: RecurrenceStatusEnum,
+  status: RecurrenceStatusEnum.meta({ column: true, label: "Status" }),
   rule: RecurrenceRule,
-  active_from: z.iso.date(),
+  active_from: z.iso.date().meta({ column: true, label: "Active From" }),
   active_until: z.iso.date().nullable(),
-  horizon_through: z.iso.date().nullable(),
+  horizon_through: z.iso.date().nullable().meta({ column: true, label: "Horizon Through" }),
   horizon_days: z.int().min(1).max(3650).nullable(),
   exception_dates: z.array(z.iso.date()).default([]),
   prototype: RecurrencePrototype,
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Recurrence",

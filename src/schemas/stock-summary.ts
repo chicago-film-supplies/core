@@ -96,10 +96,10 @@ export interface StockSummary {
 
 const StockSummaryBookingEntrySchema: z.ZodType<StockSummaryBookingEntry> = z.strictObject({
   uid: BookingId,
-  number: z.number(),
-  start: chicagoInstant().nullable(),
+  number: z.number().meta({ column: true, label: "#" }),
+  start: chicagoInstant().meta({ column: true, label: "Start" }).nullable(),
   start_fs: FirestoreTimestamp.nullable(),
-  end: chicagoInstant().nullable(),
+  end: chicagoInstant().meta({ column: true, label: "End" }).nullable(),
   end_fs: FirestoreTimestamp.nullable(),
   breakdown: BookingBreakdownSchema,
   type: ComponentTypeEnum,
@@ -107,30 +107,30 @@ const StockSummaryBookingEntrySchema: z.ZodType<StockSummaryBookingEntry> = z.st
 
 const StockSummaryOOSEntrySchema: z.ZodType<StockSummaryOOSEntry> = z.strictObject({
   uid: FirestoreId,
-  start: chicagoInstant().nullable(),
+  start: chicagoInstant().meta({ column: true, label: "Start" }).nullable(),
   start_fs: FirestoreTimestamp.nullable(),
-  end: chicagoInstant().nullable(),
+  end: chicagoInstant().meta({ column: true, label: "End" }).nullable(),
   end_fs: FirestoreTimestamp.nullable(),
-  quantity: z.number(),
-  reason: OOSReasonEnum,
-  status: OOSStatusEnum,
+  quantity: z.number().meta({ column: true, label: "Quantity" }),
+  reason: OOSReasonEnum.meta({ column: true, label: "Reason" }),
+  status: OOSStatusEnum.meta({ column: true, label: "Status" }),
 });
 
 /** Zod schema for StockSummary. */
 export const StockSummarySchema: z.ZodType<StockSummary> = z.strictObject({
   uid: FirestoreId,
   uid_product: FirestoreId,
-  type: ProductTypeEnum,
-  quantity_held: z.number(),
-  bookings: z.array(StockSummaryBookingEntrySchema).default([]),
-  out_of_service: z.array(StockSummaryOOSEntrySchema).default([]),
+  type: ProductTypeEnum.meta({ column: true, label: "Type" }),
+  quantity_held: z.number().meta({ column: true, label: "Quantity Held" }),
+  bookings: z.array(StockSummaryBookingEntrySchema).default([]).meta({ label: "Booking" }),
+  out_of_service: z.array(StockSummaryOOSEntrySchema).default([]).meta({ label: "Out of Service" }),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
 }).meta({
   title: "Stock Summary",
   collection: "stock-summaries",
   displayDefaults: {
-    columns: ["type", "quantity_held", "bookings", "out_of_service"],
+    columns: ["type", "quantity_held", "bookings.number", "out_of_service.quantity"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },

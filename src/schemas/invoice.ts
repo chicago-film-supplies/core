@@ -259,15 +259,15 @@ export interface InvoiceDocItemPrice {
 }
 
 const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject({
-  base_cents: z.int().default(0),
+  base_cents: z.int().default(0).meta({ column: true, label: "Base Price" }),
   base_percent: z.number().nullable().optional(),
-  chargeable_days: z.number().nullable().default(null),
-  formula: PriceFormulaEnum.default("five_day_week"),
-  subtotal_cents: z.int().default(0),
-  subtotal_discounted_cents: z.int().default(0),
-  discount: Discount.nullable().default(null),
-  taxes: z.array(PriceModifier).default([]),
-  total_cents: z.int().default(0),
+  chargeable_days: z.number().nullable().default(null).meta({ column: true, label: "Chargeable Days" }),
+  formula: PriceFormulaEnum.default("five_day_week").meta({ column: true, label: "Formula" }),
+  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
+  discount: Discount.nullable().default(null).meta({ label: "Discount" }),
+  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
   discount_percent: z.number().optional(),
 }).superRefine(checkPriceBaseUnit);
 
@@ -431,22 +431,22 @@ export interface InvoiceDocTotals {
 }
 
 const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
-  subtotal_cents: z.int().default(0),
-  subtotal_discounted_cents: z.int().default(0),
-  discount_amount_cents: z.int().default(0),
-  taxes: z.array(PriceModifier).default([]),
-  transaction_fees: z.array(PriceModifier).default([]),
-  total_cents: z.int().default(0),
-  amount_paid_cents: z.int().default(0),
+  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
+  discount_amount_cents: z.int().default(0).meta({ column: true, label: "Discount" }),
+  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  transaction_fees: z.array(PriceModifier).default([]).meta({ label: "Transaction Fee" }),
+  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+  amount_paid_cents: z.int().default(0).meta({ column: true, label: "Amount Paid" }),
   // Bare `.optional()` with NO default, deliberately: ~962 prod invoices
   // predate the field, and `validateBeforeWrite` persists the RAW doc, so a
   // schema default would never materialize anyway — it would only hide the
   // absence from the compiler at every read.
-  amount_credited_cents: z.int().optional(),
+  amount_credited_cents: z.int().optional().meta({ column: true, label: "Amount Credited" }),
   // Same: bare `.optional()`, no default. See the interface docblock.
-  amount_void_cents: z.int().optional(),
+  amount_void_cents: z.int().optional().meta({ column: true, label: "Amount Voided" }),
   // Unbounded on purpose: an over-credited invoice must stay negative.
-  amount_due_cents: z.int().default(0),
+  amount_due_cents: z.int().default(0).meta({ column: true, label: "Amount Due" }),
 });
 
 // ── Destinations ────────────────────────────────────────────────
@@ -464,8 +464,8 @@ export interface InvoiceDocDestinationType extends DocDestinationType {
 export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z.strictObject({
   uid_order: FirestoreId,
   dates: OrderDocDates,
-  delivery: DocDestinationEndpoint,
-  collection: DocDestinationEndpoint,
+  delivery: DocDestinationEndpoint.meta({ label: "Delivery" }),
+  collection: DocDestinationEndpoint.meta({ label: "Collection" }),
   customer_collecting: z.boolean().default(false),
   customer_returning: z.boolean().default(false),
 });
@@ -544,29 +544,31 @@ export interface Invoice {
 /** Zod schema for an Invoice document. */
 export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   uid: FirestoreId,
-  number: z.number(),
-  status: InvoiceStatus,
+  number: z.number().meta({ column: true, label: "#", linkTo: "invoiceDetail" }),
+  status: InvoiceStatus.meta({ column: true, label: "Status" }),
   query_by_orders: z.array(z.string()).default([]),
-  number_orders: z.array(z.number()).default([]),
-  tax_profile: TaxProfileEnum,
-  date: chicagoStartOfDay(),
+  number_orders: z.array(z.number()).default([]).meta({ column: true, label: "Order #" }),
+  tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+  // The ISO field carries the annotation; its `_fs` Timestamp mirror is the
+  // same column under the other encoding — see `FS_MIRROR_SUFFIX`.
+  date: chicagoStartOfDay().meta({ column: true, label: "Date", serverSortVia: "date_fs" }),
   date_fs: FirestoreTimestamp,
-  due_date: chicagoStartOfDay().optional(),
+  due_date: chicagoStartOfDay().optional().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs" }),
   due_date_fs: FirestoreTimestamp.optional(),
-  subject: z.string().nullable().optional(),
-  reference: z.string().nullable().optional(),
-  external_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
-  internal_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
+  subject: z.string().nullable().optional().meta({ column: true, label: "Subject" }),
+  reference: z.string().nullable().optional().meta({ column: true, label: "Reference" }),
+  external_notes: z.string().meta({ pii: "mask", column: true, label: "External Notes" }).nullable().optional(),
+  internal_notes: z.string().meta({ pii: "mask", column: true, label: "Internal Notes" }).nullable().optional(),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
-    name: z.string().meta({ pii: "mask" }),
+    name: z.string().meta({ pii: "mask", column: true }),
     crms_id: z.number().nullable().optional(),
-    tax_profile: TaxProfileEnum,
+    tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
     xero_id: z.uuid().nullable(),
     billing_address: Address,
-  }),
+  }).meta({ label: "Organization" }),
   destinations: z.array(InvoiceDocDestination).default([]),
-  items: z.array(InvoiceDocItem).default([]),
+  items: z.array(InvoiceDocItem).default([]).meta({ label: "Item" }),
   totals: InvoiceDocTotalsSchema,
   xero_id: z.uuid().nullable(),
   uploadcare_uuid: uploadcareRef(z.string().nullable().default(null)),
@@ -579,6 +581,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     version: z.number(),
     uploadcare_uuid: uploadcareRef(z.string()),
     created_at: FirestoreTimestamp,
+    // Not a display column — this is the PDF version's author, not the
+    // invoice's, and it sits inside an array nothing tabulates.
     created_by: ActorRef,
     deleted_at: FirestoreTimestamp.nullable(),
   })).optional(),
@@ -597,8 +601,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   uid_thread: ThreadId.optional(),
   /** Optimistic-concurrency if-match token — bumped on every whole-doc write, not a revision pointer (mirrors orders/orgs/contacts). */
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).refine(
   (inv) => inv.query_by_orders.length === 0 || inv.destinations.length >= 1,

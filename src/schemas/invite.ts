@@ -36,12 +36,12 @@ export const InviteSchema: z.ZodType<Invite> = z.strictObject({
   // The doc id IS the single-use invite token (64-char hex, `invites/{token}`),
   // not a Firestore auto-id — so this stays a permissive string, not FirestoreId.
   uid: z.string().min(1),
-  email: Email,
+  email: Email.meta({ column: true, label: "Email" }),
   ...NamePartsFields,
-  name: NameField,
-  roles: z.array(z.string()).default([]),
+  name: NameField.meta({ column: true, label: "Name" }),
+  roles: z.array(z.string()).default([]).meta({ column: true, label: "Roles" }),
   invited_by: z.string().min(1),
-  used: z.boolean().default(false),
+  used: z.boolean().default(false).meta({ column: true, label: "Used" }),
   expires_at: FirestoreTimestamp,
   ...TimestampFields,
 }).meta({

@@ -201,17 +201,17 @@ export const SettlementSchema: z.ZodType<Settlement> = z.strictObject({
   uid: FirestoreId,
   uid_invoice: FirestoreId,
   uid_organization: FirestoreId,
-  type: SettlementTypeEnum,
-  reason: SettlementReasonEnum,
-  amount_cents: z.int().nonnegative(),
+  type: SettlementTypeEnum.meta({ column: true, label: "Type" }),
+  reason: SettlementReasonEnum.meta({ column: true, label: "Reason" }),
+  amount_cents: z.int().nonnegative().meta({ column: true, label: "Amount" }),
   // `chicagoInstant()`, NOT `chicagoStartOfDay()`. A settlement is an event, and
   // the workspace table puts "true instants — moments when something happened"
   // under `chicagoInstant()` with `transaction.date` as its example. Truncating
   // to midnight would also collapse a busy day's settlements into a tie on the
   // one axis bitemporal reporting needs ordered.
-  date: chicagoInstant().meta({ serverSortVia: "date_fs" }),
+  date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
-  reference: z.string().nullable(),
+  reference: z.string().nullable().meta({ column: true, label: "Reference" }),
   uid_session: z.uuid(),
   reverses: FirestoreId.nullable(),
   uid_credit_note: FirestoreId.nullable(),
@@ -221,8 +221,8 @@ export const SettlementSchema: z.ZodType<Settlement> = z.strictObject({
   synced_at: FirestoreTimestamp.nullable(),
   legacy_payment_uid: z.string().nullable(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).superRefine(checkSettlementContract).meta({
   title: "Settlement",

@@ -47,7 +47,7 @@ export interface Quote {
 export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   uid: QuoteId,
   uid_order: FirestoreId,
-  order_number: z.number(),
+  order_number: z.number().meta({ column: true, label: "Order #" }),
   version: z.int().min(0).nullable(),
   is_draft: z.boolean(),
   uploadcare_uuid: uploadcareRef(z.string().nullable()),
@@ -61,7 +61,7 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   deleted_at: FirestoreTimestamp.nullable(),
   expires_at: FirestoreTimestamp.nullable(),
   created_at: FirestoreTimestamp,
-  updated_at: FirestoreTimestamp,
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({
   title: "Quote",
   collection: "quotes",

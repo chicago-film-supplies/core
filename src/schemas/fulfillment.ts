@@ -68,19 +68,19 @@ export interface FulfillmentLineItemType {
 // — see `_dividers.ts`.
 const FulfillmentLineItemInner = z.strictObject({
   uid: ItemUid,
-  type: z.enum(FULFILLMENT_LINE_ITEM_TYPES),
+  type: z.enum(FULFILLMENT_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
   // Fulfillment items are a projection of order items, so this is the same
   // string; it must carry the same classification.
-  name: z.string().min(1).max(100).meta({ pii: "none" }),
+  name: z.string().min(1).max(100).meta({ pii: "none", column: true }),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   // Fulfillment items are a projection of order items, so this is the same
   // string; it must carry the same classification.
-  description: z.string().meta({ pii: "none" }).default(""),
-  quantity: z.number().int().min(0).default(0),
-  stock_method: StockMethodEnum.optional(),
+  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
+  quantity: z.number().int().min(0).default(0).meta({ column: true, label: "Quantity" }),
+  stock_method: StockMethodEnum.optional().meta({ column: true, label: "Stock Method" }),
   path: z.array(ItemUid).default([]),
-  order_number: z.number().optional(),
+  order_number: z.number().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   uid_delivery: FirestoreId.nullable().optional(),
   uid_collection: FirestoreId.nullable().optional(),
@@ -151,7 +151,7 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.discriminatedUn
 /** Sanitized organization snapshot — uid and name only. */
 const FulfillmentOrganization = z.strictObject({
   uid: FirestoreId.nullable(),
-  name: z.string().min(1).max(100).meta({ pii: "mask" }),
+  name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
 });
 
 /**
@@ -186,13 +186,13 @@ export interface Fulfillment {
 
 export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   uid: FirestoreId,
-  number: z.int(),
-  status: FulfillmentOrderStatus,
-  organization: FulfillmentOrganization,
+  number: z.int().meta({ column: true, label: "#", linkTo: "fulfillmentDetail" }),
+  status: FulfillmentOrderStatus.meta({ column: true, label: "Status" }),
+  organization: FulfillmentOrganization.meta({ label: "Organization" }),
   destinations: z.array(DocDestination).min(1),
-  items: z.array(FulfillmentItem).default([]),
-  subject: z.string().default(""),
-  reference: z.string().max(255).nullable().default(null),
+  items: z.array(FulfillmentItem).default([]).meta({ label: "Item" }),
+  subject: z.string().default("").meta({ column: true, label: "Subject" }),
+  reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference" }),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
   query_by_dates: z.array(z.string()).default([]),

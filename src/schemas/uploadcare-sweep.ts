@@ -39,7 +39,7 @@ export const UploadcareSweepRunSchema: z.ZodType<UploadcareSweepRun> = z.strictO
   // operational doc here (sessions, webhook-events, rate-limits). It is also the
   // only form a Firestore TTL policy can read, should this doc ever want one.
   // `z.iso.datetime()` is for log/payload timestamps, not Firestore documents.
-  recorded_at: FirestoreTimestamp,
+  recorded_at: FirestoreTimestamp.meta({ column: true, label: "Recorded" }),
 }).meta({
   title: "Uploadcare Sweep Run",
   collection: "uploadcare-sweep",

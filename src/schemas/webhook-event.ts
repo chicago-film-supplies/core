@@ -13,8 +13,8 @@ export interface WebhookEvent {
 /** Zod schema for WebhookEvent. */
 export const WebhookEventSchema: z.ZodType<WebhookEvent> = z.strictObject({
   id: z.string(),
-  event: z.string(),
-  received: FirestoreTimestamp,
+  event: z.string().meta({ column: true, label: "Event" }),
+  received: FirestoreTimestamp.meta({ column: true, label: "Received" }),
   expiresAt: FirestoreTimestamp,
   payload: z.unknown(),
 }).meta({

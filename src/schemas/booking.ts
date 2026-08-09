@@ -38,13 +38,13 @@ export interface BookingBreakdown {
 
 /** Zod schema for BookingBreakdown. */
 export const BookingBreakdownSchema: z.ZodType<BookingBreakdown> = z.strictObject({
-  damaged: z.number(),
-  lost: z.number(),
-  out: z.number(),
-  prepped: z.number(),
-  quoted: z.number(),
-  reserved: z.number(),
-  returned: z.number(),
+  damaged: z.number().meta({ column: true, label: "Damaged" }),
+  lost: z.number().meta({ column: true, label: "Lost" }),
+  out: z.number().meta({ column: true, label: "Out" }),
+  prepped: z.number().meta({ column: true, label: "Prepped" }),
+  quoted: z.number().meta({ column: true, label: "Quoted" }),
+  reserved: z.number().meta({ column: true, label: "Reserved" }),
+  returned: z.number().meta({ column: true, label: "Returned" }),
 });
 
 /**
@@ -160,17 +160,17 @@ const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef> = z.strictOb
 
 const BookingStoreLocationSchema: z.ZodType<BookingStoreLocation> = z.strictObject({
   uid_location: FirestoreId,
-  name: z.string(),
-  quantity: z.number(),
+  name: z.string().meta({ column: true }),
+  quantity: z.number().meta({ column: true, label: "Quantity" }),
   default: z.boolean(),
 });
 
 const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
   uid_store: FirestoreId,
-  name: z.string(),
+  name: z.string().meta({ column: true }),
   default: z.boolean(),
-  quantity: z.number(),
-  locations: z.array(BookingStoreLocationSchema).default([]),
+  quantity: z.number().meta({ column: true, label: "Quantity" }),
+  locations: z.array(BookingStoreLocationSchema).default([]).meta({ label: "Location" }),
 });
 
 // ── Update input ──────────────────────────────────────────────
@@ -308,39 +308,39 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid: BookingId,
   uid_order: FirestoreId,
   uid_product: FirestoreId,
-  name: z.string(),
-  number: z.int().meta({ label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
-  type: ComponentTypeEnum,
-  status: BookingStatus,
-  quantity: z.number().meta({ serverSortVia: "quantity" }),
-  shortage: z.number(),
-  subject: z.string(),
-  unit_price_cents: z.int(),
-  total_price_cents: z.int(),
+  name: z.string().meta({ column: true, label: "Product", linkTo: "productDetail" }),
+  number: z.int().meta({ column: true, label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
+  type: ComponentTypeEnum.meta({ column: true, label: "Type" }),
+  status: BookingStatus.meta({ column: true, label: "Status" }),
+  quantity: z.number().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
+  shortage: z.number().meta({ column: true, label: "Shortage" }),
+  subject: z.string().meta({ column: true, label: "Subject" }),
+  unit_price_cents: z.int().meta({ column: true, label: "Unit Price" }),
+  total_price_cents: z.int().meta({ column: true, label: "Total" }),
   // crms_id and crms_product_id are written back post-transaction by CRMS sync
   crms_id: z.number().nullable().optional(),
   crms_product_id: z.number().nullable().optional(),
   breakdown: BookingBreakdownSchema,
   dates: z.strictObject({
-    start: chicagoInstant().meta({ serverSortVia: "dates.start_fs" }).nullable(),
+    start: chicagoInstant().meta({ serverSortVia: "dates.start_fs", column: true, label: "Start" }).nullable(),
     start_fs: FirestoreTimestamp.nullable(),
-    end: chicagoInstant().meta({ serverSortVia: "dates.end_fs" }).nullable(),
+    end: chicagoInstant().meta({ serverSortVia: "dates.end_fs", column: true, label: "End" }).nullable(),
     end_fs: FirestoreTimestamp.nullable(),
-    charge_start: chicagoInstant().nullable(),
+    charge_start: chicagoInstant().nullable().meta({ column: true, label: "Charge Start" }),
     charge_start_fs: FirestoreTimestamp.nullable(),
-    charge_end: chicagoInstant().nullable(),
+    charge_end: chicagoInstant().nullable().meta({ column: true, label: "Charge End" }),
     charge_end_fs: FirestoreTimestamp.nullable(),
   }),
   destinations: z.strictObject({
-    delivery: BookingDestinationRefSchema.nullable(),
-    collection: BookingDestinationRefSchema.nullable(),
+    delivery: BookingDestinationRefSchema.nullable().meta({ label: "Delivery" }),
+    collection: BookingDestinationRefSchema.nullable().meta({ label: "Collection" }),
   }),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
-    name: z.string().meta({ pii: "mask" }),
+    name: z.string().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
     crms_id: z.number().nullable(),
-  }),
-  stores: z.array(BookingStoreSchema).default([]),
+  }).meta({ label: "Organization" }),
+  stores: z.array(BookingStoreSchema).default([]).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId).default([]),
   query_by_uid_location: z.array(FirestoreId).default([]),
   uid_destination_delivery: FirestoreId,

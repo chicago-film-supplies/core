@@ -33,7 +33,7 @@ export const comments: TypesenseCollectionConfig = {
   },
   synonyms: [],
   displayDefaults: {
-    columns: ["sources.collection", "created_by.name", "body_text", "updated_at"],
+    columns: ["sources.collection", "created_by", "body_text", "updated_at"],
     filters: {},
     sort: { column: "updated_at", direction: "desc" },
     group: null,

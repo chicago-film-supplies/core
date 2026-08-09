@@ -70,9 +70,15 @@ export {
   enumValues,
   getServerSortableColumns,
   collectLeafPaths,
+  collectDisplayColumns,
 } from "./zod-walk.ts";
 
-export type { CollectLeafPathsResult, LeafPath } from "./zod-walk.ts";
+export type {
+  CollectDisplayColumnsResult,
+  CollectLeafPathsResult,
+  DisplayColumn,
+  LeafPath,
+} from "./zod-walk.ts";
 
 export {
   SessionSchema,
@@ -1223,6 +1229,55 @@ export const firestoreDisplayDefaults: Record<string, FirestoreDisplayDefaults> 
       })
       .filter((entry): entry is [string, FirestoreDisplayDefaults] => entry[1] != null),
   );
+
+// ── Declared table columns ─────────────────────────────────────────
+//
+// Bound here for the same reason as `firestoreDisplayDefaults`: the derivation
+// is pure and lives in display-columns.ts, but it needs the `schemas` record
+// above, which is defined in this file. Memoized because both walks allocate
+// and a table asks for its columns on every render.
+
+import {
+  buildFirestoreColumns,
+  buildTypesenseColumns,
+  type DisplayTableColumn,
+} from "./display-columns.ts";
+import { typesenseSchemas } from "./typesense/mod.ts";
+
+export type { CellKind, DisplayTableColumn } from "./display-columns.ts";
+export { TYPESENSE_ROLLUP_COLUMNS } from "./display-columns.ts";
+
+const firestoreColumnCache = new Map<string, DisplayTableColumn[]>();
+
+/**
+ * Columns a Firestore document surface offers for `collection` — every field
+ * the schema annotates `column: true`. `[]` for an unregistered collection.
+ */
+export function getFirestoreColumns(collection: string): DisplayTableColumn[] {
+  const hit = firestoreColumnCache.get(collection);
+  if (hit) return hit;
+  const schema = schemas[collection];
+  const columns = schema ? buildFirestoreColumns(schema) : [];
+  firestoreColumnCache.set(collection, columns);
+  return columns;
+}
+
+const typesenseColumnCache = new Map<string, DisplayTableColumn[]>();
+
+/**
+ * Columns a Typesense surface offers for `alias` — the annotated set
+ * intersected with the fields that collection actually indexes, plus its
+ * computed rollups. `[]` for an unknown alias.
+ */
+export function getTypesenseColumns(alias: string): DisplayTableColumn[] {
+  const hit = typesenseColumnCache.get(alias);
+  if (hit) return hit;
+  const config = typesenseSchemas[alias as keyof typeof typesenseSchemas];
+  const schema = config ? schemas[config.firestoreCollection] : undefined;
+  const columns = config && schema ? buildTypesenseColumns(schema, config) : [];
+  typesenseColumnCache.set(alias, columns);
+  return columns;
+}
 
 // ── Template schema fields (static, generated) ─────────────────────
 

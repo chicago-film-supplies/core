@@ -25,8 +25,8 @@ export const OrderDocumentSchema: z.ZodType<OrderDocument> = z.strictObject({
   // Uploadcare CDN file id — kept a plain non-empty string (not z.uuid()) so a
   // non-UUID CDN id can never block a regen write.
   uuid: uploadcareRef(z.string().min(1)),
-  mime: z.string().min(1),
-  name: z.string().min(1),
+  mime: z.string().min(1).meta({ column: true, label: "Type" }),
+  name: z.string().min(1).meta({ column: true, label: "Name" }),
   orderUpdatedAt: FirestoreTimestamp,
 }).meta({
   title: "Order Document",

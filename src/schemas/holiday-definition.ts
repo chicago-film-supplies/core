@@ -65,9 +65,9 @@ export interface HolidayDefinition {
 /** Zod schema for HolidayDefinition. */
 export const HolidayDefinitionSchema: z.ZodType<HolidayDefinition> = z.strictObject({
   uid: FirestoreId,
-  type: z.enum(["fixed", "variable"]),
-  name: z.string().min(1).max(100),
-  display_month: z.int().min(1).max(12),
+  type: z.enum(["fixed", "variable"]).meta({ column: true, label: "Type" }),
+  name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
+  display_month: z.int().min(1).max(12).meta({ column: true, label: "Display Month" }),
   js_month: z.int().min(0).max(11),
   date: z.int().min(1).max(31).optional(),
   day: z.string().min(1).max(2).optional(),
@@ -76,8 +76,8 @@ export const HolidayDefinitionSchema: z.ZodType<HolidayDefinition> = z.strictObj
   display_suffix: z.string().min(1).max(2).optional(),
   active: z.boolean().default(true),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Holiday Definition",

@@ -192,7 +192,7 @@ export interface TemplateVersion {
 export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject({
   uid: FirestoreId,
   uid_template: FirestoreId,
-  status: z.enum(TEMPLATE_VERSION_STATUSES),
+  status: z.enum(TEMPLATE_VERSION_STATUSES).meta({ column: true, label: "Status" }),
   content: z.record(z.string(), z.string()),
   params: z.array(TemplateParamSchema).default([]),
   consumed_components: z.array(z.string()).default([]),
@@ -205,8 +205,8 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   committed_content_hash: z.string().min(1).optional(),
 
   sha: z.string().min(1).optional(),
-  semver: z.string().min(1).optional(),
-  seq: z.int().min(0).optional(),
+  semver: z.string().min(1).optional().meta({ column: true, label: "Version" }),
+  seq: z.int().min(0).optional().meta({ column: true, label: "Seq" }),
   commit_meta: CommitMetaSchema.optional(),
   blob_refs: z.array(BlobRefSchema).optional(),
 

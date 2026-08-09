@@ -35,17 +35,17 @@ export interface LocationType {
 /** Zod schema for LocationType. */
 export const LocationTypeSchema: z.ZodType<LocationType> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1).max(100),
+  name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   product_capacities: z.array(z.strictObject({
     uid: FirestoreId,
-    max: z.number().nullable(),
-  })).default([]),
+    max: z.number().nullable().meta({ column: true, label: "Max" }),
+  })).default([]).meta({ label: "Capacity" }),
   query_by_product_capacities: z.array(z.string()).default([]).optional(),
   dimensions: z.strictObject({
-    width: z.number().optional(),
-    depth: z.number().optional(),
-    height: z.number().optional(),
-    weight_capacity: z.number().optional(),
+    width: z.number().optional().meta({ column: true, label: "Width" }),
+    depth: z.number().optional().meta({ column: true, label: "Depth" }),
+    height: z.number().optional().meta({ column: true, label: "Height" }),
+    weight_capacity: z.number().optional().meta({ column: true, label: "Weight Capacity" }),
   }).nullable().optional(),
   version: z.int().min(0).default(0),
   active: z.boolean().default(true),
@@ -55,7 +55,7 @@ export const LocationTypeSchema: z.ZodType<LocationType> = z.strictObject({
   title: "Location Type",
   collection: "location-types",
   displayDefaults: {
-    columns: ["name", "product_capacities", "dimensions"],
+    columns: ["name", "dimensions.width", "dimensions.height"],
     filters: {},
     sort: { column: "name", direction: "asc" },
   },

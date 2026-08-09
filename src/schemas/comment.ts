@@ -88,14 +88,14 @@ export const CommentSchema: z.ZodType<Comment> = z.strictObject({
   body: CommentBody,
   // Required (no `.default("")`): the Typesense config declares it so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
-  body_text: z.string().meta({ pii: "mask" }),
+  body_text: z.string().meta({ pii: "mask", column: true, label: "Body" }),
   reactions: z.record(z.string(), z.record(z.string(), ActorRef)).default({}),
   git: CommentGitMirrorSchema.optional(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
   deleted_at: FirestoreTimestamp.nullable(),
   deleted_by: ActorRef.nullable(),
-  updated_by: ActorRef,
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).superRefine((doc, ctx) => {
   // GitHub-mirror metadata is only meaningful on template branch/family
@@ -115,7 +115,7 @@ export const CommentSchema: z.ZodType<Comment> = z.strictObject({
   title: "Comment",
   collection: "comments",
   displayDefaults: {
-    columns: ["sources.collection", "created_by.name", "body_text", "updated_at"],
+    columns: ["sources.collection", "created_by", "body_text", "updated_at"],
     filters: {},
     sort: { column: "updated_at", direction: "desc" },
   },

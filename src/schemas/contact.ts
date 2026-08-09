@@ -28,7 +28,7 @@ export interface ContactOrganizationType {
 /** Zod schema for an organization reference embedded in a contact. */
 export const ContactOrganization: z.ZodType<ContactOrganizationType> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
+  name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
 });
 
 /**
@@ -55,19 +55,22 @@ export interface Contact extends NameParts {
 export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   uid: FirestoreId,
   ...NamePartsFields,
-  name: NameField,
+  // A clone, so the shared `NameField` stays unannotated: the contact's own
+  // name is a column headed "Name", while the same schema under `created_by`
+  // is not a column at all (the ActorRef object above it is).
+  name: NameField.meta({ column: true, label: "Name", linkTo: "contactDetail" }),
   crms_id: z.number().optional(),
   // Required (no `.default([])`): the Typesense config declares them so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
-  emails: z.array(Email),
-  phones: z.array(Phone),
-  organizations: z.array(ContactOrganization).default([]),
+  emails: z.array(Email).meta({ column: true, label: "Emails" }),
+  phones: z.array(Phone).meta({ column: true, label: "Phones" }),
+  organizations: z.array(ContactOrganization).default([]).meta({ label: "Organizations" }),
   query_by_organizations: z.array(z.string()).default([]),
   uid_user: FirestoreId.optional(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Contact",

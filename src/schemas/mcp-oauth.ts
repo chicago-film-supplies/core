@@ -26,8 +26,8 @@ export interface McpOAuthClient {
 
 /** Zod schema for McpOAuthClient. */
 export const McpOAuthClientSchema: z.ZodType<McpOAuthClient> = z.strictObject({
-  client_id: z.string(),
-  client_name: z.string(),
+  client_id: z.string().meta({ column: true, label: "Client ID" }),
+  client_name: z.string().meta({ column: true, label: "Client" }),
   redirect_uris: z.array(z.url()).min(1),
   created_at: z.number(),
 }).meta({
@@ -57,8 +57,8 @@ export interface McpOAuthAuthorizeRequest {
 /** Zod schema for McpOAuthAuthorizeRequest. */
 export const McpOAuthAuthorizeRequestSchema: z.ZodType<McpOAuthAuthorizeRequest> = z.strictObject({
   id: z.string(),
-  user_uid: z.string(),
-  client_id: z.string(),
+  user_uid: z.string().meta({ column: true, label: "User" }),
+  client_id: z.string().meta({ column: true, label: "Client ID" }),
   scope: z.string(),
   redirect_uri: z.url(),
   state: z.string().optional(),
@@ -90,8 +90,8 @@ export interface McpOAuthCode {
 
 /** Zod schema for McpOAuthCode. */
 export const McpOAuthCodeSchema: z.ZodType<McpOAuthCode> = z.strictObject({
-  user_uid: z.string(),
-  client_id: z.string(),
+  user_uid: z.string().meta({ column: true, label: "User" }),
+  client_id: z.string().meta({ column: true, label: "Client ID" }),
   scope: z.string(),
   redirect_uri: z.url(),
   code_challenge: z.string(),
@@ -119,8 +119,8 @@ export interface McpOAuthToken {
 
 /** Zod schema for McpOAuthToken. */
 export const McpOAuthTokenSchema: z.ZodType<McpOAuthToken> = z.strictObject({
-  user_uid: z.string(),
-  client_id: z.string(),
+  user_uid: z.string().meta({ column: true, label: "User" }),
+  client_id: z.string().meta({ column: true, label: "Client ID" }),
   scope: z.string(),
   created_at: z.number(),
   expiresAt: FirestoreTimestamp,

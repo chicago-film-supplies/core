@@ -35,7 +35,7 @@ export const OrganizationContact: z.ZodType<OrganizationContactType> = z.strictO
   uid: FirestoreId,
   ...NamePartsFields,
   name: NameField,
-  roles: z.array(z.string()).default([]),
+  roles: z.array(z.string()).default([]).meta({ column: true, label: "Roles" }),
 });
 
 /**
@@ -65,25 +65,27 @@ export interface Organization {
 /** Zod schema for a full organization Firestore document. */
 export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
+  name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask", column: true, label: "Name", linkTo: "organizationDetail" }),
   crms_id: z.number(),
   xero_id: z.uuid().nullable(),
   // Required (no `.default("tax_applied")`): the Typesense config declares it
   // so, and a `.default()` never materializes on a write — see the note in
   // `product.ts`. TAX_PROFILES[0] is "tax_applied", so the enum's
   // type-derived seed already equals the dropped default.
-  tax_profile: TaxProfileEnum,
-  description: z.string().default("").optional(),
-  emails: z.array(Email).default([]),
-  phones: z.array(Phone).default([]),
-  billing_address: Address,
-  contacts: z.array(OrganizationContact),
+  tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+  description: z.string().default("").optional().meta({ column: true, label: "Description" }),
+  emails: z.array(Email).default([]).meta({ column: true, label: "Emails" }),
+  phones: z.array(Phone).default([]).meta({ column: true, label: "Phones" }),
+  billing_address: Address.meta({ label: "Billing" }),
+  // The whole contact is the column — the Typesense config indexes the nested
+  // object, and `TableCell` joins the name parts.
+  contacts: z.array(OrganizationContact).meta({ column: true, label: "Contacts" }),
   query_by_contacts: z.array(z.string()).default([]),
-  last_order: FirestoreTimestamp.nullable().optional(),
+  last_order: FirestoreTimestamp.nullable().optional().meta({ column: true, label: "Last Order" }),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Organization",

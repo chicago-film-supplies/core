@@ -75,12 +75,12 @@ export interface OOSBreakdown {
 
 /** Zod schema for OOSBreakdown. */
 export const OOSBreakdownSchema: z.ZodType<OOSBreakdown> = z.strictObject({
-  draft: z.number(),
-  planned: z.number(),
-  active: z.number(),
-  blocked: z.number(),
-  written_off: z.number(),
-  returned_to_service: z.number(),
+  draft: z.number().meta({ column: true, label: "Draft" }),
+  planned: z.number().meta({ column: true, label: "Planned" }),
+  active: z.number().meta({ column: true, label: "Active" }),
+  blocked: z.number().meta({ column: true, label: "Blocked" }),
+  written_off: z.number().meta({ column: true, label: "Written Off" }),
+  returned_to_service: z.number().meta({ column: true, label: "Returned To Service" }),
 });
 
 /** A location within a store affected by an out-of-service record. */
@@ -163,8 +163,8 @@ export interface OutOfService {
 
 const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({
   uid_location: FirestoreId,
-  name: z.string(),
-  quantity: z.number(),
+  name: z.string().meta({ column: true }),
+  quantity: z.number().meta({ column: true, label: "Quantity" }),
   transactionQuantity: z.number(),
   default: z.boolean(),
   max: z.number().nullable().optional(),
@@ -172,10 +172,10 @@ const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({
 
 const OOSStoreSchema: z.ZodType<OOSStore> = z.strictObject({
   uid_store: FirestoreId,
-  name: z.string(),
+  name: z.string().meta({ column: true }),
   default: z.boolean(),
-  quantity: z.number(),
-  locations: z.array(OOSStoreLocationSchema).default([]),
+  quantity: z.number().meta({ column: true, label: "Quantity" }),
+  locations: z.array(OOSStoreLocationSchema).default([]).meta({ label: "Location" }),
 });
 
 const OOSTransactionSchema: z.ZodType<OOSTransaction> = z.strictObject({
@@ -191,9 +191,9 @@ const OOSTransactionSchema: z.ZodType<OOSTransaction> = z.strictObject({
 });
 
 const OOSDatesSchema: z.ZodType<OOSDates> = z.strictObject({
-  start: chicagoInstant().meta({ serverSortVia: "dates.start_fs" }).nullable(),
+  start: chicagoInstant().meta({ serverSortVia: "dates.start_fs", column: true, label: "Start" }).nullable(),
   start_fs: FirestoreTimestamp.nullable(),
-  end: chicagoInstant().meta({ serverSortVia: "dates.end_fs" }).nullable(),
+  end: chicagoInstant().meta({ serverSortVia: "dates.end_fs", column: true, label: "End" }).nullable(),
   end_fs: FirestoreTimestamp.nullable(),
 });
 
@@ -201,30 +201,30 @@ const OOSDatesSchema: z.ZodType<OOSDates> = z.strictObject({
 export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   uid: FirestoreId,
   uid_product: FirestoreId,
-  number: z.int().meta({ label: "#", linkTo: "outOfServiceDetail", serverSortVia: "number" }),
-  reason: OOSReasonEnum,
-  status: OOSStatusEnum,
-  quantity: z.number().meta({ serverSortVia: "quantity" }),
+  number: z.int().meta({ column: true, label: "#", linkTo: "outOfServiceDetail", serverSortVia: "number" }),
+  reason: OOSReasonEnum.meta({ column: true, label: "Reason" }),
+  status: OOSStatusEnum.meta({ column: true, label: "Status" }),
+  quantity: z.number().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   breakdown: OOSBreakdownSchema,
-  canceled_at: FirestoreTimestamp.nullable(),
+  canceled_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Canceled" }),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
-    name: z.string().meta({ pii: "mask" }),
+    name: z.string().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
     crms_id: z.number().nullable(),
-  }).nullable(),
+  }).nullable().meta({ label: "Organization" }),
   dates: OOSDatesSchema,
-  sources: z.array(DocSource).default([]),
+  sources: z.array(DocSource).default([]).meta({ label: "Source" }),
   query_by_sources: z.array(z.string()).default([]),
   crms_id: z.number().nullable().optional(),
   crms_stock_level_id: z.number().nullable().optional(),
-  stores: z.array(OOSStoreSchema).default([]),
+  stores: z.array(OOSStoreSchema).default([]).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId).default([]),
   query_by_uid_location: z.array(FirestoreId).default([]),
   transactions: z.array(OOSTransactionSchema).optional(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Out of Service Record",

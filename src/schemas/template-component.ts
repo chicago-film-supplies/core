@@ -50,17 +50,17 @@ export interface TemplateComponent {
 /** Zod schema for a TemplateComponent family document. */
 export const TemplateComponentSchema: z.ZodType<TemplateComponent> = z.strictObject({
   uid: FirestoreId,
-  git_path: z.string().min(1).max(200),
-  name: z.string().min(1).max(200),
+  git_path: z.string().min(1).max(200).meta({ column: true, label: "Path" }),
+  name: z.string().min(1).max(200).meta({ column: true, label: "Name", linkTo: "templateComponentDetail" }),
   uid_active: FirestoreId.nullable(),
   draft_uids: z.array(FirestoreId).default([]),
   // Required (no `.default(0)`): the Typesense config declares both so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
-  version_count: z.int().min(0),
-  last_published_at: FirestoreTimestamp.nullable(),
+  version_count: z.int().min(0).meta({ column: true, label: "Versions" }),
+  last_published_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Last Published" }),
   version: z.int().min(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Template Component",

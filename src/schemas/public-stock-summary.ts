@@ -61,9 +61,9 @@ const PublicUnavailableEntrySchema: z.ZodType<PublicUnavailableEntry> = z.strict
 export const PublicStockSummarySchema: z.ZodType<PublicStockSummary> = z.strictObject({
   uid: FirestoreId,
   uid_product: FirestoreId,
-  type: ProductTypeEnum,
-  quantity_held: z.number(),
-  unavailable: z.array(PublicUnavailableEntrySchema).default([]),
+  type: ProductTypeEnum.meta({ column: true, label: "Type" }),
+  quantity_held: z.number().meta({ column: true, label: "Quantity Held" }),
+  unavailable: z.array(PublicUnavailableEntrySchema).default([]).meta({ column: true, label: "Unavailable" }),
   created_at: FirestoreTimestamp,
   updated_at: FirestoreTimestamp,
 }).meta({

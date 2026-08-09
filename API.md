@@ -939,6 +939,25 @@ const CardStatusEnum: z.ZodType<CardStatus>;
 type CardUpdated = EventEnvelope<Card> & typeLiteral;
 ```
 
+### `CellKind`
+
+How a cell should render a column's value, derived from the annotated node's
+*type* rather than from its name.
+
+The predecessor guessed from the path — `includes("email")`, `includes("phone")`,
+`includes("address")` — which is why `z.email()` fields never got a `mailto:`
+(in Zod 4 `z.email() instanceof z.ZodString` is **false**, so the walker that
+fed the picker never even offered them) and why a column named `city` under an
+`address` parent rendered the whole multi-line block.
+
+`plain` is the honest default: money and rate formatting is decided by the
+cell from the storage convention (`*_cents`) and the `unit` annotation, both
+of which are value-level facts a column kind cannot carry.
+
+```ts
+type CellKind = "link" | "email" | "phone" | "date" | "address" | "name" | "bool" | "enum" | "plain";
+```
+
 ### `CfsSourceCollectionEnum`
 
 Zod schema for CfsSourceCollectionType.
@@ -1045,6 +1064,17 @@ legitimate ceiling.
 
 ```ts
 const ClientLogEntrySchema: z.ZodType<ClientLogEntry>;
+```
+
+### `CollectDisplayColumnsResult`
+
+Result of {@link collectDisplayColumns}. `unhandled` MUST be empty.
+
+```ts
+interface CollectDisplayColumnsResult {
+  columns: DisplayColumn[];
+  unhandled: Array<typeLiteral>;
+}
 ```
 
 ### `CollectLeafPathsResult`
@@ -2219,6 +2249,21 @@ interface DiscountType {
 }
 ```
 
+### `DisplayColumn`
+
+A display column declared on a schema with `.meta({ column: true })`.
+
+```ts
+interface DisplayColumn {
+  path: string;
+  label: string;
+  node: z.ZodType;
+  type: string;
+  format?: string;
+  meta: Record<string, unknown>;
+}
+```
+
 ### `DisplaySort`
 
 Sort configuration for a display preference (column + direction).
@@ -2227,6 +2272,21 @@ Sort configuration for a display preference (column + direction).
 interface DisplaySort {
   column: string | null;
   direction: "asc" | "desc";
+}
+```
+
+### `DisplayTableColumn`
+
+A column offered to a table surface.
+
+```ts
+interface DisplayTableColumn {
+  key: string;
+  label: string;
+  sortable: boolean;
+  serverSort?: typeLiteral;
+  cell: CellKind;
+  meta: Record<string, unknown>;
 }
 ```
 
@@ -2626,6 +2686,9 @@ The accepted union still includes `FirestoreFieldValue` for back-compat
 with consumers that type fields against the union (e.g. user-facing
 `cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces
 the real-Timestamp contract.
+
+Carries {@link FIRESTORE_TIMESTAMP_META} so it stays recognisable **through a
+`.meta()` clone** — see that constant.
 
 ```ts
 const FirestoreTimestamp: z.ZodType<FirestoreTimestampType>;
@@ -5179,6 +5242,12 @@ type Permission = indexedAccess;
 
 Phone string with length constraints.
 
+Carries `cell: "phone"` because a phone number is the one display type Zod
+cannot discriminate — it is a `z.string()` with a regex, structurally
+identical to a subject line. Declared once, here, rather than recovered per
+column by testing whether the path `includes("phone")`. (An email needs no
+such marker: `z.email()` has its own `format`.)
+
 ```ts
 const Phone: z.ZodType<string>;
 ```
@@ -6513,6 +6582,33 @@ Lifecycle status of a template version (mirrors the git lifecycle).
 const TEMPLATE_VERSION_STATUSES: "draft" | "published" | "archived"[];
 ```
 
+### `TYPESENSE_ROLLUP_COLUMNS`
+
+Typesense fields **computed at index time**, which therefore have no Firestore
+field to hang a label on.
+
+Keyed `"<alias>:<field>"`, exactly like `DERIVED_FIELDS` in
+`tests/typesenseFieldCoverage.test.ts` — and pinned against the real configs
+by `tests/display-columns.test.ts`, so an entry naming a field the collection
+does not declare fails rather than sitting here as a column that renders
+nothing.
+
+The root `dates.*` envelope is here because **Typesense cannot sort or filter
+on a value inside an array**: orders and fulfillments stopped persisting a
+top-level `dates`, and `deriveOrderDateEnvelope` synthesizes a flat min/max
+across `destinations[]` purely so the index has something to order by.
+`deliveries` / `pickups` / `has_conflicts` are `postProcess` predicates over
+the same array.
+
+**`_str` mirrors never appear here.** They are search mirrors that let a
+number be *found* as text — `facet: false, sort: false` by construction — not
+display columns. Under an opt-in model they are excluded by simply never
+being annotated, so no suffix rule is needed anywhere.
+
+```ts
+const TYPESENSE_ROLLUP_COLUMNS: Record<string, Record<string, typeLiteral>>;
+```
+
 ### `Tag`
 
 A tag document in Firestore.
@@ -6954,6 +7050,11 @@ type ThreadUpdated = EventEnvelope<Thread> & typeLiteral;
 ### `TimestampFields`
 
 Standard timestamp fields present on most documents.
+
+Both are declared display columns here rather than at each of the ~30 sites
+that spread this object — the heading is the same everywhere because the
+meaning is. `.meta()` clones, so these two are distinct instances of
+`FirestoreTimestamp` and the base stays unannotated.
 
 ```ts
 const TimestampFields: typeLiteral;
@@ -8111,6 +8212,54 @@ runtime, deep in `perUnitSubtotal`; here it is unwritable. The converse is
 deliberately NOT asserted: a flat-amount fee is legitimate, and
 `calculateTransactionFeeAmount` prices one.
 
+### `collectDisplayColumns(schema: z.ZodType, opts?: typeLiteral): CollectDisplayColumnsResult`
+
+Collect every column a schema **declares** for display.
+
+This is the replacement for generating the column universe by enumerating a
+schema and then generating a label for each entry with structural regexes.
+Nobody chose those columns and nobody wrote those headings, so both drifted on
+every rename — a money migration turned `total` into `total_cents` and the
+heading became "Totals - Total Cents", and `date_fs` degenerated to the
+two-letter heading **"Fs"**. Declaring is opt-in: a new field cannot surface a
+broken column by existing, and a rename carries its annotation with it.
+
+## What is emitted
+
+Any node tagged `column: true` — **object nodes included**. A contact ref and
+an address are single columns rendered from the whole object (joined name,
+multi-line block), not one column per part, so the annotation has to be able
+to land above the scalars. The walk continues past an emitted object, so a
+parent and a child can both be columns.
+
+## The label composes down the key path
+
+The heading is the `label` of **every key traversed**, root→leaf, joined with
+a space and with consecutive repeats collapsed. So `full` inside the shared
+`Address` schema is labelled `"Address"` exactly once and yields
+"Delivery Address" under `destinations[].delivery`, "Collection Address" under
+`destinations[].collection`, and a bare "Address" where nothing above it is
+labelled.
+
+The composition source is the sequence of **keys traversed**, not the terminal
+node — which is what lets one shared schema carry one label and still read
+correctly at ten sites. Two keys holding the *same* schema instance get
+distinct labels because **`.meta()` clones**: `Leg.meta({ label: "Delivery" })
+!== Leg`, and the base schema stays unannotated.
+
+A `label` with no `column` is a pure prefix — that is the normal state of an
+intermediate key like `delivery` or `organization`.
+
+## Fails closed, like {@link collectLeafPaths}
+
+A node type the walker does not recognise lands in `unhandled` rather than
+being skipped silently, because skipping it would drop its whole subtree and
+make every column under it vanish from the picker with nothing to notice.
+
+Union members are visited at the same path and deduped by (path, node), so a
+discriminated `items[]` contributes each arm's columns once. Where two arms
+annotate the same path, the first wins — they are the same column.
+
 ### `collectLeafPaths(schema: z.ZodType, opts?: typeLiteral): CollectLeafPathsResult`
 
 Walk a schema and collect every scalar leaf with its dotted path and merged
@@ -8482,6 +8631,11 @@ nothing; offering a rejected one is a dead end in the UI.
 When `increaseOnly` is true, returns only types that add stock — for the first
 transaction on a product.
 
+### `getFirestoreColumns(collection: string): DisplayTableColumn[]`
+
+Columns a Firestore document surface offers for `collection` — every field
+the schema annotates `column: true`. `[]` for an unregistered collection.
+
 ### `getInitialValues(schema: S): Partial<z.output<S>>`
 
 Walk a Zod schema and produce an initial/blank object for form binding.
@@ -8569,6 +8723,12 @@ custody-only fulfillment step, a cost-only adjustment).
 **Total** — it cannot throw. The financial-only types that used to make it
 partial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it
 cannot drift from it.
+
+### `getTypesenseColumns(alias: string): DisplayTableColumn[]`
+
+Columns a Typesense surface offers for `alias` — the annotated set
+intersected with the fields that collection actually indexes, plus its
+computed rollups. `[]` for an unknown alias.
 
 ### `getTypesenseDisplayDefaults(alias: string): TypesenseDisplayDefaults | undefined`
 
@@ -9286,6 +9446,26 @@ src/lib/eventCards.ts` (`EventPosition = "start" | "end"`).
 const EventCardId: z.ZodType<string>;
 ```
 
+### `FIRESTORE_TIMESTAMP_META`
+
+Meta key marking a node as the {@link FirestoreTimestamp} custom type.
+
+`isDateLikeNode` used to recognise it by **instance identity** — the only
+handle a `z.custom()` offers, since its `def.type` is the uninformative
+`"custom"`. That was safe exactly as long as nobody annotated a timestamp
+field, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a
+different instance, the identity test fails, and a `created_at` column
+silently stops rendering as a date and starts printing a raw epoch. Declaring
+display columns means annotating `created_at` / `updated_at` / `last_order`,
+so the identity test had to go.
+
+A meta marker survives the clone because `.meta()` **merges**: the clone
+carries both this key and whatever the annotation added.
+
+```ts
+const FIRESTORE_TIMESTAMP_META: "firestoreTimestamp";
+```
+
 ### `FULFILLMENT_LINE_ITEM_TYPES`
 
 Line item types a fulfillment carries — the `fulfillable: true` members.
@@ -9333,6 +9513,9 @@ The accepted union still includes `FirestoreFieldValue` for back-compat
 with consumers that type fields against the union (e.g. user-facing
 `cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces
 the real-Timestamp contract.
+
+Carries {@link FIRESTORE_TIMESTAMP_META} so it stays recognisable **through a
+`.meta()` clone** — see that constant.
 
 ```ts
 const FirestoreTimestamp: z.ZodType<FirestoreTimestampType>;
@@ -9592,6 +9775,12 @@ interface PartialNameParts {
 
 Phone string with length constraints.
 
+Carries `cell: "phone"` because a phone number is the one display type Zod
+cannot discriminate — it is a `z.string()` with a regex, structurally
+identical to a subject line. Declared once, here, rather than recovered per
+column by testing whether the path `includes("phone")`. (An email needs no
+such marker: `z.email()` has its own `format`.)
+
 ```ts
 const Phone: z.ZodType<string>;
 ```
@@ -9830,6 +10019,11 @@ const ThreadId: z.ZodType<string>;
 ### `TimestampFields`
 
 Standard timestamp fields present on most documents.
+
+Both are declared display columns here rather than at each of the ~30 sites
+that spread this object — the heading is the same everywhere because the
+meaning is. `.meta()` clones, so these two are distinct instances of
+`FirestoreTimestamp` and the base stays unannotated.
 
 ```ts
 const TimestampFields: typeLiteral;
@@ -20040,6 +20234,18 @@ before it is ever a number. {@linkcode distributeCents} takes the opposite
 call and reimplements, because in integers it is five lines that outsource no
 subtlety at all.
 
+## The rate boundary is a parallel set, not an option on the money one
+
+`perUnitCostAt4dp` / {@linkcode parseRate} / {@linkcode formatRate} produce,
+parse and render a **4dp rate**; `roundDivHalfUp` / {@linkcode parseMoney} /
+{@linkcode formatCents} do the same for **integer cents**. They are twins
+rather than one family with a `precision` argument because a rate is not an
+amount: `Discount.rate`, `PriceModifier.rate`, `Tax.rate` and
+`transactions:cost.unit_cost` hold four decimals to match Xero's
+`DiscountRate`, and putting either through the other's function is a measured
+regression in both directions — 2dp renders `$0.0639/unit` as **`$0.00`**,
+and a rate is not in cents so a cents renderer is 100× out.
+
 ### `PAYMENT_MATCH_TOLERANCE_CENTS`
 
 How far a CFS settlement may sit from the Xero payment it matches, in cents.
@@ -20125,6 +20331,40 @@ and the display cannot drift on rounding.
 - `cents` — Integer minor units.
 - `options.symbol` — Currency symbol. `""` for a search mirror.
 - `options.group` — Thousands separators. `false` for a search mirror.
+
+### `formatRate(value: number, _: unknown): string`
+
+Render a **rate** for display — {@linkcode formatCents}'s twin at the other
+boundary, and the direction the rate pair was missing.
+
+The rate boundary already had a producer ({@linkcode perUnitCostAt4dp}) and a
+parser ({@linkcode parseRate}); with no formatter, a collection table printed
+a bare `0.0639` for a unit cost. It had previously printed **`$0.00`**,
+because a name heuristic claimed `cost.unit_cost` for the money formatter —
+"not money" turns out to be necessary and not sufficient, since a 2dp
+formatter destroys a 4dp rate either way.
+
+**Not `formatCents` with a `dp` option.** `formatCents` takes *integer cents*
+and its minor part is literally `abs % 100`; adding a precision knob would put
+a 4dp rate through a function whose whole contract is integer minor units, and
+would make correctness depend on a per-call-site option with a default. Same
+argument that keeps `parseRate` separate from `parseMoney`.
+
+```ts
+formatRate(0.0639, { symbol: "$" });  // "$0.0639"
+formatRate(10.25);                    // "10.25"     — trailing zeros trimmed
+formatRate(10.25, { symbol: "%" });   // "10.25%"    — a percent trails its number
+```
+
+Trailing zeros are trimmed because a rate's precision is a *ceiling*, not a
+denomination: `$6.39` should not read `$6.3900`. Money is the opposite and
+pads to exactly 2, which is why these are two functions.
+
+**Parameters**
+
+- `value` — The rate, in whatever unit the field declares. NOT cents.
+- `options.dp` — Maximum decimal places. 4 — Xero's `DiscountRate` width.
+- `options.symbol` — `"$"` prefixes; `"%"` suffixes; `""` (default) neither.
 
 ### `fromCents(cents: number): number`
 

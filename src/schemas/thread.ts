@@ -47,18 +47,18 @@ export interface Thread {
 export const ThreadSchema: z.ZodType<Thread> = z.strictObject({
   uid: ThreadId,
   sources: z.array(DocSource).min(1),
-  title: z.string().max(200).meta({ pii: "mask" }).nullable(),
-  last_message_at: FirestoreTimestamp.nullable(),
-  last_message_preview: z.string().max(280).meta({ pii: "mask" }).default(""),
+  title: z.string().max(200).meta({ pii: "mask" }).nullable().meta({ column: true, label: "Title" }),
+  last_message_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Last Activity" }),
+  last_message_preview: z.string().max(280).meta({ pii: "mask", column: true, label: "Last Message" }).default(""),
   // Required (no `.default(0)`): the `threads` Typesense config declares it so.
   // That config is `enabled: false` today — the parity gate deliberately walks
   // disabled collections too, so provisioning `threads` later cannot silently
   // reintroduce the bug. All three create paths (`threadsCoWrite`, `cards`,
   // `publishFromMerge`) already supply it; the increments go through `patch`.
-  comment_count: z.int().min(0),
+  comment_count: z.int().min(0).meta({ column: true, label: "Comments" }),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Thread",

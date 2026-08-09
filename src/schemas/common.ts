@@ -27,6 +27,23 @@ export interface FirestoreFieldValue {
 export type FirestoreTimestampType = FirestoreTimestampValue | FirestoreFieldValue;
 
 /**
+ * Meta key marking a node as the {@link FirestoreTimestamp} custom type.
+ *
+ * `isDateLikeNode` used to recognise it by **instance identity** — the only
+ * handle a `z.custom()` offers, since its `def.type` is the uninformative
+ * `"custom"`. That was safe exactly as long as nobody annotated a timestamp
+ * field, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a
+ * different instance, the identity test fails, and a `created_at` column
+ * silently stops rendering as a date and starts printing a raw epoch. Declaring
+ * display columns means annotating `created_at` / `updated_at` / `last_order`,
+ * so the identity test had to go.
+ *
+ * A meta marker survives the clone because `.meta()` **merges**: the clone
+ * carries both this key and whatever the annotation added.
+ */
+export const FIRESTORE_TIMESTAMP_META = "firestoreTimestamp";
+
+/**
  * Firestore Timestamp — structural check for `{ seconds, nanoseconds }`.
  *
  * Tight on purpose: rejects `undefined`, `null`, plain objects, and
@@ -40,6 +57,9 @@ export type FirestoreTimestampType = FirestoreTimestampValue | FirestoreFieldVal
  * with consumers that type fields against the union (e.g. user-facing
  * `cloneDeep` mutate-then-stamp patterns), but the runtime gate enforces
  * the real-Timestamp contract.
+ *
+ * Carries {@link FIRESTORE_TIMESTAMP_META} so it stays recognisable **through a
+ * `.meta()` clone** — see that constant.
  */
 export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<FirestoreTimestampType>(
   (val) => {
@@ -56,17 +76,22 @@ export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<Fi
     if (typeof v._seconds === "number" && typeof v._nanoseconds === "number") return true;
     return false;
   },
-);
+).meta({ [FIRESTORE_TIMESTAMP_META]: true });
 
 /**
  * Standard timestamp fields present on most documents.
+ *
+ * Both are declared display columns here rather than at each of the ~30 sites
+ * that spread this object — the heading is the same everywhere because the
+ * meaning is. `.meta()` clones, so these two are distinct instances of
+ * `FirestoreTimestamp` and the base stays unannotated.
  */
 export const TimestampFields: {
   created_at: z.ZodType<FirestoreTimestampType>;
   updated_at: z.ZodType<FirestoreTimestampType>;
 } = {
-  created_at: FirestoreTimestamp,
-  updated_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 };
 
 /**
@@ -76,12 +101,18 @@ export const Email: z.ZodType<string> = z.email("Must be a valid email address")
 
 /**
  * Phone string with length constraints.
+ *
+ * Carries `cell: "phone"` because a phone number is the one display type Zod
+ * cannot discriminate — it is a `z.string()` with a regex, structurally
+ * identical to a subject line. Declared once, here, rather than recovered per
+ * column by testing whether the path `includes("phone")`. (An email needs no
+ * such marker: `z.email()` has its own `format`.)
  */
 export const Phone: z.ZodType<string> = z
   .string()
   .min(10, "Phone number must be at least 10 characters")
   .max(20, "Phone number must not exceed 20 characters")
-  .meta({ pii: "mask" });
+  .meta({ pii: "mask", cell: "phone" });
 
 /**
  * Split name fields shared across Contact, User, Invite, and any schema
@@ -267,11 +298,13 @@ export interface DocSourceType {
 
 /** Zod schema for a polymorphic doc reference. */
 export const DocSource: z.ZodType<DocSourceType> = z.strictObject({
-  collection: CfsSourceCollectionEnum,
+  collection: CfsSourceCollectionEnum.meta({ column: true, label: "Collection" }),
   // Polymorphic — points at any collection, including composite-keyed docs
   // (bookings, stock-summaries). AnyUid is the union of every known id shape.
   uid: AnyUid,
-  label: z.string().max(200).nullable().optional(),
+  // `label` the FIELD, and `label` the display annotation, are unrelated names
+  // that happen to collide: this is the human description of the source doc.
+  label: z.string().max(200).nullable().optional().meta({ column: true, label: "Label" }),
 });
 
 /**
@@ -286,7 +319,10 @@ export interface UidNameRefType {
 export const UidNameRef: z.ZodType<UidNameRefType> = z.strictObject({
   // Generic/polymorphic reference — AnyUid covers every known id shape.
   uid: AnyUid,
-  name: z.string().min(1).max(100).meta({ pii: "none" }),
+  // A reference's name IS the column, and the heading is the key that holds it
+  // — "Tags" under `tags`, "Alternates" under `alternates`. Hence `column`
+  // without a `label` of its own: every key holding a `UidNameRef` must name it.
+  name: z.string().min(1).max(100).meta({ pii: "none", column: true }),
 });
 
 /**
@@ -1100,8 +1136,8 @@ export interface StoreBreakdownEntry {
 /** Zod schema for StoreBreakdownLocation. */
 export const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation> = z.strictObject({
   uid_location: FirestoreId,
-  name: z.string(),
-  quantity: z.number().min(0), // physical shelf count — can't go negative
+  name: z.string().meta({ column: true }),
+  quantity: z.number().min(0).meta({ column: true, label: "Quantity" }), // physical shelf count — can't go negative
   default: z.boolean(),
   max: z.number().nullable(),
 });
@@ -1109,11 +1145,11 @@ export const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation> = z
 /** Zod schema for StoreBreakdownEntry. */
 export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.strictObject({
   uid_store: FirestoreId,
-  name: z.string(),
+  name: z.string().meta({ column: true }),
   default: z.boolean(),
   crms_stock_level_id: z.number().nullable(),
-  quantity: z.number().min(0), // Σ of this store's location quantities — can't go negative
-  locations: z.array(StoreBreakdownLocationSchema).default([]),
+  quantity: z.number().min(0).meta({ column: true, label: "Quantity" }), // Σ of this store's location quantities — can't go negative
+  locations: z.array(StoreBreakdownLocationSchema).default([]).meta({ label: "Location" }),
 });
 
 // ── Address ─────────────────────────────────────────────────────────
@@ -1131,12 +1167,17 @@ export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.stric
  * the two `Coordinates` — stay masked.
  */
 export const Address: z.ZodType<AddressType | null> = z.strictObject({
-  city: z.string().default("").meta({ pii: "none" }),
+  city: z.string().default("").meta({ pii: "none", column: true, label: "City" }),
   country_name: z.string().default("").meta({ pii: "none" }),
-  full: z.string().default(""),
+  // The whole-address column. Labelled once here and prefixed by whatever key
+  // holds the address, so `destinations[].delivery.address.full` reads "Delivery
+  // Address" and `destinations[].collection.address.full` reads "Collection
+  // Address" without forking the schema — `.meta()` on the two *legs* clones,
+  // this shared node does not.
+  full: z.string().default("").meta({ column: true, label: "Address" }),
   name: z.string().max(100).default(""),
   postcode: z.string().default(""),
-  region: z.string().default("").meta({ pii: "none" }),
+  region: z.string().default("").meta({ pii: "none", column: true, label: "State" }),
   street: z.string().default(""),
   street2: z.string().default("").optional(),
   mapbox_id: z.string().default("").optional(),

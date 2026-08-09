@@ -228,8 +228,10 @@ export interface DocDestinationEndpointType {
 export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.strictObject({
   uid: FirestoreId.nullable(),
   address: Address,
-  instructions: z.string().meta({ pii: "mask" }).nullable(),
-  contact: DocDestinationContact.nullable(),
+  instructions: z.string().meta({ pii: "mask", column: true, label: "Instructions" }).nullable(),
+  // The whole contact is one column — a joined name with a popover, not four
+  // columns of name parts. That is why an object node has to be annotatable.
+  contact: DocDestinationContact.nullable().meta({ column: true, label: "Contact" }),
 });
 
 /**
@@ -271,8 +273,12 @@ export interface DocDestinationType {
 /** Zod schema for a document-level destination pair. */
 export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
   dates: OrderDocDates,
-  delivery: DocDestinationEndpoint,
-  collection: DocDestinationEndpoint,
+  // Two keys, ONE schema instance — and two headings, because `.meta()` clones.
+  // `DocDestinationEndpoint.meta({ label: "Delivery" }) !== DocDestinationEndpoint`,
+  // so the base stays unannotated and every column below each leg inherits its
+  // own prefix ("Delivery Address" / "Collection Address").
+  delivery: DocDestinationEndpoint.meta({ label: "Delivery" }),
+  collection: DocDestinationEndpoint.meta({ label: "Collection" }),
   customer_collecting: z.boolean().default(false),
   customer_returning: z.boolean().default(false),
 });
@@ -303,10 +309,13 @@ export interface PriceModifierType {
 export const PriceModifier: z.ZodType<PriceModifierType> = z.strictObject({
   uid: FirestoreId,
   // Tax or fee label ("IL Sales Tax") — see `OrderDocLineItem.name`.
-  name: z.string().meta({ pii: "none" }),
-  rate: z.number(),
+  // No `label`: the heading comes from whichever key holds the array, so this
+  // one annotation reads "Tax" under `totals.taxes` and "Transaction Fee" under
+  // `totals.transaction_fees`.
+  name: z.string().meta({ pii: "none", column: true }),
+  rate: z.number().meta({ column: true, label: "Rate" }),
   type: RateTypeEnum,
-  amount_cents: z.int(),
+  amount_cents: z.int().meta({ column: true, label: "Amount" }),
 });
 
 /**
@@ -324,8 +333,8 @@ export interface TaxRefType {
 export const TaxRef: z.ZodType<TaxRefType> = z.strictObject({
   uid: FirestoreId,
   // Tax label ("IL Sales Tax") — see `OrderDocLineItem.name`.
-  name: z.string().meta({ pii: "none" }),
-  rate: z.number(),
+  name: z.string().meta({ pii: "none", column: true }),
+  rate: z.number().meta({ column: true, label: "Rate" }),
   type: RateTypeEnum,
 });
 
@@ -383,9 +392,9 @@ function checkDiscountRate(
 
 /** Zod schema for an item discount. */
 export const Discount: z.ZodType<DiscountType> = z.strictObject({
-  rate: z.number(),
+  rate: z.number().meta({ column: true, label: "Rate" }),
   type: RateTypeEnum,
-  amount_cents: z.int().min(0),
+  amount_cents: z.int().min(0).meta({ column: true, label: "Amount" }),
 }).superRefine(checkDiscountRate);
 
 /** Discount input — rate and type only. Amount is computed by calculateItemPrice. */
@@ -675,20 +684,24 @@ export interface OrderDocItemPriceType {
 }
 
 export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObject({
-  base_cents: z.int().default(0),
+  base_cents: z.int().default(0).meta({ column: true, label: "Base Price" }),
   base_percent: z.number().nullable().optional(),
   // `.nullable().optional()` and NOT defaulted: a null replacement means "this
   // line has no replacement value", which is not the fact `0` states, and
   // `checkItemContract`'s `forbidden` arm reads the difference.
-  replacement_cents: z.int().nullable().optional(),
-  chargeable_days: z.number().int().nullable().default(null),
-  formula: PriceFormulaEnum.default("five_day_week"),
-  subtotal_cents: z.int().default(0),
-  subtotal_discounted_cents: z.int().default(0),
-  discount: Discount.nullable().default(null),
-  taxes: z.array(PriceModifier).default([]),
-  taxes_base: z.array(TaxRef).optional(),
-  total_cents: z.int().default(0),
+  replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
+  chargeable_days: z.number().int().nullable().default(null).meta({ column: true, label: "Chargeable Days" }),
+  formula: PriceFormulaEnum.default("five_day_week").meta({ column: true, label: "Formula" }),
+  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
+  discount: Discount.nullable().default(null).meta({ label: "Discount" }),
+  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  // Labelled although nothing here is a column in its own right: `TaxRef`'s
+  // `name` and `rate` ARE columns (the product catalog offers them), so every
+  // key holding a `TaxRef` inherits two columns and needs to name them. Without
+  // this the pre-override snapshot would collide with the live `taxes`.
+  taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax" }),
+  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
 }).superRefine(checkPriceBaseUnit);
 
 /**
@@ -759,7 +772,7 @@ export interface OrderDocLineItemType {
 // See `_dividers.ts` for the full rationale.
 const OrderDocLineItemInner = z.strictObject({
   uid: ItemUid,
-  type: z.enum(DOC_LINE_ITEM_TYPES),
+  type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
   // CANONICAL RATIONALE for every item `name` in the package — the divider,
   // transaction-fee, invoice and fulfillment leaves all point back here (#40).
   //
@@ -775,7 +788,7 @@ const OrderDocLineItemInner = z.strictObject({
   // `order` / `invoice` / `fulfillment` are now listed in `NAME_SENSITIVE`
   // (`src/schemas/pii/dictionary.ts`) — being listed there forces every `name`
   // under them to state an answer instead of defaulting into one.
-  name: z.string().min(1).max(100).meta({ pii: "none" }),
+  name: z.string().min(1).max(100).meta({ pii: "none", column: true }),
   // Line-item text, classified the same as `name` above: it carries equipment,
   // service and destination wording — a PO number, a product name — not customer
   // data. It previously masked on the theory that a custom item's description
@@ -786,8 +799,8 @@ const OrderDocLineItemInner = z.strictObject({
   // (order, invoice, fulfillment, and their input schemas) states one answer.
   // Consequence: it survives fixture sanitization verbatim and appears raw in
   // logs — the same posture `name` has always had.
-  description: z.string().meta({ pii: "none" }).default(""),
-  quantity: z.number().int().min(0).default(0),
+  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
+  quantity: z.number().int().min(0).default(0).meta({ column: true, label: "Quantity" }),
   // Required, not `.optional()` — see the interface docblock. A `.default()`
   // would be worse than useless here: `validateBeforeWrite` persists the RAW
   // doc, so a default never materializes, and an omitted `price` would reach
@@ -797,12 +810,12 @@ const OrderDocLineItemInner = z.strictObject({
   // stock, which `"none"` says exactly (1,533 prod lines already use it). That
   // keeps the fee an ordinary line item, which is the whole point of W1's
   // collapse of the separate fee arm, rather than earning it a contract axis.
-  stock_method: StockMethodEnum,
-  order_number: z.number().optional(),
+  stock_method: StockMethodEnum.meta({ column: true, label: "Stock Method" }),
+  order_number: z.number().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   path: z.array(ItemUid).default([]),
-  inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional(),
-  zero_priced: z.boolean().nullable().optional(),
+  inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
+  zero_priced: z.boolean().nullable().optional().meta({ column: true, label: "Zero Priced" }),
   crms_id: z.number().nullable().optional(),
   // Denormalized from the product at write time — see the interface docblock for
   // why this is on the DOC line and not the input one. `.optional()` rather than
@@ -894,7 +907,8 @@ export function isFulfillableItem(item: OrderDocItemType): item is OrderDocLineI
 /** Denormalized organization snapshot on the order document. */
 const OrderDocOrganization = z.strictObject({
   uid: FirestoreId.nullable(),
-  name: z.string().min(1).max(100).meta({ pii: "mask" }),
+  // No `label` — the heading is the "Organization" carried by the key above.
+  name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
   crms_id: z.number().nullable().optional(),
   xero_id: z.uuid().nullable(),
   billing_address: Address.optional(),
@@ -912,13 +926,13 @@ export interface OrderDocTotalsType {
 }
 
 const OrderDocTotals: z.ZodType<OrderDocTotalsType> = z.strictObject({
-  discount_amount_cents: z.int().default(0),
-  subtotal_cents: z.int().default(0),
-  subtotal_discounted_cents: z.int().default(0),
-  taxes: z.array(PriceModifier).default([]),
-  transaction_fees: z.array(PriceModifier).default([]),
-  total_cents: z.int().default(0),
-  replacement_total_cents: z.int().default(0),
+  discount_amount_cents: z.int().default(0).meta({ column: true, label: "Discount" }),
+  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
+  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  transaction_fees: z.array(PriceModifier).default([]).meta({ label: "Transaction Fee" }),
+  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+  replacement_total_cents: z.int().default(0).meta({ column: true, label: "Replacement Total" }),
 });
 
 /**
@@ -979,18 +993,25 @@ export interface Order {
 /** Zod schema for the full order Firestore document. */
 export const OrderSchema: z.ZodType<Order> = z.strictObject({
   uid: FirestoreId,
-  number: z.int(),
-  status: OrderStatus,
-  organization: OrderDocOrganization,
+  number: z.int().meta({ column: true, label: "#", linkTo: "orderDetail" }),
+  status: OrderStatus.meta({ column: true, label: "Status" }),
+  organization: OrderDocOrganization.meta({ label: "Organization" }),
   destinations: z.array(DocDestination).min(1),
-  items: z.array(OrderDocItem).default([]),
+  // "Item" prefixes every column under here, which is what keeps
+  // `items.price.taxes.rate` ("Item Tax Rate") distinct from the order-level
+  // `totals.taxes.rate` ("Tax Rate") — the same field shape at two depths.
+  items: z.array(OrderDocItem).default([]).meta({ label: "Item" }),
   // Required (no `.default("tax_applied")`): the Typesense config declares it
   // so, and a `.default()` never materializes on a write — see the note in
   // `product.ts`. No `initial` needed: TAX_PROFILES[0] is "tax_applied", so
   // the enum's type-derived seed already equals the dropped default.
-  tax_profile: TaxProfileEnum,
+  tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
   totals: OrderDocTotals,
-  invoices: z.array(z.strictObject({ uid: FirestoreId, number: z.number(), status: InvoiceStatusEnum })).default([]),
+  invoices: z.array(z.strictObject({
+    uid: FirestoreId,
+    number: z.number().meta({ column: true, label: "#" }),
+    status: InvoiceStatusEnum.meta({ column: true, label: "Status" }),
+  })).default([]).meta({ label: "Invoice" }),
   query_by_invoices: z.array(z.string()).default([]),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
@@ -1006,8 +1027,8 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   }).default({ quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0 }),
   crms_id: z.number().nullable().optional(),
   crms_status: z.string().optional(),
-  subject: z.string().default(""),
-  reference: z.string().max(255).nullable().default(null),
+  subject: z.string().default("").meta({ column: true, label: "Subject" }),
+  reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference" }),
   xero_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),

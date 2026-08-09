@@ -58,9 +58,9 @@ export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   // Required (no `.default([])`): the Typesense config declares it so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
   mapbox_ids: z.array(z.string()),
-  organizations: z.array(UidNameRef).default([]).optional(),
+  organizations: z.array(UidNameRef).default([]).optional().meta({ label: "Organizations" }),
   query_by_organizations: z.array(z.string()).default([]).optional(),
-  products: z.array(UidNameRef).default([]).optional(),
+  products: z.array(UidNameRef).default([]).optional().meta({ label: "Products" }),
   query_by_products: z.array(z.string()).default([]).optional(),
   contacts: z.array(DestinationContactRef).default([]).optional(),
   query_by_contacts: z.array(z.string()).default([]).optional(),

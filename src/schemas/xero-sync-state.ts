@@ -49,8 +49,8 @@ export interface XeroSyncState {
 /** Zod schema for XeroSyncState. */
 export const XeroSyncStateSchema: z.ZodType<XeroSyncState> = z.strictObject({
   uid: z.literal("state"),
-  pushed_hash: z.string().min(1),
-  pushed_at: FirestoreTimestamp,
+  pushed_hash: z.string().min(1).meta({ column: true, label: "Pushed Hash" }),
+  pushed_at: FirestoreTimestamp.meta({ column: true, label: "Pushed" }),
 }).meta({
   title: "Xero Sync State",
   collection: "xero-sync",

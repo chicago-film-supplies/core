@@ -40,6 +40,18 @@
  * call and reimplements, because in integers it is five lines that outsource no
  * subtlety at all.
  *
+ * ## The rate boundary is a parallel set, not an option on the money one
+ *
+ * `perUnitCostAt4dp` / {@linkcode parseRate} / {@linkcode formatRate} produce,
+ * parse and render a **4dp rate**; `roundDivHalfUp` / {@linkcode parseMoney} /
+ * {@linkcode formatCents} do the same for **integer cents**. They are twins
+ * rather than one family with a `precision` argument because a rate is not an
+ * amount: `Discount.rate`, `PriceModifier.rate`, `Tax.rate` and
+ * `transactions:cost.unit_cost` hold four decimals to match Xero's
+ * `DiscountRate`, and putting either through the other's function is a measured
+ * regression in both directions — 2dp renders `$0.0639/unit` as **`$0.00`**,
+ * and a rate is not in cents so a cents renderer is 100× out.
+ *
  * @module
  */
 import currency from "currency.js";
@@ -176,6 +188,50 @@ export const parseMoney = (s: string | null | undefined): number =>
  */
 export const parseRate = (s: string | null | undefined): number =>
   s == null ? 0 : currency(s, { precision: 4 }).value;
+
+/**
+ * Render a **rate** for display — {@linkcode formatCents}'s twin at the other
+ * boundary, and the direction the rate pair was missing.
+ *
+ * The rate boundary already had a producer ({@linkcode perUnitCostAt4dp}) and a
+ * parser ({@linkcode parseRate}); with no formatter, a collection table printed
+ * a bare `0.0639` for a unit cost. It had previously printed **`$0.00`**,
+ * because a name heuristic claimed `cost.unit_cost` for the money formatter —
+ * "not money" turns out to be necessary and not sufficient, since a 2dp
+ * formatter destroys a 4dp rate either way.
+ *
+ * **Not `formatCents` with a `dp` option.** `formatCents` takes *integer cents*
+ * and its minor part is literally `abs % 100`; adding a precision knob would put
+ * a 4dp rate through a function whose whole contract is integer minor units, and
+ * would make correctness depend on a per-call-site option with a default. Same
+ * argument that keeps `parseRate` separate from `parseMoney`.
+ *
+ * ```ts
+ * formatRate(0.0639, { symbol: "$" });  // "$0.0639"
+ * formatRate(10.25);                    // "10.25"     — trailing zeros trimmed
+ * formatRate(10.25, { symbol: "%" });   // "10.25%"    — a percent trails its number
+ * ```
+ *
+ * Trailing zeros are trimmed because a rate's precision is a *ceiling*, not a
+ * denomination: `$6.39` should not read `$6.3900`. Money is the opposite and
+ * pads to exactly 2, which is why these are two functions.
+ *
+ * @param value - The rate, in whatever unit the field declares. NOT cents.
+ * @param options.dp - Maximum decimal places. 4 — Xero's `DiscountRate` width.
+ * @param options.symbol - `"$"` prefixes; `"%"` suffixes; `""` (default) neither.
+ */
+export function formatRate(
+  value: number,
+  options: { dp?: number; symbol?: string } = {},
+): string {
+  const { dp = 4, symbol = "" } = options;
+  const fixed = value.toFixed(dp);
+  const trimmed = fixed.includes(".") ? fixed.replace(/\.?0+$/, "") : fixed;
+  const negative = trimmed.startsWith("-");
+  const magnitude = negative ? trimmed.slice(1) : trimmed;
+  if (symbol === "%") return `${negative ? "-" : ""}${magnitude}%`;
+  return `${negative ? "-" : ""}${symbol}${magnitude}`;
+}
 
 /**
  * Split `total` cents into `parts` whole-cent shares that **sum to exactly

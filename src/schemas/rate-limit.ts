@@ -14,9 +14,9 @@ export interface RateLimit {
 }
 
 export const RateLimitSchema: z.ZodType<RateLimit> = z.strictObject({
-  attempt_count: z.number().int().min(1),
+  attempt_count: z.number().int().min(1).meta({ column: true, label: "Attempts" }),
   first_attempt_at: z.number(),
-  expiresAt: FirestoreTimestamp,
+  expiresAt: FirestoreTimestamp.meta({ column: true, label: "Expires" }),
 }).meta({
   title: "RateLimit",
   collection: "rate-limits",

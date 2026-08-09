@@ -78,6 +78,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "money": [
     { name: "distributeCents", expr: "it.money.distributeCents(total, parts)", desc: "Split `total` cents into `parts` whole-cent shares that **sum to exactly `total`**.", returns: "bigint[]" },
     { name: "formatCents", expr: "it.money.formatCents(cents, arg2)", desc: "Format integer cents for display **without ever creating a float**.", returns: "string" },
+    { name: "formatRate", expr: "it.money.formatRate(value, arg2)", desc: "Render a **rate** for display — {@linkcode formatCents}'s twin at the other boundary, and the direction the rate pair was missing.", returns: "string" },
     { name: "fromCents", expr: "it.money.fromCents(cents)", desc: "Narrow integer cents back to dollars, for a dollar-denominated projection.", returns: "number" },
     { name: "fromCentsBig", expr: "it.money.fromCentsBig(cents)", desc: "The `bigint` flavour of {@linkcode fromCents}.", returns: "number" },
     { name: "parseMoney", expr: "it.money.parseMoney(s)", desc: "Parse a money string to 2dp dollars — the string→money direction.", returns: "number" },

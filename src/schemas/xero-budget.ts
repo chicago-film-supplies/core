@@ -77,10 +77,10 @@ export interface XeroBudget {
 /** Zod schema for XeroBudget. */
 export const XeroBudgetSchema: z.ZodType<XeroBudget> = z.strictObject({
   uid: z.literal("current"),
-  day_remaining: z.int().min(0),
-  observed_at: z.iso.datetime({ offset: true }),
-  resets_at: z.iso.datetime({ offset: true }),
-  resets_at_source: z.enum(["retry_after", "inferred_rollover"]),
+  day_remaining: z.int().min(0).meta({ column: true, label: "Remaining Today" }),
+  observed_at: z.iso.datetime({ offset: true }).meta({ column: true, label: "Observed" }),
+  resets_at: z.iso.datetime({ offset: true }).meta({ column: true, label: "Resets" }),
+  resets_at_source: z.enum(["retry_after", "inferred_rollover"]).meta({ column: true, label: "Resets Source" }),
   updated_at: FirestoreTimestamp,
 }).meta({
   title: "Xero Budget",

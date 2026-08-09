@@ -15,7 +15,7 @@ export interface Counter {
 
 /** Zod schema for a Counter document. */
 export const CounterSchema: z.ZodType<Counter> = z.strictObject({
-  count: z.number(),
+  count: z.number().meta({ column: true, label: "Count" }),
   updated_at: FirestoreTimestamp,
 }).meta({
   title: "Counter",

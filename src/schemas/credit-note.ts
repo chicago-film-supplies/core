@@ -169,15 +169,15 @@ export interface CreditNoteDocItemPrice {
 }
 
 const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strictObject({
-  base_cents: z.int().default(0),
+  base_cents: z.int().default(0).meta({ column: true, label: "Base Price" }),
   base_percent: z.number().nullable().optional(),
   chargeable_days: z.number().nullable().default(null),
-  formula: PriceFormulaEnum.default("fixed"),
-  subtotal_cents: z.int().default(0),
-  subtotal_discounted_cents: z.int().default(0),
-  discount: Discount.nullable().default(null),
-  taxes: z.array(PriceModifier).default([]),
-  total_cents: z.int().default(0),
+  formula: PriceFormulaEnum.default("fixed").meta({ column: true, label: "Formula" }),
+  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
+  discount: Discount.nullable().default(null).meta({ label: "Discount" }),
+  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
 }).superRefine(checkPriceBaseUnit);
 
 // ── Line items ───────────────────────────────────────────────────
@@ -244,11 +244,11 @@ export interface CreditNoteDocLineItem {
 
 const CreditNoteDocLineItemInner = z.strictObject({
   uid: ItemUid,
-  type: z.enum(DOC_LINE_ITEM_TYPES),
+  type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
-  name: z.string().meta({ pii: "none" }),
-  description: z.string().meta({ pii: "none" }).default(""),
-  quantity: z.number().default(0),
+  name: z.string().meta({ pii: "none", column: true }),
+  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
+  quantity: z.number().default(0).meta({ column: true, label: "Quantity" }),
   price: CreditNoteDocItemPriceSchema,
   coa_revenue: COARevenueEnum.nullable(),
   coa_posting: COACode,
@@ -285,11 +285,11 @@ export interface CreditNoteDocTotals {
 }
 
 const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals> = z.strictObject({
-  subtotal_cents: z.int().default(0),
-  subtotal_discounted_cents: z.int().default(0),
-  discount_amount_cents: z.int().default(0),
-  taxes: z.array(PriceModifier).default([]),
-  total_cents: z.int().default(0),
+  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
+  discount_amount_cents: z.int().default(0).meta({ column: true, label: "Discount" }),
+  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
 });
 
 // ── Document ─────────────────────────────────────────────────────
@@ -397,38 +397,38 @@ function checkCreditNote(cn: CreditNote, ctx: z.RefinementCtx): void {
 /** Zod schema for a CreditNote. */
 export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   uid: FirestoreId,
-  number: z.int().meta({ label: "#", linkTo: "creditNoteDetail", serverSortVia: "number" }),
-  status: CreditNoteStatusEnum,
+  number: z.int().meta({ column: true, label: "#", linkTo: "creditNoteDetail", serverSortVia: "number" }),
+  status: CreditNoteStatusEnum.meta({ column: true, label: "Status" }),
   reason: z.enum(
     CREDIT_NOTE_REASONS as unknown as [SettlementReasonType, ...SettlementReasonType[]],
-  ),
+  ).meta({ column: true, label: "Reason" }),
   // `chicagoStartOfDay()`, matching `Invoice.date` — this is an accounting
   // calendar date, not an instant. (A settlement's `date` is the opposite case
   // and uses `chicagoInstant()`; the two semantics are why both factories exist.)
-  date: chicagoStartOfDay().meta({ serverSortVia: "date_fs" }),
+  date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
-  reference: z.string().nullable().default(null),
-  external_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
-  internal_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
+  reference: z.string().nullable().default(null).meta({ column: true, label: "Reference" }),
+  external_notes: z.string().meta({ pii: "mask", column: true, label: "External Notes" }).nullable().optional(),
+  internal_notes: z.string().meta({ pii: "mask", column: true, label: "Internal Notes" }).nullable().optional(),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
-    name: z.string().meta({ pii: "mask" }),
+    name: z.string().meta({ pii: "mask", column: true }),
     crms_id: z.number().nullable().optional(),
-    tax_profile: TaxProfileEnum,
+    tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
     xero_id: z.uuid().nullable(),
     billing_address: Address,
-  }),
-  tax_profile: TaxProfileEnum,
-  items: z.array(CreditNoteDocLineItem).default([]),
+  }).meta({ label: "Organization" }),
+  tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+  items: z.array(CreditNoteDocLineItem).default([]).meta({ label: "Item" }),
   totals: CreditNoteDocTotalsSchema,
-  remaining_credit_cents: z.int().default(0),
+  remaining_credit_cents: z.int().default(0).meta({ column: true, label: "Remaining Credit" }),
   sources: z.array(DocSource).default([]),
   query_by_sources: z.array(z.string()).default([]),
   xero_credit_note_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).superRefine(checkCreditNote).meta({
   title: "Credit Note",

@@ -7,7 +7,7 @@
  * predictable across Optional / Default / Nullable / Prefault / Catch wrappers.
  */
 import { z } from "zod";
-import { FirestoreTimestamp } from "./common.ts";
+import { FIRESTORE_TIMESTAMP_META, FirestoreTimestamp } from "./common.ts";
 
 /**
  * Nodes that wrap a schema without changing its shape. Kept deliberately equal
@@ -231,6 +231,19 @@ function unwrapPipes(node: z.ZodType): z.ZodType {
 }
 
 /**
+ * Is this node the {@link FirestoreTimestamp} custom type?
+ *
+ * Identity first (the common case, and free), then the meta marker — which is
+ * what makes the answer survive a `.meta()` clone. Annotating `created_at` with
+ * a display label produces a *different instance* that is still the same type,
+ * and an identity-only test would call it "not a date".
+ */
+function isFirestoreTimestampNode(node: z.ZodType): boolean {
+  if (node === FirestoreTimestamp) return true;
+  return getNodeMeta(node)?.[FIRESTORE_TIMESTAMP_META] === true;
+}
+
+/**
  * True when `node` is an ISO datetime, ISO date, or `FirestoreTimestamp` —
  * including when those types are wrapped in a `.transform()` pipe (e.g.
  * `chicagoInstant()`, `chicagoStartOfDay()`). Takes an already-unwrapped node
@@ -238,9 +251,9 @@ function unwrapPipes(node: z.ZodType): z.ZodType {
  * schema + path should use {@link isDateField} instead.
  */
 export function isDateLikeNode(node: z.ZodType): boolean {
-  if (node === FirestoreTimestamp) return true;
+  if (isFirestoreTimestampNode(node)) return true;
   const inner = unwrapPipes(node);
-  if (inner === FirestoreTimestamp) return true;
+  if (isFirestoreTimestampNode(inner)) return true;
   const def = getDef(inner);
   return def.type === "string" &&
     (def.format === "datetime" || def.format === "date");
@@ -294,8 +307,16 @@ export function getServerSortableColumns(
       const def = getDef(inner);
       if (def.type === "array") continue;
 
-      const meta = getNodeMeta(inner);
-      const via = meta?.serverSortVia;
+      // Read THROUGH the wrappers rather than unwrapping first. `.meta()`
+      // registers on the instance it is called on, so
+      // `chicagoStartOfDay().meta({…}).optional()` and
+      // `chicagoStartOfDay().optional().meta({…})` land the tag on different
+      // nodes — and an unwrap-then-read reader sees only the first. Both forms
+      // are in these schemas today (`invoice.due_date` is the second), and the
+      // silent failure is a column that stops being sortable with nothing to
+      // notice. Same lesson as `Address`'s `pii` tag; see
+      // {@link readMetaThroughWrappers}.
+      const via = readMetaThroughWrappers<string>(raw, "serverSortVia");
       if (typeof via === "string") out[path] = via;
 
       if (def.type === "object" && depth < 1) {
@@ -524,4 +545,208 @@ export function collectLeafPaths(
 
   walk(schema, "", 0, {});
   return { leaves, unhandled };
+}
+
+// ── collectDisplayColumns ────────────────────────────────────────────
+
+/**
+ * A display column declared on a schema with `.meta({ column: true })`.
+ *
+ * @see {@link collectDisplayColumns} for the label-composition rule.
+ */
+export interface DisplayColumn {
+  /**
+   * Dotted path in **table spelling** — container markers stripped, so
+   * `items[].price.total_cents` is keyed `items.price.total_cents`. That is
+   * exactly how Typesense flattens a nested array and exactly what manager's
+   * `TableCell` resolver walks, so one spelling serves both table families.
+   */
+  path: string;
+  /** The composed heading — see {@link collectDisplayColumns}. */
+  label: string;
+  /** The annotated node, transparent wrappers stripped. */
+  node: z.ZodType;
+  /** `_zod.def.type` of the stripped node (`string`, `enum`, `object`, …). */
+  type: string;
+  /** `_zod.def.format` when present (`"email"`, `"datetime"`, …). */
+  format?: string;
+  /** Merged `.meta()` from the node and every transparent wrapper above it. */
+  meta: Record<string, unknown>;
+}
+
+/** Result of {@link collectDisplayColumns}. `unhandled` MUST be empty. */
+export interface CollectDisplayColumnsResult {
+  columns: DisplayColumn[];
+  /** Nodes the walker refused to interpret — same fail-closed contract as
+   *  {@link collectLeafPaths}. A non-empty array means columns are missing. */
+  unhandled: Array<{ path: string; type: string }>;
+}
+
+/**
+ * Collect every column a schema **declares** for display.
+ *
+ * This is the replacement for generating the column universe by enumerating a
+ * schema and then generating a label for each entry with structural regexes.
+ * Nobody chose those columns and nobody wrote those headings, so both drifted on
+ * every rename — a money migration turned `total` into `total_cents` and the
+ * heading became "Totals - Total Cents", and `date_fs` degenerated to the
+ * two-letter heading **"Fs"**. Declaring is opt-in: a new field cannot surface a
+ * broken column by existing, and a rename carries its annotation with it.
+ *
+ * ## What is emitted
+ *
+ * Any node tagged `column: true` — **object nodes included**. A contact ref and
+ * an address are single columns rendered from the whole object (joined name,
+ * multi-line block), not one column per part, so the annotation has to be able
+ * to land above the scalars. The walk continues past an emitted object, so a
+ * parent and a child can both be columns.
+ *
+ * ## The label composes down the key path
+ *
+ * The heading is the `label` of **every key traversed**, root→leaf, joined with
+ * a space and with consecutive repeats collapsed. So `full` inside the shared
+ * `Address` schema is labelled `"Address"` exactly once and yields
+ * "Delivery Address" under `destinations[].delivery`, "Collection Address" under
+ * `destinations[].collection`, and a bare "Address" where nothing above it is
+ * labelled.
+ *
+ * The composition source is the sequence of **keys traversed**, not the terminal
+ * node — which is what lets one shared schema carry one label and still read
+ * correctly at ten sites. Two keys holding the *same* schema instance get
+ * distinct labels because **`.meta()` clones**: `Leg.meta({ label: "Delivery" })
+ * !== Leg`, and the base schema stays unannotated.
+ *
+ * A `label` with no `column` is a pure prefix — that is the normal state of an
+ * intermediate key like `delivery` or `organization`.
+ *
+ * ## Fails closed, like {@link collectLeafPaths}
+ *
+ * A node type the walker does not recognise lands in `unhandled` rather than
+ * being skipped silently, because skipping it would drop its whole subtree and
+ * make every column under it vanish from the picker with nothing to notice.
+ *
+ * Union members are visited at the same path and deduped by (path, node), so a
+ * discriminated `items[]` contributes each arm's columns once. Where two arms
+ * annotate the same path, the first wins — they are the same column.
+ */
+export function collectDisplayColumns(
+  schema: z.ZodType,
+  opts?: { maxDepth?: number },
+): CollectDisplayColumnsResult {
+  const maxDepth = opts?.maxDepth ?? 24;
+  const columns: DisplayColumn[] = [];
+  const seenPaths = new Set<string>();
+  const unhandled: Array<{ path: string; type: string }> = [];
+  const visited = new Map<string, Set<z.ZodType>>();
+
+  /** Append `label` unless it repeats the segment already there. */
+  function extend(labels: readonly string[], label: unknown): readonly string[] {
+    if (typeof label !== "string" || label.length === 0) return labels;
+    if (labels[labels.length - 1] === label) return labels;
+    return [...labels, label];
+  }
+
+  function emit(
+    path: string,
+    node: z.ZodType,
+    meta: Record<string, unknown>,
+    labels: readonly string[],
+  ): void {
+    // Container markers are display-irrelevant: a column names a value, and an
+    // array of destinations renders as several values in one cell.
+    const key = path.replaceAll("[]", "").replaceAll(".<key>", "");
+    if (seenPaths.has(key)) return;
+    seenPaths.add(key);
+    // A container is structural, not semantic — the same reason the path drops
+    // its `[]`. `phones: z.array(Phone)` is a phone column, and the annotation
+    // sits on the array while the type (and `Phone`'s own `cell` declaration)
+    // sits on the element. Descend to the value, merging the element's meta
+    // underneath the annotation's own so a site can still override it.
+    let inner = unwrapZod(node);
+    let elementMeta: Record<string, unknown> = {};
+    while (getDef(inner).type === "array" && getDef(inner).element) {
+      inner = unwrapZod(getDef(inner).element!);
+      elementMeta = { ...elementMeta, ...(getNodeMeta(inner) ?? {}) };
+    }
+    const def = getDef(inner);
+    columns.push({
+      path: key,
+      label: labels.join(" "),
+      node: inner,
+      type: def.type,
+      ...(def.format ? { format: def.format } : {}),
+      meta: { ...elementMeta, ...meta },
+    });
+  }
+
+  /**
+   * `carried` is the meta merged from the transparent wrappers ABOVE this node,
+   * so `z.string().meta({ unit: "usd" }).optional().meta({ column: true })` is
+   * read as one annotation. It resets at every container boundary — an object's
+   * schema-level `.meta({ title, collection })` must not become its fields'.
+   * `label` is the deliberate exception and travels separately, in `labels`.
+   */
+  function walk(
+    node: z.ZodType,
+    path: string,
+    depth: number,
+    labels: readonly string[],
+    carried: Record<string, unknown>,
+  ): void {
+    if (depth > maxDepth) {
+      unhandled.push({ path, type: "__depth_cap__" });
+      return;
+    }
+    let seenAtPath = visited.get(path);
+    if (!seenAtPath) {
+      seenAtPath = new Set();
+      visited.set(path, seenAtPath);
+    }
+    if (seenAtPath.has(node)) return;
+    seenAtPath.add(node);
+
+    const def = getDef(node);
+    const own = getNodeMeta(node);
+    const meta = own ? { ...carried, ...own } : carried;
+    const here = extend(labels, meta.label);
+
+    if (meta.column === true) emit(path, node, meta, here);
+
+    if (TRANSPARENT_TYPES.has(def.type) && def.innerType) {
+      walk(def.innerType, path, depth + 1, here, meta);
+      return;
+    }
+    if (def.type === "pipe" && def.in) {
+      walk(def.in, path, depth + 1, here, meta);
+      return;
+    }
+    if (def.type === "object") {
+      if (!def.shape) return void unhandled.push({ path, type: def.type });
+      for (const [key, child] of Object.entries(def.shape)) {
+        walk(child, path ? `${path}.${key}` : key, depth + 1, here, {});
+      }
+      return;
+    }
+    if (def.type === "array") {
+      if (!def.element) return void unhandled.push({ path, type: def.type });
+      walk(def.element, `${path}[]`, depth + 1, here, {});
+      return;
+    }
+    if (def.type === "record") {
+      if (!def.valueType) return void unhandled.push({ path, type: def.type });
+      walk(def.valueType, `${path}.<key>`, depth + 1, here, {});
+      return;
+    }
+    if (def.type === "union") {
+      if (!def.options) return void unhandled.push({ path, type: def.type });
+      for (const option of def.options) walk(option, path, depth + 1, here, meta);
+      return;
+    }
+    if (LEAF_TYPES.has(def.type)) return;
+
+    unhandled.push({ path, type: def.type });
+  }
+
+  walk(schema, "", 0, [], {});
+  return { columns, unhandled };
 }

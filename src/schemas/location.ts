@@ -54,11 +54,11 @@ export interface Location {
 export const LocationSchema: z.ZodType<Location> = z.strictObject({
   uid: FirestoreId,
   uid_store: FirestoreId,
-  name: z.string().min(1).max(100),
+  name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   // Derived denorm (see the interface note). Optional through the backfill
   // window; no `.min(1)` because a name of pure separators normalizes to "".
   name_key: z.string().max(100).optional(),
-  default: z.boolean(),
+  default: z.boolean().meta({ column: true, label: "Default" }),
   uid_location_type: FirestoreId.nullable(),
   product_capacities: z.array(z.strictObject({
     uid: FirestoreId,
@@ -66,13 +66,13 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
     max_default: z.number().nullable(),
   })).default([]),
   query_by_product_capacities: z.array(z.string()).default([]),
-  active: z.boolean(),
+  active: z.boolean().meta({ column: true, label: "Active" }),
   products: z.array(z.strictObject({
     uid: FirestoreId,
-    name: z.string(),
-    quantity: z.number(),
+    name: z.string().meta({ column: true }),
+    quantity: z.number().meta({ column: true, label: "Quantity" }),
     default: z.boolean(),
-  })).default([]),
+  })).default([]).meta({ label: "Products" }),
   query_by_products: z.array(z.string()).default([]),
   version: z.int().min(0).default(0),
   created_at: FirestoreTimestamp,

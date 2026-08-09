@@ -93,7 +93,7 @@ export interface WebshopProduct {
 const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObject({
   uid: FirestoreId,
   path: z.array(z.string()),
-  name: z.string(),
+  name: z.string().meta({ column: true }),
   active: z.boolean().optional(),
   type: ComponentTypeEnum,
   stock_method: StockMethodEnum.optional(),
@@ -104,7 +104,7 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
   price: z.strictObject({
     base_cents: z.int(),
     replacement_cents: z.int().nullable().optional(),
-    taxes: z.array(TaxRef).default([]),
+    taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }),
@@ -113,10 +113,10 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
 /** Zod schema for a WebshopProduct document. */
 export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1).max(200),
+  name: z.string().min(1).max(200).meta({ column: true, label: "Name" }),
   // Required, with the form seed carried by `initial` — see `product.ts`.
   active: z.boolean().meta({ initial: true }),
-  type: z.enum(WEBSHOP_PRODUCT_TYPES),
+  type: z.enum(WEBSHOP_PRODUCT_TYPES).meta({ column: true, label: "Type" }),
   stock_method: StockMethodEnum.optional(),
   component_only: z.boolean().optional(),
   description: z.string().optional(),
@@ -127,7 +127,7 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
   price: z.strictObject({
     base_cents: z.int(),
     replacement_cents: z.int().nullable().optional(),
-    taxes: z.array(TaxRef).default([]),
+    taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }),
@@ -139,10 +139,10 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
     air_hazardous: z.boolean().optional(),
     air_un: z.number().nullable().optional(),
   }).optional(),
-  alternates: z.array(UidNameRef).default([]),
-  components: z.array(WebshopComponentSchema).default([]),
-  component_of: z.array(WebshopComponentSchema).default([]),
-  tags: z.array(UidNameRef).default([]).optional(),
+  alternates: z.array(UidNameRef).default([]).meta({ label: "Alternates" }),
+  components: z.array(WebshopComponentSchema).default([]).meta({ label: "Component" }),
+  component_of: z.array(WebshopComponentSchema).default([]).meta({ label: "Component Of" }),
+  tags: z.array(UidNameRef).default([]).optional().meta({ label: "Tags" }),
   query_by_tags: z.array(z.string()).default([]).optional(),
   query_by_components: z.array(z.string()).default([]).optional(),
   query_by_component_of: z.array(z.string()).default([]).optional(),

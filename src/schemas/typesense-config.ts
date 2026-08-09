@@ -40,11 +40,11 @@ const ReindexStats = z.object({
 
 export const TypesenseConfigSchema: z.ZodType<TypesenseConfig> = z.strictObject({
   uid: z.string(),
-  current_collection: z.string(),
+  current_collection: z.string().meta({ column: true, label: "Collection" }),
   schema_hash: z.string(),
   intended_hash: z.string().optional(),
-  updates: z.number().optional(),
-  last_reindex: FirestoreTimestamp.optional(),
+  updates: z.number().optional().meta({ column: true, label: "Updates" }),
+  last_reindex: FirestoreTimestamp.optional().meta({ column: true, label: "Last Reindex" }),
   last_reindex_stats: ReindexStats.optional(),
   reindex_attempts: z.number().optional(),
 }).meta({

@@ -21,16 +21,16 @@ export interface Store {
 /** Zod schema for Store. */
 export const StoreSchema: z.ZodType<Store> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1).max(100),
+  name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   // Required (no `.default()`) because the Typesense config declares them so
   // and a `.default()` never materializes on a write — see the note in
   // `product.ts`. `active` carries `initial` so the create form still seeds
   // `true`.
-  default: z.boolean(),
-  default_location: UidNameRef.nullable().default(null),
+  default: z.boolean().meta({ column: true, label: "Default" }),
+  default_location: UidNameRef.nullable().default(null).meta({ label: "Default Location" }),
   crms_store_id: z.number(),
   version: z.int().min(0).default(0),
-  active: z.boolean().meta({ initial: true }),
+  active: z.boolean().meta({ initial: true, column: true, label: "Active" }),
   ...TimestampFields,
 }).meta({
   title: "Store",

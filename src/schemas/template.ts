@@ -116,11 +116,11 @@ export interface Template {
 /** Zod schema for a Template family document. */
 export const TemplateSchema: z.ZodType<Template> = z.strictObject({
   uid: FirestoreId,
-  git_path: z.string().min(1).max(200),
-  name: z.string().min(1).max(200),
-  collection_source: z.enum(TEMPLATE_SOURCE_COLLECTIONS),
-  collection_target: z.enum(TEMPLATE_TARGET_COLLECTIONS),
-  surfaces: z.array(z.enum(TEMPLATE_SURFACES)).min(1),
+  git_path: z.string().min(1).max(200).meta({ column: true, label: "Path" }),
+  name: z.string().min(1).max(200).meta({ column: true, label: "Name", linkTo: "templateDetail" }),
+  collection_source: z.enum(TEMPLATE_SOURCE_COLLECTIONS).meta({ column: true, label: "Source" }),
+  collection_target: z.enum(TEMPLATE_TARGET_COLLECTIONS).meta({ column: true, label: "Target" }),
+  surfaces: z.array(z.enum(TEMPLATE_SURFACES)).min(1).meta({ column: true, label: "Surfaces" }),
   uid_active: FirestoreId.nullable(),
   active_semver: z.string().nullable().default(null),
   depends_on: z.strictObject({
@@ -131,12 +131,12 @@ export const TemplateSchema: z.ZodType<Template> = z.strictObject({
   // `version_count` and `version` are required (no `.default(0)`): the
   // Typesense config declares both so, and a `.default()` never materializes
   // on a write — see the note in `product.ts`.
-  version_count: z.int().min(0),
-  last_published_at: FirestoreTimestamp.nullable(),
+  version_count: z.int().min(0).meta({ column: true, label: "Versions" }),
+  last_published_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Last Published" }),
   uid_thread: FirestoreId,
   version: z.int().min(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Template",

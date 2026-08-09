@@ -85,7 +85,11 @@ export const cards: TypesenseCollectionConfig = {
   },
   synonyms: [],
   displayDefaults: {
-    columns: ["subject", "status", "date_fs", "uid_list", "uid_assignees"],
+    // `uid_list` and `uid_assignees` were columns that could only ever print an
+    // opaque Firestore id — the list and the assignees are resolved to names by
+    // the facet UI, not by a table cell. They stay FACETS, which is where that
+    // resolution already lives.
+    columns: ["subject", "status", "date_fs", "created_by"],
     filters: {},
     sort: { column: "position", direction: "asc" },
     group: null,

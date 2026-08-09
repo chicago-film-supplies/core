@@ -25,22 +25,22 @@ export interface TrackingCategory {
 /** Zod schema for TrackingCategory. */
 export const TrackingCategorySchema: z.ZodType<TrackingCategory> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1).max(100),
-  count: z.union([z.record(z.string(), z.custom<FirestoreFieldValue>()), z.number()]).optional(),
+  name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
+  count: z.union([z.record(z.string(), z.custom<FirestoreFieldValue>()), z.number()]).optional().meta({ column: true, label: "Count" }),
   crms_product_group_id: z.number().optional(),
   crms_service_group_id: z.number().optional(),
   crms_product_group_name: z.string(),
-  products: z.record(z.string(), UidNameRef),
+  products: z.record(z.string(), UidNameRef).meta({ label: "Products" }),
   xero_tracking_option_id: z.uuid().nullable(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Tracking Category",
   collection: "tracking-categories",
   displayDefaults: {
-    columns: ["name", "count", "products"],
+    columns: ["name", "count"],
     filters: {},
     sort: { column: "name", direction: "asc" },
   },

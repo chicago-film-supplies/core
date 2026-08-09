@@ -162,8 +162,8 @@ export interface CardAttachmentType {
  */
 export const CardAttachment: z.ZodType<CardAttachmentType> = z.strictObject({
   uid: uploadcareRef(z.uuid()),
-  type: CardAttachmentTypeEnumSchema,
-  filename: z.string().min(1).max(260).meta({ pii: "mask" }),
+  type: CardAttachmentTypeEnumSchema.meta({ column: true, label: "Type" }),
+  filename: z.string().min(1).max(260).meta({ pii: "mask", column: true, label: "Filename" }),
   mime_type: z.string().min(1).max(120),
   size_bytes: z.int().min(0),
   locked: z.boolean().default(false),
@@ -186,7 +186,7 @@ export interface CardOrganizationType {
 /** Zod schema for CardOrganizationType. */
 export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject({
   uid: FirestoreId.nullable(),
-  name: z.string().min(1).max(100).meta({ pii: "mask" }),
+  name: z.string().min(1).max(100).meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
 });
 
 // ── Firestore document ──────────────────────────────────────────────
@@ -235,8 +235,16 @@ export interface Card {
 
 /** Zod schema for the card dates sub-object. */
 export const CardDates: z.ZodType<CardDatesType> = z.strictObject({
-  start: chicagoInstant().nullable().default(null),
-  end: chicagoInstant().nullable().default(null),
+  // `serverSortVia` names the stored Timestamp this ISO field is ordered by —
+  // and, because they are the same value under two encodings, it is also what
+  // tells the Typesense surface that its `date_fs` column IS this one. The two
+  // names do not correspond, so nothing but a declaration could pair them.
+  // The annotation sits on the PIPE, before `.nullable()`, matching `booking.ts`
+  // and `out-of-service.ts`: `getServerSortableColumns` unwraps to the pipe and
+  // reads meta THERE, so a tag on the outer `.default()` is invisible to it —
+  // and with it invisible, the Typesense `date_fs` column loses its pairing.
+  start: chicagoInstant().meta({ column: true, label: "Date", serverSortVia: "date_fs" }).nullable().default(null),
+  end: chicagoInstant().meta({ column: true, label: "End Date" }).nullable().default(null),
 });
 
 /** Zod schema for a card Firestore document. */
@@ -244,35 +252,35 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   uid: CardId,
   uid_list: ListId,
   uid_thread: ThreadId,
-  status: CardStatusEnum,
+  status: CardStatusEnum.meta({ column: true, label: "Status" }),
   action: CardActionSchema.nullable().default(null),
-  position: z.number(),
+  position: z.number().meta({ column: true, label: "Position" }),
   // Required (no `.default("")`): the Typesense config declares it so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
-  subject: z.string().max(200).meta({ pii: "mask" }),
+  subject: z.string().max(200).meta({ pii: "mask", column: true, label: "Subject" }),
   body: CommentBody.nullable(),
-  body_text: z.string().max(20000).meta({ pii: "mask" }).default(""),
+  body_text: z.string().max(20000).meta({ pii: "mask", column: true, label: "Body" }).default(""),
   dates: CardDates,
   all_day: z.boolean().default(false),
   date_fs: FirestoreTimestamp.nullable(),
-  destination: DocDestinationEndpoint.nullable(),
-  organization: CardOrganization.nullable().default(null),
-  sources: z.array(DocSource),
-  attachments: z.array(CardAttachment).default([]),
+  destination: DocDestinationEndpoint.nullable().meta({ label: "Destination" }),
+  organization: CardOrganization.nullable().default(null).meta({ label: "Organization" }),
+  sources: z.array(DocSource).meta({ label: "Source" }),
+  attachments: z.array(CardAttachment).default([]).meta({ label: "Attachment" }),
   uid_assignees: z.array(FirestoreId).default([]),
   locked: z.array(CardLockKeyEnum).default([]),
   recurrence_parent_uid: FirestoreId.nullable(),
   recurrence_index: z.int().nullable(),
   recurrence_overrides: z.array(z.string()).default([]),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Card",
   collection: "cards",
   displayDefaults: {
-    columns: ["subject", "status", "dates.start", "created_by.name"],
+    columns: ["subject", "status", "dates.start", "created_by"],
     filters: { status: [] },
     sort: { column: "position", direction: "asc" },
     groupBy: [

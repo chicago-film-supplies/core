@@ -359,10 +359,10 @@ export interface MovementLineType {
 
 /** Zod schema for one movement line. */
 export const MovementLine: z.ZodType<MovementLineType> = z.strictObject({
-  quantity: z.number().int().positive(),
+  quantity: z.number().int().positive().meta({ column: true, label: "Quantity" }),
   location: z.strictObject({
-    from: DocSource.nullable(),
-    to: DocSource.nullable(),
+    from: DocSource.nullable().meta({ label: "From" }),
+    to: DocSource.nullable().meta({ label: "To" }),
   }).refine(
     (l) => l.from !== null || l.to !== null,
     { message: "A line must move units from somewhere, to somewhere, or both" },
@@ -419,8 +419,12 @@ export interface MovementCostType {
 
 /** Zod schema for a cost change. */
 export const MovementCost: z.ZodType<MovementCostType> = z.strictObject({
-  amount_cents: z.int(),
-  unit_cost: z.number(),
+  amount_cents: z.int().meta({ column: true, label: "Cost" }),
+  // `unit: "usd"` NAMES the unit rather than asserting mere rate-ness — 4dp
+  // dollars, so the cell reaches for a rate formatter and not the 2dp money one
+  // that rendered $0.0639/unit as `$0.00`. A bare `rate: true` marker would
+  // repeat `money: boolean`'s mistake of carrying no unit at all.
+  unit_cost: z.number().meta({ column: true, label: "Unit Cost", unit: "usd" }),
   unit_costs_cents: z.array(z.int()).default([]),
 });
 
@@ -655,22 +659,22 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
 /** Zod schema for a Movement. */
 export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   uid: MovementId,
-  number: z.int().min(0).meta({ serverSortVia: "number" }),
+  number: z.int().min(0).meta({ serverSortVia: "number", column: true, label: "#" }),
   uid_product: FirestoreId,
   // Safe to constrain: the historical corpus has no uid_booking at all (it is
   // null for every migrated doc), so only new writers reach this.
   uid_booking: BookingId.nullable(),
-  type: MovementTypeEnum,
-  quantity: z.number().meta({ serverSortVia: "quantity" }),
+  type: MovementTypeEnum.meta({ column: true, label: "Type" }),
+  quantity: z.number().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   custody: MovementCustody.nullable(),
   cost: MovementCost.nullable(),
-  lines: z.array(MovementLine).default([]),
-  date: chicagoInstant().meta({ serverSortVia: "date_fs" }),
+  lines: z.array(MovementLine).default([]).meta({ label: "Line" }),
+  date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
-  reference: z.string(),
+  reference: z.string().meta({ column: true, label: "Reference" }),
   uid_session: z.uuid(),
   reverses: MovementId.nullable(),
-  sources: z.array(DocSource).default([]),
+  sources: z.array(DocSource).default([]).meta({ label: "Source" }),
   query_by_sources: z.array(z.string()).default([]),
   query_by_uid_store: z.array(FirestoreId).default([]),
   query_by_uid_location: z.array(FirestoreId).default([]),
@@ -679,8 +683,8 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
     serial_numbers: z.array(z.string()).default([]),
   }).nullable(),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).superRefine(checkMovementContract).meta({
   title: "Movement",

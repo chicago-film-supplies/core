@@ -138,6 +138,29 @@ For the full Zod 4 API reference, read `.claude/zod-llms.txt` (auto-fetched from
 
 Each schema file exports: Zod schema object, TypeScript interface, and input schemas (where applicable).
 
+**A label on an object-valued key prefixes every descendant, and `.meta()` clones.**
+That pair is the non-obvious mechanic behind display columns (below) and is worth
+stating here because it applies to any subtree-scoped annotation:
+
+```ts
+delivery:   DocDestinationEndpoint.meta({ label: "Delivery" }),
+collection: DocDestinationEndpoint.meta({ label: "Collection" }),
+```
+
+Two keys, **one schema instance**, two headings — `Leg.meta({…}) !== Leg`, the two
+annotated instances are distinct, and the base schema stays unannotated. So a
+shared building block (`Address.full`, `UidNameRef.name`, `PriceModifier.rate`)
+is annotated **once**, and each site names it by labelling the key that holds it.
+`destinations[].delivery.address.full` composes to "Delivery Address" without
+forking `Address`.
+
+⚠️ **`.meta()` also breaks instance identity**, which is what any
+`node === SomeExportedSchema` check depends on. `isDateLikeNode` used to
+recognise `FirestoreTimestamp` that way, and annotating `created_at` silently
+turned every timestamp column into a raw epoch until it was changed to read the
+`FIRESTORE_TIMESTAMP_META` marker (which survives the clone, because `.meta()`
+**merges**).
+
 ### UID property naming
 
 Any `uid` property should be named either `uid` (for the document's own user ID) or `uid_{descriptor}` (e.g., `uid_owner`, `uid_creator`) when referencing another user.
@@ -149,6 +172,46 @@ When introducing a new dependency, always double check you are introducing the l
 ### PII classification
 
 When adding or changing a field, always consider whether it needs a `.meta({ pii })` annotation. Sensitive fields must be classified so API middleware can mask, hash, or redact them in logs. See `src/schemas/log/` for the `PiiClassification` type (`"none"`, `"mask"`, `"hash"`, `"redact"`). The `tests/pii.test.ts` enforcement test will fail if a field matching a sensitive pattern (email, phone, password, address, name, notes, etc.) is missing a `pii` meta value.
+
+**This is not the only per-field duty** — see *Display columns* below. A field
+classified for `pii` and left unannotated for `column` is invisible in every
+table by design, and nothing says so.
+
+### Display columns — declared, opt-in, and labelled
+
+When adding or changing a field, decide whether it is a **table column**, the
+same way you decide its `pii` class. Both are per-field duties and neither has a
+safe default; the difference is that a missing `pii` fails loudly in
+`tests/pii.test.ts` while a missing `column` just means the field is invisible.
+
+```ts
+total_cents: z.int().meta({ column: true, label: "Total" }),
+```
+
+- **`column: true` is opt-in.** Before this, a walker enumerated ~375 columns
+  across the manager's 14 live table surfaces and structural regexes generated a
+  heading for each — nobody chose either, so both drifted on every rename
+  ("Totals - Total Cents", `date_fs` → **"Fs"**). Opt-out would be that exclusion
+  predicate relocated, drifting the same way.
+- **The heading composes down the key path** — see *Schema structure* above.
+  Annotate a shared block once with no `label`; name it at each key.
+- **Never annotate an `_fs` mirror.** `dates.start_fs` is `dates.start` under the
+  Timestamp encoding; annotating both mints two columns with one heading. The
+  pairing is declared by `.meta({ serverSortVia })`, which the Typesense
+  derivation inverts.
+- **A rate names its unit** (`unit: "usd" | "percent"`), never mere rate-ness — a
+  marker carrying no unit is what shipped every money mirror 100× (root
+  `CLAUDE.md`).
+- **Computed Typesense fields** have no Firestore field to hang a label on and go
+  in `TYPESENSE_ROLLUP_COLUMNS` (`src/schemas/display-columns.ts`) — 19 entries,
+  all `deriveOrderDateEnvelope` / `postProcess` output.
+
+Enforced by `tests/display-columns.test.ts`: **T8** every `displayDefaults.columns`
+key (Typesense *and* Firestore) is a declared column; **T9** every column composes
+a non-empty heading, no two columns on one surface share one, and no heading ends
+in `Cents`/`Fs`/`At`/`Uid`/`Str`; **T10** the rollup table names real fields and
+shadows no declared column; **T11** a column only ever names a field its
+collection actually indexes.
 
 ### Document vs input schemas
 

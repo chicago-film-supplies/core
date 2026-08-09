@@ -65,15 +65,15 @@ export interface List {
 /** Zod schema for a list Firestore document. */
 export const ListSchema: z.ZodType<List> = z.strictObject({
   uid: ListId,
-  name: z.string().min(1).max(80).meta({ pii: "none" }),
-  description: z.string().max(500).meta({ pii: "none" }).default(""),
+  name: z.string().min(1).max(80).meta({ pii: "none", column: true, label: "Name" }),
+  description: z.string().max(500).meta({ pii: "none" }).default("").meta({ column: true, label: "Description" }),
   icon: z.string().max(64).nullable(),
   color: z.string().max(16).nullable(),
-  position: z.number(),
+  position: z.number().meta({ column: true, label: "Position" }),
   locked: z.array(ListLockKeyEnum).default([]),
   version: z.int().min(0).default(0),
-  created_by: ActorRef,
-  updated_by: ActorRef,
+  created_by: ActorRef.meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "List",
