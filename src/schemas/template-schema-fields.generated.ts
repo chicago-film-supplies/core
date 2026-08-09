@@ -348,6 +348,7 @@ export const templateSchemaFields: Partial<
     { path: "totals.total_cents", type: "number" },
     { path: "totals.amount_paid_cents", type: "number" },
     { path: "totals.amount_credited_cents", type: "number?" },
+    { path: "totals.amount_void_cents", type: "number?" },
     { path: "totals.amount_due_cents", type: "number" },
     { path: "xero_id", type: "string | null" },
     { path: "uploadcare_uuid", type: "string | null" },

@@ -57,6 +57,13 @@ export const invoices: TypesenseCollectionConfig = {
       // api-cloudrun's `lib/typesenseTranslate.ts`, so only the float is declared.
       { name: "totals.amount_credited_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "totals.amount_credited_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      // The void bucket (api-cloudrun#436). A voided invoice's value is annulled
+      // rather than collected or written off, and it needs its own column for
+      // the same reason `amount_credited_cents` does: "billed T / voided T /
+      // due 0" is a different fact from "billed T / credited T / due 0", and
+      // collapsing them is what made the void class invisible in the first place.
+      { name: "totals.amount_void_cents", type: "int64", sort: true, optional: true, money: true },
+      { name: "totals.amount_void_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "totals.amount_due_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "totals.amount_due_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "crms_id", type: "int64", sort: true, index: true, facet: false, optional: true },

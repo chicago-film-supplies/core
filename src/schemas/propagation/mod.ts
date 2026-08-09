@@ -112,8 +112,12 @@ export {
   reverseSettlementTransaction,
   syncXeroSettlementRules,
   syncXeroSettlementTransaction,
+  voidInvoiceFromCrmsRules,
+  voidInvoiceFromCrmsTransaction,
   voidInvoiceFromXeroRules,
   voidInvoiceFromXeroTransaction,
+  voidInvoiceRules,
+  voidInvoiceTransaction,
 } from "./settlements.ts";
 
 // ── Fulfillment rules ───────────────────────────────────────────────
@@ -275,8 +279,12 @@ import {
   reverseSettlementTransaction,
   syncXeroSettlementRules,
   syncXeroSettlementTransaction,
+  voidInvoiceFromCrmsRules,
+  voidInvoiceFromCrmsTransaction,
   voidInvoiceFromXeroRules,
   voidInvoiceFromXeroTransaction,
+  voidInvoiceRules,
+  voidInvoiceTransaction,
 } from "./settlements.ts";
 import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
 import {
@@ -353,6 +361,8 @@ export const transactions: TransactionDefinition[] = [
   createSettlementTransaction,
   reverseSettlementTransaction,
   syncXeroSettlementTransaction,
+  voidInvoiceTransaction,
+  voidInvoiceFromCrmsTransaction,
   voidInvoiceFromXeroTransaction,
   createCreditNoteTransaction,
   allocateCreditNoteTransaction,
@@ -403,6 +413,8 @@ export const rules: CollectionRule[] = [
   ...createSettlementRules,
   ...reverseSettlementRules,
   ...syncXeroSettlementRules,
+  ...voidInvoiceRules,
+  ...voidInvoiceFromCrmsRules,
   ...voidInvoiceFromXeroRules,
   ...createCreditNoteRules,
   ...allocateCreditNoteRules,

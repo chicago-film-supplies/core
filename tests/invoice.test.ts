@@ -600,24 +600,75 @@ Deno.test("the identity refine is EXACT — there is no tolerance left to tolera
   );
 });
 
-Deno.test("VOID is exempt, and that exemption is load-bearing", () => {
-  // Without it every voided invoice becomes unwritable. This assertion is what
-  // stops the exemption being removed later as "an obviously wrong special case".
+Deno.test("VOID is NOT exempt any more — the identity holds on all four buckets (#436)", () => {
+  // The inverse of the test this replaces. That one asserted a void invoice
+  // could carry `paid 0 / credited 0 / due 0` against a 247,000 total, because
+  // `amount_due_cents` was FORCED to zero by the void writer while the journal
+  // still folded to `total`. The exemption is what made the class invisible: an
+  // invoice voided by a path that never zeroed the balance parsed exactly as
+  // cleanly as one that had, and 7 prod invoices sat that way.
+  //
+  // A void is now a `void` settlement summing into `amount_void_cents`, so the
+  // 0 is DERIVED and the status has stopped participating in the arithmetic.
   assertEquals(
     InvoiceSchema.safeParse({
       ...withTotals({ total_cents: 247_000, amount_paid_cents: 0, amount_credited_cents: 0, amount_due_cents: 0 }),
       status: "void",
     }).success,
-    true,
+    false,
+    "a void invoice with no void bucket is now a projection defect, not an exempt shape",
   );
-  // ...and the same numbers on a non-void invoice are still rejected, so the
-  // exemption is narrow rather than a hole.
+
+  // The shape the journal actually produces: the whole total in the void bucket.
   assertEquals(
     InvoiceSchema.safeParse({
-      ...withTotals({ total_cents: 247_000, amount_paid_cents: 0, amount_credited_cents: 0, amount_due_cents: 0 }),
+      ...withTotals({
+        total_cents: 247_000,
+        amount_paid_cents: 0,
+        amount_credited_cents: 0,
+        amount_void_cents: 247_000,
+        amount_due_cents: 0,
+      }),
+      status: "void",
+    }).success,
+    true,
+  );
+
+  // And `status` is not a lever on the identity in EITHER direction — the same
+  // numbers parse on an issued invoice, because what balances the books is the
+  // journal, not the status word. (Reaching this state on a live `issued`
+  // invoice would take a void row without the status move, which is a real
+  // defect the audit reports; the schema's job here is the arithmetic.)
+  assertEquals(
+    InvoiceSchema.safeParse({
+      ...withTotals({
+        total_cents: 247_000,
+        amount_paid_cents: 0,
+        amount_credited_cents: 0,
+        amount_void_cents: 247_000,
+        amount_due_cents: 0,
+      }),
       status: "issued",
     }).success,
-    false,
+    true,
+  );
+});
+
+Deno.test("amount_void is OPTIONAL, so every pre-#436 invoice still parses", () => {
+  // The field postdates the corpus. A stored invoice with no void bucket at all
+  // must still satisfy the identity through the other three, or the deploy that
+  // drops the void exemption makes ~1,000 historical invoices unwritable.
+  const { amount_void_cents: _drop, ...totalsWithout } = {
+    ...validInvoice.totals,
+    total_cents: 100_000,
+    amount_paid_cents: 60_000,
+    amount_credited_cents: 0,
+    amount_due_cents: 40_000,
+    amount_void_cents: undefined,
+  };
+  assertEquals(
+    InvoiceSchema.safeParse({ ...validInvoice, totals: totalsWithout }).success,
+    true,
   );
 });
 

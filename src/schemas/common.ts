@@ -848,7 +848,7 @@ export const OOSReasonEnum: z.ZodType<OOSReasonType> = z.enum(OOS_REASONS);
 // settlement, and authoring it three times invites three answers.
 
 /**
- * FOUR members, not two.
+ * SIX members, in three do/undo pairs.
  *
  * The reversal arms are their own **types**, exactly as `MOVEMENT_TYPES` carries
  * `sale` and `sale_return` rather than a second `kind` field. That is what lets
@@ -856,12 +856,26 @@ export const OOSReasonEnum: z.ZodType<OOSReasonType> = z.enum(OOS_REASONS);
  * zero arithmetically rather than by being filtered out, so an invoice can do
  * and undo perpetually with correct totals after each append, and there is no
  * liveness derivation to get wrong.
+ *
+ * **`void` is a settlement, and that is the whole of api-cloudrun#436.** A void
+ * annuls what is owed, so it settles the invoice exactly as cash or a credit
+ * note does — Xero reports `AmountDue: 0` and is right. It used to be modelled
+ * as a *field override*: `amount_due_cents` was assigned 0 while the journal
+ * still folded to `total`, which meant the schema's identity refine had to
+ * exempt void invoices, `audit-settlement-totals.ts` had to skip them, and
+ * `repair-invoice-settlement-totals.ts` had to refuse them. Three carve-outs, and
+ * between them they made the class **invisible**: a void invoice whose balance
+ * was never zeroed was indistinguishable from one correctly overridden, and 7
+ * prod invoices sat that way. As a journal row the fold produces the 0 on its
+ * own and every carve-out is deleted.
  */
 const SETTLEMENT_TYPES = [
   "payment",
   "payment_reversal",
   "credit",
   "credit_reversal",
+  "void",
+  "void_reversal",
 ] as const;
 /** One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS} */
 export type SettlementTypeType = typeof SETTLEMENT_TYPES[number];
@@ -899,6 +913,17 @@ const SETTLEMENT_REASONS = [
   "order_adjustment",
   /** credit — discretionary. */
   "goodwill",
+  /**
+   * void — the invoice was annulled, so nothing is owed on it.
+   *
+   * **Deliberately NOT `source_retracted`.** That member means "the originating
+   * system no longer reports it" — the reap, where CFS holds a row Xero has
+   * stopped listing. A void is the opposite kind of fact: the invoice is
+   * reported, and reported as annulled. Re-meaning an existing member after
+   * history carries it is the one change this enum's docblock calls expensive;
+   * widening is additive and free.
+   */
+  "invoice_voided",
   /** reversal — the originating system no longer reports it (the reap). */
   "source_retracted",
   /** any — an operator fixing their own record. */
@@ -928,8 +953,15 @@ export interface SettlementContract {
    * every consumer compares this as a literal (`=== "amount_paid_cents"`) and
    * nothing indexes `totals[sums_into]` anywhere, so a half-done rename is
    * TS2367 at each site rather than a silent runtime mis-route.
+   *
+   * ⚠️ **THREE buckets, and a two-way test on this field is now wrong.** Both
+   * consumers were written when there were two, as `=== "amount_paid_cents"`
+   * with an implicit `else` meaning "credited" — so adding a third member
+   * silently routed every `void` row into `amount_credited_cents`. Neither
+   * would have failed to compile. Any new reader must handle all three
+   * explicitly and fail loudly on an unrecognized one.
    */
-  sums_into: "amount_paid_cents" | "amount_credited_cents";
+  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents";
   /** Whether `reverses` must or must not be set. */
   reverses: "required" | "forbidden";
 }
@@ -978,6 +1010,26 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_credited_cents",
+    reverses: "required",
+  },
+  // A void carries no external id even though Xero is usually where it
+  // originates: Xero annuls the INVOICE, not a settlement, so there is no Xero
+  // payment or credit-note object for this row to name. The invoice's own
+  // `xero_id` is the linkage, and it is already stored.
+  void: {
+    reasons: ["invoice_voided", "correction", "unspecified"],
+    xero_id_field: null,
+    sums_into: "amount_void_cents",
+    reverses: "forbidden",
+  },
+  // Un-voiding is a real operation — a Xero void can be reversed by re-issuing,
+  // and an operator can void by mistake. Pairing the arm is what keeps
+  // `amount_void_cents` a fold rather than a latch: without it the only way back
+  // would be to edit or delete the `void` row, and the journal is append-only.
+  void_reversal: {
+    reasons: ["source_retracted", "correction", "unspecified"],
+    xero_id_field: null,
+    sums_into: "amount_void_cents",
     reverses: "required",
   },
 };

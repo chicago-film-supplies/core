@@ -137,12 +137,10 @@ export function calculateInvoiceTotals(
   const core = sumDocumentTotals(flattenForXero(items), taxes);
 
   // Settlement accounting — the projection of the journal onto this document.
-  const { amount_paid_cents, amount_credited_cents, amount_due_cents } = recomputeSettlementTotals(
-    core.total_cents,
-    settlements ?? [],
-  );
+  const { amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents } =
+    recomputeSettlementTotals(core.total_cents, settlements ?? []);
 
-  return { ...core, amount_paid_cents, amount_credited_cents, amount_due_cents };
+  return { ...core, amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents };
 }
 
 // ── Payment helpers ─────────────────────────────────────────────
@@ -212,9 +210,18 @@ export function derivePaymentStatus(
  * must stay negative, exactly as availability preserves an oversold product's
  * negative. Clamping hides the defect this exists to find.
  *
+ * **THREE buckets, dispatched on `sums_into` with no fallthrough arm.** It was
+ * two — `if (… === "amount_paid_cents") paid += …; else credited += …` — and
+ * that `else` is precisely what made `void` a schema change with a silent
+ * runtime hazard: a void row would have landed in `amount_credited_cents`, the
+ * identity would still have balanced, and every consumer would have reported a
+ * voided invoice as fully credited. A `switch` with a `default` that throws
+ * turns the next bucket into a loud failure at the one site that must know
+ * about it, instead of a quiet mis-route at every site that reads the result.
+ *
  * @param totalCents - Invoice total, in integer cents, from `items[]`
  * @param settlements - Every settlement against the invoice, reversals included
- * @returns The three projected totals plus a per-reason breakdown, in cents
+ * @returns The four projected totals plus a per-reason breakdown, in cents
  */
 export function recomputeSettlementTotals(
   totalCents: number,
@@ -226,28 +233,47 @@ export function recomputeSettlementTotals(
 ): {
   amount_paid_cents: number;
   amount_credited_cents: number;
+  amount_void_cents: number;
   amount_due_cents: number;
   breakdown: Partial<Record<SettlementReasonType, number>>;
 } {
   let paidCents = 0;
   let creditedCents = 0;
+  let voidedCents = 0;
   const breakdownCents: Partial<Record<SettlementReasonType, number>> = {};
 
   for (const s of settlements) {
     const signed = s.amount_cents * getSettlementMultiplier(s.type);
-    if (SETTLEMENT_CONTRACTS[s.type].sums_into === "amount_paid_cents") paidCents += signed;
-    else creditedCents += signed;
+    const bucket = SETTLEMENT_CONTRACTS[s.type].sums_into;
+    switch (bucket) {
+      case "amount_paid_cents":
+        paidCents += signed;
+        break;
+      case "amount_credited_cents":
+        creditedCents += signed;
+        break;
+      case "amount_void_cents":
+        voidedCents += signed;
+        break;
+      default: {
+        // Exhaustiveness, checked by the compiler: a new `sums_into` member
+        // makes `bucket` non-`never` here and this line stops type-checking.
+        const _exhaustive: never = bucket;
+        throw new Error(`unhandled settlement bucket: ${_exhaustive}`);
+      }
+    }
     breakdownCents[s.reason] = (breakdownCents[s.reason] ?? 0) + signed;
   }
 
   return {
     amount_paid_cents: paidCents,
     amount_credited_cents: creditedCents,
-    // Integer subtraction over three exact cent counts. This line used to be the
+    amount_void_cents: voidedCents,
+    // Integer subtraction over four exact cent counts. This line used to be the
     // one currency.js call in the module, because a dollar-denominated `total`
     // met two converted figures here; with every operand in the same unit there
     // is nothing left for a decimal type to reconcile.
-    amount_due_cents: totalCents - paidCents - creditedCents,
+    amount_due_cents: totalCents - paidCents - creditedCents - voidedCents,
     breakdown: breakdownCents,
   };
 }

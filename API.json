@@ -1671,7 +1671,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocTotals",
-          "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_due_cents: number;\n}",
+          "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n}",
           "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock-summaries` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
         },
         {
@@ -3063,7 +3063,7 @@
         {
           "kind": "interface",
           "name": "SettlementContract",
-          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\";\n  reverses: \"required\" | \"forbidden\";\n}",
+          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\" | \"amount_void_cents\";\n  reverses: \"required\" | \"forbidden\";\n}",
           "doc": "How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}"
         },
         {
@@ -5160,7 +5160,7 @@
         {
           "kind": "interface",
           "name": "SettlementContract",
-          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\";\n  reverses: \"required\" | \"forbidden\";\n}",
+          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\" | \"amount_void_cents\";\n  reverses: \"required\" | \"forbidden\";\n}",
           "doc": "How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}"
         },
         {
@@ -6074,7 +6074,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocTotals",
-          "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_due_cents: number;\n}",
+          "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n}",
           "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock-summaries` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
         },
         {
@@ -10137,7 +10137,7 @@
           "kind": "function",
           "name": "recomputeSettlementTotals",
           "signature": "recomputeSettlementTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral",
-          "doc": "Turn the settlements journal into the invoice's stored totals.\n\n**This is the one function that produces `amount_paid_cents`,\n`amount_credited_cents` and `amount_due_cents`.** It runs inside the api's\nco-write transaction and again in manager's optimistic recompute, so the two\ncannot disagree — the property `computeAvailability` already provides for\nstock.\n\nIt used to be \"the one place the cents↔dollars boundary is crossed\": the\njournal has always stored minor units while the invoice's `total` was\ndollars, so this fold converted at the end. With `total_cents` the two sides\nare the same unit and the boundary is gone — the function is now integer in,\ninteger out, with nothing to convert and nothing to round.\n\n**A straight signed fold over EVERY row, with no filtering.** A reversal is\nsimply a settlement whose contract multiplier is −1, so a do/undo pair nets to\nzero arithmetically rather than by being excluded, and an invoice's\nsettlements can do and undo each other perpetually with the totals correct\nafter every single append. That deletes the liveness derivation entirely —\nalong with the `R2 → R1 → S1` chain that silently vanished money when the\ntrichotomy got it wrong, which under the fold is just `+500 −500 +500 = +500`,\ncorrect at every step. `reverses` is provenance for the UI and for audit; it\ncontributes nothing to the sum.\n\nInteger sums are exact by construction — nothing to round, no ordering to get\nwrong — which is the whole reason the journal stores minor units.\n`Number.MAX_SAFE_INTEGER` is ~$90 trillion in cents, so plain integers are\nsafe here without BigInt.\n\n**Negative results are preserved, never clamped.** An over-credited invoice\nmust stay negative, exactly as availability preserves an oversold product's\nnegative. Clamping hides the defect this exists to find.",
+          "doc": "Turn the settlements journal into the invoice's stored totals.\n\n**This is the one function that produces `amount_paid_cents`,\n`amount_credited_cents` and `amount_due_cents`.** It runs inside the api's\nco-write transaction and again in manager's optimistic recompute, so the two\ncannot disagree — the property `computeAvailability` already provides for\nstock.\n\nIt used to be \"the one place the cents↔dollars boundary is crossed\": the\njournal has always stored minor units while the invoice's `total` was\ndollars, so this fold converted at the end. With `total_cents` the two sides\nare the same unit and the boundary is gone — the function is now integer in,\ninteger out, with nothing to convert and nothing to round.\n\n**A straight signed fold over EVERY row, with no filtering.** A reversal is\nsimply a settlement whose contract multiplier is −1, so a do/undo pair nets to\nzero arithmetically rather than by being excluded, and an invoice's\nsettlements can do and undo each other perpetually with the totals correct\nafter every single append. That deletes the liveness derivation entirely —\nalong with the `R2 → R1 → S1` chain that silently vanished money when the\ntrichotomy got it wrong, which under the fold is just `+500 −500 +500 = +500`,\ncorrect at every step. `reverses` is provenance for the UI and for audit; it\ncontributes nothing to the sum.\n\nInteger sums are exact by construction — nothing to round, no ordering to get\nwrong — which is the whole reason the journal stores minor units.\n`Number.MAX_SAFE_INTEGER` is ~$90 trillion in cents, so plain integers are\nsafe here without BigInt.\n\n**Negative results are preserved, never clamped.** An over-credited invoice\nmust stay negative, exactly as availability preserves an oversold product's\nnegative. Clamping hides the defect this exists to find.\n\n**THREE buckets, dispatched on `sums_into` with no fallthrough arm.** It was\ntwo — `if (… === \"amount_paid_cents\") paid += …; else credited += …` — and\nthat `else` is precisely what made `void` a schema change with a silent\nruntime hazard: a void row would have landed in `amount_credited_cents`, the\nidentity would still have balanced, and every consumer would have reported a\nvoided invoice as fully credited. A `switch` with a `default` that throws\nturns the next bucket into a loud failure at the one site that must know\nabout it, instead of a quiet mis-route at every site that reads the result.",
           "paramTags": [
             {
               "name": "totalCents",
@@ -10148,7 +10148,7 @@
               "doc": "Every settlement against the invoice, reversals included"
             }
           ],
-          "returnsTag": "The three projected totals plus a per-reason breakdown, in cents"
+          "returnsTag": "The four projected totals plus a per-reason breakdown, in cents"
         },
         {
           "kind": "function",

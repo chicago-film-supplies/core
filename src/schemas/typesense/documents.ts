@@ -227,6 +227,8 @@ export interface InvoiceDocument {
     amount_paid_cents_str?: string;
     amount_credited_cents?: number;
     amount_credited_cents_str?: string;
+    amount_void_cents?: number;
+    amount_void_cents_str?: string;
     amount_due_cents?: number;
     amount_due_cents_str?: string;
   };

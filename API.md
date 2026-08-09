@@ -3345,6 +3345,7 @@ interface InvoiceDocTotals {
   total_cents: number;
   amount_paid_cents: number;
   amount_credited_cents?: number;
+  amount_void_cents?: number;
   amount_due_cents: number;
 }
 ```
@@ -6175,7 +6176,7 @@ How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}
 interface SettlementContract {
   reasons: readonly SettlementReasonType[];
   xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
-  sums_into: "amount_paid_cents" | "amount_credited_cents";
+  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents";
   reverses: "required" | "forbidden";
 }
 ```
@@ -9695,7 +9696,7 @@ How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}
 interface SettlementContract {
   reasons: readonly SettlementReasonType[];
   xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
-  sums_into: "amount_paid_cents" | "amount_credited_cents";
+  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents";
   reverses: "required" | "forbidden";
 }
 ```
@@ -11412,6 +11413,7 @@ interface InvoiceDocTotals {
   total_cents: number;
   amount_paid_cents: number;
   amount_credited_cents?: number;
+  amount_void_cents?: number;
   amount_due_cents: number;
 }
 ```
@@ -19666,12 +19668,21 @@ safe here without BigInt.
 must stay negative, exactly as availability preserves an oversold product's
 negative. Clamping hides the defect this exists to find.
 
+**THREE buckets, dispatched on `sums_into` with no fallthrough arm.** It was
+two — `if (… === "amount_paid_cents") paid += …; else credited += …` — and
+that `else` is precisely what made `void` a schema change with a silent
+runtime hazard: a void row would have landed in `amount_credited_cents`, the
+identity would still have balanced, and every consumer would have reported a
+voided invoice as fully credited. A `switch` with a `default` that throws
+turns the next bucket into a loud failure at the one site that must know
+about it, instead of a quiet mis-route at every site that reads the result.
+
 **Parameters**
 
 - `totalCents` — Invoice total, in integer cents, from `items[]`
 - `settlements` — Every settlement against the invoice, reversals included
 
-**Returns** — The three projected totals plus a per-reason breakdown, in cents
+**Returns** — The four projected totals plus a per-reason breakdown, in cents
 
 ### `removeOrderScopedDestinations(dests: InvoiceDestinationPair[], uidOrder: string): InvoiceDestinationPair[]`
 

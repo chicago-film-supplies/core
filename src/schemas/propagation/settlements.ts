@@ -49,7 +49,7 @@ const SETTLEMENT_TOTALS_FOLD: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-settlement-totals.ts",
   clause:
-    "the projection clause only — each invoice's stored `amount_paid_cents`/`amount_credited_cents`/`amount_due_cents` equals the signed fold over its settlements, corpus-wide, exiting 1 on any divergence. Says NOTHING about the order mirror, and it deliberately exempts `amount_due_cents` on a void invoice (see `void-invoice-from-xero:totals-override`).",
+    "the projection clause only — each invoice's stored `amount_paid_cents`/`amount_credited_cents`/`amount_void_cents`/`amount_due_cents` equals the signed fold over its settlements, corpus-wide, exiting 1 on any divergence. Says NOTHING about the order mirror. **The void carve-out is gone**: it used to skip `amount_due_cents` on a void invoice, which meant the one class it could not see (api-cloudrun#436) was the one that had a live defect in it — 7 prod invoices voided by a non-zeroing path were indistinguishable from 34 correctly overridden ones. A void is now a settlement row, so the fold covers it like any other.",
   gates: true,
 };
 
@@ -207,6 +207,143 @@ export const syncXeroSettlementTransaction: TransactionDefinition = {
   ],
 };
 
+// ── Voiding an invoice ──────────────────────────────────────────────
+//
+// **Three transactions for one fact, deliberately.** A void reaches CFS from
+// three directions — an operator through `updateInvoice`, the CRMS webhook's
+// status 40, and the Xero invoice webhook — and until api-cloudrun#436 the first
+// two logged under `update-invoice`, which declares exactly ONE step. A borrowed
+// transaction id turns `logTransactionPropagation`'s only drift check
+// (`rules_fired.length === 0 && rules_expected > 0`) off silently, so a void
+// path that stopped reaping or stopped appending was unreportable by
+// construction. Declaring one transaction per origin is what gives that check
+// something to compare against.
+//
+// The MONEY half is identical across all three and lives in one helper
+// (`api-cloudrun/src/lib/invoiceVoid.ts`); what actually differs is the Xero
+// direction, which each transaction's description states.
+
+/**
+ * The shared invariant text for the reap half. Written once because the three
+ * origins do the same thing — a divergence between them is the defect, not the
+ * design.
+ */
+const REAP_INVARIANT =
+  "Voiding releases the invoice's money, so every live settlement is retracted by appending its reverser — the rows are never deleted, and each reverser's id is DERIVED from the row it retracts, so replaying the void across the three origins converges on the same documents instead of stacking retractions.";
+
+/**
+ * The shared invariant text for the void-row half.
+ *
+ * ⚠️ This replaced `void-invoice-from-xero:totals-override`, and the deletion is
+ * the point of #436. That rule declared a voided invoice to be "the ONE place
+ * the projection is overridden rather than folded" — `amount_due_cents` forced
+ * to 0 where the fold gave `total`. Three carve-outs existed to keep that
+ * legal (the schema's identity refine, `audit-settlement-totals.ts`, and
+ * `repair-invoice-settlement-totals.ts`), and between them they made the class
+ * invisible: an invoice voided by a path that never zeroed the balance looked
+ * exactly like one that had. Seven prod invoices sat that way, and the
+ * population was still growing when it was measured.
+ */
+const VOID_ROW_INVARIANT =
+  "A void is a SETTLEMENT, not a field override. Exactly one `void` row per invoice — id derived from the invoice uid — carrying `total_cents` and reason `invoice_voided`, so `amount_void_cents` folds to `total` and `amount_due_cents` falls out of the ordinary identity as 0. Xero reports `AmountDue: 0` on a voided invoice and is right; what changed is that CFS now DERIVES that 0 instead of assigning it, which is what lets the corpus audit see a void that was never released.";
+
+/** The field mappings for the void row, shared by all three origins. */
+const VOID_ROW_FIELDS = [
+  { source: [], target: ["status"], transform: "literal \"void\"" },
+  {
+    source: ["totals", "total_cents"],
+    target: ["amount_cents"],
+    transform: "the void settlement's amount IS the invoice total — a void annuls everything billed",
+  },
+  {
+    source: [],
+    target: ["totals", "amount_void_cents"],
+    transform: "folded, never assigned — `recomputeSettlementTotals` sums the void bucket",
+  },
+  {
+    source: [],
+    target: ["totals", "amount_due_cents"],
+    transform: "total − paid − credited − voided, i.e. 0. DERIVED, not overridden.",
+  },
+  { source: [], target: ["version"], transform: "+1 — see create-settlement" },
+];
+
+// ── void-invoice (CFS-originated) ───────────────────────────────────
+
+export const voidInvoiceRules: CollectionRule[] = [
+  {
+    id: "void-invoice:reap-settlements",
+    source: "invoices",
+    target: "settlements",
+    mode: "co-write",
+    invariant: REAP_INVARIANT,
+    enforced_by: [SETTLEMENT_TOTALS_FOLD],
+    transaction: "void-invoice",
+    fields: [
+      { source: ["uid"], target: ["reverses"], transform: "one reverser per unreversed settlement, sharing one uid_session" },
+    ],
+  },
+  {
+    id: "void-invoice:append-void-settlement",
+    source: "invoices",
+    target: "settlements",
+    mode: "co-write",
+    invariant: VOID_ROW_INVARIANT,
+    enforced_by: [SETTLEMENT_TOTALS_FOLD, SETTLEMENT_BUMPS_VERSION],
+    transaction: "void-invoice",
+    fields: VOID_ROW_FIELDS,
+  },
+];
+
+export const voidInvoiceTransaction: TransactionDefinition = {
+  id: "void-invoice",
+  description:
+    "An operator voids an invoice through `PUT /invoices/{uid}`: retracts every live settlement, appends the invoice's `void` row, folds the totals, and co-writes `void` to each linked order's invoices[] entry. CFS ORIGINATES this one, so the Xero void is pushed afterwards, outside the transaction (and deferred past a quota refusal rather than dropped — the CFS status flip has already committed and nothing re-pushes a non-draft invoice).",
+  steps: [
+    "void-invoice:reap-settlements",
+    "void-invoice:append-void-settlement",
+    "update-invoice:status-to-orders",
+  ],
+};
+
+// ── void-invoice-from-crms ──────────────────────────────────────────
+
+export const voidInvoiceFromCrmsRules: CollectionRule[] = [
+  {
+    id: "void-invoice-from-crms:reap-settlements",
+    source: "invoices",
+    target: "settlements",
+    mode: "co-write",
+    invariant: REAP_INVARIANT,
+    enforced_by: [SETTLEMENT_TOTALS_FOLD],
+    transaction: "void-invoice-from-crms",
+    fields: [
+      { source: ["uid"], target: ["reverses"], transform: "one reverser per unreversed settlement, sharing one uid_session" },
+    ],
+  },
+  {
+    id: "void-invoice-from-crms:append-void-settlement",
+    source: "invoices",
+    target: "settlements",
+    mode: "co-write",
+    invariant: VOID_ROW_INVARIANT,
+    enforced_by: [SETTLEMENT_TOTALS_FOLD],
+    transaction: "void-invoice-from-crms",
+    fields: VOID_ROW_FIELDS,
+  },
+];
+
+export const voidInvoiceFromCrmsTransaction: TransactionDefinition = {
+  id: "void-invoice-from-crms",
+  description:
+    "The CRMS invoice webhook reports status 40: same money as `void-invoice`, then the void is pushed on to Xero BY GUID (never by number — a CRMS renumber leaves the Xero record under its old number, and prod holds that trap at number 1859). Ingest from CRMS, egress to Xero.",
+  steps: [
+    "void-invoice-from-crms:reap-settlements",
+    "void-invoice-from-crms:append-void-settlement",
+    "update-invoice:status-to-orders",
+  ],
+};
+
 // ── void-invoice-from-xero ──────────────────────────────────────────
 
 export const voidInvoiceFromXeroRules: CollectionRule[] = [
@@ -215,8 +352,7 @@ export const voidInvoiceFromXeroRules: CollectionRule[] = [
     source: "invoices",
     target: "settlements",
     mode: "co-write",
-    invariant:
-      "Voiding in Xero releases the invoice's money, so every live settlement is retracted by appending its reverser — the rows are never deleted, and the reversers carry reason `invoice_voided_in_xero` so the retraction is distinguishable from an operator's",
+    invariant: REAP_INVARIANT,
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "void-invoice-from-xero",
     fields: [
@@ -224,31 +360,24 @@ export const voidInvoiceFromXeroRules: CollectionRule[] = [
     ],
   },
   {
-    id: "void-invoice-from-xero:totals-override",
+    id: "void-invoice-from-xero:append-void-settlement",
     source: "invoices",
-    target: "invoices",
-    mode: "derive",
-    invariant:
-      "A voided invoice is the ONE place the projection is overridden rather than folded: `amount_paid_cents` and `amount_credited_cents` fold to zero and so agree with the journal, but `amount_due_cents` is FORCED to zero where the fold would give `total`. Xero reports `AmountDue: 0` and is right — the invoice is annulled, not outstanding. This is exactly the case the invoice schema's identity refine exempts, and why a totals repair must skip void invoices: rebuilding one from the log alone would re-open a balance Xero has closed.",
+    target: "settlements",
+    mode: "co-write",
+    invariant: VOID_ROW_INVARIANT,
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "void-invoice-from-xero",
-    fields: [
-      { source: [], target: ["status"], transform: "literal \"void\"" },
-      { source: [], target: ["totals", "amount_paid_cents"], transform: "0 — agrees with the fold once every settlement is reversed" },
-      { source: [], target: ["totals", "amount_credited_cents"], transform: "0 — same" },
-      { source: [], target: ["totals", "amount_due_cents"], transform: "0 — OVERRIDDEN, does not agree with the fold" },
-      { source: [], target: ["version"], transform: "+1 — see create-settlement" },
-    ],
+    fields: VOID_ROW_FIELDS,
   },
 ];
 
 export const voidInvoiceFromXeroTransaction: TransactionDefinition = {
   id: "void-invoice-from-xero",
   description:
-    "Marks an invoice void because Xero voided it: retracts every live settlement into the journal, overrides the totals to zero, and co-writes `void` to each linked order's invoices[] entry. Ingest only — CFS never originates this; the reverse direction is `updateInvoice` with status `void`, which pushes to Xero.",
+    "Marks an invoice void because Xero voided it: retracts every live settlement into the journal, appends the invoice's `void` row, folds the totals, and co-writes `void` to each linked order's invoices[] entry. Ingest only — CFS never pushes back on this arm. ⚠️ Its `status === \"void\"` early return no longer short-circuits the money: idempotency comes from the derived void-row id, and the old early return is exactly why three Xero-bot-voided invoices kept a balance Xero had closed.",
   steps: [
     "void-invoice-from-xero:reap-settlements",
-    "void-invoice-from-xero:totals-override",
+    "void-invoice-from-xero:append-void-settlement",
     "update-invoice:status-to-orders",
   ],
 };

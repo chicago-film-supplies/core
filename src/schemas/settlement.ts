@@ -171,15 +171,22 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
     }
   }
 
-  // Derived from `sums_into` rather than declared as a fifth contract axis: a
-  // row that feeds `amount_paid_cents` is cash, and cash has no credit note.
-  if (contract.sums_into === "amount_paid_cents") {
+  // Derived from `sums_into` rather than declared as a fifth contract axis: the
+  // credit bucket is the ONLY one whose value instrument is a credit note.
+  //
+  // ⚠️ Written as `!== "amount_credited_cents"`, not `=== "amount_paid_cents"`.
+  // The positive form was correct while `sums_into` had two members and became
+  // silently permissive the moment it gained a third: a `void` row would have
+  // been exempted from the check and could have carried a `uid_credit_note`.
+  // Naming the ONE bucket the exemption belongs to is what makes a fourth
+  // bucket default to being checked rather than to being skipped.
+  if (contract.sums_into !== "amount_credited_cents") {
     for (const field of ["uid_credit_note", "number_credit_note"] as const) {
       if (s[field] !== null) {
         ctx.addIssue({
           code: "custom",
           path: [field],
-          message: `a "${s.type}" feeds amount_paid_cents and cannot reference a credit note`,
+          message: `a "${s.type}" feeds ${contract.sums_into} and cannot reference a credit note`,
         });
       }
     }

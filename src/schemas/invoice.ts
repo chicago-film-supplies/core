@@ -407,6 +407,26 @@ export interface InvoiceDocTotals {
    * stamped the ~962 pre-existing invoices.
    */
   amount_credited_cents?: number;
+  /**
+   * Value annulled by voiding the invoice. **The third settlement bucket**, and
+   * the reason `amount_due_cents` on a void invoice is now derived like every
+   * other invoice's instead of being assigned.
+   *
+   * A void used to be a *field override*: `amount_due_cents` was set to 0 while
+   * the journal still folded to `total`. That forced the identity refine below
+   * to exempt void invoices, which made the exemption a blind spot — an invoice
+   * voided by a path that forgot to zero the balance looked exactly like one
+   * that had zeroed it correctly, and 7 prod invoices sat that way undetected
+   * (api-cloudrun#436). As a `void` settlement row the fold produces the 0
+   * itself, so the identity holds on every invoice and the class becomes
+   * visible to the corpus audit.
+   *
+   * Optional for the same reason as `amount_credited_cents`: the field postdates
+   * the corpus, and `validateBeforeWrite` persists the RAW doc, so a schema
+   * default would never materialize — it would only hide the absence from the
+   * compiler at every read.
+   */
+  amount_void_cents?: number;
   amount_due_cents: number;
 }
 
@@ -423,6 +443,8 @@ const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
   // schema default would never materialize anyway — it would only hide the
   // absence from the compiler at every read.
   amount_credited_cents: z.int().optional(),
+  // Same: bare `.optional()`, no default. See the interface docblock.
+  amount_void_cents: z.int().optional(),
   // Unbounded on purpose: an over-credited invoice must stay negative.
   amount_due_cents: z.int().default(0),
 });
@@ -586,16 +608,24 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   // there is no representation error left to absorb and "within half a cent"
   // no longer describes anything — a half-cent gap is now unrepresentable, and
   // a one-cent gap is a real projection defect that the old epsilon would have
-  // caught too. The `void` exemption survives: Xero closes a voided invoice's
-  // balance without moving the settlement journal, so the identity genuinely
-  // does not hold there (api-cloudrun#436).
+  // caught too.
+  //
+  // **The `void` exemption is RETIRED (api-cloudrun#436).** It read
+  // `inv.status === "void" || …` because Xero closes a voided invoice's balance
+  // while the journal still folded to `total` — true of the old field-override
+  // model, and the cost was that the identity said nothing at all about a void
+  // invoice. It could not distinguish "balance correctly zeroed" from "voided by
+  // a path that forgot to zero it", which is the entire class #436 describes. A
+  // void is now a `void` settlement summing into `amount_void_cents`, the fold
+  // produces the 0 by itself, and the identity holds on all four buckets for
+  // every invoice in the corpus.
   (inv) =>
-    inv.status === "void" ||
     inv.totals.amount_paid_cents + (inv.totals.amount_credited_cents ?? 0) +
+          (inv.totals.amount_void_cents ?? 0) +
           inv.totals.amount_due_cents === inv.totals.total_cents,
   {
     message:
-      "amount_paid_cents + amount_credited_cents + amount_due_cents must equal total_cents exactly",
+      "amount_paid_cents + amount_credited_cents + amount_void_cents + amount_due_cents must equal total_cents exactly",
     path: ["totals", "amount_due_cents"],
   },
 ).meta({

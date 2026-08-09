@@ -202,6 +202,7 @@ Deno.test("the money marker names exactly the amount fields — pinned, not scat
     "invoices:totals.amount_credited_cents",
     "invoices:totals.amount_due_cents",
     "invoices:totals.amount_paid_cents",
+    "invoices:totals.amount_void_cents",
     "invoices:totals.total_cents",
     "orders:items.price.base_cents",
     "orders:items.price.discount.amount_cents",
@@ -313,9 +314,10 @@ Deno.test("every declared money _str mirror has a money-marked source", () => {
 
   assertEquals(
     checked,
-    7,
-    `expected exactly 7 money _str mirrors (orders totals.total_cents; invoices total_cents + ` +
-      `amount_paid_cents + amount_credited_cents + amount_due_cents; credit-notes total_cents + ` +
+    8,
+    `expected exactly 8 money _str mirrors (orders totals.total_cents; invoices total_cents + ` +
+      `amount_paid_cents + amount_credited_cents + amount_void_cents + amount_due_cents; ` +
+      `credit-notes total_cents + ` +
       `remaining_credit_cents) but walked ${checked}. A LOWER number means a mirror was dropped ` +
       `or renamed out of the _cents convention and is no longer checked; a HIGHER one means a ` +
       `new mirror landed and should be added to this count deliberately. Do not relax this to ` +
@@ -359,5 +361,5 @@ Deno.test("toWireSchema does not mutate its input — the annotation survives fo
   const before = invoicesConfig.schema.fields.filter((f) => f.money).length;
   toWireSchema(invoicesConfig.schema);
   assertEquals(invoicesConfig.schema.fields.filter((f) => f.money).length, before);
-  assertEquals(before, 4);
+  assertEquals(before, 5);
 });
