@@ -80,7 +80,6 @@ export const creditNotes: TypesenseCollectionConfig = {
       { name: "totals.total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "remaining_credit_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "remaining_credit_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
-      { name: "query_by_sources", type: "string[]", facet: false, optional: true },
       { name: "xero_credit_note_id", type: "string", optional: true },
       { name: "created_by", type: "object", optional: true },
       { name: "created_by.uid", type: "string", facet: true, optional: true },

@@ -7824,7 +7824,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocument",
-          "declaration": "interface CreditNoteDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  reason: string;\n  tax_profile: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  remaining_credit_cents?: number;\n  remaining_credit_cents_str?: string;\n  query_by_sources?: string[];\n  xero_credit_note_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface CreditNoteDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  reason: string;\n  tax_profile: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  remaining_credit_cents?: number;\n  remaining_credit_cents_str?: string;\n  xero_credit_note_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "Typesense document type for credit notes."
         },
         {
@@ -7878,13 +7878,13 @@
         {
           "kind": "interface",
           "name": "OutOfServiceDocument",
-          "declaration": "interface OutOfServiceDocument {\n  id: string;\n  uid: string;\n  uid_product: string;\n  number: number;\n  number_str?: string;\n  reason: string;\n  status: string;\n  quantity: number;\n  breakdown: typeLiteral;\n  organization?: typeLiteral;\n  dates: typeLiteral;\n  stores?: Array<typeLiteral>;\n  query_by_sources?: string[];\n  canceled_at?: number;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface OutOfServiceDocument {\n  id: string;\n  uid: string;\n  uid_product: string;\n  number: number;\n  number_str?: string;\n  reason: string;\n  status: string;\n  quantity: number;\n  breakdown: typeLiteral;\n  organization?: typeLiteral;\n  dates: typeLiteral;\n  stores?: Array<typeLiteral>;\n  canceled_at?: number;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for out-of-service records."
         },
         {
           "kind": "interface",
           "name": "ProductDocument",
-          "declaration": "interface ProductDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  tracking_category_name?: string;\n  type: string;\n  stock_method: string;\n  active: boolean;\n  component_only: boolean;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  webshop?: typeLiteral;\n  alternates?: Array<typeLiteral>;\n  crms_id?: number;\n  crms_id_str?: string;\n  uid_tracking_category?: string;\n  uid_linked_replacement?: string;\n  uid_linked_rental?: string;\n  xero_id?: string;\n  xero_tracking_option_id?: string;\n  crms_rate_id?: number;\n  crms_linked_rental_id?: number;\n  crms_linked_replacement_id?: number;\n  crms_linked_replacement_rate_id?: number;\n  shipping?: typeLiteral;\n  tags?: Array<typeLiteral>;\n  components?: ProductDocumentComponent[];\n  component_of?: ProductDocumentComponent[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  crms_stock_level_ids?: number[];\n  images?: string[];\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  updated_at: number;\n  created_at?: number;\n}",
+          "declaration": "interface ProductDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  tracking_category_name?: string;\n  type: string;\n  stock_method: string;\n  active: boolean;\n  component_only: boolean;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  webshop?: typeLiteral;\n  alternates?: Array<typeLiteral>;\n  crms_id?: number;\n  crms_id_str?: string;\n  uid_tracking_category?: string;\n  uid_linked_replacement?: string;\n  uid_linked_rental?: string;\n  xero_id?: string;\n  xero_tracking_option_id?: string;\n  crms_rate_id?: number;\n  crms_linked_rental_id?: number;\n  crms_linked_replacement_id?: number;\n  crms_linked_replacement_rate_id?: number;\n  shipping?: typeLiteral;\n  tags?: Array<typeLiteral>;\n  components?: ProductDocumentComponent[];\n  component_of?: ProductDocumentComponent[];\n  crms_stock_level_ids?: number[];\n  images?: string[];\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  updated_at: number;\n  created_at?: number;\n}",
           "doc": "Typesense document type for products."
         },
         {
@@ -7892,6 +7892,12 @@
           "name": "ProductDocumentComponent",
           "declaration": "interface ProductDocumentComponent {\n  uid?: string;\n  path?: string[];\n  name?: string;\n  quantity?: number;\n  active?: boolean;\n  type?: string;\n  stock_method?: string;\n  crms_id?: number;\n  crms_accessory_id?: number;\n  description?: string;\n  inclusion_type?: string;\n  zero_priced?: boolean;\n  price?: typeLiteral;\n}",
           "doc": "Typesense document type for a product component entry."
+        },
+        {
+          "kind": "variable",
+          "name": "QUERY_BY_PREFIX",
+          "declaration": "const QUERY_BY_PREFIX: \"query_by_\";",
+          "doc": "Prefix marking a **Firestore reverse-index mirror** — a denormalized flat\narray (`query_by_sources`, `query_by_components`, …) that exists purely so\nFirestore can `array-contains` a value it cannot reach inside an object array.\n\nTypesense CAN query inside a nested array, so the mirror is redundant there\nand is deleted from every document on the way to the index."
         },
         {
           "kind": "variable",
@@ -8144,6 +8150,14 @@
           "name": "invoices",
           "declaration": "const invoices: TypesenseCollectionConfig;",
           "doc": "Typesense collection config for invoices."
+        },
+        {
+          "kind": "function",
+          "name": "isStrippedAtIndexTime",
+          "signature": "isStrippedAtIndexTime(fieldName: string): boolean",
+          "doc": "Is this document key / declared field name removed before it reaches the\nindex?\n\n**This is the single source of truth for that rule**, imported by BOTH sides:\napi-cloudrun's `deleteQueryByFields` (`lib/typesenseTranslate.ts`), which\nperforms the strip, and `tests/typesenseFieldCoverage.test.ts`, which fails\nwhen a collection declares a field the strip would remove. A restated copy in\neither place is a rule that can drift into blessing exactly the declarations\nit exists to forbid — and it did: six `query_by_*` fields were declared across\nfive collections, four of them `facet: true`, and none ever held a value.\n\n**Top-level keys only, matching the strip.** `deleteQueryByFields` iterates\n`Object.keys(doc)`, so a nested `sources.query_by_x` survives; a predicate\nthat tested the whole dotted name would be stricter than the code it stands\nin for and would reject a legal declaration.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "variable",

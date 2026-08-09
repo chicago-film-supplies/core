@@ -94,6 +94,37 @@ export const TypesenseFieldSchema: z.ZodType<TypesenseField> = z.strictObject({
 const CFS_ONLY_FIELD_KEYS = ["money"] as const;
 
 /**
+ * Prefix marking a **Firestore reverse-index mirror** — a denormalized flat
+ * array (`query_by_sources`, `query_by_components`, …) that exists purely so
+ * Firestore can `array-contains` a value it cannot reach inside an object array.
+ *
+ * Typesense CAN query inside a nested array, so the mirror is redundant there
+ * and is deleted from every document on the way to the index.
+ */
+export const QUERY_BY_PREFIX = "query_by_";
+
+/**
+ * Is this document key / declared field name removed before it reaches the
+ * index?
+ *
+ * **This is the single source of truth for that rule**, imported by BOTH sides:
+ * api-cloudrun's `deleteQueryByFields` (`lib/typesenseTranslate.ts`), which
+ * performs the strip, and `tests/typesenseFieldCoverage.test.ts`, which fails
+ * when a collection declares a field the strip would remove. A restated copy in
+ * either place is a rule that can drift into blessing exactly the declarations
+ * it exists to forbid — and it did: six `query_by_*` fields were declared across
+ * five collections, four of them `facet: true`, and none ever held a value.
+ *
+ * **Top-level keys only, matching the strip.** `deleteQueryByFields` iterates
+ * `Object.keys(doc)`, so a nested `sources.query_by_x` survives; a predicate
+ * that tested the whole dotted name would be stricter than the code it stands
+ * in for and would reject a legal declaration.
+ */
+export function isStrippedAtIndexTime(fieldName: string): boolean {
+  return fieldName.split(".")[0].startsWith(QUERY_BY_PREFIX);
+}
+
+/**
  * The wire form of a collection schema — what actually gets POSTed to
  * `collections`.
  *

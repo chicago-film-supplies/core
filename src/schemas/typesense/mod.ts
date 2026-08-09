@@ -18,6 +18,8 @@ export type {
 
 export {
   GroupByAxisSchema,
+  isStrippedAtIndexTime,
+  QUERY_BY_PREFIX,
   TypesenseFieldTypeEnum,
   TypesenseFieldSchema,
   TypesenseSchemaSchema,

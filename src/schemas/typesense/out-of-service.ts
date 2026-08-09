@@ -35,7 +35,6 @@ export const outOfService: TypesenseCollectionConfig = {
       { name: "stores.uid_store", type: "string[]", facet: true, optional: true },
       { name: "stores.name", type: "string[]", stem: true, optional: true },
       { name: "stores.quantity", type: "int32[]", optional: true },
-      { name: "query_by_sources", type: "string[]", facet: false, optional: true },
       { name: "canceled_at", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "updated_at", type: "int64", sort: true, index: true, facet: false },

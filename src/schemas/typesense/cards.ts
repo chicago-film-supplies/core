@@ -3,13 +3,18 @@
  *
  * Enabled from day one — unlike threads which is reserved (disabled) slot.
  * Supports list/agenda search, kanban filter-by-status, calendar range by
- * `date_epoch`, and map views via `destination.coordinates` (geopoint).
+ * `date_fs`, and map views via `destination.address.address_coordinates`.
  *
- * `date_epoch` is a Typesense-only derived field (ms since Unix epoch,
- * computed from the Firestore `date_fs` Timestamp during sync in
- * api-cloudrun/src/lib/typesense.ts's per-collection mapper). It enables
- * range filters (`date_epoch:>=X && date_epoch:<=Y`) without the string-date
- * comparison pitfalls of YYYY-MM-DD lexicographic sort.
+ * ⚠️ **Both of those were dead from the day they were declared, until
+ * 2026-08-09.** The config named a flat `date` string and a
+ * `destination.coordinates` geopoint; `Card` is a `z.strictObject` carrying
+ * neither (`dates.start`/`dates.end` + `date_fs`, and the geopoint nested under
+ * `destination.address.address_coordinates`). So `date` was always absent,
+ * `date_epoch` — derived from it at index time — was `null` on all 1,097 prod
+ * cards, and the geopoint never existed. Nothing failed: a declared field that
+ * no document populates is indistinguishable from an absent one in a search
+ * response, which is exactly why `tests/typesenseFieldCoverage.test.ts` now
+ * asserts every declared field resolves against the storage schema.
  */
 import type { TypesenseCollectionConfig } from "./types.ts";
 
@@ -32,15 +37,22 @@ export const cards: TypesenseCollectionConfig = {
       { name: "subject", type: "string", stem: true },
       { name: "body_text", type: "string", stem: true, optional: true },
 
-      // Dates — `date` is the source of truth (YYYY-MM-DD string), kept as
-      // string for display + int64 epoch for range filter/sort
-      { name: "date", type: "string", facet: true, optional: true },
-      { name: "date_epoch", type: "int64", sort: true, index: true, facet: false, optional: true },
+      // Dates — `date_fs` is the stored Firestore Timestamp companion of
+      // `dates.start`, translated to epoch ms by `translateObject`. That gives
+      // the calendar range filter (`date_fs:>=X && date_fs:<=Y`) and sort
+      // directly off a stored field, with no index-time derivation to keep in
+      // step. `dates.start` itself is deliberately NOT declared: it is a
+      // Chicago-offset ISO string, and range-filtering it is the
+      // lexicographic-date trap this field exists to avoid.
+      { name: "date_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
 
-      // Destination — flattened lat/lng + city/state for map view + region facets
+      // Destination — lat/lng + city/state for map view + region facets.
+      // The geopoint sits at `destination.address.address_coordinates` because
+      // that is the key `translateForTypesense` rewrites to a `[lat, lng]` tuple
+      // (`GEOPOINT_KEYS`), and it is where `Card.destination` actually stores it.
       { name: "destination.address.city", type: "string", facet: true, optional: true },
       { name: "destination.address.region", type: "string", facet: true, optional: true },
-      { name: "destination.coordinates", type: "geopoint", optional: true },
+      { name: "destination.address.address_coordinates", type: "geopoint", optional: true },
 
       // Polymorphic sources — object[] with nested facets for
       // "all cards touching order X" and "all cards touching any order".
@@ -73,7 +85,7 @@ export const cards: TypesenseCollectionConfig = {
   },
   synonyms: [],
   displayDefaults: {
-    columns: ["subject", "status", "date", "uid_list", "uid_assignees"],
+    columns: ["subject", "status", "date_fs", "uid_list", "uid_assignees"],
     filters: {},
     sort: { column: "position", direction: "asc" },
     group: null,

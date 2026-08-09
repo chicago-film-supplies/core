@@ -278,7 +278,6 @@ export interface CreditNoteDocument {
   };
   remaining_credit_cents?: number;
   remaining_credit_cents_str?: string;
-  query_by_sources?: string[];
   xero_credit_note_id?: string;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
@@ -404,7 +403,6 @@ export interface OrderDocument {
     path?: string[];
     uid_delivery?: string;
     uid_collection?: string;
-    total_price_cents?: number;
     price?: {
       base_cents?: number;
       replacement_cents?: number;
@@ -529,7 +527,6 @@ export interface OutOfServiceDocument {
     name?: string;
     quantity?: number;
   }>;
-  query_by_sources?: string[];
   canceled_at?: number;
   created_at?: number;
   updated_at: number;
@@ -647,8 +644,6 @@ export interface ProductDocument {
   }>;
   components?: ProductDocumentComponent[];
   component_of?: ProductDocumentComponent[];
-  query_by_components?: string[];
-  query_by_component_of?: string[];
   crms_stock_level_ids?: number[];
   images?: string[];
   created_by?: TypesenseActorRef;

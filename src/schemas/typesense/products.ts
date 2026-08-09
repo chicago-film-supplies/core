@@ -109,8 +109,6 @@ export const products: TypesenseCollectionConfig = {
       { name: "component_of.price.formula", type: "string[]", facet: true, optional: true },
       { name: "component_of.price.discountable", type: "bool[]", facet: true, optional: true },
       { name: "crms_stock_level_ids", type: "int64[]", optional: true },
-      { name: "query_by_components", type: "string[]", facet: true, optional: true },
-      { name: "query_by_component_of", type: "string[]", facet: true, optional: true },
       // `images` is declared as a nested object array, NOT as the flat
       // `query_by_images` mirror that Firestore needs.
       //
@@ -120,6 +118,15 @@ export const products: TypesenseCollectionConfig = {
       // would be redundant duplication here. Declare the sub-fields and query
       // them directly — same shape as `contacts.organizations.*`,
       // `cards.sources.*`, `bookings.stores.*`.
+      //
+      // ⚠️ That strip is UNCONDITIONAL, so a `query_by_*` field declared here is
+      // dead on arrival — the key is deleted from every document on the way to
+      // the index, and an empty field is indistinguishable from an absent one in
+      // a search response. `query_by_components` and `query_by_component_of`
+      // were declared here (both `facet: true`) from March 2026 until 2026-08-09
+      // and never held a value; a prod product with 6 `components[]` entries
+      // returned neither. `isStrippedAtIndexTime` in `./types.ts` is the shared
+      // rule, and `tests/typesenseFieldCoverage.test.ts` fails on a new one.
       //
       // Every sub-field must be `optional`, and for the same reason as the note
       // on `cards.sources.*`: a product with no images, or a fresh image row

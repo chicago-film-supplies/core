@@ -211,7 +211,6 @@ Deno.test("the money marker names exactly the amount fields — pinned, not scat
     "orders:items.price.subtotal_discounted_cents",
     "orders:items.price.taxes.amount_cents",
     "orders:items.price.total_cents",
-    "orders:items.total_price_cents",
     "orders:totals.discount_amount_cents",
     "orders:totals.subtotal_cents",
     "orders:totals.subtotal_discounted_cents",

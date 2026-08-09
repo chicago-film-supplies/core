@@ -38,7 +38,6 @@ export const fulfillments: TypesenseCollectionConfig = {
       { name: "dates.collection_end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "dates.charge_start_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "dates.charge_end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
-      { name: "query_by_dates", type: "string[]", facet: true, optional: true },
       { name: "destinations", type: "object[]" },
       { name: "destinations.delivery", type: "object[]", optional: true },
       ...typesenseAddressFields("destinations.delivery.address", { array: true }),
