@@ -48,6 +48,24 @@ export const INTEGRATION_EVENT_MSGS = [
   // Carries `crms_id`, `line`, `base`, `quantity`, `subtotal` and `computed`.
   // Retire with CRMS.
   "crms_invoice_chargeable_days_unresolved",
+  // A CRMS invoice resync reached an invoice that money has already settled, so
+  // its `items` and `totals` were carried forward untouched rather than
+  // re-priced. Everything else CRMS sends — subject, reference, dates, notes,
+  // organization — still lands; none of those can move money.
+  //
+  // The freeze exists because the absence of one is api-cloudrun#437. All 16
+  // class-2 invoices were re-priced by CFS on 2026-08-08, years after Xero was
+  // invoiced, and each stored `total_cents` is exactly what CFS recomputes today
+  // from current product and tax configuration. `amount_paid_cents` (correct,
+  // and agreeing with Xero) then no longer reached the new total, leaving a
+  // phantom receivable on an invoice already marked paid. `services/orders.ts`
+  // has refused the same thing at both its resync sites from the start.
+  //
+  // INFO, not warn: on a settled invoice this is the correct outcome, and the
+  // line exists so an operator asking "why did my CRMS edit not land?" gets an
+  // answer. Carries `invoice_number`, `crms_invoice_id` and `invoice_status`.
+  // Retire with CRMS.
+  "crms_invoice_reprice_frozen",
   "crms_mark_paid_failed",
   "crms_product_not_found",
   "uploadcare_draft_cleanup_failed",
