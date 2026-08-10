@@ -38,13 +38,13 @@ export interface BookingBreakdown {
 
 /** Zod schema for BookingBreakdown. */
 export const BookingBreakdownSchema: z.ZodType<BookingBreakdown> = z.strictObject({
-  damaged: z.number().meta({ column: true, label: "Damaged" }),
-  lost: z.number().meta({ column: true, label: "Lost" }),
-  out: z.number().meta({ column: true, label: "Out" }),
-  prepped: z.number().meta({ column: true, label: "Prepped" }),
-  quoted: z.number().meta({ column: true, label: "Quoted" }),
-  reserved: z.number().meta({ column: true, label: "Reserved" }),
-  returned: z.number().meta({ column: true, label: "Returned" }),
+  damaged: z.int().meta({ column: true, label: "Damaged" }),
+  lost: z.int().meta({ column: true, label: "Lost" }),
+  out: z.int().meta({ column: true, label: "Out" }),
+  prepped: z.int().meta({ column: true, label: "Prepped" }),
+  quoted: z.int().meta({ column: true, label: "Quoted" }),
+  reserved: z.int().meta({ column: true, label: "Reserved" }),
+  returned: z.int().meta({ column: true, label: "Returned" }),
 });
 
 /**
@@ -161,7 +161,7 @@ const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef> = z.strictOb
 const BookingStoreLocationSchema: z.ZodType<BookingStoreLocation> = z.strictObject({
   uid_location: FirestoreId,
   name: z.string().meta({ column: true }),
-  quantity: z.number().meta({ column: true, label: "Quantity" }),
+  quantity: z.int().meta({ column: true, label: "Quantity" }),
   default: z.boolean(),
 });
 
@@ -169,7 +169,7 @@ const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
   uid_store: FirestoreId,
   name: z.string().meta({ column: true }),
   default: z.boolean(),
-  quantity: z.number().meta({ column: true, label: "Quantity" }),
+  quantity: z.int().meta({ column: true, label: "Quantity" }),
   locations: z.array(BookingStoreLocationSchema).default([]).meta({ label: "Location" }),
 });
 
@@ -215,13 +215,13 @@ export interface UpdateBookingInputType {
 export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
   status: BookingStatus.optional(),
   breakdown: z.object({
-    damaged: z.number().min(0),
-    lost: z.number().min(0),
-    out: z.number().min(0),
-    prepped: z.number().min(0),
-    quoted: z.number().min(0),
-    reserved: z.number().min(0),
-    returned: z.number().min(0),
+    damaged: z.int().min(0),
+    lost: z.int().min(0),
+    out: z.int().min(0),
+    prepped: z.int().min(0),
+    quoted: z.int().min(0),
+    reserved: z.int().min(0),
+    returned: z.int().min(0),
   }).optional(),
   version: z.int().min(0),
   uid_session: z.uuid(),
@@ -312,8 +312,8 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   number: z.int().meta({ column: true, label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
   type: ComponentTypeEnum.meta({ column: true, label: "Type" }),
   status: BookingStatus.meta({ column: true, label: "Status" }),
-  quantity: z.number().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
-  shortage: z.number().meta({ column: true, label: "Shortage" }),
+  quantity: z.int().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
+  shortage: z.int().meta({ column: true, label: "Shortage" }),
   subject: z.string().meta({ column: true, label: "Subject" }),
   unit_price_cents: z.int().meta({ column: true, label: "Unit Price" }),
   total_price_cents: z.int().meta({ column: true, label: "Total" }),

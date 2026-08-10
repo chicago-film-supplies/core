@@ -38,7 +38,7 @@ export const LocationTypeSchema: z.ZodType<LocationType> = z.strictObject({
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   product_capacities: z.array(z.strictObject({
     uid: FirestoreId,
-    max: z.number().nullable().meta({ column: true, label: "Max" }),
+    max: z.int().nullable().meta({ column: true, label: "Max" }),
   })).default([]).meta({ label: "Capacity" }),
   query_by_product_capacities: z.array(z.string()).default([]).optional(),
   dimensions: z.strictObject({
@@ -70,7 +70,7 @@ export interface CreateLocationTypeInputType {
 /** Input schema for creating a location type. */
 export const CreateLocationTypeInput: z.ZodType<CreateLocationTypeInputType> = z.object({
   name: z.string().min(1).max(100),
-  product_capacities: z.record(z.string(), z.object({ max: z.number() })).optional(),
+  product_capacities: z.record(z.string(), z.object({ max: z.int() })).optional(),
   dimensions: z.object({
     width: z.number().optional(),
     depth: z.number().optional(),
@@ -92,7 +92,7 @@ export interface UpdateLocationTypeInputType {
 export const UpdateLocationTypeInput: z.ZodType<UpdateLocationTypeInputType> = z.object({
   uid: FirestoreId,
   name: z.string().min(1).max(100).optional(),
-  product_capacities: z.record(z.string(), z.object({ max: z.number().nullable() })).optional(),
+  product_capacities: z.record(z.string(), z.object({ max: z.int().nullable() })).optional(),
   dimensions: z.object({
     width: z.number().optional(),
     depth: z.number().optional(),

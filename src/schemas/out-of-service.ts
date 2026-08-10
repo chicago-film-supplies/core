@@ -75,12 +75,12 @@ export interface OOSBreakdown {
 
 /** Zod schema for OOSBreakdown. */
 export const OOSBreakdownSchema: z.ZodType<OOSBreakdown> = z.strictObject({
-  draft: z.number().meta({ column: true, label: "Draft" }),
-  planned: z.number().meta({ column: true, label: "Planned" }),
-  active: z.number().meta({ column: true, label: "Active" }),
-  blocked: z.number().meta({ column: true, label: "Blocked" }),
-  written_off: z.number().meta({ column: true, label: "Written Off" }),
-  returned_to_service: z.number().meta({ column: true, label: "Returned To Service" }),
+  draft: z.int().meta({ column: true, label: "Draft" }),
+  planned: z.int().meta({ column: true, label: "Planned" }),
+  active: z.int().meta({ column: true, label: "Active" }),
+  blocked: z.int().meta({ column: true, label: "Blocked" }),
+  written_off: z.int().meta({ column: true, label: "Written Off" }),
+  returned_to_service: z.int().meta({ column: true, label: "Returned To Service" }),
 });
 
 /** A location within a store affected by an out-of-service record. */
@@ -164,17 +164,17 @@ export interface OutOfService {
 const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({
   uid_location: FirestoreId,
   name: z.string().meta({ column: true }),
-  quantity: z.number().meta({ column: true, label: "Quantity" }),
-  transactionQuantity: z.number(),
+  quantity: z.int().meta({ column: true, label: "Quantity" }),
+  transactionQuantity: z.int(),
   default: z.boolean(),
-  max: z.number().nullable().optional(),
+  max: z.int().nullable().optional(),
 });
 
 const OOSStoreSchema: z.ZodType<OOSStore> = z.strictObject({
   uid_store: FirestoreId,
   name: z.string().meta({ column: true }),
   default: z.boolean(),
-  quantity: z.number().meta({ column: true, label: "Quantity" }),
+  quantity: z.int().meta({ column: true, label: "Quantity" }),
   locations: z.array(OOSStoreLocationSchema).default([]).meta({ label: "Location" }),
 });
 
@@ -185,7 +185,7 @@ const OOSTransactionSchema: z.ZodType<OOSTransaction> = z.strictObject({
   crms_stock_level_uid: z.string().optional(),
   date: chicagoInstant(),
   date_fs: FirestoreTimestamp,
-  quantity: z.number(),
+  quantity: z.int(),
   source: DocSource,
   type: OOSTransactionTypeEnum,
 });
@@ -204,7 +204,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   number: z.int().meta({ column: true, label: "#", linkTo: "outOfServiceDetail", serverSortVia: "number" }),
   reason: OOSReasonEnum.meta({ column: true, label: "Reason" }),
   status: OOSStatusEnum.meta({ column: true, label: "Status" }),
-  quantity: z.number().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
+  quantity: z.int().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   breakdown: OOSBreakdownSchema,
   canceled_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Canceled" }),
   organization: z.strictObject({

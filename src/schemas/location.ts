@@ -62,15 +62,15 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
   uid_location_type: FirestoreId.nullable(),
   product_capacities: z.array(z.strictObject({
     uid: FirestoreId,
-    max: z.number().nullable(),
-    max_default: z.number().nullable(),
+    max: z.int().nullable(),
+    max_default: z.int().nullable(),
   })).default([]),
   query_by_product_capacities: z.array(z.string()).default([]),
   active: z.boolean().meta({ column: true, label: "Active" }),
   products: z.array(z.strictObject({
     uid: FirestoreId,
     name: z.string().meta({ column: true }),
-    quantity: z.number().meta({ column: true, label: "Quantity" }),
+    quantity: z.int().meta({ column: true, label: "Quantity" }),
     default: z.boolean(),
   })).default([]).meta({ label: "Products" }),
   query_by_products: z.array(z.string()).default([]),
