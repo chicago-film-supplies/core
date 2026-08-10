@@ -60,7 +60,7 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   })).optional(),
   deleted_at: FirestoreTimestamp.nullable(),
   expires_at: FirestoreTimestamp.nullable(),
-  created_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({
   title: "Quote",

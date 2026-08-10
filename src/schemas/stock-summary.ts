@@ -124,8 +124,8 @@ export const StockSummarySchema: z.ZodType<StockSummary> = z.strictObject({
   quantity_held: z.number().meta({ column: true, label: "Quantity Held" }),
   bookings: z.array(StockSummaryBookingEntrySchema).default([]).meta({ label: "Booking" }),
   out_of_service: z.array(StockSummaryOOSEntrySchema).default([]).meta({ label: "Out of Service" }),
-  created_at: FirestoreTimestamp,
-  updated_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({
   title: "Stock Summary",
   collection: "stock-summaries",

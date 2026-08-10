@@ -68,8 +68,8 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
   store_breakdown: z.array(StoreBreakdownEntrySchema).default([]).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId).default([]),
   query_by_uid_location: z.array(FirestoreId).default([]),
-  created_at: FirestoreTimestamp,
-  updated_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({
   title: "Inventory Ledger",
   collection: "inventory-ledgers",

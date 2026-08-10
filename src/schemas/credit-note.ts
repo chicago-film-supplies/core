@@ -407,7 +407,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // and uses `chicagoInstant()`; the two semantics are why both factories exist.)
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
-  reference: z.string().nullable().default(null).meta({ column: true, label: "Reference" }),
+  reference: z.string().nullable().default(null).meta({ column: true, label: "Reference", linkTo: "creditNoteDetail" }),
   external_notes: z.string().meta({ pii: "mask", column: true, label: "External Notes" }).nullable().optional(),
   internal_notes: z.string().meta({ pii: "mask", column: true, label: "Internal Notes" }).nullable().optional(),
   organization: z.strictObject({

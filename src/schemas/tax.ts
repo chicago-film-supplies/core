@@ -50,8 +50,8 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
-  created_at: FirestoreTimestamp,
-  updated_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({
   title: "Tax",
   collection: "taxes",

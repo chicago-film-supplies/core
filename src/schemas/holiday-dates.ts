@@ -25,8 +25,8 @@ export const HolidayDatesSchema: z.ZodType<HolidayDates> = z.strictObject({
   date_fs: FirestoreTimestamp,
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   type: z.enum(["fixed", "variable"]),
-  created_at: FirestoreTimestamp,
-  updated_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({
   title: "Holiday Dates",
   collection: "holiday-dates",

@@ -64,8 +64,8 @@ export const PublicStockSummarySchema: z.ZodType<PublicStockSummary> = z.strictO
   type: ProductTypeEnum.meta({ column: true, label: "Type" }),
   quantity_held: z.number().meta({ column: true, label: "Quantity Held" }),
   unavailable: z.array(PublicUnavailableEntrySchema).default([]).meta({ column: true, label: "Unavailable" }),
-  created_at: FirestoreTimestamp,
-  updated_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({
   title: "Public Stock Summary",
   collection: "public-stock-summaries",

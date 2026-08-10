@@ -346,8 +346,8 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid_destination_delivery: FirestoreId,
   uid_destination_collection: FirestoreId,
   version: z.int().min(0).default(0),
-  created_at: FirestoreTimestamp,
-  updated_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({
   title: "Booking",
   collection: "bookings",

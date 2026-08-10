@@ -32,7 +32,7 @@ export const PreviewRecordSchema: z.ZodType<PreviewRecord> = z.strictObject({
   // `lib/templates/render.ts`), so an author can interpolate the organization
   // name straight into it.
   filename: z.string().meta({ pii: "mask", column: true, label: "Filename" }),
-  created_at: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   expires_at: FirestoreTimestamp,
 }).meta({
   title: "Template Preview",

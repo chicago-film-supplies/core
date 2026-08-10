@@ -59,8 +59,8 @@ export const CacheGeocodesSchema: z.ZodType<CacheGeocodes> = z.strictObject({
     full: z.string().optional().meta({ column: true, label: "Address" }),
     name: z.string().optional(),
   }).meta({ pii: "mask" }),
-  created_at: FirestoreTimestamp,
-  expiresAt: FirestoreTimestamp,
+  created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
+  expiresAt: FirestoreTimestamp.meta({ column: true, label: "Expires" }),
 }).meta({
   title: "Cache Geocodes",
   collection: "cache-geocodes",
