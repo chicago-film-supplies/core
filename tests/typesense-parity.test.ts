@@ -64,15 +64,21 @@ const ALLOWED_GAPS: Record<string, string> = {
     "`deriveOrderDateEnvelope` in api-cloudrun's `translateForTypesense`.",
   "fulfillments.dates": "Same as orders.dates — synthesized by " +
     "`deriveOrderDateEnvelope`, never stored.",
-  "tags.count": "`.optional()` only because `validateBeforeWrite` strips " +
-    "FieldValue sentinels; the stored value is always concrete (#243 " +
-    "read-modify-write). Requiring it would break any writer that sends an " +
-    "increment. Marking it `optional: true` in the Typesense config is also " +
-    "not obviously available — it is `tags.default_sorting_field`, and the " +
-    "Typesense docs do not state whether that may be optional. Verify against " +
-    "a scratch dev collection before ever taking that route.",
-  "tracking-categories.count": "Same as tags.count — sentinel-written counter " +
-    "serving as `default_sorting_field`.",
+  "tags.count": "`.optional()` only because `validateBeforeWrite` strips a " +
+    "top-level FieldValue sentinel by OMITTING the key, so a sentinel write " +
+    "would reach `safeParse` as an absent field. Forward tolerance, not a live " +
+    "case: api-cloudrun#243 moved both writers to a transactional " +
+    "read-modify-write of a concrete number, and 45 prod / 45 dev tag docs all " +
+    "hold one (measured 2026-08-10, zero records). The type is now plain " +
+    "`z.int()` — the old `Record<FieldValue> | number` union was believed to be " +
+    "what permitted a sentinel and was not; the optionality is. Marking it " +
+    "`optional: true` in the Typesense config is also not obviously available " +
+    "— it is `tags.default_sorting_field`, and the Typesense docs do not state " +
+    "whether that may be optional. Verify against a scratch dev collection " +
+    "before ever taking that route.",
+  "tracking-categories.count": "Same as tags.count — an optional concrete " +
+    "counter serving as `default_sorting_field`. 21 prod / 21 dev docs, all " +
+    "concrete integers.",
 };
 
 /** A field the index requires that the storage schema does not guarantee. */

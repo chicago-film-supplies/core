@@ -6641,7 +6641,7 @@ A tag document in Firestore.
 interface Tag {
   uid: string;
   name: string;
-  count?: Record<string, FirestoreFieldValue> | number;
+  count?: number;
   products?: UidNameRefType[];
   query_by_products?: string[];
   version: number;
@@ -7092,7 +7092,7 @@ A tracking category document in Firestore.
 interface TrackingCategory {
   uid: string;
   name: string;
-  count?: Record<string, FirestoreFieldValue> | number;
+  count?: number;
   crms_product_group_id?: number;
   crms_service_group_id?: number;
   crms_product_group_name: string;
@@ -14575,7 +14575,7 @@ A tag document in Firestore.
 interface Tag {
   uid: string;
   name: string;
-  count?: Record<string, FirestoreFieldValue> | number;
+  count?: number;
   products?: UidNameRefType[];
   query_by_products?: string[];
   version: number;
@@ -14645,7 +14645,7 @@ A tracking category document in Firestore.
 interface TrackingCategory {
   uid: string;
   name: string;
-  count?: Record<string, FirestoreFieldValue> | number;
+  count?: number;
   crms_product_group_id?: number;
   crms_service_group_id?: number;
   crms_product_group_name: string;

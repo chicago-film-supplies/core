@@ -3285,7 +3285,7 @@
         {
           "kind": "interface",
           "name": "Tag",
-          "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tag document in Firestore."
         },
         {
@@ -3525,7 +3525,7 @@
         {
           "kind": "interface",
           "name": "TrackingCategory",
-          "declaration": "interface TrackingCategory {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  crms_product_group_id?: number;\n  crms_service_group_id?: number;\n  crms_product_group_name: string;\n  products: Record<string, UidNameRefType>;\n  xero_tracking_option_id: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface TrackingCategory {\n  uid: string;\n  name: string;\n  count?: number;\n  crms_product_group_id?: number;\n  crms_service_group_id?: number;\n  crms_product_group_name: string;\n  products: Record<string, UidNameRefType>;\n  xero_tracking_option_id: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tracking category document in Firestore."
         },
         {
@@ -7524,7 +7524,7 @@
         {
           "kind": "interface",
           "name": "Tag",
-          "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Tag {\n  uid: string;\n  name: string;\n  count?: number;\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tag document in Firestore."
         },
         {
@@ -7566,7 +7566,7 @@
         {
           "kind": "interface",
           "name": "TrackingCategory",
-          "declaration": "interface TrackingCategory {\n  uid: string;\n  name: string;\n  count?: Record<string, FirestoreFieldValue> | number;\n  crms_product_group_id?: number;\n  crms_service_group_id?: number;\n  crms_product_group_name: string;\n  products: Record<string, UidNameRefType>;\n  xero_tracking_option_id: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface TrackingCategory {\n  uid: string;\n  name: string;\n  count?: number;\n  crms_product_group_id?: number;\n  crms_service_group_id?: number;\n  crms_product_group_name: string;\n  products: Record<string, UidNameRefType>;\n  xero_tracking_option_id: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tracking category document in Firestore."
         },
         {
