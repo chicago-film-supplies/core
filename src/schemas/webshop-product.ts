@@ -140,7 +140,7 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
     air_un: z.number().nullable().optional(),
   }).optional(),
   alternates: z.array(UidNameRef).default([]).meta({ label: "Alternates" }),
-  components: z.array(WebshopComponentSchema).default([]).meta({ label: "Component" }),
+  components: z.array(WebshopComponentSchema).default([]).meta({ label: "Components" }),
   component_of: z.array(WebshopComponentSchema).default([]).meta({ label: "Component Of" }),
   tags: z.array(UidNameRef).default([]).optional().meta({ label: "Tags" }),
   query_by_tags: z.array(z.string()).default([]).optional(),

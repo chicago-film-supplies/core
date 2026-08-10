@@ -342,7 +342,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     air_un: z.number().nullable().meta({ column: true, label: "UN Number" }),
   }).optional(),
   alternates: z.array(UidNameRef).default([]).meta({ label: "Alternates" }),
-  components: z.array(AuthoredComponentSchema).default([]).meta({ label: "Component" }),
+  components: z.array(AuthoredComponentSchema).default([]).meta({ label: "Components" }),
   component_of: z.array(ComponentSchema).default([]).meta({ label: "Component Of" }),
   tags: z.array(UidNameRef).default([]).meta({ label: "Tags" }),
   query_by_tags: z.array(z.string()).default([]).optional(),
