@@ -12,6 +12,7 @@ import {
   type ActorRefType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  RATE_UNIT_META,
   RateTypeEnum,
   type RateType,
 } from "./common.ts";
@@ -39,7 +40,7 @@ export interface Tax {
 export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
-  rate: z.number().meta({ column: true, label: "Rate" }),
+  rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
   type: RateTypeEnum.meta({ column: true, label: "Type" }),
   active: z.boolean().default(true).meta({ column: true, label: "Active" }),
   crms_id: z.int().nullable().default(null),

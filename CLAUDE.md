@@ -202,6 +202,16 @@ total_cents: z.int().meta({ column: true, label: "Total" }),
 - **A rate names its unit** (`unit: "usd" | "percent"`), never mere rate-ness — a
   marker carrying no unit is what shipped every money mirror 100× (root
   `CLAUDE.md`).
+- **…unless the unit belongs to the ROW, in which case it names where to look.**
+  `10.25` is `10.25%` under `type: "percent"` and `$10.25` per unit under
+  `"flat"`, so no static per-field value can be right — one arm would always
+  render wrongly. Those columns spread `RATE_UNIT_META` (`src/schemas/common.ts`,
+  beside `RateTypeEnum`), which carries `unitVia` — a **sibling key resolved
+  against the leaf's own parent object** at render time — and `unitMap`, the
+  per-member unit. The map is the load-bearing half: `unitVia` alone would be
+  `money: boolean` again, a definition with no unit. Four sites today
+  (`PriceModifier.rate`, `TaxRef.rate`, `Discount.rate`, `Tax.rate`), one
+  constant, so a new `RateType` member is one edit.
 - **Computed Typesense fields** have no Firestore field to hang a label on and go
   in `TYPESENSE_ROLLUP_COLUMNS` (`src/schemas/display-columns.ts`) — 19 entries,
   all `deriveOrderDateEnvelope` / `postProcess` output.
@@ -211,7 +221,14 @@ key (Typesense *and* Firestore) is a declared column; **T9** every column compos
 a non-empty heading, no two columns on one surface share one, and no heading ends
 in `Cents`/`Fs`/`At`/`Uid`/`Str`; **T10** the rollup table names real fields and
 shadows no declared column; **T11** a column only ever names a field its
-collection actually indexes.
+collection actually indexes; **T14** every `unitVia` names an enum sibling the
+schema really has, every `unitMap` covers every member of it, and the nineteen
+columns the four annotation sites fan out to are pinned by name — the two
+property arms pass vacuously over the empty set a deleted annotation produces.
+
+Resolving the unit is the **consumer's** job and needs its own value assertion
+there: the schema says `flat` means dollars, it cannot say what `$` the cell
+printed. See `manager/CLAUDE.md` § *Money in collection tables*.
 
 ### Document vs input schemas
 

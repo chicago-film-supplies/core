@@ -5721,6 +5721,30 @@ Zod schema for Quote.
 const QuoteSchema: z.ZodType<Quote>;
 ```
 
+### `RATE_UNIT_META`
+
+The display annotation a **discriminated** rate column carries.
+
+A rate normally names its unit outright — `unit: "usd"` on
+`transactions:cost.unit_cost` says "4dp dollars" and the cell formats it. A
+`rate` beside a {@link RateTypeEnum} cannot: `10.25` is `10.25%` when the
+row's own `type` says `percent` and `$10.25` per unit when it says `flat`. The
+unit is a property of the ROW, not of the field, so no static per-field value
+can express it — one would render the other arm wrongly.
+
+So the annotation names *where to look* (`unitVia`, a sibling key resolved
+against the leaf's own parent object) and *what each value means* (`unitMap`).
+The map is the load-bearing half: a bare `rate: true` would repeat exactly
+what `TypesenseField.money` did — carry a definition with no unit, which
+rendered every money mirror 100× on 2026-08-08.
+
+One constant rather than four copies, so a new `RateType` member is one edit;
+`tests/display-columns.test.ts` T14 fails if the map stops covering the enum.
+
+```ts
+const RATE_UNIT_META: typeLiteral;
+```
+
 ### `REACHED_XERO_STATUSES`
 
 Statuses that have **ever** reached Xero. Includes `void` — see
@@ -9840,6 +9864,30 @@ type ProductTypeType = indexedAccess;
 
 ```ts
 const QuoteId: z.ZodType<string>;
+```
+
+### `RATE_UNIT_META`
+
+The display annotation a **discriminated** rate column carries.
+
+A rate normally names its unit outright — `unit: "usd"` on
+`transactions:cost.unit_cost` says "4dp dollars" and the cell formats it. A
+`rate` beside a {@link RateTypeEnum} cannot: `10.25` is `10.25%` when the
+row's own `type` says `percent` and `$10.25` per unit when it says `flat`. The
+unit is a property of the ROW, not of the field, so no static per-field value
+can express it — one would render the other arm wrongly.
+
+So the annotation names *where to look* (`unitVia`, a sibling key resolved
+against the leaf's own parent object) and *what each value means* (`unitMap`).
+The map is the load-bearing half: a bare `rate: true` would repeat exactly
+what `TypesenseField.money` did — carry a definition with no unit, which
+rendered every money mirror 100× on 2026-08-08.
+
+One constant rather than four copies, so a new `RateType` member is one edit;
+`tests/display-columns.test.ts` T14 fails if the map stops covering the enum.
+
+```ts
+const RATE_UNIT_META: typeLiteral;
 ```
 
 ### `RateType`

@@ -227,6 +227,7 @@ export {
   InvoiceStatusEnum,
   OOSReasonEnum,
   RateTypeEnum,
+  RATE_UNIT_META,
   DocItemTypeEnum,
   DocLineItemTypeEnum,
   DOC_LINE_ITEM_TYPES,

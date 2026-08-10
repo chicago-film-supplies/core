@@ -24,6 +24,7 @@ import {
   Phone,
   PriceFormulaEnum,
   type PriceFormulaType,
+  RATE_UNIT_META,
   RateTypeEnum,
   type RateType,
   StockMethodEnum,
@@ -313,7 +314,7 @@ export const PriceModifier: z.ZodType<PriceModifierType> = z.strictObject({
   // one annotation reads "Tax" under `totals.taxes` and "Transaction Fee" under
   // `totals.transaction_fees`.
   name: z.string().meta({ pii: "none", column: true }),
-  rate: z.number().meta({ column: true, label: "Rate" }),
+  rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
   type: RateTypeEnum,
   amount_cents: z.int().meta({ column: true, label: "Amount" }),
 });
@@ -334,7 +335,7 @@ export const TaxRef: z.ZodType<TaxRefType> = z.strictObject({
   uid: FirestoreId,
   // Tax label ("IL Sales Tax") — see `OrderDocLineItem.name`.
   name: z.string().meta({ pii: "none", column: true }),
-  rate: z.number().meta({ column: true, label: "Rate" }),
+  rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
   type: RateTypeEnum,
 });
 
@@ -392,7 +393,7 @@ function checkDiscountRate(
 
 /** Zod schema for an item discount. */
 export const Discount: z.ZodType<DiscountType> = z.strictObject({
-  rate: z.number().meta({ column: true, label: "Rate" }),
+  rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
   type: RateTypeEnum,
   amount_cents: z.int().min(0).meta({ column: true, label: "Amount" }),
 }).superRefine(checkDiscountRate);

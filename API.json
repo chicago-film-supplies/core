@@ -2816,6 +2816,12 @@
         },
         {
           "kind": "variable",
+          "name": "RATE_UNIT_META",
+          "declaration": "const RATE_UNIT_META: typeLiteral;",
+          "doc": "The display annotation a **discriminated** rate column carries.\n\nA rate normally names its unit outright — `unit: \"usd\"` on\n`transactions:cost.unit_cost` says \"4dp dollars\" and the cell formats it. A\n`rate` beside a {@link RateTypeEnum} cannot: `10.25` is `10.25%` when the\nrow's own `type` says `percent` and `$10.25` per unit when it says `flat`. The\nunit is a property of the ROW, not of the field, so no static per-field value\ncan express it — one would render the other arm wrongly.\n\nSo the annotation names *where to look* (`unitVia`, a sibling key resolved\nagainst the leaf's own parent object) and *what each value means* (`unitMap`).\nThe map is the load-bearing half: a bare `rate: true` would repeat exactly\nwhat `TypesenseField.money` did — carry a definition with no unit, which\nrendered every money mirror 100× on 2026-08-08.\n\nOne constant rather than four copies, so a new `RateType` member is one edit;\n`tests/display-columns.test.ts` T14 fails if the map stops covering the enum."
+        },
+        {
+          "kind": "variable",
           "name": "REACHED_XERO_STATUSES",
           "declaration": "const REACHED_XERO_STATUSES: readonly InvoiceStatusType[];",
           "doc": "Statuses that have **ever** reached Xero. Includes `void` — see\n{@link InvoiceStatusContract.reached_xero}. NOT interchangeable with\n{@link LIVE_IN_XERO_STATUSES}, which is exactly the mistake this pair exists\nto prevent."
@@ -5198,6 +5204,12 @@
           "name": "QuoteId",
           "declaration": "const QuoteId: z.ZodType<string>;",
           "doc": "`quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or\n`{uid_order}:draft` (the working draft). Built in api-cloudrun\n`src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`)."
+        },
+        {
+          "kind": "variable",
+          "name": "RATE_UNIT_META",
+          "declaration": "const RATE_UNIT_META: typeLiteral;",
+          "doc": "The display annotation a **discriminated** rate column carries.\n\nA rate normally names its unit outright — `unit: \"usd\"` on\n`transactions:cost.unit_cost` says \"4dp dollars\" and the cell formats it. A\n`rate` beside a {@link RateTypeEnum} cannot: `10.25` is `10.25%` when the\nrow's own `type` says `percent` and `$10.25` per unit when it says `flat`. The\nunit is a property of the ROW, not of the field, so no static per-field value\ncan express it — one would render the other arm wrongly.\n\nSo the annotation names *where to look* (`unitVia`, a sibling key resolved\nagainst the leaf's own parent object) and *what each value means* (`unitMap`).\nThe map is the load-bearing half: a bare `rate: true` would repeat exactly\nwhat `TypesenseField.money` did — carry a definition with no unit, which\nrendered every money mirror 100× on 2026-08-08.\n\nOne constant rather than four copies, so a new `RateType` member is one edit;\n`tests/display-columns.test.ts` T14 fails if the map stops covering the enum."
         },
         {
           "kind": "typeAlias",

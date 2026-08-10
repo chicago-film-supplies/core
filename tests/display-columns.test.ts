@@ -40,7 +40,7 @@ import {
 } from "../src/schemas/mod.ts";
 import { buildTypesenseColumns } from "../src/schemas/display-columns.ts";
 import { typesenseSchemas } from "../src/schemas/typesense/mod.ts";
-import { collectDisplayColumns } from "../src/schemas/zod-walk.ts";
+import { collectDisplayColumns, collectLeafPaths, enumValues } from "../src/schemas/zod-walk.ts";
 
 /** One `[key[], schema]` per unique schema — the record aliases most of them. */
 function uniqueSchemas(): Array<[string[], z.ZodType]> {
@@ -247,7 +247,143 @@ Deno.test("T11: every Typesense column names a field the collection declares", (
   assertEquals(invented.sort(), [], "Columns for unindexed fields:\n" + invented.join("\n"));
 });
 
+// ── T14: a discriminated unit names a real sibling, and covers it ────
+
+/**
+ * Every declared column that carries `unitVia`, paired with the enum members of
+ * the sibling it names.
+ *
+ * Built on `collectLeafPaths` rather than the column list, because the
+ * discriminator is deliberately NOT a column — `PriceModifier.type` and
+ * `Discount.type` carry no `column: true`, so a reader that looked for the
+ * sibling among the declared columns would find nothing and conclude the
+ * annotation was broken. It has to be looked up in the schema itself.
+ */
+function discriminatedUnitColumns(): Array<{
+  where: string;
+  column: string;
+  sibling: string;
+  unitMap: Record<string, unknown>;
+  members: string[] | null;
+}> {
+  const out: Array<{
+    where: string;
+    column: string;
+    sibling: string;
+    unitMap: Record<string, unknown>;
+    members: string[] | null;
+  }> = [];
+  for (const [keys, schema] of uniqueSchemas()) {
+    // Keyed WITHOUT container markers, the spelling a column path uses.
+    const leaves = new Map(
+      collectLeafPaths(schema).leaves.map((l) => [l.path.replaceAll("[]", "").replaceAll(".<key>", ""), l]),
+    );
+    for (const col of collectDisplayColumns(schema).columns) {
+      const via = col.meta.unitVia;
+      if (typeof via !== "string") continue;
+      const parent = col.path.split(".").slice(0, -1).join(".");
+      const siblingPath = parent ? `${parent}.${via}` : via;
+      const sibling = leaves.get(siblingPath);
+      out.push({
+        where: keys[0],
+        column: col.path,
+        sibling: siblingPath,
+        unitMap: (col.meta.unitMap ?? {}) as Record<string, unknown>,
+        members: sibling && sibling.type === "enum" ? enumValues(sibling.node as z.ZodType<string>) : null,
+      });
+    }
+  }
+  return out;
+}
+
+Deno.test("T14: every `unitVia` names an enum sibling the schema actually has", () => {
+  // A static `unit` cannot express a rate whose unit is a property of the ROW —
+  // `10.25` is `10.25%` under `type: "percent"` and `$10.25` under `"flat"`. So
+  // the annotation names a sibling instead, and the sibling has to exist: a
+  // rename that moved or dropped `type` would otherwise leave the column
+  // silently unitless again, which is precisely the state this replaced.
+  const broken = discriminatedUnitColumns()
+    .filter((c) => c.members === null)
+    .map((c) => `${c.where}: ${c.column} → ${c.sibling}`);
+  assertEquals(broken.sort(), [], "unitVia naming a missing or non-enum sibling:\n" + broken.join("\n"));
+});
+
+Deno.test("T14: every `unitMap` covers every member of the enum it discriminates", () => {
+  // THE ARM THAT BITES. `unitVia` alone would repeat `TypesenseField.money`
+  // exactly — a marker that says "look here" while carrying no unit, which is
+  // how every money mirror shipped 100×. The map is what supplies the unit, so
+  // a `RateType` gaining a third member must fail here rather than render that
+  // member with no unit at all.
+  const uncovered: string[] = [];
+  for (const c of discriminatedUnitColumns()) {
+    for (const member of c.members ?? []) {
+      if (typeof c.unitMap[member] !== "string") {
+        uncovered.push(`${c.where}: ${c.column} has no unit for ${c.sibling} = "${member}"`);
+      }
+    }
+  }
+  assertEquals(uncovered.sort(), [], "unitMap does not cover its discriminator:\n" + uncovered.join("\n"));
+});
+
+Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
+  // Presence, not just consistency: both arms above pass vacuously over an empty
+  // set, and an empty set is exactly what deleting `...RATE_UNIT_META` from a
+  // schema produces. Four annotation sites (`PriceModifier`, `TaxRef`,
+  // `Discount`, `Tax`) fan out to these nineteen columns.
+  const declared = discriminatedUnitColumns().map((c) => `${c.where}:${c.column}`).sort();
+  assertEquals(declared, [
+    "credit-note:items.price.discount.rate",
+    "credit-note:items.price.taxes.rate",
+    "credit-note:totals.taxes.rate",
+    "invoice:items.price.discount.rate",
+    "invoice:items.price.taxes.rate",
+    "invoice:totals.taxes.rate",
+    "invoice:totals.transaction_fees.rate",
+    "order:items.price.discount.rate",
+    "order:items.price.taxes.rate",
+    "order:items.price.taxes_base.rate",
+    "order:totals.taxes.rate",
+    "order:totals.transaction_fees.rate",
+    "product:component_of.price.taxes.rate",
+    "product:components.price.taxes.rate",
+    "product:price.taxes.rate",
+    "tax:rate",
+    "webshop-product:component_of.price.taxes.rate",
+    "webshop-product:components.price.taxes.rate",
+    "webshop-product:price.taxes.rate",
+  ]);
+});
+
 // ── Fail-closed companions ───────────────────────────────────────────
+
+Deno.test("companion: T14 reports a unitMap that has stopped covering its enum", () => {
+  // Run the same two properties against a schema whose map omits an arm. If T14
+  // ever degraded into "a unitMap exists", this stays green and the uncovered
+  // member ships rendering a bare number.
+  const partial = z.strictObject({
+    rate: z.number().meta({ column: true, label: "Rate", unitVia: "type", unitMap: { percent: "percent" } }),
+    type: z.enum(["percent", "flat"]),
+  });
+  const [col] = collectDisplayColumns(partial).columns;
+  const sibling = collectLeafPaths(partial).leaves.find((l) => l.path === "type")!;
+  const members = enumValues(sibling.node as z.ZodType<string>);
+  const map = col.meta.unitMap as Record<string, unknown>;
+  assertEquals(members, ["percent", "flat"]);
+  assertEquals(
+    members.filter((m) => typeof map[m] !== "string"),
+    ["flat"],
+    "the uncovered member must be reported",
+  );
+});
+
+Deno.test("companion: T14 reports a unitVia naming a sibling that is not there", () => {
+  const orphan = z.strictObject({
+    rate: z.number().meta({ column: true, label: "Rate", unitVia: "kind", unitMap: { percent: "percent" } }),
+    type: z.enum(["percent", "flat"]),
+  });
+  const paths = new Set(collectLeafPaths(orphan).leaves.map((l) => l.path));
+  assertEquals(paths.has("kind"), false, "the named sibling must be absent for this companion to mean anything");
+});
 
 Deno.test("companion: an unlabelled column is reported, not composed from its path", () => {
   // The whole design rests on labels being DECLARED. If a future edit added a
