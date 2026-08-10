@@ -76,7 +76,20 @@ export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<Fi
     if (typeof v._seconds === "number" && typeof v._nanoseconds === "number") return true;
     return false;
   },
-).meta({ [FIRESTORE_TIMESTAMP_META]: true });
+).meta({
+  [FIRESTORE_TIMESTAMP_META]: true,
+  // zod-to-openapi cannot infer a JSON schema for a `z.custom`, so it reads this
+  // for every usage and throws `UnknownZodTypeError` without it. It lives HERE
+  // rather than being injected by the API at boot — which is where it used to
+  // live, behind `if (!z.globalRegistry.has(FirestoreTimestamp))`. That guard
+  // meant "has no meta", so the moment this type carried ANY annotation the
+  // representation stopped being registered; and it could only ever cover the
+  // base instance, never the `.meta()` clones on `TimestampFields`. Meta MERGES
+  // through a clone, so declaring it at the source covers both.
+  type: "string",
+  format: "date-time",
+  description: "Firestore Timestamp (serialized as an ISO datetime in the spec).",
+});
 
 /**
  * Standard timestamp fields present on most documents.
