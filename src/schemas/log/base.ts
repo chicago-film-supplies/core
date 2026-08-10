@@ -6,9 +6,7 @@
  * msg-specific payload + msg literal.
  *
  * `user_id` carries `pii: "none"` by design — opaque internal Firestore
- * uids are not hashed in logs. Rationale (settled in the logger PII
- * planning session, see `.claude/HANDOFF-logger-pii-typed-records.md` in
- * api-cloudrun):
+ * uids are not hashed in logs. Rationale:
  *
  * - **GDPR**: hashing with a key the controller retains is *pseudonymization*
  *   (Recital 26 + Art 4(5)), not anonymization — stays in scope. The real
