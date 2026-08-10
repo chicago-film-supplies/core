@@ -19852,9 +19852,15 @@ Derive each order-scoped invoice line's sync status against the CURRENT order
 projection — no stored flag (minimal-state, derived). A line is `out_of_sync`
 when it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same
 `path`, ignoring the invoice-only override fields
-({@link INVOICE_ONLY_ITEM_FIELDS}); otherwise `in_sync`. Consumed by the
-manager to badge lines and offer per-line/whole resync (see
-{@link resyncInvoiceLines}).
+({@link INVOICE_ONLY_ITEM_FIELDS}); otherwise `in_sync`. Comparison is
+{@link invoiceItemsMatch}. Surfaced by `GET /invoices/{uid}/sync-status`, to
+badge lines and offer per-line/whole resync (see {@link resyncInvoiceLines}).
+
+⚠️ **Meaningful only where the invoice is hung on the SAME divider skeleton as
+its order** — it is keyed on `path`, so if the two trees disagree structurally
+no pair is ever compared and every line reports both "missing" and "removed"
+with `differs` at exactly 0. Check {@link invoiceScopeDividersMatch} first; a
+`differs` of 0 beside two large counts is the tell.
 
 Keyed by the full, divider-scoped `path` (`join("/")`), matching what the
 invoice stores. Scoped to one order divider; a multi-order invoice merges the
