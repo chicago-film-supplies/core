@@ -2083,3 +2083,29 @@ Deno.test("adoptOrderDividerStructure: an order line the invoice does not bill i
 });
 
 const KEY_B_GROUPED = [ORDER_DIV_1, DEST_1, GROUP_1, ITEM_2].join("/");
+
+Deno.test("adoptOrderDividerStructure: reads a parent from a PRE-NORMALIZED path too", () => {
+  // The CRMS invoice webhook calls this while its items still carry the raw
+  // ancestry chain — `[principalUid]` for an accessory, `[]` for a top-level
+  // line — because `computeInvoiceItemPaths` runs afterwards. A `path.at(-2)`
+  // parent read answers `undefined` for both and would drop every invoice-only
+  // accessory to the root of the scope.
+  const order = groupedOrderItems();
+  const principalUid = ITEM_1;
+  const accessoryUid = "custom-00000000-0000-4000-8000-00000000c003";
+  const preNormalized: InvoiceDocItemType[] = [
+    ...buildOrderScopedItems([{ ...RESYNC_LINE_A, path: [] } as LineItem], ORDER_DIV_1)
+      .map((it) => ({ ...it, path: [] })),
+    makeItem({ uid: accessoryUid, type: "sale", name: "Bulb", path: [principalUid] }) as unknown as InvoiceDocItemType,
+  ];
+  const { items } = adoptOrderDividerStructure(preNormalized, order, ORDER_DIV_1);
+  assertEquals(
+    items.find((it) => it.uid === accessoryUid)?.path,
+    [ORDER_DIV_1, DEST_1, GROUP_1, principalUid, accessoryUid],
+    "the invoice-only accessory lost its principal",
+  );
+  // Still a fixed point of the normalizer the webhook runs next.
+  const normalized = computeInvoiceItemPaths([orderDivider, ...items]);
+  assertEquals(validateInvoiceItemPaths(normalized), []);
+  assertEquals(validateInvoiceItemUniqueness(normalized), []);
+});

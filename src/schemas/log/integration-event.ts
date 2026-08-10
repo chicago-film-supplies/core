@@ -17,7 +17,21 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 /** Msg literals this archetype absorbs. */
 export const INTEGRATION_EVENT_MSGS = [
   "crms_invoice_items_uniqueness_violation",
-  "crms_invoice_multidest_flat",
+  // A CRMS invoice line pairs to its source-order line by `uid`, and that uid
+  // identifies more than one line on at least one side — so the k-th-occurrence
+  // tiebreak `adoptOrderDividerStructure` applies is a guess, not a fact (`uid`
+  // is not a row identity; it repeats within one document on 18% of prod
+  // orders). Warn rather than throw: the guess is stable across re-deliveries
+  // because CRMS preserves line order, and refusing the whole invoice over an
+  // ambiguity that resolves the same way every time would be worse. Carries
+  // `invoice_number`, `crms_invoice_id`, `count` and `uids`. api-cloudrun#480.
+  //
+  // It replaces `crms_invoice_multidest_flat`, which warned that a
+  // multi-destination order's invoice had been left FLAT because synthesizing
+  // structure from CRMS data is unsound. Nothing is synthesized any more — the
+  // order's whole divider skeleton is adopted — so the fallback it reported no
+  // longer exists.
+  "crms_invoice_ambiguous_line_pairing",
   "crms_invoice_multiple_orders_found",
   // A CRMS webhook resolved a doc by an external id via a first-wins
   // `where(field,"==",…).docs[0]` query and found MORE THAN ONE match — crms_id

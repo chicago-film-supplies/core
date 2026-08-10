@@ -1027,8 +1027,21 @@ export function adoptOrderDividerStructure(
   /** Key `""` is the root of the order scope. */
   const unpairedByParent = new Map<string, InvoiceDocItemType[]>();
   for (const it of unpaired) {
+    // The last segment that is not the item's own uid. Deliberately NOT
+    // `path.at(-2)`: that reads a parent only from a SELF-INCLUSIVE path, and
+    // the CRMS invoice webhook calls this while its items still carry the
+    // pre-normalized ancestry chain (`[principalUid]`, or `[]`) that
+    // `computeInvoiceItemPaths` has not yet turned into a full path. This form
+    // answers correctly for both, and for a top-level line under a divider it
+    // returns the divider — which is exactly the parent it hangs from.
     const rel = stripOrderPrefix(it.path ?? [], orderDividerUid);
-    const claimed = rel.length >= 2 ? rel[rel.length - 2] : "";
+    let claimed = "";
+    for (let k = rel.length - 1; k >= 0; k--) {
+      if (rel[k] !== it.uid) {
+        claimed = rel[k];
+        break;
+      }
+    }
     const parent = claimed !== "" && surviving.has(claimed) ? claimed : "";
     const bucket = unpairedByParent.get(parent);
     if (bucket) bucket.push(it);
