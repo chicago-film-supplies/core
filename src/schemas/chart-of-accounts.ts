@@ -104,7 +104,6 @@ export interface ChartOfAccounts {
    */
   xero_id: string | null;
   description?: string;
-  default_tax_profile: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -122,7 +121,17 @@ export const ChartOfAccountsSchema: z.ZodType<ChartOfAccounts> = z.strictObject(
   status: COAStatus.meta({ column: true, label: "Status" }),
   xero_id: z.uuid().nullable(),
   description: z.string().optional(),
-  default_tax_profile: z.string(),
+  // `default_tax_profile` was removed here (api-cloudrun#435). It had one
+  // writer (`scripts/reconcile-chart-of-accounts.ts`) and **zero readers**, was
+  // typed `z.string()` rather than an enum, and emitted a THIRD tax vocabulary
+  // (`tax_chicago_rental_tax`…) that agreed with neither `TaxProfileEnum` nor
+  // the live COA→tax map — including an outright disagreement on 4140.
+  //
+  // ⚠️ This object is strict, so the field must be gone from the STORED docs
+  // before any writer touches one — an undeclared key fails the parse, the same
+  // way a `roles/{name}` doc does. The stripper is
+  // `api-cloudrun/scripts/cleanup-coa-default-tax-profile.ts`, and it runs in
+  // the same sitting as the pin bump that takes this schema.
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),

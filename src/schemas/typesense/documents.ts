@@ -107,7 +107,6 @@ export interface ChartOfAccountsDocument {
   code: number;
   code_str?: string;
   type: string;
-  default_tax_profile: string;
   description?: string;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;

@@ -19,7 +19,6 @@ const make = (over: Record<string, unknown> = {}) => ({
   class: "Revenue",
   status: "Active",
   xero_id: "5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
-  default_tax_profile: "tax_chicago_rental_tax",
   version: 0,
   created_by: { uid: "testuser100000000000", name: "Test User" },
   updated_by: { uid: "testuser100000000000", name: "Test User" },

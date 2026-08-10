@@ -437,13 +437,12 @@ export type PriceFormulaType = typeof PRICE_FORMULAS[number];
 /** Zod schema for PriceFormulaType. */
 export const PriceFormulaEnum: z.ZodType<PriceFormulaType> = z.enum(PRICE_FORMULAS);
 
-const ITEM_TAX_PROFILES = [
-  "tax_none", "tax_chicago_rental_tax", "tax_chicago_sales_tax", "tax_rantoul_sales_tax",
-] as const;
-/** Allowed values for item-level tax profile. */
-export type ItemTaxProfileType = typeof ITEM_TAX_PROFILES[number];
-/** Zod schema for ItemTaxProfileType. */
-export const ItemTaxProfileEnum: z.ZodType<ItemTaxProfileType> = z.enum(ITEM_TAX_PROFILES);
+// `ITEM_TAX_PROFILES` / `ItemTaxProfileType` / `ItemTaxProfileEnum` were removed
+// here (api-cloudrun#435). They were a THIRD tax vocabulary beside
+// `TAX_PROFILES` and the live COA→tax map, exported from `mod.ts` and used by
+// nothing — no schema field was typed with them, and the one place their string
+// values appeared was `chart-of-accounts.default_tax_profile`, which was
+// `z.string()` and is deleted in the same change.
 
 const INCLUSION_TYPES = ["default", "mandatory", "optional"] as const;
 /** Allowed values for component inclusion type. */

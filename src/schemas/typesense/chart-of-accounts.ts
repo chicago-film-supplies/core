@@ -3,11 +3,11 @@ import type { TypesenseCollectionConfig } from "./types.ts";
 /** Typesense collection config for chart of accounts. */
 export const chartOfAccounts: TypesenseCollectionConfig = {
   alias: "chart-of-accounts",
-  version: 4,
+  version: 5,
   firestoreCollection: "chart-of-accounts",
-  collectionName: "chart-of-accounts_v4",
+  collectionName: "chart-of-accounts_v5",
   schema: {
-    name: "chart-of-accounts_v4",
+    name: "chart-of-accounts_v5",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -15,7 +15,6 @@ export const chartOfAccounts: TypesenseCollectionConfig = {
       { name: "code", type: "int32", sort: true, index: true, facet: true },
       { name: "code_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "type", type: "string", facet: true },
-      { name: "default_tax_profile", type: "string", facet: false },
       { name: "description", type: "string", stem: true, optional: true },
       { name: "created_by", type: "object", optional: true },
       { name: "created_by.uid", type: "string", facet: true, optional: true },
