@@ -2594,6 +2594,26 @@ interface EventEnvelope {
 }
 ```
 
+### `FIRESTORE_TIMESTAMP_META`
+
+Meta key marking a node as the {@link FirestoreTimestamp} custom type.
+
+`isDateLikeNode` used to recognise it by **instance identity** — the only
+handle a `z.custom()` offers, since its `def.type` is the uninformative
+`"custom"`. That was safe exactly as long as nobody annotated a timestamp
+field, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a
+different instance, the identity test fails, and a `created_at` column
+silently stops rendering as a date and starts printing a raw epoch. Declaring
+display columns means annotating `created_at` / `updated_at` / `last_order`,
+so the identity test had to go.
+
+A meta marker survives the clone because `.meta()` **merges**: the clone
+carries both this key and whatever the annotation added.
+
+```ts
+const FIRESTORE_TIMESTAMP_META: "firestoreTimestamp";
+```
+
 ### `FULFILLMENT_LINE_ITEM_TYPES`
 
 Line item types a fulfillment carries — the `fulfillable: true` members.
@@ -8812,6 +8832,49 @@ Whether an item type can be picked off a shelf — the `fulfillable` axis.
 NOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is
 not fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`
 drew exactly that distinction by hand and read as if they disagreed.
+
+### `isIntegerSafeLeaf(node: z.ZodType): boolean`
+
+Can this leaf hold a non-integer?
+
+The question a Typesense `int32`/`int64` declaration asks of the schema
+behind it. One fractional value at such a field does not fail its own
+document — it aborts the import for the **entire collection**, and the
+previous index keeps serving queries, so nothing looks wrong until someone
+checks the alias (api-cloudrun#451, #460).
+
+## Three shapes count as safe, and reading only one of them is a live trap
+
+1. **`z.int()`** — `def.format === "safeint"`, no checks.
+2. **`z.number().int()`** — no `def.format` at all; the format lives in a
+   `checks[]` entry as `{ check: "number_format", format: "safeint" }`.
+   ⚠️ Reading `def.format` alone reports every field spelled this way as
+   unsafe, and `src/schemas/` uses both spellings today. A predicate that
+   lands red on correct fields gets an allowlist, and the allowlist is what
+   the guard was supposed to replace.
+3. **A numeric literal** — `z.literal(4000)`, and by extension a union of
+   them (`COARevenueEnum`), which `collectLeafPaths` emits as one leaf per
+   member. Every value is fixed, so integrality is decided by inspection.
+   Retyping those to `z.int()` would DELETE the enum to satisfy a check,
+   which is the wrong direction — 4 of the 126 int declarations in the
+   configs are backed this way.
+
+`z.number().multipleOf(1)` is deliberately **not** safe. It is integral in
+effect and not declared so: `multipleOf` is a numeric refinement whose
+argument nothing constrains, and accepting it means this predicate now has an
+opinion about arithmetic rather than about a declaration. Nothing in
+`src/schemas/` spells it that way.
+
+Callers pass an already-unwrapped leaf — {@link collectLeafPaths}'s
+`leaf.node`, which has been walked through every transparent wrapper and pipe.
+A `.optional()` or `.nullable()` around an int does not make it fractional,
+and this function does no unwrapping of its own precisely so a caller cannot
+accidentally ask it about a wrapper.
+
+**It says nothing about timestamps.** `FirestoreTimestamp` is a `z.custom`,
+so it answers `false` here — correctly, because it is not a number. The 73
+declarations backed by one are exempted structurally by their callers, on the
+`firestoreTimestamp` meta marker rather than on a name.
 
 ### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem`
 

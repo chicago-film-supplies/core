@@ -1,5 +1,15 @@
 /**
- * Typesense field coverage — **can a declared field ever hold a value?**
+ * Typesense field coverage — **three questions about a declared field.**
+ *
+ * | question | arm |
+ * |---|---|
+ * | can it ever hold a value? | resolvability + not-stripped-at-index-time |
+ * | is it referenced by something that renders? | displayDefaults |
+ * | can the value it holds be one Typesense refuses? | integer parity + its inverse |
+ *
+ * The arms are named by their question rather than numbered, because the file
+ * has outgrown two of them and an index is a name that goes stale the moment
+ * one is added in the middle.
  *
  * The Firestore side of this question has had an answer since 2026-08-03:
  * `api-cloudrun/tests/unit/firestoreIndexCoverage.test.ts`, the *spec ⊆ schema*
@@ -10,7 +20,7 @@
  * | declaration | landed | dead because |
  * |---|---|---|
  * | `orders:items.total_price_cents` | 2026-03-13 | the order item's field is `price.total_cents`; `total_price` is the **bookings** name. The correct `items.price.*` block landed five days later BESIDE it, and nobody removed the first. Renamed `→ _cents` and marked `money: true` by later sweeps, which made a field nothing writes look deliberately curated. |
- * | six `query_by_*` across five collections | 2026-03→ | deleted from every document by `deleteQueryByFields` — see arm 2. Four carried `facet: true`. |
+ * | six `query_by_*` across five collections | 2026-03→ | deleted from every document by `deleteQueryByFields` — see the strip arm. Four carried `facet: true`. |
  * | `cards:date`, `cards:date_epoch`, `cards:destination.coordinates` | 2025-12 | written against a `Card` shape that never existed (`dates.start`/`date_fs`, geopoint nested under `destination.address`). `date_epoch` was `null` on all 1,097 prod cards; the map view's geopoint was never there at all. |
  *
  * **None of them failed anything.** A declared field that no document populates
@@ -21,11 +31,15 @@
  *
  * ## What each arm can and cannot see
  *
- * The two arms catch disjoint classes, and either alone is a false sense of
+ * The arms catch disjoint classes, and any one alone is a false sense of
  * coverage. `items.total_price_cents` resolves to nothing in Zod but is not
  * stripped; the six `query_by_*` resolve in Zod **perfectly well** (they are
  * real stored Firestore fields, with real composite indexes) and are invisible
- * to arm 1 entirely.
+ * to the resolvability arm entirely. And a field can resolve, survive the strip,
+ * be referenced by a live column — and still take the collection offline,
+ * because the leaf it resolves to is a `z.number()` under an `int64`
+ * declaration. That is the integer-parity arm, and it is the only one whose
+ * failure mode is collection-wide rather than field-wide.
  *
  * ## It tests resolvability, not population
  *
@@ -44,13 +58,15 @@
  * `tests/unit/`" rule does not transfer here.
  */
 import { assertEquals } from "@std/assert";
-import type { z } from "zod";
+import { z } from "zod";
 
+import { FIRESTORE_TIMESTAMP_META, FirestoreTimestamp } from "../src/schemas/common.ts";
+import { InvoiceSchema } from "../src/schemas/invoice.ts";
 import { schemas } from "../src/schemas/mod.ts";
 import { typesenseSchemas } from "../src/schemas/typesense/mod.ts";
 import { isStrippedAtIndexTime } from "../src/schemas/typesense/types.ts";
 import type { TypesenseField } from "../src/schemas/typesense/types.ts";
-import { collectLeafPaths } from "../src/schemas/zod-walk.ts";
+import { collectLeafPaths, getNodeMeta, isIntegerSafeLeaf } from "../src/schemas/zod-walk.ts";
 
 /**
  * Fields **computed at index time**, keyed `"<alias>:<field>"` with the
@@ -181,13 +197,13 @@ function storageFor(alias: string): z.ZodType {
   return storage;
 }
 
-// ── Arm 0: the walk must be complete, or arm 1 is unsound ────────────
+// ── The walk must be complete, or every arm below is unsound ────────
 
 Deno.test("typesense coverage: every storage schema walks with no unhandled node", () => {
   // `collectLeafPaths` fails closed — a node type it does not recognise is
   // pushed to `unhandled` rather than emitted as a leaf, because emitting it
   // would silently swallow its whole subtree and make every path under it look
-  // unresolvable. A non-empty `unhandled` means arm 1's verdicts are not
+  // unresolvable. A non-empty `unhandled` means every verdict below is not
   // trustworthy, so it is checked first and separately.
   const broken: string[] = [];
   for (const alias of Object.keys(typesenseSchemas)) {
@@ -202,7 +218,7 @@ Deno.test("typesense coverage: every storage schema walks with no unhandled node
   );
 });
 
-// ── Arm 1: resolvability ────────────────────────────────────────────
+// ── Resolvability: can a declared field ever hold a value? ──────────
 
 Deno.test("typesense coverage: every declared field resolves against the storage schema", () => {
   const dead: string[] = [];
@@ -257,10 +273,10 @@ Deno.test("typesense coverage: every DERIVED_FIELDS entry names its producer", (
   );
 });
 
-// ── Arm 2: not stripped on the way to the index ─────────────────────
+// ── Not stripped on the way to the index ────────────────────────────
 
 Deno.test("typesense coverage: no declared field is deleted at index time", () => {
-  // Invisible to arm 1 by construction: `query_by_*` fields are real stored
+  // Invisible to the resolvability arm by construction: `query_by_*` fields are real stored
   // Firestore reverse-index arrays and resolve in Zod perfectly well. They are
   // dead in Typesense for a completely different reason — `deleteQueryByFields`
   // removes them from every document AFTER `stripUndeclaredFields` has kept
@@ -286,11 +302,11 @@ Deno.test("typesense coverage: no declared field is deleted at index time", () =
   );
 });
 
-// ── Arm 3: display defaults name declared fields ────────────────────
+// ── Display defaults name declared fields ───────────────────────────
 
 Deno.test("typesense coverage: every displayDefaults reference names a declared field", () => {
   // Green the day it landed, unlike the two arms above, and kept because it
-  // closes the hole those two OPEN: deleting a dead field is exactly the moment
+  // closes the hole the two above OPEN: deleting a dead field is exactly the moment
   // a column, facet or sort still naming it becomes a reference to nothing.
   // `cards.displayDefaults.columns` held `"date"` — pointing at a field that had
   // never held a value — right up to the commit that removed it.
@@ -327,7 +343,7 @@ Deno.test("typesense coverage: every displayDefaults reference names a declared 
 
 // ── Fail-closed companions ──────────────────────────────────────────
 //
-// Both arms are assertions that a set is EMPTY, and an empty set is what a
+// Every arm here asserts that a set is EMPTY, and an empty set is what a
 // checker that has quietly stopped checking also produces. These run each arm
 // against the exact declarations that motivated it and assert it reports them —
 // so a refactor that makes the resolver accept everything fails here rather than
@@ -375,4 +391,315 @@ Deno.test("typesense coverage companion: the strip rule reports a query_by_* fie
   // declaration the code would have kept.
   assertEquals(isStrippedAtIndexTime("sources.query_by_uid"), false);
   assertEquals(isStrippedAtIndexTime("items.price.total_cents"), false);
+});
+
+// ── Integer parity: can the value it holds be one Typesense refuses? ─
+//
+// A different question from arms 1–3, on the same subject. Those ask whether a
+// declared field can ever hold a value; this asks whether the value it holds can
+// be one Typesense will refuse.
+//
+// The asymmetry is what makes it worth its own arm. A `string` declaration
+// backed by a loose schema indexes whatever it is given. An `int32`/`int64`
+// declaration backed by a `z.number()` is a promise the schema does not keep,
+// and breaking it fails the import for the WHOLE collection rather than for the
+// offending document — while the previous index keeps answering queries, so
+// nothing looks wrong. Dev's `orders` alias sat on the pre-cents schema for
+// three days that way (api-cloudrun#460), and both prod collections before it
+// (#451), each time over a handful of `1249.2`-shaped values.
+//
+// It is deliberately a check on the DECLARATION, not on the corpus. The corpus
+// was measured separately and found clean in both environments
+// (api-cloudrun `scripts/audit-typesense-int-fields.ts`, 18k documents each);
+// that proves today, this proves every future document.
+
+/** Typesense field types that promise an integer. */
+const INT_TYPES: ReadonlySet<string> = new Set(["int32", "int32[]", "int64", "int64[]"]);
+
+/** Typesense field types that permit a fraction. */
+const FLOAT_TYPES: ReadonlySet<string> = new Set(["float", "float[]"]);
+
+/**
+ * The storage leaves a Typesense field name resolves to, in the same spelling
+ * the resolvability arm uses — container markers stripped.
+ */
+function leavesFor(storage: z.ZodType, fieldName: string) {
+  return collectLeafPaths(storage).leaves.filter(
+    (leaf) => leaf.path.replaceAll("[]", "").replaceAll(".<key>", "") === fieldName,
+  );
+}
+
+/**
+ * A leaf exempt from the integer rule.
+ *
+ * **One structural rule, and no named entries.** `FirestoreTimestamp` is a
+ * `z.custom`, so it is not integer-safe by inspection — but every one of these
+ * reaches the index as `Timestamp.toMillis()`, which is whole by construction.
+ * There are 73 such declarations, and listing them would be a table nobody could
+ * keep true.
+ *
+ * Keyed on the `firestoreTimestamp` meta marker rather than on a `*_fs` name
+ * suffix, for two measured reasons: the marker survives a `.meta()` clone (the
+ * whole reason it exists — annotating `created_at` with a display label produces
+ * a different instance of the same type), and `organizations:last_order` /
+ * `out-of-service:canceled_at` are timestamps whose NAMES a suffix rule would
+ * miss entirely.
+ */
+function isTimestampBacked(leaf: { meta: Record<string, unknown> }): boolean {
+  return leaf.meta[FIRESTORE_TIMESTAMP_META] === true;
+}
+
+/**
+ * Declarations of `fields` whose backing storage can hold a non-integer.
+ *
+ * ⚠️ **ALL leaves must be safe, not ANY**, and this is the single most
+ * load-bearing line in the arm. `tags:count` resolved to TWO leaves — a
+ * `z.record(…FieldValue…)` and a `z.number()` — and under an ANY rule,
+ * tightening the number arm alone would have gone green while the record arm
+ * still admitted a map into an `int32` field that is also the collection's
+ * `default_sorting_field`. ANY is the natural "make it green" refactor, and it
+ * is the `Tag.count` hole exactly.
+ *
+ * Takes its inputs explicitly, like `unresolvedFields`, so the companions can
+ * run it against deliberately-wrong declarations and assert it reports.
+ */
+function fractionalRiskFields(storage: z.ZodType, fields: TypesenseField[]): string[] {
+  const risky: string[] = [];
+  for (const field of fields) {
+    if (!INT_TYPES.has(field.type)) continue;
+    const leaves = leavesFor(storage, field.name);
+    if (leaves.length === 0) continue; // the resolvability arm's question, not this one
+    const unsafe = leaves.filter((leaf) =>
+      !isTimestampBacked(leaf) && !isIntegerSafeLeaf(leaf.node)
+    );
+    if (unsafe.length > 0) risky.push(field.name);
+  }
+  return risky;
+}
+
+Deno.test("typesense integer parity: every int declaration is backed by an integer-safe leaf", () => {
+  const risky: string[] = [];
+  for (const [alias, config] of Object.entries(typesenseSchemas)) {
+    for (const name of fractionalRiskFields(storageFor(alias), config.schema.fields)) {
+      risky.push(`${alias}:${name}`);
+    }
+  }
+
+  assertEquals(
+    risky.sort(),
+    [],
+    "These fields are declared int32/int64 in a Typesense collection config, " +
+      "but the backing Zod schema would accept a fractional value at them. One " +
+      "such value does not fail its own write — it fails the next rebuild of " +
+      "the ENTIRE collection, while the stale index keeps serving.\n\n" +
+      "Fix by tightening the storage leaf to `z.int()` (it infers `number`, so " +
+      "no interface moves), not by widening the declaration to `float` — that " +
+      "flips the default sort direction and sorts numbers lexically.\n\n" +
+      risky.join("\n"),
+  );
+});
+
+// ── The inverse: a rate is a float ──────────────────────────────────
+
+Deno.test("typesense integer parity: no rate-family field is declared as an integer", () => {
+  // This rule lived only in a docblock on `TypesenseField.money`, and it is what
+  // stops someone running arm 4 backwards. A rate is NOT money and NOT a count:
+  // it holds 4dp to match Xero's `DiscountRate`, so declaring one `int32` would
+  // quantize every discount to whole percent — the beta.117 defect, where a
+  // 100-unit $6.39 purchase reported $0.06/unit.
+  //
+  // ⚠️ `crms_rate_id` and `crms_linked_replacement_rate_id` contain "rate" and
+  // are record IDs. They are integers, correctly, and are excluded by name here
+  // — which is the honest cost of a name-based rule and the reason arm 4 is
+  // structural instead.
+  const misdeclared: string[] = [];
+  for (const [alias, config] of Object.entries(typesenseSchemas)) {
+    for (const field of config.schema.fields) {
+      const last = field.name.split(".").at(-1) ?? "";
+      const isRate = (last === "rate" || last.endsWith("_rate") || last.endsWith("_cost")) &&
+        !last.endsWith("_rate_id") && !last.endsWith("_id");
+      if (!isRate) continue;
+      if (INT_TYPES.has(field.type)) misdeclared.push(`${alias}:${field.name} (${field.type})`);
+    }
+  }
+
+  assertEquals(
+    misdeclared.sort(),
+    [],
+    "A rate carries 4 decimal places to match Xero's DiscountRate and is not " +
+      "money and not a count. Declaring one as an integer coarsens every value " +
+      "it holds:\n" + misdeclared.join("\n"),
+  );
+});
+
+// ── Fail-closed companions for the two integer arms ─────────────────
+
+Deno.test("typesense integer parity companion: the predicate reads BOTH Zod 4 spellings", () => {
+  // `z.int()` puts the format on the def; `z.number().int()` puts it in a
+  // `checks[]` entry and leaves `def.format` undefined. Both spellings are live
+  // in `src/schemas/`, so reading only the first lands the arm RED on correct
+  // fields — and a red arm on correct fields acquires an allowlist, which is
+  // what the arm exists to replace.
+  assertEquals(isIntegerSafeLeaf(z.int()), true, "z.int()");
+  assertEquals(isIntegerSafeLeaf(z.number().int()), true, "z.number().int()");
+  assertEquals(isIntegerSafeLeaf(z.int32()), true, "z.int32()");
+  assertEquals(isIntegerSafeLeaf(z.int().min(0)), true, "z.int().min(0)");
+
+  // Negative control — the whole point is that these are distinguishable.
+  assertEquals(isIntegerSafeLeaf(z.number()), false, "z.number()");
+  assertEquals(isIntegerSafeLeaf(z.number().min(0)), false, "z.number().min(0)");
+  assertEquals(isIntegerSafeLeaf(z.string()), false, "z.string()");
+  assertEquals(isIntegerSafeLeaf(z.boolean()), false, "z.boolean()");
+
+  // Integral in effect, not declared so. `multipleOf` takes an argument nothing
+  // constrains, and accepting it gives this predicate an opinion about
+  // arithmetic rather than about a declaration.
+  assertEquals(isIntegerSafeLeaf(z.number().multipleOf(1)), false, "z.number().multipleOf(1)");
+});
+
+Deno.test("typesense integer parity companion: a numeric literal is integer-safe, a fractional one is not", () => {
+  // `COARevenueEnum` is a union of numeric literals, which `collectLeafPaths`
+  // emits as one leaf per member. Four of the int declarations in these configs
+  // are backed that way, and retyping them to `z.int()` to satisfy the arm would
+  // DELETE the enum — narrowing the check into a worse schema.
+  assertEquals(isIntegerSafeLeaf(z.literal(4000)), true);
+  assertEquals(isIntegerSafeLeaf(z.literal(1.5)), false);
+  assertEquals(isIntegerSafeLeaf(z.literal("4000")), false);
+  assertEquals(isIntegerSafeLeaf(z.literal([1, 2])), true);
+  assertEquals(isIntegerSafeLeaf(z.literal([1, 2.5])), false);
+});
+
+Deno.test("typesense integer parity companion: FirestoreTimestamp is exempt by META, not by name", () => {
+  // The exemption has to survive a `.meta()` clone, because annotating a
+  // timestamp with a display label produces a different instance of the same
+  // type — and `organizations:last_order` / `out-of-service:canceled_at` are
+  // timestamps whose names a `*_fs` suffix rule would miss entirely.
+  assertEquals(isIntegerSafeLeaf(FirestoreTimestamp), false, "not a number, correctly");
+  const annotated = FirestoreTimestamp.meta({ column: true, label: "Created" });
+  assertEquals(
+    (getNodeMeta(annotated) ?? {})[FIRESTORE_TIMESTAMP_META],
+    true,
+    "the marker must survive .meta() — otherwise 73 declarations go red",
+  );
+});
+
+Deno.test("typesense integer parity companion: ALL leaves must be safe, not ANY", () => {
+  // The `Tag.count` shape, reconstructed: a union of a record and a number.
+  // Tightening only the number arm is the natural "make it green" move, and
+  // under an ANY rule it goes green while the record arm still admits a map.
+  const twoArmed = z.strictObject({
+    count: z.union([z.record(z.string(), z.custom<unknown>()), z.number()]),
+  });
+  const halfFixed = z.strictObject({
+    count: z.union([z.record(z.string(), z.custom<unknown>()), z.int()]),
+  });
+  const field: TypesenseField[] = [{ name: "count", type: "int32" }];
+
+  assertEquals(fractionalRiskFields(twoArmed, field), ["count"], "both arms unsafe");
+  assertEquals(
+    fractionalRiskFields(halfFixed, field),
+    ["count"],
+    "ONE arm tightened is not a fix — under ANY this would report clean, which " +
+      "is exactly how the Tag.count record arm would have survived",
+  );
+  assertEquals(
+    fractionalRiskFields(z.strictObject({ count: z.int() }), field),
+    [],
+    "and a genuinely fixed schema must report nothing, or the arm reports everything",
+  );
+});
+
+Deno.test("typesense integer parity companion: the arm reports a real schema loosened back", () => {
+  // The mutation companion. Loosening a field on the REAL `InvoiceSchema` must
+  // be reported — an arm built on a resolver that has drifted into agreeing with
+  // everything passes forever, and an empty failure list is what both look like.
+  //
+  // `.safeExtend`, not `.extend`: Zod 4 refuses `.extend` on a refined object,
+  // and `InvoiceSchema` carries the settlement-identity refine.
+  const loosened = (InvoiceSchema as unknown as {
+    safeExtend: (shape: Record<string, z.ZodType>) => z.ZodType;
+  }).safeExtend({ number: z.number() });
+
+  const invoiceFields = typesenseSchemas.invoices.schema.fields;
+  assertEquals(
+    fractionalRiskFields(loosened, invoiceFields).includes("number"),
+    true,
+    "putting `number: z.number()` back on the real InvoiceSchema was NOT reported — " +
+      "the arm has stopped being able to fail",
+  );
+  assertEquals(
+    fractionalRiskFields(storageFor("invoices"), invoiceFields).includes("number"),
+    false,
+    "…and the unmodified schema must not be reported, or the above proves nothing",
+  );
+});
+
+Deno.test("typesense integer parity companion: the inverse arm reports an integer-declared rate", () => {
+  const misdeclared = [
+    { name: "discount.rate", type: "int32" },
+    { name: "cost.unit_cost", type: "int64" },
+  ] as TypesenseField[];
+  for (const field of misdeclared) {
+    const last = field.name.split(".").at(-1)!;
+    const isRate = (last === "rate" || last.endsWith("_rate") || last.endsWith("_cost")) &&
+      !last.endsWith("_rate_id") && !last.endsWith("_id");
+    assertEquals(isRate && INT_TYPES.has(field.type), true, `${field.name} must be reported`);
+  }
+  // …and the two record ids that contain "rate" must NOT be.
+  for (const name of ["crms_rate_id", "crms_linked_replacement_rate_id"]) {
+    const last = name.split(".").at(-1)!;
+    const isRate = (last === "rate" || last.endsWith("_rate") || last.endsWith("_cost")) &&
+      !last.endsWith("_rate_id") && !last.endsWith("_id");
+    assertEquals(isRate, false, `${name} is a record id, not a rate`);
+  }
+});
+
+Deno.test("typesense integer parity: the census, so an inert walker cannot report success", () => {
+  // A correct predicate and a resolver that reaches nothing produce the SAME
+  // empty failure list. This counts what each branch actually saw. The numbers
+  // are a floor plus an exact split, not a pin on a remembered total: a new
+  // collection or a new field should not fail this, but a walk that collapses
+  // to zero must.
+  let intDeclared = 0, timestampBacked = 0, indexDerived = 0, schemaBacked = 0;
+  let floatDeclared = 0;
+
+  for (const [alias, config] of Object.entries(typesenseSchemas)) {
+    const storage = storageFor(alias);
+    for (const field of config.schema.fields) {
+      if (FLOAT_TYPES.has(field.type)) floatDeclared += 1;
+      if (!INT_TYPES.has(field.type)) continue;
+      intDeclared += 1;
+      const leaves = leavesFor(storage, field.name);
+      if (leaves.length === 0) indexDerived += 1;
+      else if (leaves.every(isTimestampBacked)) timestampBacked += 1;
+      else schemaBacked += 1;
+    }
+  }
+
+  assertEquals(
+    intDeclared,
+    timestampBacked + indexDerived + schemaBacked,
+    "every int declaration must land in exactly one bucket",
+  );
+  // The floor. `>= `, not `===`: growth is expected, collapse is the failure.
+  assertEquals(intDeclared >= 190, true, `only ${intDeclared} int declarations seen — the walk went inert`);
+  assertEquals(
+    timestampBacked >= 70,
+    true,
+    `only ${timestampBacked} timestamp-backed — the meta exemption stopped matching, ` +
+      `which would make the arm above red on 73 correct fields`,
+  );
+  assertEquals(
+    schemaBacked >= 100,
+    true,
+    `only ${schemaBacked} schema-backed leaves reached — the resolver is not crossing ` +
+      `arrays or unions, and the arm above is checking almost nothing`,
+  );
+  assertEquals(
+    indexDerived > 0 && indexDerived < 30,
+    true,
+    `${indexDerived} index-derived declarations — the resolvability arm owns these, and a jump means ` +
+      `the resolver stopped resolving`,
+  );
+  assertEquals(floatDeclared > 0, true, "no float declarations seen at all");
 });

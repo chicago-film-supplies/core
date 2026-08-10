@@ -44,6 +44,10 @@ interface ZodInternalDef {
   out?: z.ZodType;
   /** Member schemas of a `z.union()` / `z.discriminatedUnion()`. */
   options?: z.ZodType[];
+  /** Permitted values of a `z.literal()` — Zod 4 allows several. */
+  values?: readonly unknown[];
+  /** Refinements attached to the node (`.int()`, `.min()`, `.multipleOf()`, …). */
+  checks?: unknown[];
 }
 
 function getDef(node: z.ZodType): ZodInternalDef {
@@ -257,6 +261,88 @@ export function isDateLikeNode(node: z.ZodType): boolean {
   const def = getDef(inner);
   return def.type === "string" &&
     (def.format === "datetime" || def.format === "date");
+}
+
+/**
+ * Zod's integer number formats. `z.int()` is `safeint`; the sized ones come
+ * from `z.int32()` / `z.uint32()` / `z.int64()` / `z.uint64()`.
+ */
+const INTEGER_NUMBER_FORMATS: ReadonlySet<string> = new Set([
+  "safeint",
+  "int32",
+  "uint32",
+  "int64",
+  "uint64",
+]);
+
+/**
+ * Can this leaf hold a non-integer?
+ *
+ * The question a Typesense `int32`/`int64` declaration asks of the schema
+ * behind it. One fractional value at such a field does not fail its own
+ * document — it aborts the import for the **entire collection**, and the
+ * previous index keeps serving queries, so nothing looks wrong until someone
+ * checks the alias (api-cloudrun#451, #460).
+ *
+ * ## Three shapes count as safe, and reading only one of them is a live trap
+ *
+ * 1. **`z.int()`** — `def.format === "safeint"`, no checks.
+ * 2. **`z.number().int()`** — no `def.format` at all; the format lives in a
+ *    `checks[]` entry as `{ check: "number_format", format: "safeint" }`.
+ *    ⚠️ Reading `def.format` alone reports every field spelled this way as
+ *    unsafe, and `src/schemas/` uses both spellings today. A predicate that
+ *    lands red on correct fields gets an allowlist, and the allowlist is what
+ *    the guard was supposed to replace.
+ * 3. **A numeric literal** — `z.literal(4000)`, and by extension a union of
+ *    them (`COARevenueEnum`), which `collectLeafPaths` emits as one leaf per
+ *    member. Every value is fixed, so integrality is decided by inspection.
+ *    Retyping those to `z.int()` would DELETE the enum to satisfy a check,
+ *    which is the wrong direction — 4 of the 126 int declarations in the
+ *    configs are backed this way.
+ *
+ * `z.number().multipleOf(1)` is deliberately **not** safe. It is integral in
+ * effect and not declared so: `multipleOf` is a numeric refinement whose
+ * argument nothing constrains, and accepting it means this predicate now has an
+ * opinion about arithmetic rather than about a declaration. Nothing in
+ * `src/schemas/` spells it that way.
+ *
+ * Callers pass an already-unwrapped leaf — {@link collectLeafPaths}'s
+ * `leaf.node`, which has been walked through every transparent wrapper and pipe.
+ * A `.optional()` or `.nullable()` around an int does not make it fractional,
+ * and this function does no unwrapping of its own precisely so a caller cannot
+ * accidentally ask it about a wrapper.
+ *
+ * **It says nothing about timestamps.** `FirestoreTimestamp` is a `z.custom`,
+ * so it answers `false` here — correctly, because it is not a number. The 73
+ * declarations backed by one are exempted structurally by their callers, on the
+ * `firestoreTimestamp` meta marker rather than on a name.
+ */
+export function isIntegerSafeLeaf(node: z.ZodType): boolean {
+  const def = getDef(node);
+
+  if (def.type === "literal") {
+    const values = def.values ?? [];
+    return values.length > 0 &&
+      values.every((v) => typeof v === "number" && Number.isInteger(v));
+  }
+
+  if (def.type !== "number") return false;
+  if (typeof def.format === "string" && INTEGER_NUMBER_FORMATS.has(def.format)) return true;
+
+  for (const check of def.checks ?? []) {
+    // A check is itself a Zod node in 4.x, so its own def is one level down.
+    const inner = check as { _zod?: { def?: { check?: string; format?: string } } };
+    const checkDef = inner._zod?.def ?? (check as { check?: string; format?: string });
+    if (
+      checkDef.check === "number_format" &&
+      typeof checkDef.format === "string" &&
+      INTEGER_NUMBER_FORMATS.has(checkDef.format)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

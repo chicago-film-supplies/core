@@ -1304,6 +1304,12 @@
         },
         {
           "kind": "variable",
+          "name": "FIRESTORE_TIMESTAMP_META",
+          "declaration": "const FIRESTORE_TIMESTAMP_META: \"firestoreTimestamp\";",
+          "doc": "Meta key marking a node as the {@link FirestoreTimestamp} custom type.\n\n`isDateLikeNode` used to recognise it by **instance identity** — the only\nhandle a `z.custom()` offers, since its `def.type` is the uninformative\n`\"custom\"`. That was safe exactly as long as nobody annotated a timestamp\nfield, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a\ndifferent instance, the identity test fails, and a `created_at` column\nsilently stops rendering as a date and starts printing a raw epoch. Declaring\ndisplay columns means annotating `created_at` / `updated_at` / `last_order`,\nso the identity test had to go.\n\nA meta marker survives the clone because `.meta()` **merges**: the clone\ncarries both this key and whatever the annotation added."
+        },
+        {
+          "kind": "variable",
           "name": "FULFILLMENT_LINE_ITEM_TYPES",
           "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\"[];",
           "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee` is excluded because a fee has no stock and is never picked\noff a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}\nwaiting to be collapsed into it; the exclusion IS the contract.\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
@@ -4480,6 +4486,14 @@
           "name": "isFulfillableItemType",
           "signature": "isFulfillableItemType(type: string): type is FulfillableItemType",
           "doc": "Whether an item type can be picked off a shelf — the `fulfillable` axis.\n\nNOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is\nnot fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`\ndrew exactly that distinction by hand and read as if they disagreed.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isIntegerSafeLeaf",
+          "signature": "isIntegerSafeLeaf(node: z.ZodType): boolean",
+          "doc": "Can this leaf hold a non-integer?\n\nThe question a Typesense `int32`/`int64` declaration asks of the schema\nbehind it. One fractional value at such a field does not fail its own\ndocument — it aborts the import for the **entire collection**, and the\nprevious index keeps serving queries, so nothing looks wrong until someone\nchecks the alias (api-cloudrun#451, #460).\n\n## Three shapes count as safe, and reading only one of them is a live trap\n\n1. **`z.int()`** — `def.format === \"safeint\"`, no checks.\n2. **`z.number().int()`** — no `def.format` at all; the format lives in a\n   `checks[]` entry as `{ check: \"number_format\", format: \"safeint\" }`.\n   ⚠️ Reading `def.format` alone reports every field spelled this way as\n   unsafe, and `src/schemas/` uses both spellings today. A predicate that\n   lands red on correct fields gets an allowlist, and the allowlist is what\n   the guard was supposed to replace.\n3. **A numeric literal** — `z.literal(4000)`, and by extension a union of\n   them (`COARevenueEnum`), which `collectLeafPaths` emits as one leaf per\n   member. Every value is fixed, so integrality is decided by inspection.\n   Retyping those to `z.int()` would DELETE the enum to satisfy a check,\n   which is the wrong direction — 4 of the 126 int declarations in the\n   configs are backed this way.\n\n`z.number().multipleOf(1)` is deliberately **not** safe. It is integral in\neffect and not declared so: `multipleOf` is a numeric refinement whose\nargument nothing constrains, and accepting it means this predicate now has an\nopinion about arithmetic rather than about a declaration. Nothing in\n`src/schemas/` spells it that way.\n\nCallers pass an already-unwrapped leaf — {@link collectLeafPaths}'s\n`leaf.node`, which has been walked through every transparent wrapper and pipe.\nA `.optional()` or `.nullable()` around an int does not make it fractional,\nand this function does no unwrapping of its own precisely so a caller cannot\naccidentally ask it about a wrapper.\n\n**It says nothing about timestamps.** `FirestoreTimestamp` is a `z.custom`,\nso it answers `false` here — correctly, because it is not a number. The 73\ndeclarations backed by one are exempted structurally by their callers, on the\n`firestoreTimestamp` meta marker rather than on a name.",
           "paramTags": [],
           "returnsTag": null
         },

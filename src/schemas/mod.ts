@@ -67,6 +67,7 @@ export {
   resolveFieldMeta,
   isDateField,
   isDateLikeNode,
+  isIntegerSafeLeaf,
   enumValues,
   getServerSortableColumns,
   collectLeafPaths,
@@ -284,6 +285,7 @@ export {
   type StoreBreakdownEntry,
   type StoreBreakdownLocation,
   // Identifier validators (defined in _uid.ts, re-exported via common.ts)
+  FIRESTORE_TIMESTAMP_META,
   FirestoreId,
   ItemUid,
   BookingId,
