@@ -296,12 +296,12 @@ export interface InvoiceDocLineItem {
 // — see `_dividers.ts`.
 const InvoiceDocLineItemInner = z.strictObject({
   uid: ItemUid,
-  type: z.enum(DOC_LINE_ITEM_TYPES),
+  type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
-  name: z.string().meta({ pii: "none" }),
+  name: z.string().meta({ pii: "none", column: true }),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
-  description: z.string().meta({ pii: "none" }).default(""),
-  quantity: z.number().default(0),
+  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
+  quantity: z.number().default(0).meta({ column: true, label: "Quantity" }),
   price: InvoiceDocItemPriceSchema,
   path: z.array(ItemUid).default([]),
   coa_revenue: COARevenueEnum.nullable().optional(),
