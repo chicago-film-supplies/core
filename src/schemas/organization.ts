@@ -66,7 +66,7 @@ export interface Organization {
 export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask", column: true, label: "Name", linkTo: "organizationDetail" }),
-  crms_id: z.number(),
+  crms_id: z.int(),
   xero_id: z.uuid().nullable(),
   // Required (no `.default("tax_applied")`): the Typesense config declares it
   // so, and a `.default()` never materializes on a write — see the note in

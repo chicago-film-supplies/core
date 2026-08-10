@@ -1184,7 +1184,7 @@ export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.stric
   uid_store: FirestoreId,
   name: z.string().meta({ column: true }),
   default: z.boolean(),
-  crms_stock_level_id: z.number().nullable(),
+  crms_stock_level_id: z.int().nullable(),
   quantity: z.number().min(0).meta({ column: true, label: "Quantity" }), // Σ of this store's location quantities — can't go negative
   locations: z.array(StoreBreakdownLocationSchema).default([]).meta({ label: "Location" }),
 });

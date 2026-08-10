@@ -59,7 +59,7 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   // name is a column headed "Name", while the same schema under `created_by`
   // is not a column at all (the ActorRef object above it is).
   name: NameField.meta({ column: true, label: "Name", linkTo: "contactDetail" }),
-  crms_id: z.number().optional(),
+  crms_id: z.int().optional(),
   // Required (no `.default([])`): the Typesense config declares them so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
   emails: z.array(Email).meta({ column: true, label: "Emails" }),

@@ -308,8 +308,8 @@ const InvoiceDocLineItemInner = z.strictObject({
   tracking_category: z.string().nullable().optional(),
   xero_id: z.uuid().nullable().optional(),
   xero_tracking_option_id: z.uuid().nullable().optional(),
-  crms_opportunity_id: z.number().nullable().optional(),
-  crms_id: z.union([z.number(), z.string()]).nullable().optional(),
+  crms_opportunity_id: z.int().nullable().optional(),
+  crms_id: z.union([z.int(), z.string()]).nullable().optional(),
 }).superRefine(checkItemPriceFormula);
 
 export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner;
@@ -562,7 +562,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask", column: true }),
-    crms_id: z.number().nullable().optional(),
+    crms_id: z.int().nullable().optional(),
     tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
     xero_id: z.uuid().nullable(),
     billing_address: Address,
@@ -596,8 +596,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     version_source: z.int().min(0),
     created_at: FirestoreTimestamp,
   })).optional(),
-  crms_id: z.number().nullable().optional(),
-  crms_opportunity_ids: z.array(z.number()).optional(),
+  crms_id: z.int().nullable().optional(),
+  crms_opportunity_ids: z.array(z.int()).optional(),
   uid_thread: ThreadId.optional(),
   /** Optimistic-concurrency if-match token — bumped on every whole-doc write, not a revision pointer (mirrors orders/orgs/contacts). */
   version: z.int().min(0).default(0),

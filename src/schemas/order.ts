@@ -817,7 +817,7 @@ const OrderDocLineItemInner = z.strictObject({
   path: z.array(ItemUid).default([]),
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
   zero_priced: z.boolean().nullable().optional().meta({ column: true, label: "Zero Priced" }),
-  crms_id: z.number().nullable().optional(),
+  crms_id: z.int().nullable().optional(),
   // Denormalized from the product at write time — see the interface docblock for
   // why this is on the DOC line and not the input one. `.optional()` rather than
   // defaulted: `validateBeforeWrite` persists the RAW doc, so a `.default()`
@@ -910,7 +910,7 @@ const OrderDocOrganization = z.strictObject({
   uid: FirestoreId.nullable(),
   // No `label` — the heading is the "Organization" carried by the key above.
   name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
-  crms_id: z.number().nullable().optional(),
+  crms_id: z.int().nullable().optional(),
   xero_id: z.uuid().nullable(),
   billing_address: Address.optional(),
 });
@@ -1026,7 +1026,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
     lost: z.number().default(0),
     damaged: z.number().default(0),
   }).default({ quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0 }),
-  crms_id: z.number().nullable().optional(),
+  crms_id: z.int().nullable().optional(),
   crms_status: z.string().optional(),
   subject: z.string().default("").meta({ column: true, label: "Subject", linkTo: "orderDetail" }),
   reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference", linkTo: "orderDetail" }),

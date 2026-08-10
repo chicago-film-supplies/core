@@ -413,7 +413,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask", column: true }),
-    crms_id: z.number().nullable().optional(),
+    crms_id: z.int().nullable().optional(),
     tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
     xero_id: z.uuid().nullable(),
     billing_address: Address,

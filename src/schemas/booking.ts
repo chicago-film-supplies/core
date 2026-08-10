@@ -318,8 +318,8 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   unit_price_cents: z.int().meta({ column: true, label: "Unit Price" }),
   total_price_cents: z.int().meta({ column: true, label: "Total" }),
   // crms_id and crms_product_id are written back post-transaction by CRMS sync
-  crms_id: z.number().nullable().optional(),
-  crms_product_id: z.number().nullable().optional(),
+  crms_id: z.int().nullable().optional(),
+  crms_product_id: z.int().nullable().optional(),
   breakdown: BookingBreakdownSchema,
   dates: z.strictObject({
     start: chicagoInstant().meta({ serverSortVia: "dates.start_fs", column: true, label: "Start" }).nullable(),
@@ -338,7 +338,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
-    crms_id: z.number().nullable(),
+    crms_id: z.int().nullable(),
   }).meta({ label: "Organization" }),
   stores: z.array(BookingStoreSchema).default([]).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId).default([]),

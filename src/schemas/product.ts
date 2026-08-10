@@ -252,8 +252,8 @@ const ComponentObject = z.strictObject({
   active: z.boolean().optional(),
   type: ComponentTypeEnum,
   stock_method: StockMethodEnum,
-  crms_id: z.number().nullable(),
-  crms_accessory_id: z.number().nullable().optional(),
+  crms_id: z.int().nullable(),
+  crms_accessory_id: z.int().nullable().optional(),
   description: z.string().optional(),
   inclusion_type: InclusionTypeEnum.optional(),
   quantity: z.number(),
@@ -314,12 +314,19 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   type: ProductTypeEnum.meta({ column: true, label: "Type" }),
   stock_method: StockMethodEnum.meta({ column: true, label: "Stock Method" }),
   component_only: z.boolean().meta({ column: true, label: "Component Only" }),
-  crms_id: z.number().nullable(),
-  crms_rate_id: z.number().nullable().optional(),
-  crms_stock_level_ids: z.record(z.string(), z.number()).optional(),
-  crms_linked_rental_id: z.number().nullable().optional(),
-  crms_linked_replacement_id: z.number().nullable().optional(),
-  crms_linked_replacement_rate_id: z.number().nullable().optional(),
+  // Every `crms_*` here is a Rails row id, so `z.int()` — the densest cluster of
+  // the rule, and the one that names the trap. `crms_rate_id` and
+  // `crms_linked_replacement_rate_id` contain "rate" and are **not rates**: a
+  // sweep keyed on the name would 4dp them, and the same sweep run backwards
+  // would integer-ize `Discount.rate` and `cost.unit_cost`, which are. The rule
+  // is about what the field IS, and it is checked structurally by
+  // `tests/typesenseFieldCoverage.test.ts` rather than by name.
+  crms_id: z.int().nullable(),
+  crms_rate_id: z.int().nullable().optional(),
+  crms_stock_level_ids: z.record(z.string(), z.int()).optional(),
+  crms_linked_rental_id: z.int().nullable().optional(),
+  crms_linked_replacement_id: z.int().nullable().optional(),
+  crms_linked_replacement_rate_id: z.int().nullable().optional(),
   description: z.string().optional().meta({ column: true, label: "Description" }),
   eligible_delivery: z.boolean().meta({ initial: true, column: true, label: "Delivery Eligible" }),
   eligible_in_store_pickup: z.boolean().meta({ initial: true, column: true, label: "Pickup Eligible" }),

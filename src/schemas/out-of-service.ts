@@ -179,9 +179,9 @@ const OOSStoreSchema: z.ZodType<OOSStore> = z.strictObject({
 });
 
 const OOSTransactionSchema: z.ZodType<OOSTransaction> = z.strictObject({
-  crms_id: z.number().nullable().optional(),
-  crms_quarantine_id: z.number().nullable().optional(),
-  crms_stock_level_id: z.number().nullable().optional(),
+  crms_id: z.int().nullable().optional(),
+  crms_quarantine_id: z.int().nullable().optional(),
+  crms_stock_level_id: z.int().nullable().optional(),
   crms_stock_level_uid: z.string().optional(),
   date: chicagoInstant(),
   date_fs: FirestoreTimestamp,
@@ -210,13 +210,13 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
-    crms_id: z.number().nullable(),
+    crms_id: z.int().nullable(),
   }).nullable().meta({ label: "Organization" }),
   dates: OOSDatesSchema,
   sources: z.array(DocSource).default([]).meta({ label: "Source" }),
   query_by_sources: z.array(z.string()).default([]),
-  crms_id: z.number().nullable().optional(),
-  crms_stock_level_id: z.number().nullable().optional(),
+  crms_id: z.int().nullable().optional(),
+  crms_stock_level_id: z.int().nullable().optional(),
   stores: z.array(OOSStoreSchema).default([]).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId).default([]),
   query_by_uid_location: z.array(FirestoreId).default([]),
@@ -265,8 +265,8 @@ export const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType> = z
   }),
   sources: z.array(DocSource).default([]).optional(),
   stores: z.array(OOSStoreSchema).default([]).optional(),
-  crms_id: z.number().nullable().optional(),
-  crms_stock_level_id: z.number().nullable().optional(),
+  crms_id: z.int().nullable().optional(),
+  crms_stock_level_id: z.int().nullable().optional(),
 });
 
 /**

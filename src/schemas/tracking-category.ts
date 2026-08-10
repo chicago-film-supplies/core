@@ -27,8 +27,8 @@ export const TrackingCategorySchema: z.ZodType<TrackingCategory> = z.strictObjec
   uid: FirestoreId,
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   count: z.union([z.record(z.string(), z.custom<FirestoreFieldValue>()), z.number()]).optional().meta({ column: true, label: "Count" }),
-  crms_product_group_id: z.number().optional(),
-  crms_service_group_id: z.number().optional(),
+  crms_product_group_id: z.int().optional(),
+  crms_service_group_id: z.int().optional(),
   crms_product_group_name: z.string(),
   products: z.record(z.string(), UidNameRef).meta({ label: "Products" }),
   xero_tracking_option_id: z.uuid().nullable(),
@@ -57,7 +57,7 @@ export interface CreateTrackingCategoryInputType {
 export const CreateTrackingCategoryInput: z.ZodType<CreateTrackingCategoryInputType> = z.object({
   uid: FirestoreId,
   name: z.string().min(1).max(100),
-  crms_product_group_id: z.number(),
+  crms_product_group_id: z.int(),
   crms_product_group_name: z.string(),
 });
 
