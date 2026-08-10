@@ -80,7 +80,7 @@ const FulfillmentLineItemInner = z.strictObject({
   quantity: z.number().int().min(0).default(0).meta({ column: true, label: "Quantity" }),
   stock_method: StockMethodEnum.optional().meta({ column: true, label: "Stock Method" }),
   path: z.array(ItemUid).default([]),
-  order_number: z.number().optional().meta({ column: true, label: "Order #" }),
+  order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   uid_delivery: FirestoreId.nullable().optional(),
   uid_collection: FirestoreId.nullable().optional(),

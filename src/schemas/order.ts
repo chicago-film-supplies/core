@@ -490,7 +490,7 @@ const OrderItemLineInner = z.object({
   path: z.array(ItemUid),
   inclusion_type: InclusionTypeEnum.nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
-  order_number: z.number().optional(),
+  order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
 }).superRefine(checkItemPriceFormula);
 
@@ -812,7 +812,7 @@ const OrderDocLineItemInner = z.strictObject({
   // keeps the fee an ordinary line item, which is the whole point of W1's
   // collapse of the separate fee arm, rather than earning it a contract axis.
   stock_method: StockMethodEnum.meta({ column: true, label: "Stock Method" }),
-  order_number: z.number().optional().meta({ column: true, label: "Order #" }),
+  order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   path: z.array(ItemUid).default([]),
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
@@ -1010,7 +1010,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   totals: OrderDocTotals,
   invoices: z.array(z.strictObject({
     uid: FirestoreId,
-    number: z.number().meta({ column: true, label: "#" }),
+    number: z.int().meta({ column: true, label: "#" }),
     status: InvoiceStatusEnum.meta({ column: true, label: "Status" }),
   })).default([]).meta({ label: "Invoice" }),
   query_by_invoices: z.array(z.string()).default([]),

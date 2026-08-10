@@ -544,10 +544,10 @@ export interface Invoice {
 /** Zod schema for an Invoice document. */
 export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   uid: FirestoreId,
-  number: z.number().meta({ column: true, label: "#", linkTo: "invoiceDetail" }),
+  number: z.int().meta({ column: true, label: "#", linkTo: "invoiceDetail" }),
   status: InvoiceStatus.meta({ column: true, label: "Status" }),
   query_by_orders: z.array(z.string()).default([]),
-  number_orders: z.array(z.number()).default([]).meta({ column: true, label: "Order #" }),
+  number_orders: z.array(z.int()).default([]).meta({ column: true, label: "Order #" }),
   tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
   // The ISO field carries the annotation; its `_fs` Timestamp mirror is the
   // same column under the other encoding — see `FS_MIRROR_SUFFIX`.
