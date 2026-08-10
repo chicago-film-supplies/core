@@ -43,6 +43,38 @@ Deno.test("ProductSchema validates with shipping", () => {
   assertEquals(ProductSchema.safeParse(doc).success, true);
 });
 
+Deno.test("shipping dimensions: `null` is 'not measured yet', distinct from 0 (core#51)", () => {
+  const unmeasured = {
+    ...validProduct,
+    shipping: { weight: null, height: null, width: null, length: null, air_hazardous: false, air_un: null },
+  };
+  assertEquals(ProductSchema.safeParse(unmeasured).success, true);
+
+  // Partially measured — weighed but not sized — is the case a block-level
+  // `measured_at` could not have expressed, and is why the four are per-field.
+  const partial = {
+    ...validProduct,
+    shipping: { weight: 5, height: null, width: null, length: null, air_hazardous: false, air_un: null },
+  };
+  assertEquals(ProductSchema.safeParse(partial).success, true);
+
+  // 0 remains legal and now means exactly one thing: measured, and it is zero.
+  const measuredZero = {
+    ...validProduct,
+    shipping: { weight: 0, height: 0, width: 0, length: 0, air_hazardous: false, air_un: null },
+  };
+  assertEquals(ProductSchema.safeParse(measuredZero).success, true);
+
+  // The INPUT boundary accepts null too — without this the schema change buys
+  // nothing going forward, because a client with no measurement has no way to
+  // say so and `Number("")` is 0.
+  const inputUnmeasured = {
+    ...validCreateInput,
+    shipping: { weight: null, height: null, width: null, length: null, air_hazardous: false, air_un: null },
+  };
+  assertEquals(CreateProductInput.safeParse(inputUnmeasured).success, true);
+});
+
 Deno.test("ProductSchema validates with components", () => {
   const doc = {
     ...validProduct,

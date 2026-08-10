@@ -5530,12 +5530,16 @@ const ProductSchema: z.ZodType<Product>;
 
 Shipping dimensions and hazard classification for a product.
 
+The four dimensions are nullable: `null` is "not measured yet", which `0`
+could not express. See the storage schema for why the distinction is
+load-bearing (core#51).
+
 ```ts
 interface ProductShipping {
-  weight: number;
-  height: number;
-  width: number;
-  length: number;
+  weight: number | null;
+  height: number | null;
+  width: number | null;
+  length: number | null;
   air_hazardous: boolean;
   air_un: number | null;
 }
@@ -13804,12 +13808,16 @@ const ProductSchema: z.ZodType<Product>;
 
 Shipping dimensions and hazard classification for a product.
 
+The four dimensions are nullable: `null` is "not measured yet", which `0`
+could not express. See the storage schema for why the distinction is
+load-bearing (core#51).
+
 ```ts
 interface ProductShipping {
-  weight: number;
-  height: number;
-  width: number;
-  length: number;
+  weight: number | null;
+  height: number | null;
+  width: number | null;
+  length: number | null;
   air_hazardous: boolean;
   air_un: number | null;
 }

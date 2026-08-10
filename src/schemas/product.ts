@@ -106,12 +106,18 @@ export interface ProductPrice {
   discountable: boolean;
 }
 
-/** Shipping dimensions and hazard classification for a product. */
+/**
+ * Shipping dimensions and hazard classification for a product.
+ *
+ * The four dimensions are nullable: `null` is "not measured yet", which `0`
+ * could not express. See the storage schema for why the distinction is
+ * load-bearing (core#51).
+ */
 export interface ProductShipping {
-  weight: number;
-  height: number;
-  width: number;
-  length: number;
+  weight: number | null;
+  height: number | null;
+  width: number | null;
+  length: number | null;
   air_hazardous: boolean;
   air_un: number | null;
 }
@@ -340,11 +346,27 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     formula: PriceFormulaEnum.meta({ column: true, label: "Price Formula" }),
     discountable: z.boolean().default(true).meta({ column: true, label: "Discountable" }),
   }),
+  // The four dimensions are NULLABLE because `0` means two different things —
+  // "weighs nothing" and "nobody has weighed it" — and the corpus is entirely
+  // the second: 0 of 549 prod products carried a value > 0 when this was
+  // measured (core#51, 2026-08-10). Once specs are populated, a remaining `0`
+  // becomes permanently ambiguous and the information to disambiguate it is
+  // gone, so the window for this change closes when data entry starts.
+  //
+  // Per-field, not a block-level `measured_at`: the four are populated
+  // independently and `measured_at` cannot express "weighed but not measured
+  // for size". The two are not exclusive — provenance can be added later.
+  //
+  // Safe for the search index: Typesense declares these `float, optional: true`
+  // and ACCEPTS an explicit `null`, dropping the key rather than rejecting the
+  // document — verified on dev Typesense 30.2, 2026-08-10, on both the
+  // single-document and bulk-import paths. Neither the type nor the optionality
+  // changes, so no reindex is forced.
   shipping: z.strictObject({
-    weight: z.number().meta({ column: true, label: "Weight" }),
-    height: z.number().meta({ column: true, label: "Height" }),
-    width: z.number().meta({ column: true, label: "Width" }),
-    length: z.number().meta({ column: true, label: "Length" }),
+    weight: z.number().nullable().meta({ column: true, label: "Weight" }),
+    height: z.number().nullable().meta({ column: true, label: "Height" }),
+    width: z.number().nullable().meta({ column: true, label: "Width" }),
+    length: z.number().nullable().meta({ column: true, label: "Length" }),
     air_hazardous: z.boolean().meta({ column: true, label: "Air Hazardous" }),
     air_un: z.number().nullable().meta({ column: true, label: "UN Number" }),
   }).optional(),
@@ -462,10 +484,10 @@ export interface CreateProductInputType {
     discountable: boolean;
   };
   shipping?: {
-    weight: number;
-    height: number;
-    width: number;
-    length: number;
+    weight: number | null;
+    height: number | null;
+    width: number | null;
+    length: number | null;
     air_hazardous: boolean;
     air_un: number | null;
   };
@@ -519,11 +541,14 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }),
+  // Nullable to match storage — see `ProductSchema`. A client that has not
+  // measured a dimension sends `null`, which is what makes "unmeasured"
+  // enterable rather than collapsing to `0` (core#51).
   shipping: z.object({
-    weight: z.number(),
-    height: z.number(),
-    width: z.number(),
-    length: z.number(),
+    weight: z.number().nullable(),
+    height: z.number().nullable(),
+    width: z.number().nullable(),
+    length: z.number().nullable(),
     air_hazardous: z.boolean(),
     air_un: z.number().nullable(),
   }).optional(),
@@ -593,10 +618,10 @@ export interface UpdateProductInputType {
     discountable: boolean;
   };
   shipping?: {
-    weight: number;
-    height: number;
-    width: number;
-    length: number;
+    weight: number | null;
+    height: number | null;
+    width: number | null;
+    length: number | null;
     air_hazardous: boolean;
     air_un: number | null;
   };
@@ -643,10 +668,10 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
     discountable: z.boolean(),
   }).optional(),
   shipping: z.object({
-    weight: z.number(),
-    height: z.number(),
-    width: z.number(),
-    length: z.number(),
+    weight: z.number().nullable(),
+    height: z.number().nullable(),
+    width: z.number().nullable(),
+    length: z.number().nullable(),
     air_hazardous: z.boolean(),
     air_un: z.number().nullable(),
   }).optional(),
