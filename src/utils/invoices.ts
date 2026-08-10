@@ -499,8 +499,29 @@ function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string):
       subtotal_discounted_cents: p.subtotal_discounted_cents ?? 0,
       discount: p.discount ?? null,
       taxes: p.taxes ?? [],
+      // The intrinsic-tax snapshot inherits, so an invoice's `tax_profile`
+      // revert is lossless the way an order's already is. Spread
+      // CONDITIONALLY, twice over: an explicit `undefined` trips
+      // `validateBeforeWrite`'s no-undefined guard, and `invoicePricesMatch`
+      // compares price KEY SETS — emitting the key unconditionally would make
+      // every pre-2026-08 invoice line differ from its order line on a field
+      // neither of them ever set.
+      ...(p.taxes_base !== undefined ? { taxes_base: p.taxes_base } : {}),
       total_cents: p.total_cents ?? 0,
     },
+    // ⚠️ `coa_revenue` is an INVOICE_ONLY field, and projecting it is not a
+    // contradiction — it is what makes the override an override. The invoice's
+    // own value still wins (`carryForwardOverrides` re-applies it after the
+    // replace); this only supplies the order's when the invoice has none,
+    // instead of leaving `undefined` for `calculateInvoiceTotals` to read as
+    // "taxable" while the stored per-line taxes say otherwise.
+    //
+    // Comparator-safe by construction: `invoiceItemsMatch` filters
+    // INVOICE_ONLY_ITEM_FIELDS out of both key sets, so adding this key changes
+    // no sync verdict. That is NOT true of `price.taxes_base` above, which is
+    // nested inside `price` and therefore compared — hence the two different
+    // treatments of two fields added in the same pass.
+    ...(item.coa_revenue !== undefined ? { coa_revenue: item.coa_revenue } : {}),
     path,
   };
 }

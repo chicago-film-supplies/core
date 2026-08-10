@@ -29,6 +29,7 @@
  */
 
 import type {
+  COARevenueType,
   DiscountType,
   PriceModifierType,
   OrderDocTotalsType,
@@ -116,8 +117,22 @@ export interface LineItem {
    * Revenue chart-of-accounts code, deciding whether the line is taxable at all
    * ({@link isTaxableCoa}). Stored on an invoice line; absent on an order line,
    * where it lives on the product — see {@link PricingItem.coa_revenue}.
+   *
+   * `COARevenueType`, not `number` — every schema that stores this field
+   * (`OrderDocLineItem`, `InvoiceDocLineItem`, and the product) types it with
+   * `COARevenueEnum`, so a bare `number` here made this type *not* a supertype
+   * of the three it claims to generalise: a `LineItem` was not assignable to an
+   * `InvoiceDocLineItem` on this one field, and the first projection that had to
+   * emit it hit TS2322.
+   *
+   * The looser `number` is still correct one layer down, on
+   * {@link PricingItem.coa_revenue} — that is the *input* surface, where an
+   * unresolved product COA legitimately arrives before anything has validated
+   * it, and {@link isTaxableCoa} keeps its `number` parameter for the same
+   * reason. Narrowing here does not narrow that: `COARevenueType` is a subtype
+   * of `number`, so a `LineItem` still satisfies `PricingItem`.
    */
-  coa_revenue?: number | null;
+  coa_revenue?: COARevenueType | null;
 }
 
 /**

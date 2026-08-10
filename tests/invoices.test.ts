@@ -672,6 +672,126 @@ Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
 });
 
+// ── What the order→invoice projection carries ──────────────────
+//
+// Two fields joined the projection together and are treated DIFFERENTLY,
+// because the comparator sees one of them and not the other. These tests exist
+// to keep that asymmetry deliberate.
+
+Deno.test("projection: `price.taxes_base` inherits, so an invoice profile revert is lossless", () => {
+  // Divergence (6): the doc-level override rewrites `taxes` and never
+  // `taxes_base`, so without the snapshot an invoice reverting to `tax_applied`
+  // has nothing to restore from — `materializeDocumentTax` returns early and the
+  // line keeps whichever override was last written.
+  const prevItem = orderShapedLine();
+  const withBase = orderShapedLine({
+    price: {
+      taxes_base: [{ uid: "chirentaltax00000001", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
+    } as unknown as LineItem["price"],
+  });
+
+  const result = syncOrderToInvoiceSelective(
+    [prevItem],
+    [withBase],
+    buildOrderScopedItems([prevItem], ORDER_DIV_1),
+    ORDER_DIV_1,
+  );
+  const price = asLine(result[0]).price as unknown as Record<string, unknown>;
+  assertEquals(
+    (price.taxes_base as Array<{ uid: string }>)[0].uid,
+    "chirentaltax00000001",
+  );
+  // …and the strict invoice schema accepts it, which is the half `core` had to
+  // ship before any of this could be written.
+  const parsed = InvoiceDocLineItemSchema.safeParse(result[0]);
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
+});
+
+Deno.test("projection: an order line with NO taxes_base emits no `taxes_base` key at all", () => {
+  // ⚠️ Not cosmetic, twice over. An explicit `undefined` trips
+  // `validateBeforeWrite`'s no-undefined guard; and `invoicePricesMatch`
+  // compares price KEY SETS, so an unconditionally-emitted key would differ from
+  // every stored invoice line written before this field existed.
+  const item = orderShapedLine();
+  const projected = buildOrderScopedItems([item], ORDER_DIV_1)[0];
+  const price = asLine(projected).price as unknown as Record<string, unknown>;
+  assertEquals("taxes_base" in price, false);
+});
+
+Deno.test("⚠️ projection: a NEW taxes_base makes a previously-synced line read OVERRIDDEN", () => {
+  // THE TRANSITION HAZARD, stated as a test rather than left to be discovered.
+  //
+  // `invoicePricesMatch` compares the price key sets for equality. Every stored
+  // ORDER line has carried `taxes_base` since 2026-07; no stored INVOICE line
+  // carries it, because the projection dropped it until now. So on the first
+  // deploy after this change, an untouched pair differs by exactly one key and
+  // `isItemSynced` says "overridden".
+  //
+  // That is self-locking: `syncOrderToInvoiceSelective` only REPLACES a line it
+  // considers synced, so a line failing this check can never be rewritten to
+  // acquire the field. It clears only by backfilling `taxes_base` onto the
+  // stored invoice lines — tracked in the convergence plan's §4.3b, sequenced
+  // with the api-cloudrun pin bump.
+  //
+  // Prod exposure is bounded: 0 draft invoices, and the order→invoice mirror
+  // skips settled/paid/void. The visible effect is the sync badge, which reads
+  // every invoice unconditionally.
+  const orderLine = orderShapedLine({
+    price: {
+      taxes_base: [{ uid: "chirentaltax00000001", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
+    } as unknown as LineItem["price"],
+  });
+  // A stored invoice line as it exists TODAY: same row, written by the old
+  // projection, so it has no `taxes_base`.
+  const storedInvoiceLine = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
+
+  assertEquals(
+    isItemSynced(orderLine, storedInvoiceLine as InvoiceItem, ORDER_DIV_1),
+    false,
+    "if this ever returns true the hazard is gone — delete this test and the backfill with it",
+  );
+
+  // The discriminating half: once the stored line carries the snapshot, the same
+  // pair is synced again. Without this, the assertion above would pass against a
+  // comparator that had broken outright.
+  const backfilled = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0];
+  assertEquals(isItemSynced(orderLine, backfilled as InvoiceItem, ORDER_DIV_1), true);
+});
+
+Deno.test("projection: `coa_revenue` inherits but changes NO sync verdict", () => {
+  // The other half of the asymmetry. `coa_revenue` is projected too — an order
+  // line that carries one should hand it to the invoice rather than leaving
+  // `undefined` for `calculateInvoiceTotals` to read as "taxable" while the
+  // stored per-line taxes say otherwise. But it is in INVOICE_ONLY_ITEM_FIELDS,
+  // so `invoiceItemsMatch` filters it out of both key sets and adding it to the
+  // projection cannot flip a verdict — unlike `price.taxes_base`, which is
+  // nested inside `price` and therefore compared.
+  const orderLine = orderShapedLine({ coa_revenue: 4000 });
+  const storedInvoiceLine = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
+  assertEquals(
+    isItemSynced(orderLine, storedInvoiceLine as InvoiceItem, ORDER_DIV_1),
+    true,
+    "coa_revenue is invoice-owned — it must not participate in the sync verdict",
+  );
+
+  // It still reaches the projected item, and the invoice's own value still wins.
+  const projected = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0];
+  assertEquals((projected as InvoiceItem).coa_revenue, 4000);
+
+  const overridden = { ...storedInvoiceLine, coa_revenue: 4100 } as InvoiceDocItemType;
+  const synced = syncOrderToInvoiceSelective(
+    [orderShapedLine()],
+    [orderLine],
+    [overridden],
+    ORDER_DIV_1,
+  );
+  assertEquals(
+    (synced[0] as InvoiceItem).coa_revenue,
+    4100,
+    "carryForwardOverrides re-applies the invoice's own COA over the projected one",
+  );
+});
+
 // ── calculateInvoiceTotals ─────────────────────────────────────
 
 const TAXES: Tax[] = [

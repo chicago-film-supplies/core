@@ -329,7 +329,12 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
   // Presence, not just consistency: both arms above pass vacuously over an empty
   // set, and an empty set is exactly what deleting `...RATE_UNIT_META` from a
   // schema produces. Four annotation sites (`PriceModifier`, `TaxRef`,
-  // `Discount`, `Tax`) fan out to these nineteen columns.
+  // `Discount`, `Tax`) fan out to these twenty columns.
+  //
+  // `invoice:items.price.taxes_base.rate` joined `order:…` here when the invoice
+  // price gained the intrinsic-tax snapshot the order price already had; the two
+  // documents are meant to be symmetric on this field, so the asymmetry that
+  // used to be visible in this list was the defect, not the fix.
   const declared = discriminatedUnitColumns().map((c) => `${c.where}:${c.column}`).sort();
   assertEquals(declared, [
     "credit-note:items.price.discount.rate",
@@ -337,6 +342,7 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
     "credit-note:totals.taxes.rate",
     "invoice:items.price.discount.rate",
     "invoice:items.price.taxes.rate",
+    "invoice:items.price.taxes_base.rate",
     "invoice:totals.taxes.rate",
     "invoice:totals.transaction_fees.rate",
     "order:items.price.discount.rate",

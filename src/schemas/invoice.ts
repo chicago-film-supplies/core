@@ -40,6 +40,8 @@ import {
   type OrderDocGroupItemType,
   PriceModifier,
   type PriceModifierType,
+  TaxRef,
+  type TaxRefType,
 } from "./order.ts";
 
 export { type InvoiceStatusType } from "./common.ts";
@@ -249,6 +251,23 @@ export interface InvoiceDocItemPrice {
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
+  /**
+   * Intrinsic (pre-override) tax snapshot — see
+   * {@link OrderDocItemPriceType.taxes_base}, whose semantics this shares
+   * exactly. Projected from the source order line, or set at build time on an
+   * invoice-native line.
+   *
+   * It is here because the doc-level `tax_profile` override rewrites `taxes` and
+   * nothing else, so **without it a profile revert on an invoice has nothing to
+   * revert to**: `materializeDocumentTax` returns early on `tax_applied`, and
+   * the item keeps whichever override was last applied. The order side has had
+   * this snapshot since 2026-07 and the invoice side never got it — divergence
+   * (6) in the convergence plan.
+   *
+   * Optional, and it will stay optional: no invoice line written before
+   * 2026-08 carries one.
+   */
+  taxes_base?: TaxRefType[];
   total_cents: number;
   /**
    * @deprecated Legacy CRMS field — not set on new invoices.
@@ -267,6 +286,10 @@ const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject
   subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
   discount: Discount.nullable().default(null).meta({ label: "Discount" }),
   taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  // Labelled for the same reason the order side's is: `TaxRef` carries `name`
+  // and `rate` as columns, so every key holding one inherits two columns and has
+  // to name them, or the pre-override snapshot collides with the live `taxes`.
+  taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax" }),
   total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
   discount_percent: z.number().optional(),
 }).superRefine(checkPriceBaseUnit);
