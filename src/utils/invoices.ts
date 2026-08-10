@@ -535,32 +535,150 @@ function pickInvoiceOnlyFields(item: InvoiceItem): InvoiceOnlyOverrides {
   return result as InvoiceOnlyOverrides;
 }
 
+// ── The one item comparator ─────────────────────────────────────
+
+/**
+ * `JSON.stringify` with object keys sorted, recursively — array order is
+ * preserved, because an items array's order is meaning.
+ *
+ * The plain form is **key-order sensitive**, and both sides of every comparison
+ * here come from somewhere that picks its own order: a projection emits keys in
+ * source order, while a Firestore map comes back sorted. Two documents that are
+ * deeply equal must compare equal, so the stringification has to be canonical.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return "[" + value.map(stableStringify).join(",") + "]";
+  return "{" + Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => JSON.stringify(k) + ":" + stableStringify(v))
+    .join(",") + "}";
+}
+
+/**
+ * Compare two `price` objects **structurally**, key by key.
+ *
+ * ⚠️ **This is the half that made the sync badge lie for the whole corpus.**
+ * `price` used to be compared as one `JSON.stringify` blob, so ANY key
+ * difference inside it failed the whole line — and every CRMS-authored line
+ * carries `price.discount_percent`, which no projection emits. Measured
+ * 2026-08-10 over 8,978 unambiguously paired prod lines: 8,015 failed on that
+ * key alone, i.e. the badge was reporting a field's presence as a price change.
+ * The `base_percent` encoding split — the projection emits an explicit `null`,
+ * a stored CRMS line omits the key, and `InvoiceDocItemPriceSchema` blesses
+ * both (`.nullable().optional()`) — is the same class.
+ *
+ * **Absent ≡ null, with no list of which keys it applies to.** A null-valued
+ * key is dropped from both sides before comparing, so the rule holds for every
+ * nullable price key there is or will be (`base_percent`, `chargeable_days`,
+ * `discount`) and cannot go stale. It is safe for the rest by construction: a
+ * key that is not nullable cannot hold `null`, so dropping nulls can never
+ * erase one of its values. A key present on one side and absent on the other
+ * with a NON-null value is still a mismatch, which is the whole point.
+ *
+ * `discount_percent` is deliberately NOT normalized away here — it is removed
+ * from the schema and from the corpus instead (api-cloudrun#480 phases 3–4),
+ * because an exclusion list polices a defect class that can be made
+ * unrepresentable.
+ */
+function invoicePricesMatch(expected: unknown, current: unknown): boolean {
+  const normalize = (p: unknown): Record<string, unknown> | null => {
+    if (p === null || typeof p !== "object" || Array.isArray(p)) return null;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(p as Record<string, unknown>)) {
+      if (v === undefined || v === null) continue;
+      out[k] = v;
+    }
+    return out;
+  };
+
+  const e = normalize(expected);
+  const c = normalize(current);
+  // One side isn't a price object at all (a divider, or a malformed line) —
+  // fall back to whole-value equality rather than pretending they agree.
+  if (e === null || c === null) return stableStringify(expected) === stableStringify(current);
+
+  const eKeys = Object.keys(e);
+  if (eKeys.length !== Object.keys(c).length) return false;
+  for (const k of eKeys) {
+    if (!(k in c)) return false;
+    if (stableStringify(e[k]) !== stableStringify(c[k])) return false;
+  }
+  return true;
+}
+
+/**
+ * **The one comparator.** Are two invoice-shaped items the same row, ignoring
+ * the fields an invoice OWNS ({@link INVOICE_ONLY_ITEM_FIELDS})?
+ *
+ * It replaced two near-duplicate comparisons — the private
+ * `invoiceProjectionMatches` behind {@link computeInvoiceSyncStatus}, and
+ * {@link isItemSynced}'s order-shaped one behind the draft mirror — which had
+ * drifted into disagreeing about what "the same line" means. Both now call
+ * this; {@link isItemSynced} projects its order item first.
+ *
+ * Both arguments must already be invoice-shaped, with full (divider-scoped)
+ * paths. Comparison is:
+ *
+ * - **top-level key sets** must be equal, minus the invoice-only fields, on
+ *   both sides (a key whose value is `undefined` does not count as present —
+ *   Firestore stores no such value, so it can only come from a caller's
+ *   partially-built object);
+ * - **`price` structurally** ({@link invoicePricesMatch}), with absent ≡ null
+ *   on the keys the schema blesses both encodings of;
+ * - **every other key by canonical value** ({@link stableStringify}).
+ */
+export function invoiceItemsMatch(expected: InvoiceItem, current: InvoiceItem): boolean {
+  const comparableKeys = (it: InvoiceItem) => {
+    const rec = it as unknown as Record<string, unknown>;
+    return Object.keys(rec).filter((k) => !INVOICE_ONLY_ITEM_FIELD_SET.has(k) && rec[k] !== undefined);
+  };
+  const eKeys = comparableKeys(expected);
+  const cKeys = comparableKeys(current);
+  if (eKeys.length !== cKeys.length) return false;
+  const cSet = new Set(cKeys);
+  for (const k of eKeys) if (!cSet.has(k)) return false;
+
+  const e = expected as unknown as Record<string, unknown>;
+  const c = current as unknown as Record<string, unknown>;
+  for (const k of eKeys) {
+    if (k === "price") {
+      if (!invoicePricesMatch(e[k], c[k])) return false;
+      continue;
+    }
+    if (stableStringify(e[k]) !== stableStringify(c[k])) return false;
+  }
+  return true;
+}
+
 /**
  * Compare a previous order item to a current invoice item to detect overrides.
  * Returns true if the invoice item is "synced" (matches the order item on all
  * non-invoice-only fields), false if it has been manually overridden.
  *
- * The comparison strips the order divider prefix from the invoice item's path
- * and ignores {@link INVOICE_ONLY_ITEM_FIELDS} — on BOTH sides, since order
- * lines carry `crms_id` too.
+ * **It projects the order item first, then delegates to
+ * {@link invoiceItemsMatch} — and that projection IS core#52's fix.** The
+ * function used to compare an order-SHAPED item against an invoice-SHAPED one,
+ * key sets before values; `stock_method` is required on a stored order line
+ * (`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItemSchema`,
+ * so the two sets could never be equal and an unchanged item reported
+ * "overridden" — for every real line item in the corpus, with nothing thrown.
+ * `price.replacement_cents` was a second, independent mismatch. The consequence
+ * was that the order→invoice draft mirror propagated additions only: never an
+ * edit, never a removal. Filtering both sides did NOT fix it — those are
+ * order-only fields, not invoice-only overrides — so the fix had to be to
+ * compare two invoice-shaped items, which is a real behavioural change to the
+ * mirror rather than a tidy-up.
  *
- * ⚠️ **This function returns `false` for every real line item — core#52.**
- * It compares KEY SETS before values; `stock_method` is required on a stored
- * order line (`schemas/order.ts`) and REJECTED by the strict
- * `InvoiceDocLineItemSchema`, so the two sets can never be equal and an
- * unchanged item reports "overridden" (measured: an item vs. its own
- * projection). `price.replacement_cents` is a second, independent mismatch.
- * The consequence is that the order→invoice draft mirror propagates additions
- * only — never edits, never removals. The two-sided filter below does NOT fix
- * that (those are order-only fields, not invoice-only overrides); the fix is to
- * compare two invoice-SHAPED items, as {@link invoiceProjectionMatches} does,
- * and it is a behavioural change to the mirror. Do not "fix" the fixture in
- * the covering unit test to make it green — that fixture is green precisely
- * because it omits `stock_method`.
+ * ⚠️ The covering unit test's fixture omits `stock_method`, which is why it was
+ * green throughout. Keep it that way only if it is testing something else — a
+ * fixture repaired to make this green would delete the evidence.
  *
  * @param prevOrderItem - The order item from the previous version of the order
  * @param invoiceItem - The current invoice item (with order-scoped path)
- * @param orderDividerUid - The uid of the order divider (for path prefix stripping)
+ * @param orderDividerUid - The uid of the order divider (both sides carry the
+ *   scoped path once the order item is projected, so nothing is stripped)
  * @returns true if the item is synced (not overridden), false if overridden
  */
 export function isItemSynced(
@@ -568,42 +686,10 @@ export function isItemSynced(
   invoiceItem: InvoiceItem,
   orderDividerUid: string,
 ): boolean {
-  // Build a normalized version of the invoice item for comparison:
-  // strip invoice-only fields and order divider path prefix
-  const normalizedInvoice: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(invoiceItem)) {
-    if (INVOICE_ONLY_ITEM_FIELD_SET.has(key)) continue;
-    if (key === "path") {
-      normalizedInvoice[key] = stripOrderPrefix(value as string[], orderDividerUid);
-    } else {
-      normalizedInvoice[key] = value;
-    }
-  }
-
-  // Compare all fields from the order item against the normalized invoice item.
-  // BOTH sides are filtered: order lines carry `crms_id` too
-  // (`schemas/order.ts`), so stripping it from one side only would manufacture
-  // the very key-set mismatch this function reads as "overridden".
-  const orderKeys = Object.keys(prevOrderItem).filter((k) => !INVOICE_ONLY_ITEM_FIELD_SET.has(k));
-  const invoiceKeys = Object.keys(normalizedInvoice);
-
-  // Must have the same set of non-invoice-only keys
-  const orderKeySet = new Set(orderKeys);
-  const invoiceKeySet = new Set(invoiceKeys);
-  for (const k of orderKeySet) {
-    if (!invoiceKeySet.has(k)) return false;
-  }
-  for (const k of invoiceKeySet) {
-    if (!orderKeySet.has(k)) return false;
-  }
-
-  for (const key of orderKeys) {
-    const a = (prevOrderItem as unknown as Record<string, unknown>)[key];
-    const b = normalizedInvoice[key];
-    if (JSON.stringify(a) !== JSON.stringify(b)) return false;
-  }
-
-  return true;
+  return invoiceItemsMatch(
+    projectOrderItemToInvoiceItem(prevOrderItem, orderDividerUid),
+    invoiceItem,
+  );
 }
 
 /**
@@ -815,6 +901,216 @@ export function buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: s
   return orderItems.map((item) => projectOrderItemToInvoiceItem(item, orderDividerUid));
 }
 
+// ── Divider-structure adoption ──────────────────────────────────
+
+/**
+ * A uid that identifies more than one line on at least one side, so the k-th
+ * occurrence pairing in {@link adoptOrderDividerStructure} is a guess rather
+ * than a fact. Reported, never silently resolved.
+ */
+export interface AmbiguousItemPairing {
+  uid: string;
+  /** Occurrences of this uid among the scope's invoice LINE items. */
+  invoiceOccurrences: number;
+  /** Occurrences of this uid among the order's LINE items. */
+  orderOccurrences: number;
+}
+
+/** @see {@link adoptOrderDividerStructure} */
+export interface AdoptedDividerStructure {
+  items: InvoiceDocItemType[];
+  ambiguous: AmbiguousItemPairing[];
+}
+
+/**
+ * Re-hang one order-scope of an invoice's items on the ORDER's divider
+ * skeleton. Pure, and **structure-only**.
+ *
+ * The CRMS invoice tree carries none of the `group` dividers its order does
+ * (measured 2026-08-10: zero of 999 prod invoices carry one; 941 of 978 orders
+ * do), so every invoice line's path is shorter than its counterpart's and the
+ * path-keyed comparators match nothing at all — `computeInvoiceSyncStatus`
+ * reports every line both "missing" and "removed", and
+ * `syncOrderToInvoiceSelective` re-projects nothing. This is what makes the two
+ * trees comparable again; the direction is settled — **the order tree is
+ * right**, and `flattenForXero` strips dividers at the Xero boundary so
+ * carrying them costs Xero nothing.
+ *
+ * What it does:
+ * - **Adopts the order's divider skeleton wholesale.** A `destination`/`group`
+ *   divider the order carries is placed at the order's position; an invoice-side
+ *   divider the order lacks is dropped. A divider the invoice ALREADY carries
+ *   under the same uid keeps its own row — only its `path` moves. That is
+ *   deliberate: 112 prod invoices hold destination dividers whose
+ *   `uid_delivery`/`uid_collection` point at a different `destinations` doc than
+ *   the order's, and that staleness is a real difference the badge should keep
+ *   showing, not something a structural repair should quietly overwrite.
+ * - **Re-paths each paired line** to `[orderDividerUid, ...orderLine.path]`.
+ * - **Adds, removes, re-prices, re-names and re-quantifies nothing.** An order
+ *   line the invoice does not carry is NOT added; an invoice line the order does
+ *   not carry is kept, at its current parent (root of the order scope when that
+ *   parent no longer exists), because an invoice-only line is line-level drift
+ *   for the badge to report — not a structural defect to erase.
+ * - **Passes any `order` divider row through at the head**, and never mints one:
+ *   its identity is the source order's uid and only the caller knows it.
+ *
+ * Pairing is by `uid`; where a uid repeats, the k-th invoice occurrence pairs
+ * with the k-th order occurrence in document order. `uid` is NOT a row identity
+ * (it repeats within one document on 18% of prod orders), so those pairings are
+ * returned in `ambiguous` for the caller to surface rather than being trusted
+ * silently.
+ *
+ * The result is a fixed point of {@link computeInvoiceItemPaths}: callers still
+ * run it (and {@link validateInvoiceItemUniqueness}) before writing.
+ *
+ * @param scopedInvoiceItems - This order's slice of the invoice's items, as
+ *   {@link getOrderScopedItems} returns it (the `order` divider may be present
+ *   or absent)
+ * @param orderItems - The source order's full `items` array
+ * @param orderDividerUid - The order divider's uid, i.e. the source order's uid
+ */
+export function adoptOrderDividerStructure(
+  scopedInvoiceItems: InvoiceDocItemType[],
+  orderItems: LineItem[],
+  orderDividerUid: string,
+): AdoptedDividerStructure {
+  const orderDividerRows = scopedInvoiceItems.filter((it) => it.type === "order");
+  const rest = scopedInvoiceItems.filter((it) => it.type !== "order");
+  const invoiceLines = rest.filter((it) => isLineItemType(it.type));
+  const invoiceDividerByUid = new Map<string, InvoiceDocItemType>();
+  for (const it of rest) if (!isLineItemType(it.type)) invoiceDividerByUid.set(it.uid, it);
+
+  // ── pair lines by (uid, k-th occurrence) ──
+  const invoiceByUid = new Map<string, InvoiceDocItemType[]>();
+  for (const it of invoiceLines) {
+    const bucket = invoiceByUid.get(it.uid);
+    if (bucket) bucket.push(it);
+    else invoiceByUid.set(it.uid, [it]);
+  }
+  const orderLineCounts = new Map<string, number>();
+  for (const it of orderItems) {
+    if (!isLineItemType(it.type)) continue;
+    orderLineCounts.set(it.uid, (orderLineCounts.get(it.uid) ?? 0) + 1);
+  }
+
+  const cursor = new Map<string, number>();
+  const pairedFor = new Map<LineItem, InvoiceDocItemType>();
+  const paired = new Set<InvoiceDocItemType>();
+  for (const orderLine of orderItems) {
+    if (!isLineItemType(orderLine.type)) continue;
+    const bucket = invoiceByUid.get(orderLine.uid);
+    if (!bucket) continue;
+    const k = cursor.get(orderLine.uid) ?? 0;
+    cursor.set(orderLine.uid, k + 1);
+    const match = bucket[k];
+    if (!match) continue;
+    pairedFor.set(orderLine, match);
+    paired.add(match);
+  }
+
+  const ambiguous: AmbiguousItemPairing[] = [];
+  for (const [uid, bucket] of invoiceByUid) {
+    const orderOccurrences = orderLineCounts.get(uid) ?? 0;
+    if (orderOccurrences === 0) continue;
+    if (bucket.length > 1 || orderOccurrences > 1) {
+      ambiguous.push({ uid, invoiceOccurrences: bucket.length, orderOccurrences });
+    }
+  }
+
+  // ── where does each unpaired invoice line hang? ──
+  const unpaired = invoiceLines.filter((it) => !paired.has(it));
+  const surviving = new Set<string>();
+  for (const it of orderItems) if (isDividerItemType(it.type)) surviving.add(it.uid);
+  for (const orderLine of pairedFor.keys()) surviving.add(orderLine.uid);
+  for (const it of unpaired) surviving.add(it.uid);
+
+  /** Key `""` is the root of the order scope. */
+  const unpairedByParent = new Map<string, InvoiceDocItemType[]>();
+  for (const it of unpaired) {
+    const rel = stripOrderPrefix(it.path ?? [], orderDividerUid);
+    const claimed = rel.length >= 2 ? rel[rel.length - 2] : "";
+    const parent = claimed !== "" && surviving.has(claimed) ? claimed : "";
+    const bucket = unpairedByParent.get(parent);
+    if (bucket) bucket.push(it);
+    else unpairedByParent.set(parent, [it]);
+  }
+
+  // ── emit ──
+  const out: InvoiceDocItemType[] = orderDividerRows.map((d) => ({ ...d, path: [d.uid] }));
+  const emitted = new Set<InvoiceDocItemType>();
+  const emitUnpairedChildren = (parentUid: string, parentPath: string[]) => {
+    for (const child of unpairedByParent.get(parentUid) ?? []) {
+      if (emitted.has(child)) continue;
+      emitted.add(child);
+      const childPath = [...parentPath, child.uid];
+      out.push({ ...child, path: childPath } as InvoiceDocItemType);
+      emitUnpairedChildren(child.uid, childPath);
+    }
+  };
+
+  // Root-level invoice-only lines head the scope. Appending them instead would
+  // drop them inside whichever divider happened to be last, silently changing
+  // the parent of the one population this function promises not to move.
+  emitUnpairedChildren("", [orderDividerUid]);
+
+  for (const orderItem of orderItems) {
+    const path = [orderDividerUid, ...(orderItem.path ?? [])];
+    if (isDividerItemType(orderItem.type)) {
+      const existing = invoiceDividerByUid.get(orderItem.uid);
+      out.push(
+        existing
+          ? ({ ...existing, path } as InvoiceDocItemType)
+          : projectOrderItemToInvoiceItem(orderItem, orderDividerUid),
+      );
+      emitUnpairedChildren(orderItem.uid, path);
+      continue;
+    }
+    const match = pairedFor.get(orderItem);
+    if (!match) continue; // an order line the invoice does not bill — not added
+    out.push({ ...match, path } as InvoiceDocItemType);
+    emitUnpairedChildren(orderItem.uid, path);
+  }
+
+  return { items: out, ambiguous };
+}
+
+/**
+ * Is one order-scope of an invoice hung on the same divider skeleton as its
+ * order? The alignment predicate {@link adoptOrderDividerStructure} drives
+ * toward, and the one definition of "aligned" the audit and the endpoint share.
+ *
+ * ⚠️ **It compares DIVIDER paths, not all paths.** Full path-set equality is
+ * the wrong criterion and would never go green: measured 2026-08-10, 15 of the
+ * 102 prod pairs carrying a custom line carry a legitimate invoice-only line,
+ * which makes the path sets differ forever while the tree shapes agree
+ * perfectly. A line the order lacks is **line-level drift**, correctly reported
+ * `out_of_sync` by {@link computeInvoiceSyncStatus}; conflating it with a
+ * structural misalignment would make the two indistinguishable and the
+ * structural repair unfinishable.
+ *
+ * The invoice's own `order` divider is excluded — it has no order-side
+ * counterpart by construction (`isDividerItemType("order")` is `true`).
+ */
+export function invoiceScopeDividersMatch(
+  scopedInvoiceItems: InvoiceItem[],
+  orderItems: LineItem[],
+  orderDividerUid: string,
+): boolean {
+  const invoice = new Set<string>();
+  for (const it of scopedInvoiceItems) {
+    if (it.type === "order" || !isDividerItemType(it.type)) continue;
+    invoice.add(itemPathKey(stripOrderPrefix(it.path ?? [], orderDividerUid)));
+  }
+  const order = new Set<string>();
+  for (const it of orderItems) {
+    if (!isDividerItemType(it.type)) continue;
+    order.add(itemPathKey(it.path ?? []));
+  }
+  if (invoice.size !== order.size) return false;
+  for (const k of order) if (!invoice.has(k)) return false;
+  return true;
+}
+
 /**
  * Carry forward invoice-specific overrides from existing items to rebuilt items.
  * Matches by uid — if a rebuilt item has the same uid as an existing invoice
@@ -904,29 +1200,6 @@ export function syncOrderItems(
 }
 
 // ── On-demand order → invoice resync (operator-triggered) ───────────
-
-/**
- * Compare two invoice-shaped items for sync equality, ignoring the invoice-only
- * override fields ({@link INVOICE_ONLY_ITEM_FIELDS}). Key-set + per-key JSON
- * comparison — order-insensitive, the same normalization {@link isItemSynced}
- * applies at the order↔invoice boundary. Both items must already be
- * invoice-shaped with full (divider-scoped) paths.
- */
-function invoiceProjectionMatches(expected: InvoiceItem, current: InvoiceItem): boolean {
-  const comparableKeys = (it: InvoiceItem) =>
-    Object.keys(it).filter((k) => !INVOICE_ONLY_ITEM_FIELD_SET.has(k));
-  const eKeys = comparableKeys(expected);
-  const cKeys = comparableKeys(current);
-  if (eKeys.length !== cKeys.length) return false;
-  const cSet = new Set(cKeys);
-  for (const k of eKeys) if (!cSet.has(k)) return false;
-  const e = expected as unknown as Record<string, unknown>;
-  const c = current as unknown as Record<string, unknown>;
-  for (const k of eKeys) {
-    if (JSON.stringify(e[k]) !== JSON.stringify(c[k])) return false;
-  }
-  return true;
-}
 
 /**
  * Re-project an order's lines into an invoice, on demand.
@@ -1032,7 +1305,7 @@ export function computeInvoiceSyncStatus(
       continue;
     }
     const expected = projectOrderItemToInvoiceItem(orderItem, orderDividerUid);
-    status.set(fullKey, invoiceProjectionMatches(expected, current) ? "in_sync" : "out_of_sync");
+    status.set(fullKey, invoiceItemsMatch(expected, current) ? "in_sync" : "out_of_sync");
   }
 
   // Invoice-scoped lines the order no longer has.

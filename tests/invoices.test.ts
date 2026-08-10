@@ -1,7 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues, InvoiceDocLineItemSchema, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
-import { calculateOrderTotals, sumDocumentTotals, validateItemPaths } from "../src/utils/orders.ts";
+import { calculateOrderTotals, computeItemPaths, sumDocumentTotals, validateItemPaths } from "../src/utils/orders.ts";
 import {
+  adoptOrderDividerStructure,
   buildInvoiceDestinationDivider,
   buildOrderScopedItems,
   calculateInvoiceTotals,
@@ -14,6 +15,9 @@ import {
   getXeroUnitAmountFromCents,
   type InvoiceDestinationPair,
   type InvoiceItem,
+  invoiceItemsMatch,
+  invoiceScopeDividersMatch,
+  isItemSynced,
   type LineItem,
   type Tax,
   recomputeSettlementTotals,
@@ -609,38 +613,49 @@ Deno.test("syncOrderToInvoiceSelective projects new items to invoice-line-item s
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
 });
 
-Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward invoice-only fields", () => {
-  // Prev order + matching invoice item with overrides → sync branch replaces body, keeps overrides.
-  const prevItem: LineItem = {
+/**
+ * An ORDER-shaped line, order-only fields and all — `stock_method`,
+ * `order_number`, `uid_order`, `price.replacement_cents`. This is what a stored
+ * order line looks like, and it is the shape core#52 was about.
+ */
+function orderShapedLine(overrides: Partial<LineItem> = {}): LineItem {
+  return {
     uid: ITEM_1,
     type: "rental",
     name: "Light",
+    description: "",
     quantity: 1,
     path: [DEST_1, ITEM_1],
-    price: {
-      base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
-      subtotal_cents: 10000, subtotal_discounted_cents: 10000, discount: null, taxes: [], total_cents: 10000,
-    } as unknown as LineItem["price"],
-  };
-  // Deliberately a bare spread of `prevItem`: `isItemSynced` compares the two
-  // field by field, so padding this out with the schema base would introduce
-  // differences and push the test down the "overridden" branch it is not
-  // testing.
-  const invoiceItem: InvoiceDocItemType = {
-    ...prevItem,
-    path: [ORDER_DIV_1, DEST_1, ITEM_1],
-    coa_revenue: 4100,
-    xero_id: "00000000-0000-4000-8000-000000000001",
-  } as InvoiceDocItemType;
-  const newItem: LineItem = {
-    ...prevItem,
-    name: "Light v2",
-    quantity: 3,
-    // Order-only fields must NOT survive into invoice item.
     stock_method: "reserve",
     order_number: 1001,
     uid_order: ORDER_ID_1,
+    zero_priced: false,
+    ...overrides,
+    price: {
+      base_cents: 10000, replacement_cents: 50000, base_percent: null, chargeable_days: 5,
+      formula: "five_day_week", subtotal_cents: 10000, subtotal_discounted_cents: 10000,
+      discount: null, taxes: [], total_cents: 10000,
+      ...((overrides.price ?? {}) as Record<string, unknown>),
+    } as unknown as LineItem["price"],
   };
+}
+
+Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward invoice-only fields", () => {
+  // Prev order + matching invoice item with overrides → sync branch replaces body, keeps overrides.
+  //
+  // ⚠️ The invoice side is `prevItem`'s PROJECTION, not a bare spread of it —
+  // which is what a stored invoice actually holds, and what makes this arm
+  // reachable. `isItemSynced` used to compare the order shape against the
+  // invoice shape directly; `stock_method` alone made the key sets unequal, so
+  // this branch was dead for every real line in the corpus and the test passed
+  // only because its fixture omitted every order-only field (core#52).
+  const prevItem = orderShapedLine();
+  const invoiceItem: InvoiceDocItemType = {
+    ...buildOrderScopedItems([prevItem], ORDER_DIV_1)[0],
+    coa_revenue: 4100,
+    xero_id: "00000000-0000-4000-8000-000000000001",
+  } as InvoiceDocItemType;
+  const newItem: LineItem = orderShapedLine({ name: "Light v2", quantity: 3 });
 
   const result = syncOrderToInvoiceSelective([prevItem], [newItem], [invoiceItem], ORDER_DIV_1);
   assertEquals(result.length, 1);
@@ -1755,3 +1770,316 @@ Deno.test("validateInvoiceItemPaths still recomputes at INVOICE depth after the 
   assertEquals(atOrderDepth.length > 0, true, "order depth agreed with invoice depth");
   assertEquals(atOrderDepth.find((i) => i.uid === ITEM_1)?.expected, [DEST_1, ITEM_1]);
 });
+
+// ══════════════════════════════════════════════════════════════════
+// invoiceItemsMatch — the one comparator (api-cloudrun#480, core#52)
+// ══════════════════════════════════════════════════════════════════
+
+const GROUP_1 = "00000000-0000-4000-8000-0000000009a1";
+const GROUP_2 = "00000000-0000-4000-8000-0000000009a2";
+
+/** The projection of `RESYNC_LINE_A`, i.e. what a native invoice stores. */
+function projectedLineA(): InvoiceItem {
+  return buildOrderScopedItems([RESYNC_LINE_A], ORDER_DIV_1)[0] as InvoiceItem;
+}
+
+/** The pre-2026-08-10 comparison, executed for real. @see the companions below. */
+function blobComparison(expected: InvoiceItem, current: InvoiceItem): boolean {
+  const INVOICE_ONLY = new Set([
+    "coa_revenue", "tracking_category", "xero_id", "xero_tracking_option_id", "crms_id", "crms_opportunity_id",
+  ]);
+  const keys = (it: InvoiceItem) => Object.keys(it).filter((k) => !INVOICE_ONLY.has(k));
+  const e = expected as unknown as Record<string, unknown>;
+  const c = current as unknown as Record<string, unknown>;
+  const eKeys = keys(expected);
+  const cKeys = keys(current);
+  if (eKeys.length !== cKeys.length) return false;
+  const cSet = new Set(cKeys);
+  for (const k of eKeys) if (!cSet.has(k)) return false;
+  for (const k of eKeys) if (JSON.stringify(e[k]) !== JSON.stringify(c[k])) return false;
+  return true;
+}
+
+Deno.test("invoiceItemsMatch: an absent nullable price key equals an explicit null", () => {
+  // The projection emits `base_percent: null`; a stored CRMS line omits the key.
+  // `InvoiceDocItemPriceSchema` declares it `.nullable().optional()` and blesses
+  // BOTH encodings, so a comparator that separates them is reporting a
+  // difference the schema says does not exist.
+  const expected = projectedLineA();
+  const stored = structuredClone(expected) as unknown as { price: Record<string, unknown> };
+  delete stored.price.base_percent;
+  assertEquals(invoiceItemsMatch(expected, stored as unknown as InvoiceItem), true);
+
+  // Both encodings really are legal — probed, not asserted from memory.
+  assertEquals(InvoiceDocLineItemSchema.safeParse(expected).success, true);
+  assertEquals(InvoiceDocLineItemSchema.safeParse(stored).success, true);
+});
+
+Deno.test("fail-closed companion: the old JSON-blob price comparison DISAGREES", () => {
+  // Executes the pre-fix comparison for real against the same pair, so the
+  // assertion above cannot quietly become a restatement of the new code.
+  const expected = projectedLineA();
+  const stored = structuredClone(expected) as unknown as { price: Record<string, unknown> };
+  delete stored.price.base_percent;
+  assertEquals(
+    blobComparison(expected, stored as unknown as InvoiceItem),
+    false,
+    "the blob comparison must still fail — otherwise this companion proves nothing",
+  );
+});
+
+Deno.test("invoiceItemsMatch: a stored discount_percent still reports a mismatch", () => {
+  // The dominant cause on prod — 8,015 of 8,978 paired lines. It is NOT excluded
+  // here on purpose: the field is removed from the schema and the corpus
+  // (api-cloudrun#480 phases 3–4) rather than policed by an exclusion list, so
+  // until the repair runs these lines keep reporting `out_of_sync` — the status
+  // quo, not a regression.
+  const expected = projectedLineA();
+  const stored = structuredClone(expected) as unknown as { price: Record<string, unknown> };
+  stored.price.discount_percent = 0;
+  assertEquals(invoiceItemsMatch(expected, stored as unknown as InvoiceItem), false);
+});
+
+Deno.test("invoiceItemsMatch: key ORDER inside price is not a difference", () => {
+  // A projection emits keys in source order; a Firestore map comes back sorted.
+  // `JSON.stringify` is key-order sensitive, so the blob form called two deeply
+  // equal prices different — a second, silent contributor to the same badge.
+  const expected = projectedLineA();
+  const price = (expected as unknown as { price: Record<string, unknown> }).price;
+  const reordered = Object.fromEntries(Object.entries(price).reverse());
+  const stored = { ...expected, price: reordered } as unknown as InvoiceItem;
+  assertEquals(invoiceItemsMatch(expected, stored), true);
+  assertEquals(
+    JSON.stringify(price) === JSON.stringify(reordered),
+    false,
+    "the reordering must actually change the blob — otherwise this proves nothing",
+  );
+});
+
+Deno.test("invoiceItemsMatch: a real value change on any compared price key still mismatches", () => {
+  const expected = projectedLineA();
+  for (const [k, v] of Object.entries((expected as unknown as { price: Record<string, unknown> }).price)) {
+    const stored = structuredClone(expected) as unknown as { price: Record<string, unknown> };
+    // Move the value to something genuinely different, whatever its type.
+    stored.price[k] = typeof v === "number" ? v + 1 : v === null ? 7 : Array.isArray(v) ? [{ uid: "x" }] : "changed";
+    assertEquals(
+      invoiceItemsMatch(expected, stored as unknown as InvoiceItem),
+      false,
+      `price.${k} changed and the comparator still called it in_sync`,
+    );
+  }
+  // …and a non-price key too, so the structural branch has not swallowed the rest.
+  assertEquals(invoiceItemsMatch(expected, { ...expected, quantity: 99 } as InvoiceItem), false);
+});
+
+Deno.test("isItemSynced: an ORDER-shaped line matches its own projection — core#52", () => {
+  // The regression the whole draft mirror rested on. `stock_method` is required
+  // on a stored order line and rejected by the strict invoice line schema, so
+  // comparing the two shapes directly could never agree and the mirror
+  // propagated additions only — never an edit, never a removal.
+  const orderLine = orderShapedLine();
+  const invoiceLine = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0] as InvoiceItem;
+  assertEquals(isItemSynced(orderLine, invoiceLine, ORDER_DIV_1), true);
+  // The fixture is not vacuous: it really does carry the order-only fields.
+  assertEquals(typeof (orderLine as unknown as Record<string, unknown>).stock_method, "string");
+  assertEquals(
+    typeof (orderLine.price as unknown as Record<string, unknown>).replacement_cents,
+    "number",
+  );
+});
+
+Deno.test("fail-closed companion: comparing the two SHAPES directly still disagrees", () => {
+  const orderLine = orderShapedLine();
+  const invoiceLine = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0] as InvoiceItem;
+  assertEquals(
+    blobComparison(orderLine as unknown as InvoiceItem, invoiceLine),
+    false,
+    "the un-projected comparison must still fail — otherwise core#52 was never real",
+  );
+});
+
+Deno.test("isItemSynced: a genuine override is still detected", () => {
+  const orderLine = orderShapedLine();
+  const overridden = {
+    ...buildOrderScopedItems([orderLine], ORDER_DIV_1)[0],
+    name: "Operator renamed this",
+  } as InvoiceItem;
+  assertEquals(isItemSynced(orderLine, overridden, ORDER_DIV_1), false);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// adoptOrderDividerStructure / invoiceScopeDividersMatch
+// ══════════════════════════════════════════════════════════════════
+
+/** An order carrying a group divider the CRMS invoice tree omits. */
+function groupedOrderItems(): LineItem[] {
+  return computeItemPaths([
+    { ...RESYNC_DEST, path: [] },
+    { uid: GROUP_1, type: "group", name: "Lighting", description: "", path: [] } as LineItem,
+    { ...RESYNC_LINE_A, path: [] } as LineItem,
+    { ...RESYNC_LINE_B, path: [] } as LineItem,
+  ]);
+}
+
+/** The flat, divider-less shape the CRMS invoice webhook produces today. */
+function flatInvoiceScope(): InvoiceDocItemType[] {
+  return computeInvoiceItemPaths([
+    orderDivider,
+    ...buildOrderScopedItems(
+      [{ ...RESYNC_LINE_A, path: [] } as LineItem, { ...RESYNC_LINE_B, path: [] } as LineItem],
+      ORDER_DIV_1,
+    ),
+  ]);
+}
+
+Deno.test("adoptOrderDividerStructure: an aligned pair is a structural no-op", () => {
+  const before = computeInvoiceItemPaths(
+    [orderDivider, ...buildOrderScopedItems(groupedOrderItems(), ORDER_DIV_1)],
+  );
+  const { items, ambiguous } = adoptOrderDividerStructure(before, groupedOrderItems(), ORDER_DIV_1);
+  assertEquals(ambiguous, []);
+  assertEquals(items, before);
+});
+
+Deno.test("adoptOrderDividerStructure: a flat invoice gains the order's dividers and nothing else moves", () => {
+  const order = groupedOrderItems();
+  const before = flatInvoiceScope();
+  const { items } = adoptOrderDividerStructure(before, order, ORDER_DIV_1);
+
+  // The order's whole divider skeleton is now present, by uid and by path.
+  assertEquals(invoiceScopeDividersMatch(before as InvoiceItem[], order, ORDER_DIV_1), false);
+  assertEquals(invoiceScopeDividersMatch(items as InvoiceItem[], order, ORDER_DIV_1), true);
+
+  // Not one line was added, removed, re-priced, re-named or re-quantified.
+  const lineKey = (its: InvoiceDocItemType[]) =>
+    its.filter((it) => isInvoiceLineItem(it))
+      .map((it) => JSON.stringify({ ...it, path: undefined }))
+      .sort();
+  assertEquals(lineKey(items), lineKey(before));
+
+  // …and the result is a fixed point of the normalizer the caller runs next.
+  assertEquals(validateInvoiceItemPaths(computeInvoiceItemPaths(items)), []);
+  assertEquals(validateInvoiceItemPaths(items), []);
+  assertEquals(validateInvoiceItemUniqueness(items), []);
+  assertEquals(items.find((it) => it.uid === ITEM_1)?.path, [ORDER_DIV_1, DEST_1, GROUP_1, ITEM_1]);
+});
+
+Deno.test("adoptOrderDividerStructure: an invoice-only line is KEPT, at the root of the scope", () => {
+  const order = groupedOrderItems();
+  const custom = makeItem({
+    uid: "custom-00000000-0000-4000-8000-00000000c001",
+    type: "sale",
+    name: "Rush fee",
+    path: [ORDER_DIV_1, "custom-00000000-0000-4000-8000-00000000c001"],
+  }) as unknown as InvoiceDocItemType;
+  const before = [...flatInvoiceScope(), custom];
+  const { items } = adoptOrderDividerStructure(before, order, ORDER_DIV_1);
+
+  const kept = items.find((it) => it.uid === custom.uid);
+  assertEquals(kept?.path, [ORDER_DIV_1, custom.uid]);
+  // Structurally aligned even so — an invoice-only line is LINE-level drift.
+  assertEquals(invoiceScopeDividersMatch(items as InvoiceItem[], order, ORDER_DIV_1), true);
+});
+
+Deno.test("invoiceScopeDividersMatch: compares divider paths, NOT all paths", () => {
+  // ⚠️ The criterion this test pins. Full path-set equality would never go green
+  // — 15 of the 102 prod pairs carrying a custom line carry a legitimate
+  // invoice-only one, so the path sets differ forever while the tree shapes
+  // agree perfectly.
+  const order = groupedOrderItems();
+  const custom = makeItem({
+    uid: "custom-00000000-0000-4000-8000-00000000c002",
+    type: "sale",
+    name: "Invoice-only",
+    path: [ORDER_DIV_1, "custom-00000000-0000-4000-8000-00000000c002"],
+  }) as unknown as InvoiceDocItemType;
+  const { items } = adoptOrderDividerStructure([...flatInvoiceScope(), custom], order, ORDER_DIV_1);
+
+  assertEquals(invoiceScopeDividersMatch(items as InvoiceItem[], order, ORDER_DIV_1), true);
+  // The companion: full path-set equality DOES fail on the same pair, which is
+  // why it is the wrong criterion rather than a stricter one.
+  const invoicePaths = new Set(
+    items.filter((it) => it.type !== "order").map((it) => it.path.slice(1).join("/")),
+  );
+  const orderPaths = new Set(order.map((it) => (it.path ?? []).join("/")));
+  assertEquals(
+    invoicePaths.size === orderPaths.size && [...orderPaths].every((p) => invoicePaths.has(p)),
+    false,
+    "full path-set equality must still fail here — otherwise the ⚠️ above is moot",
+  );
+});
+
+Deno.test("invoiceScopeDividersMatch: a missing group, and a divider at the wrong depth, both fail", () => {
+  const order = groupedOrderItems();
+  assertEquals(invoiceScopeDividersMatch(flatInvoiceScope() as InvoiceItem[], order, ORDER_DIV_1), false);
+
+  // Same divider uids, wrong nesting — the group hung off the order divider
+  // rather than the destination. A uid-set check would call this aligned.
+  const wrongDepth = [
+    orderDivider,
+    { uid: DEST_1, type: "destination", name: "Main Venue", description: "", uid_delivery: DEL_1, uid_collection: null, path: [ORDER_DIV_1, DEST_1] },
+    { uid: GROUP_1, type: "group", name: "Lighting", description: "", path: [ORDER_DIV_1, GROUP_1] },
+  ] as unknown as InvoiceItem[];
+  assertEquals(invoiceScopeDividersMatch(wrongDepth, order, ORDER_DIV_1), false);
+});
+
+Deno.test("adoptOrderDividerStructure: an existing divider row keeps its own fields", () => {
+  // 112 prod invoices hold a destination divider whose uid_delivery points at a
+  // different `destinations` doc than the order's. That is benign staleness the
+  // badge should keep showing — a STRUCTURAL repair must not quietly overwrite
+  // it, so an existing row is re-pathed and never re-cloned.
+  const order = groupedOrderItems();
+  const staleDest = {
+    uid: DEST_1, type: "destination", name: "Main Venue", description: "",
+    uid_delivery: DEL_9, uid_collection: COL_9, path: [ORDER_DIV_1, DEST_1],
+  } as unknown as InvoiceDocItemType;
+  const { items } = adoptOrderDividerStructure([...flatInvoiceScope(), staleDest], order, ORDER_DIV_1);
+  const dest = items.find((it) => it.uid === DEST_1) as unknown as Record<string, unknown>;
+  assertEquals(dest.uid_delivery, DEL_9, "the invoice's own (stale) ref was overwritten");
+  assertEquals(dest.path, [ORDER_DIV_1, DEST_1]);
+});
+
+Deno.test("adoptOrderDividerStructure: a repeated uid is reported as ambiguous, not silently paired", () => {
+  // `uid` is NOT a row identity — it repeats within one document on 18% of prod
+  // orders — so the k-th-occurrence pairing is a guess and says so.
+  const order = computeItemPaths([
+    { ...RESYNC_DEST, path: [] },
+    { uid: GROUP_1, type: "group", name: "A", description: "", path: [] } as LineItem,
+    { ...RESYNC_LINE_A, path: [] } as LineItem,
+    { uid: GROUP_2, type: "group", name: "B", description: "", path: [] } as LineItem,
+    { ...RESYNC_LINE_A, path: [] } as LineItem,
+  ]);
+  const flat = computeInvoiceItemPaths([
+    orderDivider,
+    ...buildOrderScopedItems(
+      [{ ...RESYNC_LINE_A, path: [] } as LineItem, { ...RESYNC_LINE_A, path: [] } as LineItem],
+      ORDER_DIV_1,
+    ),
+  ]);
+  const { items, ambiguous } = adoptOrderDividerStructure(flat, order, ORDER_DIV_1);
+  assertEquals(ambiguous, [{ uid: ITEM_1, invoiceOccurrences: 2, orderOccurrences: 2 }]);
+  // It still pairs k-th to k-th, so both copies land under their own group.
+  assertEquals(items.filter((it) => it.uid === ITEM_1).map((it) => it.path), [
+    [ORDER_DIV_1, DEST_1, GROUP_1, ITEM_1],
+    [ORDER_DIV_1, DEST_1, GROUP_2, ITEM_1],
+  ]);
+});
+
+Deno.test("adoptOrderDividerStructure: an order line the invoice does not bill is NOT added", () => {
+  const order = groupedOrderItems();
+  const onlyA = computeInvoiceItemPaths([
+    orderDivider,
+    ...buildOrderScopedItems([{ ...RESYNC_LINE_A, path: [] } as LineItem], ORDER_DIV_1),
+  ]);
+  const { items } = adoptOrderDividerStructure(onlyA, order, ORDER_DIV_1);
+  assertEquals(items.some((it) => it.uid === ITEM_2), false);
+  // Structurally aligned — the absent line is line-level drift, reported by
+  // computeInvoiceSyncStatus, not a structural gap.
+  assertEquals(invoiceScopeDividersMatch(items as InvoiceItem[], order, ORDER_DIV_1), true);
+  assertEquals(
+    computeInvoiceSyncStatus(items as InvoiceItem[], order, ORDER_DIV_1).get(KEY_B_GROUPED),
+    "out_of_sync",
+  );
+});
+
+const KEY_B_GROUPED = [ORDER_DIV_1, DEST_1, GROUP_1, ITEM_2].join("/");

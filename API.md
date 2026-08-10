@@ -19379,6 +19379,29 @@ import { flattenForXero, isPriceableItem, syncOrderItems } from "@cfs/core/utils
 const billableItems = flattenForXero(invoice.items);
 ```
 
+### `AdoptedDividerStructure`
+
+```ts
+interface AdoptedDividerStructure {
+  items: InvoiceDocItemType[];
+  ambiguous: AmbiguousItemPairing[];
+}
+```
+
+### `AmbiguousItemPairing`
+
+A uid that identifies more than one line on at least one side, so the k-th
+occurrence pairing in {@link adoptOrderDividerStructure} is a guess rather
+than a fact. Reported, never silently resolved.
+
+```ts
+interface AmbiguousItemPairing {
+  uid: string;
+  invoiceOccurrences: number;
+  orderOccurrences: number;
+}
+```
+
 ### `ConsolidatedItem`
 
 ```ts
@@ -19649,6 +19672,56 @@ interface TransactionFeeLineItem {
   price: PriceObject;
 }
 ```
+
+### `adoptOrderDividerStructure(scopedInvoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string): AdoptedDividerStructure`
+
+Re-hang one order-scope of an invoice's items on the ORDER's divider
+skeleton. Pure, and **structure-only**.
+
+The CRMS invoice tree carries none of the `group` dividers its order does
+(measured 2026-08-10: zero of 999 prod invoices carry one; 941 of 978 orders
+do), so every invoice line's path is shorter than its counterpart's and the
+path-keyed comparators match nothing at all — `computeInvoiceSyncStatus`
+reports every line both "missing" and "removed", and
+`syncOrderToInvoiceSelective` re-projects nothing. This is what makes the two
+trees comparable again; the direction is settled — **the order tree is
+right**, and `flattenForXero` strips dividers at the Xero boundary so
+carrying them costs Xero nothing.
+
+What it does:
+- **Adopts the order's divider skeleton wholesale.** A `destination`/`group`
+  divider the order carries is placed at the order's position; an invoice-side
+  divider the order lacks is dropped. A divider the invoice ALREADY carries
+  under the same uid keeps its own row — only its `path` moves. That is
+  deliberate: 112 prod invoices hold destination dividers whose
+  `uid_delivery`/`uid_collection` point at a different `destinations` doc than
+  the order's, and that staleness is a real difference the badge should keep
+  showing, not something a structural repair should quietly overwrite.
+- **Re-paths each paired line** to `[orderDividerUid, ...orderLine.path]`.
+- **Adds, removes, re-prices, re-names and re-quantifies nothing.** An order
+  line the invoice does not carry is NOT added; an invoice line the order does
+  not carry is kept, at its current parent (root of the order scope when that
+  parent no longer exists), because an invoice-only line is line-level drift
+  for the badge to report — not a structural defect to erase.
+- **Passes any `order` divider row through at the head**, and never mints one:
+  its identity is the source order's uid and only the caller knows it.
+
+Pairing is by `uid`; where a uid repeats, the k-th invoice occurrence pairs
+with the k-th order occurrence in document order. `uid` is NOT a row identity
+(it repeats within one document on 18% of prod orders), so those pairings are
+returned in `ambiguous` for the caller to surface rather than being trusted
+silently.
+
+The result is a fixed point of {@link computeInvoiceItemPaths}: callers still
+run it (and {@link validateInvoiceItemUniqueness}) before writing.
+
+**Parameters**
+
+- `scopedInvoiceItems` — This order's slice of the invoice's items, as
+{@link getOrderScopedItems} returns it (the `order` divider may be present
+or absent)
+- `orderItems` — The source order's full `items` array
+- `orderDividerUid` — The order divider's uid, i.e. the source order's uid
 
 ### `buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): OrderDocDestinationItemType`
 
@@ -19970,35 +20043,76 @@ narrowed, so a non-integer cannot throw on the Xero push path.
 
 **Returns** — Per-unit amount for Xero **in dollars**, or 0 if quantity is 0
 
+### `invoiceItemsMatch(expected: InvoiceItem, current: InvoiceItem): boolean`
+
+**The one comparator.** Are two invoice-shaped items the same row, ignoring
+the fields an invoice OWNS ({@link INVOICE_ONLY_ITEM_FIELDS})?
+
+It replaced two near-duplicate comparisons — the private
+`invoiceProjectionMatches` behind {@link computeInvoiceSyncStatus}, and
+{@link isItemSynced}'s order-shaped one behind the draft mirror — which had
+drifted into disagreeing about what "the same line" means. Both now call
+this; {@link isItemSynced} projects its order item first.
+
+Both arguments must already be invoice-shaped, with full (divider-scoped)
+paths. Comparison is:
+
+- **top-level key sets** must be equal, minus the invoice-only fields, on
+  both sides (a key whose value is `undefined` does not count as present —
+  Firestore stores no such value, so it can only come from a caller's
+  partially-built object);
+- **`price` structurally** ({@link invoicePricesMatch}), with absent ≡ null
+  on the keys the schema blesses both encodings of;
+- **every other key by canonical value** ({@link stableStringify}).
+
+### `invoiceScopeDividersMatch(scopedInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): boolean`
+
+Is one order-scope of an invoice hung on the same divider skeleton as its
+order? The alignment predicate {@link adoptOrderDividerStructure} drives
+toward, and the one definition of "aligned" the audit and the endpoint share.
+
+⚠️ **It compares DIVIDER paths, not all paths.** Full path-set equality is
+the wrong criterion and would never go green: measured 2026-08-10, 15 of the
+102 prod pairs carrying a custom line carry a legitimate invoice-only line,
+which makes the path sets differ forever while the tree shapes agree
+perfectly. A line the order lacks is **line-level drift**, correctly reported
+`out_of_sync` by {@link computeInvoiceSyncStatus}; conflating it with a
+structural misalignment would make the two indistinguishable and the
+structural repair unfinishable.
+
+The invoice's own `order` divider is excluded — it has no order-side
+counterpart by construction (`isDividerItemType("order")` is `true`).
+
 ### `isItemSynced(prevOrderItem: LineItem, invoiceItem: InvoiceItem, orderDividerUid: string): boolean`
 
 Compare a previous order item to a current invoice item to detect overrides.
 Returns true if the invoice item is "synced" (matches the order item on all
 non-invoice-only fields), false if it has been manually overridden.
 
-The comparison strips the order divider prefix from the invoice item's path
-and ignores {@link INVOICE_ONLY_ITEM_FIELDS} — on BOTH sides, since order
-lines carry `crms_id` too.
+**It projects the order item first, then delegates to
+{@link invoiceItemsMatch} — and that projection IS core#52's fix.** The
+function used to compare an order-SHAPED item against an invoice-SHAPED one,
+key sets before values; `stock_method` is required on a stored order line
+(`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItemSchema`,
+so the two sets could never be equal and an unchanged item reported
+"overridden" — for every real line item in the corpus, with nothing thrown.
+`price.replacement_cents` was a second, independent mismatch. The consequence
+was that the order→invoice draft mirror propagated additions only: never an
+edit, never a removal. Filtering both sides did NOT fix it — those are
+order-only fields, not invoice-only overrides — so the fix had to be to
+compare two invoice-shaped items, which is a real behavioural change to the
+mirror rather than a tidy-up.
 
-⚠️ **This function returns `false` for every real line item — core#52.**
-It compares KEY SETS before values; `stock_method` is required on a stored
-order line (`schemas/order.ts`) and REJECTED by the strict
-`InvoiceDocLineItemSchema`, so the two sets can never be equal and an
-unchanged item reports "overridden" (measured: an item vs. its own
-projection). `price.replacement_cents` is a second, independent mismatch.
-The consequence is that the order→invoice draft mirror propagates additions
-only — never edits, never removals. The two-sided filter below does NOT fix
-that (those are order-only fields, not invoice-only overrides); the fix is to
-compare two invoice-SHAPED items, as {@link invoiceProjectionMatches} does,
-and it is a behavioural change to the mirror. Do not "fix" the fixture in
-the covering unit test to make it green — that fixture is green precisely
-because it omits `stock_method`.
+⚠️ The covering unit test's fixture omits `stock_method`, which is why it was
+green throughout. Keep it that way only if it is testing something else — a
+fixture repaired to make this green would delete the evidence.
 
 **Parameters**
 
 - `prevOrderItem` — The order item from the previous version of the order
 - `invoiceItem` — The current invoice item (with order-scoped path)
-- `orderDividerUid` — The uid of the order divider (for path prefix stripping)
+- `orderDividerUid` — The uid of the order divider (both sides carry the
+scoped path once the order item is projected, so nothing is stripped)
 
 **Returns** — true if the item is synced (not overridden), false if overridden
 

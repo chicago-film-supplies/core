@@ -144,6 +144,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "removeOrderScopedDestinations", // destinations mutation (write-path)
     "resyncInvoiceLines", // operator-triggered resync (write-path)
     "computeInvoiceSyncStatus", // manager line-badging, not rendering
+    "invoiceItemsMatch", // the one order↔invoice comparator — sync machinery
+    "adoptOrderDividerStructure", // re-hangs an invoice on the order's dividers (write-path)
+    "invoiceScopeDividersMatch", // structural alignment predicate — audit + endpoint
   ],
   // The line builders, denylisted whole. Every one of them CONSTRUCTS a line
   // item from a Typesense `ProductDocument` — a write-path input a render context
