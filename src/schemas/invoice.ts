@@ -301,7 +301,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   name: z.string().meta({ pii: "none", column: true }),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
-  quantity: z.number().default(0).meta({ column: true, label: "Quantity" }),
+  quantity: z.int().default(0).meta({ column: true, label: "Quantity" }),
   price: InvoiceDocItemPriceSchema,
   path: z.array(ItemUid).default([]),
   coa_revenue: COARevenueEnum.nullable().optional(),
@@ -695,7 +695,7 @@ const InvoiceItemInputLineInner = z.object({
   name: z.string().meta({ pii: "none" }).optional(),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   description: z.string().meta({ pii: "none" }).optional(),
-  quantity: z.number().optional(),
+  quantity: z.int().optional(),
   price: InvoiceItemInputPriceSchema.optional(),
   path: z.array(ItemUid).optional(),
   coa_revenue: COARevenueEnum.nullable().optional(),
