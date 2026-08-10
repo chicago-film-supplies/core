@@ -42,10 +42,13 @@ export interface WebshopProductComponent {
 
 /** Shipping dimensions and hazard classification for a webshop product. */
 export interface WebshopProductShipping {
-  weight?: number;
-  height?: number;
-  width?: number;
-  length?: number;
+  // Nullable for the same reason `ProductShipping` is: `null` is "not measured
+  // yet" and `0` cannot say that (core#51). The webshop doc is a projection of
+  // the product, so it has to be able to carry the fact rather than flatten it.
+  weight?: number | null;
+  height?: number | null;
+  width?: number | null;
+  length?: number | null;
   air_hazardous?: boolean;
   air_un?: number | null;
 }
@@ -132,10 +135,10 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
     discountable: z.boolean(),
   }),
   shipping: z.strictObject({
-    weight: z.number().optional(),
-    height: z.number().optional(),
-    width: z.number().optional(),
-    length: z.number().optional(),
+    weight: z.number().nullable().optional(),
+    height: z.number().nullable().optional(),
+    width: z.number().nullable().optional(),
+    length: z.number().nullable().optional(),
     air_hazardous: z.boolean().optional(),
     air_un: z.number().nullable().optional(),
   }).optional(),

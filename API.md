@@ -8079,10 +8079,10 @@ Shipping dimensions and hazard classification for a webshop product.
 
 ```ts
 interface WebshopProductShipping {
-  weight?: number;
-  height?: number;
-  width?: number;
-  length?: number;
+  weight?: number | null;
+  height?: number | null;
+  width?: number | null;
+  length?: number | null;
   air_hazardous?: boolean;
   air_un?: number | null;
 }
@@ -15392,10 +15392,10 @@ Shipping dimensions and hazard classification for a webshop product.
 
 ```ts
 interface WebshopProductShipping {
-  weight?: number;
-  height?: number;
-  width?: number;
-  length?: number;
+  weight?: number | null;
+  height?: number | null;
+  width?: number | null;
+  length?: number | null;
   air_hazardous?: boolean;
   air_un?: number | null;
 }

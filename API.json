@@ -3981,7 +3981,7 @@
         {
           "kind": "interface",
           "name": "WebshopProductShipping",
-          "declaration": "interface WebshopProductShipping {\n  weight?: number;\n  height?: number;\n  width?: number;\n  length?: number;\n  air_hazardous?: boolean;\n  air_un?: number | null;\n}",
+          "declaration": "interface WebshopProductShipping {\n  weight?: number | null;\n  height?: number | null;\n  width?: number | null;\n  length?: number | null;\n  air_hazardous?: boolean;\n  air_un?: number | null;\n}",
           "doc": "Shipping dimensions and hazard classification for a webshop product."
         },
         {
@@ -7874,7 +7874,7 @@
         {
           "kind": "interface",
           "name": "WebshopProductShipping",
-          "declaration": "interface WebshopProductShipping {\n  weight?: number;\n  height?: number;\n  width?: number;\n  length?: number;\n  air_hazardous?: boolean;\n  air_un?: number | null;\n}",
+          "declaration": "interface WebshopProductShipping {\n  weight?: number | null;\n  height?: number | null;\n  width?: number | null;\n  length?: number | null;\n  air_hazardous?: boolean;\n  air_un?: number | null;\n}",
           "doc": "Shipping dimensions and hazard classification for a webshop product."
         }
       ]
