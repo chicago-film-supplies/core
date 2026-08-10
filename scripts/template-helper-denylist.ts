@@ -167,6 +167,20 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // invoices and quotes).
     "deriveProductImageUuids",
   ],
+  taxes: [
+    // Recomputes MONEY at render time. It is `overrideItemTaxesForProfile` plus
+    // a `calculateItemPrice` pass, and that second half is the whole difference:
+    // the sibling rewrites a tax amount from the line's **stored**
+    // `subtotal_discounted_cents`, while this one rebuilds `subtotal_cents` /
+    // `subtotal_discounted_cents` / `total_cents` from `base_cents × quantity ×
+    // days_factor`. A template that called it could print totals that disagree
+    // with the document it is rendering — the same trap named on
+    // `calculateTransactionFeeAmountCents` above. It also mutates its argument.
+    //
+    // That is why the sibling stays emitted and this does not; the line is
+    // "recomputes money from base inputs", not "is a write-path helper".
+    "materializeDocumentTax",
+  ],
   // No `it.dates.*` exports are hidden today.
   dates: [],
 };

@@ -988,7 +988,6 @@ interface ChartOfAccounts {
   status: COAStatusType;
   xero_id: string | null;
   description?: string;
-  default_tax_profile: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -3339,6 +3338,7 @@ interface InvoiceDocItemPrice {
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
+  taxes_base?: TaxRefType[];
   total_cents: number;
   discount_percent?: number;
 }
@@ -3669,22 +3669,6 @@ interface ItemPriceType {
   taxes?: Array<typeLiteral>;
   total_cents?: number;
 }
-```
-
-### `ItemTaxProfileEnum`
-
-Zod schema for ItemTaxProfileType.
-
-```ts
-const ItemTaxProfileEnum: z.ZodType<ItemTaxProfileType>;
-```
-
-### `ItemTaxProfileType`
-
-Allowed values for item-level tax profile.
-
-```ts
-type ItemTaxProfileType = indexedAccess;
 ```
 
 ### `ItemTypeEnum`
@@ -9735,22 +9719,6 @@ interface ItemContract {
 }
 ```
 
-### `ItemTaxProfileEnum`
-
-Zod schema for ItemTaxProfileType.
-
-```ts
-const ItemTaxProfileEnum: z.ZodType<ItemTaxProfileType>;
-```
-
-### `ItemTaxProfileType`
-
-Allowed values for item-level tax profile.
-
-```ts
-type ItemTaxProfileType = indexedAccess;
-```
-
 ### `ItemTypeEnum`
 
 Zod schema for {@link ItemTypeType}.
@@ -10991,7 +10959,6 @@ interface ChartOfAccounts {
   status: COAStatusType;
   xero_id: string | null;
   description?: string;
-  default_tax_profile: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -11639,6 +11606,7 @@ interface InvoiceDocItemPrice {
   subtotal_discounted_cents: number;
   discount: DiscountType | null;
   taxes: PriceModifierType[];
+  taxes_base?: TaxRefType[];
   total_cents: number;
   discount_percent?: number;
 }
@@ -15451,7 +15419,6 @@ interface ChartOfAccountsDocument {
   code: number;
   code_str?: string;
   type: string;
-  default_tax_profile: string;
   description?: string;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
@@ -19535,7 +19502,7 @@ interface LineItem {
   description?: string;
   order_number?: number;
   uid_order?: string | null;
-  coa_revenue?: number | null;
+  coa_revenue?: COARevenueType | null;
 }
 ```
 
@@ -21252,7 +21219,7 @@ interface LineItem {
   description?: string;
   order_number?: number;
   uid_order?: string | null;
-  coa_revenue?: number | null;
+  coa_revenue?: COARevenueType | null;
 }
 ```
 
@@ -22223,6 +22190,54 @@ non-revenue, and a caller that can resolve the COA must supply it (see
 the state of a `custom-` line: it has no product, so the quote push sends
 `NONE` while the engine keeps taxing it. Closing that needs a decision about
 what a custom line's COA should be, not a change to this predicate.
+
+### `materializeDocumentTax(items: LineItem[], orgProfile: TaxProfileType, docProfile: TaxProfileType, taxCatalog: Tax[], asOf: string): void`
+
+**The one tax materializer.** Apply a document's `tax_profile` as a doc-level
+override, then reprice every priceable line from its (rewritten) tax uid.
+Mutates `items` in place; callers run `calculateOrderTotals` /
+`calculateInvoiceTotals` afterwards.
+
+This is {@link overrideItemTaxesForProfile} **plus the reprice** — the pair
+every write path that owns its own line prices needs, and the pair only the
+order path had. `api-cloudrun`'s `repriceOrderItemsForProfile` was this
+function for orders only; native `POST/PUT /invoices` called neither half, so
+a `tax_exempt` invoice stored the profile, sent Xero `TaxType: NONE`, and kept
+CFS items and totals fully taxed.
+
+Three consumers, one implementation: api-cloudrun's order write paths,
+api-cloudrun's `createInvoice`/`updateInvoice`, and the manager's optimistic
+recompute. The manager consumer is the reason this lives in `core` rather than
+in `api-cloudrun/src/lib/` — a client-side reimplementation would recreate, on
+the client, exactly the order/invoice divergence this function exists to
+close.
+
+⚠️ **The CRMS invoice webhook must keep calling the bare
+{@link overrideItemTaxesForProfile}, not this.** Its subtotals are
+`charge_total`-authoritative (api-cloudrun#236) — a reprice would recompute
+them from `base_cents × quantity × days_factor` and under-bill, which
+`crms.test.ts` pins at 28.6% on a real line.
+
+**`orgProfile` is a real parameter, not a constant.** The order path hardcoded
+`"tax_applied"` here, so an org-level `tax_exempt` was honored on that
+customer's invoices and silently ignored on their orders. Precedence is
+{@link getEffectiveProfileTax}'s: `tax_exempt` from either side wins, then the
+doc's location profile, then the org's.
+
+**Pure** — `asOf` is injected rather than defaulted to now, so this stays free
+of an ambient clock (the workspace date rules ban `new Date()` for business
+datetimes, and a defaulted `now` is how that ban gets bypassed). Callers
+derive it: the order paths from the earliest destination delivery start, the
+invoice paths from `invoice.date`.
+
+**Parameters**
+
+- `items` — Document items, mutated in place. Non-priceable members
+(destination/group/transaction_fee) are skipped by both halves.
+- `orgProfile` — The customer organization's `tax_profile`.
+- `docProfile` — The document's own `tax_profile`, which takes precedence.
+- `taxCatalog` — The `taxes` collection, for name+date resolution.
+- `asOf` — Instant to resolve the tax catalog at.
 
 ### `overrideItemTaxesForProfile(items: LineItem[], orgProfile: string, docProfile: string, taxCatalog: Tax[], asOf: string): void`
 

@@ -489,7 +489,7 @@
         {
           "kind": "interface",
           "name": "ChartOfAccounts",
-          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  class: COAClassType;\n  status: COAStatusType;\n  xero_id: string | null;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  class: COAClassType;\n  status: COAStatusType;\n  xero_id: string | null;\n  description?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A chart of accounts document in Firestore."
         },
         {
@@ -1665,7 +1665,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPrice",
-          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n  discount_percent?: number;\n}",
+          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  discount_percent?: number;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -1817,18 +1817,6 @@
           "name": "ItemPriceType",
           "declaration": "interface ItemPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
-        },
-        {
-          "kind": "variable",
-          "name": "ItemTaxProfileEnum",
-          "declaration": "const ItemTaxProfileEnum: z.ZodType<ItemTaxProfileType>;",
-          "doc": "Zod schema for ItemTaxProfileType."
-        },
-        {
-          "kind": "typeAlias",
-          "name": "ItemTaxProfileType",
-          "declaration": "type ItemTaxProfileType = indexedAccess;",
-          "doc": "Allowed values for item-level tax profile."
         },
         {
           "kind": "variable",
@@ -5101,18 +5089,6 @@
         },
         {
           "kind": "variable",
-          "name": "ItemTaxProfileEnum",
-          "declaration": "const ItemTaxProfileEnum: z.ZodType<ItemTaxProfileType>;",
-          "doc": "Zod schema for ItemTaxProfileType."
-        },
-        {
-          "kind": "typeAlias",
-          "name": "ItemTaxProfileType",
-          "declaration": "type ItemTaxProfileType = indexedAccess;",
-          "doc": "Allowed values for item-level tax profile."
-        },
-        {
-          "kind": "variable",
           "name": "ItemTypeEnum",
           "declaration": "const ItemTypeEnum: z.ZodType<ItemTypeType>;",
           "doc": "Zod schema for {@link ItemTypeType}."
@@ -5776,7 +5752,7 @@
         {
           "kind": "interface",
           "name": "ChartOfAccounts",
-          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  class: COAClassType;\n  status: COAStatusType;\n  xero_id: string | null;\n  description?: string;\n  default_tax_profile: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  class: COAClassType;\n  status: COAStatusType;\n  xero_id: string | null;\n  description?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A chart of accounts document in Firestore."
         },
         {
@@ -6124,7 +6100,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPrice",
-          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  total_cents: number;\n  discount_percent?: number;\n}",
+          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  discount_percent?: number;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -7892,7 +7868,7 @@
         {
           "kind": "interface",
           "name": "ChartOfAccountsDocument",
-          "declaration": "interface ChartOfAccountsDocument {\n  id: string;\n  uid: string;\n  name: string;\n  code: number;\n  code_str?: string;\n  type: string;\n  default_tax_profile: string;\n  description?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  updated_at: number;\n}",
+          "declaration": "interface ChartOfAccountsDocument {\n  id: string;\n  uid: string;\n  name: string;\n  code: number;\n  code_str?: string;\n  type: string;\n  description?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  updated_at: number;\n}",
           "doc": "Typesense document type for chart of accounts."
         },
         {
@@ -9890,7 +9866,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: number | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -10870,7 +10846,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: number | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -11447,6 +11423,35 @@
           "signature": "isTaxableCoa(coaRevenue: number | null | undefined): boolean",
           "doc": "Is a line with this revenue COA subject to tax?\n\n**`null`/`undefined` means UNKNOWN, and unknown is treated as TAXABLE** — the\nopposite of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`, and the\nasymmetry is deliberate. That call site resolves the COA from the product\nbefore asking, so absent there really does mean \"not a taxable account\". The\npricing engine has no such guarantee: **an order line item carries no\n`coa_revenue` at all** — the field is on the invoice item and the product, not\nthe order item. Folding unknown into \"untaxable\" here would silently zero the\ntax on every order line in the corpus.\n\nSo this gate only ever *removes* tax from a line it can positively identify as\nnon-revenue, and a caller that can resolve the COA must supply it (see\n{@link PricingItem.coa_revenue}).\n\n⚠️ The two sides therefore still disagree for an unknown COA, which is exactly\nthe state of a `custom-` line: it has no product, so the quote push sends\n`NONE` while the engine keeps taxing it. Closing that needs a decision about\nwhat a custom line's COA should be, not a change to this predicate.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "materializeDocumentTax",
+          "signature": "materializeDocumentTax(items: LineItem[], orgProfile: TaxProfileType, docProfile: TaxProfileType, taxCatalog: Tax[], asOf: string): void",
+          "doc": "**The one tax materializer.** Apply a document's `tax_profile` as a doc-level\noverride, then reprice every priceable line from its (rewritten) tax uid.\nMutates `items` in place; callers run `calculateOrderTotals` /\n`calculateInvoiceTotals` afterwards.\n\nThis is {@link overrideItemTaxesForProfile} **plus the reprice** — the pair\nevery write path that owns its own line prices needs, and the pair only the\norder path had. `api-cloudrun`'s `repriceOrderItemsForProfile` was this\nfunction for orders only; native `POST/PUT /invoices` called neither half, so\na `tax_exempt` invoice stored the profile, sent Xero `TaxType: NONE`, and kept\nCFS items and totals fully taxed.\n\nThree consumers, one implementation: api-cloudrun's order write paths,\napi-cloudrun's `createInvoice`/`updateInvoice`, and the manager's optimistic\nrecompute. The manager consumer is the reason this lives in `core` rather than\nin `api-cloudrun/src/lib/` — a client-side reimplementation would recreate, on\nthe client, exactly the order/invoice divergence this function exists to\nclose.\n\n⚠️ **The CRMS invoice webhook must keep calling the bare\n{@link overrideItemTaxesForProfile}, not this.** Its subtotals are\n`charge_total`-authoritative (api-cloudrun#236) — a reprice would recompute\nthem from `base_cents × quantity × days_factor` and under-bill, which\n`crms.test.ts` pins at 28.6% on a real line.\n\n**`orgProfile` is a real parameter, not a constant.** The order path hardcoded\n`\"tax_applied\"` here, so an org-level `tax_exempt` was honored on that\ncustomer's invoices and silently ignored on their orders. Precedence is\n{@link getEffectiveProfileTax}'s: `tax_exempt` from either side wins, then the\ndoc's location profile, then the org's.\n\n**Pure** — `asOf` is injected rather than defaulted to now, so this stays free\nof an ambient clock (the workspace date rules ban `new Date()` for business\ndatetimes, and a defaulted `now` is how that ban gets bypassed). Callers\nderive it: the order paths from the earliest destination delivery start, the\ninvoice paths from `invoice.date`.",
+          "paramTags": [
+            {
+              "name": "items",
+              "doc": "Document items, mutated in place. Non-priceable members\n(destination/group/transaction_fee) are skipped by both halves."
+            },
+            {
+              "name": "orgProfile",
+              "doc": "The customer organization's `tax_profile`."
+            },
+            {
+              "name": "docProfile",
+              "doc": "The document's own `tax_profile`, which takes precedence."
+            },
+            {
+              "name": "taxCatalog",
+              "doc": "The `taxes` collection, for name+date resolution."
+            },
+            {
+              "name": "asOf",
+              "doc": "Instant to resolve the tax catalog at."
+            }
+          ],
           "returnsTag": null
         },
         {

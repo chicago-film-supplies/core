@@ -3,6 +3,7 @@ import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
   findTaxAt,
   getEffectiveProfileTax,
+  materializeDocumentTax,
   overrideItemTaxesForProfile,
   TAX_PROFILE_OVERRIDE_NAME,
 } from "../src/utils/taxes.ts";
@@ -27,6 +28,19 @@ const CATALOG: Tax[] = [
     uid: "rantoul-tax",
     name: "Rantoul Sales Tax",
     rate: 9,
+    type: "percent",
+    valid_from: "2026-01-01T00:00:00.000-06:00",
+    valid_to: null,
+  },
+  // The tax `makeItem` puts ON the line. `overrideItemTaxesForProfile` never
+  // reads it — it only ever writes `taxes` — but `materializeDocumentTax`
+  // reprices, and the reprice resolves the line's EXISTING uid through
+  // `calculateItemTax`, which throws `Unknown tax uid` on a miss. See the
+  // incomplete-catalog test at the bottom of this file.
+  {
+    uid: "chi-rental-tax",
+    name: "Chicago Rental Tax",
+    rate: 15,
     type: "percent",
     valid_from: "2026-01-01T00:00:00.000-06:00",
     valid_to: null,
@@ -238,4 +252,153 @@ Deno.test("tax_paxton with no Paxton doc in the catalog resolves to null, not a 
   // The guard that matters: an unseeded profile must NOT fall through to
   // whichever location tax happens to be in the catalog.
   assertEquals(getEffectiveProfileTax("tax_applied", "tax_paxton", CATALOG, AS_OF), null);
+});
+
+// ── materializeDocumentTax ───────────────────────────────────────
+//
+// The override PLUS the reprice — the pair the order path had as
+// `api-cloudrun`'s `repriceOrderItemsForProfile` and the native invoice path had
+// not at all. Three things are worth pinning that the bare override cannot show:
+// the org arm is a real parameter, the reprice actually happens, and the price
+// rebuild is shape-agnostic.
+
+/** Full price surface, for asserting what survived the rebuild. */
+const pxFull = (it: LineItem) =>
+  it.price as unknown as Record<string, unknown>;
+
+Deno.test("materialize: an ORG-level tax_exempt exempts a tax_applied document", () => {
+  // THE ARM THAT IS NEW. `repriceOrderItemsForProfile` passed the literal
+  // `"tax_applied"` as the org profile, so a tax-exempt customer's ORDERS were
+  // taxed while their INVOICES were not — the same customer, the same products,
+  // two answers depending on which document you looked at.
+  const items = [makeItem()];
+  materializeDocumentTax(items, "tax_exempt", "tax_applied", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes, []);
+  assertEquals(px(items[0]).total_cents, 10000);
+});
+
+Deno.test("companion: the hardcoded org arm does NOT exempt, so the arm above bites", () => {
+  // Sweeps the pre-change behavior — `"tax_applied"` in the org position — and
+  // asserts it disagrees. Without this, the test above would keep passing
+  // against a function that had quietly gone back to ignoring `orgProfile`.
+  const items = [makeItem()];
+  materializeDocumentTax(items, "tax_applied", "tax_applied", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes.length, 1, "org arm ignored → the line stays taxed");
+  assertEquals(px(items[0]).total_cents, 11500);
+});
+
+Deno.test("materialize: the DOC profile still beats a plain org profile", () => {
+  // Precedence is unchanged — adding the org arm must not let the org override
+  // the document. Org says Rantoul (9%), doc says Frankfort (8%): 8% wins.
+  const items = [makeItem()];
+  materializeDocumentTax(items, "tax_rantoul", "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes[0].uid, "frankfort-tax");
+  assertEquals(px(items[0]).total_cents, 10800);
+});
+
+Deno.test("materialize: the org profile applies when the doc has none", () => {
+  const items = [makeItem()];
+  materializeDocumentTax(items, "tax_rantoul", "tax_applied", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes[0].uid, "rantoul-tax");
+  assertEquals(px(items[0]).total_cents, 10900);
+});
+
+Deno.test("materialize: REPRICES, where the bare override only rewrites the tax", () => {
+  // The half that distinguishes the two functions. A line arriving with a stale
+  // `subtotal_cents` is corrected from `base_cents × quantity × days_factor`;
+  // `overrideItemTaxesForProfile` alone would leave the lie in place and compute
+  // the tax off it.
+  const stale = { subtotal_cents: 1, subtotal_discounted_cents: 1, total_cents: 1 };
+
+  const bare = [makeItem({}, stale)];
+  overrideItemTaxesForProfile(bare, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(pxFull(bare[0]).subtotal_cents, 1, "the bare override does not reprice");
+  assertEquals(px(bare[0]).total_cents, 1, "…so the tax is computed off the stale subtotal");
+
+  const materialized = [makeItem({}, stale)];
+  materializeDocumentTax(materialized, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(pxFull(materialized[0]).subtotal_cents, 10000);
+  assertEquals(pxFull(materialized[0]).subtotal_discounted_cents, 10000);
+  assertEquals(px(materialized[0]).total_cents, 10800);
+});
+
+Deno.test("materialize: preserves every price key it does not compute", () => {
+  // The reason the rebuild is a SPREAD. The order-side original listed the keys
+  // it meant to keep, so `taxes_base` was dropped until a conditional spread was
+  // added back for it specifically — and `base_percent` is still missing from
+  // that list. Here the assertion is about keys the function has never heard of,
+  // which is what makes one implementation safe for both document shapes.
+  const items = [makeItem({}, {
+    taxes_base: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
+    replacement_cents: 50000, // order-only key
+    discount_percent: 12, // invoice-only key
+  })];
+  materializeDocumentTax(items, "tax_applied", "tax_exempt", CATALOG, AS_OF);
+
+  const p = pxFull(items[0]);
+  assertEquals(
+    (p.taxes_base as Array<{ uid: string }>)[0].uid,
+    "chi-rental-tax",
+    "the intrinsic snapshot survives — it is what a profile revert reads",
+  );
+  assertEquals(p.replacement_cents, 50000, "order-only key survives");
+  assertEquals(p.discount_percent, 12, "invoice-only key survives");
+  assertEquals(p.taxes, [], "…while the override still did its job");
+});
+
+Deno.test("materialize: never writes an `undefined` price key", () => {
+  // `validateBeforeWrite` rejects an explicit `undefined`, and a spread cannot
+  // introduce one — but it also cannot remove one, so this asserts the absent
+  // keys stay absent rather than materializing as undefined.
+  const items = [makeItem()];
+  materializeDocumentTax(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
+  const undef = Object.entries(pxFull(items[0]))
+    .filter(([, v]) => v === undefined)
+    .map(([k]) => k);
+  assertEquals(undef, []);
+});
+
+Deno.test("materialize: a non-revenue COA is untaxed under every profile", () => {
+  for (const profile of ["tax_applied", "tax_frankfort", "tax_rantoul", "tax_exempt"] as const) {
+    const items = [makeItem({ coa_revenue: 4100 })];
+    materializeDocumentTax(items, "tax_applied", profile, CATALOG, AS_OF);
+    assertEquals(px(items[0]).taxes, [], `${profile} re-taxed a non-revenue COA`);
+    assertEquals(px(items[0]).total_cents, 10000, `${profile} total`);
+  }
+});
+
+Deno.test("materialize: skips non-priceable items instead of throwing on them", () => {
+  // `calculateItemPrice` THROWS on a divider. The reprice loop has to guard, and
+  // a document always carries dividers, so this is the common case rather than
+  // an edge one.
+  const items: LineItem[] = [
+    { uid: "d1", name: "Stage", type: "destination", path: ["d1"] },
+    { uid: "g1", name: "Camera", type: "group", path: ["d1", "g1"] },
+    makeItem(),
+  ];
+  materializeDocumentTax(items, "tax_applied", "tax_exempt", CATALOG, AS_OF);
+  assertEquals(items[0].price, undefined);
+  assertEquals(px(items[2]).taxes, []);
+});
+
+Deno.test("materialize: reprices under tax_applied too — so the catalog must be COMPLETE", () => {
+  // ⚠️ The trap for every caller. There is no `tax_applied` early return: the
+  // override half returns early, the REPRICE half does not, and the reprice
+  // resolves each line's stored `taxes[].uid` against the catalog it was handed.
+  // So passing a filtered catalog — "just the profile taxes", say — throws on
+  // any line carrying a tax that filter dropped, on a document with no override
+  // at all. Callers pass the whole `taxes` collection.
+  const withoutTheLinesOwnTax = CATALOG.filter((t) => t.uid !== "chi-rental-tax");
+  assertThrows(
+    () => materializeDocumentTax([makeItem()], "tax_applied", "tax_applied", withoutTheLinesOwnTax, AS_OF),
+    Error,
+    "Unknown tax uid",
+  );
+
+  // And the same document with the complete catalog is repriced, not thrown on —
+  // otherwise the assertion above would pass against a function that always threw.
+  const items = [makeItem()];
+  materializeDocumentTax(items, "tax_applied", "tax_applied", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes[0].uid, "chi-rental-tax");
+  assertEquals(px(items[0]).total_cents, 11500);
 });
