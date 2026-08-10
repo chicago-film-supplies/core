@@ -19429,6 +19429,7 @@ interface InvoiceItem {
   xero_id?: string | null;
   xero_tracking_option_id?: string | null;
   crms_id?: number | string | null;
+  crms_opportunity_id?: number | null;
 }
 ```
 
@@ -19719,9 +19720,10 @@ wrote. Recomputing it here would need a basis this function does not have.
 ### `carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[]`
 
 Carry forward invoice-specific overrides from existing items to rebuilt items.
-Matches by uid — if a rebuilt item has the same uid as an existing invoice item,
-the invoice-specific fields (coa_revenue, tracking_category, xero_id,
-xero_tracking_option_id) are preserved from the existing item.
+Matches by uid — if a rebuilt item has the same uid as an existing invoice
+item, the {@link INVOICE_ONLY_ITEM_FIELDS} are preserved from the existing
+item. The field list is not restated here on purpose; this delegates to
+{@link pickInvoiceOnlyFields} so there is one place to change.
 
 **Parameters**
 
@@ -19967,8 +19969,22 @@ Returns true if the invoice item is "synced" (matches the order item on all
 non-invoice-only fields), false if it has been manually overridden.
 
 The comparison strips the order divider prefix from the invoice item's path
-and ignores invoice-only fields (coa_revenue, tracking_category, xero_id,
-xero_tracking_option_id).
+and ignores {@link INVOICE_ONLY_ITEM_FIELDS} — on BOTH sides, since order
+lines carry `crms_id` too.
+
+⚠️ **This function returns `false` for every real line item — core#52.**
+It compares KEY SETS before values; `stock_method` is required on a stored
+order line (`schemas/order.ts`) and REJECTED by the strict
+`InvoiceDocLineItemSchema`, so the two sets can never be equal and an
+unchanged item reports "overridden" (measured: an item vs. its own
+projection). `price.replacement_cents` is a second, independent mismatch.
+The consequence is that the order→invoice draft mirror propagates additions
+only — never edits, never removals. The two-sided filter below does NOT fix
+that (those are order-only fields, not invoice-only overrides); the fix is to
+compare two invoice-SHAPED items, as {@link invoiceProjectionMatches} does,
+and it is a behavioural change to the mirror. Do not "fix" the fixture in
+the covering unit test to make it green — that fixture is green precisely
+because it omits `stock_method`.
 
 **Parameters**
 

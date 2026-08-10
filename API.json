@@ -9854,7 +9854,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPrice from schemas to avoid type drift."
         },
         {
@@ -10031,7 +10031,7 @@
           "kind": "function",
           "name": "carryForwardOverrides",
           "signature": "carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[]",
-          "doc": "Carry forward invoice-specific overrides from existing items to rebuilt items.\nMatches by uid — if a rebuilt item has the same uid as an existing invoice item,\nthe invoice-specific fields (coa_revenue, tracking_category, xero_id,\nxero_tracking_option_id) are preserved from the existing item.",
+          "doc": "Carry forward invoice-specific overrides from existing items to rebuilt items.\nMatches by uid — if a rebuilt item has the same uid as an existing invoice\nitem, the {@link INVOICE_ONLY_ITEM_FIELDS} are preserved from the existing\nitem. The field list is not restated here on purpose; this delegates to\n{@link pickInvoiceOnlyFields} so there is one place to change.",
           "paramTags": [
             {
               "name": "rebuiltItems",
@@ -10184,7 +10184,7 @@
           "kind": "function",
           "name": "isItemSynced",
           "signature": "isItemSynced(prevOrderItem: LineItem, invoiceItem: InvoiceItem, orderDividerUid: string): boolean",
-          "doc": "Compare a previous order item to a current invoice item to detect overrides.\nReturns true if the invoice item is \"synced\" (matches the order item on all\nnon-invoice-only fields), false if it has been manually overridden.\n\nThe comparison strips the order divider prefix from the invoice item's path\nand ignores invoice-only fields (coa_revenue, tracking_category, xero_id,\nxero_tracking_option_id).",
+          "doc": "Compare a previous order item to a current invoice item to detect overrides.\nReturns true if the invoice item is \"synced\" (matches the order item on all\nnon-invoice-only fields), false if it has been manually overridden.\n\nThe comparison strips the order divider prefix from the invoice item's path\nand ignores {@link INVOICE_ONLY_ITEM_FIELDS} — on BOTH sides, since order\nlines carry `crms_id` too.\n\n⚠️ **This function returns `false` for every real line item — core#52.**\nIt compares KEY SETS before values; `stock_method` is required on a stored\norder line (`schemas/order.ts`) and REJECTED by the strict\n`InvoiceDocLineItemSchema`, so the two sets can never be equal and an\nunchanged item reports \"overridden\" (measured: an item vs. its own\nprojection). `price.replacement_cents` is a second, independent mismatch.\nThe consequence is that the order→invoice draft mirror propagates additions\nonly — never edits, never removals. The two-sided filter below does NOT fix\nthat (those are order-only fields, not invoice-only overrides); the fix is to\ncompare two invoice-SHAPED items, as {@link invoiceProjectionMatches} does,\nand it is a behavioural change to the mirror. Do not \"fix\" the fixture in\nthe covering unit test to make it green — that fixture is green precisely\nbecause it omits `stock_method`.",
           "paramTags": [
             {
               "name": "prevOrderItem",

@@ -98,6 +98,10 @@ export interface InvoiceItem extends LineItem {
   xero_id?: string | null;
   xero_tracking_option_id?: string | null;
   crms_id?: number | string | null;
+  // Present on the stored schema (`schemas/invoice.ts`) but absent from this
+  // shadow until 2026-08-10, which is why it was missing from every one of the
+  // four hand-maintained copies of {@link INVOICE_ONLY_ITEM_FIELDS}.
+  crms_opportunity_id?: number | null;
 }
 
 // ── Invoice totals ──────────────────────────────────────────────
@@ -346,10 +350,32 @@ export function getXeroUnitAmountFromCents(subtotalCents: number, quantity: numb
 
 // ── Selective sync helpers ──────────────────────────────────────
 
-/** Invoice-only item fields excluded from override comparison. */
-const INVOICE_ONLY_ITEM_FIELDS = new Set([
-  "coa_revenue", "tracking_category", "xero_id", "xero_tracking_option_id",
-]);
+/**
+ * The line fields an invoice OWNS rather than inheriting from its order.
+ *
+ * ONE list. The type ({@link InvoiceOnlyOverrides}), the picker
+ * ({@link pickInvoiceOnlyFields}) and the carry-forward
+ * ({@link carryForwardOverrides}) are all derived from it — because four
+ * hand-maintained copies of one fact is how `crms_id` came to be absent from
+ * every one of them while {@link invoiceProjectionMatches} compared key sets
+ * before values and reported the ENTIRE CRMS-authored corpus `out_of_sync`,
+ * with nothing thrown.
+ *
+ * ⚠️ Six literals, no spread. core#43 is the standing case where JSR's npm
+ * `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate could
+ * see it.
+ */
+const INVOICE_ONLY_ITEM_FIELDS = [
+  "coa_revenue",
+  "tracking_category",
+  "xero_id",
+  "xero_tracking_option_id",
+  "crms_id",
+  "crms_opportunity_id",
+] as const;
+
+/** Membership form of {@link INVOICE_ONLY_ITEM_FIELDS}, for key filtering. */
+const INVOICE_ONLY_ITEM_FIELD_SET: ReadonlySet<string> = new Set(INVOICE_ONLY_ITEM_FIELDS);
 
 /**
  * Return the intersection of two key arrays, minus any keys in the exclude set.
@@ -480,8 +506,9 @@ function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string):
 }
 
 /**
- * The four fields an invoice line may override against its source order line —
- * the type-level twin of {@link INVOICE_ONLY_ITEM_FIELDS}.
+ * The fields an invoice line may override against its source order line —
+ * the type-level twin of {@link INVOICE_ONLY_ITEM_FIELDS}, DERIVED from it
+ * rather than restated beside it.
  *
  * Named as its own type because the return of {@link pickInvoiceOnlyFields} is
  * SPREAD over a projected item. `Partial<InvoiceItem>` would let that spread
@@ -489,20 +516,23 @@ function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string):
  * type was a licence the function never wanted and does not use.
  */
 type InvoiceOnlyOverrides = Partial<
-  Pick<InvoiceItem, "coa_revenue" | "tracking_category" | "xero_id" | "xero_tracking_option_id">
+  Pick<InvoiceItem, typeof INVOICE_ONLY_ITEM_FIELDS[number]>
 >;
 
 /**
  * Pick only invoice-only override fields from an invoice item.
  * Used to carry forward overrides when replacing an item with updated order data.
+ *
+ * A loop over {@link INVOICE_ONLY_ITEM_FIELDS}, not one `if` per field: the
+ * whole point of the tuple is that adding a field here is a single edit.
  */
 function pickInvoiceOnlyFields(item: InvoiceItem): InvoiceOnlyOverrides {
-  const result: InvoiceOnlyOverrides = {};
-  if (item.coa_revenue !== undefined) result.coa_revenue = item.coa_revenue;
-  if (item.tracking_category !== undefined) result.tracking_category = item.tracking_category;
-  if (item.xero_id !== undefined) result.xero_id = item.xero_id;
-  if (item.xero_tracking_option_id !== undefined) result.xero_tracking_option_id = item.xero_tracking_option_id;
-  return result;
+  const result: Record<string, unknown> = {};
+  const source = item as unknown as Record<string, unknown>;
+  for (const key of INVOICE_ONLY_ITEM_FIELDS) {
+    if (source[key] !== undefined) result[key] = source[key];
+  }
+  return result as InvoiceOnlyOverrides;
 }
 
 /**
@@ -511,8 +541,22 @@ function pickInvoiceOnlyFields(item: InvoiceItem): InvoiceOnlyOverrides {
  * non-invoice-only fields), false if it has been manually overridden.
  *
  * The comparison strips the order divider prefix from the invoice item's path
- * and ignores invoice-only fields (coa_revenue, tracking_category, xero_id,
- * xero_tracking_option_id).
+ * and ignores {@link INVOICE_ONLY_ITEM_FIELDS} — on BOTH sides, since order
+ * lines carry `crms_id` too.
+ *
+ * ⚠️ **This function returns `false` for every real line item — core#52.**
+ * It compares KEY SETS before values; `stock_method` is required on a stored
+ * order line (`schemas/order.ts`) and REJECTED by the strict
+ * `InvoiceDocLineItemSchema`, so the two sets can never be equal and an
+ * unchanged item reports "overridden" (measured: an item vs. its own
+ * projection). `price.replacement_cents` is a second, independent mismatch.
+ * The consequence is that the order→invoice draft mirror propagates additions
+ * only — never edits, never removals. The two-sided filter below does NOT fix
+ * that (those are order-only fields, not invoice-only overrides); the fix is to
+ * compare two invoice-SHAPED items, as {@link invoiceProjectionMatches} does,
+ * and it is a behavioural change to the mirror. Do not "fix" the fixture in
+ * the covering unit test to make it green — that fixture is green precisely
+ * because it omits `stock_method`.
  *
  * @param prevOrderItem - The order item from the previous version of the order
  * @param invoiceItem - The current invoice item (with order-scoped path)
@@ -528,7 +572,7 @@ export function isItemSynced(
   // strip invoice-only fields and order divider path prefix
   const normalizedInvoice: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(invoiceItem)) {
-    if (INVOICE_ONLY_ITEM_FIELDS.has(key)) continue;
+    if (INVOICE_ONLY_ITEM_FIELD_SET.has(key)) continue;
     if (key === "path") {
       normalizedInvoice[key] = stripOrderPrefix(value as string[], orderDividerUid);
     } else {
@@ -536,8 +580,11 @@ export function isItemSynced(
     }
   }
 
-  // Compare all fields from the order item against the normalized invoice item
-  const orderKeys = Object.keys(prevOrderItem);
+  // Compare all fields from the order item against the normalized invoice item.
+  // BOTH sides are filtered: order lines carry `crms_id` too
+  // (`schemas/order.ts`), so stripping it from one side only would manufacture
+  // the very key-set mismatch this function reads as "overridden".
+  const orderKeys = Object.keys(prevOrderItem).filter((k) => !INVOICE_ONLY_ITEM_FIELD_SET.has(k));
   const invoiceKeys = Object.keys(normalizedInvoice);
 
   // Must have the same set of non-invoice-only keys
@@ -770,9 +817,10 @@ export function buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: s
 
 /**
  * Carry forward invoice-specific overrides from existing items to rebuilt items.
- * Matches by uid — if a rebuilt item has the same uid as an existing invoice item,
- * the invoice-specific fields (coa_revenue, tracking_category, xero_id,
- * xero_tracking_option_id) are preserved from the existing item.
+ * Matches by uid — if a rebuilt item has the same uid as an existing invoice
+ * item, the {@link INVOICE_ONLY_ITEM_FIELDS} are preserved from the existing
+ * item. The field list is not restated here on purpose; this delegates to
+ * {@link pickInvoiceOnlyFields} so there is one place to change.
  *
  * @param rebuiltItems - Items rebuilt from the order
  * @param existingItems - Current invoice items (to carry forward overrides from)
@@ -789,13 +837,8 @@ export function carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existi
     const existing = existingByUid.get(item.uid);
     if (!existing) return item;
 
-    return {
-      ...item,
-      ...(existing.coa_revenue !== undefined && { coa_revenue: existing.coa_revenue }),
-      ...(existing.tracking_category !== undefined && { tracking_category: existing.tracking_category }),
-      ...(existing.xero_id !== undefined && { xero_id: existing.xero_id }),
-      ...(existing.xero_tracking_option_id !== undefined && { xero_tracking_option_id: existing.xero_tracking_option_id }),
-    };
+    // What the four hand-inlined conditional spreads were doing, expressed once.
+    return { ...item, ...pickInvoiceOnlyFields(existing) };
   });
 }
 
@@ -871,7 +914,7 @@ export function syncOrderItems(
  */
 function invoiceProjectionMatches(expected: InvoiceItem, current: InvoiceItem): boolean {
   const comparableKeys = (it: InvoiceItem) =>
-    Object.keys(it).filter((k) => !INVOICE_ONLY_ITEM_FIELDS.has(k));
+    Object.keys(it).filter((k) => !INVOICE_ONLY_ITEM_FIELD_SET.has(k));
   const eKeys = comparableKeys(expected);
   const cKeys = comparableKeys(current);
   if (eKeys.length !== cKeys.length) return false;

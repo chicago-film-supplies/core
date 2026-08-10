@@ -390,6 +390,110 @@ Deno.test("carryForwardOverrides preserves coa_revenue and xero_id from existing
   // the old `undefined` was an artifact of a fixture built without one.
 });
 
+// ── INVOICE_ONLY_ITEM_FIELDS: one list, six fields ──────────────
+//
+// `pickInvoiceOnlyFields` is module-private, so it is asserted through
+// `carryForwardOverrides` — its only production consumer and the surface that
+// used to hand-inline the same four conditional spreads.
+
+/** Every invoice-only field, populated, on one existing line. */
+const ALL_SIX_OVERRIDES = {
+  coa_revenue: 4100,
+  tracking_category: "Camera",
+  xero_id: "00000000-0000-4000-8000-0000000000a1",
+  xero_tracking_option_id: "00000000-0000-4000-8000-0000000000a2",
+  crms_id: 8812,
+  crms_opportunity_id: 5501,
+} as const;
+
+Deno.test("carryForwardOverrides carries ALL SIX invoice-only fields, not just the original four", () => {
+  const rebuilt = [
+    { ...lineItemBase, uid: "item-1", type: "rental", name: "Light Updated", quantity: 3, path: [] },
+  ] as InvoiceDocItemType[];
+  const existing: InvoiceItem[] = [
+    { uid: "item-1", type: "rental", name: "Light", path: [], ...ALL_SIX_OVERRIDES },
+  ];
+
+  const out = carryForwardOverrides(rebuilt, existing)[0] as unknown as Record<string, unknown>;
+
+  // The rebuilt body still wins…
+  assertEquals(out.name, "Light Updated");
+  assertEquals(out.quantity, 3);
+  // …and every invoice-only field is carried, including the two that were
+  // missing from all four hand-maintained copies of the list.
+  for (const [key, value] of Object.entries(ALL_SIX_OVERRIDES)) {
+    assertEquals(out[key], value, `invoice-only field "${key}" was not carried forward`);
+  }
+});
+
+Deno.test("carryForwardOverrides leaves the rebuilt value alone where the existing line has no override", () => {
+  // All six are schema defaults (`getInitialValues` → `null`), so "absent" on a
+  // real line means `undefined`, which `pickInvoiceOnlyFields` skips. The
+  // property under test is that a missing override does not CLOBBER the
+  // rebuilt item — so the rebuilt values are made distinguishable.
+  const rebuilt = [
+    {
+      ...lineItemBase,
+      uid: "item-1",
+      type: "rental",
+      name: "Light",
+      quantity: 1,
+      path: [],
+      crms_opportunity_id: 999,
+      coa_revenue: 4200,
+    },
+  ] as InvoiceDocItemType[];
+  // Only `crms_id` is carried; every other invoice-only key is `undefined` here.
+  const existing: InvoiceItem[] = [{ uid: "item-1", type: "rental", name: "Light", path: [], crms_id: 8812 }];
+
+  const out = carryForwardOverrides(rebuilt, existing)[0] as unknown as Record<string, unknown>;
+  assertEquals(out.crms_id, 8812); // carried forward
+  assertEquals(out.crms_opportunity_id, 999); // rebuilt value survives, not clobbered
+  assertEquals(out.coa_revenue, 4200); // rebuilt value survives, not clobbered
+});
+
+Deno.test("fail-closed companion: the pre-2026-08-10 FOUR-field carry-forward disagrees", () => {
+  // Sweeps the implementation this change replaced — four literal conditional
+  // spreads — and asserts it DISAGREES. An oracle that has drifted into a
+  // restatement of its implementation passes forever and proves nothing.
+  const wrongCarryForward = (
+    item: Record<string, unknown>,
+    existing: Record<string, unknown>,
+  ): Record<string, unknown> => ({
+    ...item,
+    ...(existing.coa_revenue !== undefined && { coa_revenue: existing.coa_revenue }),
+    ...(existing.tracking_category !== undefined && { tracking_category: existing.tracking_category }),
+    ...(existing.xero_id !== undefined && { xero_id: existing.xero_id }),
+    ...(existing.xero_tracking_option_id !== undefined && { xero_tracking_option_id: existing.xero_tracking_option_id }),
+  });
+
+  const rebuilt = [
+    { ...lineItemBase, uid: "item-1", type: "rental", name: "Light", quantity: 1, path: [] },
+  ] as InvoiceDocItemType[];
+  const existing: InvoiceItem[] = [
+    { uid: "item-1", type: "rental", name: "Light", path: [], ...ALL_SIX_OVERRIDES },
+  ];
+
+  const right = carryForwardOverrides(rebuilt, existing)[0] as unknown as Record<string, unknown>;
+  const wrong = wrongCarryForward(
+    rebuilt[0] as unknown as Record<string, unknown>,
+    existing[0] as unknown as Record<string, unknown>,
+  );
+
+  // The two CRMS fields are exactly what the old form dropped: the override is
+  // discarded and the rebuilt item's schema default (`null`) stands instead —
+  // which is indistinguishable from "this line has no CRMS id" downstream.
+  assertEquals(right.crms_id, 8812);
+  assertEquals(wrong.crms_id, null);
+  assertEquals(right.crms_opportunity_id, 5501);
+  assertEquals(wrong.crms_opportunity_id, null);
+  assertEquals(
+    JSON.stringify(right) === JSON.stringify(wrong),
+    false,
+    "the four-field form must not agree with the six-field one",
+  );
+});
+
 // ── syncOrderItems ──────────────────────────────────────────────
 
 Deno.test("syncOrderItems replaces scoped items and carries forward overrides", () => {
@@ -1377,6 +1481,42 @@ Deno.test("computeInvoiceSyncStatus: invoice-only overrides do not count as drif
   );
   const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1);
   assertEquals(status.get(KEY_A), "in_sync"); // coa_revenue / xero_id excluded from comparison
+});
+
+Deno.test("computeInvoiceSyncStatus: a CRMS-authored line is in_sync — the corpus-wide false positive", () => {
+  // `invoiceProjectionMatches` compares KEY SETS before values, so before
+  // 2026-08-10 a line carrying `crms_id` had one more comparable key than its
+  // projection and reported `out_of_sync` — every CRMS-authored line in the
+  // corpus, with nothing thrown. Same mechanism as the documented
+  // `base_percent` case in `api-cloudrun/src/services/invoices.ts`.
+  const inv = baselineInvoice().map((it) =>
+    it.uid === ITEM_1 ? ({ ...it, crms_id: 8812, crms_opportunity_id: 5501 } as InvoiceItem) : it
+  );
+  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1);
+  assertEquals(status.get(KEY_A), "in_sync");
+  assertEquals(status.get(KEY_B), "in_sync"); // sibling without the field, unaffected
+});
+
+Deno.test("fail-closed companion: excluding only the original four still reports out_of_sync", () => {
+  // Executes the pre-fix exclusion list for real against the same corpus shape,
+  // so the assertion above cannot quietly become a restatement of the code.
+  const FOUR = new Set(["coa_revenue", "tracking_category", "xero_id", "xero_tracking_option_id"]);
+  const comparableKeys = (it: Record<string, unknown>, exclude: ReadonlySet<string>) =>
+    Object.keys(it).filter((k) => !exclude.has(k));
+
+  const projected = buildOrderScopedItems(RESYNC_ORDER_ITEMS, ORDER_DIV_1)
+    .find((i) => i.uid === ITEM_1)! as unknown as Record<string, unknown>;
+  const stored = { ...projected, crms_id: 8812 };
+
+  // Under the old four-field list the key sets differ → `out_of_sync`.
+  assertEquals(
+    comparableKeys(stored, FOUR).length === comparableKeys(projected, FOUR).length,
+    false,
+    "the four-field exclusion must still mismatch — otherwise this companion proves nothing",
+  );
+  // Under the six-field list they agree, which is what the test above observes.
+  const SIX = new Set([...FOUR, "crms_id", "crms_opportunity_id"]);
+  assertEquals(comparableKeys(stored, SIX).length, comparableKeys(projected, SIX).length);
 });
 
 Deno.test("computeInvoiceSyncStatus: order line missing from the invoice is out_of_sync", () => {
