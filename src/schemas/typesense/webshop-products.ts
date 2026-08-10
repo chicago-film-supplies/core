@@ -95,7 +95,5 @@ export const webshopProducts: TypesenseCollectionConfig = {
     columns: ["name", "type", "tags.name", "components.name", "component_of.name", "alternates.name"],
     filters: { type: ["rental", "sale", "service"], active: [true] },
     sort: { column: "name", direction: "asc" },
-    group: null,
-    facet: [],
   },
 };

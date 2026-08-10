@@ -36,7 +36,5 @@ export const comments: TypesenseCollectionConfig = {
     columns: ["sources.collection", "created_by", "body_text", "updated_at"],
     filters: {},
     sort: { column: "updated_at", direction: "desc" },
-    group: null,
-    facet: [],
   },
 };

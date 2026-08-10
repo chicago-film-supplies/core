@@ -7260,13 +7260,19 @@ const TypesenseConfigSchema: z.ZodType<TypesenseConfig>;
 
 User display preferences for a Typesense-backed collection view.
 
+`group` and `facet` were removed here alongside
+{@linkcode TypesenseDisplayDefaults} — both were written on every save and
+read by nothing. This object is **strict**, so a blob still carrying them
+fails to parse; the write path does not validate (`updateUser` merges and
+`transaction.set`s), so nothing breaks at runtime, but
+`scripts/audit-schema-validation.ts --only=users` will report it. Both
+environments held `{}` when this landed, so there was nothing to migrate.
+
 ```ts
 interface TypesenseDisplayPrefs {
   columns: string[];
   filters: Record<string, parenthesized[]>;
   sort: DisplaySort;
-  group: string | null;
-  facet: string[];
 }
 ```
 
@@ -15177,13 +15183,19 @@ interface FirestoreDisplayPrefs {
 
 User display preferences for a Typesense-backed collection view.
 
+`group` and `facet` were removed here alongside
+{@linkcode TypesenseDisplayDefaults} — both were written on every save and
+read by nothing. This object is **strict**, so a blob still carrying them
+fails to parse; the write path does not validate (`updateUser` merges and
+`transaction.set`s), so nothing breaks at runtime, but
+`scripts/audit-schema-validation.ts --only=users` will report it. Both
+environments held `{}` when this landed, so there was nothing to migrate.
+
 ```ts
 interface TypesenseDisplayPrefs {
   columns: string[];
   filters: Record<string, parenthesized[]>;
   sort: DisplaySort;
-  group: string | null;
-  facet: string[];
 }
 ```
 
@@ -15906,13 +15918,34 @@ const TypesenseCollectionConfigSchema: z.ZodType<TypesenseCollectionConfig>;
 
 Display defaults for a Typesense collection in the UI.
 
+**`facet` and `group` used to sit here and were write-only.** Both were
+carried into every saved prefs blob by manager's `buildTypesensePrefs` and
+read back by nothing — measured 2026-08-09: `typesenseDisplayDefaults` is read
+in three places, all for `columns` or `filters`.
+
+`facet: string[]` is easy to mistake for Typesense's own faceting. It is not:
+that is {@linkcode TypesenseField.facet}, a per-field boolean on the index
+schema, which is load-bearing. This was a list of field NAMES — the facet
+analogue of `columns`, meaning "which filters does this collection open with".
+The filter bar was built on a different mechanism (`getFilters()` derives what
+is *offered* from `TypesenseField.facet` + a covering column; the sibling
+`filters` key holds what is *active*), so it never acquired a reader.
+
+Because the object is strict and both keys were required, all 22 collections
+had to declare them, 21 of them `facet: []` purely to satisfy the type — and
+an entry inside a field nothing reads is unfalsifiable. `cards` named
+`uid_list` there and carried a comment asserting the facet UI resolved it to a
+list name; no such resolution existed anywhere (core#50).
+
+Deleted rather than left empty, so a future entry cannot be inert: with the
+key gone every reference is a compile error. Re-adding either is ~2 lines the
+day something actually renders it.
+
 ```ts
 interface TypesenseDisplayDefaults {
   columns: string[];
   filters: Record<string, parenthesized[]>;
   sort: typeLiteral;
-  group: string | null;
-  facet: string[];
   groupBy?: GroupByAxis[];
 }
 ```

@@ -46,7 +46,5 @@ export const organizations: TypesenseCollectionConfig = {
     columns: ["name", "contacts", "emails", "phones"],
     filters: {},
     sort: { column: "name", direction: "asc" },
-    group: null,
-    facet: [],
   },
 };

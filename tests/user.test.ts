@@ -104,8 +104,6 @@ Deno.test("UserSchema accepts prefs_typesense", () => {
         columns: ["number", "name"],
         filters: { status: [] },
         sort: { column: "number", direction: "desc" },
-        group: null,
-        facet: [],
       },
     },
   });
@@ -172,8 +170,6 @@ Deno.test("UpdateUserInput requires version", () => {
         columns: ["number"],
         filters: {},
         sort: { column: "number", direction: "desc" },
-        group: null,
-        facet: [],
       },
     },
   });

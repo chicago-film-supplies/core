@@ -85,14 +85,22 @@ export const cards: TypesenseCollectionConfig = {
   },
   synonyms: [],
   displayDefaults: {
-    // `uid_list` and `uid_assignees` were columns that could only ever print an
-    // opaque Firestore id — the list and the assignees are resolved to names by
-    // the facet UI, not by a table cell. They stay FACETS, which is where that
-    // resolution already lives.
+    // `uid_list` and `uid_assignees` are not columns: they could only ever print
+    // an opaque Firestore id.
+    //
+    // ⚠️ This comment used to add that they "stay FACETS, which is where that
+    // resolution already lives", naming a `facet: ["uid_list", …]` entry beside
+    // it. **No such resolution existed anywhere** (core#50). `getFilters()`
+    // requires a covering declared column, which `uid_list` deliberately lacks,
+    // so it was never offered as a filter either — and the `facet` key it sat in
+    // had no reader at all, so nothing could contradict the claim. Both are gone.
+    //
+    // A list filter is still worth having. It needs option labels resolved
+    // through the lists store — `useListsGroupKeys`, already wired for the
+    // `uid_list` groupBy axis in `card.ts` — rather than the raw ids Typesense
+    // returns, plus a declared column to carry the heading.
     columns: ["subject", "status", "date_fs", "created_by"],
     filters: {},
     sort: { column: "position", direction: "asc" },
-    group: null,
-    facet: ["uid_list", "status", "sources.collection"],
   },
 };

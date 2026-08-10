@@ -90,7 +90,5 @@ export const fulfillments: TypesenseCollectionConfig = {
     columns: ["number", "organization.name", "subject", "dates.delivery_start_fs", "dates.collection_start_fs", "status"],
     filters: { status: [] },
     sort: { column: "dates.delivery_start_fs", direction: "desc" },
-    group: null,
-    facet: [],
   },
 };

@@ -298,12 +298,15 @@ Deno.test("typesense coverage: every displayDefaults reference names a declared 
   for (const [alias, config] of Object.entries(typesenseSchemas)) {
     const declared = new Set(config.schema.fields.map((f) => f.name));
     const d = config.displayDefaults;
+    // `facet` and `group` were checked here too, until both keys were deleted as
+    // write-only (core#50). Worth knowing why this arm did not catch them: it
+    // asks whether a reference names a DECLARED FIELD, and `cards.facet`'s
+    // `uid_list` named a real one. A reference can be perfectly resolvable and
+    // still render nothing, if the thing holding it has no reader.
     const refs: Array<[string, string]> = [
       ...d.columns.map((c) => ["columns", c] as [string, string]),
-      ...d.facet.map((c) => ["facet", c] as [string, string]),
       ...Object.keys(d.filters).map((c) => ["filters", c] as [string, string]),
       ...(d.sort.column ? [["sort.column", d.sort.column] as [string, string]] : []),
-      ...(d.group ? [["group", d.group] as [string, string]] : []),
       ...(d.groupBy ?? []).flatMap((g) =>
         g.field ? [["groupBy", g.field] as [string, string]] : []
       ),

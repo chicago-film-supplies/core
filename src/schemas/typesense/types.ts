@@ -235,13 +235,36 @@ export const GroupByAxisSchema: z.ZodType<GroupByAxis> = z.strictObject({
   collection: z.string().optional(),
 });
 
-/** Display defaults for a Typesense collection in the UI. */
+/**
+ * Display defaults for a Typesense collection in the UI.
+ *
+ * **`facet` and `group` used to sit here and were write-only.** Both were
+ * carried into every saved prefs blob by manager's `buildTypesensePrefs` and
+ * read back by nothing — measured 2026-08-09: `typesenseDisplayDefaults` is read
+ * in three places, all for `columns` or `filters`.
+ *
+ * `facet: string[]` is easy to mistake for Typesense's own faceting. It is not:
+ * that is {@linkcode TypesenseField.facet}, a per-field boolean on the index
+ * schema, which is load-bearing. This was a list of field NAMES — the facet
+ * analogue of `columns`, meaning "which filters does this collection open with".
+ * The filter bar was built on a different mechanism (`getFilters()` derives what
+ * is *offered* from `TypesenseField.facet` + a covering column; the sibling
+ * `filters` key holds what is *active*), so it never acquired a reader.
+ *
+ * Because the object is strict and both keys were required, all 22 collections
+ * had to declare them, 21 of them `facet: []` purely to satisfy the type — and
+ * an entry inside a field nothing reads is unfalsifiable. `cards` named
+ * `uid_list` there and carried a comment asserting the facet UI resolved it to a
+ * list name; no such resolution existed anywhere (core#50).
+ *
+ * Deleted rather than left empty, so a future entry cannot be inert: with the
+ * key gone every reference is a compile error. Re-adding either is ~2 lines the
+ * day something actually renders it.
+ */
 export interface TypesenseDisplayDefaults {
   columns: string[];
   filters: Record<string, (string | boolean)[]>;
   sort: { column: string | null; direction: "asc" | "desc" };
-  group: string | null;
-  facet: string[];
   /** Available groupBy axes the UI can offer for this collection. */
   groupBy?: GroupByAxis[];
 }
@@ -254,8 +277,6 @@ export const TypesenseDisplayDefaultsSchema: z.ZodType<TypesenseDisplayDefaults>
     column: z.string().nullable(),
     direction: z.enum(["asc", "desc"]),
   }),
-  group: z.string().nullable(),
-  facet: z.array(z.string()),
   groupBy: z.array(GroupByAxisSchema).optional(),
 });
 

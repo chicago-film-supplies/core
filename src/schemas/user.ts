@@ -41,21 +41,27 @@ const FirestoreDisplayPrefsSchema: z.ZodType<FirestoreDisplayPrefs> = z.strictOb
   sort: DisplaySortSchema,
 });
 
-/** User display preferences for a Typesense-backed collection view. */
+/**
+ * User display preferences for a Typesense-backed collection view.
+ *
+ * `group` and `facet` were removed here alongside
+ * {@linkcode TypesenseDisplayDefaults} — both were written on every save and
+ * read by nothing. This object is **strict**, so a blob still carrying them
+ * fails to parse; the write path does not validate (`updateUser` merges and
+ * `transaction.set`s), so nothing breaks at runtime, but
+ * `scripts/audit-schema-validation.ts --only=users` will report it. Both
+ * environments held `{}` when this landed, so there was nothing to migrate.
+ */
 export interface TypesenseDisplayPrefs {
   columns: string[];
   filters: Record<string, (string | boolean)[]>;
   sort: DisplaySort;
-  group: string | null;
-  facet: string[];
 }
 
 const TypesenseDisplayPrefsSchema: z.ZodType<TypesenseDisplayPrefs> = z.strictObject({
   columns: z.array(z.string()),
   filters: z.record(z.string(), z.array(z.union([z.string(), z.boolean()]))),
   sort: DisplaySortSchema,
-  group: z.string().nullable(),
-  facet: z.array(z.string()),
 });
 
 /**

@@ -46,7 +46,5 @@ export const outOfService: TypesenseCollectionConfig = {
     columns: ["number", "reason", "status", "organization.name", "quantity", "dates.start_fs"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
-    group: null,
-    facet: [],
   },
 };

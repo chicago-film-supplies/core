@@ -70,7 +70,5 @@ export const bookings: TypesenseCollectionConfig = {
     columns: ["number", "name", "status", "organization.name", "quantity"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
-    group: null,
-    facet: [],
   },
 };

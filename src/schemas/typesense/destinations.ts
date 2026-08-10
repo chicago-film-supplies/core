@@ -36,7 +36,5 @@ export const destinations: TypesenseCollectionConfig = {
     columns: ["address.full", "address.city", "address.region"],
     filters: {},
     sort: { column: null, direction: "desc" },
-    group: null,
-    facet: [],
   },
 };

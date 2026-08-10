@@ -32,7 +32,5 @@ export const chartOfAccounts: TypesenseCollectionConfig = {
     columns: ["code", "name", "type"],
     filters: { type: [] },
     sort: { column: "code", direction: "asc" },
-    group: null,
-    facet: [],
   },
 };

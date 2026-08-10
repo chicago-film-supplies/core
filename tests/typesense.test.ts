@@ -119,30 +119,34 @@ Deno.test("displayDefaults.sort.column is null or a valid field name", () => {
   }
 });
 
-Deno.test("displayDefaults.group is null for all configs", () => {
-  for (const config of allConfigs) {
-    assertEquals(
-      config.displayDefaults.group,
-      null,
-      `${config.alias}: group should be null`,
-    );
-  }
-});
-
-Deno.test("displayDefaults.facet entries reference fields with facet: true", () => {
-  for (const config of allConfigs) {
-    const facetFields = new Set(
-      config.schema.fields.filter((f) => f.facet === true).map((f) => f.name),
-    );
-    for (const f of config.displayDefaults.facet) {
-      assertEquals(
-        facetFields.has(f),
-        true,
-        `${config.alias}: facet entry "${f}" is not a faceted field`,
-      );
-    }
-  }
-});
+// Two tests stood here and both are deleted with the keys they covered
+// (core#50). They are worth a note, because each was evidence of the problem
+// while reading as coverage of it:
+//
+//   "displayDefaults.group is null for all configs" — an assertion that a field
+//   is ALWAYS its zero value across every collection. That is not a guard; it is
+//   a description of a field nobody sets.
+//
+//   "displayDefaults.facet entries reference fields with facet: true" — green
+//   for `cards.facet`'s `uid_list` the entire time, because `uid_list` genuinely
+//   is `facet: true` on the index. The test checked the entry named a facetable
+//   FIELD; what was false was that anything rendered the entry. A property about
+//   the reference cannot see that its container has no reader.
+//
+// `TypesenseField.facet` — the per-field boolean these confusingly shared a name
+// with — is untouched and still covered above.
+//
+// **They are not replaced by a third test, deliberately.** `TypesenseDisplayDefaults`
+// is a strict interface and `TypesenseDisplayDefaultsSchema` a `z.strictObject`,
+// so re-adding either key is a COMPILE error on the object literal (verified:
+// `TS2353` on `tags.ts` with a `facet: []` put back). The type is the guard, and
+// it is the stronger one — it fires before a test can run.
+//
+// The obvious runtime version — assert every key of `displayDefaults` appears in
+// a `KEYS_WITH_READERS` list — was written and then deleted: it is a parity
+// assertion between two hand-maintained lists, and it could not see the failure
+// that actually happened. `facet` was a *declared* key losing its reader, not an
+// undeclared one appearing, so the list would simply have contained it.
 
 Deno.test("enable_nested_fields is true when schema has object or object[] fields", () => {
   for (const config of allConfigs) {

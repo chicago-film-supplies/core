@@ -35,7 +35,5 @@ export const templates: TypesenseCollectionConfig = {
     columns: ["name", "collection_source", "collection_target", "surfaces"],
     filters: {},
     sort: { column: "name", direction: "asc" },
-    group: null,
-    facet: [],
   },
 };

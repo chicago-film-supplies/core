@@ -37,7 +37,5 @@ export const trackingCategories: TypesenseCollectionConfig = {
     columns: ["name", "count", "products.name"],
     filters: {},
     sort: { column: "name", direction: "asc" },
-    group: null,
-    facet: [],
   },
 };

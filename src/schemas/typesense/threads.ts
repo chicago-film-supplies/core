@@ -42,7 +42,5 @@ export const threads: TypesenseCollectionConfig = {
     columns: ["sources.collection", "title", "last_message_preview", "last_message_at", "comment_count"],
     filters: {},
     sort: { column: "last_message_at", direction: "desc" },
-    group: null,
-    facet: [],
   },
 };

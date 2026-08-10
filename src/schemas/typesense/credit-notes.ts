@@ -105,7 +105,5 @@ export const creditNotes: TypesenseCollectionConfig = {
     ],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
-    group: null,
-    facet: [],
   },
 };

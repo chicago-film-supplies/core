@@ -31,7 +31,5 @@ export const users: TypesenseCollectionConfig = {
     columns: ["email", "name", "roles"],
     filters: {},
     sort: { column: "email", direction: "asc" },
-    group: null,
-    facet: [],
   },
 };

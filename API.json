@@ -3609,8 +3609,8 @@
         {
           "kind": "interface",
           "name": "TypesenseDisplayPrefs",
-          "declaration": "interface TypesenseDisplayPrefs {\n  columns: string[];\n  filters: Record<string, parenthesized[]>;\n  sort: DisplaySort;\n  group: string | null;\n  facet: string[];\n}",
-          "doc": "User display preferences for a Typesense-backed collection view."
+          "declaration": "interface TypesenseDisplayPrefs {\n  columns: string[];\n  filters: Record<string, parenthesized[]>;\n  sort: DisplaySort;\n}",
+          "doc": "User display preferences for a Typesense-backed collection view.\n\n`group` and `facet` were removed here alongside\n{@linkcode TypesenseDisplayDefaults} — both were written on every save and\nread by nothing. This object is **strict**, so a blob still carrying them\nfails to parse; the write path does not validate (`updateUser` merges and\n`transaction.set`s), so nothing breaks at runtime, but\n`scripts/audit-schema-validation.ts --only=users` will report it. Both\nenvironments held `{}` when this landed, so there was nothing to migrate."
         },
         {
           "kind": "variable",
@@ -7806,8 +7806,8 @@
         {
           "kind": "interface",
           "name": "TypesenseDisplayPrefs",
-          "declaration": "interface TypesenseDisplayPrefs {\n  columns: string[];\n  filters: Record<string, parenthesized[]>;\n  sort: DisplaySort;\n  group: string | null;\n  facet: string[];\n}",
-          "doc": "User display preferences for a Typesense-backed collection view."
+          "declaration": "interface TypesenseDisplayPrefs {\n  columns: string[];\n  filters: Record<string, parenthesized[]>;\n  sort: DisplaySort;\n}",
+          "doc": "User display preferences for a Typesense-backed collection view.\n\n`group` and `facet` were removed here alongside\n{@linkcode TypesenseDisplayDefaults} — both were written on every save and\nread by nothing. This object is **strict**, so a blob still carrying them\nfails to parse; the write path does not validate (`updateUser` merges and\n`transaction.set`s), so nothing breaks at runtime, but\n`scripts/audit-schema-validation.ts --only=users` will report it. Both\nenvironments held `{}` when this landed, so there was nothing to migrate."
         },
         {
           "kind": "variable",
@@ -8034,8 +8034,8 @@
         {
           "kind": "interface",
           "name": "TypesenseDisplayDefaults",
-          "declaration": "interface TypesenseDisplayDefaults {\n  columns: string[];\n  filters: Record<string, parenthesized[]>;\n  sort: typeLiteral;\n  group: string | null;\n  facet: string[];\n  groupBy?: GroupByAxis[];\n}",
-          "doc": "Display defaults for a Typesense collection in the UI."
+          "declaration": "interface TypesenseDisplayDefaults {\n  columns: string[];\n  filters: Record<string, parenthesized[]>;\n  sort: typeLiteral;\n  groupBy?: GroupByAxis[];\n}",
+          "doc": "Display defaults for a Typesense collection in the UI.\n\n**`facet` and `group` used to sit here and were write-only.** Both were\ncarried into every saved prefs blob by manager's `buildTypesensePrefs` and\nread back by nothing — measured 2026-08-09: `typesenseDisplayDefaults` is read\nin three places, all for `columns` or `filters`.\n\n`facet: string[]` is easy to mistake for Typesense's own faceting. It is not:\nthat is {@linkcode TypesenseField.facet}, a per-field boolean on the index\nschema, which is load-bearing. This was a list of field NAMES — the facet\nanalogue of `columns`, meaning \"which filters does this collection open with\".\nThe filter bar was built on a different mechanism (`getFilters()` derives what\nis *offered* from `TypesenseField.facet` + a covering column; the sibling\n`filters` key holds what is *active*), so it never acquired a reader.\n\nBecause the object is strict and both keys were required, all 22 collections\nhad to declare them, 21 of them `facet: []` purely to satisfy the type — and\nan entry inside a field nothing reads is unfalsifiable. `cards` named\n`uid_list` there and carried a comment asserting the facet UI resolved it to a\nlist name; no such resolution existed anywhere (core#50).\n\nDeleted rather than left empty, so a future entry cannot be inert: with the\nkey gone every reference is a compile error. Re-adding either is ~2 lines the\nday something actually renders it."
         },
         {
           "kind": "variable",
