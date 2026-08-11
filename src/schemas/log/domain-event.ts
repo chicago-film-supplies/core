@@ -51,6 +51,16 @@ export const DOMAIN_EVENT_MSGS = [
   // `src/lib/orderInvoiceMirror.ts`'s two callers in api-cloudrun
   // (`services/orderInvoiceMirror.ts`, `services/invoices.ts`). api#453.
   "order_invoice_mirror_repaired",
+  // A denorm cascade resolved its target ids OUTSIDE its transaction (so the
+  // collection leaves `contended_ranges` — api-cloudrun#423) and then re-scanned
+  // after committing to repair anything that scan could not have seen. Emitted
+  // once per converge pass that found a straggler; SILENT when it found none,
+  // which is the steady state. `still_appearing` non-empty escalates to `warn`
+  // and means ids kept arriving through the repair — the source is being written
+  // continuously and another round would not converge either.
+  // `{ tx_name, source_doc_id, repaired_counts, written_counts, still_appearing }`.
+  // Emitted from `src/lib/cascadeScan.ts` in api-cloudrun.
+  "cascade_converged",
   "location_cascade_skip",
   // updateTransaction / updateStoreTransfer reversing the previous version out
   // of a location doc found the doc or its product row missing, or repointed a
