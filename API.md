@@ -2060,10 +2060,24 @@ type CreditNoteStatusType = indexedAccess;
 
 ### `DEFAULT_TAX_PROFILE`
 
-The one fallback for a document snapshot that predates
-{@link DocumentOrganizationSnapshot}'s `tax_profile`. Named rather than
-inlined so the sites depending on the backfill are a single grep, and so the
-follow-up that makes the field required has a work list.
+The profile to assume when no organization profile is in hand.
+
+⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began
+as the fallback for documents predating {@link DocumentOrganizationSnapshot}'s
+`tax_profile`; that population is gone (category A = 0 in both environments)
+and every STORED snapshot now carries one. What survives is the case a schema
+cannot legislate: the pure functions here are called by the manager against
+**in-memory, mid-edit** documents, where the organization may not be attached
+yet — a fresh draft, or the moment between detaching one customer and picking
+another.
+
+So the `| undefined` on {@link resolveEffectiveProfile} and its siblings is
+deliberate and stays. #489's work list said to collapse it; collapsing it
+would push this default out to each caller, and "a document whose customer is
+unknown is taxed normally, never silently exempted" is exactly the kind of
+rule this campaign exists to keep in one place. What #489 actually bought is
+that a *stored* document can no longer be missing it — so readers of stored
+documents (the Xero push, the quote push) can and do collapse.
 
 ```ts
 const DEFAULT_TAX_PROFILE: TaxProfileType;
@@ -2516,7 +2530,7 @@ interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile?: TaxProfileType;
+  tax_profile: TaxProfileType;
   xero_id: string | null;
   billing_address?: AddressType | null;
 }
@@ -9545,10 +9559,24 @@ interface CoordinatesType {
 
 ### `DEFAULT_TAX_PROFILE`
 
-The one fallback for a document snapshot that predates
-{@link DocumentOrganizationSnapshot}'s `tax_profile`. Named rather than
-inlined so the sites depending on the backfill are a single grep, and so the
-follow-up that makes the field required has a work list.
+The profile to assume when no organization profile is in hand.
+
+⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began
+as the fallback for documents predating {@link DocumentOrganizationSnapshot}'s
+`tax_profile`; that population is gone (category A = 0 in both environments)
+and every STORED snapshot now carries one. What survives is the case a schema
+cannot legislate: the pure functions here are called by the manager against
+**in-memory, mid-edit** documents, where the organization may not be attached
+yet — a fresh draft, or the moment between detaching one customer and picking
+another.
+
+So the `| undefined` on {@link resolveEffectiveProfile} and its siblings is
+deliberate and stays. #489's work list said to collapse it; collapsing it
+would push this default out to each caller, and "a document whose customer is
+unknown is taxed normally, never silently exempted" is exactly the kind of
+rule this campaign exists to keep in one place. What #489 actually bought is
+that a *stored* document can no longer be missing it — so readers of stored
+documents (the Xero push, the quote push) can and do collapse.
 
 ```ts
 const DEFAULT_TAX_PROFILE: TaxProfileType;
@@ -9674,7 +9702,7 @@ interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile?: TaxProfileType;
+  tax_profile: TaxProfileType;
   xero_id: string | null;
   billing_address?: AddressType | null;
 }
@@ -22359,10 +22387,17 @@ type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<Sche
 
 ### `TaxSourcingDestination`
 
-The one destination shape {@link isEntirelyOutOfIllinois} reads.
+The one destination shape the order-side tax rules read.
+
+Two fields, for the two questions: `delivery.address.region` answers *"is this
+document sourced outside Illinois?"* ({@link isEntirelyOutOfIllinois}) and
+`dates.delivery_start` answers *"as of when do its taxes resolve?"*
+({@link deriveOrderTaxAsOf}). Both optional, because a caller mid-edit may
+have neither.
 
 ```ts
 interface TaxSourcingDestination {
+  dates?: typeLiteral | null;
   delivery?: typeLiteral | null;
 }
 ```
@@ -22392,6 +22427,23 @@ A negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat
 discount exceed its line rather than clamping — so the rounding is half *away
 from zero* and the tax carries the subtotal's sign, exactly as the currency.js
 form did.
+
+### `deriveOrderTaxAsOf(destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined, now: string): string`
+
+As-of instant for resolving an order's taxes: the earliest destination
+delivery start, falling back to `now`.
+
+**`now` is injected, and that is the whole reason this can live in `core`.**
+The two callers reach for different clocks — api-cloudrun's
+`Timestamp.now().toDate().toISOString()`, the manager's
+`new Date().toISOString()` — and both produce the same UTC-Z form, so the
+fallback resolves identically on either side.
+
+⚠️ **Not the banned business-date anti-pattern.** `asOf` is a resolution
+instant handed to {@link findTaxAt}, never written to a document. Emitting
+Chicago offset form here would make the server and the client resolve
+differently for an instant near midnight, which is the failure this note
+exists to prevent.
 
 ### `findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null`
 
@@ -22536,6 +22588,50 @@ invoice paths from `invoice.date`.
 - `docProfile` — The document's own `tax_profile`, which takes precedence.
 - `taxCatalog` — The `taxes` collection, for name+date resolution.
 - `asOf` — Instant to resolve the tax catalog at.
+
+### `materializeOrderTax(items: LineItem[], orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined, taxCatalog: Tax[], now: string): void`
+
+**The one order-side tax materializer.** Resolve an order's effective tax from
+its organization snapshot, its own `tax_profile` and its destinations, then
+reprice every billable line. Mutates `items` in place; callers run
+`calculateOrderTotals` after.
+
+This is {@link materializeDocumentTax} plus the two things that are true of an
+ORDER and not of an invoice — the as-of instant is the delivery date rather
+than `invoice.date`, and an out-of-state delivery is exempt.
+
+⚠️ **It lives here because it is POLICY, and policy written twice drifts.**
+It began as `api-cloudrun/src/lib/orderTaxPricing.ts`, and the manager then
+wrote a second copy in `src/utils/documentTax.ts` — carrying a comment saying
+the two must stay byte-for-byte identical, which is a wish, not a mechanism.
+The arithmetic was already shared; this is the ~10 lines around it.
+
+Three things it centralizes across the order write paths:
+
+1. **The organization's profile is passed for real.** Its predecessor
+   hardcoded `"tax_applied"` in that position because an order's snapshot had
+   no `tax_profile` to pass (api-cloudrun#486). A tax-exempt customer's
+   invoices went untaxed and their orders went taxed, and what covered the gap
+   was CRMS stamping the order's profile from the opportunity header — i.e.
+   the system being retired.
+2. **`docProfile: null` means INHERIT**, and is the safe default: an order
+   that says nothing cannot tax an exempt customer. A non-null value is a
+   deliberate override, and an explicit `"tax_applied"` beats an org-level
+   location profile rather than losing to it.
+3. **The out-of-state rule**, applied as an exemption in the DOC position so
+   it composes with the precedence rule instead of shadowing it — a Frankfort
+   customer's Missouri delivery is still untaxed.
+
+⚠️ Deriving that rule from the destination address does **not** generalize to
+jurisdiction: CFS is registered in exactly three, a Chicago production films
+in a dozen Illinois suburbs on short notice, and picking a jurisdiction per
+suburb is explicitly not wanted (api-cloudrun#237, won't-do). Out-of-state is
+a REGISTRATION boundary, not a sourcing model.
+
+⚠️ The CRMS **invoice** webhook must keep calling the bare
+{@link overrideItemTaxesForProfile} — its subtotals are
+`charge_total`-authoritative and a reprice would under-bill
+(api-cloudrun#236). This is the order path only.
 
 ### `overrideItemTaxesForProfile(items: LineItem[], orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, taxCatalog: Tax[], asOf: string): void`
 

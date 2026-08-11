@@ -35,9 +35,11 @@ export const orders: TypesenseCollectionConfig = {
       { name: "organization.crms_id", type: "int64", optional: true },
       { name: "organization.crms_id_str", type: "string", index: true, sort: false, facet: false, optional: true },
       // Mirrors the invoice + credit-note configs, which have carried it all
-      // along. Optional for the duration of the `organization.tax_profile`
-      // backfill — see `DocumentOrganizationSnapshot`.
-      { name: "organization.tax_profile", type: "string", facet: true, optional: true },
+      // along. NOT optional since api-cloudrun#489: every stored snapshot
+      // carries a profile, so an absent value here would mean an indexing bug
+      // rather than a document mid-backfill — and Typesense refusing the
+      // document is the honest report of that.
+      { name: "organization.tax_profile", type: "string", facet: true },
       { name: "organization.xero_id", type: "string", optional: true },
       ...typesenseAddressFields("organization.billing_address"),
       { name: "dates", type: "object" },

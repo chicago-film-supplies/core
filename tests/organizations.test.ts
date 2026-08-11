@@ -69,7 +69,7 @@ Deno.test("the shared snapshot admits both a present and an absent billing_addre
   // Order had it `.optional()`, invoice + credit note required with an explicit
   // stored `null`. Merging to either side alone makes existing documents of the
   // other unwritable, so both must parse.
-  const base = { uid: ORG_ID, name: "A", xero_id: null };
+  const base = { uid: ORG_ID, name: "A", xero_id: null, tax_profile: "tax_applied" };
   assertEquals(DocumentOrganizationSnapshot.safeParse(base).success, true);
   assertEquals(
     DocumentOrganizationSnapshot.safeParse({ ...base, billing_address: null }).success,
@@ -81,7 +81,7 @@ Deno.test("the shared snapshot still rejects an out-of-bounds name", () => {
   // Order's `[1, 100]` bounds are kept. Not a tightening in practice —
   // `Organization.name` carries the same bounds and every snapshot is copied
   // from it — but the assertion is what says the merge took the bounded side.
-  const base = { uid: ORG_ID, xero_id: null };
+  const base = { uid: ORG_ID, xero_id: null, tax_profile: "tax_applied" as const };
   assertEquals(DocumentOrganizationSnapshot.safeParse({ ...base, name: "" }).success, false);
   assertEquals(
     DocumentOrganizationSnapshot.safeParse({ ...base, name: "x".repeat(101) }).success,
@@ -89,15 +89,33 @@ Deno.test("the shared snapshot still rejects an out-of-bounds name", () => {
   );
 });
 
-Deno.test("the shared snapshot tolerates an ABSENT tax_profile for the backfill window", () => {
-  // Optional by necessity, not preference: the old and new schemas have disjoint
-  // accepted sets (both are `z.strictObject` and every write validates the full
-  // document), so there is no deploy order in which a required field avoids a
-  // window of failing order writes. The follow-up publish drops the `.optional()`.
-  const parsed = DocumentOrganizationSnapshot.parse({
+Deno.test("the shared snapshot now REFUSES an absent tax_profile — api-cloudrun#489", () => {
+  // The contract third of expand/migrate/contract, and this assertion is the
+  // inverse of the one it replaces: for one release cycle the field had to be
+  // optional, because both schema versions are `z.strictObject` and every write
+  // validates the full document, so a required field would have refused the 981
+  // prod orders that lacked it.
+  //
+  // Both environments now measure category A = 0 (`audit-order-tax-profile.ts`),
+  // so an absent value no longer means "mid-backfill" — it means a writer that
+  // forgot to build the snapshot through `buildOrganizationSnapshot`, and
+  // refusing it at the boundary is the point.
+  const parsed = DocumentOrganizationSnapshot.safeParse({
     uid: ORG_ID,
     name: "A",
     xero_id: null,
   });
-  assertEquals((parsed as { tax_profile?: string }).tax_profile, undefined);
+  assertEquals(parsed.success, false);
+
+  // The discriminating half: the SAME document with a profile parses. Without
+  // it, this arm would also pass against a schema that rejected everything.
+  assertEquals(
+    DocumentOrganizationSnapshot.safeParse({
+      uid: ORG_ID,
+      name: "A",
+      xero_id: null,
+      tax_profile: "tax_exempt",
+    }).success,
+    true,
+  );
 });

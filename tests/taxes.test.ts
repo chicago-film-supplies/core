@@ -1,10 +1,12 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
+  deriveOrderTaxAsOf,
   findTaxAt,
   getEffectiveProfileTax,
   isEntirelyOutOfIllinois,
   materializeDocumentTax,
+  materializeOrderTax,
   overrideItemTaxesForProfile,
   resolveEffectiveProfile,
   TAX_PROFILE_OVERRIDE_NAME,
@@ -542,4 +544,123 @@ Deno.test("isEntirelyOutOfIllinois: an UNRESOLVABLE region keeps the tax", () =>
 Deno.test("isEntirelyOutOfIllinois: no destinations is not out of state", () => {
   assertEquals(isEntirelyOutOfIllinois([]), false);
   assertEquals(isEntirelyOutOfIllinois(undefined), false);
+});
+
+// ── The ORDER-side composition (api-cloudrun#4.10) ───────────────
+//
+// `materializeOrderTax` and `deriveOrderTaxAsOf` moved here from
+// `api-cloudrun/src/lib/orderTaxPricing.ts`, because the manager had written a
+// second copy of both in `src/utils/documentTax.ts` — carrying a comment saying
+// the two must stay byte-for-byte identical, which is a wish rather than a
+// mechanism. These arms are what makes it a mechanism.
+
+/**
+ * A destination delivering to `region`, starting `delivery_start`.
+ *
+ * Distinct from the `dest` above, which carries only an address: these arms
+ * need the DATE half too, because the order-side composition reads both.
+ */
+const orderDest = (region: string | undefined, delivery_start: string | null = null) => ({
+  dates: { delivery_start },
+  delivery: { address: region === undefined ? null : { region } },
+});
+
+const NOW = "2026-07-02T12:00:00.000Z";
+
+Deno.test("deriveOrderTaxAsOf: the EARLIEST delivery start wins", () => {
+  // Earliest, not first: an order's destinations are in operator order, and the
+  // tax point is the first time anything ships.
+  assertEquals(
+    deriveOrderTaxAsOf([orderDest("IL", "2026-03-04T09:00:00.000-06:00"), orderDest("IL", "2026-01-05T09:00:00.000-06:00")], NOW),
+    "2026-01-05T09:00:00.000-06:00",
+  );
+});
+
+Deno.test("deriveOrderTaxAsOf: falls back to the INJECTED now, never an ambient clock", () => {
+  // The injection is what lets this live in core at all: api-cloudrun passes
+  // `Timestamp.now().toDate().toISOString()` and the manager passes
+  // `new Date().toISOString()`, both UTC-Z, so the fallback resolves the same
+  // Tax doc on either side.
+  assertEquals(deriveOrderTaxAsOf([], NOW), NOW);
+  assertEquals(deriveOrderTaxAsOf(undefined, NOW), NOW);
+  assertEquals(deriveOrderTaxAsOf([orderDest("IL", null), null, undefined], NOW), NOW);
+});
+
+Deno.test("materializeOrderTax: an entirely out-of-state order is untaxed", () => {
+  const items = [makeItem()];
+  materializeOrderTax(items, "tax_applied", null, [orderDest("MO")], CATALOG, NOW);
+  assertEquals(px(items[0]).taxes, []);
+  // The money, not just the empty array: an untaxed line's total IS its
+  // discounted subtotal.
+  const priced = items[0].price as { subtotal_discounted_cents: number };
+  assertEquals(px(items[0]).total_cents, priced.subtotal_discounted_cents);
+});
+
+Deno.test("materializeOrderTax: out-of-state beats an org LOCATION profile", () => {
+  // The rule is applied in the DOC position, so it composes with the precedence
+  // rule instead of shadowing it — exemption is sticky from either side, which
+  // is why a Frankfort customer's Missouri delivery is still untaxed.
+  const items = [makeItem()];
+  materializeOrderTax(items, "tax_frankfort", null, [orderDest("MO")], CATALOG, NOW);
+  assertEquals(px(items[0]).taxes, []);
+});
+
+Deno.test("materializeOrderTax: ONE in-state destination is enough to tax the order", () => {
+  // The discriminating half. Without it the arms above would also pass against
+  // an implementation that exempted everything.
+  const items = [makeItem()];
+  materializeOrderTax(items, "tax_frankfort", null, [orderDest("MO"), orderDest("IL")], CATALOG, NOW);
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
+});
+
+Deno.test("materializeOrderTax: the org's profile is honored when the doc says nothing", () => {
+  // `docProfile: null` means INHERIT, and it is the safe default: an order that
+  // says nothing cannot tax an exempt customer (api-cloudrun#486).
+  const items = [makeItem()];
+  materializeOrderTax(items, "tax_exempt", null, [orderDest("IL")], CATALOG, NOW);
+  assertEquals(px(items[0]).taxes, []);
+
+  const rantoul = [makeItem()];
+  materializeOrderTax(rantoul, "tax_rantoul", null, [orderDest("IL")], CATALOG, NOW);
+  assertEquals(px(rantoul[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
+});
+
+Deno.test("materializeOrderTax: an explicit doc tax_applied BEATS an org location profile", () => {
+  // The #2348 class: the operator saying "this one is ordinary" must outrank the
+  // customer's Frankfort default rather than falling through to it.
+  const items = [makeItem()];
+  materializeOrderTax(items, "tax_frankfort", "tax_applied", [orderDest("IL")], CATALOG, NOW);
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+});
+
+Deno.test("materializeOrderTax: the as-of instant comes from the DELIVERY date, not now", () => {
+  // The order-vs-invoice difference this whole composition exists to express: an
+  // invoice resolves at `invoice.date`, an order at its earliest delivery start.
+  // Here the Frankfort doc does not exist yet at the delivery date, so the
+  // override resolves to nothing and the line keeps its intrinsic tax — the same
+  // "no version brackets this date" case the order path handles by keeping what
+  // it had rather than silently untaxing the line.
+  const items = [makeItem()];
+  materializeOrderTax(
+    items,
+    "tax_applied",
+    "tax_frankfort",
+    [orderDest("IL", "2025-06-01T09:00:00.000-05:00")],
+    CATALOG,
+    NOW,
+  );
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+
+  // The discriminating half: the same order delivered after Frankfort's
+  // `valid_from` DOES resolve the override.
+  const later = [makeItem()];
+  materializeOrderTax(
+    later,
+    "tax_applied",
+    "tax_frankfort",
+    [orderDest("IL", "2026-06-01T09:00:00.000-05:00")],
+    CATALOG,
+    NOW,
+  );
+  assertEquals(px(later[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
 });

@@ -1030,7 +1030,7 @@
           "kind": "variable",
           "name": "DEFAULT_TAX_PROFILE",
           "declaration": "const DEFAULT_TAX_PROFILE: TaxProfileType;",
-          "doc": "The one fallback for a document snapshot that predates\n{@link DocumentOrganizationSnapshot}'s `tax_profile`. Named rather than\ninlined so the sites depending on the backfill are a single grep, and so the\nfollow-up that makes the field required has a work list."
+          "doc": "The profile to assume when no organization profile is in hand.\n\n⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began\nas the fallback for documents predating {@link DocumentOrganizationSnapshot}'s\n`tax_profile`; that population is gone (category A = 0 in both environments)\nand every STORED snapshot now carries one. What survives is the case a schema\ncannot legislate: the pure functions here are called by the manager against\n**in-memory, mid-edit** documents, where the organization may not be attached\nyet — a fresh draft, or the moment between detaching one customer and picking\nanother.\n\nSo the `| undefined` on {@link resolveEffectiveProfile} and its siblings is\ndeliberate and stays. #489's work list said to collapse it; collapsing it\nwould push this default out to each caller, and \"a document whose customer is\nunknown is taxed normally, never silently exempted\" is exactly the kind of\nrule this campaign exists to keep in one place. What #489 actually bought is\nthat a *stored* document can no longer be missing it — so readers of stored\ndocuments (the Xero push, the quote push) can and do collapse."
         },
         {
           "kind": "variable",
@@ -1251,7 +1251,7 @@
         {
           "kind": "interface",
           "name": "DocumentOrganizationSnapshotType",
-          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile?: TaxProfileType;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
+          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile: TaxProfileType;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
           "doc": "The customer-organization snapshot embedded on an order/invoice/credit note."
         },
         {
@@ -4991,7 +4991,7 @@
           "kind": "variable",
           "name": "DEFAULT_TAX_PROFILE",
           "declaration": "const DEFAULT_TAX_PROFILE: TaxProfileType;",
-          "doc": "The one fallback for a document snapshot that predates\n{@link DocumentOrganizationSnapshot}'s `tax_profile`. Named rather than\ninlined so the sites depending on the backfill are a single grep, and so the\nfollow-up that makes the field required has a work list."
+          "doc": "The profile to assume when no organization profile is in hand.\n\n⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began\nas the fallback for documents predating {@link DocumentOrganizationSnapshot}'s\n`tax_profile`; that population is gone (category A = 0 in both environments)\nand every STORED snapshot now carries one. What survives is the case a schema\ncannot legislate: the pure functions here are called by the manager against\n**in-memory, mid-edit** documents, where the organization may not be attached\nyet — a fresh draft, or the moment between detaching one customer and picking\nanother.\n\nSo the `| undefined` on {@link resolveEffectiveProfile} and its siblings is\ndeliberate and stays. #489's work list said to collapse it; collapsing it\nwould push this default out to each caller, and \"a document whose customer is\nunknown is taxed normally, never silently exempted\" is exactly the kind of\nrule this campaign exists to keep in one place. What #489 actually bought is\nthat a *stored* document can no longer be missing it — so readers of stored\ndocuments (the Xero push, the quote push) can and do collapse."
         },
         {
           "kind": "variable",
@@ -5050,7 +5050,7 @@
         {
           "kind": "interface",
           "name": "DocumentOrganizationSnapshotType",
-          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile?: TaxProfileType;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
+          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile: TaxProfileType;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
           "doc": "The customer-organization snapshot embedded on an order/invoice/credit note."
         },
         {
@@ -11502,14 +11502,22 @@
         {
           "kind": "interface",
           "name": "TaxSourcingDestination",
-          "declaration": "interface TaxSourcingDestination {\n  delivery?: typeLiteral | null;\n}",
-          "doc": "The one destination shape {@link isEntirelyOutOfIllinois} reads."
+          "declaration": "interface TaxSourcingDestination {\n  dates?: typeLiteral | null;\n  delivery?: typeLiteral | null;\n}",
+          "doc": "The one destination shape the order-side tax rules read.\n\nTwo fields, for the two questions: `delivery.address.region` answers *\"is this\ndocument sourced outside Illinois?\"* ({@link isEntirelyOutOfIllinois}) and\n`dates.delivery_start` answers *\"as of when do its taxes resolve?\"*\n({@link deriveOrderTaxAsOf}). Both optional, because a caller mid-edit may\nhave neither."
         },
         {
           "kind": "function",
           "name": "computeItemTaxAmountCents",
           "signature": "computeItemTaxAmountCents(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscountedCents: number, quantity: number): number",
           "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.\n\nExact: both factors are applied as `× n ÷ d` over integer cents and rounded\nhalf-up exactly once (core#47). The form this replaced was\n`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float\nratio, and **the one percent-of-money path that never migrated to integer\ncents**: inside a single `calculateItemPrice` call the discount on a line was\nalready exact BigInt while the tax on that same line was not. It was measured\nbenign across CFS's six live rates, which is precisely why it survived; the\nsweep in `tests/orders.test.ts` is what makes a future rate or magnitude\nunable to change that silently.\n\nA negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat\ndiscount exceed its line rather than clamping — so the rounding is half *away\nfrom zero* and the tax carries the subtotal's sign, exactly as the currency.js\nform did.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveOrderTaxAsOf",
+          "signature": "deriveOrderTaxAsOf(destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined, now: string): string",
+          "doc": "As-of instant for resolving an order's taxes: the earliest destination\ndelivery start, falling back to `now`.\n\n**`now` is injected, and that is the whole reason this can live in `core`.**\nThe two callers reach for different clocks — api-cloudrun's\n`Timestamp.now().toDate().toISOString()`, the manager's\n`new Date().toISOString()` — and both produce the same UTC-Z form, so the\nfallback resolves identically on either side.\n\n⚠️ **Not the banned business-date anti-pattern.** `asOf` is a resolution\ninstant handed to {@link findTaxAt}, never written to a document. Emitting\nChicago offset form here would make the server and the client resolve\ndifferently for an instant near midnight, which is the failure this note\nexists to prevent.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11572,6 +11580,14 @@
               "doc": "Instant to resolve the tax catalog at."
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "materializeOrderTax",
+          "signature": "materializeOrderTax(items: LineItem[], orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined, taxCatalog: Tax[], now: string): void",
+          "doc": "**The one order-side tax materializer.** Resolve an order's effective tax from\nits organization snapshot, its own `tax_profile` and its destinations, then\nreprice every billable line. Mutates `items` in place; callers run\n`calculateOrderTotals` after.\n\nThis is {@link materializeDocumentTax} plus the two things that are true of an\nORDER and not of an invoice — the as-of instant is the delivery date rather\nthan `invoice.date`, and an out-of-state delivery is exempt.\n\n⚠️ **It lives here because it is POLICY, and policy written twice drifts.**\nIt began as `api-cloudrun/src/lib/orderTaxPricing.ts`, and the manager then\nwrote a second copy in `src/utils/documentTax.ts` — carrying a comment saying\nthe two must stay byte-for-byte identical, which is a wish, not a mechanism.\nThe arithmetic was already shared; this is the ~10 lines around it.\n\nThree things it centralizes across the order write paths:\n\n1. **The organization's profile is passed for real.** Its predecessor\n   hardcoded `\"tax_applied\"` in that position because an order's snapshot had\n   no `tax_profile` to pass (api-cloudrun#486). A tax-exempt customer's\n   invoices went untaxed and their orders went taxed, and what covered the gap\n   was CRMS stamping the order's profile from the opportunity header — i.e.\n   the system being retired.\n2. **`docProfile: null` means INHERIT**, and is the safe default: an order\n   that says nothing cannot tax an exempt customer. A non-null value is a\n   deliberate override, and an explicit `\"tax_applied\"` beats an org-level\n   location profile rather than losing to it.\n3. **The out-of-state rule**, applied as an exemption in the DOC position so\n   it composes with the precedence rule instead of shadowing it — a Frankfort\n   customer's Missouri delivery is still untaxed.\n\n⚠️ Deriving that rule from the destination address does **not** generalize to\njurisdiction: CFS is registered in exactly three, a Chicago production films\nin a dozen Illinois suburbs on short notice, and picking a jurisdiction per\nsuburb is explicitly not wanted (api-cloudrun#237, won't-do). Out-of-state is\na REGISTRATION boundary, not a sourcing model.\n\n⚠️ The CRMS **invoice** webhook must keep calling the bare\n{@link overrideItemTaxesForProfile} — its subtotals are\n`charge_total`-authoritative and a reprice would under-bill\n(api-cloudrun#236). This is the order path only.",
+          "paramTags": [],
           "returnsTag": null
         },
         {

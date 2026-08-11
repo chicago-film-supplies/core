@@ -312,8 +312,17 @@ export function materializeDocumentTax(
 
 // ── Out-of-state sourcing ────────────────────────────────────────
 
-/** The one destination shape {@link isEntirelyOutOfIllinois} reads. */
+/**
+ * The one destination shape the order-side tax rules read.
+ *
+ * Two fields, for the two questions: `delivery.address.region` answers *"is this
+ * document sourced outside Illinois?"* ({@link isEntirelyOutOfIllinois}) and
+ * `dates.delivery_start` answers *"as of when do its taxes resolve?"*
+ * ({@link deriveOrderTaxAsOf}). Both optional, because a caller mid-edit may
+ * have neither.
+ */
 export interface TaxSourcingDestination {
+  dates?: { delivery_start?: string | null } | null;
   delivery?: { address?: { region?: string } | null } | null;
 }
 
@@ -352,4 +361,100 @@ export function isEntirelyOutOfIllinois(
   const codes = (destinations ?? []).map((d) => toUsStateCode(d?.delivery?.address?.region));
   if (codes.length === 0) return false;
   return codes.every((code) => code !== null && code !== "IL");
+}
+
+// ── The ORDER-side composition ──────────────────────────────────
+
+/**
+ * As-of instant for resolving an order's taxes: the earliest destination
+ * delivery start, falling back to `now`.
+ *
+ * **`now` is injected, and that is the whole reason this can live in `core`.**
+ * The two callers reach for different clocks — api-cloudrun's
+ * `Timestamp.now().toDate().toISOString()`, the manager's
+ * `new Date().toISOString()` — and both produce the same UTC-Z form, so the
+ * fallback resolves identically on either side.
+ *
+ * ⚠️ **Not the banned business-date anti-pattern.** `asOf` is a resolution
+ * instant handed to {@link findTaxAt}, never written to a document. Emitting
+ * Chicago offset form here would make the server and the client resolve
+ * differently for an instant near midnight, which is the failure this note
+ * exists to prevent.
+ */
+export function deriveOrderTaxAsOf(
+  destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined,
+  now: string,
+): string {
+  const starts = (destinations ?? [])
+    .map((d) => d?.dates?.delivery_start)
+    .filter((s): s is string => typeof s === "string")
+    .sort();
+  return starts[0] ?? now;
+}
+
+/**
+ * **The one order-side tax materializer.** Resolve an order's effective tax from
+ * its organization snapshot, its own `tax_profile` and its destinations, then
+ * reprice every billable line. Mutates `items` in place; callers run
+ * `calculateOrderTotals` after.
+ *
+ * This is {@link materializeDocumentTax} plus the two things that are true of an
+ * ORDER and not of an invoice — the as-of instant is the delivery date rather
+ * than `invoice.date`, and an out-of-state delivery is exempt.
+ *
+ * ⚠️ **It lives here because it is POLICY, and policy written twice drifts.**
+ * It began as `api-cloudrun/src/lib/orderTaxPricing.ts`, and the manager then
+ * wrote a second copy in `src/utils/documentTax.ts` — carrying a comment saying
+ * the two must stay byte-for-byte identical, which is a wish, not a mechanism.
+ * The arithmetic was already shared; this is the ~10 lines around it.
+ *
+ * Three things it centralizes across the order write paths:
+ *
+ * 1. **The organization's profile is passed for real.** Its predecessor
+ *    hardcoded `"tax_applied"` in that position because an order's snapshot had
+ *    no `tax_profile` to pass (api-cloudrun#486). A tax-exempt customer's
+ *    invoices went untaxed and their orders went taxed, and what covered the gap
+ *    was CRMS stamping the order's profile from the opportunity header — i.e.
+ *    the system being retired.
+ * 2. **`docProfile: null` means INHERIT**, and is the safe default: an order
+ *    that says nothing cannot tax an exempt customer. A non-null value is a
+ *    deliberate override, and an explicit `"tax_applied"` beats an org-level
+ *    location profile rather than losing to it.
+ * 3. **The out-of-state rule**, applied as an exemption in the DOC position so
+ *    it composes with the precedence rule instead of shadowing it — a Frankfort
+ *    customer's Missouri delivery is still untaxed.
+ *
+ * ⚠️ Deriving that rule from the destination address does **not** generalize to
+ * jurisdiction: CFS is registered in exactly three, a Chicago production films
+ * in a dozen Illinois suburbs on short notice, and picking a jurisdiction per
+ * suburb is explicitly not wanted (api-cloudrun#237, won't-do). Out-of-state is
+ * a REGISTRATION boundary, not a sourcing model.
+ *
+ * ⚠️ The CRMS **invoice** webhook must keep calling the bare
+ * {@link overrideItemTaxesForProfile} — its subtotals are
+ * `charge_total`-authoritative and a reprice would under-bill
+ * (api-cloudrun#236). This is the order path only.
+ */
+export function materializeOrderTax(
+  items: LineItem[],
+  orgProfile: TaxProfileType | undefined,
+  docProfile: TaxProfileType | null,
+  destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined,
+  taxCatalog: Tax[],
+  now: string,
+): void {
+  // Out of state → exempt, expressed in the doc position. `getEffectiveProfileTax`
+  // makes exemption sticky from either side, so this cannot be silently
+  // outranked by an org-level location profile.
+  const effectiveDocProfile: TaxProfileType | null = isEntirelyOutOfIllinois(destinations)
+    ? "tax_exempt"
+    : docProfile;
+
+  materializeDocumentTax(
+    items,
+    orgProfile,
+    effectiveDocProfile,
+    taxCatalog,
+    deriveOrderTaxAsOf(destinations, now),
+  );
 }

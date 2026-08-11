@@ -427,6 +427,10 @@ const minimalDoc = {
     uid: null,
     name: "Test Acme Corp",
     xero_id: null,
+    // Required since api-cloudrun#489 — a stored snapshot always carries the
+    // customer's profile, so a fixture without one is not a document any writer
+    // can produce.
+    tax_profile: "tax_applied",
   },
   destinations: [validDocDestination],
   totals: {

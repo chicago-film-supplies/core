@@ -1238,7 +1238,7 @@ export interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile?: TaxProfileType;
+  tax_profile: TaxProfileType;
   xero_id: string | null;
   billing_address?: AddressType | null;
 }
@@ -1282,31 +1282,45 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
     // No `label` — the heading is the "Organization" carried by the key above.
     name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
     crms_id: z.int().nullable().optional(),
-    // ⚠️ OPTIONAL FOR ONE RELEASE CYCLE, THEN REQUIRED — expand/migrate/contract.
-    //
-    // It cannot land required in the same publish that starts writing it. Every
-    // write path validates the FULL document (`validatedSet` inside
+    // REQUIRED as of api-cloudrun#489 — the contract third of
+    // expand/migrate/contract, and the reason it took three steps is worth
+    // keeping: it could not land required in the publish that started writing
+    // it. Every write path validates the FULL document (`validatedSet` inside
     // `runInstrumentedTransaction`) and every one of these snapshots is a
-    // `z.strictObject`, so the two schema versions have disjoint accepted sets:
-    // the old one REJECTS an order carrying `tax_profile`, the new one REJECTS
-    // the 981 prod orders that lack it. There is no deploy order that avoids a
-    // window in which ordinary order writes 500 — including the CRMS
-    // opportunity webhook, whose failures are silent drops.
+    // `z.strictObject`, so the two schema versions have disjoint accepted sets —
+    // the old one REJECTS a document carrying `tax_profile`, a required new one
+    // REJECTS the 981 prod orders that lacked it. No deploy order avoids a
+    // window of failing order writes, including the CRMS opportunity webhook,
+    // whose failures are silent drops.
     //
-    // So: optional here, backfill both environments, then a follow-up publish
-    // drops the `.optional()`. Until it does, readers must handle `undefined`
-    // rather than assume — `DEFAULT_TAX_PROFILE` is the one named fallback, so
-    // it greps, and `audit-order-tax-profile.ts` asserts the count reaches 0.
-    tax_profile: TaxProfileEnum.optional().meta({ column: true, label: "Tax Profile" }),
+    // Gate, re-measured immediately before this landed (2026-08-11):
+    // `audit-order-tax-profile.ts` category A = 0 in BOTH environments — prod
+    // 0 of 984, dev 0 of 984 after a re-run of the backfill, which had been
+    // clobbered back to 2 by the prod→dev mirror.
+    tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
     xero_id: z.uuid().nullable(),
     billing_address: Address.optional(),
   })
   .meta({ label: "Organization" });
 
 /**
- * The one fallback for a document snapshot that predates
- * {@link DocumentOrganizationSnapshot}'s `tax_profile`. Named rather than
- * inlined so the sites depending on the backfill are a single grep, and so the
- * follow-up that makes the field required has a work list.
+ * The profile to assume when no organization profile is in hand.
+ *
+ * ⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began
+ * as the fallback for documents predating {@link DocumentOrganizationSnapshot}'s
+ * `tax_profile`; that population is gone (category A = 0 in both environments)
+ * and every STORED snapshot now carries one. What survives is the case a schema
+ * cannot legislate: the pure functions here are called by the manager against
+ * **in-memory, mid-edit** documents, where the organization may not be attached
+ * yet — a fresh draft, or the moment between detaching one customer and picking
+ * another.
+ *
+ * So the `| undefined` on {@link resolveEffectiveProfile} and its siblings is
+ * deliberate and stays. #489's work list said to collapse it; collapsing it
+ * would push this default out to each caller, and "a document whose customer is
+ * unknown is taxed normally, never silently exempted" is exactly the kind of
+ * rule this campaign exists to keep in one place. What #489 actually bought is
+ * that a *stored* document can no longer be missing it — so readers of stored
+ * documents (the Xero push, the quote push) can and do collapse.
  */
 export const DEFAULT_TAX_PROFILE: TaxProfileType = "tax_applied";
