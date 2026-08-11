@@ -13,6 +13,16 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 
 /** Msg literals this archetype absorbs. */
 export const SYSTEM_EVENT_MSGS = [
+  /**
+   * A `GET /db/{collection}` page ended early on the response size budget
+   * rather than on `limit`. Carries `collection`, `limit`, `returned`,
+   * `budget_chars`, `had_select`.
+   *
+   * Seam-level rather than MCP-level on purpose: the budget lives in
+   * `services/dbRead.ts` and bounds every consumer of that seam — operator
+   * scripts and plain HTTP callers as much as the MCP tools.
+   */
+  "db_page_clipped",
   "dev_guard_skip",
   "dry_run_skip",
   "rate_limit_exceeded",

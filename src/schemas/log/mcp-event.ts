@@ -17,6 +17,16 @@ export const MCP_EVENT_MSGS = [
   "mcp_bearer_invalid",
   "mcp_bearer_unconfigured",
   "mcp_legacy_bearer_used",
+  /**
+   * A tool result exceeded the response budget and was refused whole
+   * (`capToolResult`). Carries `tool`, `chars`, `budget_chars`.
+   *
+   * Worth watching in one direction only: a RISING rate means callers are not
+   * narrowing their queries, which on `/db/*` usually means the connect-time
+   * instructions have regressed past the client's 2 KB truncation again. A
+   * steady rate is the bound doing its job.
+   */
+  "mcp_result_capped",
   "mcp_template_tool_error",
   "mcp_template_tools_registered",
 ] as const;

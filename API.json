@@ -8779,7 +8779,7 @@
         {
           "kind": "variable",
           "name": "MCP_EVENT_MSGS",
-          "declaration": "const MCP_EVENT_MSGS: \"mcp_autogen_tool_error\" | \"mcp_autogen_tools_registered\" | \"mcp_bearer_invalid\" | \"mcp_bearer_unconfigured\" | \"mcp_legacy_bearer_used\" | \"mcp_template_tool_error\" | \"mcp_template_tools_registered\"[];",
+          "declaration": "const MCP_EVENT_MSGS: \"mcp_autogen_tool_error\" | \"mcp_autogen_tools_registered\" | \"mcp_bearer_invalid\" | \"mcp_bearer_unconfigured\" | \"mcp_legacy_bearer_used\" | \"mcp_result_capped\" | \"mcp_template_tool_error\" | \"mcp_template_tools_registered\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
@@ -8887,7 +8887,7 @@
         {
           "kind": "variable",
           "name": "SYSTEM_EVENT_MSGS",
-          "declaration": "const SYSTEM_EVENT_MSGS: \"dev_guard_skip\" | \"dry_run_skip\" | \"rate_limit_exceeded\" | \"retry_attempt\" | \"startup_error\" | \"unhandled_error\" | \"health_check_firestore_error\" | \"preview_served\" | \"validation_failed\"[];",
+          "declaration": "const SYSTEM_EVENT_MSGS: \"db_page_clipped\" | \"dev_guard_skip\" | \"dry_run_skip\" | \"rate_limit_exceeded\" | \"retry_attempt\" | \"startup_error\" | \"unhandled_error\" | \"health_check_firestore_error\" | \"preview_served\" | \"validation_failed\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {

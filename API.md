@@ -17386,7 +17386,7 @@ const LogRecordSchema: z.ZodType<LogRecord>;
 Msg literals this archetype absorbs.
 
 ```ts
-const MCP_EVENT_MSGS: "mcp_autogen_tool_error" | "mcp_autogen_tools_registered" | "mcp_bearer_invalid" | "mcp_bearer_unconfigured" | "mcp_legacy_bearer_used" | "mcp_template_tool_error" | "mcp_template_tools_registered"[];
+const MCP_EVENT_MSGS: "mcp_autogen_tool_error" | "mcp_autogen_tools_registered" | "mcp_bearer_invalid" | "mcp_bearer_unconfigured" | "mcp_legacy_bearer_used" | "mcp_result_capped" | "mcp_template_tool_error" | "mcp_template_tools_registered"[];
 ```
 
 ### `MSG_SCHEMA_REGISTRY`
@@ -17631,7 +17631,7 @@ const RequestLogRecordSchema: z.ZodType<RequestLogRecord>;
 Msg literals this archetype absorbs.
 
 ```ts
-const SYSTEM_EVENT_MSGS: "dev_guard_skip" | "dry_run_skip" | "rate_limit_exceeded" | "retry_attempt" | "startup_error" | "unhandled_error" | "health_check_firestore_error" | "preview_served" | "validation_failed"[];
+const SYSTEM_EVENT_MSGS: "db_page_clipped" | "dev_guard_skip" | "dry_run_skip" | "rate_limit_exceeded" | "retry_attempt" | "startup_error" | "unhandled_error" | "health_check_firestore_error" | "preview_served" | "validation_failed"[];
 ```
 
 ### `SyncErrorLogRecord`
