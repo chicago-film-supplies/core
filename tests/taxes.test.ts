@@ -3,8 +3,10 @@ import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
   findTaxAt,
   getEffectiveProfileTax,
+  isEntirelyOutOfIllinois,
   materializeDocumentTax,
   overrideItemTaxesForProfile,
+  resolveEffectiveProfile,
   TAX_PROFILE_OVERRIDE_NAME,
 } from "../src/utils/taxes.ts";
 import { TaxProfileEnum } from "../src/schemas/mod.ts";
@@ -459,4 +461,85 @@ Deno.test("materialize: reprices under tax_applied too — so the catalog must b
   materializeDocumentTax(items, "tax_applied", "tax_applied", CATALOG, AS_OF);
   assertEquals(px(items[0]).taxes[0].uid, "chi-rental-tax");
   assertEquals(px(items[0]).total_cents, 11500);
+});
+
+// ── resolveEffectiveProfile + the out-of-Illinois rule ───────────
+
+Deno.test("resolveEffectiveProfile agrees with getEffectiveProfileTax on every pair", () => {
+  // The point of extracting it: the Xero TaxType mapping and the pricing engine
+  // must answer the SAME question. This asserts they cannot drift — for each
+  // (org, doc) pair, resolving the profile and then its Tax gives what
+  // getEffectiveProfileTax gives directly.
+  const profiles: Array<"tax_applied" | "tax_exempt" | "tax_rantoul" | "tax_frankfort"> = [
+    "tax_applied",
+    "tax_exempt",
+    "tax_rantoul",
+    "tax_frankfort",
+  ];
+  for (const org of profiles) {
+    for (const doc of [...profiles, null]) {
+      const viaProfile = resolveEffectiveProfile(org, doc);
+      const direct = getEffectiveProfileTax(org, doc, CATALOG, AS_OF);
+      if (viaProfile === "tax_exempt") {
+        assertEquals(direct, "exempt", `${org}/${doc}`);
+      } else {
+        const name = TAX_PROFILE_OVERRIDE_NAME[viaProfile];
+        const expected = name ? findTaxAt(CATALOG, name, AS_OF) : null;
+        assertEquals(direct, expected, `${org}/${doc}`);
+      }
+    }
+  }
+});
+
+Deno.test("resolveEffectiveProfile: the SCAN it replaced disagrees where it costs money", () => {
+  // Fail-closed companion. The old rule was `[doc, org].find(names a location
+  // tax)`; the new one is `doc ?? org`. They agree everywhere except the case
+  // that matters — a doc-level "tax_applied" under a location-profile org —
+  // which is prod invoice #2348. If this ever stops disagreeing, the extraction
+  // has been undone.
+  const scan = (org: string, doc: string | null) =>
+    [doc, org].find((p) => p !== null && TAX_PROFILE_OVERRIDE_NAME[p as never]) ?? "tax_applied";
+
+  assertEquals(scan("tax_frankfort", "tax_applied"), "tax_frankfort");
+  assertEquals(resolveEffectiveProfile("tax_frankfort", "tax_applied"), "tax_applied");
+
+  // …and they still agree on inherit, which is what makes the change surgical.
+  assertEquals(scan("tax_frankfort", null), "tax_frankfort");
+  assertEquals(resolveEffectiveProfile("tax_frankfort", null), "tax_frankfort");
+});
+
+const dest = (region: string | undefined) => ({ delivery: { address: { region } } });
+
+Deno.test("isEntirelyOutOfIllinois: every destination out of state", () => {
+  assertEquals(isEntirelyOutOfIllinois([dest("MO")]), true);
+  assertEquals(isEntirelyOutOfIllinois([dest("MO"), dest("WI")]), true);
+  assertEquals(isEntirelyOutOfIllinois([dest("Missouri")]), true);
+});
+
+Deno.test("isEntirelyOutOfIllinois: a MIXED order keeps its tax", () => {
+  // `every`, not `some` — under-collecting is the expensive error.
+  assertEquals(isEntirelyOutOfIllinois([dest("MO"), dest("IL")]), false);
+  assertEquals(isEntirelyOutOfIllinois([dest("IL")]), false);
+});
+
+Deno.test("isEntirelyOutOfIllinois: 'Illinois' spelled out is NOT out of state", () => {
+  // The corpus case. 18 of the 48 non-"IL" prod destinations are this, 13 of
+  // them Chicago — a bare `region !== "IL"` would have zeroed the tax on all 18.
+  assertEquals(isEntirelyOutOfIllinois([dest("Illinois")]), false);
+  assertEquals(isEntirelyOutOfIllinois([dest("illinois")]), false);
+  assertEquals(isEntirelyOutOfIllinois([dest("Illinois"), dest("MO")]), false);
+});
+
+Deno.test("isEntirelyOutOfIllinois: an UNRESOLVABLE region keeps the tax", () => {
+  // `null` from toUsStateCode means unknown, never "not Illinois".
+  assertEquals(isEntirelyOutOfIllinois([dest("")]), false);
+  assertEquals(isEntirelyOutOfIllinois([dest(undefined)]), false);
+  assertEquals(isEntirelyOutOfIllinois([dest("Ontario")]), false);
+  assertEquals(isEntirelyOutOfIllinois([{ delivery: null }]), false);
+  assertEquals(isEntirelyOutOfIllinois([dest("MO"), dest("")]), false);
+});
+
+Deno.test("isEntirelyOutOfIllinois: no destinations is not out of state", () => {
+  assertEquals(isEntirelyOutOfIllinois([]), false);
+  assertEquals(isEntirelyOutOfIllinois(undefined), false);
 });

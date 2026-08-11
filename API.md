@@ -22357,6 +22357,16 @@ partial `Tax` literals in tests/callers keep type-checking.
 type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
 ```
 
+### `TaxSourcingDestination`
+
+The one destination shape {@link isEntirelyOutOfIllinois} reads.
+
+```ts
+interface TaxSourcingDestination {
+  delivery?: typeLiteral | null;
+}
+```
+
 ### `computeItemTaxAmountCents(tax: Pick<Tax, "rate" | "type">, subtotalDiscountedCents: number, quantity: number): number`
 
 Pure per-item tax amount for one tax against a given subtotal.
@@ -22426,6 +22436,36 @@ and therefore not a regression; `audit-order-tax-profile.ts` is what says
 when the window has closed.
 
 **Returns** — `"exempt"` (→ empty taxes) | a resolved `Tax` | `null` (no override).
+
+### `isEntirelyOutOfIllinois(destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined): boolean`
+
+Does **every** destination on this document deliver outside Illinois?
+
+The one automatic exception to "everything sources to the store address".
+CFS is registered to collect in exactly three jurisdictions — Chicago,
+Frankfort and Rantoul — and collects no sales tax outside Illinois, so an
+order delivered entirely out of state carries none. Everything else,
+including the dozen Illinois suburbs a Chicago production films in on three
+days' notice, sources to Chicago and is overridden by hand when a customer
+asks; deriving forty jurisdictions from an address is explicitly not wanted
+(api-cloudrun#237, closed won't-do).
+
+**Conservative in two directions, deliberately:**
+
+- `every`, not `some` — a mixed Illinois/out-of-state order keeps its tax
+  rather than being wholly exempted. Under-collecting is the expensive error.
+- An **unresolvable** region keeps the tax. {@link toUsStateCode} returns
+  `null` for unknown, never for "not Illinois", and this reads it that way.
+  That distinction is not academic: 18 of the 48 non-`"IL"` prod destinations
+  are Illinois spelled `"Illinois"`, 13 of them in Chicago, so a bare
+  `region !== "IL"` here would have stopped collecting tax CFS owes on all 18.
+
+A document with no destinations is not out of state.
+
+Lives in core rather than in api-cloudrun because the manager's optimistic
+recompute has to reach the same answer — a client-side reimplementation would
+put the divergence back on the client, which is the whole reason
+{@link materializeDocumentTax} lives here too.
 
 ### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
 
@@ -22510,6 +22550,27 @@ Materialize a doc-level `tax_profile` override onto each priceable item's
 - `tax_applied` / no active override doc → item left untouched.
 
 Non-priceable items (destination/group/transaction_fee) are skipped.
+
+### `resolveEffectiveProfile(orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null): TaxProfileType`
+
+The **one precedence rule**, as a profile rather than as a resolved Tax:
+exemption from either side wins, then the document's profile, then the
+organization's.
+
+Extracted because two consumers need the same answer in different currencies
+and had grown two rules. {@link getEffectiveProfileTax} answers *"which Tax
+document prices this line?"*; `resolveXeroTaxType` (api-cloudrun
+`src/lib/xeroTax.ts`) answers *"which Xero `TaxType` does the line carry?"* —
+and it did so with its own `taxProfiles.includes("tax_frankfort")` scan over
+`[org, doc]`. Under the `??` precedence those two disagree exactly where it
+costs money: a document-level `"tax_applied"` under a Frankfort organization
+now prices Chicago in CFS while the scan still stamps Xero `TAX007`. CFS has
+paid for that class of divergence once already — 19 invoices and $2,741.78 of
+phantom receivable when this function's taxable-COA set was a second copy
+(api-cloudrun#409).
+
+So the Xero side resolves the profile through *this* and passes the single
+answer, rather than restating the precedence over an array.
 
 ## `@cfs/core/utils/templates`
 
