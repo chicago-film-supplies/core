@@ -95,11 +95,17 @@ export interface TransactionLogRecord {
    * `WARN_BYTES`/`WARN_WRITES`, and the durable one: a volume threshold has to be
    * re-derived as the corpus grows, while a SHAPE invariant survives untouched.
    *
-   * **It fires on the SUCCESSFUL runs of a path, not the hung ones.** A transaction
-   * that blocks to the deadline usually staged no writes at all (`write_count: 0` on
-   * every abort sampled), so `target_counts` is empty and the intersection is too.
-   * That is sufficient rather than a gap: the overlap is a property of the CODE, so any
-   * run of that code reports it, and 83% of `crms-opportunity-order`'s runs succeeded.
+   * **Emitted on BOTH paths — completed and aborted.** An earlier note here claimed an
+   * abort always carries `write_count: 0` and so never reports the field; measured false
+   * on prod `cfs-3100` (2026-08-11, 30d): 19 aborted records carry `contended_ranges`, at
+   * `write_count: 2`. An abort that names its overlap is the strongest signal the field
+   * produces — it identifies what blocked the transaction, not merely what could.
+   *
+   * It is still a property of the CODE rather than of the traffic, so a successful run of
+   * the same path reports the same overlap. Do not read a *quiet* path as a safe one: a
+   * fan-out gated on a real field change reports nothing on a run that changes nothing
+   * (measured 4 of 19 `crms-member-organization` runs), so an alert keyed on "every run
+   * reports it" would be wrong.
    */
   contended_ranges?: string[];
   error_name?: string;
