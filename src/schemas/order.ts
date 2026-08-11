@@ -7,6 +7,8 @@ import { chicagoInstant } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import {
   Address,
+  DocumentOrganizationSnapshot,
+  type DocumentOrganizationSnapshotType,
   type AddressType,
   checkItemContract,
   checkItemPriceFormula,
@@ -591,7 +593,7 @@ export interface CreateOrderInputType {
   uid: string;
   organization: { uid: string };
   status: OrderStatusType;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType | null;
   destinations: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -603,7 +605,13 @@ export const CreateOrderInput: z.ZodType<CreateOrderInputType> = z.object({
   uid: FirestoreId,
   organization: z.object({ uid: FirestoreId }),
   status: OrderStatus,
-  tax_profile: TaxProfileEnum,
+  // Omitting it means INHERIT, not "tax_applied". This was a required field
+  // that `createOrder` hard-threw on, which was survivable only because the one
+  // client always sent it; the failure it invites is a client that forgets and
+  // gets a plain-Chicago order for a tax-exempt customer. `.default(null)`
+  // materializes here — unlike on a document schema — because route validation
+  // passes the PARSED input on.
+  tax_profile: TaxProfileEnum.nullable().default(null),
   destinations: z.array(Destination).min(1, "At least one destination is required"),
   items: z.array(OrderItem)
     .refine(
@@ -622,7 +630,8 @@ export interface UpdateOrderInputType {
   uid?: string;
   organization?: { uid: string };
   status?: OrderStatusType;
-  tax_profile?: TaxProfileType;
+  /** Absent = leave unchanged; `null` = clear the override and inherit the org's. */
+  tax_profile?: TaxProfileType | null;
   destinations?: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -635,7 +644,7 @@ export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
   uid: FirestoreId.optional(),
   organization: z.object({ uid: FirestoreId }).optional(),
   status: OrderStatus.optional(),
-  tax_profile: TaxProfileEnum.optional(),
+  tax_profile: TaxProfileEnum.nullable().optional(),
   destinations: z.array(Destination).min(1, "At least one destination is required").optional(),
   items: z.array(OrderItem)
     .refine(
@@ -905,15 +914,15 @@ export function isFulfillableItem(item: OrderDocItemType): item is OrderDocLineI
   return isFulfillableItemType(item.type);
 }
 
-/** Denormalized organization snapshot on the order document. */
-const OrderDocOrganization = z.strictObject({
-  uid: FirestoreId.nullable(),
-  // No `label` — the heading is the "Organization" carried by the key above.
-  name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
-  crms_id: z.int().nullable().optional(),
-  xero_id: z.uuid().nullable(),
-  billing_address: Address.optional(),
-});
+/**
+ * Denormalized organization snapshot on the order document.
+ *
+ * Was a hand-maintained literal one field short of the invoice's — no
+ * `tax_profile`, which is the whole of api-cloudrun#486. Now the shared
+ * {@link DocumentOrganizationSnapshot}; see its docstring for the union taken
+ * on the two fields the three copies disagreed about.
+ */
+const OrderDocOrganization = DocumentOrganizationSnapshot;
 
 /** Order totals. */
 export interface OrderDocTotalsType {
@@ -944,16 +953,24 @@ export interface Order {
   uid: string;
   number: number;
   status: OrderStatusType;
-  organization: {
-    uid: string | null;
-    name: string;
-    crms_id?: number | null;
-    xero_id: string | null;
-    billing_address?: AddressType | null;
-  };
+  organization: DocumentOrganizationSnapshotType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
-  tax_profile: TaxProfileType;
+  /**
+   * The order's own tax profile, or `null` to **inherit the organization's**.
+   *
+   * `null` is the safe default and is what makes both directions expressible:
+   * a client that says nothing cannot tax an exempt customer, and an explicit
+   * `"tax_applied"` now *beats* an org-level location profile instead of losing
+   * to it. That second half is a live defect on the invoice side — prod invoice
+   * #2348 is issued and in Xero carrying `tax_profile: "tax_applied"` and taxed
+   * Frankfort 8%, because `getEffectiveProfileTax` used to SCAN
+   * `[doc, org]` for the first location profile rather than pick one.
+   *
+   * "Is this order overridden?" is then `tax_profile !== null` — no second
+   * stored fact, and no comparison against the org snapshot.
+   */
+  tax_profile: TaxProfileType | null;
   totals: OrderDocTotalsType;
   invoices: Array<{ uid: string; number: number; status: InvoiceStatusType }>;
   query_by_invoices: string[];
@@ -1002,11 +1019,11 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // `items.price.taxes.rate` ("Item Tax Rate") distinct from the order-level
   // `totals.taxes.rate` ("Tax Rate") — the same field shape at two depths.
   items: z.array(OrderDocItem).default([]).meta({ label: "Item" }),
-  // Required (no `.default("tax_applied")`): the Typesense config declares it
-  // so, and a `.default()` never materializes on a write — see the note in
-  // `product.ts`. No `initial` needed: TAX_PROFILES[0] is "tax_applied", so
-  // the enum's type-derived seed already equals the dropped default.
-  tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+  // Present but NULLABLE, not optional — `null` is a value meaning "inherit the
+  // organization's profile", so it has to be stored rather than absent. Still
+  // no `.default()`: one never materializes on a write (see the note in
+  // `product.ts`), and the Typesense config declares the field required.
+  tax_profile: TaxProfileEnum.nullable().meta({ column: true, label: "Tax Profile" }),
   totals: OrderDocTotals,
   invoices: z.array(z.strictObject({
     uid: FirestoreId,

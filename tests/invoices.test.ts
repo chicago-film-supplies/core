@@ -24,7 +24,6 @@ import {
   removeOrderScopedDestinations,
   removeOrderScopedItems,
   resyncInvoiceLines,
-  syncObjectWithOverride,
   syncOrderDestinationsSelective,
   syncOrderItems,
   syncOrderToInvoiceSelective,
@@ -1402,23 +1401,6 @@ Deno.test("syncScalarWithOverride replaces when invoice matches prev", () => {
 Deno.test("syncScalarWithOverride keeps invoice when it differs from prev", () => {
   assertEquals(syncScalarWithOverride("foo", "bar", "manual"), "manual");
   assertEquals(syncScalarWithOverride(null, "new", "manual"), "manual");
-});
-
-Deno.test("syncObjectWithOverride respects keys subset", () => {
-  const prev = { uid: "org1", name: "A", tax_profile: "applied" };
-  const next = { uid: "org1", name: "B", tax_profile: "applied" };
-  const invoice = { uid: "org1", name: "A", tax_profile: "exempt" };
-  // Keys-subset match on (uid, name): prev.name === invoice.name → replace.
-  const result = syncObjectWithOverride(prev, next, invoice, ["uid", "name"]);
-  assertEquals(result, next);
-});
-
-Deno.test("syncObjectWithOverride keeps invoice when compared subset diverges", () => {
-  const prev = { uid: "org1", name: "A" };
-  const next = { uid: "org1", name: "B" };
-  const invoice = { uid: "org1", name: "manual" };
-  const result = syncObjectWithOverride(prev, next, invoice, ["uid", "name"]);
-  assertEquals(result, invoice);
 });
 
 // ── validateInvoiceItemPaths ────────────────────────────────────

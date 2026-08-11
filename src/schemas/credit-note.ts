@@ -36,8 +36,8 @@ import { chicagoStartOfDay } from "./_datetime.ts";
 import {
   ActorRef,
   type ActorRefType,
-  Address,
-  type AddressType,
+  DocumentOrganizationSnapshot,
+  type DocumentOrganizationSnapshotType,
   checkItemPriceFormula,
   checkPriceBaseUnit,
   COARevenueEnum,
@@ -318,14 +318,7 @@ export interface CreditNote {
   reference: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
-  organization: {
-    uid: string | null;
-    name: string;
-    crms_id?: number | null;
-    tax_profile: TaxProfileType;
-    xero_id: string | null;
-    billing_address: AddressType | null;
-  };
+  organization: DocumentOrganizationSnapshotType;
   tax_profile: TaxProfileType;
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
@@ -410,14 +403,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   reference: z.string().nullable().default(null).meta({ column: true, label: "Reference", linkTo: "creditNoteDetail" }),
   external_notes: z.string().meta({ pii: "mask", column: true, label: "External Notes" }).nullable().optional(),
   internal_notes: z.string().meta({ pii: "mask", column: true, label: "Internal Notes" }).nullable().optional(),
-  organization: z.strictObject({
-    uid: FirestoreId.nullable(),
-    name: z.string().meta({ pii: "mask", column: true }),
-    crms_id: z.int().nullable().optional(),
-    tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
-    xero_id: z.uuid().nullable(),
-    billing_address: Address,
-  }).meta({ label: "Organization" }),
+  organization: DocumentOrganizationSnapshot,
   tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
   items: z.array(CreditNoteDocLineItem).default([]).meta({ label: "Item" }),
   totals: CreditNoteDocTotalsSchema,

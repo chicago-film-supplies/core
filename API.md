@@ -1591,7 +1591,7 @@ interface CreateOrderInputType {
   uid: string;
   organization: typeLiteral;
   status: OrderStatusType;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType | null;
   destinations: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -1908,7 +1908,7 @@ interface CreditNote {
   reference: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
-  organization: typeLiteral;
+  organization: DocumentOrganizationSnapshotType;
   tax_profile: TaxProfileType;
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
@@ -2056,6 +2056,17 @@ Allowed credit-note statuses.
 
 ```ts
 type CreditNoteStatusType = indexedAccess;
+```
+
+### `DEFAULT_TAX_PROFILE`
+
+The one fallback for a document snapshot that predates
+{@link DocumentOrganizationSnapshot}'s `tax_profile`. Named rather than
+inlined so the sites depending on the backfill are a single grep, and so the
+follow-up that makes the field required has a work list.
+
+```ts
+const DEFAULT_TAX_PROFILE: TaxProfileType;
 ```
 
 ### `DOC_LINE_ITEM_TYPES`
@@ -2455,6 +2466,59 @@ interface DocSourceType {
   collection: CfsSourceCollectionType;
   uid: string;
   label?: string | null;
+}
+```
+
+### `DocumentOrganizationSnapshot`
+
+The customer-organization snapshot embedded on an order, an invoice and a
+credit note.
+
+**One schema, because four hand-maintained near-identical literals is what
+caused api-cloudrun#486.** The order's copy was one field short of the
+invoice's — it carried no `tax_profile` — so nothing on the order write path
+could see that a customer was tax-exempt, and `repriceOrderItemsForProfile`
+passed a hardcoded `"tax_applied"` into `materializeDocumentTax` because
+there was nothing else to pass. A tax-exempt customer's *invoices* were
+untaxed and their *orders* were taxed, and only CRMS stamping
+`order.tax_profile` from the opportunity header hid it.
+
+⚠️ **Sharing the schema pins WHERE the snapshot is built, not WHAT it holds**
+— the Ratchet-G lesson in the workspace `CLAUDE.md`, where a single allowed
+renderer of the money `_str` mirror was singular and wrong for five months.
+The value assertion that sits beside this is api-cloudrun's writer-parity
+test: one order created natively and one created through the CRMS opportunity
+path, same commercial facts, must produce byte-identical `organization`
+blocks.
+
+The two fields where the three schemas disagreed take the **union**, not
+either side: merging to one alone retroactively makes existing documents of
+the other unwritable.
+
+- `billing_address` — the order had it `.optional()`, the invoice and credit
+  note required (and prod invoices store an explicit `null`). {@link Address}
+  is already `.nullable()`, so `.optional()` is the union of the three.
+- `name` — the order bounded it `[1, 100]`, the other two did not. Bounded
+  wins here and is *not* a tightening in practice: every snapshot is copied
+  from `Organization.name`, which carries the same bounds, and prod holds no
+  invoice or credit note with an empty one (measured 2026-08-11).
+
+```ts
+const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapshotType>;
+```
+
+### `DocumentOrganizationSnapshotType`
+
+The customer-organization snapshot embedded on an order/invoice/credit note.
+
+```ts
+interface DocumentOrganizationSnapshotType {
+  uid: string | null;
+  name: string;
+  crms_id?: number | null;
+  tax_profile?: TaxProfileType;
+  xero_id: string | null;
+  billing_address?: AddressType | null;
 }
 ```
 
@@ -3267,7 +3331,7 @@ interface Invoice {
   reference?: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
-  organization: typeLiteral;
+  organization: DocumentOrganizationSnapshotType;
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
@@ -4625,10 +4689,10 @@ interface Order {
   uid: string;
   number: number;
   status: OrderStatusType;
-  organization: typeLiteral;
+  organization: DocumentOrganizationSnapshotType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
-  tax_profile: TaxProfileType;
+  tax_profile: TaxProfileType | null;
   totals: OrderDocTotalsType;
   invoices: Array<typeLiteral>;
   query_by_invoices: string[];
@@ -7553,7 +7617,7 @@ interface UpdateOrderInputType {
   uid?: string;
   organization?: typeLiteral;
   status?: OrderStatusType;
-  tax_profile?: TaxProfileType;
+  tax_profile?: TaxProfileType | null;
   destinations?: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -8821,6 +8885,13 @@ NOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is
 not fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`
 drew exactly that distinction by hand and read as if they disagreed.
 
+### `isIllinoisPostcode(postcode: string | null | undefined): boolean`
+
+Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the
+region — `audit-order-tax-profile.ts` reports a disagreement rather than
+letting either field silently win, because a wrong region and a wrong
+postcode are both live in prod and neither is authoritative.
+
 ### `isIntegerSafeLeaf(node: z.ZodType): boolean`
 
 Can this leaf hold a non-integer?
@@ -9070,6 +9141,29 @@ const threadProductRules: CollectionRule[];
 const threadRoleRules: CollectionRule[];
 ```
 
+### `toRegionCode(input: string): string`
+
+Canonical stored form of `Address.region`: the two-letter code when the input
+resolves, otherwise the input trimmed and otherwise untouched.
+
+Deliberately **normalizing, not validating**. `Address` is shared by
+destinations, organizations, orders and invoices, and its `region` is free
+text that is legitimately blank on plenty of prod documents and could hold a
+non-US region tomorrow. Rejecting an unresolvable value would turn a cosmetic
+data-quality problem into a failed write on the order path. Idempotent.
+
+### `toUsStateCode(input: string | null | undefined): string | null`
+
+Resolve a free-text region to its two-letter USPS code, or `null` when it
+cannot be resolved (blank, a non-US region, a typo).
+
+**`null` means "unknown", never "not Illinois".** Every caller deciding
+something consequential — the out-of-state no-tax rule above all — must treat
+`null` conservatively rather than as a negative answer: the prod corpus holds
+`"Illinois"` spelled out on 18 destinations (13 of them Chicago), which is
+exactly the case a naive `region !== "IL"` test gets wrong in the direction
+that stops collecting tax CFS owes.
+
 ### `transactions`
 
 ```ts
@@ -9239,6 +9333,19 @@ const updateUserRules: CollectionRule[];
 ```ts
 const updateUserTransaction: TransactionDefinition;
 ```
+
+### `usState(): z.ZodType<string, string>`
+
+Schema factory for `Address.region` — canonicalizes to the USPS code on
+parse, the same shape as `chicagoInstant()` for datetimes.
+
+⚠️ **A transform on a DOCUMENT schema does not rewrite what gets stored.**
+`validateBeforeWrite` discards `result.data` on purpose (it would strip
+FieldValue sentinels), so this only materializes where the parsed output is
+what flows on — i.e. route input validation. A writer that builds an address
+from a source that never passes through an input schema (the CRMS webhooks)
+still stores whatever it was handed. So consumers that care about the value
+must call {@link toUsStateCode} themselves rather than trusting storage.
 
 ## `@cfs/core/schemas/common`
 
@@ -9436,6 +9543,17 @@ interface CoordinatesType {
 }
 ```
 
+### `DEFAULT_TAX_PROFILE`
+
+The one fallback for a document snapshot that predates
+{@link DocumentOrganizationSnapshot}'s `tax_profile`. Named rather than
+inlined so the sites depending on the backfill are a single grep, and so the
+follow-up that makes the field required has a work list.
+
+```ts
+const DEFAULT_TAX_PROFILE: TaxProfileType;
+```
+
 ### `DOC_LINE_ITEM_TYPES`
 
 Billable line item types stored in order/invoice documents (excludes destination/group dividers).
@@ -9506,6 +9624,59 @@ interface DocSourceType {
   collection: CfsSourceCollectionType;
   uid: string;
   label?: string | null;
+}
+```
+
+### `DocumentOrganizationSnapshot`
+
+The customer-organization snapshot embedded on an order, an invoice and a
+credit note.
+
+**One schema, because four hand-maintained near-identical literals is what
+caused api-cloudrun#486.** The order's copy was one field short of the
+invoice's — it carried no `tax_profile` — so nothing on the order write path
+could see that a customer was tax-exempt, and `repriceOrderItemsForProfile`
+passed a hardcoded `"tax_applied"` into `materializeDocumentTax` because
+there was nothing else to pass. A tax-exempt customer's *invoices* were
+untaxed and their *orders* were taxed, and only CRMS stamping
+`order.tax_profile` from the opportunity header hid it.
+
+⚠️ **Sharing the schema pins WHERE the snapshot is built, not WHAT it holds**
+— the Ratchet-G lesson in the workspace `CLAUDE.md`, where a single allowed
+renderer of the money `_str` mirror was singular and wrong for five months.
+The value assertion that sits beside this is api-cloudrun's writer-parity
+test: one order created natively and one created through the CRMS opportunity
+path, same commercial facts, must produce byte-identical `organization`
+blocks.
+
+The two fields where the three schemas disagreed take the **union**, not
+either side: merging to one alone retroactively makes existing documents of
+the other unwritable.
+
+- `billing_address` — the order had it `.optional()`, the invoice and credit
+  note required (and prod invoices store an explicit `null`). {@link Address}
+  is already `.nullable()`, so `.optional()` is the union of the three.
+- `name` — the order bounded it `[1, 100]`, the other two did not. Bounded
+  wins here and is *not* a tightening in practice: every snapshot is copied
+  from `Organization.name`, which carries the same bounds, and prod holds no
+  invoice or credit note with an empty one (measured 2026-08-11).
+
+```ts
+const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapshotType>;
+```
+
+### `DocumentOrganizationSnapshotType`
+
+The customer-organization snapshot embedded on an order/invoice/credit note.
+
+```ts
+interface DocumentOrganizationSnapshotType {
+  uid: string | null;
+  name: string;
+  crms_id?: number | null;
+  tax_profile?: TaxProfileType;
+  xero_id: string | null;
+  billing_address?: AddressType | null;
 }
 ```
 
@@ -10250,6 +10421,13 @@ NOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is
 not fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`
 drew exactly that distinction by hand and read as if they disagreed.
 
+### `isIllinoisPostcode(postcode: string | null | undefined): boolean`
+
+Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the
+region — `audit-order-tax-profile.ts` reports a disagreement rather than
+letting either field silently win, because a wrong region and a wrong
+postcode are both live in prod and neither is authoritative.
+
 ### `isLineItemType(type: string): type is DocLineItemTypeType`
 
 Whether an item type is a billable line rather than a structural divider.
@@ -10275,6 +10453,42 @@ contract and every derived predicate answers `false` for it.
 The contract for a settlement `type`, or `undefined` for a value outside
 {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
 {@link itemContract} is — callers hold types from loosely-typed sources.
+
+### `toRegionCode(input: string): string`
+
+Canonical stored form of `Address.region`: the two-letter code when the input
+resolves, otherwise the input trimmed and otherwise untouched.
+
+Deliberately **normalizing, not validating**. `Address` is shared by
+destinations, organizations, orders and invoices, and its `region` is free
+text that is legitimately blank on plenty of prod documents and could hold a
+non-US region tomorrow. Rejecting an unresolvable value would turn a cosmetic
+data-quality problem into a failed write on the order path. Idempotent.
+
+### `toUsStateCode(input: string | null | undefined): string | null`
+
+Resolve a free-text region to its two-letter USPS code, or `null` when it
+cannot be resolved (blank, a non-US region, a typo).
+
+**`null` means "unknown", never "not Illinois".** Every caller deciding
+something consequential — the out-of-state no-tax rule above all — must treat
+`null` conservatively rather than as a negative answer: the prod corpus holds
+`"Illinois"` spelled out on 18 destinations (13 of them Chicago), which is
+exactly the case a naive `region !== "IL"` test gets wrong in the direction
+that stops collecting tax CFS owes.
+
+### `usState(): z.ZodType<string, string>`
+
+Schema factory for `Address.region` — canonicalizes to the USPS code on
+parse, the same shape as `chicagoInstant()` for datetimes.
+
+⚠️ **A transform on a DOCUMENT schema does not rewrite what gets stored.**
+`validateBeforeWrite` discards `result.data` on purpose (it would strip
+FieldValue sentinels), so this only materializes where the parsed output is
+what flows on — i.e. route input validation. A writer that builds an address
+from a source that never passes through an input schema (the CRMS webhooks)
+still stores whatever it was handed. So consumers that care about the value
+must call {@link toUsStateCode} themselves rather than trusting storage.
 
 ## `@cfs/core/schemas/booking`
 
@@ -11541,7 +11755,7 @@ interface Invoice {
   reference?: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
-  organization: typeLiteral;
+  organization: DocumentOrganizationSnapshotType;
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
@@ -12276,7 +12490,7 @@ interface CreateOrderInputType {
   uid: string;
   organization: typeLiteral;
   status: OrderStatusType;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType | null;
   destinations: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -12533,10 +12747,10 @@ interface Order {
   uid: string;
   number: number;
   status: OrderStatusType;
-  organization: typeLiteral;
+  organization: DocumentOrganizationSnapshotType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
-  tax_profile: TaxProfileType;
+  tax_profile: TaxProfileType | null;
   totals: OrderDocTotalsType;
   invoices: Array<typeLiteral>;
   query_by_invoices: string[];
@@ -12992,7 +13206,7 @@ interface UpdateOrderInputType {
   uid?: string;
   organization?: typeLiteral;
   status?: OrderStatusType;
-  tax_profile?: TaxProfileType;
+  tax_profile?: TaxProfileType | null;
   destinations?: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -14162,7 +14376,7 @@ interface CreditNote {
   reference: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
-  organization: typeLiteral;
+  organization: DocumentOrganizationSnapshotType;
   tax_profile: TaxProfileType;
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
@@ -15644,7 +15858,7 @@ interface OrderDocument {
   crms_id?: number;
   crms_id_str?: string;
   status: string;
-  tax_profile: string;
+  tax_profile?: string;
   deliveries?: boolean;
   pickups?: boolean;
   subject?: string;
@@ -20205,14 +20419,6 @@ override fields (`coa_revenue`, `tracking_category`, `xero_id`,
 The caller re-linearizes paths via {@link computeInvoiceItemPaths} and
 recomputes `totals` via {@link calculateInvoiceTotals} before writing.
 
-### `syncObjectWithOverride(prevOrderValue: T, newOrderValue: T, currentInvoiceValue: T, keys?: parenthesized[]): T`
-
-Object co-write with override detection. Like `syncScalarWithOverride` but
-compares two objects for deep equality via JSON.stringify. If `keys` is
-provided, only those keys are compared (useful when one side carries
-fields the other doesn't — e.g. invoice.organization.tax_profile has no
-equivalent on the order snapshot).
-
 ### `syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string): InvoiceDestinationPair[]`
 
 Selectively sync one order's destination pairs into an invoice's destinations,
@@ -21989,6 +22195,34 @@ it. Pair it with a property that holds independently — `validateItemParentage`
 against the contract table, and the direct `path.length >= 1` /
 `path.at(-1) === uid` assertions in `api-cloudrun/src/lib/validate.ts`.
 
+## `@cfs/core/utils/organizations`
+
+Organization helpers.
+
+### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "name" | "crms_id" | "tax_profile" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
+
+Build the denormalized organization snapshot an order, invoice or credit note
+embeds.
+
+**The one builder, because four hand-maintained literals is what api-cloudrun
+#486 was.** `createOrder`, `updateOrder`'s organization branch, the CRMS
+opportunity webhook and `createInvoice` each assembled this block by hand,
+and the three order-side copies were one field short of the invoice's: they
+carried no `tax_profile`. Nothing on the order write path could see a
+tax-exempt customer, so `repriceOrderItemsForProfile` passed a hardcoded
+`"tax_applied"` — the same customer's invoices went untaxed and their orders
+went taxed, hidden only by CRMS stamping the profile from the opportunity
+header.
+
+⚠️ **This pins WHERE the snapshot is built, not WHAT it holds** — the
+Ratchet-G lesson. api-cloudrun's writer-parity test is the value assertion
+beside it: one order created natively and one through the CRMS opportunity
+path, same commercial facts, must produce byte-identical `organization`
+blocks.
+
+`|| null` rather than `?? null` on `crms_id` and `xero_id` is deliberate and
+matches every call site it replaces — a `crms_id` of `0` is not a CRMS id.
+
 ## `@cfs/core/utils/products`
 
 Shared product utility functions for CFS applications.
@@ -22160,12 +22394,36 @@ instant). A missing `valid_from` is treated as an open start; missing/null
 Comparison is by instant (ms since epoch), so Chicago-offset strings with
 heterogeneous DST (-05:00 vs -06:00) compare correctly.
 
-### `getEffectiveProfileTax(orgProfile: string, docProfile: string, taxCatalog: Tax[], asOf: string): Tax | "exempt" | null`
+### `getEffectiveProfileTax(orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, taxCatalog: Tax[], asOf: string): Tax | "exempt" | null`
 
 Resolve the effective doc-level override from the org + doc `tax_profile`
-pair, as-of `asOf`. Precedence: `tax_exempt` wins (a tax-exempt customer pays
-no tax regardless of location) → else the doc-level location profile
-(doc over org) resolved to its Tax → else `null` (no override, `tax_applied`).
+pair, as-of `asOf`.
+
+**Two questions, in order — not a scan.**
+
+1. Is either side `tax_exempt`? Then exempt. Exemption is sticky from either
+   direction because it is a legal fact about the customer, not a preference
+   about where the work happened; no prod order or invoice overrides *away*
+   from an exempt org.
+2. Otherwise the document's profile if it has one, else the org's — a plain
+   `??`, so a `null` doc profile means INHERIT and any non-null value means
+   the document is deliberately overriding.
+
+⚠️ **What this replaced could not express "plain Chicago".** It scanned
+`[docProfile, orgProfile]` and took the first that named a *location* tax, so
+a doc-level `"tax_applied"` — the operator saying "this one is ordinary" —
+matched no name, fell through, and picked up the org's location profile
+anyway. That is live: prod invoice #2348 is issued and in Xero with
+`tax_profile: "tax_applied"`, taxed **Frankfort 8%**, while its own
+`taxes_base` records Chicago Sales 10.25%. Making `Order.tax_profile`
+nullable is what gives "inherit" its own representation and frees
+`"tax_applied"` to mean what it says.
+
+`orgProfile` accepts `undefined` for the duration of the
+`organization.tax_profile` backfill — see `DocumentOrganizationSnapshot`.
+It resolves to {@link DEFAULT_TAX_PROFILE}, which is the pre-#486 behaviour
+and therefore not a regression; `audit-order-tax-profile.ts` is what says
+when the window has closed.
 
 **Returns** — `"exempt"` (→ empty taxes) | a resolved `Tax` | `null` (no override).
 
@@ -22191,7 +22449,7 @@ the state of a `custom-` line: it has no product, so the quote push sends
 `NONE` while the engine keeps taxing it. Closing that needs a decision about
 what a custom line's COA should be, not a change to this predicate.
 
-### `materializeDocumentTax(items: LineItem[], orgProfile: TaxProfileType, docProfile: TaxProfileType, taxCatalog: Tax[], asOf: string): void`
+### `materializeDocumentTax(items: LineItem[], orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, taxCatalog: Tax[], asOf: string): void`
 
 **The one tax materializer.** Apply a document's `tax_profile` as a doc-level
 override, then reprice every priceable line from its (rewritten) tax uid.
@@ -22239,7 +22497,7 @@ invoice paths from `invoice.date`.
 - `taxCatalog` — The `taxes` collection, for name+date resolution.
 - `asOf` — Instant to resolve the tax catalog at.
 
-### `overrideItemTaxesForProfile(items: LineItem[], orgProfile: string, docProfile: string, taxCatalog: Tax[], asOf: string): void`
+### `overrideItemTaxesForProfile(items: LineItem[], orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, taxCatalog: Tax[], asOf: string): void`
 
 Materialize a doc-level `tax_profile` override onto each priceable item's
 `price.taxes` (single mode — mutates in place):

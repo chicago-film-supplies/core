@@ -9,7 +9,7 @@
  * @module
  */
 
-import type { TaxProfileType } from "../schemas/mod.ts";
+import { DEFAULT_TAX_PROFILE, type TaxProfileType } from "../schemas/mod.ts";
 import {
   calculateItemPrice,
   computeItemTaxAmountCents,
@@ -92,26 +92,47 @@ export const TAX_PROFILE_OVERRIDE_NAME: Partial<Record<TaxProfileType, string>> 
 
 /**
  * Resolve the effective doc-level override from the org + doc `tax_profile`
- * pair, as-of `asOf`. Precedence: `tax_exempt` wins (a tax-exempt customer pays
- * no tax regardless of location) → else the doc-level location profile
- * (doc over org) resolved to its Tax → else `null` (no override, `tax_applied`).
+ * pair, as-of `asOf`.
+ *
+ * **Two questions, in order — not a scan.**
+ *
+ * 1. Is either side `tax_exempt`? Then exempt. Exemption is sticky from either
+ *    direction because it is a legal fact about the customer, not a preference
+ *    about where the work happened; no prod order or invoice overrides *away*
+ *    from an exempt org.
+ * 2. Otherwise the document's profile if it has one, else the org's — a plain
+ *    `??`, so a `null` doc profile means INHERIT and any non-null value means
+ *    the document is deliberately overriding.
+ *
+ * ⚠️ **What this replaced could not express "plain Chicago".** It scanned
+ * `[docProfile, orgProfile]` and took the first that named a *location* tax, so
+ * a doc-level `"tax_applied"` — the operator saying "this one is ordinary" —
+ * matched no name, fell through, and picked up the org's location profile
+ * anyway. That is live: prod invoice #2348 is issued and in Xero with
+ * `tax_profile: "tax_applied"`, taxed **Frankfort 8%**, while its own
+ * `taxes_base` records Chicago Sales 10.25%. Making `Order.tax_profile`
+ * nullable is what gives "inherit" its own representation and frees
+ * `"tax_applied"` to mean what it says.
+ *
+ * `orgProfile` accepts `undefined` for the duration of the
+ * `organization.tax_profile` backfill — see `DocumentOrganizationSnapshot`.
+ * It resolves to {@link DEFAULT_TAX_PROFILE}, which is the pre-#486 behaviour
+ * and therefore not a regression; `audit-order-tax-profile.ts` is what says
+ * when the window has closed.
  *
  * @returns `"exempt"` (→ empty taxes) | a resolved `Tax` | `null` (no override).
  */
 export function getEffectiveProfileTax(
-  orgProfile: string,
-  docProfile: string,
+  orgProfile: TaxProfileType | undefined,
+  docProfile: TaxProfileType | null,
   taxCatalog: Tax[],
   asOf: string,
 ): Tax | "exempt" | null {
-  // Doc-level profile takes precedence over the org's.
-  const profiles = [docProfile, orgProfile];
-  if (profiles.includes("tax_exempt")) return "exempt";
-  for (const p of profiles) {
-    const name = TAX_PROFILE_OVERRIDE_NAME[p as TaxProfileType];
-    if (name) return findTaxAt(taxCatalog, name, asOf);
-  }
-  return null;
+  const org = orgProfile ?? DEFAULT_TAX_PROFILE;
+  if (org === "tax_exempt" || docProfile === "tax_exempt") return "exempt";
+  const effective = docProfile ?? org;
+  const name = TAX_PROFILE_OVERRIDE_NAME[effective];
+  return name ? findTaxAt(taxCatalog, name, asOf) : null;
 }
 
 /**
@@ -129,8 +150,8 @@ export function getEffectiveProfileTax(
  */
 export function overrideItemTaxesForProfile(
   items: LineItem[],
-  orgProfile: string,
-  docProfile: string,
+  orgProfile: TaxProfileType | undefined,
+  docProfile: TaxProfileType | null,
   taxCatalog: Tax[],
   asOf: string,
 ): void {
@@ -229,8 +250,8 @@ export function overrideItemTaxesForProfile(
  */
 export function materializeDocumentTax(
   items: LineItem[],
-  orgProfile: TaxProfileType,
-  docProfile: TaxProfileType,
+  orgProfile: TaxProfileType | undefined,
+  docProfile: TaxProfileType | null,
   taxCatalog: Tax[],
   asOf: string,
 ): void {

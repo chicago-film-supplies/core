@@ -96,7 +96,7 @@ Deno.test("getInitialValues — custom types (FirestoreTimestamp) are omitted", 
 Deno.test("getInitialValues — nested objects are recursed", () => {
   const result = getInitialValues(OrderSchema);
   assertEquals(typeof result.organization, "object");
-  const org = result.organization as Record<string, unknown>;
+  const org = result.organization as unknown as Record<string, unknown>;
   assertEquals(org.name, "");
   assertEquals(org.uid, null);
 });
@@ -220,6 +220,9 @@ Deno.test("getInitialValues — fields whose dropped default equalled the type-z
   // Enum: TAX_PROFILES[0] is "tax_applied", the value the dropped default held.
   const org = getInitialValues(OrganizationSchema);
   assertEquals(org.tax_profile, "tax_applied");
+  // An ORDER seeds `null`, not "tax_applied" — the field is nullable and `null`
+  // means "inherit the organization's". That is the safe seed for a new-order
+  // form: a client that never touches the control cannot tax an exempt customer.
   const order = getInitialValues(OrderSchema);
-  assertEquals(order.tax_profile, "tax_applied");
+  assertEquals(order.tax_profile, null);
 });

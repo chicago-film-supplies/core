@@ -66,6 +66,14 @@ const ORG_BILLING_TO_INVOICES: EnforcementRef = {
   gates: true,
 };
 
+const ORG_TAX_PROFILE_TO_ORDERS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
+  clause:
+    "an org tax_profile change RE-PRICING every non-terminal, un-invoiced order — not merely re-stamping the snapshot. Unlike its five siblings this cascade moves money, so the assertion is on `items[].price.taxes` and `totals`, not on a copied string. Paired with a corpus detector, which the name/billing rules do not have: `scripts/audit-order-tax-profile.ts` walks both directions (snapshot vs live org, and stored taxes vs recomputed).",
+  gates: true,
+};
+
 // ── create-organization ──────────────────────────────────────────
 
 export const createOrganizationRules: CollectionRule[] = [
@@ -163,6 +171,28 @@ export const updateOrganizationRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-org:tax-profile-to-orders",
+    source: "organizations",
+    target: "orders",
+    mode: "fan-out",
+    invariant:
+      "An order's stored line taxes are computed under its organization's current tax_profile, unless the order overrides it",
+    enforced_by: [ORG_TAX_PROFILE_TO_ORDERS],
+    transaction: "update-organization",
+    trigger:
+      "tax_profile change — targets non-terminal orders that carry no invoice. An invoiced order is skipped: its money is already committed downstream, and `POST /orders/{uid}/tax-resync` is the deliberate repair path for it.",
+    fields: [
+      { source: ["tax_profile"], target: ["organization", "tax_profile"] },
+      {
+        source: ["tax_profile"],
+        target: ["items", "price", "taxes"],
+        transform:
+          "materializeDocumentTax(items, org.tax_profile, order.tax_profile, taxCatalog, deriveOrderTaxAsOf(destinations)) — a PURE function of (items, orgProfile, docProfile, catalog, asOf), which is what makes it safe under `convergeCascade`'s idempotent-apply contract",
+      },
+      { source: ["tax_profile"], target: ["totals"], transform: "calculateOrderTotals after the reprice" },
+    ],
+  },
+  {
     id: "update-org:contacts-change",
     source: "organizations",
     target: "contacts",
@@ -188,6 +218,7 @@ export const updateOrganizationTransaction: TransactionDefinition = {
     "update-org:billing-to-orders",
     "update-org:name-to-invoices",
     "update-org:billing-to-invoices",
+    "update-org:tax-profile-to-orders",
     "update-org:contacts-change",
   ],
 };

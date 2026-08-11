@@ -17,7 +17,13 @@ export const orders: TypesenseCollectionConfig = {
       { name: "crms_id", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "crms_id_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "status", type: "string", facet: true },
-      { name: "tax_profile", type: "string", facet: true },
+      // OPTIONAL because `Order.tax_profile` is nullable and `null` means
+      // "inherit the organization's" — the translator omits the key rather than
+      // sending a null for a `string` field. So in the index, PRESENT means the
+      // order deliberately overrides and ABSENT means it inherits; the
+      // inherited baseline is `organization.tax_profile` below. Faceting on this
+      // field therefore enumerates overrides, which is the operator's question.
+      { name: "tax_profile", type: "string", facet: true, optional: true },
       { name: "deliveries", type: "bool", facet: true, optional: true },
       { name: "pickups", type: "bool", facet: true, optional: true },
       { name: "subject", type: "string", sort: true, stem: true, optional: true },
@@ -28,6 +34,10 @@ export const orders: TypesenseCollectionConfig = {
       { name: "organization.name", type: "string", sort: true, stem: true, facet: false },
       { name: "organization.crms_id", type: "int64", optional: true },
       { name: "organization.crms_id_str", type: "string", index: true, sort: false, facet: false, optional: true },
+      // Mirrors the invoice + credit-note configs, which have carried it all
+      // along. Optional for the duration of the `organization.tax_profile`
+      // backfill — see `DocumentOrganizationSnapshot`.
+      { name: "organization.tax_profile", type: "string", facet: true, optional: true },
       { name: "organization.xero_id", type: "string", optional: true },
       ...typesenseAddressFields("organization.billing_address"),
       { name: "dates", type: "object" },

@@ -1519,25 +1519,3 @@ export function syncScalarWithOverride<T>(
   return prevOrderValue === currentInvoiceValue ? newOrderValue : currentInvoiceValue;
 }
 
-/**
- * Object co-write with override detection. Like `syncScalarWithOverride` but
- * compares two objects for deep equality via JSON.stringify. If `keys` is
- * provided, only those keys are compared (useful when one side carries
- * fields the other doesn't — e.g. invoice.organization.tax_profile has no
- * equivalent on the order snapshot).
- */
-export function syncObjectWithOverride<T extends Record<string, unknown>>(
-  prevOrderValue: T,
-  newOrderValue: T,
-  currentInvoiceValue: T,
-  keys?: (keyof T)[],
-): T {
-  const pick = (v: T) => {
-    if (!keys) return v;
-    const out: Record<string, unknown> = {};
-    for (const k of keys) out[k as string] = v[k];
-    return out;
-  };
-  const matches = JSON.stringify(pick(prevOrderValue)) === JSON.stringify(pick(currentInvoiceValue));
-  return matches ? newOrderValue : currentInvoiceValue;
-}

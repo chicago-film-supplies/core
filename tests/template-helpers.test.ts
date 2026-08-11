@@ -23,6 +23,7 @@ import * as moneyUtils from "../src/utils/money.ts";
 import * as movementUtils from "../src/utils/movements.ts";
 import * as orderLineUtils from "../src/utils/order-lines.ts";
 import * as orderUtils from "../src/utils/orders.ts";
+import * as organizationUtils from "../src/utils/organizations.ts";
 import * as productUtils from "../src/utils/products.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
 import * as templateUtils from "../src/utils/templates.ts";
@@ -55,6 +56,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   movements: movementUtils,
   "order-lines": orderLineUtils,
   orders: orderUtils,
+  organizations: organizationUtils,
   products: productUtils,
   taxes: taxUtils,
   templates: templateUtils,

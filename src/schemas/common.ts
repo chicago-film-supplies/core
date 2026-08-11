@@ -3,9 +3,13 @@
  */
 import { z } from "zod";
 import { AnyUid, FirestoreId } from "./_uid.ts";
+import { usState } from "./_usState.ts";
 
 // Re-export the id validators so consumers can import them from the package root.
 export { AnyUid, BookingId, CardId, EventCardId, FirestoreId, ItemUid, ListId, QuoteId, ThreadId } from "./_uid.ts";
+
+// Re-export the region canonicalizer so consumers reach one implementation.
+export { isIllinoisPostcode, toRegionCode, toUsStateCode, usState } from "./_usState.ts";
 
 /**
  * Structural interfaces for Firestore Timestamp and FieldValue.
@@ -1213,7 +1217,11 @@ export const Address: z.ZodType<AddressType | null> = z.strictObject({
   full: z.string().default("").meta({ column: true, label: "Address" }),
   name: z.string().max(100).default(""),
   postcode: z.string().default(""),
-  region: z.string().default("").meta({ pii: "none", column: true, label: "State" }),
+  // Canonicalized to the two-letter USPS code on parse — see `_usState.ts` for
+  // why this normalizes rather than validates, and for the caveat that a
+  // document-schema transform does NOT rewrite what `validateBeforeWrite`
+  // stores.
+  region: usState().default("").meta({ pii: "none", column: true, label: "State" }),
   street: z.string().default(""),
   street2: z.string().default("").optional(),
   mapbox_id: z.string().default("").optional(),
@@ -1222,3 +1230,83 @@ export const Address: z.ZodType<AddressType | null> = z.strictObject({
 }).nullable().meta({
   pii: "mask",
 });
+
+// ── Document organization snapshot ──────────────────────────────────
+
+/** The customer-organization snapshot embedded on an order/invoice/credit note. */
+export interface DocumentOrganizationSnapshotType {
+  uid: string | null;
+  name: string;
+  crms_id?: number | null;
+  tax_profile?: TaxProfileType;
+  xero_id: string | null;
+  billing_address?: AddressType | null;
+}
+
+/**
+ * The customer-organization snapshot embedded on an order, an invoice and a
+ * credit note.
+ *
+ * **One schema, because four hand-maintained near-identical literals is what
+ * caused api-cloudrun#486.** The order's copy was one field short of the
+ * invoice's — it carried no `tax_profile` — so nothing on the order write path
+ * could see that a customer was tax-exempt, and `repriceOrderItemsForProfile`
+ * passed a hardcoded `"tax_applied"` into `materializeDocumentTax` because
+ * there was nothing else to pass. A tax-exempt customer's *invoices* were
+ * untaxed and their *orders* were taxed, and only CRMS stamping
+ * `order.tax_profile` from the opportunity header hid it.
+ *
+ * ⚠️ **Sharing the schema pins WHERE the snapshot is built, not WHAT it holds**
+ * — the Ratchet-G lesson in the workspace `CLAUDE.md`, where a single allowed
+ * renderer of the money `_str` mirror was singular and wrong for five months.
+ * The value assertion that sits beside this is api-cloudrun's writer-parity
+ * test: one order created natively and one created through the CRMS opportunity
+ * path, same commercial facts, must produce byte-identical `organization`
+ * blocks.
+ *
+ * The two fields where the three schemas disagreed take the **union**, not
+ * either side: merging to one alone retroactively makes existing documents of
+ * the other unwritable.
+ *
+ * - `billing_address` — the order had it `.optional()`, the invoice and credit
+ *   note required (and prod invoices store an explicit `null`). {@link Address}
+ *   is already `.nullable()`, so `.optional()` is the union of the three.
+ * - `name` — the order bounded it `[1, 100]`, the other two did not. Bounded
+ *   wins here and is *not* a tightening in practice: every snapshot is copied
+ *   from `Organization.name`, which carries the same bounds, and prod holds no
+ *   invoice or credit note with an empty one (measured 2026-08-11).
+ */
+export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapshotType> = z
+  .strictObject({
+    uid: FirestoreId.nullable(),
+    // No `label` — the heading is the "Organization" carried by the key above.
+    name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
+    crms_id: z.int().nullable().optional(),
+    // ⚠️ OPTIONAL FOR ONE RELEASE CYCLE, THEN REQUIRED — expand/migrate/contract.
+    //
+    // It cannot land required in the same publish that starts writing it. Every
+    // write path validates the FULL document (`validatedSet` inside
+    // `runInstrumentedTransaction`) and every one of these snapshots is a
+    // `z.strictObject`, so the two schema versions have disjoint accepted sets:
+    // the old one REJECTS an order carrying `tax_profile`, the new one REJECTS
+    // the 981 prod orders that lack it. There is no deploy order that avoids a
+    // window in which ordinary order writes 500 — including the CRMS
+    // opportunity webhook, whose failures are silent drops.
+    //
+    // So: optional here, backfill both environments, then a follow-up publish
+    // drops the `.optional()`. Until it does, readers must handle `undefined`
+    // rather than assume — `DEFAULT_TAX_PROFILE` is the one named fallback, so
+    // it greps, and `audit-order-tax-profile.ts` asserts the count reaches 0.
+    tax_profile: TaxProfileEnum.optional().meta({ column: true, label: "Tax Profile" }),
+    xero_id: z.uuid().nullable(),
+    billing_address: Address.optional(),
+  })
+  .meta({ label: "Organization" });
+
+/**
+ * The one fallback for a document snapshot that predates
+ * {@link DocumentOrganizationSnapshot}'s `tax_profile`. Named rather than
+ * inlined so the sites depending on the backfill are a single grep, and so the
+ * follow-up that makes the field required has a work list.
+ */
+export const DEFAULT_TAX_PROFILE: TaxProfileType = "tax_applied";

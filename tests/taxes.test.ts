@@ -114,12 +114,52 @@ Deno.test("getEffectiveProfileTax: doc-level tax_frankfort resolves the Frankfor
 });
 
 Deno.test("getEffectiveProfileTax: org-level tax_rantoul resolves the Rantoul tax", () => {
-  const r = getEffectiveProfileTax("tax_rantoul", "tax_applied", CATALOG, AS_OF);
+  // The doc INHERITS — expressed as `null`. Passing "tax_applied" here is now a
+  // different question, answered by the test below.
+  const r = getEffectiveProfileTax("tax_rantoul", null, CATALOG, AS_OF);
   assertEquals(typeof r === "object" && r?.uid, "rantoul-tax");
 });
 
 Deno.test("getEffectiveProfileTax: tax_applied → null (no override)", () => {
   assertEquals(getEffectiveProfileTax("tax_applied", "tax_applied", CATALOG, AS_OF), null);
+});
+
+// ── The two questions `null` split apart (api-cloudrun#486) ──────
+//
+// Before, "inherit" and "plain Chicago" were the same stored value, and the
+// resolver SCANNED `[doc, org]` for the first location profile. So a doc-level
+// "tax_applied" could not mean anything — it matched no name and fell through
+// to the org's. Live in prod: invoice #2348, issued and in Xero, carries
+// `tax_profile: "tax_applied"` and is taxed Frankfort 8%.
+
+Deno.test("getEffectiveProfileTax: a doc-level tax_applied BEATS an org location profile", () => {
+  assertEquals(getEffectiveProfileTax("tax_frankfort", "tax_applied", CATALOG, AS_OF), null);
+});
+
+Deno.test("getEffectiveProfileTax: null inherits the org's location profile", () => {
+  const r = getEffectiveProfileTax("tax_frankfort", null, CATALOG, AS_OF);
+  assertEquals(typeof r === "object" && r?.uid, "frankfort-tax");
+});
+
+Deno.test("getEffectiveProfileTax: null under a plain org is no override", () => {
+  assertEquals(getEffectiveProfileTax("tax_applied", null, CATALOG, AS_OF), null);
+});
+
+Deno.test("getEffectiveProfileTax: exemption is sticky from EITHER side", () => {
+  assertEquals(getEffectiveProfileTax("tax_exempt", null, CATALOG, AS_OF), "exempt");
+  assertEquals(getEffectiveProfileTax("tax_exempt", "tax_applied", CATALOG, AS_OF), "exempt");
+  assertEquals(getEffectiveProfileTax("tax_exempt", "tax_frankfort", CATALOG, AS_OF), "exempt");
+  assertEquals(getEffectiveProfileTax("tax_applied", "tax_exempt", CATALOG, AS_OF), "exempt");
+});
+
+Deno.test("getEffectiveProfileTax: an ABSENT org profile falls back to the default", () => {
+  // The backfill window — `DocumentOrganizationSnapshot.tax_profile` is optional
+  // until both environments carry it. Absent must behave as the pre-#486 default
+  // (no override), never as exempt and never as a throw.
+  assertEquals(getEffectiveProfileTax(undefined, null, CATALOG, AS_OF), null);
+  const r = getEffectiveProfileTax(undefined, "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(typeof r === "object" && r?.uid, "frankfort-tax");
+  assertEquals(getEffectiveProfileTax(undefined, "tax_exempt", CATALOG, AS_OF), "exempt");
 });
 
 // ── overrideItemTaxesForProfile ──────────────────────────────────
@@ -298,9 +338,27 @@ Deno.test("materialize: the DOC profile still beats a plain org profile", () => 
 
 Deno.test("materialize: the org profile applies when the doc has none", () => {
   const items = [makeItem()];
-  materializeDocumentTax(items, "tax_rantoul", "tax_applied", CATALOG, AS_OF);
+  materializeDocumentTax(items, "tax_rantoul", null, CATALOG, AS_OF);
   assertEquals(px(items[0]).taxes[0].uid, "rantoul-tax");
   assertEquals(px(items[0]).total_cents, 10900);
+});
+
+Deno.test("materialize: a doc-level tax_applied keeps Chicago under a Frankfort org", () => {
+  // The Kenwood-films-in-Chicago case, and the repair #2348 needed. Under the
+  // scan this priced Frankfort 8%; the line's own Chicago Rental 15% survives.
+  const items = [makeItem()];
+  materializeDocumentTax(items, "tax_frankfort", "tax_applied", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes[0].uid, "chi-rental-tax");
+  assertEquals(px(items[0]).total_cents, 11500);
+});
+
+Deno.test("materialize: an exempt ORG zeroes the tax on a doc that says nothing", () => {
+  // api-cloudrun#486 in one line — the order path passed a hardcoded
+  // "tax_applied" in the org position, so this line stayed taxed.
+  const items = [makeItem()];
+  materializeDocumentTax(items, "tax_exempt", null, CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes, []);
+  assertEquals(px(items[0]).total_cents, 10000);
 });
 
 Deno.test("materialize: REPRICES, where the bare override only rewrites the tax", () => {

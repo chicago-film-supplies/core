@@ -36,6 +36,11 @@
  * `./utils/*` entrypoint so a new collection needs no generator change.
  */
 export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
+  // Write-path only. It assembles the embedded `organization` block from a live
+  // `Organization` DOCUMENT — a shape no render context ever holds (a template
+  // sees `it.doc.organization`, which is this function's OUTPUT). Emitting it
+  // would advertise a helper whose one argument is unreachable from a template.
+  organizations: ["buildOrganizationSnapshot"],
   // The whole availability engine. It answers "how many units are free over this
   // window?" from a StockSummary — and a template's render context never holds
   // one (templates render orders, invoices and quotes). There is no argument a
@@ -137,7 +142,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "syncOrderItems", // whole-scope item sync
     "syncOrderDestinationsSelective", // selective destination sync
     "syncScalarWithOverride", // co-write override detection
-    "syncObjectWithOverride", // co-write override detection
     "carryForwardOverrides", // invoice-only override carryforward
     "buildOrderScopedItems", // order → invoice projection (write-path)
     "removeOrderScopedItems", // items mutation (write-path)

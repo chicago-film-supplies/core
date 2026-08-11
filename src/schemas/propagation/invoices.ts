@@ -104,7 +104,7 @@ const SELECTIVE_SYNC_SEMANTICS: EnforcementRef = {
   kind: "test",
   ref: "core/tests/invoices.test.ts:461",
   clause:
-    "the override policy, per helper — `syncOrderToInvoiceSelective` and `syncOrderItems` (scoped replace + `carryForwardOverrides` keeping `coa_revenue`/`xero_id`), `syncOrderDestinationsSelective` (adds tagged with `uid_order`, keeps overridden pairs, drops non-overridden removals, leaves other orders' pairs untouched), and `syncScalarWithOverride`/`syncObjectWithOverride` both directions. Does NOT cover the FREEZE predicate that decides which invoices are eligible.",
+    "the override policy, per helper — `syncOrderToInvoiceSelective` and `syncOrderItems` (scoped replace + `carryForwardOverrides` keeping `coa_revenue`/`xero_id`), `syncOrderDestinationsSelective` (adds tagged with `uid_order`, keeps overridden pairs, drops non-overridden removals, leaves other orders' pairs untouched), and `syncScalarWithOverride` both directions. Does NOT cover the FREEZE predicate that decides which invoices are eligible.",
   gates: true,
 };
 

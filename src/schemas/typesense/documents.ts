@@ -322,7 +322,8 @@ export interface OrderDocument {
   crms_id?: number;
   crms_id_str?: string;
   status: string;
-  tax_profile: string;
+  /** Absent = inherits `organization.tax_profile`; present = a deliberate override. */
+  tax_profile?: string;
   deliveries?: boolean;
   pickups?: boolean;
   subject?: string;
@@ -338,6 +339,7 @@ export interface OrderDocument {
     name: string;
     crms_id?: number;
     crms_id_str?: string;
+    tax_profile?: string;
     xero_id?: string;
     billing_address?: TypesenseAddressFields;
   };

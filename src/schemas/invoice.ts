@@ -9,8 +9,8 @@ import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
   ActorRef,
   type ActorRefType,
-  Address,
-  type AddressType,
+  DocumentOrganizationSnapshot,
+  type DocumentOrganizationSnapshotType,
   checkItemPriceFormula,
   checkPriceBaseUnit,
   COARevenueEnum,
@@ -511,14 +511,7 @@ export interface Invoice {
   reference?: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
-  organization: {
-    uid: string | null;
-    name: string;
-    crms_id?: number | null;
-    tax_profile: TaxProfileType;
-    xero_id: string | null;
-    billing_address: AddressType | null;
-  };
+  organization: DocumentOrganizationSnapshotType;
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
@@ -582,14 +575,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   reference: z.string().nullable().optional().meta({ column: true, label: "Reference", linkTo: "invoiceDetail" }),
   external_notes: z.string().meta({ pii: "mask", column: true, label: "External Notes" }).nullable().optional(),
   internal_notes: z.string().meta({ pii: "mask", column: true, label: "Internal Notes" }).nullable().optional(),
-  organization: z.strictObject({
-    uid: FirestoreId.nullable(),
-    name: z.string().meta({ pii: "mask", column: true }),
-    crms_id: z.int().nullable().optional(),
-    tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
-    xero_id: z.uuid().nullable(),
-    billing_address: Address,
-  }).meta({ label: "Organization" }),
+  organization: DocumentOrganizationSnapshot,
   destinations: z.array(InvoiceDocDestination).default([]),
   items: z.array(InvoiceDocItem).default([]).meta({ label: "Item" }),
   totals: InvoiceDocTotalsSchema,

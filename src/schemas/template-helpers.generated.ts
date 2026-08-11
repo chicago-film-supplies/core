@@ -125,13 +125,16 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "orderHasRentals", expr: "it.orders.orderHasRentals(items)", desc: "Check whether any line item is a rental.", returns: "boolean" },
     { name: "orderHasTax", expr: "it.orders.orderHasTax(items)", desc: "Check whether any pre-tax line item has taxes applied.", returns: "boolean" },
   ],
+  "organizations": [
+
+  ],
   "products": [
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
   "taxes": [
     { name: "findTaxAt", expr: "it.taxes.findTaxAt(taxes, name, asOf)", desc: "Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched by exact `name`. Returns null when nothing matches (e.g. `asOf` before any historical doc). Throws on catalog drift (two same-name docs bracket the same instant). A missing `valid_from` is treated as an open start; missing/null `valid_to` as an open end.", returns: "Tax | null" },
-    { name: "getEffectiveProfileTax", expr: "it.taxes.getEffectiveProfileTax(orgProfile, docProfile, taxCatalog, asOf)", desc: "Resolve the effective doc-level override from the org + doc `tax_profile` pair, as-of `asOf`. Precedence: `tax_exempt` wins (a tax-exempt customer pays no tax regardless of location) → else the doc-level location profile (doc over org) resolved to its Tax → else `null` (no override, `tax_applied`).", returns: "Tax | \"exempt\" | null" },
+    { name: "getEffectiveProfileTax", expr: "it.taxes.getEffectiveProfileTax(orgProfile, docProfile, taxCatalog, asOf)", desc: "Resolve the effective doc-level override from the org + doc `tax_profile` pair, as-of `asOf`.", returns: "Tax | \"exempt\" | null" },
     { name: "isTaxableCoa", expr: "it.taxes.isTaxableCoa(coaRevenue)", desc: "Is a line with this revenue COA subject to tax?", returns: "boolean" },
     { name: "overrideItemTaxesForProfile", expr: "it.taxes.overrideItemTaxesForProfile(items, orgProfile, docProfile, taxCatalog, asOf)", desc: "Materialize a doc-level `tax_profile` override onto each priceable item's `price.taxes` (single mode — mutates in place): - `tax_exempt` → `taxes = []`, `total_cents = subtotal_discounted_cents`. - `tax_rantoul` / `tax_frankfort` → `taxes = [<resolved tax>]` with amount computed from the item's **existing** `subtotal_discounted_cents` + `total_cents` refreshed. (Orders re-run `calculateItemPrice` after, which recomputes both from the rewritten uid; the CRMS invoice webhook keeps the amounts computed here on its `charge_total`-authoritative subtotal.) - `tax_applied` / no active override doc → item left untouched.", returns: "void" },
   ],
