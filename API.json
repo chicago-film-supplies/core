@@ -1683,7 +1683,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPrice",
-          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  discount_percent?: number;\n}",
+          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
@@ -6200,7 +6200,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocItemPrice",
-          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n  discount_percent?: number;\n}",
+          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {

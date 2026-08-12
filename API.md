@@ -3418,7 +3418,6 @@ interface InvoiceDocItemPrice {
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   total_cents: number;
-  discount_percent?: number;
 }
 ```
 
@@ -11850,7 +11849,6 @@ interface InvoiceDocItemPrice {
   taxes: PriceModifierType[];
   taxes_base?: TaxRefType[];
   total_cents: number;
-  discount_percent?: number;
 }
 ```
 

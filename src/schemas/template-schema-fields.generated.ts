@@ -310,7 +310,6 @@ export const templateSchemaFields: Partial<
     { path: "items[] (type: rental, replacement, ...).price.taxes_base[].rate", type: "number" },
     { path: "items[] (type: rental, replacement, ...).price.taxes_base[].type", type: "percent | flat" },
     { path: "items[] (type: rental, replacement, ...).price.total_cents", type: "number" },
-    { path: "items[] (type: rental, replacement, ...).price.discount_percent", type: "number?" },
     { path: "items[] (type: rental, replacement, ...).path", type: "union[]" },
     { path: "items[] (type: rental, replacement, ...).coa_revenue", type: "union? | null" },
     { path: "items[] (type: rental, replacement, ...).tracking_category", type: "string? | null" },

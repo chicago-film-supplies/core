@@ -135,10 +135,6 @@ Deno.test("InvoiceSchema accepts legacy CRMS fields", () => {
       ...validInvoice.items[0],
       crms_opportunity_id: 100,
       crms_id: 42,
-      price: {
-        ...validInvoice.items[0].price,
-        discount_percent: 0,
-      },
     }],
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);

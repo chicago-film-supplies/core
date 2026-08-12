@@ -269,12 +269,6 @@ export interface InvoiceDocItemPrice {
    */
   taxes_base?: TaxRefType[];
   total_cents: number;
-  /**
-   * @deprecated Legacy CRMS field — not set on new invoices.
-   *
-   * A PERCENT, not money — no `_cents` suffix, and it must not acquire one.
-   */
-  discount_percent?: number;
 }
 
 const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject({
@@ -291,7 +285,6 @@ const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject
   // to name them, or the pre-override snapshot collides with the live `taxes`.
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax" }),
   total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
-  discount_percent: z.number().optional(),
 }).superRefine(checkPriceBaseUnit);
 
 // ── Line items ───────────────────────────────────────────────────

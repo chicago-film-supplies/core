@@ -297,8 +297,10 @@ export function materializeDocumentTax(
     //
     // Spreading also makes this function shape-agnostic, which is what lets one
     // implementation serve both documents: an order price carries
-    // `replacement_cents` and an invoice price carries `discount_percent`, both
-    // strict-schema keys the other rejects, and neither is named here.
+    // `replacement_cents`, a strict-schema key the invoice rejects, and it is
+    // not named here. Since api-cloudrun#480 dropped `discount_percent` the
+    // asymmetry runs one way only — but the spread is what keeps that a fact
+    // about today's schemas rather than a precondition of this function.
     item.price = {
       ...item.price,
       subtotal_cents: computed.subtotal_cents,

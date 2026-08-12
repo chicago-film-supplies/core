@@ -390,10 +390,17 @@ Deno.test("materialize: preserves every price key it does not compute", () => {
   // added back for it specifically — and `base_percent` is still missing from
   // that list. Here the assertion is about keys the function has never heard of,
   // which is what makes one implementation safe for both document shapes.
+  //
+  // `legacy_unknown_key` is deliberately synthetic: since api-cloudrun#480 drop-
+  // ped `discount_percent`, `InvoiceDocItemPrice` declares no invoice-only key
+  // at all, so there is no real one to stand in for it. A key no schema declares
+  // is the stronger form anyway — it cannot quietly become a key this function
+  // learns about. Nothing parses here (`makeItem`'s overrides are
+  // `Record<string, unknown>` and `pxFull` casts), so strictness never applies.
   const items = [makeItem({}, {
     taxes_base: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
     replacement_cents: 50000, // order-only key
-    discount_percent: 12, // invoice-only key
+    legacy_unknown_key: 12, // a key NO schema declares
   })];
   materializeDocumentTax(items, "tax_applied", "tax_exempt", CATALOG, AS_OF);
 
@@ -404,7 +411,7 @@ Deno.test("materialize: preserves every price key it does not compute", () => {
     "the intrinsic snapshot survives — it is what a profile revert reads",
   );
   assertEquals(p.replacement_cents, 50000, "order-only key survives");
-  assertEquals(p.discount_percent, 12, "invoice-only key survives");
+  assertEquals(p.legacy_unknown_key, 12, "an undeclared key survives");
   assertEquals(p.taxes, [], "…while the override still did its job");
 });
 

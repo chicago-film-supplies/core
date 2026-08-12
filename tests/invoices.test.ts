@@ -1930,15 +1930,17 @@ Deno.test("fail-closed companion: the old JSON-blob price comparison DISAGREES",
   );
 });
 
-Deno.test("invoiceItemsMatch: a stored discount_percent still reports a mismatch", () => {
-  // The dominant cause on prod — 8,015 of 8,978 paired lines. It is NOT excluded
-  // here on purpose: the field is removed from the schema and the corpus
-  // (api-cloudrun#480 phases 3–4) rather than policed by an exclusion list, so
-  // until the repair runs these lines keep reporting `out_of_sync` — the status
-  // quo, not a regression.
+Deno.test("invoiceItemsMatch: a stored unknown price key still reports a mismatch", () => {
+  // `discount_percent` was once the dominant cause on prod — 8,015 of 8,978
+  // paired lines — and was never excluded here: the field was removed from the
+  // schema and the corpus (api-cloudrun#480) rather than policed by an exclusion
+  // list. The key is gone, so this now guards the general rule that outlived it:
+  // a stored key the projection does not emit is a mismatch, whatever it is.
+  // Keep it stated with a key no schema declares — pointing it at a live field
+  // would make it a duplicate of some other test the day that field changes.
   const expected = projectedLineA();
   const stored = structuredClone(expected) as unknown as { price: Record<string, unknown> };
-  stored.price.discount_percent = 0;
+  stored.price.legacy_unknown_key = 0;
   assertEquals(invoiceItemsMatch(expected, stored as unknown as InvoiceItem), false);
 });
 

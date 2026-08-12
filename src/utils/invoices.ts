@@ -583,9 +583,11 @@ function stableStringify(value: unknown): string {
  * ⚠️ **This is the half that made the sync badge lie for the whole corpus.**
  * `price` used to be compared as one `JSON.stringify` blob, so ANY key
  * difference inside it failed the whole line — and every CRMS-authored line
- * carries `price.discount_percent`, which no projection emits. Measured
+ * carried `price.discount_percent`, which no projection emitted. Measured
  * 2026-08-10 over 8,978 unambiguously paired prod lines: 8,015 failed on that
  * key alone, i.e. the badge was reporting a field's presence as a price change.
+ * (That key is gone from the schema and the corpus as of api-cloudrun#480; the
+ * structural comparison is what makes the NEXT such key a non-event.)
  * The `base_percent` encoding split — the projection emits an explicit `null`,
  * a stored CRMS line omits the key, and `InvoiceDocItemPriceSchema` blesses
  * both (`.nullable().optional()`) — is the same class.
@@ -598,10 +600,11 @@ function stableStringify(value: unknown): string {
  * erase one of its values. A key present on one side and absent on the other
  * with a NON-null value is still a mismatch, which is the whole point.
  *
- * `discount_percent` is deliberately NOT normalized away here — it is removed
- * from the schema and from the corpus instead (api-cloudrun#480 phases 3–4),
- * because an exclusion list polices a defect class that can be made
- * unrepresentable.
+ * `discount_percent` was deliberately never normalized away here — it was
+ * removed from the schema and from the corpus instead (api-cloudrun#480, landed
+ * once both envs measured zero residue), because an exclusion list polices a
+ * defect class that can be made unrepresentable. Keep it that way: the fix for
+ * a future legacy key is a contraction, not an entry in a skip list.
  */
 function invoicePricesMatch(expected: unknown, current: unknown): boolean {
   const normalize = (p: unknown): Record<string, unknown> | null => {
