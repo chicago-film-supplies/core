@@ -9,6 +9,7 @@
  * @module
  */
 
+import { compareAsc, parseISO } from "date-fns";
 import { DEFAULT_TAX_PROFILE, type TaxProfileType, toUsStateCode } from "../schemas/mod.ts";
 import {
   calculateItemPrice,
@@ -382,6 +383,20 @@ export function isEntirelyOutOfIllinois(
  * Chicago offset form here would make the server and the client resolve
  * differently for an instant near midnight, which is the failure this note
  * exists to prevent.
+ *
+ * ⚠️ **"Earliest" is by INSTANT, and a `.sort()` over the strings is not that.**
+ * The form this replaced sorted the ISO text. For CANONICAL Chicago values that
+ * happens to be correct — canonicalization makes the wall-clock text monotonic
+ * with the instant, including across a DST switch, because everything before it
+ * reads `≤ 01:59:59.999-06:00` and everything after reads `≥ 03:00:00.000-05:00`
+ * (measured; the earlier draft of this note claimed a DST inversion and was
+ * wrong). It breaks on a MIXED set: `2026-06-01T08:00:00.000-05:00` sorts before
+ * `2026-06-01T12:00:00.000Z` while being an hour LATER.
+ *
+ * That is reachable, and specifically on the client: the manager calls this
+ * against an in-memory, mid-edit order, where a date picker can supply a raw
+ * `Z` value that has not been through `toChicagoInstant` yet. Stored documents
+ * are all canonical, so no persisted order was ever affected.
  */
 export function deriveOrderTaxAsOf(
   destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined,
@@ -389,9 +404,15 @@ export function deriveOrderTaxAsOf(
 ): string {
   const starts = (destinations ?? [])
     .map((d) => d?.dates?.delivery_start)
-    .filter((s): s is string => typeof s === "string")
-    .sort();
-  return starts[0] ?? now;
+    .filter((s): s is string => typeof s === "string");
+  if (starts.length === 0) return now;
+  // Earliest by INSTANT — `compareAsc` over parsed dates, not `.sort()` over the
+  // strings. See the ⚠️ in the docblock for why the text order is not the
+  // instant order. The original string is returned rather than a re-serialized
+  // one, so the value handed to `findTaxAt` is still what the document says.
+  return starts.reduce((earliest, s) =>
+    compareAsc(parseISO(s), parseISO(earliest)) < 0 ? s : earliest
+  );
 }
 
 /**

@@ -583,6 +583,38 @@ Deno.test("deriveOrderTaxAsOf: the EARLIEST delivery start wins", () => {
   );
 });
 
+Deno.test("deriveOrderTaxAsOf: earliest is by INSTANT, not by string order", () => {
+  // ⚠️ The form this replaced sorted the ISO TEXT. For canonical Chicago values
+  // that is accidentally correct — canonicalization makes the wall clock
+  // monotonic with the instant, DST switch included — so the arm above passes
+  // either way and proves nothing about the ordering rule.
+  //
+  // A MIXED set is what separates them, and the manager can hold one: it calls
+  // this against an in-memory order where a date picker may supply a raw `Z`
+  // value not yet through `toChicagoInstant`. Here `08:00-05:00` is 13:00Z and
+  // sorts FIRST as text while being an hour later than `12:00Z`.
+  assertEquals(
+    deriveOrderTaxAsOf(
+      [orderDest("IL", "2026-06-01T08:00:00.000-05:00"), orderDest("IL", "2026-06-01T12:00:00.000Z")],
+      NOW,
+    ),
+    "2026-06-01T12:00:00.000Z",
+  );
+});
+
+Deno.test("deriveOrderTaxAsOf: canonical Chicago values across a DST switch are unaffected", () => {
+  // The companion, and the reason the fix is a correctness tidy rather than an
+  // incident: every STORED business datetime is canonical, so no persisted order
+  // could have been ordered wrongly. 01:30 CST is 07:30Z; 03:00 CDT is 08:00Z.
+  assertEquals(
+    deriveOrderTaxAsOf(
+      [orderDest("IL", "2026-03-08T03:00:00.000-05:00"), orderDest("IL", "2026-03-08T01:30:00.000-06:00")],
+      NOW,
+    ),
+    "2026-03-08T01:30:00.000-06:00",
+  );
+});
+
 Deno.test("deriveOrderTaxAsOf: falls back to the INJECTED now, never an ambient clock", () => {
   // The injection is what lets this live in core at all: api-cloudrun passes
   // `Timestamp.now().toDate().toISOString()` and the manager passes

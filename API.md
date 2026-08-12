@@ -22443,6 +22443,20 @@ Chicago offset form here would make the server and the client resolve
 differently for an instant near midnight, which is the failure this note
 exists to prevent.
 
+⚠️ **"Earliest" is by INSTANT, and a `.sort()` over the strings is not that.**
+The form this replaced sorted the ISO text. For CANONICAL Chicago values that
+happens to be correct — canonicalization makes the wall-clock text monotonic
+with the instant, including across a DST switch, because everything before it
+reads `≤ 01:59:59.999-06:00` and everything after reads `≥ 03:00:00.000-05:00`
+(measured; the earlier draft of this note claimed a DST inversion and was
+wrong). It breaks on a MIXED set: `2026-06-01T08:00:00.000-05:00` sorts before
+`2026-06-01T12:00:00.000Z` while being an hour LATER.
+
+That is reachable, and specifically on the client: the manager calls this
+against an in-memory, mid-edit order, where a date picker can supply a raw
+`Z` value that has not been through `toChicagoInstant` yet. Stored documents
+are all canonical, so no persisted order was ever affected.
+
 ### `findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null`
 
 Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched
