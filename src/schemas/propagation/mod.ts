@@ -103,6 +103,13 @@ export {
   updateOrderInvoiceRules,
 } from "./invoices.ts";
 
+// ── CRMS ingest transactions (no rules of their own — they reuse) ────
+
+export {
+  crmsInvoiceUpsertTransaction,
+  crmsOpportunityOrderTransaction,
+} from "./crms-ingest.ts";
+
 // ── Settlement rules ────────────────────────────────────────────────
 
 export {
@@ -286,6 +293,10 @@ import {
   voidInvoiceRules,
   voidInvoiceTransaction,
 } from "./settlements.ts";
+import {
+  crmsInvoiceUpsertTransaction,
+  crmsOpportunityOrderTransaction,
+} from "./crms-ingest.ts";
 import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
 import {
   createCreditNoteRules,
@@ -364,6 +375,8 @@ export const transactions: TransactionDefinition[] = [
   voidInvoiceTransaction,
   voidInvoiceFromCrmsTransaction,
   voidInvoiceFromXeroTransaction,
+  crmsInvoiceUpsertTransaction,
+  crmsOpportunityOrderTransaction,
   createCreditNoteTransaction,
   allocateCreditNoteTransaction,
   voidCreditNoteTransaction,
