@@ -47,6 +47,22 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // template could ever pass these, so surfacing them in the helper panel would
   // be pure dead surface. `toChicagoEndOfDay` stays visible under `dates`,
   // though: that one is a genuine date helper.
+  // Stock primitives — the interval rules and the two consumption definitions.
+  // Denylisted whole, for the same reason as `availability` and `movements`:
+  // every one takes a booking breakdown, an OOS record or a Firestore timestamp
+  // pair off a stock document, and a render context holds none of those —
+  // templates render orders, invoices and quotes. Pure dead surface in the
+  // helper panel, and worse than dead for the two consumption functions, which
+  // are only safe to use when you know which denominator you are subtracting
+  // from (see `utils/stock.ts`'s header).
+  stock: [
+    "heldByBooking",
+    "unitsClaimedOnShelves",
+    "bookingHoldsStock",
+    "oosConsumes",
+    "boundMs",
+    "intervalsOverlap",
+  ],
   availability: [
     "computeAvailability", // needs a StockSummary — never in a render context
     "computePublicAvailability", // needs a PublicStockSummary — likewise

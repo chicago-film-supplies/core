@@ -136,6 +136,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
+  "stock": [
+
+  ],
   "taxes": [
     { name: "deriveOrderTaxAsOf", expr: "it.taxes.deriveOrderTaxAsOf(destinations, now)", desc: "As-of instant for resolving an order's taxes: the earliest destination delivery start, falling back to `now`.", returns: "string" },
     { name: "findTaxAt", expr: "it.taxes.findTaxAt(taxes, name, asOf)", desc: "Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched by exact `name`. Returns null when nothing matches (e.g. `asOf` before any historical doc). Throws on catalog drift (two same-name docs bracket the same instant). A missing `valid_from` is treated as an open start; missing/null `valid_to` as an open end.", returns: "Tax | null" },

@@ -10630,7 +10630,73 @@
           "kind": "function",
           "name": "buildReservedByLocation",
           "signature": "buildReservedByLocation(bookings: ReadonlyArray<typeLiteral>): ReservedByLocation",
-          "doc": "Sum the physical units held by a set of bookings, per location. Only bookings\nthat currently hold stock (`reserved + prepped + out > 0`, the same definition\nas `quantity_booked`) contribute — a returned/quoted booking reserves nothing\neven if a stale `stores` array lingers.",
+          "doc": "Sum the shelf units claimed by a set of bookings, per location. Only bookings\nthat currently hold stock contribute — a returned/quoted booking reserves\nnothing even if a stale `stores` array lingers.\n\n⚠️ **This is the SHELF-side question, not `quantity_booked`.** This docstring\nused to claim the gate was *\"the same definition as `quantity_booked`\"*. It is\nnot, and that sentence is why the two looked safe to merge: this result is\nsubtracted from `store_breakdown`, which a check-out DOES reduce, while\n`quantity_booked` is subtracted from `quantity_held`, which a rental check-out\ndoes NOT. Unifying them would make the allocator under-net for rentals and\npoint two pickers at one unit. See `utils/stock.ts`'s header for the table.\n\nThe gate is {@link bookingHoldsStock}; the *amount* added is the booking's own\n`stores[].locations[].quantity`, not the gate's value.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/stock",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "StockConsumingBooking",
+          "declaration": "interface StockConsumingBooking {\n  breakdown: BookingBreakdown;\n  type: ComponentTypeType;\n}",
+          "doc": "Just enough of a booking to answer either consumption question."
+        },
+        {
+          "kind": "variable",
+          "name": "TERMINAL_OOS_STATUSES",
+          "declaration": "const TERMINAL_OOS_STATUSES: ReadonlySet<string>;",
+          "doc": "OOS statuses that no longer hold units out of service."
+        },
+        {
+          "kind": "function",
+          "name": "bookingHoldsStock",
+          "signature": "bookingHoldsStock(b: typeLiteral): boolean",
+          "doc": "Does this booking hold any physical stock at all? The shelf-side liveness\npredicate — `unitsClaimedOnShelves(b) > 0`.\n\nDeliberately the shelf definition rather than {@link heldByBooking}: every\ncurrent caller is asking \"is this booking still physically live\", which a\nfully-checked-out sale still is until it completes.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "boundMs",
+          "signature": "boundMs(fs: FirestoreTimestampType | null, iso: string | null): number | null",
+          "doc": "Resolve an interval bound to epoch millis, or `null` for open-ended.\n\nPrefers the `_fs` twin — that is the field Firestore itself orders by, so it\nis the bound of record — and falls back to parsing the paired ISO string when\n`_fs` isn't a real Timestamp (a plain-JSON fixture, a REST read, a write-time\n`FieldValue` sentinel). `null` on both sides means genuinely open-ended.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "heldByBooking",
+          "signature": "heldByBooking(b: StockConsumingBooking): number",
+          "doc": "Units this booking still consumes from **`quantity_held`** — the definition of\n`quantity_booked`, and deliberately narrower than `sumBookingBreakdown`.\n\n`reserved + prepped`, plus `out` **unless the booking is a sale**. For a sale\nthe checkout is also the moment ownership ends: the movement drops\n`quantity_held`, so counting the booking's `out` as well would subtract the\nsame units twice.\n\nNote this excludes `out` **only**, never the whole entry. A 5-unit sale\nbooking with 2 checked out must keep consuming for the other 3, or the\nremainder is handed back as available and oversells — which is why the entry\nstays in the summary rather than being filtered out of it.\n\nSee the module header before making this agree with\n{@link unitsClaimedOnShelves}. It should not.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "intervalsOverlap",
+          "signature": "intervalsOverlap(startMs: number | null, endMs: number | null, windowStartMs: number, windowEndMs: number): boolean",
+          "doc": "Does `[startMs, endMs]` overlap `[windowStartMs, windowEndMs]`?\n\nA null bound is open-ended: `start === null` is −∞, `end === null` is +∞. That\nsingle rule covers both an open-ended OOS record and — the load-bearing case —\na pending **sale** booking, which carries no end date because a sold unit does\nnot come back. It must keep consuming stock in every window after its sale\ndate until the booking completes and an operator's `sale` transaction drops\n`quantity_held`. Collapsing a null end to a point (`end = start`) would hand\nthose units back as \"available\" the day after the sale — a live oversell.\n\n⚠️ **A Firestore query CANNOT express this rule**, and that asymmetry has\nalready cost us. An inequality (`where(\"dates.end_fs\", \">=\", start)`) does not\nmatch a null field, so a predicate written to mirror this function silently\ndrops every open-ended interval — measured 2026-08-13 as 80 prod / 73 dev\npending sale bookings invisible to the allocator's netting read\n(api-cloudrun#512). A query needs an explicit `== null` arm; only in-memory\nfiltering can use this function directly.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "oosConsumes",
+          "signature": "oosConsumes(o: typeLiteral): number",
+          "doc": "Units an out-of-service record consumes — its **full `quantity`** until it\nreaches a terminal status, then zero.\n\n⚠️ **Never reduce this by `breakdown.returned_to_service`.** A 5-unit record\nwith 3 returned to service still holds 5 out of service: the returned units\nare accounted for by the record's own status transition, and subtracting them\nhere hands the same units back twice. It looks like a tidy-up and it is a live\noversell. (Swept 2026-08-13: no site in the workspace does this — keep it that\nway.)",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unitsClaimedOnShelves",
+          "signature": "unitsClaimedOnShelves(b: typeLiteral): number",
+          "doc": "Units this booking still claims from **`store_breakdown`** — the shelf-side\nquestion, and type-blind on purpose.\n\n`reserved + prepped + out`. It is used as a LIVENESS GATE by the allocator's\nnetting: a booking that holds nothing contributes no claim even if a stale\n`stores` array lingers. The netting then subtracts the booking's whole\n`stores[].locations[].quantity`, not this number — so this decides *whether*\na booking claims, not *how much*.\n\n⚠️ **It includes `out`, and that is not the same statement as\n{@link heldByBooking}'s.** Read the module header for why the two must differ.\nWhether including `out` is right *here* is a separate, open question: a\ncheck-out removes the units from `store_breakdown`, so a booking whose units\nhave all left arguably claims nothing more. Measured 2026-08-13 across both\nenvironments, no live booking over-claims against its shelves (0 of 21\ncandidates), which is consistent with `recomputeBookingAllocations` converging\n`stores` against the live ledger on every write. Do not \"fix\" this without\nre-measuring that — the convergence job may be what is holding it up.",
           "paramTags": [],
           "returnsTag": null
         }

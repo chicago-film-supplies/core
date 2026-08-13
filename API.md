@@ -20759,10 +20759,130 @@ same product nets against it too. Pure (no I/O).
 
 ### `buildReservedByLocation(bookings: ReadonlyArray<typeLiteral>): ReservedByLocation`
 
-Sum the physical units held by a set of bookings, per location. Only bookings
-that currently hold stock (`reserved + prepped + out > 0`, the same definition
-as `quantity_booked`) contribute — a returned/quoted booking reserves nothing
-even if a stale `stores` array lingers.
+Sum the shelf units claimed by a set of bookings, per location. Only bookings
+that currently hold stock contribute — a returned/quoted booking reserves
+nothing even if a stale `stores` array lingers.
+
+⚠️ **This is the SHELF-side question, not `quantity_booked`.** This docstring
+used to claim the gate was *"the same definition as `quantity_booked`"*. It is
+not, and that sentence is why the two looked safe to merge: this result is
+subtracted from `store_breakdown`, which a check-out DOES reduce, while
+`quantity_booked` is subtracted from `quantity_held`, which a rental check-out
+does NOT. Unifying them would make the allocator under-net for rentals and
+point two pickers at one unit. See `utils/stock.ts`'s header for the table.
+
+The gate is {@link bookingHoldsStock}; the *amount* added is the booking's own
+`stores[].locations[].quantity`, not the gate's value.
+
+## `@cfs/core/utils/stock`
+
+### `StockConsumingBooking`
+
+Just enough of a booking to answer either consumption question.
+
+```ts
+interface StockConsumingBooking {
+  breakdown: BookingBreakdown;
+  type: ComponentTypeType;
+}
+```
+
+### `TERMINAL_OOS_STATUSES`
+
+OOS statuses that no longer hold units out of service.
+
+```ts
+const TERMINAL_OOS_STATUSES: ReadonlySet<string>;
+```
+
+### `bookingHoldsStock(b: typeLiteral): boolean`
+
+Does this booking hold any physical stock at all? The shelf-side liveness
+predicate — `unitsClaimedOnShelves(b) > 0`.
+
+Deliberately the shelf definition rather than {@link heldByBooking}: every
+current caller is asking "is this booking still physically live", which a
+fully-checked-out sale still is until it completes.
+
+### `boundMs(fs: FirestoreTimestampType | null, iso: string | null): number | null`
+
+Resolve an interval bound to epoch millis, or `null` for open-ended.
+
+Prefers the `_fs` twin — that is the field Firestore itself orders by, so it
+is the bound of record — and falls back to parsing the paired ISO string when
+`_fs` isn't a real Timestamp (a plain-JSON fixture, a REST read, a write-time
+`FieldValue` sentinel). `null` on both sides means genuinely open-ended.
+
+### `heldByBooking(b: StockConsumingBooking): number`
+
+Units this booking still consumes from **`quantity_held`** — the definition of
+`quantity_booked`, and deliberately narrower than `sumBookingBreakdown`.
+
+`reserved + prepped`, plus `out` **unless the booking is a sale**. For a sale
+the checkout is also the moment ownership ends: the movement drops
+`quantity_held`, so counting the booking's `out` as well would subtract the
+same units twice.
+
+Note this excludes `out` **only**, never the whole entry. A 5-unit sale
+booking with 2 checked out must keep consuming for the other 3, or the
+remainder is handed back as available and oversells — which is why the entry
+stays in the summary rather than being filtered out of it.
+
+See the module header before making this agree with
+{@link unitsClaimedOnShelves}. It should not.
+
+### `intervalsOverlap(startMs: number | null, endMs: number | null, windowStartMs: number, windowEndMs: number): boolean`
+
+Does `[startMs, endMs]` overlap `[windowStartMs, windowEndMs]`?
+
+A null bound is open-ended: `start === null` is −∞, `end === null` is +∞. That
+single rule covers both an open-ended OOS record and — the load-bearing case —
+a pending **sale** booking, which carries no end date because a sold unit does
+not come back. It must keep consuming stock in every window after its sale
+date until the booking completes and an operator's `sale` transaction drops
+`quantity_held`. Collapsing a null end to a point (`end = start`) would hand
+those units back as "available" the day after the sale — a live oversell.
+
+⚠️ **A Firestore query CANNOT express this rule**, and that asymmetry has
+already cost us. An inequality (`where("dates.end_fs", ">=", start)`) does not
+match a null field, so a predicate written to mirror this function silently
+drops every open-ended interval — measured 2026-08-13 as 80 prod / 73 dev
+pending sale bookings invisible to the allocator's netting read
+(api-cloudrun#512). A query needs an explicit `== null` arm; only in-memory
+filtering can use this function directly.
+
+### `oosConsumes(o: typeLiteral): number`
+
+Units an out-of-service record consumes — its **full `quantity`** until it
+reaches a terminal status, then zero.
+
+⚠️ **Never reduce this by `breakdown.returned_to_service`.** A 5-unit record
+with 3 returned to service still holds 5 out of service: the returned units
+are accounted for by the record's own status transition, and subtracting them
+here hands the same units back twice. It looks like a tidy-up and it is a live
+oversell. (Swept 2026-08-13: no site in the workspace does this — keep it that
+way.)
+
+### `unitsClaimedOnShelves(b: typeLiteral): number`
+
+Units this booking still claims from **`store_breakdown`** — the shelf-side
+question, and type-blind on purpose.
+
+`reserved + prepped + out`. It is used as a LIVENESS GATE by the allocator's
+netting: a booking that holds nothing contributes no claim even if a stale
+`stores` array lingers. The netting then subtracts the booking's whole
+`stores[].locations[].quantity`, not this number — so this decides *whether*
+a booking claims, not *how much*.
+
+⚠️ **It includes `out`, and that is not the same statement as
+{@link heldByBooking}'s.** Read the module header for why the two must differ.
+Whether including `out` is right *here* is a separate, open question: a
+check-out removes the units from `store_breakdown`, so a booking whose units
+have all left arguably claims nothing more. Measured 2026-08-13 across both
+environments, no live booking over-claims against its shelves (0 of 21
+candidates), which is consistent with `recomputeBookingAllocations` converging
+`stores` against the live ledger on every write. Do not "fix" this without
+re-measuring that — the convergence job may be what is holding it up.
 
 ## `@cfs/core/utils/money`
 

@@ -38,15 +38,18 @@
  */
 import type {
   BookingBreakdown,
-  ComponentTypeType,
-  FirestoreTimestampType,
-  FirestoreTimestampValue,
   OOSReasonType,
   PublicStockSummary,
   StockSummary,
   StockSummaryBookingEntry,
 } from "../schemas/mod.ts";
 import { emptyBookingsBreakdown } from "./bookings.ts";
+import {
+  boundMs,
+  heldByBooking,
+  intervalsOverlap,
+  oosConsumes,
+} from "./stock.ts";
 import { toChicagoEndOfDay, toChicagoStartOfDay } from "./dates.ts";
 
 /** The window an availability question is asked about. Offset-carrying ISO strings. */
@@ -83,51 +86,9 @@ export interface PublicAvailabilityResult {
   quantity_available: number;
 }
 
-/** OOS statuses that no longer hold units out of service. */
-const TERMINAL_OOS_STATUSES = new Set(["complete", "canceled"]);
-
 /** The empty per-reason OOS breakdown. */
 function emptyOutOfServiceBreakdown(): OutOfServiceBreakdown {
   return { cleaning: 0, damaged: 0, maintenance: 0, lost: 0 };
-}
-
-/**
- * Resolve an interval bound to epoch millis, or `null` for open-ended.
- *
- * Prefers the `_fs` twin — that is the field Firestore itself orders by, so it
- * is the bound of record — and falls back to parsing the paired ISO string when
- * `_fs` isn't a real Timestamp (a plain-JSON fixture, a REST read, a write-time
- * `FieldValue` sentinel). `null` on both sides means genuinely open-ended.
- */
-function boundMs(fs: FirestoreTimestampType | null, iso: string | null): number | null {
-  const maybe = fs as FirestoreTimestampValue | null;
-  if (maybe && typeof maybe.toMillis === "function") return maybe.toMillis();
-  if (iso) {
-    const ms = Date.parse(iso);
-    if (!Number.isNaN(ms)) return ms;
-  }
-  return null;
-}
-
-/**
- * Does `[startMs, endMs]` overlap `[windowStartMs, windowEndMs]`?
- *
- * A null bound is open-ended: `start === null` is −∞, `end === null` is +∞. That
- * single rule covers both an open-ended OOS record and — the load-bearing case —
- * a pending **sale** booking, which carries no end date because a sold unit does
- * not come back. It must keep consuming stock in every window after its sale date
- * until the booking completes and an operator's `sale` transaction drops
- * `quantity_held`. Collapsing a null end to a point (`end = start`) would hand
- * those units back as "available" the day after the sale — a live oversell.
- */
-function overlaps(
-  startMs: number | null,
-  endMs: number | null,
-  windowStartMs: number,
-  windowEndMs: number,
-): boolean {
-  return (startMs === null || startMs <= windowEndMs) &&
-    (endMs === null || endMs >= windowStartMs);
 }
 
 /**
@@ -141,30 +102,6 @@ function windowMs(window: AvailabilityWindow): { startMs: number; endMs: number 
     startMs: Date.parse(toChicagoStartOfDay(window.start)),
     endMs: Date.parse(toChicagoEndOfDay(window.end)),
   };
-}
-
-/**
- * The units a booking still consumes from stock: `reserved + prepped + out`. A
- * `quoted` booking has claimed nothing yet, and the terminal buckets
- * (`returned`, `lost`, `damaged`) have already given the units back or written
- * them off — this is the definition of `quantity_booked`, and it is deliberately
- * narrower than `sumBookingBreakdown`.
- *
- * **A sale's `out` units are excluded**, because for a sale the checkout is also
- * the moment ownership ends: the movement drops `quantity_held`, so counting the
- * booking's `out` as well would subtract the same units twice.
- *
- * Note this excludes `out` **only** — not the whole entry. A 5-unit sale booking
- * with 2 checked out must keep consuming for the other 3, or the remainder is
- * handed back as available and oversells. That is why the entry stays in the
- * summary rather than being filtered out of it.
- *
- * Both call sites — `computeAvailability` and `toPublicStockSummary` — go through
- * here, so the manager and the public storefront cannot disagree about it.
- */
-function heldByBooking(b: { breakdown: BookingBreakdown; type: ComponentTypeType }): number {
-  const base = b.breakdown.reserved + b.breakdown.prepped;
-  return b.type === "sale" ? base : base + b.breakdown.out;
 }
 
 /**
@@ -188,7 +125,7 @@ export function computeAvailability(
   let quantity_booked = 0;
 
   for (const b of summary.bookings) {
-    if (!overlaps(boundMs(b.start_fs, b.start), boundMs(b.end_fs, b.end), startMs, endMs)) {
+    if (!intervalsOverlap(boundMs(b.start_fs, b.start), boundMs(b.end_fs, b.end), startMs, endMs)) {
       continue;
     }
     bookings.push(b);
@@ -206,12 +143,17 @@ export function computeAvailability(
   let quantity_out_of_service = 0;
 
   for (const o of summary.out_of_service) {
-    if (TERMINAL_OOS_STATUSES.has(o.status)) continue;
-    if (!overlaps(boundMs(o.start_fs, o.start), boundMs(o.end_fs, o.end), startMs, endMs)) {
+    if (!intervalsOverlap(boundMs(o.start_fs, o.start), boundMs(o.end_fs, o.end), startMs, endMs)) {
       continue;
     }
-    quantity_out_of_service += o.quantity;
-    out_of_service_breakdown[o.reason as OOSReasonType] += o.quantity;
+    // `oosConsumes` owns BOTH halves of the rule — terminal statuses hold zero,
+    // and a live record holds its FULL `quantity` (never reduced by
+    // `returned_to_service`). Going through it rather than restating the status
+    // set here is what keeps this arm and the summary writer in step.
+    const quantity = oosConsumes(o);
+    if (quantity === 0) continue;
+    quantity_out_of_service += quantity;
+    out_of_service_breakdown[o.reason as OOSReasonType] += quantity;
   }
 
   const quantity_held = summary.quantity_held;
@@ -240,7 +182,7 @@ export function computePublicAvailability(
 
   let quantity_unavailable = 0;
   for (const u of summary.unavailable) {
-    if (overlaps(boundMs(u.start_fs, u.start), boundMs(u.end_fs, u.end), startMs, endMs)) {
+    if (intervalsOverlap(boundMs(u.start_fs, u.start), boundMs(u.end_fs, u.end), startMs, endMs)) {
       quantity_unavailable += u.quantity;
     }
   }
@@ -278,14 +220,17 @@ export function toPublicStockSummary(summary: StockSummary): PublicStockSummary 
   }
 
   for (const o of summary.out_of_service) {
-    if (TERMINAL_OOS_STATUSES.has(o.status)) continue;
-    if (o.quantity <= 0) continue;
+    // Same one rule as `computeAvailability`'s OOS arm — terminal holds zero,
+    // live holds its full `quantity`. Sharing `oosConsumes` is what stops the
+    // projection and the reader disagreeing about which records still bite.
+    const quantity = oosConsumes(o);
+    if (quantity <= 0) continue;
     unavailable.push({
       start: o.start,
       start_fs: o.start_fs,
       end: o.end,
       end_fs: o.end_fs,
-      quantity: o.quantity,
+      quantity,
     });
   }
 

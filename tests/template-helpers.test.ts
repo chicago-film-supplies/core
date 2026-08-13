@@ -11,6 +11,7 @@
  */
 import { assert, assertEquals, assertExists, assertGreater } from "@std/assert";
 
+import * as stockUtils from "../src/utils/stock.ts";
 import * as allocationUtils from "../src/utils/allocation.ts";
 import * as availabilityUtils from "../src/utils/availability.ts";
 import * as bookingUtils from "../src/utils/bookings.ts";
@@ -62,6 +63,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   products: productUtils,
   taxes: taxUtils,
   templates: templateUtils,
+  stock: stockUtils,
 };
 
 /**

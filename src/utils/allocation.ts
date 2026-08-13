@@ -29,6 +29,7 @@ import type {
   StoreBreakdownEntry,
   StoreBreakdownLocation,
 } from "../schemas/mod.ts";
+import { bookingHoldsStock, intervalsOverlap } from "./stock.ts";
 
 /** Booking breakdown shape — matches Booking["breakdown"] from schema. */
 type BookingBreakdown = Booking["breakdown"];
@@ -146,18 +147,27 @@ export function allocateBookingToStores(
 export type ReservedByLocation = Map<string, number>;
 
 /**
- * Sum the physical units held by a set of bookings, per location. Only bookings
- * that currently hold stock (`reserved + prepped + out > 0`, the same definition
- * as `quantity_booked`) contribute — a returned/quoted booking reserves nothing
- * even if a stale `stores` array lingers.
+ * Sum the shelf units claimed by a set of bookings, per location. Only bookings
+ * that currently hold stock contribute — a returned/quoted booking reserves
+ * nothing even if a stale `stores` array lingers.
+ *
+ * ⚠️ **This is the SHELF-side question, not `quantity_booked`.** This docstring
+ * used to claim the gate was *"the same definition as `quantity_booked`"*. It is
+ * not, and that sentence is why the two looked safe to merge: this result is
+ * subtracted from `store_breakdown`, which a check-out DOES reduce, while
+ * `quantity_booked` is subtracted from `quantity_held`, which a rental check-out
+ * does NOT. Unifying them would make the allocator under-net for rentals and
+ * point two pickers at one unit. See `utils/stock.ts`'s header for the table.
+ *
+ * The gate is {@link bookingHoldsStock}; the *amount* added is the booking's own
+ * `stores[].locations[].quantity`, not the gate's value.
  */
 export function buildReservedByLocation(
   bookings: ReadonlyArray<{ breakdown: BookingBreakdown; stores: BookingStore[] }>,
 ): ReservedByLocation {
   const reserved: ReservedByLocation = new Map();
   for (const b of bookings) {
-    const held = (b.breakdown?.reserved ?? 0) + (b.breakdown?.prepped ?? 0) + (b.breakdown?.out ?? 0);
-    if (held <= 0) continue;
+    if (!bookingHoldsStock(b)) continue;
     for (const s of b.stores ?? []) {
       for (const l of s.locations ?? []) {
         reserved.set(l.uid_location, (reserved.get(l.uid_location) ?? 0) + l.quantity);
@@ -233,8 +243,7 @@ export function allocateBookingWithNetting(
   const combined: ReservedByLocation = new Map(inBatchReserved);
   if (windowStartMs != null && windowEndMs != null) {
     const overlapping = reserving.filter((b) =>
-      (b.startMs == null || b.startMs <= windowEndMs) &&
-      (b.endMs == null || b.endMs >= windowStartMs)
+      intervalsOverlap(b.startMs, b.endMs, windowStartMs, windowEndMs)
     );
     for (const [loc, q] of buildReservedByLocation(overlapping)) {
       combined.set(loc, (combined.get(loc) ?? 0) + q);
