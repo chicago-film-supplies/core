@@ -2815,17 +2815,28 @@ interface FirestoreTimestampValue {
 
 ### `FixtureMeta`
 
-A fixture manifest entry — the operator-facing label/description for one
-git-canonical fixture (`fixtures/<git_path>/<slug>.json`). Files are
-authoritative: discovery globs the directory; this manifest only enriches
-the manager list with labels. An orphaned manifest entry (slug with no
-matching file) is ignored at render/golden time — never breaks a render.
+A fixture manifest entry for one git-canonical fixture
+(`fixtures/<git_path>/<slug>.json`).
+
+**The manifest carries the fixture's REASON**; the label is the incidental
+half. A fixture set is a coverage argument — each file exists to exercise
+something the others do not — and that argument lives nowhere else: the
+fixture file itself is a `z.strictObject` source document with no room for a
+comment, so an undescribed fixture is one whose purpose is unrecoverable
+without diffing it against every sibling. That is why `description` is
+required rather than optional.
+
+Files remain authoritative for *discovery*: every reader globs the directory
+and left-joins this manifest, so an orphaned entry (slug with no matching
+file) is ignored at render/golden time and never breaks a render. The
+`templates` repo's `lint-fixtures.ts` is what fails drift in either
+direction.
 
 ```ts
 interface FixtureMeta {
   slug: string;
   label: string;
-  description?: string;
+  description: string;
 }
 ```
 
@@ -16819,17 +16830,28 @@ interface SaveQuoteVersionInputType {
 
 ### `FixtureMeta`
 
-A fixture manifest entry — the operator-facing label/description for one
-git-canonical fixture (`fixtures/<git_path>/<slug>.json`). Files are
-authoritative: discovery globs the directory; this manifest only enriches
-the manager list with labels. An orphaned manifest entry (slug with no
-matching file) is ignored at render/golden time — never breaks a render.
+A fixture manifest entry for one git-canonical fixture
+(`fixtures/<git_path>/<slug>.json`).
+
+**The manifest carries the fixture's REASON**; the label is the incidental
+half. A fixture set is a coverage argument — each file exists to exercise
+something the others do not — and that argument lives nowhere else: the
+fixture file itself is a `z.strictObject` source document with no room for a
+comment, so an undescribed fixture is one whose purpose is unrecoverable
+without diffing it against every sibling. That is why `description` is
+required rather than optional.
+
+Files remain authoritative for *discovery*: every reader globs the directory
+and left-joins this manifest, so an orphaned entry (slug with no matching
+file) is ignored at render/golden time and never breaks a render. The
+`templates` repo's `lint-fixtures.ts` is what fails drift in either
+direction.
 
 ```ts
 interface FixtureMeta {
   slug: string;
   label: string;
-  description?: string;
+  description: string;
 }
 ```
 

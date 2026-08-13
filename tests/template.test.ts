@@ -1,8 +1,14 @@
 /**
  * Tests for the operator-managed `fixtures: FixtureMeta[]` manifest on
  * TemplateSchema. The manifest is projected from the family sidecar's
- * `fixtures` array; files in `fixtures/<git_path>/` remain authoritative,
- * so this list only enriches the manager UI with labels.
+ * `fixtures` array; files in `fixtures/<git_path>/` remain authoritative for
+ * discovery, so this list is where each fixture's REASON is recorded.
+ *
+ * `description` is required. The fixture file is a strict source document with
+ * no room for a comment, so the manifest is the only place a fixture can say
+ * what it covers that its siblings do not — an optional field there means the
+ * coverage argument is optional, which is how a fixture set silently becomes a
+ * pile of similar documents.
  */
 import { assertEquals } from "@std/assert";
 import { FixtureMetaSchema, TemplateSchema } from "../src/schemas/template.ts";
@@ -31,14 +37,7 @@ function baseFamily(extra: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
-Deno.test("FixtureMetaSchema accepts a minimal entry", () => {
-  assertEquals(
-    FixtureMetaSchema.safeParse({ slug: "order-841", label: "Order 841" }).success,
-    true,
-  );
-});
-
-Deno.test("FixtureMetaSchema accepts an entry with description", () => {
+Deno.test("FixtureMetaSchema accepts a complete entry", () => {
   assertEquals(
     FixtureMetaSchema.safeParse({
       slug: "order-841",
@@ -49,16 +48,32 @@ Deno.test("FixtureMetaSchema accepts an entry with description", () => {
   );
 });
 
+Deno.test("FixtureMetaSchema rejects an entry with no description", () => {
+  assertEquals(
+    FixtureMetaSchema.safeParse({ slug: "order-841", label: "Order 841" }).success,
+    false,
+  );
+});
+
+Deno.test("FixtureMetaSchema rejects an empty description", () => {
+  // An empty string would satisfy a bare `z.string()` and record no reason at
+  // all — the exact hole `.min(1)` closes.
+  assertEquals(
+    FixtureMetaSchema.safeParse({ slug: "s", label: "l", description: "" }).success,
+    false,
+  );
+});
+
 Deno.test("FixtureMetaSchema rejects an empty slug", () => {
   assertEquals(
-    FixtureMetaSchema.safeParse({ slug: "", label: "x" }).success,
+    FixtureMetaSchema.safeParse({ slug: "", label: "x", description: "why" }).success,
     false,
   );
 });
 
 Deno.test("FixtureMetaSchema rejects unknown keys", () => {
   assertEquals(
-    FixtureMetaSchema.safeParse({ slug: "s", label: "l", extra: 1 }).success,
+    FixtureMetaSchema.safeParse({ slug: "s", label: "l", description: "why", extra: 1 }).success,
     false,
   );
 });
@@ -73,11 +88,25 @@ Deno.test("TemplateSchema accepts a family with multiple fixtures", () => {
   const res = TemplateSchema.safeParse(
     baseFamily({
       fixtures: [
-        { slug: "order-841", label: "Order 841" },
-        { slug: "tax-exempt", label: "Tax-exempt customer" },
+        { slug: "order-841", label: "Order 841", description: "Single destination, rentals + tax." },
+        { slug: "tax-exempt", label: "Tax-exempt customer", description: "The only tax_exempt profile." },
       ],
     }),
   );
   assertEquals(res.success, true);
   if (res.success) assertEquals(res.data.fixtures.length, 2);
+});
+
+Deno.test("TemplateSchema rejects a fixtures[] entry with no description", () => {
+  // The family doc is the projection of the sidecar, so this is what stops an
+  // undescribed sidecar entry from being published onto the family.
+  const res = TemplateSchema.safeParse(
+    baseFamily({
+      fixtures: [
+        { slug: "order-841", label: "Order 841", description: "Single destination, rentals + tax." },
+        { slug: "tax-exempt", label: "Tax-exempt customer" },
+      ],
+    }),
+  );
+  assertEquals(res.success, false);
 });

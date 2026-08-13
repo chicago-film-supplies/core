@@ -1389,8 +1389,8 @@
         {
           "kind": "interface",
           "name": "FixtureMeta",
-          "declaration": "interface FixtureMeta {\n  slug: string;\n  label: string;\n  description?: string;\n}",
-          "doc": "A fixture manifest entry — the operator-facing label/description for one\ngit-canonical fixture (`fixtures/<git_path>/<slug>.json`). Files are\nauthoritative: discovery globs the directory; this manifest only enriches\nthe manager list with labels. An orphaned manifest entry (slug with no\nmatching file) is ignored at render/golden time — never breaks a render."
+          "declaration": "interface FixtureMeta {\n  slug: string;\n  label: string;\n  description: string;\n}",
+          "doc": "A fixture manifest entry for one git-canonical fixture\n(`fixtures/<git_path>/<slug>.json`).\n\n**The manifest carries the fixture's REASON**; the label is the incidental\nhalf. A fixture set is a coverage argument — each file exists to exercise\nsomething the others do not — and that argument lives nowhere else: the\nfixture file itself is a `z.strictObject` source document with no room for a\ncomment, so an undescribed fixture is one whose purpose is unrecoverable\nwithout diffing it against every sibling. That is why `description` is\nrequired rather than optional.\n\nFiles remain authoritative for *discovery*: every reader globs the directory\nand left-joins this manifest, so an orphaned entry (slug with no matching\nfile) is ignored at render/golden time and never breaks a render. The\n`templates` repo's `lint-fixtures.ts` is what fails drift in either\ndirection."
         },
         {
           "kind": "variable",
@@ -8490,8 +8490,8 @@
         {
           "kind": "interface",
           "name": "FixtureMeta",
-          "declaration": "interface FixtureMeta {\n  slug: string;\n  label: string;\n  description?: string;\n}",
-          "doc": "A fixture manifest entry — the operator-facing label/description for one\ngit-canonical fixture (`fixtures/<git_path>/<slug>.json`). Files are\nauthoritative: discovery globs the directory; this manifest only enriches\nthe manager list with labels. An orphaned manifest entry (slug with no\nmatching file) is ignored at render/golden time — never breaks a render."
+          "declaration": "interface FixtureMeta {\n  slug: string;\n  label: string;\n  description: string;\n}",
+          "doc": "A fixture manifest entry for one git-canonical fixture\n(`fixtures/<git_path>/<slug>.json`).\n\n**The manifest carries the fixture's REASON**; the label is the incidental\nhalf. A fixture set is a coverage argument — each file exists to exercise\nsomething the others do not — and that argument lives nowhere else: the\nfixture file itself is a `z.strictObject` source document with no room for a\ncomment, so an undescribed fixture is one whose purpose is unrecoverable\nwithout diffing it against every sibling. That is why `description` is\nrequired rather than optional.\n\nFiles remain authoritative for *discovery*: every reader globs the directory\nand left-joins this manifest, so an orphaned entry (slug with no matching\nfile) is ignored at render/golden time and never breaks a render. The\n`templates` repo's `lint-fixtures.ts` is what fails drift in either\ndirection."
         },
         {
           "kind": "variable",

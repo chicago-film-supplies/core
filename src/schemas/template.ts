@@ -54,26 +54,41 @@ export interface TemplateDependsOn {
 }
 
 /**
- * A fixture manifest entry — the operator-facing label/description for one
- * git-canonical fixture (`fixtures/<git_path>/<slug>.json`). Files are
- * authoritative: discovery globs the directory; this manifest only enriches
- * the manager list with labels. An orphaned manifest entry (slug with no
- * matching file) is ignored at render/golden time — never breaks a render.
+ * A fixture manifest entry for one git-canonical fixture
+ * (`fixtures/<git_path>/<slug>.json`).
+ *
+ * **The manifest carries the fixture's REASON**; the label is the incidental
+ * half. A fixture set is a coverage argument — each file exists to exercise
+ * something the others do not — and that argument lives nowhere else: the
+ * fixture file itself is a `z.strictObject` source document with no room for a
+ * comment, so an undescribed fixture is one whose purpose is unrecoverable
+ * without diffing it against every sibling. That is why `description` is
+ * required rather than optional.
+ *
+ * Files remain authoritative for *discovery*: every reader globs the directory
+ * and left-joins this manifest, so an orphaned entry (slug with no matching
+ * file) is ignored at render/golden time and never breaks a render. The
+ * `templates` repo's `lint-fixtures.ts` is what fails drift in either
+ * direction.
  */
 export interface FixtureMeta {
   /** Filename slug — the join key to `fixtures/<git_path>/<slug>.json`. */
   slug: string;
   /** Operator-facing label shown in the editor's fixture picker. */
   label: string;
-  /** Optional one-line description (e.g. "Order with three destinations + a tax-exempt subgroup"). */
-  description?: string;
+  /** Why this fixture exists — what it covers that no other fixture does. */
+  description: string;
 }
 
 /** Zod schema for a fixture manifest entry. */
 export const FixtureMetaSchema: z.ZodType<FixtureMeta> = z.strictObject({
   slug: z.string().min(1).max(100),
   label: z.string().min(1).max(200),
-  description: z.string().max(2000).optional(),
+  // Required, and `.min(1)` so an empty string cannot stand in for the reason.
+  // `pii: "none"` is the explicit classification: this is prose about a
+  // template's coverage, never customer data (the fixture *document* is where
+  // PII would live, and that is sanitized on capture by `applyPii`).
+  description: z.string().min(1).max(2000).meta({ pii: "none" }),
 });
 
 /** A thin template *family* document — identity + rollups, no content/status. */
@@ -93,9 +108,9 @@ export interface Template {
   active_semver?: string | null;
   depends_on: TemplateDependsOn;
   /** Operator-managed fixture manifest, projected from the sidecar
-   * `fixtures: [{slug, label, description?}]`. Files in `fixtures/<git_path>/`
-   * are authoritative — this list only enriches the manager UI with labels.
-   * Defaults to `[]` for a never-captured family. */
+   * `fixtures: [{slug, label, description}]`. Files in `fixtures/<git_path>/`
+   * are authoritative for discovery — this list carries each fixture's reason
+   * (see {@link FixtureMeta}). Defaults to `[]` for a never-captured family. */
   fixtures: FixtureMeta[];
   /** Rollup: uids of versions currently in `draft` status. */
   draft_uids: string[];
