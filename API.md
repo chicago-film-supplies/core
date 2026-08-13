@@ -35,6 +35,13 @@ every one of the 19 call sites in `templates/quote.eta` would have read
 Documents are cents-denominated now, `it.money.formatCents(doc.total_cents)`
 is the natural form, and the trade flipped exactly as predicted.
 
+`icons` is always on for the same reason `money` is — a glyph beside a phone
+number or a delivery block is not a property of the source collection. It also
+has to be always-on to be *usable*: header and footer partials render in an
+isolated Chromium frame that loads no external resources, so inline SVG from a
+util is the only icon a partial can have, and partials are shared across
+collections.
+
 ```ts
 const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];
 ```
@@ -17037,6 +17044,13 @@ every one of the 19 call sites in `templates/quote.eta` would have read
 Documents are cents-denominated now, `it.money.formatCents(doc.total_cents)`
 is the natural form, and the trade flipped exactly as predicted.
 
+`icons` is always on for the same reason `money` is — a glyph beside a phone
+number or a delivery block is not a property of the source collection. It also
+has to be always-on to be *usable*: header and footer partials render in an
+isolated Chromium frame that loads no external resources, so inline SVG from a
+util is the only icon a partial can have, and partials are shared across
+collections.
+
 ```ts
 const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];
 ```
@@ -19596,6 +19610,56 @@ toChicagoYmd("2025-02-14T00:00:00.000-06:00"); // "2025-02-14"
 toChicagoYmd("2025-02-14T03:00:00.000Z");      // "2025-02-13" (Chicago day)
 toChicagoYmd("2025-07-04T00:00:00.000-05:00"); // "2025-07-04" (CDT)
 ```
+
+## `@cfs/core/utils/icons`
+
+### `CFS_LOGO_SVG`
+
+The CFS logo, inline.
+
+Injected into every render as the scalar `it.logo` — templates keep calling
+it that way, and this is not reachable as `it.icons.*` (the template-helper
+generator catalogues functions, not constants). It lives here so the render
+pipeline and the `templates` repo's local preview harness read **one**
+string: they previously held separate copies, and the preview's copy had a
+single path where the real logo has five (measured 2026-08-13), so local
+preview had been rendering a visibly different logo from production with
+nothing to catch it.
+
+```ts
+const CFS_LOGO_SVG: string;
+```
+
+### `IconOptions`
+
+Options for {@link svg}.
+
+```ts
+interface IconOptions {
+  size?: number | string;
+  stroke?: number;
+  color?: string;
+  class?: string;
+  title?: string;
+}
+```
+
+### `has(name: string): boolean`
+
+Whether `name` is a known icon (following aliases).
+
+For data-driven names, where {@link svg} would throw — e.g. an icon chosen by
+a document field: `<% if (it.icons.has(n)) { %><%~ it.icons.svg(n) %><% } %>`.
+
+### `svg(name: string, _: unknown): string`
+
+Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg("truck") %>`.
+
+Throws on an unknown name, listing near matches. That is deliberate: a
+silently-blank icon is invisible in a PDF and would ship, whereas a render
+error is caught by the draft render gate and the golden gate before it can.
+For a name that comes from document data rather than the template author, gate
+it with {@link has} first.
 
 ## `@cfs/core/utils/invoices`
 

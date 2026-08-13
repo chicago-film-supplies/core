@@ -16,7 +16,7 @@
           "kind": "variable",
           "name": "ALWAYS_ON_UTIL_NAMESPACES",
           "declaration": "const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];",
-          "doc": "Utils namespaces injected for every template regardless of collection.\n\n`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every\ndocument a template renders carries money — an order, an invoice and a quote\nall need `it.money.formatCents`, so keying it to one collection would just\nmean listing it under all of them.\n\nIt also closes a gap the generated helper catalogue had already opened:\n`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so\nit has been advertising eleven `it.money.*` helpers to template authors while\nthe render path injected none of them. Documentation promising a global that\nthrows at render time is worse than no documentation.\n\n✅ `it.currency` (raw currency.js) **is gone as of Phase 11 Phase E**, and\n`it.money` is what replaced it. It survived this long because the natural\nreplacement takes **cents** while template documents held **dollars**, so\nevery one of the 19 call sites in `templates/quote.eta` would have read\n`it.money.formatCents(it.money.toCents(x))` — worse than what it replaced.\nDocuments are cents-denominated now, `it.money.formatCents(doc.total_cents)`\nis the natural form, and the trade flipped exactly as predicted."
+          "doc": "Utils namespaces injected for every template regardless of collection.\n\n`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every\ndocument a template renders carries money — an order, an invoice and a quote\nall need `it.money.formatCents`, so keying it to one collection would just\nmean listing it under all of them.\n\nIt also closes a gap the generated helper catalogue had already opened:\n`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so\nit has been advertising eleven `it.money.*` helpers to template authors while\nthe render path injected none of them. Documentation promising a global that\nthrows at render time is worse than no documentation.\n\n✅ `it.currency` (raw currency.js) **is gone as of Phase 11 Phase E**, and\n`it.money` is what replaced it. It survived this long because the natural\nreplacement takes **cents** while template documents held **dollars**, so\nevery one of the 19 call sites in `templates/quote.eta` would have read\n`it.money.formatCents(it.money.toCents(x))` — worse than what it replaced.\nDocuments are cents-denominated now, `it.money.formatCents(doc.total_cents)`\nis the natural form, and the trade flipped exactly as predicted.\n\n`icons` is always on for the same reason `money` is — a glyph beside a phone\nnumber or a delivery block is not a property of the source collection. It also\nhas to be always-on to be *usable*: header and footer partials render in an\nisolated Chromium frame that loads no external resources, so inline SVG from a\nutil is the only icon a partial can have, and partials are shared across\ncollections."
         },
         {
           "kind": "variable",
@@ -8581,7 +8581,7 @@
           "kind": "variable",
           "name": "ALWAYS_ON_UTIL_NAMESPACES",
           "declaration": "const ALWAYS_ON_UTIL_NAMESPACES: readonly string[];",
-          "doc": "Utils namespaces injected for every template regardless of collection.\n\n`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every\ndocument a template renders carries money — an order, an invoice and a quote\nall need `it.money.formatCents`, so keying it to one collection would just\nmean listing it under all of them.\n\nIt also closes a gap the generated helper catalogue had already opened:\n`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so\nit has been advertising eleven `it.money.*` helpers to template authors while\nthe render path injected none of them. Documentation promising a global that\nthrows at render time is worse than no documentation.\n\n✅ `it.currency` (raw currency.js) **is gone as of Phase 11 Phase E**, and\n`it.money` is what replaced it. It survived this long because the natural\nreplacement takes **cents** while template documents held **dollars**, so\nevery one of the 19 call sites in `templates/quote.eta` would have read\n`it.money.formatCents(it.money.toCents(x))` — worse than what it replaced.\nDocuments are cents-denominated now, `it.money.formatCents(doc.total_cents)`\nis the natural form, and the trade flipped exactly as predicted."
+          "doc": "Utils namespaces injected for every template regardless of collection.\n\n`money` is here rather than in {@link TEMPLATE_COLLECTION_UTILS} because every\ndocument a template renders carries money — an order, an invoice and a quote\nall need `it.money.formatCents`, so keying it to one collection would just\nmean listing it under all of them.\n\nIt also closes a gap the generated helper catalogue had already opened:\n`template-helpers.generated.ts` derives its namespaces from `src/utils/`, so\nit has been advertising eleven `it.money.*` helpers to template authors while\nthe render path injected none of them. Documentation promising a global that\nthrows at render time is worse than no documentation.\n\n✅ `it.currency` (raw currency.js) **is gone as of Phase 11 Phase E**, and\n`it.money` is what replaced it. It survived this long because the natural\nreplacement takes **cents** while template documents held **dollars**, so\nevery one of the 19 call sites in `templates/quote.eta` would have read\n`it.money.formatCents(it.money.toCents(x))` — worse than what it replaced.\nDocuments are cents-denominated now, `it.money.formatCents(doc.total_cents)`\nis the natural form, and the trade flipped exactly as predicted.\n\n`icons` is always on for the same reason `money` is — a glyph beside a phone\nnumber or a delivery block is not a property of the source collection. It also\nhas to be always-on to be *usable*: header and footer partials render in an\nisolated Chromium frame that loads no external resources, so inline SVG from a\nutil is the only icon a partial can have, and partials are shared across\ncollections."
         },
         {
           "kind": "variable",
@@ -9888,6 +9888,40 @@
           "name": "toChicagoYmd",
           "signature": "toChicagoYmd(input: string): string",
           "doc": "Format an ISO datetime as the Chicago calendar date in `YYYY-MM-DD` form.\nThe inverse of {@link toChicagoStartOfDay} — use to populate\n`<input type=\"date\">` from a canonical Chicago-offset value.\n\n```ts\ntoChicagoYmd(\"2025-02-14T00:00:00.000-06:00\"); // \"2025-02-14\"\ntoChicagoYmd(\"2025-02-14T03:00:00.000Z\");      // \"2025-02-13\" (Chicago day)\ntoChicagoYmd(\"2025-07-04T00:00:00.000-05:00\"); // \"2025-07-04\" (CDT)\n```",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/icons",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "CFS_LOGO_SVG",
+          "declaration": "const CFS_LOGO_SVG: string;",
+          "doc": "The CFS logo, inline.\n\nInjected into every render as the scalar `it.logo` — templates keep calling\nit that way, and this is not reachable as `it.icons.*` (the template-helper\ngenerator catalogues functions, not constants). It lives here so the render\npipeline and the `templates` repo's local preview harness read **one**\nstring: they previously held separate copies, and the preview's copy had a\nsingle path where the real logo has five (measured 2026-08-13), so local\npreview had been rendering a visibly different logo from production with\nnothing to catch it."
+        },
+        {
+          "kind": "interface",
+          "name": "IconOptions",
+          "declaration": "interface IconOptions {\n  size?: number | string;\n  stroke?: number;\n  color?: string;\n  class?: string;\n  title?: string;\n}",
+          "doc": "Options for {@link svg}."
+        },
+        {
+          "kind": "function",
+          "name": "has",
+          "signature": "has(name: string): boolean",
+          "doc": "Whether `name` is a known icon (following aliases).\n\nFor data-driven names, where {@link svg} would throw — e.g. an icon chosen by\na document field: `<% if (it.icons.has(n)) { %><%~ it.icons.svg(n) %><% } %>`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "svg",
+          "signature": "svg(name: string, _: unknown): string",
+          "doc": "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.\n\nThrows on an unknown name, listing near matches. That is deliberate: a\nsilently-blank icon is invisible in a PDF and would ship, whereas a render\nerror is caught by the draft render gate and the golden gate before it can.\nFor a name that comes from document data rather than the template author, gate\nit with {@link has} first.",
           "paramTags": [],
           "returnsTag": null
         }

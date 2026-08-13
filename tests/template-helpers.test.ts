@@ -17,6 +17,7 @@ import * as bookingUtils from "../src/utils/bookings.ts";
 import * as cardUtils from "../src/utils/cards.ts";
 import * as contactNameUtils from "../src/utils/contact-name.ts";
 import * as dateUtils from "../src/utils/dates.ts";
+import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as locationUtils from "../src/utils/locations.ts";
 import * as moneyUtils from "../src/utils/money.ts";
@@ -37,7 +38,7 @@ import {
 import { TEMPLATE_HELPER_DENYLIST } from "../scripts/template-helper-denylist.ts";
 
 /** Every `./utils/*` entrypoint, keyed by the namespace the generator emits. */
-// ⚠️ **All FIFTEEN injectable namespaces, not the eleven this held before.**
+// ⚠️ **All SIXTEEN injectable namespaces, not the eleven this held before.**
 // `allocation`, `availability`, `movements` and `order-lines` emit zero helpers
 // (every export is denylisted), and their absence here meant the drift guard
 // below skipped them entirely — a new export in any of the four was neither
@@ -50,6 +51,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   cards: cardUtils,
   "contact-name": contactNameUtils,
   dates: dateUtils,
+  icons: iconUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,
@@ -265,22 +267,26 @@ Deno.test("every emitted entry carries a description and a return type", () => {
 
 Deno.test("availableUtilNamespaces resolves the union of source + target", () => {
   // The live quote template.
-  assertEquals(availableUtilNamespaces(["orders"], ["quotes"]), ["dates", "money", "orders"]);
+  assertEquals(availableUtilNamespaces(["orders"], ["quotes"]), ["dates", "money", "icons", "orders"]);
   // packing_lists contributes no namespace.
-  assertEquals(availableUtilNamespaces(["orders"], ["packing_lists"]), ["dates", "money", "orders"]);
+  assertEquals(availableUtilNamespaces(["orders"], ["packing_lists"]), ["dates", "money", "icons", "orders"]);
   // The only combination where the target arm widens the union.
-  assertEquals(availableUtilNamespaces(["orders"], ["invoices"]), ["dates", "money", "orders", "invoices"]);
+  assertEquals(
+    availableUtilNamespaces(["orders"], ["invoices"]),
+    ["dates", "money", "icons", "orders", "invoices"],
+  );
   // Source and target agreeing must not duplicate.
-  assertEquals(availableUtilNamespaces(["invoices"], ["invoices"]), ["dates", "money", "invoices"]);
-  // Always-on survives an empty collection set — and `money` is always-on
-  // because every document a template renders carries money.
-  assertEquals(availableUtilNamespaces([], []), ["dates", "money"]);
+  assertEquals(availableUtilNamespaces(["invoices"], ["invoices"]), ["dates", "money", "icons", "invoices"]);
+  // Always-on survives an empty collection set — `money` because every document
+  // a template renders carries money, `icons` because a glyph is not a property
+  // of the source collection (and a footer partial can have no other kind).
+  assertEquals(availableUtilNamespaces([], []), ["dates", "money", "icons"]);
 });
 
 Deno.test("availableUtilNamespaces takes lists (forward-compatible with multi-collection)", () => {
   assertEquals(
     availableUtilNamespaces(["orders", "invoices"], ["quotes", "packing_lists"]),
-    ["dates", "money", "orders", "invoices"],
+    ["dates", "money", "icons", "orders", "invoices"],
   );
 });
 

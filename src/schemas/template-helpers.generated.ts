@@ -58,6 +58,10 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "toChicagoStartOfDay", expr: "it.dates.toChicagoStartOfDay(input)", desc: "Canonicalize to Chicago local midnight for the calendar date containing the input instant. Use for fields that semantically represent a date (invoice.date, invoice.due_date, payments[].date). Idempotent.", returns: "string" },
     { name: "toChicagoYmd", expr: "it.dates.toChicagoYmd(input)", desc: "Format an ISO datetime as the Chicago calendar date in `YYYY-MM-DD` form. The inverse of {@link toChicagoStartOfDay} — use to populate `<input type=\"date\">` from a canonical Chicago-offset value.", returns: "string" },
   ],
+  "icons": [
+    { name: "has", expr: "it.icons.has(name)", desc: "Whether `name` is a known icon (following aliases).", returns: "boolean" },
+    { name: "svg", expr: "it.icons.svg(name, arg2)", desc: "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.", returns: "string" },
+  ],
   "invoices": [
     { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.", returns: "OrderDocDestinationItemType" },
     { name: "calculateInvoiceTotals", expr: "it.invoices.calculateInvoiceTotals(items, taxes, settlements)", desc: "Calculate aggregated pricing totals for an invoice.", returns: "InvoiceTotals" },

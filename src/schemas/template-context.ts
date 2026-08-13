@@ -59,8 +59,15 @@ export const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, s
  * `it.money.formatCents(it.money.toCents(x))` — worse than what it replaced.
  * Documents are cents-denominated now, `it.money.formatCents(doc.total_cents)`
  * is the natural form, and the trade flipped exactly as predicted.
+ *
+ * `icons` is always on for the same reason `money` is — a glyph beside a phone
+ * number or a delivery block is not a property of the source collection. It also
+ * has to be always-on to be *usable*: header and footer partials render in an
+ * isolated Chromium frame that loads no external resources, so inline SVG from a
+ * util is the only icon a partial can have, and partials are shared across
+ * collections.
  */
-export const ALWAYS_ON_UTIL_NAMESPACES: readonly string[] = ["dates", "money"];
+export const ALWAYS_ON_UTIL_NAMESPACES: readonly string[] = ["dates", "money", "icons"];
 
 /**
  * Third-party libraries injected as `it.*` globals for every template
