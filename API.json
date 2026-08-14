@@ -1731,7 +1731,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n  uid_delivery?: string;\n  uid_collection?: string;\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -2439,7 +2439,7 @@
         {
           "kind": "interface",
           "name": "OrderItemDestinationType",
-          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  uid_delivery?: string;\n  uid_collection?: string;\n}",
+          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -6248,7 +6248,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n  uid_delivery?: string;\n  uid_collection?: string;\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -6798,7 +6798,7 @@
         {
           "kind": "interface",
           "name": "OrderItemDestinationType",
-          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  uid_delivery?: string;\n  uid_collection?: string;\n}",
+          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
           "doc": "A destination divider as a client sends it."
         },
         {

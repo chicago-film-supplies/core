@@ -714,8 +714,8 @@ export interface InvoiceItemInputDestinationType {
   name?: string;
   description?: string;
   path?: string[];
-  uid_delivery?: string;
-  uid_collection?: string;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
 }
 
 // `z.strictObject`, unlike the line arm above — see the note on
@@ -729,8 +729,20 @@ const InvoiceItemInputDestinationInner = z.strictObject({
   name: z.string().meta({ pii: "none" }).optional(),
   description: z.string().meta({ pii: "none" }).optional(),
   path: z.array(ItemUid).optional(),
-  uid_delivery: FirestoreId.optional(),
-  uid_collection: FirestoreId.optional(),
+  // `.nullable()`, not merely `.optional()` (api-cloudrun#492). The divider
+  // BUILDER writes `?? null`, so the stored shape carries an explicit `null`
+  // whenever the client omitted the id — and the manager drafts an invoice from
+  // an order by projecting those stored dividers straight back through this
+  // schema. Accepting only `undefined` therefore 400s on a payload the system
+  // itself produced: `expected string, received null`, making an order created
+  // through POST /orders un-invoiceable through the manager's own draft flow.
+  //
+  // Widening what the boundary ACCEPTS, and nothing downstream: every reader on
+  // a stored divider already treats `null` and absent identically, and the
+  // builder already writes `?? null`. It cannot break an older client either —
+  // a widening never rejects what was previously valid.
+  uid_delivery: FirestoreId.nullable().optional(),
+  uid_collection: FirestoreId.nullable().optional(),
 });
 
 /** Zod schema for a destination divider (invoice input). */

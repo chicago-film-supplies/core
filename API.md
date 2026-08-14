@@ -3546,8 +3546,8 @@ interface InvoiceItemInputDestinationType {
   name?: string;
   description?: string;
   path?: string[];
-  uid_delivery?: string;
-  uid_collection?: string;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
 }
 ```
 
@@ -5041,8 +5041,8 @@ interface OrderItemDestinationType {
   name?: string;
   description?: string;
   path: string[];
-  uid_delivery?: string;
-  uid_collection?: string;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
 }
 ```
 
@@ -12009,8 +12009,8 @@ interface InvoiceItemInputDestinationType {
   name?: string;
   description?: string;
   path?: string[];
-  uid_delivery?: string;
-  uid_collection?: string;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
 }
 ```
 
@@ -13117,8 +13117,8 @@ interface OrderItemDestinationType {
   name?: string;
   description?: string;
   path: string[];
-  uid_delivery?: string;
-  uid_collection?: string;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
 }
 ```
 
