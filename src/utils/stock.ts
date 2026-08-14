@@ -34,20 +34,36 @@
  * double-subtract a sale's units. Both directions are bugs. Keep them separate,
  * keep them named, and keep this table.
  *
- * ## The `sale` / `rental` axis is NOT settled — do not "align" it here
+ * ## The `sale` / `rental` axis reads like a disagreement and is NOT one
  *
- * {@link heldByBooking} keys on `type === "sale"`. Three other live sites key on
- * `type === "rental"` instead — `isBookingClosed` (`utils/bookings.ts`), the
- * order propagation spec (`schemas/propagation/orders.ts`) and manager's
- * fulfillment stage machine. Those agree with each other and disagree with this
- * one about `service`/`surcharge` bookings.
+ * {@link heldByBooking} keys on `type === "sale"` while `isBookingClosed`
+ * (`utils/bookings.ts`) keys on `type === "rental"`, so on paper they differ
+ * about `service`/`surcharge`. **Only `rental` and `sale` bookings can reach
+ * this function**, so the two agree everywhere it is evaluated.
  *
- * It is latent because a service or surcharge product has `stock_method: "none"`
- * → no inventory ledger → no stock summary, so such a booking never reaches
- * {@link heldByBooking} at all. **It goes live the day someone gives a service
- * product a real stock method**, silently. Deciding it is a product question
- * ("do a service booking's checked-out units hold stock?"), not a refactor, so
- * it is recorded here rather than resolved.
+ * Measured 2026-08-13, both environments, and worth keeping because the naive
+ * version of this claim is false: 439 `service` bookings DO exist (over 15
+ * products), so "services have no bookings" is not what makes this safe. What
+ * makes it safe is that **0 of those 15 products carry an inventory ledger** — a
+ * service product is `stock_method: "none"`, so it has no ledger, therefore no
+ * stock summary, therefore nothing to evaluate here. Bookings exist for
+ * `rental` and `sale`; only those with a stock method hold stock.
+ *
+ * So do NOT "align" the two predicates. They are answering different questions
+ * about the only two types that arrive, and each is right about its own.
+ *
+ * ## What IS open: a sale can come back
+ *
+ * `sale` being terminal on `out` is the general rule, not an absolute one — a
+ * sold item can be returned, for a refund or without one, and the transaction
+ * system already models that (`sale_return`, alongside `check_in`). When it
+ * happens the units re-enter `quantity_held` through that transaction and this
+ * function needs no special case: a returned unit leaves `out` for `returned`,
+ * and neither counts here.
+ *
+ * The gap is downstream, not here: **0 sale bookings in either environment have
+ * `returned > 0`**, i.e. the path has never been exercised end to end, and
+ * fulfillment support for it is incomplete (api-cloudrun#513).
  */
 import type {
   BookingBreakdown,
