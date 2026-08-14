@@ -18,6 +18,11 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 /** Msg literals this archetype absorbs. */
 export const DOMAIN_EVENT_MSGS = [
   "afterOrderWrite_order_not_found",
+  // The order fan-out's change guard declined a write that touched only
+  // excluded fields (api-cloudrun#407). Sibling of the product one below, and
+  // the same `debug` level: it is a development aid, suppressed in prod by
+  // `LOG_LEVEL=info`. `{ order_uid, reason }`.
+  "after_order_write_no_changes",
   "after_product_write_no_changes",
   "after_product_write_not_found",
   "after_product_write_skip_create",

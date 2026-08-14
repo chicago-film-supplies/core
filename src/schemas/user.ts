@@ -35,7 +35,7 @@ export interface FirestoreDisplayPrefs {
   sort: DisplaySort;
 }
 
-const FirestoreDisplayPrefsSchema: z.ZodType<FirestoreDisplayPrefs> = z.strictObject({
+export const FirestoreDisplayPrefsSchema: z.ZodType<FirestoreDisplayPrefs> = z.strictObject({
   columns: z.array(z.string()),
   filters: z.record(z.string(), z.array(z.union([z.string(), z.boolean()]))),
   sort: DisplaySortSchema,
@@ -58,7 +58,7 @@ export interface TypesenseDisplayPrefs {
   sort: DisplaySort;
 }
 
-const TypesenseDisplayPrefsSchema: z.ZodType<TypesenseDisplayPrefs> = z.strictObject({
+export const TypesenseDisplayPrefsSchema: z.ZodType<TypesenseDisplayPrefs> = z.strictObject({
   columns: z.array(z.string()),
   filters: z.record(z.string(), z.array(z.union([z.string(), z.boolean()]))),
   sort: DisplaySortSchema,

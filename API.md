@@ -2762,6 +2762,12 @@ interface FirestoreDisplayPrefs {
 }
 ```
 
+### `FirestoreDisplayPrefsSchema`
+
+```ts
+const FirestoreDisplayPrefsSchema: z.ZodType<FirestoreDisplayPrefs>;
+```
+
 ### `FirestoreFieldValue`
 
 Structural interface for Firestore FieldValue (write-time sentinel).
@@ -7391,6 +7397,12 @@ interface TypesenseDisplayPrefs {
   filters: Record<string, parenthesized[]>;
   sort: DisplaySort;
 }
+```
+
+### `TypesenseDisplayPrefsSchema`
+
+```ts
+const TypesenseDisplayPrefsSchema: z.ZodType<TypesenseDisplayPrefs>;
 ```
 
 ### `UidNameRef`
@@ -15519,6 +15531,12 @@ interface FirestoreDisplayPrefs {
 }
 ```
 
+### `FirestoreDisplayPrefsSchema`
+
+```ts
+const FirestoreDisplayPrefsSchema: z.ZodType<FirestoreDisplayPrefs>;
+```
+
 ### `TypesenseDisplayPrefs`
 
 User display preferences for a Typesense-backed collection view.
@@ -15537,6 +15555,12 @@ interface TypesenseDisplayPrefs {
   filters: Record<string, parenthesized[]>;
   sort: DisplaySort;
 }
+```
+
+### `TypesenseDisplayPrefsSchema`
+
+```ts
+const TypesenseDisplayPrefsSchema: z.ZodType<TypesenseDisplayPrefs>;
 ```
 
 ### `UpdateUserInput`
@@ -17465,7 +17489,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override"[];
 ```
 
 ### `DmarcAggregateLogRecord`

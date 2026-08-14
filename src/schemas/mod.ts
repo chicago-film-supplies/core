@@ -32,6 +32,13 @@ export {
   UserSchema,
   CreateUserInput,
   UpdateUserInput,
+  // Exported so a consumer can DERIVE prefs fixtures from the schema rather
+  // than hand-writing them (api-cloudrun#472). Hand-written prefs scaffolding
+  // drifts on every schema change, and both objects are `z.strictObject`, so
+  // the drift surfaces as an unrelated test failure rather than as a message
+  // about prefs.
+  FirestoreDisplayPrefsSchema,
+  TypesenseDisplayPrefsSchema,
   type User,
   type DisplaySort,
   type FirestoreDisplayPrefs,

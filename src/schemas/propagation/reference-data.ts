@@ -242,6 +242,69 @@ export const rematerializeHolidaySnapshotRules: CollectionRule[] = [
   },
 ];
 
+/**
+ * The materialization fan-out — a definition produces its dated instances.
+ *
+ * Declared for api-cloudrun#503B. It was the one holiday edge with **no rule at
+ * all**, and it is the edge that decides whether an order is charged for a day:
+ * `getDuration` reads the materialized set, so a definition whose instances were
+ * never written silently bills a holiday as a working day. A transaction cannot
+ * declare a step it fires until the step exists, so this had to be declared
+ * before `materialize-holiday-dates` could be.
+ *
+ * ⚠️ **There is NO corpus detector for this edge, and that is why the
+ * `enforced_by` list is all `test`.** `audit-holidays.ts` checks three things —
+ * the snapshot equals the `holiday-dates` set, the horizon is not stale, and past
+ * instances survive — and **none of them re-derives instances from the
+ * definitions**. So a definition that materialized the wrong dates, or none,
+ * passes that audit cleanly: assertion 1 compares the snapshot against whatever
+ * `holiday-dates` happens to contain, which is a fixed point over the same
+ * possibly-wrong set. Pairing this with a re-derivation is real outstanding work,
+ * not a formality — the repo's own rule is that a fixed-point check needs an
+ * independent property beside it.
+ */
+export const materializeHolidayDateRules: CollectionRule[] = [
+  {
+    id: "holiday-definition:materialize-dates",
+    source: "holiday-definitions",
+    target: "holiday-dates",
+    mode: "fan-out",
+    invariant:
+      "Every active holiday-definition materializes one holiday-dates instance per occurrence across the rolling forward window (current year + 3); a soft-deleted or edited definition refreshes only FUTURE instances and leaves past ones untouched, because a past instance is what a historical order was priced against",
+    enforced_by: [
+      {
+        kind: "test",
+        ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:62",
+        clause: "create — a fixed definition writes its forward-window instances",
+        gates: true,
+      },
+      {
+        kind: "test",
+        ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:115",
+        clause: "update — a version-checked edit REGENERATES future instances onto the new date",
+        gates: true,
+      },
+      {
+        kind: "test",
+        ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:143",
+        clause:
+          "immutable past — regenerate keeps past instances and refreshes only future ones. NOT covered corpus-wide: see this block's note.",
+        gates: true,
+      },
+    ],
+    trigger:
+      "holiday definition create/update/soft-delete/regenerate, plus the monthly extend-holiday-horizon cron which advances the window without touching existing instances",
+    fields: [
+      {
+        source: ["rule", "month", "day", "weekday", "occurrence", "active"],
+        target: ["date", "uid_definition", "name"],
+        transform:
+          "expand the fixed/variable rule across the forward window into one dated instance per occurrence; an inactive definition materializes none",
+      },
+    ],
+  },
+];
+
 export const recomputeHolidayDraftOrderRules: CollectionRule[] = [
   {
     id: "holiday-change:recompute-draft-orders",

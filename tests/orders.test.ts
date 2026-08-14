@@ -788,7 +788,7 @@ Deno.test("calculateOrderTotals computes all totals", () => {
   assertEquals(result.total_cents, 14923); // 140 + 9.23
 });
 
-Deno.test("calculateOrderTotals two-pass with transaction fee", () => {
+Deno.test("calculateOrderTotals two-pass with transaction fee — basis is the CAPTURED amount", () => {
   const items = [
     makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
     makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" }),
@@ -796,15 +796,40 @@ Deno.test("calculateOrderTotals two-pass with transaction fee", () => {
   const result = calculateOrderTotals(items, TAXES);
   // subtotal = 100, subtotal_discounted = 100
   // tax = 100 * 0.15 = 15
-  // fee = 100 * 0.03 = 3
+  // fee = (100 + 15) * 0.03 = 3.45 — a card processor charges on what it
+  // captures, and the customer pays the tax (api-cloudrun#401).
   assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.subtotal_discounted_cents, 10000);
   assertEquals(result.taxes[0].amount_cents, 1500);
-  assertEquals(result.transaction_fees[0].amount_cents, 300);
-  assertEquals(result.total_cents, 11800); // 100 + 15 + 3
+  assertEquals(result.transaction_fees[0].amount_cents, 345);
+  assertEquals(result.total_cents, 11845); // 100 + 15 + 3.45
 });
 
-Deno.test("calculateOrderTotals fee based on subtotal_discounted", () => {
+Deno.test("calculateOrderTotals transaction fee is not itself taxed — no circular basis", () => {
+  // The guard on the basis change: a fee is not an `isPreTaxItem`, so it never
+  // reaches `getTaxTotals` and the tax total is fully determined before the fee
+  // pass. If a fee ever became taxable this assertion breaks, which is the
+  // intended signal — the expression would then be genuinely circular and needs
+  // a different shape rather than a bigger one.
+  const withFee = calculateOrderTotals([
+    makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
+    makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" }),
+  ], TAXES);
+  const withoutFee = calculateOrderTotals([
+    makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
+  ], TAXES);
+
+  assertEquals(
+    withFee.taxes[0].amount_cents,
+    withoutFee.taxes[0].amount_cents,
+    "adding a transaction fee changed the tax — the fee is being taxed, and the basis is now circular",
+  );
+});
+
+Deno.test("calculateOrderTotals fee basis nets the DISCOUNT and includes the tax", () => {
+  // Renamed from "fee based on subtotal_discounted", which named the old policy
+  // in its title — the discount half of that name still holds, the pre-tax half
+  // does not (api-cloudrun#401).
   const items = [
     makeItem({}, {
       discount: { rate: 20, type: "percent", amount_cents: 0 },
@@ -815,13 +840,13 @@ Deno.test("calculateOrderTotals fee based on subtotal_discounted", () => {
   const result = calculateOrderTotals(items, TAXES);
   // subtotal = 100, subtotal_discounted = 80
   // tax = 80 * 0.15 = 12
-  // fee = 80 * 0.03 = 2.40
+  // fee = (80 + 12) * 0.03 = 2.76
   assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.subtotal_discounted_cents, 8000);
   assertEquals(result.discount_amount_cents, 2000);
   assertEquals(result.taxes[0].amount_cents, 1200);
-  assertEquals(result.transaction_fees[0].amount_cents, 240);
-  assertEquals(result.total_cents, 9440); // 80 + 12 + 2.40
+  assertEquals(result.transaction_fees[0].amount_cents, 276);
+  assertEquals(result.total_cents, 9476); // 80 + 12 + 2.76
 });
 
 Deno.test("calculateOrderTotals flat transaction fee", () => {

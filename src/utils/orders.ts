@@ -1165,9 +1165,28 @@ export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTota
     taxSumCents += entry.amount_cents;
   }
 
-  // Pass 2: compute transaction fee amounts from the pre-tax subtotal
+  // Pass 2: cost the transaction fees, against the CAPTURED amount.
+  //
+  // The basis is `subtotal_discounted + tax`, not the pre-tax subtotal, and that
+  // is a decided product question rather than an implementation detail
+  // (api-cloudrun#401, decided 2026-08-14): a card processor charges on the
+  // amount actually captured, and the customer pays tax. Costing the fee off the
+  // pre-tax figure under-charges by the fee rate times the tax.
+  //
+  // ⚠️ **No circularity, and it is worth stating because the expression looks
+  // like there could be.** A `transaction_fee` is not an `isPreTaxItem`, so
+  // `getTaxTotals` above never sees one: `taxSumCents` is fully determined
+  // before this line, and the fee it feeds is itself untaxed (Card Fee and the
+  // Distance/Holiday/Rush surcharges are all `tax_class: none` by policy). A
+  // future decision to TAX a fee would make this genuinely circular and needs a
+  // different shape, not a bigger expression.
+  //
+  // Inert on today's corpus: 0 prod invoices carry a non-empty
+  // `totals.transaction_fees`, because the Card Fee is still a CRMS-authored
+  // `sale` line living inside `subtotal_discounted_cents`. This lands ahead of
+  // that migration so the flip is a data change rather than a code change.
   const transaction_fees = getTransactionFeeTotals(
-    costTransactionFees(items, subtotalDiscountedCents),
+    costTransactionFees(items, subtotalDiscountedCents + taxSumCents),
   );
 
   let feeSumCents = 0;

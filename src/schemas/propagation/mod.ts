@@ -155,6 +155,7 @@ export {
   updateTrackingCategoryRules,
   updateLocationTypeRules,
   updateLocationRules,
+  materializeHolidayDateRules,
   rematerializeHolidaySnapshotRules,
   recomputeHolidayDraftOrderRules,
   recomputeHolidayDraftInvoiceRules,
@@ -307,7 +308,7 @@ import {
   voidCreditNoteTransaction,
 } from "./credit-notes.ts";
 import { updateTaxRules } from "./taxes.ts";
-import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
+import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, materializeHolidayDateRules, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
 import { createStoreRules, updateStoreRules } from "./stores.ts";
 import {
   createStoreTransferRules,
@@ -443,6 +444,7 @@ export const rules: CollectionRule[] = [
   ...createLocationRules,
   ...updateLocationTransactionalRules,
   ...updateLocationRules,
+  ...materializeHolidayDateRules,
   ...rematerializeHolidaySnapshotRules,
   ...recomputeHolidayDraftOrderRules,
   ...recomputeHolidayDraftInvoiceRules,
