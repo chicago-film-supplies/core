@@ -11,7 +11,7 @@
 import { assert, assertEquals, assertExists, assertNotEquals } from "@std/assert";
 import { z } from "zod";
 import { TEMPLATE_SOURCE_COLLECTIONS, TEMPLATE_TARGET_COLLECTIONS } from "../src/schemas/template.ts";
-import { schemas } from "../src/schemas/mod.ts";
+import { isCollectionName, schemaFor } from "../src/schemas/mod.ts";
 import { templateSchemaFields } from "../src/schemas/template-schema-fields.generated.ts";
 import type { SchemaField } from "../src/schemas/template-schema-fields.generated.ts";
 import { walkSchema } from "../scripts/schema-walk.ts";
@@ -30,7 +30,7 @@ function fieldsFor(collection: string): SchemaField[] {
 /** Collections we expect to be present: every source, plus targets with a schema. */
 const PRESENT_COLLECTIONS = [
   ...new Set<string>([...TEMPLATE_SOURCE_COLLECTIONS, ...TEMPLATE_TARGET_COLLECTIONS]),
-].filter((c) => schemas[c]);
+].filter((c) => isCollectionName(c));
 
 // ── Structural tests ────────────────────────────────────────────────
 
@@ -56,8 +56,13 @@ Deno.test("packing_lists is absent — it has no walkable schema", () => {
     undefined,
     "packing_lists has no schema in the `schemas` map, so it must not be emitted",
   );
-  // Guard the premise: if a schema is ever added, this test should force a re-think.
-  assertEquals(schemas["packing_lists"], undefined);
+  // Guard the premise: if a schema is ever added, this test should force a
+  // re-think. ⚠️ Phrased as `isCollectionName(...) === false` rather than
+  // `schemas["packing_lists"] === undefined`, because once `schemas` is the
+  // precise mapped type the latter is a COMPILE error on an unknown key — a
+  // stronger guarantee, but one that would delete this runtime premise-guard
+  // instead of keeping it. Both now hold.
+  assertEquals(isCollectionName("packing_lists"), false);
 });
 
 Deno.test("no _fs suffix fields appear", () => {
@@ -127,7 +132,10 @@ Deno.test("nullable fields are labelled nullable", () => {
 
 Deno.test("no pii:\"redact\" path leaks into any collection (incl. targets)", () => {
   for (const collection of PRESENT_COLLECTIONS) {
-    const schema = schemas[collection];
+    // `PRESENT_COLLECTIONS` is filtered by `isCollectionName` above, so this
+    // cannot miss — but the filter erases the narrowing, hence the re-check.
+    if (!isCollectionName(collection)) continue;
+    const schema = schemaFor(collection);
     const redactPaths = collectRedactPaths(schema);
     const emitted = new Set(fieldsFor(collection).map((f) => f.path));
 

@@ -14,7 +14,7 @@
  *   protection. See `api-cloudrun/src/lib/uploadcareReferenceMap.ts`.
  */
 import type { z } from "zod";
-import { schemas } from "../mod.ts";
+import { isCollectionName, schemaFor } from "../mod.ts";
 import { collectLeafPaths } from "../zod-walk.ts";
 import { UPLOADCARE_REF_META } from "./ref.ts";
 
@@ -51,14 +51,22 @@ export const UPLOADCARE_COLLECTION_KEYS = [
 /** A key of {@link UPLOADCARE_COLLECTION_KEYS}. */
 export type UploadcareCollectionKey = typeof UPLOADCARE_COLLECTION_KEYS[number];
 
-function schemaFor(collection: string): z.ZodType {
-  const schema = schemas[collection];
-  if (!schema) {
+/**
+ * The document schema for an Uploadcare collection key, throwing when the key
+ * names no registered collection.
+ *
+ * ⚠️ This was a LOCAL `schemaFor` shadowing the registry's exported one of the
+ * same name, doing the same lookup with its own truthiness test. It now narrows
+ * and delegates, so "string → known collection" has one implementation in this
+ * package rather than two that can disagree (api-cloudrun#444).
+ */
+function uploadcareSchemaFor(collection: string): z.ZodType {
+  if (!isCollectionName(collection)) {
     throw new Error(
       `UPLOADCARE_COLLECTION_KEYS names "${collection}", which is not a key of the \`schemas\` record`,
     );
   }
-  return schema;
+  return schemaFor(collection);
 }
 
 /**
@@ -71,7 +79,7 @@ function schemaFor(collection: string): z.ZodType {
 export function uploadcareRefPaths(): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const collection of UPLOADCARE_COLLECTION_KEYS) {
-    const { leaves, unhandled } = collectLeafPaths(schemaFor(collection));
+    const { leaves, unhandled } = collectLeafPaths(uploadcareSchemaFor(collection));
     if (unhandled.length > 0) {
       throw new Error(
         `collectLeafPaths could not interpret ${unhandled.length} node(s) in "${collection}": ` +

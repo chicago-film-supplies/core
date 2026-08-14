@@ -35,6 +35,7 @@ import {
   firestoreDisplayDefaults,
   getFirestoreColumns,
   getTypesenseColumns,
+  schemaFor,
   schemas,
   TYPESENSE_ROLLUP_COLUMNS,
 } from "../src/schemas/mod.ts";
@@ -45,7 +46,10 @@ import { collectDisplayColumns, collectLeafPaths, enumValues } from "../src/sche
 /** One `[key[], schema]` per unique schema — the record aliases most of them. */
 function uniqueSchemas(): Array<[string[], z.ZodType]> {
   const map = new Map<z.ZodType, string[]>();
-  for (const [key, schema] of Object.entries(schemas)) {
+  // `Object.entries` on the now-precise `schemas` widens the value side, so it
+  // is named here rather than left to read as `unknown` at three use sites.
+  const entries = Object.entries(schemas) as Array<[string, z.ZodType]>;
+  for (const [key, schema] of entries) {
     const hit = map.get(schema);
     if (hit) hit.push(key);
     else map.set(schema, [key]);
@@ -207,7 +211,7 @@ Deno.test("T10: no rollup shadows a column the schema already declares", () => {
   const shadowed: string[] = [];
   for (const [alias, entries] of Object.entries(TYPESENSE_ROLLUP_COLUMNS)) {
     const config = typesenseSchemas[alias as keyof typeof typesenseSchemas];
-    const schema = config ? schemas[config.firestoreCollection] : undefined;
+    const schema = config ? schemaFor(config.firestoreCollection) : undefined;
     if (!schema) continue;
     const declared = new Set(collectDisplayColumns(schema).columns.map((c) => c.path));
     for (const field of Object.keys(entries)) {

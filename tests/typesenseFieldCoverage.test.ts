@@ -62,7 +62,7 @@ import { z } from "zod";
 
 import { FIRESTORE_TIMESTAMP_META, FirestoreTimestamp } from "../src/schemas/common.ts";
 import { InvoiceSchema } from "../src/schemas/invoice.ts";
-import { schemas } from "../src/schemas/mod.ts";
+import { schemaFor } from "../src/schemas/mod.ts";
 import { typesenseSchemas } from "../src/schemas/typesense/mod.ts";
 import { isStrippedAtIndexTime } from "../src/schemas/typesense/types.ts";
 import type { TypesenseField } from "../src/schemas/typesense/types.ts";
@@ -187,7 +187,8 @@ function unresolvedFields(storage: z.ZodType, fields: TypesenseField[]): string[
 /** The storage schema backing a collection config, or a hard failure. */
 function storageFor(alias: string): z.ZodType {
   const config = typesenseSchemas[alias as keyof typeof typesenseSchemas];
-  const storage = schemas[config.firestoreCollection];
+  // `firestoreCollection` is a `CollectionName` — the lookup cannot miss.
+  const storage = schemaFor(config.firestoreCollection);
   if (!storage) {
     throw new Error(
       `${alias}: no storage schema registered for firestoreCollection ` +

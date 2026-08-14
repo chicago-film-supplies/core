@@ -47,7 +47,7 @@
 import { assertEquals } from "@std/assert";
 import type { z } from "zod";
 
-import { schemas } from "../src/schemas/mod.ts";
+import { schemaFor } from "../src/schemas/mod.ts";
 import { typesenseSchemas } from "../src/schemas/typesense/mod.ts";
 
 /**
@@ -121,7 +121,8 @@ function findGaps(): Gap[] {
   const gaps: Gap[] = [];
 
   for (const [alias, config] of Object.entries(typesenseSchemas)) {
-    const storage = schemas[config.firestoreCollection];
+    // `firestoreCollection` is a `CollectionName` — the lookup cannot miss.
+    const storage = schemaFor(config.firestoreCollection);
     // A config pointed at a collection with no storage schema would make this
     // whole test silently blind for that collection, so it is a hard failure
     // rather than a skip.

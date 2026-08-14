@@ -9288,22 +9288,26 @@ verify locally (see {@link CollectionDocs}).
 
 All document schemas keyed by singular and plural collection names.
 
-⚠️ **Deliberately the LOOSE view of {@link schemasTyped}, not a second table.**
-It is the same object; only the annotation is wider. Every call site that
-reaches this registry does so with a runtime string —
-`schemas[collection]` where `collection` came from a Firestore path, a
-Typesense config or a route param — and there are 21 of them across core,
-api-cloudrun and manager. Narrowing them all is api-cloudrun#444's Slice B and
-a migration in its own right; making THIS precise would have forced that
-migration as a side effect of adding a type.
+⚠️ **PRECISE as of beta.170 — indexing it with a bare `string` is now a
+compile error, and that is the point.** It was `Record<string, z.ZodType>`
+through beta.169 while every consumer still reached it with a runtime string.
+Flipping it earlier would have broken api-cloudrun, manager and templates on
+their next pin bump, so the migration went first and the flip went last:
+every one of those call sites now narrows through {@link isCollectionName}
+and reads {@link schemaFor}, and each repo was verified clean against this
+exact annotation BEFORE it landed here (api by a `file://` pin across all 26
+subpaths, manager by patching its installed declaration, templates by holding
+zero references at all).
 
-So the precision is additive: `schemasTyped` is checked against
-{@link CollectionDocs} by the compiler, `schemas` keeps working exactly as it
-did, and a call site that knows its collection statically can reach for
-{@link schemaFor} instead.
+What the precision buys is not the lookup type — it is that a **key nothing
+declares** stops compiling. `schemas["packing_lsits"]` was `undefined` at
+runtime and silently well-typed; it is now `TS7053`/`TS2339` at the call site.
+
+The object is unchanged — this is the same value as {@link schemasTyped},
+exported once. There is no second table to drift.
 
 ```ts
-const schemas: Record<string, z.ZodType>;
+const schemas: mapped;
 ```
 
 ### `settlementContract(type: string): SettlementContract | undefined`
