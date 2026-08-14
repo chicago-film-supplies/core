@@ -161,7 +161,7 @@ export const updateLocationRules: CollectionRule[] = [
       { source: ["name"], target: ["store_breakdown", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
     ],
   },
-  // No `update-location:name-to-stock-summaries` rule, deliberately. Stock
+  // No `update-location:name-to-stock` rule, deliberately. Stock
   // summaries used to embed `store_breakdown` (location names and all), so a
   // rename had to fan out across every summary of every product stored at that
   // location — a BulkWriter pass whose only job was to fix a denormalized string.

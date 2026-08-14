@@ -15,7 +15,7 @@
  * `update-store-transfer:transactions-to-locations` existed to describe (#284,
  * #172) has nothing left to describe.
  *
- * **A transfer deliberately has NO stock-summary rule, and that is the point.**
+ * **A transfer deliberately has NO stock rule, and that is the point.**
  * Its lines net to exactly zero on `quantity_held` — the same units leave and
  * arrive — and the summary embeds `quantity_held` and `type` and nothing about
  * placement, so a transfer cannot change any availability answer. Rebuilding the
@@ -130,7 +130,7 @@ export const createStoreTransferRules: CollectionRule[] = [
 export const createStoreTransferTransaction: TransactionDefinition = {
   id: "create-store-transfer",
   description:
-    "Moves stock between stores/locations as a single `transfer` movement whose lines pair each source location with a destination, applying them to the ledger (net zero on quantity_held) and rewriting the affected location documents. Deliberately touches neither stock-summaries (a transfer changes no availability answer) nor the cost basis (it has no cost object to mis-gate).",
+    "Moves stock between stores/locations as a single `transfer` movement whose lines pair each source location with a destination, applying them to the ledger (net zero on quantity_held) and rewriting the affected location documents. Deliberately touches neither `stock` (a transfer changes no availability answer) nor the cost basis (it has no cost object to mis-gate).",
   steps: [
     "create-store-transfer:transaction-to-ledger",
     "create-store-transfer:transaction-to-locations",

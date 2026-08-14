@@ -11,7 +11,7 @@
  *
  * Pure and db-free — the input is a Typesense `ProductDocument` the caller
  * already holds, and the output is a plain array. It lives here for the same
- * reason `@cfs/core/utils/availability` does: it is shared verbatim so two
+ * reason `@cfs/core/utils/stock` does: it is shared verbatim so two
  * consumers **cannot disagree**. There are three — the manager's staging
  * popover, the manager's order/invoice stores, and the public webapp's order
  * drafts — across two repos. A second copy of the component expansion is a

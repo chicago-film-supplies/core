@@ -24,7 +24,7 @@
  * **co-written projection** of this log, produced only by
  * `recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —
  * an event log plus a client-ready projection for snapshot listeners — arriving
- * early in one domain, and it is `transactions` + `stock-summaries` for money.
+ * early in one domain, and it is `transactions` + `stock` for money.
  *
  * @module
  */

@@ -25,7 +25,14 @@ export interface BookingDestinationRef {
   address: AddressType | null;
 }
 
-/** Per-status quantity breakdown for a booking — also embedded in stock-summary entries. */
+/**
+ * Per-status quantity breakdown for a booking.
+ *
+ * ⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s
+ * entries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this
+ * breakdown down to a single `quantity` — so the breakdown reaches availability
+ * as a number and never as a structure.
+ */
 export interface BookingBreakdown {
   damaged: number;
   lost: number;

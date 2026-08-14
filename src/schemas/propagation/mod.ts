@@ -173,7 +173,7 @@ export {
 
 // ── Stock-summary rule factories ─────────────────────────────────────
 
-export { seedStockSummaryRules, stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
+export { seedStockRules, stockRules, stockSteps } from "./stock.ts";
 
 // ── Credit-note rules ────────────────────────────────────────────────
 

@@ -12,8 +12,9 @@
  * The twin existed because {@link Stock}'s predecessor carried a booking's uid,
  * number and full breakdown, none of which an anonymous reader may see — so a
  * second document held the same intervals with the identifying fields stripped,
- * and `audit-stock-summaries.ts` grew an invariant asserting the two agreed
- * byte-for-byte.
+ * and its audit grew an invariant asserting the two agreed byte-for-byte.
+ * (That audit, `audit-stock-summaries.ts`, is deleted with the pair;
+ * `scripts/audit-stock.ts` is the one that checks this document.)
  *
  * Pre-reducing removes the reason for the split rather than automating it: an
  * entry is now `{ start, end, quantity, kind }` and there is nothing left to

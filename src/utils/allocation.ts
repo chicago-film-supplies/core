@@ -17,7 +17,7 @@
  * `allocateBookingWithNetting`) stays in api-cloudrun `lib/stockSummary.ts`.
  *
  * Note this is a *different* question from availability. Availability asks "how
- * many units are free over this window?" and lives in `@cfs/core/utils/availability`;
+ * many units are free over this window?" and lives in `@cfs/core/utils/stock`;
  * allocation asks "which shelf do I pick them off?" and lives here. Allocation
  * still needs a date window — two bookings that don't overlap in time can share a
  * unit — which is why `prefetchReservingBookings` keeps its range predicates even
@@ -35,10 +35,11 @@ import { bookingHoldsStock, intervalsOverlap } from "./stock.ts";
 type BookingBreakdown = Booking["breakdown"];
 
 // The deterministic-id builder and the public-summary projection both lived
-// here. Neither survives the interval model: a summary's doc id is now simply
-// its product's uid (nothing to build), and the public projection is
-// `toPublicStockSummary` in `@cfs/core/utils/availability`, so the API's writer
-// and the browser share one definition of the sanitized shape.
+// here. Neither survives the interval model: the projection's doc id is now
+// simply its product's uid (nothing to build), and there is no public projection
+// left to build either — `stock/{P}`'s entries are pre-reduced and anonymous, so
+// the twin that `toPublicStockSummary` used to produce was deleted outright
+// rather than shared. One document, one security rule.
 
 // ── Booking store allocation ─────────────────────────────────────
 

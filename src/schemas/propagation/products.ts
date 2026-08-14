@@ -4,7 +4,7 @@
  * Traced from: api-cloudrun/src/services/products.ts
  */
 import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
-import { seedStockSummaryRules } from "./stock-summaries.ts";
+import { seedStockRules } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -225,7 +225,7 @@ export const createProductRules: CollectionRule[] = [
     enforced_by: [
       {
         kind: "audit",
-        ref: "api-cloudrun/scripts/audit-stock-summaries.ts:201",
+        ref: "api-cloudrun/scripts/audit-stock.ts:225",
         clause:
           "the whole predicate against the corpus — it imports productHoldsStock itself and reports `product_without_ledger` in both directions, so this covers the invariant rather than a clause of it (exit 1 on any violation)",
         gates: true,
@@ -243,9 +243,9 @@ export const createProductRules: CollectionRule[] = [
       { source: ["stock_method"], target: ["stock_method"] },
     ],
   },
-  ...seedStockSummaryRules(
+  ...seedStockRules(
     "create-product",
-    "A product that gets an inventory ledger gets a stock summary in the same transaction — the two are created and destroyed together. The summary starts empty (no bookings, no OOS) and carries the ledger's type + quantity_held.",
+    "A product that gets an inventory ledger gets a `stock/{P}` projection and a `stock-locks/{P}` token in the same transaction — all three are created and destroyed together. The projection starts empty (no bookings, no OOS) and carries the ledger's quantity_held.",
   ),
   {
     id: "create-product:product-to-webshop",
@@ -284,8 +284,7 @@ export const createProductTransaction: TransactionDefinition = {
     "create-product:product-to-tracking-categories",
     "create-product:product-to-components",
     "create-product:product-to-ledger",
-    "create-product:ledger-to-stock-summary",
-    "create-product:stock-summary-to-public",
+    "create-product:ledger-to-stock",
     "create-product:product-to-webshop",
     "cowrite-thread:products-to-thread",
     "cowrite-thread:thread-to-products",
@@ -466,12 +465,12 @@ export const updateProductRules: CollectionRule[] = [
     source: "products",
     target: "inventory-ledgers",
     mode: "co-write",
-    invariant: "Changing stock_method to 'none' deletes the ledger AND the product's stock summary and its public twin; changing away from 'none' creates all three. The summary exists if and only if the ledger does — see seedStockSummaryRules. The old rule described only the ledger, while the code also deleted summaries (and leaked their public twins).",
+    invariant: "Changing stock_method to 'none' deletes the ledger AND the product's `stock/{P}` projection and its `stock-locks/{P}` token; changing away from 'none' creates all three. The projection and the token exist if and only if the ledger does — see seedStockRules. The old rule described only the ledger, while the code also deleted summaries (and leaked their public twins).",
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [
       { source: ["stock_method"], target: [], transform: "delete ledger if 'none', create empty ledger if 'bulk'/'serialized'" },
-      { source: ["stock_method"], target: [], transform: "stock-summaries/{uid} + public-stock-summaries/{uid} deleted or seeded in lockstep with the ledger" },
+      { source: ["stock_method"], target: [], transform: "stock/{uid} + stock-locks/{uid} deleted or seeded in lockstep with the ledger. The TOKEN leg is the one with teeth: stageStockClaim PATCHES it and update does not upsert, so a ledger left without one fails every claim against that product." },
     ],
   },
   {
@@ -479,7 +478,7 @@ export const updateProductRules: CollectionRule[] = [
     source: "products",
     target: "inventory-ledgers",
     mode: "co-write",
-    invariant: "Changing type to service/surcharge/replacement deletes the ledger, the stock summary and its public twin — none of those types hold stock. Changing to rental/sale creates the ledger when moving from a non-stock type, and the summary is (re)seeded rather than deleted: a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. The summary's `type` field follows the product's.",
+    invariant: "Changing type to service/surcharge/replacement deletes the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token — none of those types hold stock. Changing to rental/sale creates the ledger when moving from a non-stock type, and the summary is (re)seeded rather than deleted: a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. The summary's `type` field follows the product's.",
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [

@@ -124,7 +124,7 @@
           "kind": "interface",
           "name": "BookingBreakdown",
           "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n}",
-          "doc": "Per-status quantity breakdown for a booking — also embedded in stock-summary entries."
+          "doc": "Per-status quantity breakdown for a booking.\n\n⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s\nentries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this\nbreakdown down to a single `quantity` — so the breakdown reaches availability\nas a number and never as a structure."
         },
         {
           "kind": "variable",
@@ -1477,18 +1477,6 @@
           "doc": "Golden visual-diff verdicts (mirrors the golden-diff endpoint).\n\n`no-fixtures` is an informational result emitted when a template family has\nzero fixtures in git — there is nothing to render, so CI treats it as a pass\nand the manager renders it as a \"capture a source doc to enable golden\nreview\" hint. It's never aggregated with other verdicts (the family-level\naggregate uses the per-fixture entries directly)."
         },
         {
-          "kind": "variable",
-          "name": "GetAvailabilityInput",
-          "declaration": "const GetAvailabilityInput: z.ZodType<GetAvailabilityInputType>;",
-          "doc": ""
-        },
-        {
-          "kind": "interface",
-          "name": "GetAvailabilityInputType",
-          "declaration": "interface GetAvailabilityInputType {\n  productUid: string;\n  type: \"rental\" | \"sale\";\n  start?: string;\n  end?: string;\n  date?: string;\n}",
-          "doc": ""
-        },
-        {
           "kind": "interface",
           "name": "GoldenDiff",
           "declaration": "interface GoldenDiff {\n  fixture: string;\n  verdict: GoldenDiffVerdict;\n  delta: number;\n  image_uuids: typeLiteral;\n  sha: string;\n  checked_at: FirestoreTimestampType;\n}",
@@ -1720,7 +1708,7 @@
           "kind": "interface",
           "name": "InvoiceDocTotals",
           "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n}",
-          "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock-summaries` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
+          "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock/{P}` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
         },
         {
           "kind": "typeAlias",
@@ -2768,30 +2756,6 @@
         },
         {
           "kind": "interface",
-          "name": "PublicStockSummary",
-          "declaration": "interface PublicStockSummary {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  quantity_held: number;\n  unavailable: PublicUnavailableEntry[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
-          "doc": "Window-independent, public-safe availability inputs for one product."
-        },
-        {
-          "kind": "typeAlias",
-          "name": "PublicStockSummaryRecalculated",
-          "declaration": "type PublicStockSummaryRecalculated = EventEnvelope<PublicStockSummary> & typeLiteral;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "PublicStockSummarySchema",
-          "declaration": "const PublicStockSummarySchema: z.ZodType<PublicStockSummary>;",
-          "doc": "Zod schema for PublicStockSummary."
-        },
-        {
-          "kind": "interface",
-          "name": "PublicUnavailableEntry",
-          "declaration": "interface PublicUnavailableEntry {\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  quantity: number;\n}",
-          "doc": "One anonymous unavailable interval — a booking or an OOS record, indistinguishable."
-        },
-        {
-          "kind": "interface",
           "name": "Quote",
           "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  uploadcare_files?: Array<typeLiteral>;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
@@ -3081,7 +3045,7 @@
         {
           "kind": "typeAlias",
           "name": "SchemaDocType",
-          "declaration": "type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | StockSummary | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;",
+          "declaration": "type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;",
           "doc": "Union of all Firestore document types. Use with validateBeforeWrite.\n\n**`TemplateVersion` and `TemplateComponent` were the only two schema-backed\ndocument types missing from this union**, and their absence was the whole\nreason for 43 `as unknown as SchemaDocType` casts in `api-cloudrun`. The\nproof it was the union and not the pattern: `Template` IS a member and writes\nuncast, while its sibling `TemplateComponent` was not and writes cast — same\nthree-collection family, different treatment, no stated reason.\n\nWidening is safe by construction rather than by review: there is no\ndiscriminant to switch on (these types share no common `type` tag, so a\ndiscriminated union over `SchemaDocType` is not expressible), and a\nworkspace-wide grep finds no `Extract<SchemaDocType…>`, no\n`keyof SchemaDocType` and no exhaustive switch. Every one of the 126\nreferences lives in `api-cloudrun`; `manager` and `templates` have none.\n\nThe one thing it gives up is real and was never a guarantee: `tx.set(ref,\ntemplateVersionDoc)` used to be a compile error absent a cast. That caught\nnothing 51 of 53 doc types were not already free to do, and the runtime guard\nin `validateBeforeWrite` still rejects every doc/collection mismatch with a\n`collection/id` label."
         },
         {
@@ -3175,40 +3139,16 @@
           "doc": "Allowed values for inventory stock tracking method."
         },
         {
+          "kind": "typeAlias",
+          "name": "StockRecalculated",
+          "declaration": "type StockRecalculated = EventEnvelope<Stock> & typeLiteral;",
+          "doc": "ONE event, because there is one document. This replaced a\n`stock_summary.recalculated` / `public_stock_summary.recalculated` pair when\n`stock-summaries` and its public twin collapsed into `stock/{P}`: pre-reducing\nthe intervals to anonymous `{start, end, quantity, kind}` removed the reason\nfor a sanitized twin, so one document now serves the operator UI and the\npublic storefront under one security rule."
+        },
+        {
           "kind": "variable",
           "name": "StockSchema",
           "declaration": "const StockSchema: z.ZodType<Stock>;",
           "doc": "Zod schema for {@link Stock}."
-        },
-        {
-          "kind": "interface",
-          "name": "StockSummary",
-          "declaration": "interface StockSummary {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  quantity_held: number;\n  bookings: StockSummaryBookingEntry[];\n  out_of_service: StockSummaryOOSEntry[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
-          "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id."
-        },
-        {
-          "kind": "interface",
-          "name": "StockSummaryBookingEntry",
-          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  breakdown: BookingBreakdown;\n  type: ComponentTypeType;\n}",
-          "doc": "A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`\nnull = open-ended (see the module note — this is the sale case)."
-        },
-        {
-          "kind": "interface",
-          "name": "StockSummaryOOSEntry",
-          "declaration": "interface StockSummaryOOSEntry {\n  uid: string;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  quantity: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n}",
-          "doc": "A non-terminal out-of-service record as an interval + its quantity."
-        },
-        {
-          "kind": "typeAlias",
-          "name": "StockSummaryRecalculated",
-          "declaration": "type StockSummaryRecalculated = EventEnvelope<StockSummary> & typeLiteral;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "StockSummarySchema",
-          "declaration": "const StockSummarySchema: z.ZodType<StockSummary>;",
-          "doc": "Zod schema for StockSummary."
         },
         {
           "kind": "interface",
@@ -5583,7 +5523,7 @@
           "kind": "interface",
           "name": "BookingBreakdown",
           "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n}",
-          "doc": "Per-status quantity breakdown for a booking — also embedded in stock-summary entries."
+          "doc": "Per-status quantity breakdown for a booking.\n\n⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s\nentries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this\nbreakdown down to a single `quantity` — so the breakdown reaches availability\nas a number and never as a structure."
         },
         {
           "kind": "variable",
@@ -6285,7 +6225,7 @@
           "kind": "interface",
           "name": "InvoiceDocTotals",
           "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n}",
-          "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock-summaries` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
+          "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock/{P}` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
         },
         {
           "kind": "variable",
@@ -7324,30 +7264,6 @@
       ]
     },
     {
-      "entrypoint": "@cfs/core/schemas/public-stock-summary",
-      "moduleDoc": "",
-      "symbols": [
-        {
-          "kind": "interface",
-          "name": "PublicStockSummary",
-          "declaration": "interface PublicStockSummary {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  quantity_held: number;\n  unavailable: PublicUnavailableEntry[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
-          "doc": "Window-independent, public-safe availability inputs for one product."
-        },
-        {
-          "kind": "variable",
-          "name": "PublicStockSummarySchema",
-          "declaration": "const PublicStockSummarySchema: z.ZodType<PublicStockSummary>;",
-          "doc": "Zod schema for PublicStockSummary."
-        },
-        {
-          "kind": "interface",
-          "name": "PublicUnavailableEntry",
-          "declaration": "interface PublicUnavailableEntry {\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  quantity: number;\n}",
-          "doc": "One anonymous unavailable interval — a booking or an OOS record, indistinguishable."
-        }
-      ]
-    },
-    {
       "entrypoint": "@cfs/core/schemas/recurrence",
       "moduleDoc": "",
       "symbols": [
@@ -7543,7 +7459,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/settlement",
-      "moduleDoc": "Settlement document schema — Firestore collection: `settlements`\n\nOne settlement event against an invoice. **The revenue-side twin of the\n`transactions` movement journal**: append-only, dated, reversible, and\ntype-blind by design — a cash payment and a credit-note allocation differ\nonly in `type` and `reason`.\n\nCFS puts event journals in collections and value-detail in arrays. `items[]`\nis detail; movements are events; a settlement is an event. `transaction.ts`\ndraws the boundary from the other side — *\"cost is cost only, never revenue —\ncustomer-facing money lives in Xero\"* — so the shape is the model and revenue\nis exactly what it excludes. This is that missing half.\n\n**APPEND-ONLY.** Nothing is edited or deleted; a correction is a NEW document\ncarrying `reverses`. There is deliberately no `status` field, for the same\nreason `Movement` has none: a status flag *and* a reverser link is two sources\nof truth. The one permitted mutation in the whole design is\n`linkSettlementToXero` (api-cloudrun `src/lib/settlements.ts`) writing\n`xero_payment_id` null → value once — late-binding external linkage is not\npart of the money fact.\n\nThe invoice's `totals.{amount_paid, amount_credited, amount_due}` are a\n**co-written projection** of this log, produced only by\n`recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —\nan event log plus a client-ready projection for snapshot listeners — arriving\nearly in one domain, and it is `transactions` + `stock-summaries` for money.",
+      "moduleDoc": "Settlement document schema — Firestore collection: `settlements`\n\nOne settlement event against an invoice. **The revenue-side twin of the\n`transactions` movement journal**: append-only, dated, reversible, and\ntype-blind by design — a cash payment and a credit-note allocation differ\nonly in `type` and `reason`.\n\nCFS puts event journals in collections and value-detail in arrays. `items[]`\nis detail; movements are events; a settlement is an event. `transaction.ts`\ndraws the boundary from the other side — *\"cost is cost only, never revenue —\ncustomer-facing money lives in Xero\"* — so the shape is the model and revenue\nis exactly what it excludes. This is that missing half.\n\n**APPEND-ONLY.** Nothing is edited or deleted; a correction is a NEW document\ncarrying `reverses`. There is deliberately no `status` field, for the same\nreason `Movement` has none: a status flag *and* a reverser link is two sources\nof truth. The one permitted mutation in the whole design is\n`linkSettlementToXero` (api-cloudrun `src/lib/settlements.ts`) writing\n`xero_payment_id` null → value once — late-binding external linkage is not\npart of the money fact.\n\nThe invoice's `totals.{amount_paid, amount_credited, amount_due}` are a\n**co-written projection** of this log, produced only by\n`recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —\nan event log plus a client-ready projection for snapshot listeners — arriving\nearly in one domain, and it is `transactions` + `stock` for money.",
       "symbols": [
         {
           "kind": "interface",
@@ -7610,36 +7526,6 @@
           "name": "StockUnavailableKindType",
           "declaration": "type StockUnavailableKindType = indexedAccess;",
           "doc": "Union of {@link STOCK_UNAVAILABLE_KINDS}."
-        }
-      ]
-    },
-    {
-      "entrypoint": "@cfs/core/schemas/stock-summary",
-      "moduleDoc": "",
-      "symbols": [
-        {
-          "kind": "interface",
-          "name": "StockSummary",
-          "declaration": "interface StockSummary {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  quantity_held: number;\n  bookings: StockSummaryBookingEntry[];\n  out_of_service: StockSummaryOOSEntry[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
-          "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id."
-        },
-        {
-          "kind": "interface",
-          "name": "StockSummaryBookingEntry",
-          "declaration": "interface StockSummaryBookingEntry {\n  uid: string;\n  number: number;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  breakdown: BookingBreakdown;\n  type: ComponentTypeType;\n}",
-          "doc": "A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`\nnull = open-ended (see the module note — this is the sale case)."
-        },
-        {
-          "kind": "interface",
-          "name": "StockSummaryOOSEntry",
-          "declaration": "interface StockSummaryOOSEntry {\n  uid: string;\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n  quantity: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n}",
-          "doc": "A non-terminal out-of-service record as an interval + its quantity."
-        },
-        {
-          "kind": "variable",
-          "name": "StockSummarySchema",
-          "declaration": "const StockSummarySchema: z.ZodType<StockSummary>;",
-          "doc": "Zod schema for StockSummary."
         }
       ]
     },
@@ -9633,60 +9519,6 @@
       ]
     },
     {
-      "entrypoint": "@cfs/core/utils/availability",
-      "moduleDoc": "The availability engine — the single source of the CFS availability formula.\n\nA stock summary caches the *inputs* to an availability answer (one doc per\nproduct: `quantity_held` + the live booking intervals + the live OOS\nintervals). The window enters only as an overlap filter, so any window is\nderivable from that one doc, by anyone holding it:\n\n```ts\nimport { computeAvailability } from \"@cfs/core/utils/availability\";\n\nconst { quantity_available } = computeAvailability(summary, {\n  start: \"2026-06-01T00:00:00.000-05:00\",\n  end:   \"2026-06-05T00:00:00.000-05:00\",\n});\n```\n\nPure and db-free: interval arithmetic runs off `FirestoreTimestampValue`'s\nstructural `toMillis()` (or the paired ISO string), so this runs unchanged in\nDeno on the server, in the browser against an `onSnapshot` doc, and over a\nplain JSON fixture in a test. No Firestore SDK import, either side.\n\n**Availability is always Chicago wall clock, and this module owns that rule.**\nThe shop is in Chicago; a requester in California asking for \"June 1 – June 5\"\nmeans Chicago `Jun 1 00:00:00.000` → `Jun 5 23:59:59.999`, no matter where the\nbrowser is. The window is normalized here — `toChicagoStartOfDay` on `start`,\n`toChicagoEndOfDay` on `end` — so a `-08:00`, a `Z` and a `-06:00` spelling of\nthe same day produce identical numbers. Callers pass offset-carrying ISO\nstrings; a bare `YYYY-MM-DD` is rejected upstream by the schema factories.\n\n**This must not be decomposed into a per-day rollup.** With `held = 2`, a\nbooking on days 1–2 and another on days 4–5, the answer for window `[1, 5]` is\nexactly **0** — no single unit is free for the whole span — while a\nmin-over-days curve says 1. Overstating availability oversells. Intervals give\nthe exact answer; a daily curve does not.",
-      "symbols": [
-        {
-          "kind": "interface",
-          "name": "AvailabilityResult",
-          "declaration": "interface AvailabilityResult {\n  quantity_held: number;\n  quantity_booked: number;\n  quantity_out_of_service: number;\n  quantity_in_service: number;\n  quantity_available: number;\n  bookings_breakdown: BookingBreakdown;\n  out_of_service_breakdown: OutOfServiceBreakdown;\n  bookings: StockSummaryBookingEntry[];\n}",
-          "doc": "Everything the manager's availability cells and stock panel need for one window."
-        },
-        {
-          "kind": "interface",
-          "name": "AvailabilityWindow",
-          "declaration": "interface AvailabilityWindow {\n  start: string;\n  end: string;\n}",
-          "doc": "The window an availability question is asked about. Offset-carrying ISO strings."
-        },
-        {
-          "kind": "interface",
-          "name": "OutOfServiceBreakdown",
-          "declaration": "interface OutOfServiceBreakdown {\n  cleaning: number;\n  damaged: number;\n  maintenance: number;\n  lost: number;\n}",
-          "doc": "Per-reason out-of-service quantities over the window."
-        },
-        {
-          "kind": "interface",
-          "name": "PublicAvailabilityResult",
-          "declaration": "interface PublicAvailabilityResult {\n  quantity_held: number;\n  quantity_unavailable: number;\n  quantity_available: number;\n}",
-          "doc": "The public storefront's answer — no booking/OOS detail, same exact numbers."
-        },
-        {
-          "kind": "function",
-          "name": "computeAvailability",
-          "signature": "computeAvailability(summary: StockSummary, window: AvailabilityWindow): AvailabilityResult",
-          "doc": "Compute availability for one product over one window, from the cached inputs.\n\n```\nquantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)\n```\n\nNegative results are preserved, never clamped: an oversold product must stay\nvisibly oversold.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "computePublicAvailability",
-          "signature": "computePublicAvailability(summary: PublicStockSummary, window: AvailabilityWindow): PublicAvailabilityResult",
-          "doc": "The public-storefront form. Same arithmetic, run over the sanitized\n`unavailable[]` list (bookings ∪ OOS, merged and anonymized), so an outsider\ngets the exact number without learning what made a unit unavailable.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "toPublicStockSummary",
-          "signature": "toPublicStockSummary(summary: StockSummary): PublicStockSummary",
-          "doc": "Project the internal summary to its public twin — the one place the sanitized\nshape is defined, so the API's writer and any rebuild script can't drift.\n\nBookings and OOS records merge into one anonymous interval list. Only\nstock-*consuming* entries survive: a booking contributes `heldByBooking` (a\n`quoted` booking holds nothing), and zero-quantity entries are dropped\noutright — they'd leak the existence of a booking without affecting any answer.",
-          "paramTags": [],
-          "returnsTag": null
-        }
-      ]
-    },
-    {
       "entrypoint": "@cfs/core/utils/bookings",
       "moduleDoc": "Pure helpers over the booking breakdown shape and the order's denormalized\nroll-up. Used both server-side (api-cloudrun) and client-side (manager) so\nthe warehouse picker sees instant optimistic updates and the order detail\npage can compute \"is this order done?\" without a round-trip.\n\n```ts\nimport {\n  sumBookingBreakdown,\n  isOrderBookingsClosed,\n  mergeBookingBreakdown,\n} from \"@cfs/core/utils/bookings\";\n```",
       "symbols": [
@@ -9774,7 +9606,7 @@
           "kind": "function",
           "name": "sumBookingsBreakdown",
           "signature": "sumBookingsBreakdown(bookings: Array<typeLiteral>): indexedAccess",
-          "doc": "Sum a list of booking breakdowns into the order's roll-up shape.\n\nMirrors the keys of `stock-summaries.bookings_breakdown` (which aggregates\nalong the *product* axis) but aggregated along the *order* axis. Used to\nseed `order.bookings_breakdown` at create/update time and to recompute it\nclient-side from cached bookings when the order doc isn't authoritative\nyet.",
+          "doc": "Sum a list of booking breakdowns into the order's roll-up shape.\n\nMirrors the per-status keys of a booking's own `breakdown` (which aggregates\nalong the *product* axis) but aggregated along the *order* axis. Used to\nseed `order.bookings_breakdown` at create/update time and to recompute it\nclient-side from cached bookings when the order doc isn't authoritative\nyet.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -9965,7 +9797,7 @@
           "kind": "function",
           "name": "toChicagoEndOfDay",
           "signature": "toChicagoEndOfDay(input: string): string",
-          "doc": "Canonicalize to the last representable instant of the Chicago calendar date\ncontaining the input (`23:59:59.999` local). The closing twin of\n{@link toChicagoStartOfDay} — together they turn a pair of dates into the\nhalf-open-in-spirit, closed-in-fact window `[startOfDay(s), endOfDay(e)]` that\n{@link module:availability} overlaps intervals against. Idempotent, DST-aware.\n\n```ts\ntoChicagoEndOfDay(\"2025-12-22T15:15:00.000Z\"); // \"2025-12-22T23:59:59.999-06:00\"\ntoChicagoEndOfDay(\"2025-12-22T03:00:00.000Z\"); // \"2025-12-21T23:59:59.999-06:00\" (Chicago day = Dec 21)\ntoChicagoEndOfDay(\"2025-07-04\");               // \"2025-07-04T23:59:59.999-05:00\" (CDT)\n```",
+          "doc": "Canonicalize to the last representable instant of the Chicago calendar date\ncontaining the input (`23:59:59.999` local). The closing twin of\n{@link toChicagoStartOfDay} — together they turn a pair of dates into the\nhalf-open-in-spirit, closed-in-fact window `[startOfDay(s), endOfDay(e)]` that\n{@link module:stock} overlaps intervals against. Idempotent, DST-aware.\n\n```ts\ntoChicagoEndOfDay(\"2025-12-22T15:15:00.000Z\"); // \"2025-12-22T23:59:59.999-06:00\"\ntoChicagoEndOfDay(\"2025-12-22T03:00:00.000Z\"); // \"2025-12-21T23:59:59.999-06:00\" (Chicago day = Dec 21)\ntoChicagoEndOfDay(\"2025-07-04\");               // \"2025-07-04T23:59:59.999-05:00\" (CDT)\n```",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11101,7 +10933,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/order-lines",
-      "moduleDoc": "The order/invoice line builders — the one answer to *\"given catalog product P\nat quantity N, which line items does it produce, at what quantities?\"*\n\n```ts\nimport { buildOrderLineFromProduct, buildOrderComponentLines } from \"@cfs/core/utils/order-lines\";\n\nconst line = buildOrderLineFromProduct(productDoc, { quantity: 2, chargeDays: 5, uidOrder });\nconst kids = buildOrderComponentLines(productDoc, { quantity: 2, chargeDays: 5, uidOrder });\n```\n\nPure and db-free — the input is a Typesense `ProductDocument` the caller\nalready holds, and the output is a plain array. It lives here for the same\nreason `@cfs/core/utils/availability` does: it is shared verbatim so two\nconsumers **cannot disagree**. There are three — the manager's staging\npopover, the manager's order/invoice stores, and the public webapp's order\ndrafts — across two repos. A second copy of the component expansion is a\nsecond answer to \"what does this kit bring\", and the drafts a customer creates\nwould then disagree with the operator's view of the same order.\n\n## What these builders do NOT do: price\n\nThe returned lines carry `subtotal`/`subtotal_discounted`/`total` of `0`, and\ntheir `price.taxes` are bare `{ uid }` references copied from the catalog.\nRun {@link https://jsr.io/@cfs/core/doc/utils/orders | calculateItemPrice}\nagainst the live tax docs before persisting — that resolves each uid to\nname/rate/type and computes the amounts. Pricing is not folded in here\nbecause the custom-line builders receive the *line's* tax set rather than the\ntax catalog `calculateItemPrice` needs, so a single signature cannot express\nboth.\n\n## The catalog `path` convention is the INVERSE of the doc-item one\n\nA `product.components[]` row's `path` **excludes** itself and starts at the\nroot product: a direct child of product `A` has `path: [\"A\"]`, a grandchild\nhas `path: [\"A\", \"child\"]`. A doc-item `path` **includes** itself, so its\nparent is `path.at(-2)`. {@link buildOrderComponentLines} is the seam where one\nbecomes the other, and it derives every doc path from the **resolved parent**\nrather than concatenating the catalog chain — the same \"one author, parent-\nderived\" rule `computeItemPaths` follows, and for the same reason: a catalog\nrow whose chain contradicts its position must not be able to write a path.",
+      "moduleDoc": "The order/invoice line builders — the one answer to *\"given catalog product P\nat quantity N, which line items does it produce, at what quantities?\"*\n\n```ts\nimport { buildOrderLineFromProduct, buildOrderComponentLines } from \"@cfs/core/utils/order-lines\";\n\nconst line = buildOrderLineFromProduct(productDoc, { quantity: 2, chargeDays: 5, uidOrder });\nconst kids = buildOrderComponentLines(productDoc, { quantity: 2, chargeDays: 5, uidOrder });\n```\n\nPure and db-free — the input is a Typesense `ProductDocument` the caller\nalready holds, and the output is a plain array. It lives here for the same\nreason `@cfs/core/utils/stock` does: it is shared verbatim so two\nconsumers **cannot disagree**. There are three — the manager's staging\npopover, the manager's order/invoice stores, and the public webapp's order\ndrafts — across two repos. A second copy of the component expansion is a\nsecond answer to \"what does this kit bring\", and the drafts a customer creates\nwould then disagree with the operator's view of the same order.\n\n## What these builders do NOT do: price\n\nThe returned lines carry `subtotal`/`subtotal_discounted`/`total` of `0`, and\ntheir `price.taxes` are bare `{ uid }` references copied from the catalog.\nRun {@link https://jsr.io/@cfs/core/doc/utils/orders | calculateItemPrice}\nagainst the live tax docs before persisting — that resolves each uid to\nname/rate/type and computes the amounts. Pricing is not folded in here\nbecause the custom-line builders receive the *line's* tax set rather than the\ntax catalog `calculateItemPrice` needs, so a single signature cannot express\nboth.\n\n## The catalog `path` convention is the INVERSE of the doc-item one\n\nA `product.components[]` row's `path` **excludes** itself and starts at the\nroot product: a direct child of product `A` has `path: [\"A\"]`, a grandchild\nhas `path: [\"A\", \"child\"]`. A doc-item `path` **includes** itself, so its\nparent is `path.at(-2)`. {@link buildOrderComponentLines} is the seam where one\nbecomes the other, and it derives every doc path from the **resolved parent**\nrather than concatenating the catalog chain — the same \"one author, parent-\nderived\" rule `computeItemPaths` follows, and for the same reason: a catalog\nrow whose chain contradicts its position must not be able to write a path.",
       "symbols": [
         {
           "kind": "interface",

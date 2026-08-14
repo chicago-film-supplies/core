@@ -40,7 +40,7 @@
  * a CRMS-written order — so this is not the minority path, it is very nearly
  * the only one.
  */
-import { stockSummarySteps } from "./stock-summaries.ts";
+import { stockSteps } from "./stock.ts";
 import type { TransactionDefinition } from "./types.ts";
 
 // ── crms-opportunity-order ──────────────────────────────────────────
@@ -56,13 +56,13 @@ import type { TransactionDefinition } from "./types.ts";
 export const crmsOpportunityOrderTransaction: TransactionDefinition = {
   id: "crms-opportunity-order",
   description:
-    "Rebuilds a CFS order from a CRMS opportunity — org snapshot, server-derived totals and query arrays, one booking per consolidated product per destination with store allocation drawn from the inventory ledger, the event-card projection with its per-card threads, and the sanitized fulfillment view. Cowrites the order's default thread on the create arm. Stock summaries are rebuilt post-commit via the coalesced `/tasks/rebuild-stock-summary`, as on the native order path. Does NOT sync to linked invoices — see api-cloudrun#501.",
+    "Rebuilds a CFS order from a CRMS opportunity — org snapshot, server-derived totals and query arrays, one booking per consolidated product per destination with store allocation drawn from the inventory ledger, the event-card projection with its per-card threads, and the sanitized fulfillment view. Cowrites the order's default thread on the create arm. Stock summaries are rebuilt post-commit via the coalesced `/tasks/rebuild-stock`, as on the native order path. Does NOT sync to linked invoices — see api-cloudrun#501.",
   steps: [
     "update-order:org-to-order",
     "update-order:order-self-derive",
     "update-order:order-to-bookings",
     "update-order:ledger-to-bookings",
-    ...stockSummarySteps("update-order"),
+    ...stockSteps("update-order"),
     "update-order:order-to-cards",
     "update-order:order-to-fulfillment",
     "cowrite-thread:orders-to-thread",

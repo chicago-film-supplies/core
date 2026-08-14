@@ -68,7 +68,7 @@
  * products), so "services have no bookings" is not what makes this safe. What
  * makes it safe is that **0 of those 15 products carry an inventory ledger** — a
  * service product is `stock_method: "none"`, so it has no ledger, therefore no
- * stock summary, therefore nothing to evaluate here. Bookings exist for
+ * stock projection, therefore nothing to evaluate here. Bookings exist for
  * `rental` and `sale`; only those with a stock method hold stock.
  *
  * So do NOT "align" the two predicates. They are answering different questions

@@ -1,13 +1,12 @@
 /**
  * Order aggregate events.
  *
- * Covers: orders, bookings, stock-summaries, public-stock-summaries, quotes.
+ * Covers: orders, bookings, stock, quotes.
  */
 import type { EventEnvelope } from "./common.ts";
 import type { Order } from "../order.ts";
 import type { Booking } from "../booking.ts";
-import type { StockSummary } from "../stock-summary.ts";
-import type { PublicStockSummary } from "../public-stock-summary.ts";
+import type { Stock } from "../stock.ts";
 import type { Quote } from "../quote.ts";
 
 // ── Order events ────────────────────────────────────────────────────
@@ -23,10 +22,17 @@ export type BookingCreated = EventEnvelope<Booking> & { event: "booking.created"
 export type BookingUpdated = EventEnvelope<Booking> & { event: "booking.updated" };
 export type BookingStatusChanged = EventEnvelope<Booking> & { event: "booking.status_changed" };
 
-// ── Stock summary events ────────────────────────────────────────────
+// ── Stock events ────────────────────────────────────────────────────
 
-export type StockSummaryRecalculated = EventEnvelope<StockSummary> & { event: "stock_summary.recalculated" };
-export type PublicStockSummaryRecalculated = EventEnvelope<PublicStockSummary> & { event: "public_stock_summary.recalculated" };
+/**
+ * ONE event, because there is one document. This replaced a
+ * `stock_summary.recalculated` / `public_stock_summary.recalculated` pair when
+ * `stock-summaries` and its public twin collapsed into `stock/{P}`: pre-reducing
+ * the intervals to anonymous `{start, end, quantity, kind}` removed the reason
+ * for a sanitized twin, so one document now serves the operator UI and the
+ * public storefront under one security rule.
+ */
+export type StockRecalculated = EventEnvelope<Stock> & { event: "stock.recalculated" };
 
 // ── Quote events ────────────────────────────────────────────────────
 

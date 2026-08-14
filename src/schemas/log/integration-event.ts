@@ -114,7 +114,7 @@ export const INTEGRATION_EVENT_MSGS = [
   "dns_record_check_resolve_failed",
   "location_integrity_check",
   "location_integrity_check_failed",
-  // The backstop under the DEFERRED stock-summary rebuild (api-cloudrun#358). The
+  // The backstop under the DEFERRED stock rebuild (api-cloudrun#358). The
   // rebuild's enqueue is post-commit and therefore not transactional with Firestore,
   // so a crash or an exhausted retry budget leaves a summary stale with nothing
   // scheduled to fix it. Steady state is `repaired: 0` — a non-zero count is a bug

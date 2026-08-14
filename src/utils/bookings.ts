@@ -79,7 +79,7 @@ export function mergeBookingBreakdown(
 /**
  * Sum a list of booking breakdowns into the order's roll-up shape.
  *
- * Mirrors the keys of `stock-summaries.bookings_breakdown` (which aggregates
+ * Mirrors the per-status keys of a booking's own `breakdown` (which aggregates
  * along the *product* axis) but aggregated along the *order* axis. Used to
  * seed `order.bookings_breakdown` at create/update time and to recompute it
  * client-side from cached bookings when the order doc isn't authoritative

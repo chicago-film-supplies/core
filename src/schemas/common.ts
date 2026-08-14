@@ -317,7 +317,7 @@ export interface DocSourceType {
 export const DocSource: z.ZodType<DocSourceType> = z.strictObject({
   collection: CfsSourceCollectionEnum.meta({ column: true, label: "Collection" }),
   // Polymorphic — points at any collection, including composite-keyed docs
-  // (bookings, stock-summaries). AnyUid is the union of every known id shape.
+  // (bookings, stock). AnyUid is the union of every known id shape.
   uid: AnyUid,
   // `label` the FIELD, and `label` the display annotation, are unrelated names
   // that happen to collide: this is the human description of the source doc.

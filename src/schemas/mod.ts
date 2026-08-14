@@ -671,11 +671,6 @@ export {
 } from "./transaction.ts";
 
 export {
-  GetAvailabilityInput,
-  type GetAvailabilityInputType,
-} from "./availability.ts";
-
-export {
   OutOfServiceSchema,
   type OutOfService,
   OOSStatusEnum,
@@ -710,19 +705,6 @@ export {
   type CreditNoteStatusType,
   type CreditNoteDocTotals,
 } from "./credit-note.ts";
-
-export {
-  StockSummarySchema,
-  type StockSummary,
-  type StockSummaryBookingEntry,
-  type StockSummaryOOSEntry,
-} from "./stock-summary.ts";
-
-export {
-  PublicStockSummarySchema,
-  type PublicStockSummary,
-  type PublicUnavailableEntry,
-} from "./public-stock-summary.ts";
 
 export {
   STOCK_UNAVAILABLE_KINDS,
@@ -938,8 +920,7 @@ export type {
   BookingCreated,
   BookingUpdated,
   BookingStatusChanged,
-  StockSummaryRecalculated,
-  PublicStockSummaryRecalculated,
+  StockRecalculated,
   QuoteCreated,
   QuoteRestored,
   QuoteDeleted,
@@ -1036,10 +1017,8 @@ import type { Quote } from "./quote.ts";
 import type { Template } from "./template.ts";
 import type { TemplateComponent } from "./template-component.ts";
 import type { TemplateVersion } from "./template-version.ts";
-import type { PublicStockSummary } from "./public-stock-summary.ts";
 import type { RateLimit } from "./rate-limit.ts";
 import type { Session } from "./session.ts";
-import type { StockSummary } from "./stock-summary.ts";
 import type { Stock, StockLock } from "./stock.ts";
 import type { Store } from "./store.ts";
 import type { Role } from "./role.ts";
@@ -1091,8 +1070,8 @@ export type SchemaDocType =
   | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
   | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
-  | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session
-  | Stock | StockLock | StockSummary | Tax | Template
+  | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session
+  | Stock | StockLock | Tax | Template
   | TemplateComponent | TemplateVersion
   | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User
   | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState
@@ -1135,9 +1114,7 @@ import { TemplateComponentSchema as TemplateComponentSchema_ } from "./template-
 import { RateLimitSchema } from "./rate-limit.ts";
 import { RecurrenceSchema } from "./recurrence.ts";
 import { RoleSchema } from "./role.ts";
-import { PublicStockSummarySchema } from "./public-stock-summary.ts";
 import { SessionSchema } from "./session.ts";
-import { StockSummarySchema } from "./stock-summary.ts";
 import { StockLockSchema, StockSchema } from "./stock.ts";
 import { StoreSchema } from "./store.ts";
 import { TagSchema } from "./tag.ts";
@@ -1199,7 +1176,6 @@ export const schemas: Record<string, z.ZodType> = {
   "rate-limit": RateLimitSchema, "rate-limits": RateLimitSchema,
   "recurrence": RecurrenceSchema, "recurrences": RecurrenceSchema,
   "role": RoleSchema, "roles": RoleSchema,
-  "public-stock-summary": PublicStockSummarySchema, "public-stock-summaries": PublicStockSummarySchema,
   "session": SessionSchema, "sessions": SessionSchema,
   "credit-note": CreditNoteSchema, "credit-notes": CreditNoteSchema,
   "settlement": SettlementSchema, "settlements": SettlementSchema,
@@ -1207,7 +1183,6 @@ export const schemas: Record<string, z.ZodType> = {
   // the usual pair. `stock-locks` gets the pair like everything else.
   "stock": StockSchema,
   "stock-lock": StockLockSchema, "stock-locks": StockLockSchema,
-  "stock-summary": StockSummarySchema, "stock-summaries": StockSummarySchema,
   "store": StoreSchema, "stores": StoreSchema,
   "tag": TagSchema, "tags": TagSchema,
   "tax": TaxSchema_, "taxes": TaxSchema_,

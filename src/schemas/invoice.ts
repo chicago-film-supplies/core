@@ -400,7 +400,7 @@ export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocL
  * that changed them, and rebuildable from the log by
  * `scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
  * to apologise for; they are the target architecture, and the same shape
- * `stock-summaries` already has against the movement journal.
+ * `stock/{P}` already has against the movement journal.
  *
  * `total` is NOT part of that projection — it derives from `items[]`. So the
  * rebuild is deliberately **partial**: it repairs the settlement-fed fields

@@ -4,7 +4,7 @@
  * Traced from: api-cloudrun/src/services/orders.ts
  */
 import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
-import { stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
+import { stockRules, stockSteps } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -90,12 +90,22 @@ const BOOKING_DIFF_TESTS: EnforcementRef = {
   gates: true,
 };
 
-/** The "and their stock summaries zeroed" half, from the other side. */
-const ORPHAN_BOOKING_LEAVES_NO_SUMMARY: EnforcementRef = {
+/**
+ * The "and their stock projection zeroed" half, from the other side.
+ *
+ * ⚠️ Re-pointed at `audit-stock.ts` when the legacy pair was deleted, and the
+ * CLAUSE changed with it rather than being translated. The old check was
+ * `booking_stale_in_summary` — a summary still *naming* a booking that is no
+ * longer live — and naming is exactly what the pre-reduced projection no longer
+ * does: its entries are anonymous. The equivalent evidence is now the `extra`
+ * side of the fold's multiset diff, which is what an un-zeroed orphan's leftover
+ * interval shows up as.
+ */
+const ORPHAN_BOOKING_LEAVES_NO_STOCK_ENTRY: EnforcementRef = {
   kind: "audit",
-  ref: "api-cloudrun/scripts/audit-stock-summaries.ts:300",
+  ref: "api-cloudrun/scripts/audit-stock.ts:306",
   clause:
-    "the `stock summaries zeroed` half — `booking_stale_in_summary` fires on any summary still naming a booking that is no longer live, which is exactly what an un-zeroed orphan looks like",
+    "the `stock projection zeroed` half — invariant 4's `extra` side (`unavailable_stale`) fires on any `stock/{P}` carrying an interval the live bookings and OOS records do not account for, which is exactly what an un-zeroed orphan leaves behind",
   gates: true,
 };
 
@@ -333,7 +343,7 @@ export const createOrderRules: CollectionRule[] = [
       { source: ["store_breakdown"], target: ["shortage"], transform: "remaining quantity that couldn't be allocated" },
     ],
   },
-  ...stockSummaryRules("create-order", "Creating an order's bookings"),
+  ...stockRules("create-order", "Creating an order's bookings"),
   {
     id: "create-order:order-to-cards",
     source: "orders",
@@ -386,14 +396,14 @@ export const createOrderRules: CollectionRule[] = [
 
 export const createOrderTransaction: TransactionDefinition = {
   id: "create-order",
-  description: "Creates an order with bookings, stock summaries, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view).",
+  description: "Creates an order with bookings, the `stock/{P}` projection, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view).",
   steps: [
     "create-order:org-to-order",
     "create-order:products-to-order-items",
     "create-order:order-self-derive",
     "create-order:order-to-bookings",
     "create-order:ledger-to-bookings",
-    ...stockSummarySteps("create-order"),
+    ...stockSteps("create-order"),
     "create-order:order-to-cards",
     "create-order:order-to-fulfillment",
     "cowrite-thread:orders-to-thread",
@@ -443,8 +453,8 @@ export const updateOrderRules: CollectionRule[] = [
     source: "orders",
     target: "bookings",
     mode: "co-write",
-    invariant: "Bookings are diffed — created, updated, or deleted based on item/status/date/destination changes. Orphan bookings (bookings whose {order,product,destination} composite id no longer appears in the order) are deleted and their stock summaries zeroed.",
-    enforced_by: [BOOKING_ID_IS_THE_CARDINALITY, BOOKING_DIFF_TESTS, ORPHAN_BOOKING_LEAVES_NO_SUMMARY],
+    invariant: "Bookings are diffed — created, updated, or deleted based on item/status/date/destination changes. Orphan bookings (bookings whose {order,product,destination} composite id no longer appears in the order) are deleted and their `stock/{P}` projections zeroed.",
+    enforced_by: [BOOKING_ID_IS_THE_CARDINALITY, BOOKING_DIFF_TESTS, ORPHAN_BOOKING_LEAVES_NO_STOCK_ENTRY],
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["uid_order"] },
@@ -475,7 +485,7 @@ export const updateOrderRules: CollectionRule[] = [
       { source: ["store_breakdown"], target: ["shortage"] },
     ],
   },
-  ...stockSummaryRules(
+  ...stockRules(
     "update-order",
     "Adding, changing or removing an order's bookings (a removed booking is simply absent from the rebuilt array)",
   ),
@@ -529,13 +539,13 @@ export const updateOrderRules: CollectionRule[] = [
 
 export const updateOrderTransaction: TransactionDefinition = {
   id: "update-order",
-  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, recalculate stock summaries, rebuild event cards, and refresh the fulfillment view.",
+  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, rebuild the `stock/{P}` projection, rebuild event cards, and refresh the fulfillment view.",
   steps: [
     "update-order:org-to-order",
     "update-order:order-self-derive",
     "update-order:order-to-bookings",
     "update-order:ledger-to-bookings",
-    ...stockSummarySteps("update-order"),
+    ...stockSteps("update-order"),
     "update-order:order-to-cards",
     "update-order:order-to-fulfillment",
     "update-order:items-to-invoices",
@@ -566,9 +576,9 @@ export const updateBookingRules: CollectionRule[] = [
     // completion — the breakdown sum and the monotonic lost/damaged floor. Those
     // are the ones an operator actually hits.
     //
-    // `sale` semantics are load-bearing across stock-summaries.ts:126, :135 and
-    // orders.ts:349; a reader who took this string literally would have
-    // contradicted all three.
+    // `sale` semantics are load-bearing across stock.ts:264 (the reduced
+    // quantity's `out unless sale` rule) and orders.ts:349; a reader who took
+    // this string literally would have contradicted both.
     invariant:
       "Status and breakdown rewritten with an optimistic version bump. Three guards, and only the last is about completion: (1) breakdown must always sum to booking.quantity; (2) breakdown.lost and breakdown.damaged may never DECREASE through this endpoint — reduce the OOS record instead; (3) when status flips to 'complete', the terminal count must equal quantity, where terminal is returned + lost + damaged for a RENTAL and returned + lost + damaged + out for every non-rental type (sale, service, surcharge), because a sold unit does not come back and checkout is its terminal state.",
     transaction: "update-booking",
@@ -584,7 +594,7 @@ export const updateBookingRules: CollectionRule[] = [
       { source: [], target: ["version"], transform: "version + 1 (optimistic concurrency)" },
     ],
   },
-  ...stockSummaryRules("update-booking", "Every booking breakdown change"),
+  ...stockRules("update-booking", "Every booking breakdown change"),
   {
     id: "update-booking:booking-to-out-of-service",
     source: "bookings",
@@ -685,10 +695,10 @@ export const updateBookingRules: CollectionRule[] = [
 
 export const updateBookingTransaction: TransactionDefinition = {
   id: "update-booking",
-  description: "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates stock summaries FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of stock summaries and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings.",
+  description: "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates `stock/{P}` projections FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of `stock/{P}` projections and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings.",
   steps: [
     "update-booking:booking-to-self",
-    ...stockSummarySteps("update-booking"),
+    ...stockSteps("update-booking"),
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-transactions",
     "update-booking:transactions-to-ledger",
@@ -697,7 +707,7 @@ export const updateBookingTransaction: TransactionDefinition = {
     "update-booking:booking-to-cards",
     // OOS cowrites pull these in when a new OOS record is created:
     "create-out-of-service-record:sources-to-record",
-    ...stockSummarySteps("create-out-of-service-record"),
+    ...stockSteps("create-out-of-service-record"),
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],
@@ -716,7 +726,7 @@ export const bulkCheckoutOrderTransaction: TransactionDefinition = {
   description: "Flip every booking on an order from reserved/prepped to active and move quantities into breakdown.out in one Firestore transaction. Reuses update-booking rules per row, including the per-destination card status recompute.",
   steps: [
     "update-booking:booking-to-self",
-    ...stockSummarySteps("update-booking"),
+    ...stockSteps("update-booking"),
     "update-booking:booking-to-transactions",
     "update-booking:transactions-to-ledger",
     "update-booking:transactions-to-locations",
@@ -730,7 +740,7 @@ export const bulkReturnOrderTransaction: TransactionDefinition = {
   description: "Apply per-booking returned/lost/damaged deltas across the order in one Firestore transaction. Reuses update-booking rules per row, including OOS cowrite for any lost/damaged deltas and the per-destination card status recompute; final state may auto-complete the order.",
   steps: [
     "update-booking:booking-to-self",
-    ...stockSummarySteps("update-booking"),
+    ...stockSteps("update-booking"),
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-transactions",
     "update-booking:transactions-to-ledger",
@@ -738,7 +748,7 @@ export const bulkReturnOrderTransaction: TransactionDefinition = {
     "update-booking:booking-to-order",
     "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
-    ...stockSummarySteps("create-out-of-service-record"),
+    ...stockSteps("create-out-of-service-record"),
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],
@@ -748,15 +758,15 @@ export const bulkReturnOrderTransaction: TransactionDefinition = {
 //
 // PUT /fulfillments/{uid}/bookings — picker UI applies N booking transitions
 // in one Firestore transaction. Reuses update-booking rules per row but with
-// deduped stock-summary recalc per product, single order roll-up delta +
+// deduped stock rebuild per product, single order roll-up delta +
 // auto-complete check, and one OOS counter allocation pass.
 
 export const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
   id: "bulk-fulfillment-bookings",
-  description: "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock-summary recalc per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
+  description: "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock rebuilds per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
   steps: [
     "update-booking:booking-to-self",
-    ...stockSummarySteps("update-booking"),
+    ...stockSteps("update-booking"),
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-transactions",
     "update-booking:transactions-to-ledger",
@@ -764,7 +774,7 @@ export const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
     "update-booking:booking-to-order",
     "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
-    ...stockSummarySteps("create-out-of-service-record"),
+    ...stockSteps("create-out-of-service-record"),
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],

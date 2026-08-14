@@ -49,7 +49,7 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
   stock_method: z.enum(INVENTORY_STOCK_METHODS).meta({ column: true, label: "Stock Method" }),
   // Physical / valuation scalars are floored at 0 — fail-closed backstop behind
   // the server-side over-decrease + OOS-cap guards (you can't physically hold or
-  // value below zero units). Demand-side availability lives on stock-summaries
+  // value below zero units). Demand-side availability lives on `stock/{P}`
   // (quantity_available) and is intentionally left unconstrained so overbooking
   // can show negative.
   quantity_held: z.number().min(0).meta({ column: true, label: "Quantity Held" }),

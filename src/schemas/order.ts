@@ -979,7 +979,7 @@ export interface Order {
   query_by_dates: string[];
   /**
    * Roll-up of breakdown across all bookings on this order. Mirrors the keys
-   * of `stock-summaries.bookings_breakdown` and `booking.breakdown` but
+   * of `booking.breakdown` but
    * aggregated along the order axis. Maintained incrementally by booking
    * writes (createOrder seeds it; updateBooking applies a delta).
    *

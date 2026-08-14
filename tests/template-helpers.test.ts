@@ -13,7 +13,6 @@ import { assert, assertEquals, assertExists, assertGreater } from "@std/assert";
 
 import * as stockUtils from "../src/utils/stock.ts";
 import * as allocationUtils from "../src/utils/allocation.ts";
-import * as availabilityUtils from "../src/utils/availability.ts";
 import * as bookingUtils from "../src/utils/bookings.ts";
 import * as cardUtils from "../src/utils/cards.ts";
 import * as contactNameUtils from "../src/utils/contact-name.ts";
@@ -39,15 +38,17 @@ import {
 import { TEMPLATE_HELPER_DENYLIST } from "../scripts/template-helper-denylist.ts";
 
 /** Every `./utils/*` entrypoint, keyed by the namespace the generator emits. */
-// ⚠️ **All SIXTEEN injectable namespaces, not the eleven this held before.**
-// `allocation`, `availability`, `movements` and `order-lines` emit zero helpers
-// (every export is denylisted), and their absence here meant the drift guard
-// below skipped them entirely — a new export in any of the four was neither
-// emitted nor denylisted nor reported. It also made the denylist staleness
-// guard blind to the ~14 entries filed under them.
+// ⚠️ **EVERY injectable namespace, including the ones that emit nothing.**
+// `allocation`, `movements` and `order-lines` emit zero helpers (every export is
+// denylisted), and their absence here once meant the drift guard skipped them
+// entirely — a new export in any of them was neither emitted nor denylisted nor
+// reported, and the denylist staleness guard was blind to the ~14 entries filed
+// under them. Deliberately NOT stated as a count: the previous wording said
+// SIXTEEN while the map held eighteen, because a hand-maintained number drifts
+// every time a namespace is added or removed. The guard below is what enforces
+// completeness against `deno.json`; this comment must not restate it.
 const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   allocation: allocationUtils,
-  availability: availabilityUtils,
   bookings: bookingUtils,
   cards: cardUtils,
   "contact-name": contactNameUtils,

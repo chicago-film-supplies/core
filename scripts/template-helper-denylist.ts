@@ -41,14 +41,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // sees `it.doc.organization`, which is this function's OUTPUT). Emitting it
   // would advertise a helper whose one argument is unreachable from a template.
   organizations: ["buildOrganizationSnapshot"],
-  // The whole availability engine. It answers "how many units are free over this
-  // window?" from a StockSummary — and a template's render context never holds
-  // one (templates render orders, invoices and quotes). There is no argument a
-  // template could ever pass these, so surfacing them in the helper panel would
-  // be pure dead surface. `toChicagoEndOfDay` stays visible under `dates`,
-  // though: that one is a genuine date helper.
   // Stock primitives — the interval rules and the two consumption definitions.
-  // Denylisted whole, for the same reason as `availability` and `movements`:
+  // Denylisted whole, for the same reason as `movements`:
   // every one takes a booking breakdown, an OOS record or a Firestore timestamp
   // pair off a stock document, and a render context holds none of those —
   // templates render orders, invoices and quotes. Pure dead surface in the
@@ -70,13 +64,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "computeStockAvailability",
     "peakStockConsumption",
   ],
-  availability: [
-    "computeAvailability", // needs a StockSummary — never in a render context
-    "computePublicAvailability", // needs a PublicStockSummary — likewise
-    "toPublicStockSummary", // write-path projection, not a render helper
-  ],
   // The movement-journal fold, denylisted whole for the same reason as
-  // `availability`: every one of these takes an InventoryLedger or a Movement,
+  // `stock`: every one of these takes an InventoryLedger or a Movement,
   // and a render context holds neither — templates render orders, invoices and
   // quotes. Surfacing them would be pure dead surface in the helper panel.
   movements: [

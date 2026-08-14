@@ -29,14 +29,11 @@ import {
   unavailableFromOOS,
   unitsClaimedOnShelves,
 } from "../src/utils/stock.ts";
-import { computeAvailability } from "../src/utils/availability.ts";
 import type {
   BookingBreakdown,
   ComponentTypeType,
-  StockSummary,
   StockUnavailableEntry,
 } from "../src/schemas/mod.ts";
-import { mockTimestamp, tsAt } from "./helpers/timestamp.ts";
 
 function bd(p: Partial<BookingBreakdown> = {}): BookingBreakdown {
   return {
@@ -444,17 +441,16 @@ function dayIso(d: number): string {
   return dayNum(d) + "T00:00:00.000-05:00";
 }
 
-// ── Equivalence with the engine it replaces ────────────────────────────────
+// ── The random corpus, and the canary that keeps it honest ─────────────────
 
 /**
- * The migration's correctness claim, as a sweep: reducing a product's live
- * sources and folding them must give the SAME three numbers as running the
- * legacy summary engine over the same sources.
+ * A deterministic random case: a product's live booking and OOS sources plus a
+ * query window.
  *
- * This is the check `stock/{P}` needs before anything switches over, and it is
- * shaped as an equivalence rather than as expected values because the numbers
- * themselves are already pinned above — what is unproven is that pre-reducing
- * loses nothing that `computeAvailability` was using.
+ * It was built for the migration's equivalence sweep, which compared reduce-then-
+ * fold against the legacy `computeAvailability`. That engine is deleted, so the
+ * sweep is too — but the generator survives, because the canary below still needs
+ * a corpus that genuinely exercises the sale rule.
  */
 function randomCase(seed: number) {
   // Deterministic mulberry32 — no Math.random, so a failure is reproducible from
@@ -481,7 +477,6 @@ function randomCase(seed: number) {
     `2026-06-${String(1 + (d % 28)).padStart(2, "0")}T00:00:00.000-05:00`;
 
   const bookings: StockBookingSource[] = [];
-  const summaryBookings: StockSummary["bookings"] = [];
   const bookingCount = next(6);
   for (let i = 0; i < bookingCount; i++) {
     const type: ComponentTypeType = next(2) === 0 ? "rental" : "sale";
@@ -490,30 +485,9 @@ function randomCase(seed: number) {
     const start = next(5) === 0 ? null : dayIso(next(28));
     const end = next(5) === 0 ? null : dayIso(next(28));
     bookings.push({ type, status, breakdown, dates: { start, end } });
-    // ⚠️ The legacy comparison is against the whole legacy PIPELINE, not against
-    // `computeAvailability` alone. A summary's `bookings[]` is already
-    // liveness-filtered by its writer (`toSummaryBookingEntry` drops a `complete`
-    // booking), and `computeAvailability` has no status arm of its own — so
-    // pushing a completed booking in here would make the old engine count units
-    // it never sees in production, and the sweep would report a disagreement that
-    // exists only in the fixture. That filter is the ONE rule replicated here; the
-    // sale rule, the zero-quantity drop, the OOS handling, the overlap test and
-    // the window normalization are all still genuinely compared.
-    if (status === "complete") continue;
-    summaryBookings.push({
-      uid: `testorder10000000${String(i).padStart(3, "0")}:testprod100000000000:testdest100000000000`,
-      number: i,
-      type,
-      start,
-      start_fs: start ? tsAt(start) : null,
-      end,
-      end_fs: end ? tsAt(end) : null,
-      breakdown,
-    });
   }
 
   const oosSources: StockOOSSource[] = [];
-  const summaryOOS: StockSummary["out_of_service"] = [];
   const oosCount = next(4);
   for (let i = 0; i < oosCount; i++) {
     const status = (["active", "planned", "complete", "canceled"] as const)[next(4)];
@@ -521,32 +495,12 @@ function randomCase(seed: number) {
     const start = next(5) === 0 ? null : dayIso(next(28));
     const end = next(5) === 0 ? null : dayIso(next(28));
     oosSources.push({ status, quantity, dates: { start, end } });
-    summaryOOS.push({
-      uid: `testoos1000000000${String(i).padStart(3, "0")}`,
-      start,
-      start_fs: start ? tsAt(start) : null,
-      end,
-      end_fs: end ? tsAt(end) : null,
-      quantity,
-      reason: "damaged",
-      status,
-    });
   }
 
   const quantity_held = next(20);
-  const summary: StockSummary = {
-    uid: "testprod100000000000",
-    uid_product: "testprod100000000000",
-    type: "rental",
-    quantity_held,
-    bookings: summaryBookings,
-    out_of_service: summaryOOS,
-    created_at: mockTimestamp,
-    updated_at: mockTimestamp,
-  };
   const window = win(`2026-06-${String(1 + next(20)).padStart(2, "0")}`, `2026-06-28`);
 
-  return { bookings, oosSources, quantity_held, summary, window };
+  return { bookings, oosSources, quantity_held, window };
 }
 
 /** Reduce a case's sources the way the rebuild will. */
@@ -566,24 +520,26 @@ function reduce(
   return stock(c.quantity_held, unavailable);
 }
 
-Deno.test("equivalence: reduce-then-fold agrees with computeAvailability over 5,000 cases", () => {
-  for (let seed = 1; seed <= 5_000; seed++) {
-    const c = randomCase(seed);
-    const legacy = computeAvailability(c.summary, c.window);
-    const next = computeStockAvailability(reduce(c), c.window);
-    assertEquals(
-      [next.quantity_booked, next.quantity_out_of_service, next.quantity_available],
-      [legacy.quantity_booked, legacy.quantity_out_of_service, legacy.quantity_available],
-      `seed ${seed}`,
-    );
-  }
-});
-
-Deno.test("equivalence, fail-closed: a reducer that forgets the sale rule DISAGREES", () => {
-  // The companion. Without it the sweep above proves only that two functions run;
-  // an oracle that has drifted into a restatement of its implementation passes
-  // forever. This sweeps the single most plausible wrong reducer — one that uses
-  // the SHELF definition, i.e. counts a sale's `out` — and asserts it is caught.
+Deno.test("corpus canary: the shelf-definition reducer DISAGREES with the real one", () => {
+  // ⚠️ **What is left of the migration's equivalence sweep, and why only this
+  // half survives.** Until the legacy pair was deleted this file ran two sweeps:
+  // `reduce-then-fold agrees with computeAvailability over 5,000 cases`, and this
+  // companion. The first one's oracle WAS `computeAvailability` — the engine over
+  // `stock-summaries` — so deleting that engine deletes the sweep: there is
+  // nothing left for the fold to be equivalent to, and re-pointing it at the fold
+  // itself would make it a restatement of its own implementation, which passes
+  // forever and proves nothing.
+  //
+  // The companion needs no legacy engine, because its claim was never "the old
+  // engine agrees". Its claim is **the corpus is not degenerate** — that these
+  // 5,000 generated cases actually exercise the sale rule, so the direct
+  // assertions above are testing something. Stated against the wrong reducer
+  // instead of against the deleted one, it keeps exactly that guarantee.
+  //
+  // The wrong reducer is the single most plausible mistake: the SHELF definition,
+  // which counts a sale's `out` units. Those units left ownership at the sale
+  // movement, which already dropped `quantity_held`, so counting them again
+  // double-subtracts — the defect `unavailableFromBooking` exists to prevent.
   const wrong = (b: StockBookingSource): StockUnavailableEntry | null => {
     if (b.status === "complete") return null;
     const quantity = unitsClaimedOnShelves(b);
@@ -594,15 +550,18 @@ Deno.test("equivalence, fail-closed: a reducer that forgets the sale rule DISAGR
   let disagreements = 0;
   for (let seed = 1; seed <= 5_000; seed++) {
     const c = randomCase(seed);
-    const legacy = computeAvailability(c.summary, c.window);
-    if (computeStockAvailability(reduce(c, wrong), c.window).quantity_available !== legacy.quantity_available) {
+    const right = computeStockAvailability(reduce(c), c.window).quantity_available;
+    if (computeStockAvailability(reduce(c, wrong), c.window).quantity_available !== right) {
       disagreements++;
     }
   }
   assert(
     disagreements > 0,
-    "the wrong reducer agreed on every case — the corpus no longer exercises the sale rule, " +
-      "so the sweep above is vacuous",
+    "the shelf-definition reducer agreed on every case — the corpus no longer exercises the " +
+      "sale rule, so every sale assertion in this file is vacuous",
   );
-  console.log(`  fail-closed: the shelf-definition reducer is wrong on ${disagreements} of 5,000 cases`);
+  // REPORTED, never asserted as a floor: pinning a remembered count means tuning
+  // the corpus until it reproduces that number, which is fitting rather than
+  // testing.
+  console.log(`  corpus canary: the shelf-definition reducer is wrong on ${disagreements} of 5,000 cases`);
 });

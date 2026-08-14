@@ -73,7 +73,7 @@ export function toChicagoStartOfDay(input: string): string {
  * containing the input (`23:59:59.999` local). The closing twin of
  * {@link toChicagoStartOfDay} — together they turn a pair of dates into the
  * half-open-in-spirit, closed-in-fact window `[startOfDay(s), endOfDay(e)]` that
- * {@link module:availability} overlaps intervals against. Idempotent, DST-aware.
+ * {@link module:stock} overlaps intervals against. Idempotent, DST-aware.
  *
  * ```ts
  * toChicagoEndOfDay("2025-12-22T15:15:00.000Z"); // "2025-12-22T23:59:59.999-06:00"

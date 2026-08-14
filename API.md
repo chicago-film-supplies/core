@@ -304,7 +304,12 @@ interface Booking {
 
 ### `BookingBreakdown`
 
-Per-status quantity breakdown for a booking — also embedded in stock-summary entries.
+Per-status quantity breakdown for a booking.
+
+⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s
+entries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this
+breakdown down to a single `quantity` — so the breakdown reaches availability
+as a number and never as a structure.
 
 ```ts
 interface BookingBreakdown {
@@ -2998,24 +3003,6 @@ aggregate uses the per-fixture entries directly).
 const GOLDEN_DIFF_VERDICTS: "match" | "diff" | "no-golden" | "renderer-unavailable" | "no-fixtures"[];
 ```
 
-### `GetAvailabilityInput`
-
-```ts
-const GetAvailabilityInput: z.ZodType<GetAvailabilityInputType>;
-```
-
-### `GetAvailabilityInputType`
-
-```ts
-interface GetAvailabilityInputType {
-  productUid: string;
-  type: "rental" | "sale";
-  start?: string;
-  end?: string;
-  date?: string;
-}
-```
-
 ### `GoldenDiff`
 
 Per-fixture golden visual-diff result for a draft branch. The CI golden-diff
@@ -3507,7 +3494,7 @@ projection** of the `settlements` journal — produced only by
 that changed them, and rebuildable from the log by
 `scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
 to apologise for; they are the target architecture, and the same shape
-`stock-summaries` already has against the movement journal.
+`stock/{P}` already has against the movement journal.
 
 `total` is NOT part of that projection — it derives from `items[]`. So the
 rebuild is deliberately **partial**: it repairs the settlement-fed fields
@@ -5724,50 +5711,6 @@ Status outcome of a propagation rule execution.
 type PropagationStatusType = indexedAccess;
 ```
 
-### `PublicStockSummary`
-
-Window-independent, public-safe availability inputs for one product.
-
-```ts
-interface PublicStockSummary {
-  uid: string;
-  uid_product: string;
-  type: ProductTypeType;
-  quantity_held: number;
-  unavailable: PublicUnavailableEntry[];
-  created_at: FirestoreTimestampType;
-  updated_at: FirestoreTimestampType;
-}
-```
-
-### `PublicStockSummaryRecalculated`
-
-```ts
-type PublicStockSummaryRecalculated = EventEnvelope<PublicStockSummary> & typeLiteral;
-```
-
-### `PublicStockSummarySchema`
-
-Zod schema for PublicStockSummary.
-
-```ts
-const PublicStockSummarySchema: z.ZodType<PublicStockSummary>;
-```
-
-### `PublicUnavailableEntry`
-
-One anonymous unavailable interval — a booking or an OOS record, indistinguishable.
-
-```ts
-interface PublicUnavailableEntry {
-  start: string | null;
-  start_fs: FirestoreTimestampType | null;
-  end: string | null;
-  end_fs: FirestoreTimestampType | null;
-  quantity: number;
-}
-```
-
 ### `Quote`
 
 A PDF quote document associated with an order.
@@ -6302,7 +6245,7 @@ in `validateBeforeWrite` still rejects every doc/collection mismatch with a
 `collection/id` label.
 
 ```ts
-type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | StockSummary | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 ```
 
 ### `SchemaField`
@@ -6515,79 +6458,25 @@ Allowed values for inventory stock tracking method.
 type StockMethodType = indexedAccess;
 ```
 
+### `StockRecalculated`
+
+ONE event, because there is one document. This replaced a
+`stock_summary.recalculated` / `public_stock_summary.recalculated` pair when
+`stock-summaries` and its public twin collapsed into `stock/{P}`: pre-reducing
+the intervals to anonymous `{start, end, quantity, kind}` removed the reason
+for a sanitized twin, so one document now serves the operator UI and the
+public storefront under one security rule.
+
+```ts
+type StockRecalculated = EventEnvelope<Stock> & typeLiteral;
+```
+
 ### `StockSchema`
 
 Zod schema for {@link Stock}.
 
 ```ts
 const StockSchema: z.ZodType<Stock>;
-```
-
-### `StockSummary`
-
-Window-independent availability inputs for one product. Doc id == `uid` ==
-`uid_product` == the product's / inventory-ledger's Firestore id.
-
-```ts
-interface StockSummary {
-  uid: string;
-  uid_product: string;
-  type: ProductTypeType;
-  quantity_held: number;
-  bookings: StockSummaryBookingEntry[];
-  out_of_service: StockSummaryOOSEntry[];
-  created_at: FirestoreTimestampType;
-  updated_at: FirestoreTimestampType;
-}
-```
-
-### `StockSummaryBookingEntry`
-
-A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`
-null = open-ended (see the module note — this is the sale case).
-
-```ts
-interface StockSummaryBookingEntry {
-  uid: string;
-  number: number;
-  start: string | null;
-  start_fs: FirestoreTimestampType | null;
-  end: string | null;
-  end_fs: FirestoreTimestampType | null;
-  breakdown: BookingBreakdown;
-  type: ComponentTypeType;
-}
-```
-
-### `StockSummaryOOSEntry`
-
-A non-terminal out-of-service record as an interval + its quantity.
-
-```ts
-interface StockSummaryOOSEntry {
-  uid: string;
-  start: string | null;
-  start_fs: FirestoreTimestampType | null;
-  end: string | null;
-  end_fs: FirestoreTimestampType | null;
-  quantity: number;
-  reason: OOSReasonType;
-  status: OOSStatusType;
-}
-```
-
-### `StockSummaryRecalculated`
-
-```ts
-type StockSummaryRecalculated = EventEnvelope<StockSummary> & typeLiteral;
-```
-
-### `StockSummarySchema`
-
-Zod schema for StockSummary.
-
-```ts
-const StockSummarySchema: z.ZodType<StockSummary>;
 ```
 
 ### `StockUnavailableEntry`
@@ -10727,7 +10616,12 @@ interface Booking {
 
 ### `BookingBreakdown`
 
-Per-status quantity breakdown for a booking — also embedded in stock-summary entries.
+Per-status quantity breakdown for a booking.
+
+⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s
+entries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this
+breakdown down to a single `quantity` — so the breakdown reaches availability
+as a number and never as a structure.
 
 ```ts
 interface BookingBreakdown {
@@ -12063,7 +11957,7 @@ projection** of the `settlements` journal — produced only by
 that changed them, and rebuildable from the log by
 `scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
 to apologise for; they are the target architecture, and the same shape
-`stock-summaries` already has against the movement journal.
+`stock/{P}` already has against the movement journal.
 
 `total` is NOT part of that projection — it derives from `items[]`. So the
 rebuild is deliberately **partial**: it repairs the settlement-fed fields
@@ -14242,46 +14136,6 @@ for Firestore `array-contains`, and the refinement below compares it as a
 multiset, so a differently-ordered mirror holding the same uuids is still
 valid. Nothing may read order back out of it.
 
-## `@cfs/core/schemas/public-stock-summary`
-
-### `PublicStockSummary`
-
-Window-independent, public-safe availability inputs for one product.
-
-```ts
-interface PublicStockSummary {
-  uid: string;
-  uid_product: string;
-  type: ProductTypeType;
-  quantity_held: number;
-  unavailable: PublicUnavailableEntry[];
-  created_at: FirestoreTimestampType;
-  updated_at: FirestoreTimestampType;
-}
-```
-
-### `PublicStockSummarySchema`
-
-Zod schema for PublicStockSummary.
-
-```ts
-const PublicStockSummarySchema: z.ZodType<PublicStockSummary>;
-```
-
-### `PublicUnavailableEntry`
-
-One anonymous unavailable interval — a booking or an OOS record, indistinguishable.
-
-```ts
-interface PublicUnavailableEntry {
-  start: string | null;
-  start_fs: FirestoreTimestampType | null;
-  end: string | null;
-  end_fs: FirestoreTimestampType | null;
-  quantity: number;
-}
-```
-
 ## `@cfs/core/schemas/recurrence`
 
 ### `CreateRecurrenceInput`
@@ -14774,7 +14628,7 @@ The invoice's `totals.{amount_paid, amount_credited, amount_due}` are a
 **co-written projection** of this log, produced only by
 `recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —
 an event log plus a client-ready projection for snapshot listeners — arriving
-early in one domain, and it is `transactions` + `stock-summaries` for money.
+early in one domain, and it is `transactions` + `stock` for money.
 
 ### `Settlement`
 
@@ -14940,69 +14794,6 @@ Union of {@link STOCK_UNAVAILABLE_KINDS}.
 
 ```ts
 type StockUnavailableKindType = indexedAccess;
-```
-
-## `@cfs/core/schemas/stock-summary`
-
-### `StockSummary`
-
-Window-independent availability inputs for one product. Doc id == `uid` ==
-`uid_product` == the product's / inventory-ledger's Firestore id.
-
-```ts
-interface StockSummary {
-  uid: string;
-  uid_product: string;
-  type: ProductTypeType;
-  quantity_held: number;
-  bookings: StockSummaryBookingEntry[];
-  out_of_service: StockSummaryOOSEntry[];
-  created_at: FirestoreTimestampType;
-  updated_at: FirestoreTimestampType;
-}
-```
-
-### `StockSummaryBookingEntry`
-
-A live (non-complete) booking as an interval + its breakdown. `end`/`end_fs`
-null = open-ended (see the module note — this is the sale case).
-
-```ts
-interface StockSummaryBookingEntry {
-  uid: string;
-  number: number;
-  start: string | null;
-  start_fs: FirestoreTimestampType | null;
-  end: string | null;
-  end_fs: FirestoreTimestampType | null;
-  breakdown: BookingBreakdown;
-  type: ComponentTypeType;
-}
-```
-
-### `StockSummaryOOSEntry`
-
-A non-terminal out-of-service record as an interval + its quantity.
-
-```ts
-interface StockSummaryOOSEntry {
-  uid: string;
-  start: string | null;
-  start_fs: FirestoreTimestampType | null;
-  end: string | null;
-  end_fs: FirestoreTimestampType | null;
-  quantity: number;
-  reason: OOSReasonType;
-  status: OOSStatusType;
-}
-```
-
-### `StockSummarySchema`
-
-Zod schema for StockSummary.
-
-```ts
-const StockSummarySchema: z.ZodType<StockSummary>;
 ```
 
 ## `@cfs/core/schemas/store`
@@ -19260,123 +19051,6 @@ interface UpdateCommentInputType {
 }
 ```
 
-## `@cfs/core/utils/availability`
-
-The availability engine — the single source of the CFS availability formula.
-
-A stock summary caches the *inputs* to an availability answer (one doc per
-product: `quantity_held` + the live booking intervals + the live OOS
-intervals). The window enters only as an overlap filter, so any window is
-derivable from that one doc, by anyone holding it:
-
-```ts
-import { computeAvailability } from "@cfs/core/utils/availability";
-
-const { quantity_available } = computeAvailability(summary, {
-  start: "2026-06-01T00:00:00.000-05:00",
-  end:   "2026-06-05T00:00:00.000-05:00",
-});
-```
-
-Pure and db-free: interval arithmetic runs off `FirestoreTimestampValue`'s
-structural `toMillis()` (or the paired ISO string), so this runs unchanged in
-Deno on the server, in the browser against an `onSnapshot` doc, and over a
-plain JSON fixture in a test. No Firestore SDK import, either side.
-
-**Availability is always Chicago wall clock, and this module owns that rule.**
-The shop is in Chicago; a requester in California asking for "June 1 – June 5"
-means Chicago `Jun 1 00:00:00.000` → `Jun 5 23:59:59.999`, no matter where the
-browser is. The window is normalized here — `toChicagoStartOfDay` on `start`,
-`toChicagoEndOfDay` on `end` — so a `-08:00`, a `Z` and a `-06:00` spelling of
-the same day produce identical numbers. Callers pass offset-carrying ISO
-strings; a bare `YYYY-MM-DD` is rejected upstream by the schema factories.
-
-**This must not be decomposed into a per-day rollup.** With `held = 2`, a
-booking on days 1–2 and another on days 4–5, the answer for window `[1, 5]` is
-exactly **0** — no single unit is free for the whole span — while a
-min-over-days curve says 1. Overstating availability oversells. Intervals give
-the exact answer; a daily curve does not.
-
-### `AvailabilityResult`
-
-Everything the manager's availability cells and stock panel need for one window.
-
-```ts
-interface AvailabilityResult {
-  quantity_held: number;
-  quantity_booked: number;
-  quantity_out_of_service: number;
-  quantity_in_service: number;
-  quantity_available: number;
-  bookings_breakdown: BookingBreakdown;
-  out_of_service_breakdown: OutOfServiceBreakdown;
-  bookings: StockSummaryBookingEntry[];
-}
-```
-
-### `AvailabilityWindow`
-
-The window an availability question is asked about. Offset-carrying ISO strings.
-
-```ts
-interface AvailabilityWindow {
-  start: string;
-  end: string;
-}
-```
-
-### `OutOfServiceBreakdown`
-
-Per-reason out-of-service quantities over the window.
-
-```ts
-interface OutOfServiceBreakdown {
-  cleaning: number;
-  damaged: number;
-  maintenance: number;
-  lost: number;
-}
-```
-
-### `PublicAvailabilityResult`
-
-The public storefront's answer — no booking/OOS detail, same exact numbers.
-
-```ts
-interface PublicAvailabilityResult {
-  quantity_held: number;
-  quantity_unavailable: number;
-  quantity_available: number;
-}
-```
-
-### `computeAvailability(summary: StockSummary, window: AvailabilityWindow): AvailabilityResult`
-
-Compute availability for one product over one window, from the cached inputs.
-
-```
-quantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)
-```
-
-Negative results are preserved, never clamped: an oversold product must stay
-visibly oversold.
-
-### `computePublicAvailability(summary: PublicStockSummary, window: AvailabilityWindow): PublicAvailabilityResult`
-
-The public-storefront form. Same arithmetic, run over the sanitized
-`unavailable[]` list (bookings ∪ OOS, merged and anonymized), so an outsider
-gets the exact number without learning what made a unit unavailable.
-
-### `toPublicStockSummary(summary: StockSummary): PublicStockSummary`
-
-Project the internal summary to its public twin — the one place the sanitized
-shape is defined, so the API's writer and any rebuild script can't drift.
-
-Bookings and OOS records merge into one anonymous interval list. Only
-stock-*consuming* entries survive: a booking contributes `heldByBooking` (a
-`quoted` booking holds nothing), and zero-quantity entries are dropped
-outright — they'd leak the existence of a booking without affecting any answer.
-
 ## `@cfs/core/utils/bookings`
 
 Pure helpers over the booking breakdown shape and the order's denormalized
@@ -19518,7 +19192,7 @@ before submitting it through `PUT /bookings/{uid}`.
 
 Sum a list of booking breakdowns into the order's roll-up shape.
 
-Mirrors the keys of `stock-summaries.bookings_breakdown` (which aggregates
+Mirrors the per-status keys of a booking's own `breakdown` (which aggregates
 along the *product* axis) but aggregated along the *order* axis. Used to
 seed `order.bookings_breakdown` at create/update time and to recompute it
 client-side from cached bookings when the order doc isn't authoritative
@@ -19820,7 +19494,7 @@ Canonicalize to the last representable instant of the Chicago calendar date
 containing the input (`23:59:59.999` local). The closing twin of
 {@link toChicagoStartOfDay} — together they turn a pair of dates into the
 half-open-in-spirit, closed-in-fact window `[startOfDay(s), endOfDay(e)]` that
-{@link module:availability} overlaps intervals against. Idempotent, DST-aware.
+{@link module:stock} overlaps intervals against. Idempotent, DST-aware.
 
 ```ts
 toChicagoEndOfDay("2025-12-22T15:15:00.000Z"); // "2025-12-22T23:59:59.999-06:00"
@@ -21773,7 +21447,7 @@ const kids = buildOrderComponentLines(productDoc, { quantity: 2, chargeDays: 5, 
 
 Pure and db-free — the input is a Typesense `ProductDocument` the caller
 already holds, and the output is a plain array. It lives here for the same
-reason `@cfs/core/utils/availability` does: it is shared verbatim so two
+reason `@cfs/core/utils/stock` does: it is shared verbatim so two
 consumers **cannot disagree**. There are three — the manager's staging
 popover, the manager's order/invoice stores, and the public webapp's order
 drafts — across two repos. A second copy of the component expansion is a

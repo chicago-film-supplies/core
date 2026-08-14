@@ -26,7 +26,7 @@
  * Traced from: api-cloudrun/src/services/transactions.ts
  */
 import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
-import { stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
+import { stockRules, stockSteps } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -211,7 +211,7 @@ export const createTransactionRules: CollectionRule[] = [
     "Locations track which products sit on which shelf. A movement writes ONLY products[]/query_by_products/updated_at — never name, active, default, uid_location_type or the capacities, which belong to createLocation/updateLocation. A movement cannot create a location either: it references one by uid, and a missing one is a 404.",
     [MOVEMENT_LOCATION_STAGING],
   ),
-  ...stockSummaryRules(
+  ...stockRules(
     "create-transaction",
     "A movement that moves quantity_held (a pure placement move, which leaves quantity_held untouched, skips the rebuild)",
   ),
@@ -220,11 +220,11 @@ export const createTransactionRules: CollectionRule[] = [
 export const createTransactionTransaction: TransactionDefinition = {
   id: "create-transaction",
   description:
-    "Appends a movement to the journal, folds its lines onto the inventory ledger and the location documents, and rebuilds the product's stock summary when quantity_held actually moved. The document id is the derived {uid_session}|{type}|{subject}, so a retried create resolves to the same document instead of appending a second event.",
+    "Appends a movement to the journal, folds its lines onto the inventory ledger and the location documents, and rebuilds the product's `stock/{P}` projection when quantity_held actually moved. The document id is the derived {uid_session}|{type}|{subject}, so a retried create resolves to the same document instead of appending a second event.",
   steps: [
     "create-transaction:transaction-to-ledger",
     "create-transaction:transaction-to-locations",
-    ...stockSummarySteps("create-transaction"),
+    ...stockSteps("create-transaction"),
   ],
 };
 
@@ -241,7 +241,7 @@ export const reverseTransactionRules: CollectionRule[] = [
     "The negated lines put the units back on the shelves they came from. An outbound side may name a deactivated bin: pulling stock out of a dead or mis-stored location is exactly the corrective action, so only an INBOUND side into an inactive location is rejected.",
     [REVERSAL_LOCATIONS, MOVEMENT_LOCATION_STAGING],
   ),
-  ...stockSummaryRules(
+  ...stockRules(
     "reverse-transaction",
     "A reversal that moves quantity_held (reversing a pure placement move leaves quantity_held untouched and skips the rebuild)",
   ),
@@ -254,6 +254,6 @@ export const reverseTransactionTransaction: TransactionDefinition = {
   steps: [
     "reverse-transaction:transaction-to-ledger",
     "reverse-transaction:transaction-to-locations",
-    ...stockSummarySteps("reverse-transaction"),
+    ...stockSteps("reverse-transaction"),
   ],
 };

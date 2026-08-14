@@ -3,7 +3,7 @@
  *
  * `create-out-of-service-record` — direct admin POST or born from a booking
  * update (warehouse marks items lost/damaged on check-in). Cowrites a default
- * thread; rebuilds the product's stock summary (`buildStockSummary`), which
+ * thread; rebuilds the product's stock projection (`buildStockSummary`), which
  * re-derives `out_of_service[]` from the live non-terminal records.
  *
  * `update-out-of-service-record` — operator/system PUT moves units between
@@ -18,7 +18,7 @@
  * breakdown.
  */
 import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
-import { stockSummaryRules, stockSummarySteps } from "./stock-summaries.ts";
+import { stockRules, stockSteps } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 
@@ -82,22 +82,22 @@ export const createOutOfServiceRules: CollectionRule[] = [
       { source: [], target: ["stores"] },
     ],
   },
-  ...stockSummaryRules("create-out-of-service-record", "Creating an OOS record"),
+  ...stockRules("create-out-of-service-record", "Creating an OOS record"),
 ];
 
 export const createOutOfServiceTransaction: TransactionDefinition = {
   id: "create-out-of-service-record",
-  description: "Creates an out-of-service record, recomputes the affected product's stock-summaries, and cowrites a default thread for the record.",
+  description: "Creates an out-of-service record, rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record.",
   steps: [
     "create-out-of-service-record:sources-to-record",
-    ...stockSummarySteps("create-out-of-service-record"),
+    ...stockSteps("create-out-of-service-record"),
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],
 };
 
 export const updateOutOfServiceRules: CollectionRule[] = [
-  ...stockSummaryRules(
+  ...stockRules(
     "update-out-of-service-record",
     "Any OOS quantity/date/status change (including a cancel, which drops the record from the array entirely)",
   ),
@@ -106,7 +106,7 @@ export const updateOutOfServiceRules: CollectionRule[] = [
     source: "out-of-service",
     target: "transactions",
     mode: "co-write",
-    invariant: "Once derived status === 'complete' (breakdown.returned_to_service + breakdown.written_off === quantity), cowrite an inventory transaction in the same Firestore transaction — a 'return-to-service' for breakdown.returned_to_service > 0 and/or a 'write-off' for breakdown.written_off > 0. Each cowritten transaction follows the standard create-transaction rules (ledger update + locations update + stock-summary recalc).",
+    invariant: "Once derived status === 'complete' (breakdown.returned_to_service + breakdown.written_off === quantity), cowrite an inventory transaction in the same Firestore transaction — a 'return-to-service' for breakdown.returned_to_service > 0 and/or a 'write-off' for breakdown.written_off > 0. Each cowritten transaction follows the standard create-transaction rules (ledger update + locations update + stock recalc).",
     enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "update-out-of-service-record",
     fields: [
@@ -135,9 +135,9 @@ export const updateOutOfServiceRules: CollectionRule[] = [
 
 export const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
-  description: "Updates an out-of-service record. Quantity changes recompute stock summaries. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock-summary update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown.",
+  description: "Updates an out-of-service record. Quantity changes rebuild the product's `stock/{P}` projection. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown.",
   steps: [
-    ...stockSummarySteps("update-out-of-service-record"),
+    ...stockSteps("update-out-of-service-record"),
     "update-out-of-service-record:record-to-transactions",
     "update-out-of-service-record:transactions-to-ledger",
   ],

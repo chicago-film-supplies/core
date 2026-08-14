@@ -14,5 +14,5 @@ export function bookingId(uidOrder: string, uidProduct: string, uidDest: string)
   return `${uidOrder}:${uidProduct}:${uidDest}`;
 }
 
-// No stock-summary id builder: a stock summary's doc id IS the product uid
-// (a plain FirestoreId) — there is no composite form any more.
+// No stock id builder: `stock/{P}` and `stock-locks/{P}` are both keyed by the
+// product uid (a plain FirestoreId) — there is no composite form any more.
