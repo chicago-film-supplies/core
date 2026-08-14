@@ -62,6 +62,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "oosConsumes",
     "boundMs",
     "intervalsOverlap",
+    "windowMs",
+    // The reducers and the fold: one takes a booking, one an OOS record, one a
+    // `stock/{P}` document. Same reason as the rest of the namespace.
+    "unavailableFromBooking",
+    "unavailableFromOOS",
+    "computeStockAvailability",
   ],
   availability: [
     "computeAvailability", // needs a StockSummary — never in a render context

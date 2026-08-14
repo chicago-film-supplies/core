@@ -1,9 +1,29 @@
 /**
- * Stock primitives — the interval rules and the two "how much does this consume"
- * definitions, in one place so the availability engine and the shelf allocator
- * cannot drift apart.
+ * Stock primitives — the interval rules, the two "how much does this consume"
+ * definitions, and the reduce-and-fold pair that turns raw booking / OOS rows
+ * into an availability answer. One place, so the availability engine, the shelf
+ * allocator and the oversell gate cannot drift apart.
  *
  * Pure and db-free, like every `utils/*` module.
+ *
+ * ## The three layers, and why they are one module
+ *
+ * 1. **Primitives** — {@link heldByBooking}, {@link unitsClaimedOnShelves},
+ *    {@link oosConsumes}, {@link boundMs}, {@link intervalsOverlap},
+ *    {@link windowMs}. The rules that are easy to get subtly wrong.
+ * 2. **Reducers** — {@link unavailableFromBooking}, {@link unavailableFromOOS}:
+ *    one source document → the pre-reduced anonymous interval stored in
+ *    `stock/{P}.unavailable[]`.
+ * 3. **The fold** — {@link computeStockAvailability}: that array + a window → the
+ *    numbers.
+ *
+ * They sit together because **the projection writer and the oversell gate run
+ * different halves of the same pipeline**. The rebuild runs (2) and stores the
+ * result; a claim cannot use the stored result — it would be racing against the
+ * projection's own freshness — so it reads the sources itself, runs (2) in
+ * memory and then (3). Splitting the layers across modules would mean the
+ * write path and the gate could come to disagree about what a booking consumes,
+ * which is the exact failure this file exists to prevent.
  *
  * ## ⚠️ There are TWO consumption definitions, and they are not interchangeable
  *
@@ -67,10 +87,15 @@
  */
 import type {
   BookingBreakdown,
+  BookingStatusType,
   ComponentTypeType,
   FirestoreTimestampType,
   FirestoreTimestampValue,
+  OOSStatusType,
+  Stock,
+  StockUnavailableEntry,
 } from "../schemas/mod.ts";
+import { toChicagoEndOfDay, toChicagoStartOfDay } from "./dates.ts";
 
 /** Just enough of a booking to answer either consumption question. */
 export interface StockConsumingBooking {
@@ -202,4 +227,160 @@ export function intervalsOverlap(
 ): boolean {
   return (startMs === null || startMs <= windowEndMs) &&
     (endMs === null || endMs >= windowStartMs);
+}
+
+// ── The window ───────────────────────────────────────────────────────────────
+
+/** The window an availability question is asked about. Offset-carrying ISO strings. */
+export interface AvailabilityWindow {
+  start: string;
+  end: string;
+}
+
+/**
+ * Normalize a requested window to the Chicago wall-clock day span it means, as
+ * epoch millis.
+ *
+ * **Availability is always Chicago wall clock, and this function owns that
+ * rule.** The shop is in Chicago; a requester in California asking for "June 1 –
+ * June 5" means Chicago `Jun 1 00:00:00.000` → `Jun 5 23:59:59.999`, no matter
+ * where the browser is — so a `-08:00`, a `Z` and a `-06:00` spelling of the same
+ * day must produce identical numbers. Callers pass offset-carrying ISO strings; a
+ * bare `YYYY-MM-DD` is rejected upstream by the schema factories.
+ *
+ * It lives here rather than in `utils/availability.ts` (which is where it was)
+ * because both the summary engine and the pre-reduced fold below need it, and
+ * this module is the one they can both reach: `availability.ts` already imports
+ * from here, so the reverse edge would be a cycle.
+ */
+export function windowMs(window: AvailabilityWindow): { startMs: number; endMs: number } {
+  return {
+    startMs: Date.parse(toChicagoStartOfDay(window.start)),
+    endMs: Date.parse(toChicagoEndOfDay(window.end)),
+  };
+}
+
+// ── Source → pre-reduced entry (the reducers) ────────────────────────────────
+
+/**
+ * Just enough of a booking to reduce it to an unavailable interval. Structural
+ * rather than `Pick<Booking, …>` so a caller can hand over a whole `Booking`, a
+ * REST read, or a fixture — and so `dates` names only the two bounds that are
+ * read, never the `_fs` twins (see {@link unavailableFromBooking}).
+ */
+export interface StockBookingSource extends StockConsumingBooking {
+  status: BookingStatusType;
+  dates: { start: string | null; end: string | null };
+}
+
+/** Just enough of an out-of-service record to reduce it to an unavailable interval. */
+export interface StockOOSSource {
+  status: OOSStatusType;
+  quantity: number;
+  dates: { start: string | null; end: string | null };
+}
+
+/**
+ * Reduce a booking to the interval it makes unavailable, or `null` when it makes
+ * none.
+ *
+ * `null` covers **both** exits, and folding them into one function is the point:
+ * a `complete` booking has left the live working set, and a live booking that
+ * consumes nothing (a `quoted` one holds no units) contributes nothing to any
+ * answer. Two separate rules — a liveness filter on the query and a
+ * zero-quantity filter on the projection — is what the previous model had, and
+ * they could disagree.
+ *
+ * ⚠️ **The liveness test must be shared with whatever reads the sources.** The
+ * rebuild query filters on status, and an overlay call site passes the
+ * *post-write* booking — which may be the very write that completed it. Without
+ * one rule the two disagree: the query drops a freshly-completed booking while
+ * the overlay adds it straight back. That is not cosmetic — a completed **sale**
+ * booking carries `out === quantity`, so leaving it in would keep consuming stock
+ * forever, against the very `sale` transaction that removed those units from
+ * `quantity_held`.
+ *
+ * The bounds are copied from the ISO fields and the `_fs` twins are ignored, not
+ * because they are unreliable but because they have no job here: `_fs` exists so
+ * Firestore can order and range-filter the `bookings` collection, and nothing
+ * range-filters an array member. A null bound is preserved, never coerced — for a
+ * pending sale it is the whole point.
+ */
+export function unavailableFromBooking(b: StockBookingSource): StockUnavailableEntry | null {
+  if (b.status === "complete") return null;
+  const quantity = heldByBooking(b);
+  if (quantity <= 0) return null;
+  return { start: b.dates.start, end: b.dates.end, quantity, kind: "booking" };
+}
+
+/**
+ * Reduce an out-of-service record to the interval it makes unavailable, or `null`
+ * when it makes none.
+ *
+ * The liveness rule is {@link oosConsumes}'s — terminal statuses hold zero — so
+ * the status set is not restated here. See that function for the rule that must
+ * never be "cleaned up": a live record claims its **full `quantity`**, never
+ * reduced by `breakdown.returned_to_service`.
+ */
+export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | null {
+  const quantity = oosConsumes(o);
+  if (quantity <= 0) return null;
+  return { start: o.dates.start, end: o.dates.end, quantity, kind: "oos" };
+}
+
+// ── The fold ────────────────────────────────────────────────────────────────
+
+/** Everything a consumer needs from one product over one window. */
+export interface StockAvailability {
+  quantity_held: number;
+  quantity_booked: number;
+  quantity_out_of_service: number;
+  quantity_available: number;
+}
+
+/**
+ * Compute availability for one product over one window, from the pre-reduced
+ * projection.
+ *
+ * ```
+ * quantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)
+ * ```
+ *
+ * Negative results are preserved, never clamped: an oversold product must stay
+ * visibly oversold, and #424 makes that the intended shortage signal for
+ * operators rather than an error state.
+ *
+ * `quantity_in_service` is not returned — it is `quantity_held −
+ * quantity_out_of_service`, and no current consumer asks for it.
+ *
+ * ⚠️ **This must not be decomposed into a per-day rollup.** With `held = 2`, a
+ * booking on days 1–2 and another on days 4–5, the answer for window `[1, 5]` is
+ * exactly **0** — no single unit is free for the whole span — while a
+ * min-over-days curve says 1. Overstating availability oversells. Intervals give
+ * the exact answer; a daily curve does not.
+ */
+export function computeStockAvailability(
+  stock: Pick<Stock, "quantity_held" | "unavailable">,
+  window: AvailabilityWindow,
+): StockAvailability {
+  const { startMs, endMs } = windowMs(window);
+
+  let quantity_booked = 0;
+  let quantity_out_of_service = 0;
+
+  for (const u of stock.unavailable) {
+    const start = u.start === null ? null : Date.parse(u.start);
+    const end = u.end === null ? null : Date.parse(u.end);
+    if (!intervalsOverlap(start, end, startMs, endMs)) continue;
+    if (u.kind === "booking") quantity_booked += u.quantity;
+    else quantity_out_of_service += u.quantity;
+  }
+
+  const quantity_held = stock.quantity_held;
+  return {
+    quantity_held,
+    quantity_booked,
+    quantity_out_of_service,
+    quantity_available: quantity_held - quantity_booked - quantity_out_of_service,
+  };
 }

@@ -3062,6 +3062,12 @@
         },
         {
           "kind": "variable",
+          "name": "STOCK_UNAVAILABLE_KINDS",
+          "declaration": "const STOCK_UNAVAILABLE_KINDS: \"booking\" | \"oos\"[];",
+          "doc": "What made an interval unavailable. The only non-quantitative fact a reader gets."
+        },
+        {
+          "kind": "variable",
           "name": "SaveQuoteVersionInput",
           "declaration": "const SaveQuoteVersionInput: z.ZodType<SaveQuoteVersionInputType>;",
           "doc": "Zod schema for SaveQuoteVersionInput."
@@ -3075,7 +3081,7 @@
         {
           "kind": "typeAlias",
           "name": "SchemaDocType",
-          "declaration": "type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;",
+          "declaration": "type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | StockSummary | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;",
           "doc": "Union of all Firestore document types. Use with validateBeforeWrite.\n\n**`TemplateVersion` and `TemplateComponent` were the only two schema-backed\ndocument types missing from this union**, and their absence was the whole\nreason for 43 `as unknown as SchemaDocType` casts in `api-cloudrun`. The\nproof it was the union and not the pattern: `Template` IS a member and writes\nuncast, while its sibling `TemplateComponent` was not and writes cast — same\nthree-collection family, different treatment, no stated reason.\n\nWidening is safe by construction rather than by review: there is no\ndiscriminant to switch on (these types share no common `type` tag, so a\ndiscriminated union over `SchemaDocType` is not expressible), and a\nworkspace-wide grep finds no `Extract<SchemaDocType…>`, no\n`keyof SchemaDocType` and no exhaustive switch. Every one of the 126\nreferences lives in `api-cloudrun`; `manager` and `templates` have none.\n\nThe one thing it gives up is real and was never a guarantee: `tx.set(ref,\ntemplateVersionDoc)` used to be a compile error absent a cast. That caught\nnothing 51 of 53 doc types were not already free to do, and the runtime guard\nin `validateBeforeWrite` still rejects every doc/collection mismatch with a\n`collection/id` label."
         },
         {
@@ -3139,6 +3145,24 @@
           "doc": "One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS}"
         },
         {
+          "kind": "interface",
+          "name": "Stock",
+          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number;\n  unavailable: StockUnavailableEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id.\n\nThe window enters only as an overlap filter, so **any** window is derivable\nfrom this one document by `computeStockAvailability`\n(`@cfs/core/utils/stock`) — on the server, in the browser against an\n`onSnapshot`, or over a plain JSON fixture, with no round-trip and no document\nminted per question asked."
+        },
+        {
+          "kind": "interface",
+          "name": "StockLock",
+          "declaration": "interface StockLock {\n  uid: string;\n  uid_product: string;\n  seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "The per-product serialization token — one document per product, whose *only*\ncontent is a counter, and whose only writers are claim writers.\n\n## Why the token is a separate document from {@link Stock}\n\nA claim has to be serializable per product: read the sources, decide, write —\nand refuse if anyone claimed the same product in between. Firestore's only\nwrite preconditions are `exists` and `lastUpdateTime`; there is no\nfield-value precondition. So the thing being preconditioned on must be a\ndocument that **nothing else writes**:\n\n- Preconditioning on `stock/{P}` itself fails, because the rebuild writes it\n  constantly — every claim would lose to a projection refresh that changed\n  nothing it cared about.\n- Reading-then-writing one document inside a transaction is the hot-doc\n  read-modify-write pathology, measured at **60–87 s per contender** against\n  **1.3–1.5 s** for the compare-and-set form.\n\nHence: read outside, write under `lastUpdateTime`. A loser is told so in\n~266 ms and retries against fresh state, rather than blocking to a deadline.\n\n## What a forgotten bump costs, and why that is the cheap failure\n\nA writer that claims stock without bumping `seq` loses serialization under an\nexact race — i.e. a possible oversell, which is what **every** write does\ntoday. It fails soft and self-corrects on the next claim. Contrast the shape\nthis design rejected (the projection holding claims as a delta), where the\nsymmetric slip is a claim that is never *released*: stock consumed forever,\nrepairable only by a rebuild. Under a query-rebuilt projection the absence of\na row IS the release, and an absence cannot be forgotten."
+        },
+        {
+          "kind": "variable",
+          "name": "StockLockSchema",
+          "declaration": "const StockLockSchema: z.ZodType<StockLock>;",
+          "doc": "Zod schema for {@link StockLock}."
+        },
+        {
           "kind": "variable",
           "name": "StockMethodEnum",
           "declaration": "const StockMethodEnum: z.ZodType<StockMethodType>;",
@@ -3149,6 +3173,12 @@
           "name": "StockMethodType",
           "declaration": "type StockMethodType = indexedAccess;",
           "doc": "Allowed values for inventory stock tracking method."
+        },
+        {
+          "kind": "variable",
+          "name": "StockSchema",
+          "declaration": "const StockSchema: z.ZodType<Stock>;",
+          "doc": "Zod schema for {@link Stock}."
         },
         {
           "kind": "interface",
@@ -3179,6 +3209,24 @@
           "name": "StockSummarySchema",
           "declaration": "const StockSummarySchema: z.ZodType<StockSummary>;",
           "doc": "Zod schema for StockSummary."
+        },
+        {
+          "kind": "interface",
+          "name": "StockUnavailableEntry",
+          "declaration": "interface StockUnavailableEntry {\n  start: string | null;\n  end: string | null;\n  quantity: number;\n  kind: StockUnavailableKindType;\n}",
+          "doc": "One pre-reduced, anonymous unavailable interval.\n\n`quantity` is what the source **still consumes**, already folded — a booking\ncontributes `heldByBooking` (which excludes a sale's `out` units, since the\nsale movement already dropped `quantity_held`), an OOS record contributes its\nfull `quantity` until terminal. An entry that consumes nothing is not written\nat all: it would affect no answer while disclosing that something exists."
+        },
+        {
+          "kind": "variable",
+          "name": "StockUnavailableKindEnum",
+          "declaration": "const StockUnavailableKindEnum: z.ZodType<StockUnavailableKindType>;",
+          "doc": "Zod enum for {@link StockUnavailableKindType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "StockUnavailableKindType",
+          "declaration": "type StockUnavailableKindType = indexedAccess;",
+          "doc": "Union of {@link STOCK_UNAVAILABLE_KINDS}."
         },
         {
           "kind": "interface",
@@ -7512,6 +7560,60 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/schemas/stock",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "STOCK_UNAVAILABLE_KINDS",
+          "declaration": "const STOCK_UNAVAILABLE_KINDS: \"booking\" | \"oos\"[];",
+          "doc": "What made an interval unavailable. The only non-quantitative fact a reader gets."
+        },
+        {
+          "kind": "interface",
+          "name": "Stock",
+          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number;\n  unavailable: StockUnavailableEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id.\n\nThe window enters only as an overlap filter, so **any** window is derivable\nfrom this one document by `computeStockAvailability`\n(`@cfs/core/utils/stock`) — on the server, in the browser against an\n`onSnapshot`, or over a plain JSON fixture, with no round-trip and no document\nminted per question asked."
+        },
+        {
+          "kind": "interface",
+          "name": "StockLock",
+          "declaration": "interface StockLock {\n  uid: string;\n  uid_product: string;\n  seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "The per-product serialization token — one document per product, whose *only*\ncontent is a counter, and whose only writers are claim writers.\n\n## Why the token is a separate document from {@link Stock}\n\nA claim has to be serializable per product: read the sources, decide, write —\nand refuse if anyone claimed the same product in between. Firestore's only\nwrite preconditions are `exists` and `lastUpdateTime`; there is no\nfield-value precondition. So the thing being preconditioned on must be a\ndocument that **nothing else writes**:\n\n- Preconditioning on `stock/{P}` itself fails, because the rebuild writes it\n  constantly — every claim would lose to a projection refresh that changed\n  nothing it cared about.\n- Reading-then-writing one document inside a transaction is the hot-doc\n  read-modify-write pathology, measured at **60–87 s per contender** against\n  **1.3–1.5 s** for the compare-and-set form.\n\nHence: read outside, write under `lastUpdateTime`. A loser is told so in\n~266 ms and retries against fresh state, rather than blocking to a deadline.\n\n## What a forgotten bump costs, and why that is the cheap failure\n\nA writer that claims stock without bumping `seq` loses serialization under an\nexact race — i.e. a possible oversell, which is what **every** write does\ntoday. It fails soft and self-corrects on the next claim. Contrast the shape\nthis design rejected (the projection holding claims as a delta), where the\nsymmetric slip is a claim that is never *released*: stock consumed forever,\nrepairable only by a rebuild. Under a query-rebuilt projection the absence of\na row IS the release, and an absence cannot be forgotten."
+        },
+        {
+          "kind": "variable",
+          "name": "StockLockSchema",
+          "declaration": "const StockLockSchema: z.ZodType<StockLock>;",
+          "doc": "Zod schema for {@link StockLock}."
+        },
+        {
+          "kind": "variable",
+          "name": "StockSchema",
+          "declaration": "const StockSchema: z.ZodType<Stock>;",
+          "doc": "Zod schema for {@link Stock}."
+        },
+        {
+          "kind": "interface",
+          "name": "StockUnavailableEntry",
+          "declaration": "interface StockUnavailableEntry {\n  start: string | null;\n  end: string | null;\n  quantity: number;\n  kind: StockUnavailableKindType;\n}",
+          "doc": "One pre-reduced, anonymous unavailable interval.\n\n`quantity` is what the source **still consumes**, already folded — a booking\ncontributes `heldByBooking` (which excludes a sale's `out` units, since the\nsale movement already dropped `quantity_held`), an OOS record contributes its\nfull `quantity` until terminal. An entry that consumes nothing is not written\nat all: it would affect no answer while disclosing that something exists."
+        },
+        {
+          "kind": "variable",
+          "name": "StockUnavailableKindEnum",
+          "declaration": "const StockUnavailableKindEnum: z.ZodType<StockUnavailableKindType>;",
+          "doc": "Zod enum for {@link StockUnavailableKindType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "StockUnavailableKindType",
+          "declaration": "type StockUnavailableKindType = indexedAccess;",
+          "doc": "Union of {@link STOCK_UNAVAILABLE_KINDS}."
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/schemas/stock-summary",
       "moduleDoc": "",
       "symbols": [
@@ -10642,9 +10744,33 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "AvailabilityWindow",
+          "declaration": "interface AvailabilityWindow {\n  start: string;\n  end: string;\n}",
+          "doc": "The window an availability question is asked about. Offset-carrying ISO strings."
+        },
+        {
+          "kind": "interface",
+          "name": "StockAvailability",
+          "declaration": "interface StockAvailability {\n  quantity_held: number;\n  quantity_booked: number;\n  quantity_out_of_service: number;\n  quantity_available: number;\n}",
+          "doc": "Everything a consumer needs from one product over one window."
+        },
+        {
+          "kind": "interface",
+          "name": "StockBookingSource",
+          "declaration": "interface StockBookingSource {\n  status: BookingStatusType;\n  dates: typeLiteral;\n}",
+          "doc": "Just enough of a booking to reduce it to an unavailable interval. Structural\nrather than `Pick<Booking, …>` so a caller can hand over a whole `Booking`, a\nREST read, or a fixture — and so `dates` names only the two bounds that are\nread, never the `_fs` twins (see {@link unavailableFromBooking})."
+        },
+        {
+          "kind": "interface",
           "name": "StockConsumingBooking",
           "declaration": "interface StockConsumingBooking {\n  breakdown: BookingBreakdown;\n  type: ComponentTypeType;\n}",
           "doc": "Just enough of a booking to answer either consumption question."
+        },
+        {
+          "kind": "interface",
+          "name": "StockOOSSource",
+          "declaration": "interface StockOOSSource {\n  status: OOSStatusType;\n  quantity: number;\n  dates: typeLiteral;\n}",
+          "doc": "Just enough of an out-of-service record to reduce it to an unavailable interval."
         },
         {
           "kind": "variable",
@@ -10665,6 +10791,14 @@
           "name": "boundMs",
           "signature": "boundMs(fs: FirestoreTimestampType | null, iso: string | null): number | null",
           "doc": "Resolve an interval bound to epoch millis, or `null` for open-ended.\n\nPrefers the `_fs` twin — that is the field Firestore itself orders by, so it\nis the bound of record — and falls back to parsing the paired ISO string when\n`_fs` isn't a real Timestamp (a plain-JSON fixture, a REST read, a write-time\n`FieldValue` sentinel). `null` on both sides means genuinely open-ended.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "computeStockAvailability",
+          "signature": "computeStockAvailability(stock: Pick<Stock, \"quantity_held\" | \"unavailable\">, window: AvailabilityWindow): StockAvailability",
+          "doc": "Compute availability for one product over one window, from the pre-reduced\nprojection.\n\n```\nquantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)\n```\n\nNegative results are preserved, never clamped: an oversold product must stay\nvisibly oversold, and #424 makes that the intended shortage signal for\noperators rather than an error state.\n\n`quantity_in_service` is not returned — it is `quantity_held −\nquantity_out_of_service`, and no current consumer asks for it.\n\n⚠️ **This must not be decomposed into a per-day rollup.** With `held = 2`, a\nbooking on days 1–2 and another on days 4–5, the answer for window `[1, 5]` is\nexactly **0** — no single unit is free for the whole span — while a\nmin-over-days curve says 1. Overstating availability oversells. Intervals give\nthe exact answer; a daily curve does not.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10694,9 +10828,33 @@
         },
         {
           "kind": "function",
+          "name": "unavailableFromBooking",
+          "signature": "unavailableFromBooking(b: StockBookingSource): StockUnavailableEntry | null",
+          "doc": "Reduce a booking to the interval it makes unavailable, or `null` when it makes\nnone.\n\n`null` covers **both** exits, and folding them into one function is the point:\na `complete` booking has left the live working set, and a live booking that\nconsumes nothing (a `quoted` one holds no units) contributes nothing to any\nanswer. Two separate rules — a liveness filter on the query and a\nzero-quantity filter on the projection — is what the previous model had, and\nthey could disagree.\n\n⚠️ **The liveness test must be shared with whatever reads the sources.** The\nrebuild query filters on status, and an overlay call site passes the\n*post-write* booking — which may be the very write that completed it. Without\none rule the two disagree: the query drops a freshly-completed booking while\nthe overlay adds it straight back. That is not cosmetic — a completed **sale**\nbooking carries `out === quantity`, so leaving it in would keep consuming stock\nforever, against the very `sale` transaction that removed those units from\n`quantity_held`.\n\nThe bounds are copied from the ISO fields and the `_fs` twins are ignored, not\nbecause they are unreliable but because they have no job here: `_fs` exists so\nFirestore can order and range-filter the `bookings` collection, and nothing\nrange-filters an array member. A null bound is preserved, never coerced — for a\npending sale it is the whole point.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unavailableFromOOS",
+          "signature": "unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | null",
+          "doc": "Reduce an out-of-service record to the interval it makes unavailable, or `null`\nwhen it makes none.\n\nThe liveness rule is {@link oosConsumes}'s — terminal statuses hold zero — so\nthe status set is not restated here. See that function for the rule that must\nnever be \"cleaned up\": a live record claims its **full `quantity`**, never\nreduced by `breakdown.returned_to_service`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "unitsClaimedOnShelves",
           "signature": "unitsClaimedOnShelves(b: typeLiteral): number",
           "doc": "Units this booking still claims from **`store_breakdown`** — the shelf-side\nquestion, and type-blind on purpose.\n\n`reserved + prepped + out`. It is used as a LIVENESS GATE by the allocator's\nnetting: a booking that holds nothing contributes no claim even if a stale\n`stores` array lingers. The netting then subtracts the booking's whole\n`stores[].locations[].quantity`, not this number — so this decides *whether*\na booking claims, not *how much*.\n\n⚠️ **It includes `out`, and that is not the same statement as\n{@link heldByBooking}'s.** Read the module header for why the two must differ.\nWhether including `out` is right *here* is a separate, open question: a\ncheck-out removes the units from `store_breakdown`, so a booking whose units\nhave all left arguably claims nothing more. Measured 2026-08-13 across both\nenvironments, no live booking over-claims against its shelves (0 of 21\ncandidates), which is consistent with `recomputeBookingAllocations` converging\n`stores` against the live ledger on every write. Do not \"fix\" this without\nre-measuring that — the convergence job may be what is holding it up.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "windowMs",
+          "signature": "windowMs(window: AvailabilityWindow): typeLiteral",
+          "doc": "Normalize a requested window to the Chicago wall-clock day span it means, as\nepoch millis.\n\n**Availability is always Chicago wall clock, and this function owns that\nrule.** The shop is in Chicago; a requester in California asking for \"June 1 –\nJune 5\" means Chicago `Jun 1 00:00:00.000` → `Jun 5 23:59:59.999`, no matter\nwhere the browser is — so a `-08:00`, a `Z` and a `-06:00` spelling of the same\nday must produce identical numbers. Callers pass offset-carrying ISO strings; a\nbare `YYYY-MM-DD` is rejected upstream by the schema factories.\n\nIt lives here rather than in `utils/availability.ts` (which is where it was)\nbecause both the summary engine and the pre-reduced fold below need it, and\nthis module is the one they can both reach: `availability.ts` already imports\nfrom here, so the reverse edge would be a cycle.",
           "paramTags": [],
           "returnsTag": null
         }

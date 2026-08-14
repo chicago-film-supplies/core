@@ -45,18 +45,20 @@ import type {
 } from "../schemas/mod.ts";
 import { emptyBookingsBreakdown } from "./bookings.ts";
 import {
+  type AvailabilityWindow,
   boundMs,
   heldByBooking,
   intervalsOverlap,
   oosConsumes,
+  windowMs,
 } from "./stock.ts";
-import { toChicagoEndOfDay, toChicagoStartOfDay } from "./dates.ts";
 
-/** The window an availability question is asked about. Offset-carrying ISO strings. */
-export interface AvailabilityWindow {
-  start: string;
-  end: string;
-}
+// The window type and its Chicago normalization moved down into `utils/stock.ts`
+// when the pre-reduced fold landed there and needed them too — this module
+// already imports from that one, so the reverse edge would be a cycle. Re-exported
+// rather than relocated silently: `AvailabilityWindow` is the parameter type of
+// every availability call in the manager.
+export type { AvailabilityWindow };
 
 /** Per-reason out-of-service quantities over the window. */
 export interface OutOfServiceBreakdown {
@@ -89,19 +91,6 @@ export interface PublicAvailabilityResult {
 /** The empty per-reason OOS breakdown. */
 function emptyOutOfServiceBreakdown(): OutOfServiceBreakdown {
   return { cleaning: 0, damaged: 0, maintenance: 0, lost: 0 };
-}
-
-/**
- * Normalize a requested window to the Chicago wall-clock day span it means, as
- * epoch millis. See the module note: this is where "June 1 – June 5" becomes
- * Chicago `Jun 1 00:00:00.000` → `Jun 5 23:59:59.999` regardless of the caller's
- * offset.
- */
-function windowMs(window: AvailabilityWindow): { startMs: number; endMs: number } {
-  return {
-    startMs: Date.parse(toChicagoStartOfDay(window.start)),
-    endMs: Date.parse(toChicagoEndOfDay(window.end)),
-  };
 }
 
 /**

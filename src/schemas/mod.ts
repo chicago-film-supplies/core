@@ -725,6 +725,17 @@ export {
 } from "./public-stock-summary.ts";
 
 export {
+  STOCK_UNAVAILABLE_KINDS,
+  type Stock,
+  StockLockSchema,
+  type StockLock,
+  StockSchema,
+  StockUnavailableKindEnum,
+  type StockUnavailableEntry,
+  type StockUnavailableKindType,
+} from "./stock.ts";
+
+export {
   TypesenseConfigSchema,
   type TypesenseConfig,
   type TypesenseConfigReindexStats,
@@ -1029,6 +1040,7 @@ import type { PublicStockSummary } from "./public-stock-summary.ts";
 import type { RateLimit } from "./rate-limit.ts";
 import type { Session } from "./session.ts";
 import type { StockSummary } from "./stock-summary.ts";
+import type { Stock, StockLock } from "./stock.ts";
 import type { Store } from "./store.ts";
 import type { Role } from "./role.ts";
 import type { Thread } from "./thread.ts";
@@ -1079,7 +1091,8 @@ export type SchemaDocType =
   | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
   | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location
   | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
-  | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template
+  | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session
+  | Stock | StockLock | StockSummary | Tax | Template
   | TemplateComponent | TemplateVersion
   | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User
   | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState
@@ -1125,6 +1138,7 @@ import { RoleSchema } from "./role.ts";
 import { PublicStockSummarySchema } from "./public-stock-summary.ts";
 import { SessionSchema } from "./session.ts";
 import { StockSummarySchema } from "./stock-summary.ts";
+import { StockLockSchema, StockSchema } from "./stock.ts";
 import { StoreSchema } from "./store.ts";
 import { TagSchema } from "./tag.ts";
 import { TaxSchema as TaxSchema_ } from "./tax.ts";
@@ -1189,6 +1203,10 @@ export const schemas: Record<string, z.ZodType> = {
   "session": SessionSchema, "sessions": SessionSchema,
   "credit-note": CreditNoteSchema, "credit-notes": CreditNoteSchema,
   "settlement": SettlementSchema, "settlements": SettlementSchema,
+  // `stock` is both the singular and the plural, so it takes one key rather than
+  // the usual pair. `stock-locks` gets the pair like everything else.
+  "stock": StockSchema,
+  "stock-lock": StockLockSchema, "stock-locks": StockLockSchema,
   "stock-summary": StockSummarySchema, "stock-summaries": StockSummarySchema,
   "store": StoreSchema, "stores": StoreSchema,
   "tag": TagSchema, "tags": TagSchema,

@@ -33,6 +33,7 @@
     "./schemas/credit-note": "./src/schemas/credit-note.ts",
     "./schemas/session": "./src/schemas/session.ts",
     "./schemas/settlement": "./src/schemas/settlement.ts",
+    "./schemas/stock": "./src/schemas/stock.ts",
     "./schemas/stock-summary": "./src/schemas/stock-summary.ts",
     "./schemas/store": "./src/schemas/store.ts",
     "./schemas/tag": "./src/schemas/tag.ts",

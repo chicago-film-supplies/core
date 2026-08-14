@@ -6251,6 +6251,14 @@ counterpart, and the id it retracts is still on the row `reverses` names.
 const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, SettlementContract>>;
 ```
 
+### `STOCK_UNAVAILABLE_KINDS`
+
+What made an interval unavailable. The only non-quantitative fact a reader gets.
+
+```ts
+const STOCK_UNAVAILABLE_KINDS: "booking" | "oos"[];
+```
+
 ### `SaveQuoteVersionInput`
 
 Zod schema for SaveQuoteVersionInput.
@@ -6294,7 +6302,7 @@ in `validateBeforeWrite` still rejects every doc/collection mismatch with a
 `collection/id` label.
 
 ```ts
-type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | StockSummary | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | PublicStockSummary | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | StockSummary | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 ```
 
 ### `SchemaField`
@@ -6417,6 +6425,80 @@ One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS}
 type SettlementTypeType = indexedAccess;
 ```
 
+### `Stock`
+
+Window-independent availability inputs for one product. Doc id == `uid` ==
+`uid_product` == the product's / inventory-ledger's Firestore id.
+
+The window enters only as an overlap filter, so **any** window is derivable
+from this one document by `computeStockAvailability`
+(`@cfs/core/utils/stock`) — on the server, in the browser against an
+`onSnapshot`, or over a plain JSON fixture, with no round-trip and no document
+minted per question asked.
+
+```ts
+interface Stock {
+  uid: string;
+  uid_product: string;
+  quantity_held: number;
+  unavailable: StockUnavailableEntry[];
+  claim_seq: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `StockLock`
+
+The per-product serialization token — one document per product, whose *only*
+content is a counter, and whose only writers are claim writers.
+
+## Why the token is a separate document from {@link Stock}
+
+A claim has to be serializable per product: read the sources, decide, write —
+and refuse if anyone claimed the same product in between. Firestore's only
+write preconditions are `exists` and `lastUpdateTime`; there is no
+field-value precondition. So the thing being preconditioned on must be a
+document that **nothing else writes**:
+
+- Preconditioning on `stock/{P}` itself fails, because the rebuild writes it
+  constantly — every claim would lose to a projection refresh that changed
+  nothing it cared about.
+- Reading-then-writing one document inside a transaction is the hot-doc
+  read-modify-write pathology, measured at **60–87 s per contender** against
+  **1.3–1.5 s** for the compare-and-set form.
+
+Hence: read outside, write under `lastUpdateTime`. A loser is told so in
+~266 ms and retries against fresh state, rather than blocking to a deadline.
+
+## What a forgotten bump costs, and why that is the cheap failure
+
+A writer that claims stock without bumping `seq` loses serialization under an
+exact race — i.e. a possible oversell, which is what **every** write does
+today. It fails soft and self-corrects on the next claim. Contrast the shape
+this design rejected (the projection holding claims as a delta), where the
+symmetric slip is a claim that is never *released*: stock consumed forever,
+repairable only by a rebuild. Under a query-rebuilt projection the absence of
+a row IS the release, and an absence cannot be forgotten.
+
+```ts
+interface StockLock {
+  uid: string;
+  uid_product: string;
+  seq: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `StockLockSchema`
+
+Zod schema for {@link StockLock}.
+
+```ts
+const StockLockSchema: z.ZodType<StockLock>;
+```
+
 ### `StockMethodEnum`
 
 Zod schema for StockMethodType.
@@ -6431,6 +6513,14 @@ Allowed values for inventory stock tracking method.
 
 ```ts
 type StockMethodType = indexedAccess;
+```
+
+### `StockSchema`
+
+Zod schema for {@link Stock}.
+
+```ts
+const StockSchema: z.ZodType<Stock>;
 ```
 
 ### `StockSummary`
@@ -6498,6 +6588,41 @@ Zod schema for StockSummary.
 
 ```ts
 const StockSummarySchema: z.ZodType<StockSummary>;
+```
+
+### `StockUnavailableEntry`
+
+One pre-reduced, anonymous unavailable interval.
+
+`quantity` is what the source **still consumes**, already folded — a booking
+contributes `heldByBooking` (which excludes a sale's `out` units, since the
+sale movement already dropped `quantity_held`), an OOS record contributes its
+full `quantity` until terminal. An entry that consumes nothing is not written
+at all: it would affect no answer while disclosing that something exists.
+
+```ts
+interface StockUnavailableEntry {
+  start: string | null;
+  end: string | null;
+  quantity: number;
+  kind: StockUnavailableKindType;
+}
+```
+
+### `StockUnavailableKindEnum`
+
+Zod enum for {@link StockUnavailableKindType}.
+
+```ts
+const StockUnavailableKindEnum: z.ZodType<StockUnavailableKindType>;
+```
+
+### `StockUnavailableKindType`
+
+Union of {@link STOCK_UNAVAILABLE_KINDS}.
+
+```ts
+type StockUnavailableKindType = indexedAccess;
 ```
 
 ### `Store`
@@ -14690,6 +14815,133 @@ Zod schema for a Settlement.
 const SettlementSchema: z.ZodType<Settlement>;
 ```
 
+## `@cfs/core/schemas/stock`
+
+### `STOCK_UNAVAILABLE_KINDS`
+
+What made an interval unavailable. The only non-quantitative fact a reader gets.
+
+```ts
+const STOCK_UNAVAILABLE_KINDS: "booking" | "oos"[];
+```
+
+### `Stock`
+
+Window-independent availability inputs for one product. Doc id == `uid` ==
+`uid_product` == the product's / inventory-ledger's Firestore id.
+
+The window enters only as an overlap filter, so **any** window is derivable
+from this one document by `computeStockAvailability`
+(`@cfs/core/utils/stock`) — on the server, in the browser against an
+`onSnapshot`, or over a plain JSON fixture, with no round-trip and no document
+minted per question asked.
+
+```ts
+interface Stock {
+  uid: string;
+  uid_product: string;
+  quantity_held: number;
+  unavailable: StockUnavailableEntry[];
+  claim_seq: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `StockLock`
+
+The per-product serialization token — one document per product, whose *only*
+content is a counter, and whose only writers are claim writers.
+
+## Why the token is a separate document from {@link Stock}
+
+A claim has to be serializable per product: read the sources, decide, write —
+and refuse if anyone claimed the same product in between. Firestore's only
+write preconditions are `exists` and `lastUpdateTime`; there is no
+field-value precondition. So the thing being preconditioned on must be a
+document that **nothing else writes**:
+
+- Preconditioning on `stock/{P}` itself fails, because the rebuild writes it
+  constantly — every claim would lose to a projection refresh that changed
+  nothing it cared about.
+- Reading-then-writing one document inside a transaction is the hot-doc
+  read-modify-write pathology, measured at **60–87 s per contender** against
+  **1.3–1.5 s** for the compare-and-set form.
+
+Hence: read outside, write under `lastUpdateTime`. A loser is told so in
+~266 ms and retries against fresh state, rather than blocking to a deadline.
+
+## What a forgotten bump costs, and why that is the cheap failure
+
+A writer that claims stock without bumping `seq` loses serialization under an
+exact race — i.e. a possible oversell, which is what **every** write does
+today. It fails soft and self-corrects on the next claim. Contrast the shape
+this design rejected (the projection holding claims as a delta), where the
+symmetric slip is a claim that is never *released*: stock consumed forever,
+repairable only by a rebuild. Under a query-rebuilt projection the absence of
+a row IS the release, and an absence cannot be forgotten.
+
+```ts
+interface StockLock {
+  uid: string;
+  uid_product: string;
+  seq: number;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `StockLockSchema`
+
+Zod schema for {@link StockLock}.
+
+```ts
+const StockLockSchema: z.ZodType<StockLock>;
+```
+
+### `StockSchema`
+
+Zod schema for {@link Stock}.
+
+```ts
+const StockSchema: z.ZodType<Stock>;
+```
+
+### `StockUnavailableEntry`
+
+One pre-reduced, anonymous unavailable interval.
+
+`quantity` is what the source **still consumes**, already folded — a booking
+contributes `heldByBooking` (which excludes a sale's `out` units, since the
+sale movement already dropped `quantity_held`), an OOS record contributes its
+full `quantity` until terminal. An entry that consumes nothing is not written
+at all: it would affect no answer while disclosing that something exists.
+
+```ts
+interface StockUnavailableEntry {
+  start: string | null;
+  end: string | null;
+  quantity: number;
+  kind: StockUnavailableKindType;
+}
+```
+
+### `StockUnavailableKindEnum`
+
+Zod enum for {@link StockUnavailableKindType}.
+
+```ts
+const StockUnavailableKindEnum: z.ZodType<StockUnavailableKindType>;
+```
+
+### `StockUnavailableKindType`
+
+Union of {@link STOCK_UNAVAILABLE_KINDS}.
+
+```ts
+type StockUnavailableKindType = indexedAccess;
+```
+
 ## `@cfs/core/schemas/stock-summary`
 
 ### `StockSummary`
@@ -20776,6 +21028,44 @@ The gate is {@link bookingHoldsStock}; the *amount* added is the booking's own
 
 ## `@cfs/core/utils/stock`
 
+### `AvailabilityWindow`
+
+The window an availability question is asked about. Offset-carrying ISO strings.
+
+```ts
+interface AvailabilityWindow {
+  start: string;
+  end: string;
+}
+```
+
+### `StockAvailability`
+
+Everything a consumer needs from one product over one window.
+
+```ts
+interface StockAvailability {
+  quantity_held: number;
+  quantity_booked: number;
+  quantity_out_of_service: number;
+  quantity_available: number;
+}
+```
+
+### `StockBookingSource`
+
+Just enough of a booking to reduce it to an unavailable interval. Structural
+rather than `Pick<Booking, …>` so a caller can hand over a whole `Booking`, a
+REST read, or a fixture — and so `dates` names only the two bounds that are
+read, never the `_fs` twins (see {@link unavailableFromBooking}).
+
+```ts
+interface StockBookingSource {
+  status: BookingStatusType;
+  dates: typeLiteral;
+}
+```
+
 ### `StockConsumingBooking`
 
 Just enough of a booking to answer either consumption question.
@@ -20784,6 +21074,18 @@ Just enough of a booking to answer either consumption question.
 interface StockConsumingBooking {
   breakdown: BookingBreakdown;
   type: ComponentTypeType;
+}
+```
+
+### `StockOOSSource`
+
+Just enough of an out-of-service record to reduce it to an unavailable interval.
+
+```ts
+interface StockOOSSource {
+  status: OOSStatusType;
+  quantity: number;
+  dates: typeLiteral;
 }
 ```
 
@@ -20812,6 +21114,28 @@ Prefers the `_fs` twin — that is the field Firestore itself orders by, so it
 is the bound of record — and falls back to parsing the paired ISO string when
 `_fs` isn't a real Timestamp (a plain-JSON fixture, a REST read, a write-time
 `FieldValue` sentinel). `null` on both sides means genuinely open-ended.
+
+### `computeStockAvailability(stock: Pick<Stock, "quantity_held" | "unavailable">, window: AvailabilityWindow): StockAvailability`
+
+Compute availability for one product over one window, from the pre-reduced
+projection.
+
+```
+quantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)
+```
+
+Negative results are preserved, never clamped: an oversold product must stay
+visibly oversold, and #424 makes that the intended shortage signal for
+operators rather than an error state.
+
+`quantity_in_service` is not returned — it is `quantity_held −
+quantity_out_of_service`, and no current consumer asks for it.
+
+⚠️ **This must not be decomposed into a per-day rollup.** With `held = 2`, a
+booking on days 1–2 and another on days 4–5, the answer for window `[1, 5]` is
+exactly **0** — no single unit is free for the whole span — while a
+min-over-days curve says 1. Overstating availability oversells. Intervals give
+the exact answer; a daily curve does not.
 
 ### `heldByBooking(b: StockConsumingBooking): number`
 
@@ -20863,6 +21187,43 @@ here hands the same units back twice. It looks like a tidy-up and it is a live
 oversell. (Swept 2026-08-13: no site in the workspace does this — keep it that
 way.)
 
+### `unavailableFromBooking(b: StockBookingSource): StockUnavailableEntry | null`
+
+Reduce a booking to the interval it makes unavailable, or `null` when it makes
+none.
+
+`null` covers **both** exits, and folding them into one function is the point:
+a `complete` booking has left the live working set, and a live booking that
+consumes nothing (a `quoted` one holds no units) contributes nothing to any
+answer. Two separate rules — a liveness filter on the query and a
+zero-quantity filter on the projection — is what the previous model had, and
+they could disagree.
+
+⚠️ **The liveness test must be shared with whatever reads the sources.** The
+rebuild query filters on status, and an overlay call site passes the
+*post-write* booking — which may be the very write that completed it. Without
+one rule the two disagree: the query drops a freshly-completed booking while
+the overlay adds it straight back. That is not cosmetic — a completed **sale**
+booking carries `out === quantity`, so leaving it in would keep consuming stock
+forever, against the very `sale` transaction that removed those units from
+`quantity_held`.
+
+The bounds are copied from the ISO fields and the `_fs` twins are ignored, not
+because they are unreliable but because they have no job here: `_fs` exists so
+Firestore can order and range-filter the `bookings` collection, and nothing
+range-filters an array member. A null bound is preserved, never coerced — for a
+pending sale it is the whole point.
+
+### `unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | null`
+
+Reduce an out-of-service record to the interval it makes unavailable, or `null`
+when it makes none.
+
+The liveness rule is {@link oosConsumes}'s — terminal statuses hold zero — so
+the status set is not restated here. See that function for the rule that must
+never be "cleaned up": a live record claims its **full `quantity`**, never
+reduced by `breakdown.returned_to_service`.
+
 ### `unitsClaimedOnShelves(b: typeLiteral): number`
 
 Units this booking still claims from **`store_breakdown`** — the shelf-side
@@ -20883,6 +21244,23 @@ environments, no live booking over-claims against its shelves (0 of 21
 candidates), which is consistent with `recomputeBookingAllocations` converging
 `stores` against the live ledger on every write. Do not "fix" this without
 re-measuring that — the convergence job may be what is holding it up.
+
+### `windowMs(window: AvailabilityWindow): typeLiteral`
+
+Normalize a requested window to the Chicago wall-clock day span it means, as
+epoch millis.
+
+**Availability is always Chicago wall clock, and this function owns that
+rule.** The shop is in Chicago; a requester in California asking for "June 1 –
+June 5" means Chicago `Jun 1 00:00:00.000` → `Jun 5 23:59:59.999`, no matter
+where the browser is — so a `-08:00`, a `Z` and a `-06:00` spelling of the same
+day must produce identical numbers. Callers pass offset-carrying ISO strings; a
+bare `YYYY-MM-DD` is rejected upstream by the schema factories.
+
+It lives here rather than in `utils/availability.ts` (which is where it was)
+because both the summary engine and the pre-reduced fold below need it, and
+this module is the one they can both reach: `availability.ts` already imports
+from here, so the reverse edge would be a cycle.
 
 ## `@cfs/core/utils/money`
 
