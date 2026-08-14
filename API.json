@@ -548,6 +548,18 @@
         },
         {
           "kind": "interface",
+          "name": "CollectionDocs",
+          "declaration": "interface CollectionDocs {\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  tax: Tax;\n  taxes: Tax;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
+          "doc": "The ONE place a collection name is bound to its document type.\n\n`schemas` below is annotated by a mapped type over this interface, so the two\ncannot drift: a key here with no entry there is an error at the object\nliteral, and an entry there with no key here is an excess property. That is\nthe compiler enforcing the parity — not a test that can go stale, and not the\n\"parity assertion between two hand-maintained lists\" the workspace rules warn\nabout. It fails at `deno task check`.\n\n⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's\nnpm declaration emit is SYNTACTIC — it writes declarations without running\ninference — so a type it has to COMPUTE from an initializer can publish\nwrongly to npm consumers while Deno consumers, this suite, `deno task check`\nand `deno publish --dry-run` all agree with the source. That is core#43: nine\n`as const` members emitted as one, and 57 phantom type errors on manager's\nnext pin bump. An interface and a written mapped-type annotation are text the\nemitter copies verbatim, so neither needs expanding.\n\n⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the\ninference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus\n`keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.\nPassing that check is NOT evidence the emit is right — core#44 closed as \"no\npost-publish declaration gate\", so nothing here can see a wrong published\ndeclaration. The explicit form is chosen because it needs no expansion at all,\nwhich is a reasoned preference rather than a measured one.\n\nSingular and plural both appear because the registry has always carried both.\n⚠️ The singular half may be vestigial — there are zero literal `schemas[\"order\"]`\n-style lookups across api-cloudrun, manager and templates, and every call site\nfound passes a plural or the literal `\"events\"`. Removing them would halve this\nfile's hand-written surface, but it is a breaking change to a published API and\nwants the dynamic callers' domain established first. Not folded in here."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CollectionName",
+          "declaration": "type CollectionName = keyof CollectionDocs;",
+          "doc": "Every collection name the registry answers for."
+        },
+        {
+          "kind": "interface",
           "name": "CollectionRule",
           "declaration": "interface CollectionRule {\n  id: string;\n  source: string;\n  target: string;\n  mode: PropagationMode;\n  invariant?: string;\n  enforced_by?: EnforcementRef[];\n  transaction?: string;\n  trigger?: string;\n  fields: FieldMapping[];\n}",
           "doc": "One edge in the propagation graph — describes data flow between two collections."
@@ -1205,6 +1217,12 @@
           "name": "DocDestinationType",
           "declaration": "interface DocDestinationType {\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n}",
           "doc": "Document-level destination pair. See `DestinationType` for flag semantics."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "DocFor",
+          "declaration": "type DocFor = indexedAccess;",
+          "doc": "The stored document type for a collection.\n\nReads {@link CollectionDocs} directly rather than going through\n`z.infer<typeof schemas[C]>` — one less thing for the declaration emit to\nexpand, on the one surface this package cannot verify locally."
         },
         {
           "kind": "variable",
@@ -4616,10 +4634,18 @@
           "doc": "All propagation rules across all transactions and cascades."
         },
         {
+          "kind": "function",
+          "name": "schemaFor",
+          "signature": "schemaFor(collection: C): z.ZodType<indexedAccess>",
+          "doc": "The schema for a collection known at compile time, typed to its document.\n\nThe precise counterpart to {@link schemas} — use it wherever the collection is\na literal, and the return type carries the document type instead of\n`z.ZodType<unknown>`. Return type written out rather than inferred: this is\nexported, and the declaration emit is the one surface this package cannot\nverify locally (see {@link CollectionDocs}).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
           "kind": "variable",
           "name": "schemas",
           "declaration": "const schemas: Record<string, z.ZodType>;",
-          "doc": "All document schemas keyed by singular and plural collection names."
+          "doc": "All document schemas keyed by singular and plural collection names.\n\n⚠️ **Deliberately the LOOSE view of {@link schemasTyped}, not a second table.**\nIt is the same object; only the annotation is wider. Every call site that\nreaches this registry does so with a runtime string —\n`schemas[collection]` where `collection` came from a Firestore path, a\nTypesense config or a route param — and there are 21 of them across core,\napi-cloudrun and manager. Narrowing them all is api-cloudrun#444's Slice B and\na migration in its own right; making THIS precise would have forced that\nmigration as a side effect of adding a type.\n\nSo the precision is additive: `schemasTyped` is checked against\n{@link CollectionDocs} by the compiler, `schemas` keeps working exactly as it\ndid, and a call site that knows its collection statically can reach for\n{@link schemaFor} instead."
         },
         {
           "kind": "function",

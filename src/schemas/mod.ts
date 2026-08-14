@@ -1037,6 +1037,7 @@ import type { Movement } from "./transaction.ts";
 import type { TypesenseConfig } from "./typesense-config.ts";
 import type { UploadcareSweepRun } from "./uploadcare-sweep.ts";
 import type { User } from "./user.ts";
+import type { Destination } from "./destination.ts";
 import type { WebhookEvent } from "./webhook-event.ts";
 import type { WebshopProduct } from "./webshop-product.ts";
 import type { XeroBudget } from "./xero-budget.ts";
@@ -1145,8 +1146,152 @@ import {
   McpOAuthTokenSchema as McpOAuthTokenSchema_,
 } from "./mcp-oauth.ts";
 
+/**
+ * The ONE place a collection name is bound to its document type.
+ *
+ * `schemas` below is annotated by a mapped type over this interface, so the two
+ * cannot drift: a key here with no entry there is an error at the object
+ * literal, and an entry there with no key here is an excess property. That is
+ * the compiler enforcing the parity — not a test that can go stale, and not the
+ * "parity assertion between two hand-maintained lists" the workspace rules warn
+ * about. It fails at `deno task check`.
+ *
+ * ⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's
+ * npm declaration emit is SYNTACTIC — it writes declarations without running
+ * inference — so a type it has to COMPUTE from an initializer can publish
+ * wrongly to npm consumers while Deno consumers, this suite, `deno task check`
+ * and `deno publish --dry-run` all agree with the source. That is core#43: nine
+ * `as const` members emitted as one, and 57 phantom type errors on manager's
+ * next pin bump. An interface and a written mapped-type annotation are text the
+ * emitter copies verbatim, so neither needs expanding.
+ *
+ * ⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the
+ * inference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus
+ * `keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.
+ * Passing that check is NOT evidence the emit is right — core#44 closed as "no
+ * post-publish declaration gate", so nothing here can see a wrong published
+ * declaration. The explicit form is chosen because it needs no expansion at all,
+ * which is a reasoned preference rather than a measured one.
+ *
+ * Singular and plural both appear because the registry has always carried both.
+ * ⚠️ The singular half may be vestigial — there are zero literal `schemas["order"]`
+ * -style lookups across api-cloudrun, manager and templates, and every call site
+ * found passes a plural or the literal `"events"`. Removing them would halve this
+ * file's hand-written surface, but it is a breaking change to a published API and
+ * wants the dynamic callers' domain established first. Not folded in here.
+ */
+export interface CollectionDocs {
+  booking: Booking;
+  bookings: Booking;
+  card: Card;
+  cards: Card;
+  counter: Counter;
+  counters: Counter;
+  "cache-geocodes": CacheGeocodes;
+  "chart-of-accounts": ChartOfAccounts;
+  comment: Comment;
+  comments: Comment;
+  contact: Contact;
+  contacts: Contact;
+  destination: Destination;
+  destinations: Destination;
+  "email-verification": EmailVerification;
+  "email-verifications": EmailVerification;
+  "holiday-dates": HolidayDates;
+  dates: HolidayDates;
+  "holiday-definition": HolidayDefinition;
+  "holiday-definitions": HolidayDefinition;
+  "holiday-snapshot": HolidaySnapshot;
+  "inventory-ledger": InventoryLedger;
+  "inventory-ledgers": InventoryLedger;
+  invite: Invite;
+  invites: Invite;
+  invoice: Invoice;
+  invoices: Invoice;
+  list: List;
+  lists: List;
+  location: Location;
+  locations: Location;
+  "location-type": LocationType;
+  "location-types": LocationType;
+  order: Order;
+  orders: Order;
+  fulfillment: Fulfillment;
+  fulfillments: Fulfillment;
+  organization: Organization;
+  organizations: Organization;
+  "out-of-service": OutOfService;
+  "password-reset": PasswordReset;
+  "password-resets": PasswordReset;
+  product: Product;
+  products: Product;
+  quote: Quote;
+  quotes: Quote;
+  template: Template;
+  templates: Template;
+  "templates-versions": TemplateVersion;
+  "template-components": TemplateComponent;
+  "rate-limit": RateLimit;
+  "rate-limits": RateLimit;
+  recurrence: Recurrence;
+  recurrences: Recurrence;
+  role: Role;
+  roles: Role;
+  session: Session;
+  sessions: Session;
+  "credit-note": CreditNote;
+  "credit-notes": CreditNote;
+  settlement: Settlement;
+  settlements: Settlement;
+  stock: Stock;
+  "stock-lock": StockLock;
+  "stock-locks": StockLock;
+  store: Store;
+  stores: Store;
+  tag: Tag;
+  tags: Tag;
+  tax: Tax;
+  taxes: Tax;
+  thread: Thread;
+  threads: Thread;
+  "tracking-category": TrackingCategory;
+  "tracking-categories": TrackingCategory;
+  transaction: Movement;
+  transactions: Movement;
+  user: User;
+  users: User;
+  "webhook-event": WebhookEvent;
+  "webhook-events": WebhookEvent;
+  events: WebhookEvent;
+  "webshop-product": WebshopProduct;
+  "webshop-products": WebshopProduct;
+  "typesense-config": TypesenseConfig;
+  typesense: TypesenseConfig;
+  "uploadcare-sweep": UploadcareSweepRun;
+  "xero-budget": XeroBudget;
+  "xero-sync": XeroSyncState;
+  documents: OrderDocument;
+  template_previews: PreviewRecord;
+  "mcp-oauth-clients": McpOAuthClient;
+  "mcp-oauth-authorize-requests": McpOAuthAuthorizeRequest;
+  "mcp-oauth-codes": McpOAuthCode;
+  "mcp-oauth-tokens": McpOAuthToken;
+}
+
+/** Every collection name the registry answers for. */
+export type CollectionName = keyof CollectionDocs;
+
+/**
+ * The stored document type for a collection.
+ *
+ * Reads {@link CollectionDocs} directly rather than going through
+ * `z.infer<typeof schemas[C]>` — one less thing for the declaration emit to
+ * expand, on the one surface this package cannot verify locally.
+ */
+export type DocFor<C extends CollectionName> = CollectionDocs[C];
+
 /** All document schemas keyed by singular and plural collection names. */
-export const schemas: Record<string, z.ZodType> = {
+const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "booking": BookingSchema, "bookings": BookingSchema,
   "card": CardSchema, "cards": CardSchema,
   "counter": CounterSchema_, "counters": CounterSchema_,
@@ -1218,6 +1363,38 @@ export const schemas: Record<string, z.ZodType> = {
   "mcp-oauth-codes": McpOAuthCodeSchema_,
   "mcp-oauth-tokens": McpOAuthTokenSchema_,
 };
+
+/**
+ * All document schemas keyed by singular and plural collection names.
+ *
+ * ⚠️ **Deliberately the LOOSE view of {@link schemasTyped}, not a second table.**
+ * It is the same object; only the annotation is wider. Every call site that
+ * reaches this registry does so with a runtime string —
+ * `schemas[collection]` where `collection` came from a Firestore path, a
+ * Typesense config or a route param — and there are 21 of them across core,
+ * api-cloudrun and manager. Narrowing them all is api-cloudrun#444's Slice B and
+ * a migration in its own right; making THIS precise would have forced that
+ * migration as a side effect of adding a type.
+ *
+ * So the precision is additive: `schemasTyped` is checked against
+ * {@link CollectionDocs} by the compiler, `schemas` keeps working exactly as it
+ * did, and a call site that knows its collection statically can reach for
+ * {@link schemaFor} instead.
+ */
+export const schemas: Record<string, z.ZodType> = schemasTyped;
+
+/**
+ * The schema for a collection known at compile time, typed to its document.
+ *
+ * The precise counterpart to {@link schemas} — use it wherever the collection is
+ * a literal, and the return type carries the document type instead of
+ * `z.ZodType<unknown>`. Return type written out rather than inferred: this is
+ * exported, and the declaration emit is the one surface this package cannot
+ * verify locally (see {@link CollectionDocs}).
+ */
+export function schemaFor<C extends CollectionName>(collection: C): z.ZodType<CollectionDocs[C]> {
+  return schemasTyped[collection];
+}
 
 // Defined here (not in display-defaults.ts) to avoid a circular dependency.
 // Firestore display defaults live in Zod's .meta() registry, so we need the
