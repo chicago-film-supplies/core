@@ -2,6 +2,7 @@
  * Type definitions for Typesense collection schemas.
  */
 import { z } from "zod";
+import type { CollectionName } from "../mod.ts";
 
 const TYPESENSE_FIELD_TYPES = [
   "string", "string[]",
@@ -284,7 +285,17 @@ export const TypesenseDisplayDefaultsSchema: z.ZodType<TypesenseDisplayDefaults>
 export interface TypesenseCollectionConfig {
   alias: string;
   version: number;
-  firestoreCollection: string;
+  /**
+   * The Firestore collection this index is built from — a {@link CollectionName},
+   * not a bare string.
+   *
+   * Typed so a renamed or mistyped collection is a COMPILE error in the config
+   * rather than an empty index nobody notices. That is the same defect class
+   * `typesenseFieldCoverage` exists for: a declared field nothing populates is
+   * byte-identical to an absent one in a search response, and a config pointed
+   * at a collection that does not exist fails just as quietly.
+   */
+  firestoreCollection: CollectionName;
   collectionName: string;
   schema: TypesenseSchema;
   synonyms: TypesenseSynonym[];
@@ -297,7 +308,13 @@ export interface TypesenseCollectionConfig {
 export const TypesenseCollectionConfigSchema: z.ZodType<TypesenseCollectionConfig> = z.strictObject({
   alias: z.string(),
   version: z.number(),
-  firestoreCollection: z.string(),
+  // `z.custom<CollectionName>` rather than `z.string()`, so the parsed shape
+  // matches the interface above. The predicate stays loose (string-ness only)
+  // deliberately: narrowing it at runtime would need `isCollectionName` as a
+  // VALUE from `../mod.ts`, turning a type-only import cycle into a real one.
+  // No regression — the field accepted any string before — and the check that
+  // matters is the compile-time one on the 15 config literals.
+  firestoreCollection: z.custom<CollectionName>((v) => typeof v === "string"),
   collectionName: z.string(),
   schema: TypesenseSchemaSchema,
   synonyms: z.array(TypesenseSynonymSchema),

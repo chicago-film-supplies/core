@@ -165,7 +165,11 @@ export const typesenseSchemas: Record<TypesenseAlias, TypesenseCollectionConfig>
 /** Firestore collection names that are actively synced to Typesense (enabled !== false). */
 export const typesenseEnabledCollections: Set<string> = new Set(
   allSchemas
-    .filter((s) => s.enabled !== false && s.firestoreCollection !== "")
+    // No `!== ""` clause: `firestoreCollection` is a `CollectionName`, so an
+    // empty mapping is unrepresentable rather than filtered. The compiler
+    // flagged the old clause as a comparison with no overlap the moment that
+    // type landed, which is the tightening paying for itself immediately.
+    .filter((s) => s.enabled !== false)
     .map((s) => s.firestoreCollection),
 );
 

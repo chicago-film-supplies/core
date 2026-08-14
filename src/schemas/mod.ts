@@ -1396,6 +1396,19 @@ export function schemaFor<C extends CollectionName>(collection: C): z.ZodType<Co
   return schemasTyped[collection];
 }
 
+/**
+ * Narrow a runtime string to a known collection name.
+ *
+ * The bridge for the call sites that genuinely start from a string — a Firestore
+ * path segment, a route param, a Typesense alias. Most already ran a `if
+ * (!schema)` check and threw or returned a default; this lets that SAME check
+ * also narrow the type, so the runtime guard they already had starts paying for
+ * itself at compile time instead of being duplicated by one.
+ */
+export function isCollectionName(name: string): name is CollectionName {
+  return Object.hasOwn(schemasTyped, name);
+}
+
 // Defined here (not in display-defaults.ts) to avoid a circular dependency.
 // Firestore display defaults live in Zod's .meta() registry, so we need the
 // `schemas` record above to extract them. display-defaults.ts is re-exported
@@ -1441,8 +1454,10 @@ const firestoreColumnCache = new Map<string, DisplayTableColumn[]>();
 export function getFirestoreColumns(collection: string): DisplayTableColumn[] {
   const hit = firestoreColumnCache.get(collection);
   if (hit) return hit;
-  const schema = schemas[collection];
-  const columns = schema ? buildFirestoreColumns(schema) : [];
+  // Narrowed rather than looked up loosely: this returns `[]` for an
+  // unregistered collection either way, so the guard costs nothing and the
+  // lookup below is precise.
+  const columns = isCollectionName(collection) ? buildFirestoreColumns(schemasTyped[collection]) : [];
   firestoreColumnCache.set(collection, columns);
   return columns;
 }

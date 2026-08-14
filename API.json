@@ -4475,6 +4475,14 @@
         },
         {
           "kind": "function",
+          "name": "isCollectionName",
+          "signature": "isCollectionName(name: string): name is CollectionName",
+          "doc": "Narrow a runtime string to a known collection name.\n\nThe bridge for the call sites that genuinely start from a string — a Firestore\npath segment, a route param, a Typesense alias. Most already ran a `if\n(!schema)` check and threw or returned a default; this lets that SAME check\nalso narrow the type, so the runtime guard they already had starts paying for\nitself at compile time instead of being duplicated by one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isDateField",
           "signature": "isDateField(schema: z.ZodType, fieldPath: string): boolean",
           "doc": "True when the schema's leaf at `fieldPath` is an ISO datetime, ISO date, or\nthe `FirestoreTimestamp` custom type. Unwraps Optional/Default/Nullable and\nsees through `.transform()` pipes, so neither modifiers nor Chicago\ndatetime factories (`chicagoInstant`, `chicagoStartOfDay`) mask the\nunderlying type.",
@@ -8150,7 +8158,7 @@
         {
           "kind": "interface",
           "name": "TypesenseCollectionConfig",
-          "declaration": "interface TypesenseCollectionConfig {\n  alias: string;\n  version: number;\n  firestoreCollection: string;\n  collectionName: string;\n  schema: TypesenseSchema;\n  synonyms: TypesenseSynonym[];\n  displayDefaults: TypesenseDisplayDefaults;\n  enabled?: boolean;\n}",
+          "declaration": "interface TypesenseCollectionConfig {\n  alias: string;\n  version: number;\n  firestoreCollection: CollectionName;\n  collectionName: string;\n  schema: TypesenseSchema;\n  synonyms: TypesenseSynonym[];\n  displayDefaults: TypesenseDisplayDefaults;\n  enabled?: boolean;\n}",
           "doc": "Full collection config with alias, version, and Firestore mapping."
         },
         {

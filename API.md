@@ -9052,6 +9052,16 @@ Get the display defaults for a Typesense collection by alias.
 
 Whether a movement type carries a cost object. Derived from the contract.
 
+### `isCollectionName(name: string): name is CollectionName`
+
+Narrow a runtime string to a known collection name.
+
+The bridge for the call sites that genuinely start from a string — a Firestore
+path segment, a route param, a Typesense alias. Most already ran a `if
+(!schema)` check and threw or returned a default; this lets that SAME check
+also narrow the type, so the runtime guard they already had starts paying for
+itself at compile time instead of being duplicated by one.
+
 ### `isDateField(schema: z.ZodType, fieldPath: string): boolean`
 
 True when the schema's leaf at `fieldPath` is an ISO datetime, ISO date, or
@@ -16439,7 +16449,7 @@ Full collection config with alias, version, and Firestore mapping.
 interface TypesenseCollectionConfig {
   alias: string;
   version: number;
-  firestoreCollection: string;
+  firestoreCollection: CollectionName;
   collectionName: string;
   schema: TypesenseSchema;
   synonyms: TypesenseSynonym[];
