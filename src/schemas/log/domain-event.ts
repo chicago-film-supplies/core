@@ -78,6 +78,27 @@ export const DOMAIN_EVENT_MSGS = [
   "stock_recalc_item_removed",
   "stock_recalc_items",
   "stock_recalc_status_changed",
+  // A product is oversold at some instant — `worstStockAvailability` over the
+  // rebuilt `stock/{P}` projection reports `quantity_available < 0`. This is the
+  // **operator advisory** half of the oversell policy (api-cloudrun#510 P4): the
+  // operator, order and CRMS paths deliberately never refuse a claim (#424 —
+  // shortage is the intended signal, and a refusal on the CRMS webhook is a 400
+  // to something that retries forever), so this is what records the fact instead
+  // of blocking it.
+  //
+  // Emitted **post-commit from the rebuild**, not from a pre-write gate, and that
+  // is a cost decision worth keeping: the rebuild already holds the projection,
+  // so the check is arithmetic on a document in hand — zero extra reads — while a
+  // pre-write gate would add two queries per product to every order write (~61
+  // products on the largest live order, on a request already measured at ~5.5 s —
+  // api-cloudrun#508). Post-commit is also the more accurate of the two, since it
+  // sees the state that actually landed.
+  //
+  // `{ product_uid, quantity_held, quantity_booked, quantity_out_of_service,
+  // quantity_available, since, reason }`, at `warn`. `since` is the ISO instant
+  // the worst point opens, or null when open-ended entries alone carry it.
+  // Emitted from `src/services/stockSummaryRebuild.ts` in api-cloudrun.
+  "stock_oversold",
   // Fulfillment picker accepted a quantity edit on a `custom-*` line
   // item. Custom uids regenerate on the next CRMS opportunity sync, so
   // the override is lossy — this is the explicit warning trail. Emitted

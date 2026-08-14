@@ -68,6 +68,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "unavailableFromBooking",
     "unavailableFromOOS",
     "computeStockAvailability",
+    "peakStockConsumption",
   ],
   availability: [
     "computeAvailability", // needs a StockSummary — never in a render context

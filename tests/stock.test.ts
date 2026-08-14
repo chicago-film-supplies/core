@@ -21,6 +21,7 @@ import {
   heldByBooking,
   intervalsOverlap,
   oosConsumes,
+  peakStockConsumption,
   type StockBookingSource,
   type StockOOSSource,
   TERMINAL_OOS_STATUSES,
@@ -166,6 +167,7 @@ Deno.test("boundMs: prefers the _fs twin, falls back to the ISO string, else nul
 // ── The reducers: source document → pre-reduced interval ────────────────────
 
 const D1 = "2026-06-01T00:00:00.000-05:00";
+const D3 = "2026-06-03T00:00:00.000-05:00";
 const D5 = "2026-06-05T00:00:00.000-05:00";
 
 const src = (
@@ -306,6 +308,141 @@ Deno.test("computeStockAvailability: the window is Chicago wall clock whoever as
   ];
   for (const a of answers) assertEquals(a, answers[0]);
 });
+
+// ── The peak instant ────────────────────────────────────────────────────────
+
+Deno.test("⚠️ peakStockConsumption is NOT the worst window — the inequality runs the other way", () => {
+  // The same fixture that forbids a per-day rollup, read the other direction.
+  // Window [1,5] sums BOTH bookings because both overlap it, and answers 0 —
+  // correct, because no single unit is free for the whole span. The peak sums
+  // only what is live at one instant, and answers 1 — also correct, because the
+  // shop never has more than one unit out at a time.
+  //
+  // Asserting the two DIFFER is the point: this is what fails if someone
+  // "simplifies" the peak into `computeStockAvailability` over the widest window,
+  // which would report every busy product as physically oversold.
+  const s = stock(2, [
+    iv("2026-06-01T00:00:00.000-05:00", "2026-06-02T23:59:59.999-05:00", 1),
+    iv("2026-06-04T00:00:00.000-05:00", "2026-06-05T23:59:59.999-05:00", 1),
+  ]);
+  assertEquals(computeStockAvailability(s, win("2026-06-01", "2026-06-05")).quantity_available, 0);
+  assertEquals(peakStockConsumption(s).quantity_available, 1);
+});
+
+Deno.test("peakStockConsumption: the peak is the overlap, and `since` names where it opens", () => {
+  const s = stock(10, [
+    iv(D1, D5, 3, "booking"),
+    // Opens on D3, inside the first — 3 + 4 = 7 out at once from D3.
+    iv(D3, D5, 4, "booking"),
+    iv(D3, D5, 2, "oos"),
+  ]);
+  assertEquals(peakStockConsumption(s), {
+    quantity_held: 10,
+    quantity_booked: 7,
+    quantity_out_of_service: 2,
+    quantity_available: 1,
+    since: D3,
+  });
+});
+
+Deno.test("peakStockConsumption: a physical oversell is negative, and that is the alert", () => {
+  const s = stock(2, [iv(D1, D5, 5)]);
+  const peak = peakStockConsumption(s);
+  assertEquals(peak.quantity_available, -3);
+  assertEquals(peak.since, D1);
+});
+
+Deno.test("peakStockConsumption: an open-ended entry carries the peak, and `since` is null for it", () => {
+  // A pending SALE — `end: null`, no start either once it is open on both sides.
+  // The peak is reached before any dated entry opens, so there is no ISO to name.
+  const s = stock(4, [iv(null, null, 5, "booking")]);
+  assertEquals(peakStockConsumption(s), {
+    quantity_held: 4,
+    quantity_booked: 5,
+    quantity_out_of_service: 0,
+    quantity_available: -1,
+    since: null,
+  });
+});
+
+Deno.test("peakStockConsumption: an open-ended sale keeps consuming AFTER its start", () => {
+  // `end: null` is +∞, so the sale is live at every later entry's start too — the
+  // peak must be 3 + 2, not 3. Collapsing a null end to a point would answer 3.
+  const s = stock(10, [
+    iv(D1, null, 3, "booking"),
+    iv(D3, D5, 2, "booking"),
+  ]);
+  assertEquals(peakStockConsumption(s).quantity_booked, 5);
+  assertEquals(peakStockConsumption(s).since, D3);
+});
+
+Deno.test("peakStockConsumption: nothing unavailable means held, everywhere", () => {
+  assertEquals(peakStockConsumption(stock(7, [])), {
+    quantity_held: 7,
+    quantity_booked: 0,
+    quantity_out_of_service: 0,
+    quantity_available: 7,
+    since: null,
+  });
+});
+
+Deno.test("peakStockConsumption: the ALL-TIME window is never more available than the peak", () => {
+  // The direction that does hold, swept — and stated over the all-time window
+  // specifically, because the general claim is FALSE and it is the tempting one
+  // to write. A window that misses the peak entirely reports MORE availability
+  // than the peak does (held = 10, two 5-unit bookings on days 1–2, window
+  // [10, 11] → 10 available against the peak's 0). What holds is the special
+  // case that matters: every entry overlaps the all-time window, so its sum is
+  // an upper bound on any instant's.
+  //
+  // That special case is exactly the substitution this function exists to
+  // prevent — "just call computeStockAvailability over the widest window" — so
+  // pinning the inequality pins the direction of the error it would introduce:
+  // over-reporting oversells, never missing one.
+  const rand = prng(0x5eed);
+  for (let i = 0; i < 2_000; i++) {
+    const entries: StockUnavailableEntry[] = [];
+    let lo = 28;
+    let hi = 1;
+    const n = 1 + rand(6);
+    for (let k = 0; k < n; k++) {
+      const s0 = 1 + rand(20);
+      const e0 = s0 + rand(8);
+      lo = Math.min(lo, s0);
+      hi = Math.max(hi, e0);
+      entries.push(iv(dayIso(s0), rand(7) === 0 ? null : dayIso(e0), 1 + rand(3)));
+    }
+    const s = stock(10, entries);
+    const peak = peakStockConsumption(s);
+    // `end: null` reaches past any finite window, so extend to cover it.
+    const all = computeStockAvailability(s, win(dayNum(lo), dayNum(Math.min(28, hi + 1))));
+    assert(
+      all.quantity_available <= peak.quantity_available,
+      `all-time window [${lo},${hi}] reported ${all.quantity_available} available, ABOVE ` +
+        `the peak's ${peak.quantity_available}. The peak is the LEAST pessimistic of the ` +
+        `two, so this means one of the folds is wrong. entries=${JSON.stringify(entries)}`,
+    );
+  }
+});
+
+/** mulberry32, for the sweep above. Same `Math.imul` requirement as `randomCase`. */
+function prng(seed: number): (n: number) => number {
+  let s = seed >>> 0;
+  return (n: number) => {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (((t ^ (t >>> 14)) >>> 0) / 4294967296 * n) | 0;
+  };
+}
+
+/** `2026-06-DD`, clamped into June, for the sweep above. */
+function dayNum(d: number): string {
+  return `2026-06-${String(Math.min(28, Math.max(1, d))).padStart(2, "0")}`;
+}
+function dayIso(d: number): string {
+  return dayNum(d) + "T00:00:00.000-05:00";
+}
 
 // ── Equivalence with the engine it replaces ────────────────────────────────
 

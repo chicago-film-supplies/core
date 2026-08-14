@@ -123,6 +123,10 @@ export interface Stock {
    * correctly.** An equal `seq` says no claim has landed since the rebuild read
    * its sources; it says nothing about arithmetic, so it does not replace the
    * recompute — it decides how often the recompute has to run.
+   *
+   * Since P4 the token also moves on a **supply** change, so an equal `seq` now
+   * covers `quantity_held` as well as `unavailable[]` — see {@link StockLock.seq}
+   * for why that widening was a correctness fix rather than tidiness.
    */
   claim_seq: number;
   created_at: FirestoreTimestampType;
@@ -165,8 +169,36 @@ export interface StockLock {
   uid: string;
   uid_product: string;
   /**
-   * Monotonically increasing count of claims made against this product. Only its
-   * *movement* is meaningful — nothing reads the value as a quantity.
+   * Monotonically increasing count of **changes to any input of an availability
+   * answer** for this product. Only its *movement* is meaningful — nothing reads
+   * the value as a quantity.
+   *
+   * ⚠️ **"Claim" here means demand AND supply, and that is wider than it first
+   * shipped.** P3 bumped this for the demand side only — a booking or an
+   * out-of-service record, the things that populate {@link Stock.unavailable}.
+   * P4 added the supply side: a movement that changes
+   * `inventory-ledgers/{P}.quantity_held` bumps it too.
+   *
+   * The reason is the gate's arithmetic, not symmetry.
+   * `available = quantity_held − booked(w) − oos(w)` reads `quantity_held` as an
+   * input, and this counter exists so that *"everything I read is still true"* is
+   * one precondition. Leaving supply out makes that promise false in the one
+   * direction that oversells: a write-off or a loss landing between a claimer's
+   * read and its write **lowers** `quantity_held` invisibly, so the claimer
+   * commits against stock that no longer exists. (An increase is conservative —
+   * it only refuses more than necessary — so the exposure is one-sided, which is
+   * exactly why it is easy to miss.)
+   *
+   * A booking-mediated supply change was already covered, and that is what made
+   * the gap look closed: a sale check-out drops `quantity_held` *and* moves the
+   * booking, and the booking write bumps this. The uncovered decreases are the
+   * ones with no booking — a write-off, a loss, a damage transaction, and any
+   * reversal of one.
+   *
+   * The field is still named `seq` (and its mirror {@link Stock.claim_seq}) after
+   * the narrower meaning: a rename is a schema change plus a migration of every
+   * document in both environments, for no behavioural gain. Read the name as
+   * historical and this docstring as the contract.
    */
   seq: number;
   created_at: FirestoreTimestampType;

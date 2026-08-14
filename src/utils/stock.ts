@@ -14,8 +14,10 @@
  * 2. **Reducers** — {@link unavailableFromBooking}, {@link unavailableFromOOS}:
  *    one source document → the pre-reduced anonymous interval stored in
  *    `stock/{P}.unavailable[]`.
- * 3. **The fold** — {@link computeStockAvailability}: that array + a window → the
- *    numbers.
+ * 3. **The folds** — {@link computeStockAvailability}: that array + a window →
+ *    the numbers. {@link peakStockConsumption}: that array alone → the instant
+ *    at which most units are out at once, which is the window-free *"is this
+ *    PHYSICALLY oversold?"* question the operator advisory signal asks.
  *
  * They sit together because **the projection writer and the oversell gate run
  * different halves of the same pipeline**. The rebuild runs (2) and stores the
@@ -383,4 +385,121 @@ export function computeStockAvailability(
     quantity_out_of_service,
     quantity_available: quantity_held - quantity_booked - quantity_out_of_service,
   };
+}
+
+// ── The peak instant ────────────────────────────────────────────────────────
+
+/** {@link peakStockConsumption}'s answer: the numbers, plus where they occur. */
+export interface PeakStockConsumption extends StockAvailability {
+  /**
+   * The instant the peak opens, as the offset-carrying ISO string of the entry
+   * whose start opens it — or `null` when the peak is reached before any entry
+   * starts, i.e. it is carried by open-ended (`start: null`) entries alone.
+   *
+   * `null` is therefore a real answer ("as far back as this projection goes"),
+   * never "not found": {@link peakStockConsumption} always returns a point,
+   * because an empty `unavailable[]` consumes zero everywhere.
+   */
+  since: string | null;
+}
+
+/**
+ * The instant at which this product's units are most consumed **at once** — the
+ * physical peak, across all time, with no window named.
+ *
+ * `quantity_available < 0` here means the product is oversold *physically*: at
+ * one moment more units are claimed than exist. That is the operator advisory
+ * signal (api-cloudrun#510 P4) — the operator, order and CRMS paths deliberately
+ * never refuse a claim, so this is what records the fact.
+ *
+ * ⚠️ **This is NOT "the worst answer `computeStockAvailability` could give", and
+ * the inequality runs the opposite way to the intuition.** A window's
+ * consumption sums every entry *overlapping* it, so it can sum entries that never
+ * coexist; an instant's sums only entries live *at* it. Every entry live at an
+ * instant inside a window also overlaps that window, so:
+ *
+ * ```
+ * peak consumption  ≤  any window's consumption that contains the peak
+ * peak available    ≥  that window's available
+ * ```
+ *
+ * The witness is the same fixture that forbids a per-day rollup: `held = 2`,
+ * bookings on days 1–2 and 4–5. Window `[1, 5]` consumes **2** and reports 0
+ * available — correct, because no single unit is free for the whole span — while
+ * the peak consumes **1** and reports 1 available, also correct, because the
+ * shop never holds more than one unit out at a time.
+ *
+ * So the two answer different questions and neither bounds the other usefully in
+ * the direction one expects:
+ *
+ * | | question | a shortage means |
+ * |---|---|---|
+ * | {@link computeStockAvailability} | what can I **promise** over this span? | ordinary business — #424's advisory signal, seen on every busy product |
+ * | {@link peakStockConsumption} | how many units are **out at once**? | a physical impossibility — the units do not exist |
+ *
+ * **Log the second, not the first.** A window shortage is routine and alerting on
+ * it would be pure noise; a physical oversell is the *"a `reserved` order for 100
+ * units of a 2-unit product commits silently"* case, and it is rare.
+ *
+ * Evaluated at candidate points rather than by a sweep with epsilon handling,
+ * because the bounds are closed (`[start, end]`, both inclusive) and an interval
+ * with `end: null` never ends: coverage is piecewise constant and only ever
+ * *rises* at a start, so a maximum is attained at some entry's `start` — or, when
+ * any entry is open on the left, in the region before every real start, where
+ * exactly the `start: null` entries are live. Both cases are candidates below.
+ *
+ * O(n²) on purpose: `n` is one product's live entries (26 is the corpus max
+ * across both environments), and the quadratic form is `intervalsOverlap` applied
+ * directly at each candidate — no boundary arithmetic to get subtly wrong, and no
+ * second definition of what "live at t" means.
+ */
+export function peakStockConsumption(
+  stock: Pick<Stock, "quantity_held" | "unavailable">,
+): PeakStockConsumption {
+  const quantity_held = stock.quantity_held;
+  const entries = stock.unavailable.map((u) => ({
+    startMs: u.start === null ? null : Date.parse(u.start),
+    endMs: u.end === null ? null : Date.parse(u.end),
+    quantity: u.quantity,
+    kind: u.kind,
+    startIso: u.start,
+  }));
+
+  // The candidates: every real start, plus the open-on-the-left region when any
+  // entry has none. `-Infinity` stands in for that region; `intervalsOverlap`
+  // treats it correctly (a null start is −∞ ≤ t, a null end is +∞ ≥ t, and a real
+  // start is never ≤ −∞), so it needs no special case below.
+  const candidates: { at: number; iso: string | null }[] = [];
+  if (entries.some((e) => e.startMs === null)) candidates.push({ at: -Infinity, iso: null });
+  for (const e of entries) if (e.startMs !== null) candidates.push({ at: e.startMs, iso: e.startIso });
+
+  let peak: PeakStockConsumption = {
+    quantity_held,
+    quantity_booked: 0,
+    quantity_out_of_service: 0,
+    quantity_available: quantity_held,
+    since: null,
+  };
+
+  for (const c of candidates) {
+    let quantity_booked = 0;
+    let quantity_out_of_service = 0;
+    for (const e of entries) {
+      if (!intervalsOverlap(e.startMs, e.endMs, c.at, c.at)) continue;
+      if (e.kind === "booking") quantity_booked += e.quantity;
+      else quantity_out_of_service += e.quantity;
+    }
+    const quantity_available = quantity_held - quantity_booked - quantity_out_of_service;
+    if (quantity_available < peak.quantity_available) {
+      peak = {
+        quantity_held,
+        quantity_booked,
+        quantity_out_of_service,
+        quantity_available,
+        since: c.iso,
+      };
+    }
+  }
+
+  return peak;
 }

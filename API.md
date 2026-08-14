@@ -17674,7 +17674,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "fulfillment_custom_item_qty_override"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -21039,6 +21039,16 @@ interface AvailabilityWindow {
 }
 ```
 
+### `PeakStockConsumption`
+
+{@link peakStockConsumption}'s answer: the numbers, plus where they occur.
+
+```ts
+interface PeakStockConsumption {
+  since: string | null;
+}
+```
+
 ### `StockAvailability`
 
 Everything a consumer needs from one product over one window.
@@ -21186,6 +21196,57 @@ are accounted for by the record's own status transition, and subtracting them
 here hands the same units back twice. It looks like a tidy-up and it is a live
 oversell. (Swept 2026-08-13: no site in the workspace does this — keep it that
 way.)
+
+### `peakStockConsumption(stock: Pick<Stock, "quantity_held" | "unavailable">): PeakStockConsumption`
+
+The instant at which this product's units are most consumed **at once** — the
+physical peak, across all time, with no window named.
+
+`quantity_available < 0` here means the product is oversold *physically*: at
+one moment more units are claimed than exist. That is the operator advisory
+signal (api-cloudrun#510 P4) — the operator, order and CRMS paths deliberately
+never refuse a claim, so this is what records the fact.
+
+⚠️ **This is NOT "the worst answer `computeStockAvailability` could give", and
+the inequality runs the opposite way to the intuition.** A window's
+consumption sums every entry *overlapping* it, so it can sum entries that never
+coexist; an instant's sums only entries live *at* it. Every entry live at an
+instant inside a window also overlaps that window, so:
+
+```
+peak consumption  ≤  any window's consumption that contains the peak
+peak available    ≥  that window's available
+```
+
+The witness is the same fixture that forbids a per-day rollup: `held = 2`,
+bookings on days 1–2 and 4–5. Window `[1, 5]` consumes **2** and reports 0
+available — correct, because no single unit is free for the whole span — while
+the peak consumes **1** and reports 1 available, also correct, because the
+shop never holds more than one unit out at a time.
+
+So the two answer different questions and neither bounds the other usefully in
+the direction one expects:
+
+| | question | a shortage means |
+|---|---|---|
+| {@link computeStockAvailability} | what can I **promise** over this span? | ordinary business — #424's advisory signal, seen on every busy product |
+| {@link peakStockConsumption} | how many units are **out at once**? | a physical impossibility — the units do not exist |
+
+**Log the second, not the first.** A window shortage is routine and alerting on
+it would be pure noise; a physical oversell is the *"a `reserved` order for 100
+units of a 2-unit product commits silently"* case, and it is rare.
+
+Evaluated at candidate points rather than by a sweep with epsilon handling,
+because the bounds are closed (`[start, end]`, both inclusive) and an interval
+with `end: null` never ends: coverage is piecewise constant and only ever
+*rises* at a start, so a maximum is attained at some entry's `start` — or, when
+any entry is open on the left, in the region before every real start, where
+exactly the `start: null` entries are live. Both cases are candidates below.
+
+O(n²) on purpose: `n` is one product's live entries (26 is the corpus max
+across both environments), and the quadratic form is `intervalsOverlap` applied
+directly at each candidate — no boundary arithmetic to get subtly wrong, and no
+second definition of what "live at t" means.
 
 ### `unavailableFromBooking(b: StockBookingSource): StockUnavailableEntry | null`
 
