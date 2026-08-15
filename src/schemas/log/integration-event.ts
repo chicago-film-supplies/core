@@ -81,6 +81,25 @@ export const INTEGRATION_EVENT_MSGS = [
   // Retire with CRMS.
   "crms_invoice_reprice_frozen",
   "crms_mark_paid_failed",
+  // `mark_paid` was refused because the CRMS invoice is ALREADY paid, so the
+  // desired end state already holds and the call is a no-op rather than a
+  // failure. Operators mark an invoice paid in CRMS by hand to produce a paid
+  // invoice document, and Xero's bank transactions — the authority — run about a
+  // day behind, so by the time the Xero payment webhook fires the record is
+  // frequently already paid (api-cloudrun#360: 238 events in 90 days).
+  //
+  // ⚠️ It is classified from the RECORD, never from the response. CRMS refuses
+  // this with a bare 401 and `You are not authorized to access this page.` —
+  // byte-identical to a genuine auth failure — so the demotion re-reads the
+  // invoice and keys on `status == 20` (probed live on invoice 1072,
+  // 2026-08-15). Demoting on the status code alone would silence a real
+  // credential outage on the money path.
+  //
+  // INFO, not warn: same reasoning as `crms_invoice_reprice_frozen` above — the
+  // outcome is correct, and the line exists so the condition stays countable
+  // after it stops being an error. Carries `invoice_uid` and `crms_id`.
+  // Retire with CRMS.
+  "crms_mark_paid_noop",
   "crms_product_not_found",
   "uploadcare_draft_cleanup_failed",
   "uploadcare_file_not_found",
