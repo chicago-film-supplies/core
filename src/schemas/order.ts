@@ -37,6 +37,8 @@ import {
   type TaxProfileType,
   NameField,
   TimestampFields,
+  ActorRef,
+  type ActorRefType,
   isFulfillableItemType,
   isLineItemType,
 } from "./common.ts";
@@ -1016,6 +1018,32 @@ export interface Order {
   xero_id?: string | null;
   uid_thread?: string;
   version: number;
+  /**
+   * Who created this order — **optional, and there is no `updated_by` twin**
+   * (api-cloudrun#407).
+   *
+   * `updated_by` is deliberately absent rather than pending: `orders` is the
+   * most machine-written collection in the system (holiday recompute, the draft
+   * fan-out, calendar, Trello, the Xero and CRMS sweeps), and corpus-wide
+   * **15,885 of 16,046 prod ActorRefs already name a bot**. A second field that
+   * reads "Cloud Task Worker" on almost every order is worse than no field.
+   *
+   * Optional because it is **not backfilled**. Every historical order is
+   * CRMS-authored, so a backfill could only write `crms-bot`, i.e. the field
+   * would ship saying "we don't know" on 100% of the corpus. Absent means
+   * absent — the `pdf_versions` precedent.
+   *
+   * ⚠️ **The `null` arm is load-bearing, not decoration.** `getInitialValues`
+   * recurses INTO an `optional` rather than skipping it, so a bare
+   * `ActorRef.optional()` seeds `{uid: "", name: ""}` — which strict `ActorRef`
+   * then rejects (`min(1)` on both). That seed is not a test detail: manager
+   * builds its order draft from `getInitialValues(OrderSchema)`
+   * (`src/stores/orders.ts`), and api's invoice and credit-note suites spread it
+   * into orders they WRITE. `nullable` makes `resolveField` yield `null`, which
+   * every one of them can store. `comment.ts`'s `deleted_by` is the precedent
+   * for a nullable ActorRef.
+   */
+  created_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -1062,6 +1090,11 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   xero_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
+  // `created_by` only — see the interface for why there is no `updated_by`, and
+  // why this is optional rather than backfilled. Adding it puts `orders` into
+  // the user-rename cascade, which is safe only because api-cloudrun's
+  // `ORDER_FANOUT_EXCLUDED_FIELDS` already refuses both actor names.
+  created_by: ActorRef.nullable().optional().meta({ column: true, label: "Created By" }),
   ...TimestampFields,
 }).meta({
   title: "Order",

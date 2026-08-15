@@ -4886,6 +4886,7 @@ interface Order {
   xero_id?: string | null;
   uid_thread?: string;
   version: number;
+  created_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -13033,6 +13034,7 @@ interface Order {
   xero_id?: string | null;
   uid_thread?: string;
   version: number;
+  created_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }

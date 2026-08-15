@@ -187,6 +187,9 @@ export const templateSchemaFields: Partial<
     { path: "xero_id", type: "string | null" },
     { path: "uid_thread", type: "union?" },
     { path: "version", type: "number" },
+    { path: "created_by", type: "object? | null" },
+    { path: "created_by.uid", type: "string" },
+    { path: "created_by.name", type: "string" },
   ],
   "invoices": [
     { path: "uid", type: "string" },
