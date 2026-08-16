@@ -116,7 +116,7 @@ export const updateContactRules: CollectionRule[] = [
       kind: "audit",
       ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
       clause:
-        "row `orders←contacts`. VACUOUS TODAY: all 1,940 stored destination legs carry contact:null in both envs, so this compares nothing — the cascade is real but has never had a target",
+        "row `orders←contacts`. VACUOUS TODAY: all 1,974 stored destination legs carry contact:null in both envs (re-measured 2026-08-16), so this compares nothing — the cascade is real but has never had a target. The reason is that every stored order is CRMS-authored and CRMS states no destination contact; `createOrder` reads one straight off the request, so the population is live the moment the manager mints an order",
       gates: false,
     }],
     fields: [

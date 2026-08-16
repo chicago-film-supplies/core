@@ -133,34 +133,45 @@ export const crmsInvoiceUpsertTransaction: TransactionDefinition = {
  * or by the shared thread cowrite. It is an UPSERT, so both arms are declared
  * and `rules_fired` reports per run which of them actually moved.
  *
- * ## ⚠️ Two steps `update-organization` declares are ABSENT, and both are facts
+ * ## ⚠️ `tax-profile-to-orders` is declared as of api-cloudrun#528, and the
+ *    defect it closed was TWO-SIDED
  *
- * - **`update-org:tax-profile-to-orders`.** That rule's fields include
- *   re-materializing every line's taxes; this path copies the org snapshot and
- *   re-prices nothing. Declaring it would report drift on every run.
- * - **`update-org:name-to-orders` / `billing-to-orders` ARE declared** — those
- *   two are pure snapshot copies and `applyOrgToOrder` performs exactly them.
+ * This comment previously recorded the step as deliberately absent, because
+ * *"this path copies the org snapshot and re-prices nothing"*. That was true,
+ * and it was the defect rather than the design — read against its twin:
  *
- * ## ⚠️ And one edge this path drives has NO rule on either side
+ * | document | native `updateOrganization` | CRMS member webhook (before #528) |
+ * |---|---|---|
+ * | order   | writes the snapshot **and reprices** | wrote **nothing** |
+ * | invoice | writes **nothing**, deliberately     | wrote the snapshot |
  *
- * `applyOrgToInvoice` writes `invoice.organization.tax_profile`, while the
- * native `updateOrganization` deliberately refuses to (its comment: an invoice
- * is a billing document whose taxes were agreed at issue). So the two writers
- * disagree about whether that field may move on an issued invoice, and no rule
- * describes the CRMS one — which means it cannot be declared here without
- * inventing a vocabulary for behaviour that may itself be the defect. Left
- * undeclared and filed rather than papered over.
+ * i.e. the two writers were exact inverses of each other, and #528 named only
+ * the invoice half. Both halves are now the native path's rule: an org's
+ * `tax_profile` change reprices its live **un-invoiced orders** and touches no
+ * invoice on either path. An invoice is a billing document whose taxes were
+ * agreed at issue — several are in Xero — and `resyncInvoice` is its deliberate
+ * repair path, exactly as `POST /orders/{uid}/tax-resync` is an invoiced
+ * order's. `applyOrgToOrder` now delegates to the same
+ * `applyOrgTaxProfileToOrder` the native path uses, so there is one
+ * implementation of the reprice and the two cannot drift.
+ *
+ * ⚠️ **Inert on the corpus when it landed, and that is a fact worth keeping**:
+ * prod measured 0 of 987 orders and 0 of 1,010 invoices disagreeing with their
+ * org's current profile (2026-08-16). Each writer covered only one side, so
+ * zero drift on *both* sides is evidence the trigger has never fired — not
+ * evidence the cascades were keeping up.
  */
 export const crmsMemberOrganizationTransaction: TransactionDefinition = {
   id: "crms-member-organization",
   description:
-    "Creates or updates a CFS organization from a CRMS member — geocoded billing address, emails/phones, tax profile derived from the CRMS sales-tax class, and the full child-contact set with bidirectional back-references maintained in both directions. Fans the org's name and billing address out to its live orders and invoices, and cowrites a default thread for the organization and for every contact it mints.",
+    "Creates or updates a CFS organization from a CRMS member — geocoded billing address, emails/phones, tax profile derived from the CRMS sales-tax class, and the full child-contact set with bidirectional back-references maintained in both directions. Fans the org's name and billing address out to its live orders and invoices, reprices the live un-invoiced orders when the tax profile moves, and cowrites a default thread for the organization and for every contact it mints.",
   steps: [
     "create-org:org-to-contacts",
     "update-org:contacts-change",
     "update-org:name-to-contacts",
     "update-org:name-to-orders",
     "update-org:billing-to-orders",
+    "update-org:tax-profile-to-orders",
     "update-org:name-to-invoices",
     "update-org:billing-to-invoices",
     "cowrite-thread:organizations-to-thread",
@@ -176,20 +187,24 @@ export const crmsMemberOrganizationTransaction: TransactionDefinition = {
  * The CRMS member (`membership_type: "Contact"`) → CFS contact upsert, the
  * sibling of the above. Three collections — contacts, organizations, threads.
  *
- * ## ⚠️ Three `update-contact` steps are ABSENT, and this is now the LAST
- *    instance of #501's shape — the opportunity one above is closed
+ * ## ⚠️ The three `update-contact` steps are declared as of api-cloudrun#531 —
+ *    #501's shape is now closed everywhere
  *
  * `update-contact` declares `name-to-orders`, `phones-to-orders` and
- * `name-to-user`. This path fires none of them: a contact renamed **through
- * CRMS** does not reach the destination legs of its live orders, nor its linked
- * user, while the same rename through `PUT /contacts/{uid}` does. Two of those
- * three are measured vacuous corpus-wide anyway (every stored destination leg
- * carries `contact: null`), but `update-contact:name-to-user` is not — a CRMS
- * rename of a contact linked to a user leaves the user's name stale.
+ * `name-to-user`, and this path fired **none** of them: a contact renamed
+ * **through CRMS** reached neither the destination legs of its live orders nor
+ * its linked user, while the same rename through `PUT /contacts/{uid}` did.
+ * Both writers now go through `lib/contactCascade.ts`, so there is one
+ * implementation of each denorm rather than two that can drift.
  *
- * The steps go in when the sync does, which is the call
- * `crms-opportunity-order` above has now made. Tracked as
- * **api-cloudrun#531**.
+ * ⚠️ **All three legs measured VACUOUS when this landed, in BOTH envs** — 0 of
+ * 165 prod contacts carry a `uid_user`, and 0 of 1,974 stored destination legs
+ * carry a contact (2026-08-16). So this is a forward fix with no repair, and
+ * the reason for the zero is the reason it does not stay zero: every prod order
+ * is CRMS-authored and CRMS states no destination contact, while `createUser`
+ * links a user to an email-matching contact automatically. Both populations
+ * become live the moment the manager mints orders and users — which is the
+ * CRMS-overlap window, i.e. exactly the window this path is still running in.
  *
  * ⚠️ **Correcting this comment's own earlier reasoning:** it said declaring
  * early would produce "a permanent drift warning". It would not —
@@ -203,11 +218,14 @@ export const crmsMemberOrganizationTransaction: TransactionDefinition = {
 export const crmsMemberContactTransaction: TransactionDefinition = {
   id: "crms-member-contact",
   description:
-    "Creates or updates a CFS contact from a CRMS member — split name, emails/phones, and membership of every parent organization CRMS names, with each org's contacts[] and query_by_contacts back-reference maintained on join and on leave. Cowrites a default thread on the create arm. An unresolvable parent org is a hard failure rather than a silent unlink.",
+    "Creates or updates a CFS contact from a CRMS member — split name, emails/phones, and membership of every parent organization CRMS names, with each org's contacts[] and query_by_contacts back-reference maintained on join and on leave. A rename also reaches the destination legs of the contact's live orders and its linked user; a phone change reaches the same order legs. Cowrites a default thread on the create arm. An unresolvable parent org is a hard failure rather than a silent unlink.",
   steps: [
     "create-contact:contact-to-orgs",
     "update-contact:name-to-orgs",
     "update-contact:orgs-change",
+    "update-contact:name-to-orders",
+    "update-contact:phones-to-orders",
+    "update-contact:name-to-user",
     "cowrite-thread:contacts-to-thread",
     "cowrite-thread:thread-to-contacts",
   ],
