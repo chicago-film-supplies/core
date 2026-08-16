@@ -22,23 +22,35 @@
  *   undeclared here and `webhooks/opportunity.ts` imported neither logger, so
  *   its cascade — five collections — emitted nothing to check against.
  *
- * ## ⚠️ What `crms-opportunity-order` does NOT declare, and why that is a fact
- *    rather than an omission
+ * ## ✅ The two invoice steps are now DECLARED — api-cloudrun#501 is closed
  *
- * `update-order` declares `update-order:items-to-invoices` and
- * `update-order:status-to-invoices`. This transaction declares neither, because
- * it fires neither: an order edited through CRMS does not propagate to its
- * invoices, while the same edit through the native PUT does. That is
- * **api-cloudrun#501**, and it is a live gap, not a design choice.
+ * `crms-opportunity-order` used to declare neither
+ * `update-order:items-to-invoices` nor `update-order:status-to-invoices`,
+ * because it fired neither: an order edited through CRMS did not reach its
+ * invoices while the same edit through the native PUT did. The steps went in
+ * when the sync did, exactly as this comment previously promised.
  *
- * Declaring the two steps here to make the gap visible would be the wrong
- * encoding — a declared-but-never-fired step reports drift on every single run,
- * which is a permanent warning rather than a finding. The steps go in when the
- * sync does. Measured 2026-08-12 against prod: `crms-opportunity-order` ran
- * **1,480** times over 114 orders in 90 days while `update-order` ran **4**
- * times corpus-wide, and **27 of 27** sync-eligible order↔invoice pairs sit on
- * a CRMS-written order — so this is not the minority path, it is very nearly
- * the only one.
+ * Why that gap was worth closing rather than documenting: measured 2026-08-12
+ * against prod, `crms-opportunity-order` ran **1,480** times over 114 orders in
+ * 90 days while `update-order` ran **4** times corpus-wide, and **27 of 27**
+ * sync-eligible order↔invoice pairs sit on a CRMS-written order. The propagating
+ * surface was very nearly the only one that never propagated.
+ *
+ * ⚠️ **A declared-but-never-fired step does NOT report drift on every run, and
+ * the previous revision of this comment said it did.** `logTransactionPropagation`
+ * warns only on `rules_fired.length === 0 && rules_expected > 0`, and this
+ * transaction always fires at least three. What declaring early would really
+ * have broken is the STATIC guard — `propagationCoverage`'s per-transaction arm
+ * requires every declared step to appear as a literal in the file that logs the
+ * transaction, so the declaration would have failed the build, not the logs.
+ * Same conclusion, different mechanism; the distinction matters because it is
+ * the one that tells you where to look when it goes red.
+ *
+ * ⚠️ Both steps are CONDITIONAL at the call site, and that is not drift: the
+ * item sync needs a linked non-terminal invoice carrying this order's divider,
+ * and the cancel arm needs a transition INTO `canceled`. `rules_fired` reports
+ * per run which of them moved, exactly as the `cowrite-thread:*` create-arm
+ * steps already do.
  */
 import { stockSteps } from "./stock.ts";
 import type { TransactionDefinition } from "./types.ts";
@@ -56,7 +68,7 @@ import type { TransactionDefinition } from "./types.ts";
 export const crmsOpportunityOrderTransaction: TransactionDefinition = {
   id: "crms-opportunity-order",
   description:
-    "Rebuilds a CFS order from a CRMS opportunity — org snapshot, server-derived totals and query arrays, one booking per consolidated product per destination with store allocation drawn from the inventory ledger, the event-card projection with its per-card threads, and the sanitized fulfillment view. Cowrites the order's default thread on the create arm. Stock summaries are rebuilt post-commit via the coalesced `/tasks/rebuild-stock`, as on the native order path. Does NOT sync to linked invoices — see api-cloudrun#501.",
+    "Rebuilds a CFS order from a CRMS opportunity — org snapshot, server-derived totals and query arrays, one booking per consolidated product per destination with store allocation drawn from the inventory ledger, the event-card projection with its per-card threads, and the sanitized fulfillment view. Cowrites the order's default thread on the create arm. Selectively syncs the rebuilt items, destinations, subject, reference and organization onto every linked non-terminal invoice, and strips this order's scope from them on a cancel — the same two edges the native PUT drives. Stock summaries are rebuilt post-commit via the coalesced `/tasks/rebuild-stock`, as on the native order path.",
   steps: [
     "update-order:org-to-order",
     "update-order:order-self-derive",
@@ -65,6 +77,11 @@ export const crmsOpportunityOrderTransaction: TransactionDefinition = {
     ...stockSteps("update-order"),
     "update-order:order-to-cards",
     "update-order:order-to-fulfillment",
+    // api-cloudrun#501. Conditional, like the two create-arm thread cowrites
+    // below: the item sync needs a linked non-terminal invoice holding this
+    // order's divider, and the cancel arm needs a transition INTO `canceled`.
+    "update-order:items-to-invoices",
+    "update-order:status-to-invoices",
     "cowrite-thread:orders-to-thread",
     "cowrite-thread:thread-to-orders",
     "cowrite-thread:cards-to-thread",
@@ -159,8 +176,8 @@ export const crmsMemberOrganizationTransaction: TransactionDefinition = {
  * The CRMS member (`membership_type: "Contact"`) → CFS contact upsert, the
  * sibling of the above. Three collections — contacts, organizations, threads.
  *
- * ## ⚠️ Three `update-contact` steps are ABSENT, and that is api-cloudrun#501's
- *    shape in a second place
+ * ## ⚠️ Three `update-contact` steps are ABSENT, and this is now the LAST
+ *    instance of #501's shape — the opportunity one above is closed
  *
  * `update-contact` declares `name-to-orders`, `phones-to-orders` and
  * `name-to-user`. This path fires none of them: a contact renamed **through
@@ -170,9 +187,18 @@ export const crmsMemberOrganizationTransaction: TransactionDefinition = {
  * carries `contact: null`), but `update-contact:name-to-user` is not — a CRMS
  * rename of a contact linked to a user leaves the user's name stale.
  *
- * Declared-but-never-fired would be a permanent drift warning rather than a
- * finding, so the steps go in when the sync does — the same call
- * `crms-opportunity-order` makes above for #501.
+ * The steps go in when the sync does, which is the call
+ * `crms-opportunity-order` above has now made. Tracked as
+ * **api-cloudrun#531**.
+ *
+ * ⚠️ **Correcting this comment's own earlier reasoning:** it said declaring
+ * early would produce "a permanent drift warning". It would not —
+ * `logTransactionPropagation` warns only when `rules_fired` is EMPTY, and this
+ * transaction always fires several. The real cost is that
+ * `propagationCoverage`'s per-transaction arm requires each declared step to
+ * appear as a literal in the file that logs the transaction, so an early
+ * declaration fails the BUILD. Same instruction, different mechanism — and the
+ * mechanism is what tells you where to look when it goes red.
  */
 export const crmsMemberContactTransaction: TransactionDefinition = {
   id: "crms-member-contact",
