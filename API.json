@@ -3241,6 +3241,18 @@
           "doc": ""
         },
         {
+          "kind": "variable",
+          "name": "SupersedeTaxInput",
+          "declaration": "const SupersedeTaxInput: z.ZodType<SupersedeTaxInputType>;",
+          "doc": "Zod schema for SupersedeTaxInput."
+        },
+        {
+          "kind": "interface",
+          "name": "SupersedeTaxInputType",
+          "declaration": "interface SupersedeTaxInputType {\n  uid: string;\n  version: number;\n  valid_from: string;\n  rate: number;\n  type?: RateType;\n  valid_to?: string | null;\n}",
+          "doc": "Input for superseding a tax — closing the incumbent's window and opening its\nsuccessor's, in one write (api-cloudrun#495).\n\n## Why this is not two calls\n\nA rate change is retroactive by nature, so the correct model is a new\n*version* rather than an edit — but the sanctioned way to reach it was\n`POST /taxes` followed by `PUT /taxes/{old}`, and **between those two calls\nboth versions are open-ended**. {@link findTaxAt} does not pick one when two\nsame-name docs bracket an instant, it THROWS `Tax catalog drift` — on the\npricing path, for every order and invoice write touching that name. So the\ndocumented workflow had a window in which pricing was down, and the operator\ngetting the order wrong was the only thing standing between the catalog and\nthat throw. One transaction makes the overlap unrepresentable instead.\n\n## What is deliberately absent\n\n- **No `name`.** A supersede is by construction the next version of the same\n  tax, and `findTaxAt` matches by name — so a caller-supplied name would let\n  one call close this series and open a different one, which is two edits\n  wearing one verb.\n- **No way to deactivate the incumbent.** A closed version must stay in the\n  catalog: `getTaxDocs()` reads the collection unfiltered and `findTaxAt`\n  resolves *historical* instants off it, so retiring the incumbent would\n  re-price every past document that names it. It is also what keeps a\n  consumer holding a pinned uid working — manager pins `RENTAL_TAX_UID` as a\n  constant and `getDefaultTaxesForType` returns `[]` on a miss, so a\n  deactivated incumbent creates every new rental line **untaxed, silently**.\n  The line still prices correctly because the order writers re-resolve by\n  name at `asOf` (`resolveTaxRefsAt`); that resolution is the reason this\n  endpoint is safe to ship before manager stops pinning uids.\n\n`valid_from` is one field doing two jobs — the successor's start AND the\nincumbent's `valid_to` — because they are the same instant by definition.\nTwo fields would be two chances to disagree."
+        },
+        {
           "kind": "interface",
           "name": "SyncErrorLogRecord",
           "declaration": "interface SyncErrorLogRecord {\n  level: LogLevelType;\n  msg: \"sync_error\";\n  ts: string;\n  sync_service: string;\n  document_path?: string;\n  operation?: string;\n  error_name?: string;\n  error_message?: string;\n  error_stack?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",

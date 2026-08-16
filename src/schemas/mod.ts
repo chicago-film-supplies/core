@@ -635,9 +635,11 @@ export {
   TaxSchema,
   CreateTaxInput,
   UpdateTaxInput,
+  SupersedeTaxInput,
   type Tax,
   type CreateTaxInputType,
   type UpdateTaxInputType,
+  type SupersedeTaxInputType,
 } from "./tax.ts";
 
 export {

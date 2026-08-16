@@ -106,3 +106,65 @@ export const UpdateTaxInput: z.ZodType<UpdateTaxInputType> = z.object({
   valid_to: chicagoInstant().nullable().optional(),
   version: z.int().min(0),
 });
+
+/**
+ * Input for superseding a tax — closing the incumbent's window and opening its
+ * successor's, in one write (api-cloudrun#495).
+ *
+ * ## Why this is not two calls
+ *
+ * A rate change is retroactive by nature, so the correct model is a new
+ * *version* rather than an edit — but the sanctioned way to reach it was
+ * `POST /taxes` followed by `PUT /taxes/{old}`, and **between those two calls
+ * both versions are open-ended**. {@link findTaxAt} does not pick one when two
+ * same-name docs bracket an instant, it THROWS `Tax catalog drift` — on the
+ * pricing path, for every order and invoice write touching that name. So the
+ * documented workflow had a window in which pricing was down, and the operator
+ * getting the order wrong was the only thing standing between the catalog and
+ * that throw. One transaction makes the overlap unrepresentable instead.
+ *
+ * ## What is deliberately absent
+ *
+ * - **No `name`.** A supersede is by construction the next version of the same
+ *   tax, and `findTaxAt` matches by name — so a caller-supplied name would let
+ *   one call close this series and open a different one, which is two edits
+ *   wearing one verb.
+ * - **No way to deactivate the incumbent.** A closed version must stay in the
+ *   catalog: `getTaxDocs()` reads the collection unfiltered and `findTaxAt`
+ *   resolves *historical* instants off it, so retiring the incumbent would
+ *   re-price every past document that names it. It is also what keeps a
+ *   consumer holding a pinned uid working — manager pins `RENTAL_TAX_UID` as a
+ *   constant and `getDefaultTaxesForType` returns `[]` on a miss, so a
+ *   deactivated incumbent creates every new rental line **untaxed, silently**.
+ *   The line still prices correctly because the order writers re-resolve by
+ *   name at `asOf` (`resolveTaxRefsAt`); that resolution is the reason this
+ *   endpoint is safe to ship before manager stops pinning uids.
+ *
+ * `valid_from` is one field doing two jobs — the successor's start AND the
+ * incumbent's `valid_to` — because they are the same instant by definition.
+ * Two fields would be two chances to disagree.
+ */
+export interface SupersedeTaxInputType {
+  /** The incumbent being closed. The successor is minted with a fresh id. */
+  uid: string;
+  /** OCC on the INCUMBENT — the successor does not exist yet. */
+  version: number;
+  /** The successor's start, and the instant the incumbent's window closes. */
+  valid_from: string;
+  /** The successor's rate. */
+  rate: number;
+  /** Defaults to the incumbent's. */
+  type?: RateType;
+  /** The successor's own end. Open-ended unless a third version is planned. */
+  valid_to?: string | null;
+}
+
+/** Zod schema for SupersedeTaxInput. */
+export const SupersedeTaxInput: z.ZodType<SupersedeTaxInputType> = z.object({
+  uid: FirestoreId,
+  version: z.int().min(0),
+  valid_from: chicagoInstant(),
+  rate: z.number(),
+  type: RateTypeEnum.optional(),
+  valid_to: chicagoInstant().nullable().optional(),
+});
