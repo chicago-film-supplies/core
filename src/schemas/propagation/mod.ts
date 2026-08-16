@@ -32,6 +32,7 @@ export {
   bulkCheckoutOrderTransaction,
   bulkReturnOrderTransaction,
   bulkFulfillmentBookingsTransaction,
+  finalizeOrderTransaction,
   processOrderDocsRules,
   processOrderDocsTransaction,
 } from "./orders.ts";
@@ -264,6 +265,7 @@ import {
   bulkCheckoutOrderTransaction,
   bulkReturnOrderTransaction,
   bulkFulfillmentBookingsTransaction,
+  finalizeOrderTransaction,
   processOrderDocsRules,
   processOrderDocsTransaction,
 } from "./orders.ts";
@@ -351,6 +353,7 @@ export const transactions: TransactionDefinition[] = [
   bulkCheckoutOrderTransaction,
   bulkReturnOrderTransaction,
   bulkFulfillmentBookingsTransaction,
+  finalizeOrderTransaction,
   processOrderDocsTransaction,
   createOutOfServiceTransaction,
   updateOutOfServiceTransaction,

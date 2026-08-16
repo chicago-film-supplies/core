@@ -780,6 +780,33 @@ export const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
   ],
 };
 
+// ── finalize-order ─────────────────────────────────────────────────
+//
+// The idempotent recompute that runs after a batch of booking writes: it
+// re-derives the order's roll-up + status, mirrors the fulfillment view, and
+// recomputes per-destination card status from the committed bookings. Callers
+// that fold its rules into their OWN record pass `emitPropagationLog: false`
+// (`bulk-*` do); the standalone caller is `POST /tasks/finalize-order`, the
+// retry ladder that runs when the in-request finalize never got there.
+//
+// ⚠️ **It is declared because it is LOGGED, and it was logged undeclared.**
+// `logTransactionPropagation` resolves an unknown id to `rules_expected: 0`
+// (`tx?.steps.length ?? 0`), so the drift warn it exists to raise could never
+// fire on this path — and the api's static guard could not see it, because the
+// id reaches the logger through a variable (`options.transactionName ??
+// "finalize-order"`) rather than as a literal. api-cloudrun#503.
+
+export const finalizeOrderTransaction: TransactionDefinition = {
+  id: "finalize-order",
+  description:
+    "Recompute an order from its committed bookings: roll-up + auto-complete status, the sanitized fulfillment mirror, and per-destination event card status. Idempotent — re-running against unchanged bookings writes nothing. Runs in-request after a bulk booking write and again from the finalize Cloud Task.",
+  steps: [
+    "update-booking:booking-to-order",
+    "update-order:order-to-fulfillment",
+    "update-booking:booking-to-cards",
+  ],
+};
+
 // ── process-order-docs ─────────────────────────────────────────────
 //
 // Async fanout: after `processOrderDocs` uploads a fresh packing-list PDF to
