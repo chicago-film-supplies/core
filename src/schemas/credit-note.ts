@@ -327,8 +327,22 @@ export interface CreditNote {
    * unreversed allocation minus any cash refunded.
    *
    * A stored projection of the settlements that name this note, exactly as the
-   * invoice's `amount_credited_cents` is — co-written in the same transaction,
-   * and rebuildable from the journal.
+   * invoice's `amount_credited_cents` is — co-written in the same transaction.
+   *
+   * ⚠️ **NOT rebuildable from the journal, and an earlier revision of this line
+   * said it was.** A cash refund consumes a note without touching any invoice,
+   * so it appends no settlement row — there is none to append, since a
+   * `Settlement` is keyed on `uid_invoice`. The status docblock above states the
+   * same thing from the other side (*"however it got there"*), and the two
+   * claims cannot both be true. Measured on prod 2026-08-16: CN-1013 ($485.06)
+   * and CN-1016 ($62.16) are `applied` with `remaining_credit_cents: 0` and
+   * **zero** rows naming them, and Xero agrees — `RemainingCredit: 0`,
+   * `Allocations: []`, one `Payments[]` entry each. A rebuild from the journal
+   * would hand both notes their full credit back and flip them out of
+   * `applied`, re-opening $547.22 of credit that has already been paid out in
+   * cash. Nothing rebuilds this field today — `allocateCreditNote` applies a
+   * delta and `createCreditNote` seeds it — and nothing should start.
+   * api-cloudrun#469.
    */
   remaining_credit_cents: number;
   sources: DocSourceType[];
