@@ -115,6 +115,7 @@ import {
   updateOutOfServiceTransaction,
   updateFulfillmentItemsRules,
   updateFulfillmentItemsTransaction,
+  uploadcareWorkListRules,
 } from "../src/schemas/propagation/mod.ts";
 import { schemas } from "../src/schemas/mod.ts";
 
@@ -180,6 +181,7 @@ Deno.test("rules array contains all individual rule sets", () => {
     ...createOutOfServiceRules,
     ...updateOutOfServiceRules,
     ...updateFulfillmentItemsRules,
+    ...uploadcareWorkListRules,
   ];
   assertEquals(rules.length, allRuleSets.length);
   for (const rule of allRuleSets) {

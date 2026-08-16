@@ -258,6 +258,10 @@ export {
   deleteCardScopeAllTransaction,
 } from "./recurrences.ts";
 
+// ── Uploadcare work-list rules ───────────────────────────────────────
+
+export { uploadcareWorkListRules } from "./uploadcare.ts";
+
 // ── Convenience arrays ───────────────────────────────────────────────
 
 import type { CollectionRule, TransactionDefinition } from "./types.ts";
@@ -356,6 +360,7 @@ import {
   deleteCardScopeFollowingTransaction,
   deleteCardScopeAllTransaction,
 } from "./recurrences.ts";
+import { uploadcareWorkListRules } from "./uploadcare.ts";
 
 export const transactions: TransactionDefinition[] = [
   createOrderTransaction,
@@ -474,4 +479,5 @@ export const rules: CollectionRule[] = [
   ...cardRules,
   ...templateRules,
   ...recurrenceRules,
+  ...uploadcareWorkListRules,
 ];
