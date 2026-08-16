@@ -220,3 +220,52 @@ export const createCommentTransaction: TransactionDefinition = {
     "create-comment:comment-to-thread",
   ],
 };
+
+// ── delete-comment transaction ──────────────────────────────────────
+
+/**
+ * The soft-delete half of the counter above, declared for api-cloudrun#503B.
+ *
+ * ⚠️ **The asymmetry is what made this invisible.** `create-comment` writes two
+ * collections, declares two rules and logs them; `delete-comment` writes the
+ * same two and declared nothing — so the increment was observable and the
+ * decrement was not, and a thread whose `comment_count` had drifted low left no
+ * record naming the write that did it. The two are one invariant read in
+ * opposite directions, which is why this is a rule of its own rather than a
+ * second `trigger` on `create-comment:comment-to-thread`: a rule's `source` and
+ * `target` describe an edge, and only its own `fields` can say the count went
+ * DOWN.
+ *
+ * **No `last_message_*` refresh, deliberately.** Deleting the newest comment
+ * leaves the thread's preview naming a comment that is now soft-deleted. That
+ * is pre-existing behaviour and is NOT declared here — declaring a field this
+ * transaction does not write would report drift on every run, the encoding
+ * `crms-ingest.ts` refuses for api-cloudrun#501. Recovering the preview needs a
+ * query for the newest live comment, which is a range read this transaction
+ * does not take.
+ */
+export const deleteCommentRules: CollectionRule[] = [
+  {
+    id: "delete-comment:comment-to-thread",
+    source: "comments",
+    target: "threads",
+    mode: "derive",
+    invariant:
+      "A soft-deleted comment is not counted: `thread.comment_count` is decremented so it keeps equalling the number of live comments the thread list would render",
+    transaction: "delete-comment",
+    trigger:
+      "first soft delete only — `deleteComment` returns early on an already-deleted comment, so a repeated DELETE cannot double-decrement",
+    fields: [
+      { source: [], target: ["comment_count"], transform: "FieldValue.increment(-1) — the undo of create-comment:comment-to-thread" },
+    ],
+  },
+];
+
+export const deleteCommentTransaction: TransactionDefinition = {
+  id: "delete-comment",
+  description:
+    "Soft-deletes a comment (stamping deleted_at/deleted_by rather than removing it) and decrements the parent thread's live-comment count.",
+  steps: [
+    "delete-comment:comment-to-thread",
+  ],
+};

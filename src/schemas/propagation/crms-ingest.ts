@@ -101,3 +101,88 @@ export const crmsInvoiceUpsertTransaction: TransactionDefinition = {
     "void-invoice-from-crms:append-void-settlement",
   ],
 };
+
+// ── crms-member-organization ────────────────────────────────────────
+
+/**
+ * The CRMS member (`membership_type: "Organisation"`) → CFS organization upsert
+ * (`services/webhooks/member.ts`). Declared for api-cloudrun#503B: it writes
+ * **five** collections — organizations, contacts, invoices, orders, threads —
+ * and emitted no propagation record at all, which made the widest cascade in
+ * the CRMS ingest surface the least observable one.
+ *
+ * Like its two siblings above it mints **no new rule ids**: every edge it
+ * drives is already described by `create-organization` / `update-organization`
+ * or by the shared thread cowrite. It is an UPSERT, so both arms are declared
+ * and `rules_fired` reports per run which of them actually moved.
+ *
+ * ## ⚠️ Two steps `update-organization` declares are ABSENT, and both are facts
+ *
+ * - **`update-org:tax-profile-to-orders`.** That rule's fields include
+ *   re-materializing every line's taxes; this path copies the org snapshot and
+ *   re-prices nothing. Declaring it would report drift on every run.
+ * - **`update-org:name-to-orders` / `billing-to-orders` ARE declared** — those
+ *   two are pure snapshot copies and `applyOrgToOrder` performs exactly them.
+ *
+ * ## ⚠️ And one edge this path drives has NO rule on either side
+ *
+ * `applyOrgToInvoice` writes `invoice.organization.tax_profile`, while the
+ * native `updateOrganization` deliberately refuses to (its comment: an invoice
+ * is a billing document whose taxes were agreed at issue). So the two writers
+ * disagree about whether that field may move on an issued invoice, and no rule
+ * describes the CRMS one — which means it cannot be declared here without
+ * inventing a vocabulary for behaviour that may itself be the defect. Left
+ * undeclared and filed rather than papered over.
+ */
+export const crmsMemberOrganizationTransaction: TransactionDefinition = {
+  id: "crms-member-organization",
+  description:
+    "Creates or updates a CFS organization from a CRMS member — geocoded billing address, emails/phones, tax profile derived from the CRMS sales-tax class, and the full child-contact set with bidirectional back-references maintained in both directions. Fans the org's name and billing address out to its live orders and invoices, and cowrites a default thread for the organization and for every contact it mints.",
+  steps: [
+    "create-org:org-to-contacts",
+    "update-org:contacts-change",
+    "update-org:name-to-contacts",
+    "update-org:name-to-orders",
+    "update-org:billing-to-orders",
+    "update-org:name-to-invoices",
+    "update-org:billing-to-invoices",
+    "cowrite-thread:organizations-to-thread",
+    "cowrite-thread:thread-to-organizations",
+    "cowrite-thread:contacts-to-thread",
+    "cowrite-thread:thread-to-contacts",
+  ],
+};
+
+// ── crms-member-contact ─────────────────────────────────────────────
+
+/**
+ * The CRMS member (`membership_type: "Contact"`) → CFS contact upsert, the
+ * sibling of the above. Three collections — contacts, organizations, threads.
+ *
+ * ## ⚠️ Three `update-contact` steps are ABSENT, and that is api-cloudrun#501's
+ *    shape in a second place
+ *
+ * `update-contact` declares `name-to-orders`, `phones-to-orders` and
+ * `name-to-user`. This path fires none of them: a contact renamed **through
+ * CRMS** does not reach the destination legs of its live orders, nor its linked
+ * user, while the same rename through `PUT /contacts/{uid}` does. Two of those
+ * three are measured vacuous corpus-wide anyway (every stored destination leg
+ * carries `contact: null`), but `update-contact:name-to-user` is not — a CRMS
+ * rename of a contact linked to a user leaves the user's name stale.
+ *
+ * Declared-but-never-fired would be a permanent drift warning rather than a
+ * finding, so the steps go in when the sync does — the same call
+ * `crms-opportunity-order` makes above for #501.
+ */
+export const crmsMemberContactTransaction: TransactionDefinition = {
+  id: "crms-member-contact",
+  description:
+    "Creates or updates a CFS contact from a CRMS member — split name, emails/phones, and membership of every parent organization CRMS names, with each org's contacts[] and query_by_contacts back-reference maintained on join and on leave. Cowrites a default thread on the create arm. An unresolvable parent org is a hard failure rather than a silent unlink.",
+  steps: [
+    "create-contact:contact-to-orgs",
+    "update-contact:name-to-orgs",
+    "update-contact:orgs-change",
+    "cowrite-thread:contacts-to-thread",
+    "cowrite-thread:thread-to-contacts",
+  ],
+};

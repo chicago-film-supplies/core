@@ -108,6 +108,8 @@ export {
 
 export {
   crmsInvoiceUpsertTransaction,
+  crmsMemberContactTransaction,
+  crmsMemberOrganizationTransaction,
   crmsOpportunityOrderTransaction,
 } from "./crms-ingest.ts";
 
@@ -157,6 +159,9 @@ export {
   updateLocationTypeRules,
   updateLocationRules,
   materializeHolidayDateRules,
+  createHolidayDefinitionTransaction,
+  updateHolidayDefinitionTransaction,
+  deleteHolidayDefinitionTransaction,
   rematerializeHolidaySnapshotRules,
   recomputeHolidayDraftOrderRules,
   recomputeHolidayDraftInvoiceRules,
@@ -203,6 +208,8 @@ export {
   createRoleTransaction,
   createCommentRules,
   createCommentTransaction,
+  deleteCommentRules,
+  deleteCommentTransaction,
 } from "./threads.ts";
 
 // ── Cards rules ──────────────────────────────────────────────────────
@@ -298,6 +305,8 @@ import {
 } from "./settlements.ts";
 import {
   crmsInvoiceUpsertTransaction,
+  crmsMemberContactTransaction,
+  crmsMemberOrganizationTransaction,
   crmsOpportunityOrderTransaction,
 } from "./crms-ingest.ts";
 import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
@@ -310,7 +319,7 @@ import {
   voidCreditNoteTransaction,
 } from "./credit-notes.ts";
 import { updateTaxRules } from "./taxes.ts";
-import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, materializeHolidayDateRules, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
+import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, materializeHolidayDateRules, createHolidayDefinitionTransaction, updateHolidayDefinitionTransaction, deleteHolidayDefinitionTransaction, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
 import { createStoreRules, updateStoreRules } from "./stores.ts";
 import {
   createStoreTransferRules,
@@ -320,6 +329,8 @@ import {
   threadCowriteRules,
   createCommentRules,
   createCommentTransaction,
+  deleteCommentRules,
+  deleteCommentTransaction,
   createRoleTransaction,
 } from "./threads.ts";
 import {
@@ -381,12 +392,18 @@ export const transactions: TransactionDefinition[] = [
   voidInvoiceFromXeroTransaction,
   crmsInvoiceUpsertTransaction,
   crmsOpportunityOrderTransaction,
+  crmsMemberOrganizationTransaction,
+  crmsMemberContactTransaction,
   createCreditNoteTransaction,
   allocateCreditNoteTransaction,
   voidCreditNoteTransaction,
   updateFulfillmentItemsTransaction,
   createRoleTransaction,
   createCommentTransaction,
+  deleteCommentTransaction,
+  createHolidayDefinitionTransaction,
+  updateHolidayDefinitionTransaction,
+  deleteHolidayDefinitionTransaction,
   createCardTransaction,
   deleteCardTransaction,
   createTemplateTransaction,
@@ -453,6 +470,7 @@ export const rules: CollectionRule[] = [
   ...recomputeHolidayDraftInvoiceRules,
   ...threadCowriteRules,
   ...createCommentRules,
+  ...deleteCommentRules,
   ...cardRules,
   ...templateRules,
   ...recurrenceRules,

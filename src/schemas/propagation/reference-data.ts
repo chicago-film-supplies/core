@@ -8,7 +8,7 @@
  *   api-cloudrun/src/services/trackingCategories.ts
  *   api-cloudrun/src/services/locationTypes.ts
  */
-import type { CollectionRule, EnforcementRef } from "./types.ts";
+import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
 
 // ── What checks the rules below that are not already linked ──────────
 
@@ -304,6 +304,56 @@ export const materializeHolidayDateRules: CollectionRule[] = [
     ],
   },
 ];
+
+// ── The three holiday-definition writers ────────────────────────────
+
+/**
+ * `create` / `update` / `delete` of a holiday definition, declared for
+ * api-cloudrun#503B. Each writes **two** collections — the definition and its
+ * `holiday-dates` instances — inside one transaction, and each emitted no
+ * propagation record at all.
+ *
+ * All three declare the **same single step**, and that is the point rather than
+ * a shortcut: {@link materializeHolidayDateRules} describes one edge, and what
+ * separates the three transactions is which *direction* they push it. A create
+ * materializes the forward window; an update replaces the future half of it in
+ * place; a soft delete empties it. The definition write itself is the source
+ * document, not a propagation, so it is not a step.
+ *
+ * ⚠️ **`regenerate-holiday-dates` and `extend-holiday-horizon` are NOT declared
+ * here, and the discriminator is the collection count, not the verb.** Both
+ * write `holiday-dates` alone — they read the definition and never write it —
+ * so each is a single-rule cascade that logs itself through
+ * `logPropagation("holiday-definition:materialize-dates")` and expects no
+ * transaction record. Adding a `TransactionDefinition` for either would declare
+ * an atomic multi-collection operation that does not exist.
+ *
+ * ⚠️ **What none of these can carry is the recompute.** The draft-order and
+ * draft-invoice recomputes below are enqueued POST-commit as a coalesced Cloud
+ * Task, so they are not steps of any of these transactions — a step is
+ * something the transaction's own commit either did or did not do. That is why
+ * `holiday-change:recompute-draft-orders` has no `transaction` field.
+ */
+export const createHolidayDefinitionTransaction: TransactionDefinition = {
+  id: "create-holiday-definition",
+  description:
+    "Creates a holiday definition (fixed date or variable nth-weekday rule) and materializes its instances across the rolling forward window in the same commit, so a definition can never exist without the dates it implies. The snapshot rematerialize and the draft recompute follow post-commit.",
+  steps: ["holiday-definition:materialize-dates"],
+};
+
+export const updateHolidayDefinitionTransaction: TransactionDefinition = {
+  id: "update-holiday-definition",
+  description:
+    "Version-checked in-place edit of a holiday rule. Full-replaces the definition document (so a fixed↔variable switch drops the stale variant fields) and regenerates only FUTURE instances — past ones are what historical orders were priced against and stay untouched.",
+  steps: ["holiday-definition:materialize-dates"],
+};
+
+export const deleteHolidayDefinitionTransaction: TransactionDefinition = {
+  id: "delete-holiday-definition",
+  description:
+    "Soft-deletes a holiday definition — marks it inactive rather than removing it, keeping the record for historical fidelity — and deletes only its FUTURE instances, so past holidays stay materialized.",
+  steps: ["holiday-definition:materialize-dates"],
+};
 
 export const recomputeHolidayDraftOrderRules: CollectionRule[] = [
   {
