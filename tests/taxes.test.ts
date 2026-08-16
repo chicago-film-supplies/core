@@ -10,6 +10,8 @@ import {
   overrideItemTaxesForProfile,
   resolveEffectiveProfile,
   TAX_PROFILE_OVERRIDE_NAME,
+  assertCoaTaxMapCoversCore,
+  defaultTaxNameForLine,
 } from "../src/utils/taxes.ts";
 import { TaxProfileEnum } from "../src/schemas/mod.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
@@ -702,4 +704,57 @@ Deno.test("materializeOrderTax: the as-of instant comes from the DELIVERY date, 
     NOW,
   );
   assertEquals(px(later[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
+});
+
+// ── defaultTaxNameForLine — the COA-first default rule (manager#297) ─────────
+//
+// These pin the two directions the 2026-08-16 corpus measurement found, because
+// they behave DIFFERENTLY downstream and only one of them is self-correcting.
+
+Deno.test("defaultTaxNameForLine: coa_revenue decides, and beats the type map", () => {
+  // Direction 1 — the COA says taxed where a type-keyed map says untaxed.
+  // 36 prod `service` lines sit at coa 4000 carrying Chicago Rental Tax.
+  // ⚠️ NOT self-correcting downstream: `isTaxableCoa(4000)` passes, so
+  // `materializeDocumentTax` prices whatever refs the line carries — none — and
+  // the line is silently untaxed. This is the money half.
+  assertEquals(defaultTaxNameForLine(4000, "service"), "Chicago Rental Tax");
+  assertEquals(defaultTaxNameForLine(4200, "service"), "Chicago Sales Tax");
+  assertEquals(defaultTaxNameForLine(4210, "service"), "Chicago Sales Tax");
+  assertEquals(defaultTaxNameForLine(4200, "surcharge"), "Chicago Sales Tax");
+
+  // Direction 2 — the COA says untaxed where a type-keyed map says taxed.
+  // 105 prod `sale` lines sit at coa 4700, all carrying no tax; this is the
+  // LARGER population and the one the issue had not looked at. Harmless in
+  // practice because `materializeDocumentTax` clears `price.taxes` outright
+  // when `isTaxableCoa` is false — but a client that seeds one shows the
+  // operator a tax the save then removes.
+  assertEquals(defaultTaxNameForLine(4700, "sale"), null);
+  assertEquals(defaultTaxNameForLine(4800, "rental"), null);
+  assertEquals(defaultTaxNameForLine(2210, "sale"), null);
+
+  // Taxable in principle, no tax in practice — a real answer, not a miss.
+  assertEquals(defaultTaxNameForLine(4140, "rental"), null);
+});
+
+Deno.test("defaultTaxNameForLine: type is the fallback ONLY when there is no account", () => {
+  // A custom line carries no `coa_revenue` at all — `buildCustomOrderLine`
+  // constructs no such field — so `type` is the only key it has. 99 prod lines.
+  // This is why the type map survives rather than being deleted.
+  assertEquals(defaultTaxNameForLine(null, "rental"), "Chicago Rental Tax");
+  assertEquals(defaultTaxNameForLine(undefined, "sale"), "Chicago Sales Tax");
+  assertEquals(defaultTaxNameForLine(undefined, "replacement"), "Chicago Sales Tax");
+
+  // Untaxed by design under the fallback, not a miss.
+  assertEquals(defaultTaxNameForLine(undefined, "service"), null);
+  assertEquals(defaultTaxNameForLine(null, "surcharge"), null);
+
+  // ⚠️ The fallback must NOT fire when an account is present — that would
+  // restore the exact divergence this function replaces.
+  assertEquals(defaultTaxNameForLine(4700, "rental"), null);
+});
+
+Deno.test("assertCoaTaxMapCoversCore: the name map covers every taxable COA", () => {
+  // Fails CLOSED. A taxable COA with no entry would be silently left untaxed,
+  // which is a money defect that looks like a clean run.
+  assertCoaTaxMapCoversCore();
 });

@@ -22914,6 +22914,59 @@ implementation.
 
 Depends one-way on `./orders.ts` (base pricing module) — no cycle.
 
+### `TAXABLE_COA_TO_TAX_NAME`
+
+**Which tax a newly authored line carries, keyed on `coa_revenue`** — the
+DEFAULT, as against `TAXABLE_REVENUE_COAS` above, which is the PERMISSIVE
+rule. The two answer different questions: *may* a line here carry tax, and
+*what does a new line here get*.
+
+Measured over the whole prod corpus, restricted to `tax_applied` invoices,
+every taxed line agrees:
+
+| coa | tax carried | lines | exceptions |
+|---|---|---|---|
+| 4000 | Chicago Rental Tax | 6,289 | 0 |
+| 4200 | Chicago Sales Tax  |   518 | 0 |
+| 4210 | Chicago Sales Tax  |   218 | 0 |
+
+⚠️ **`type` explicitly does NOT decide it, and that is measured in BOTH
+directions** (re-measured over orders *and* invoices, 2026-08-16 — see
+manager#297):
+
+- a taxable COA carries its tax on types the type-keyed map calls untaxed —
+  coa 4000 on **36** `service` lines, 4200 on **24**, 4210 on **4**;
+- and a NON-taxable COA stays untaxed on types the type-keyed map would tax —
+  **105** `sale` lines at coa 4700, all carrying no tax.
+
+That second direction is the larger population and the one nobody had looked
+at. It is also the harmless one: `materializeDocumentTax` clears
+`price.taxes` outright when `isTaxableCoa` is false, so a client that seeds a
+tax there is corrected on save. **The first direction is NOT corrected** —
+the gate passes and the materializer then prices whatever refs the line
+carries, which is none. A client keyed on `type` alone therefore drops tax
+silently on exactly the pairings this table exists to describe.
+
+The **rate** is not here: it comes from the date-bracketed catalog via
+{@link findTaxAt} at the document's own date.
+
+⚠️ **A line with NO `coa_revenue` is not covered by this table** — custom
+lines (`buildCustomOrderLine` / `buildCustomInvoiceLine`) construct no such
+field, so a type-keyed fallback is still required and is not a redundant
+second encoding. Prod carries **99** such lines. That is the whole reason
+this is a default table rather than the only key.
+
+⚠️ **This lives in core because it has TWO consumers.** It was
+`api-cloudrun/src/lib/taxByCoa.ts`, unreachable from the manager, which is
+why the manager grew a type-keyed twin answering the same question. Moving it
+rather than copying it is the point — an earlier revision of its docblock
+records a *third* encoding (`chart-of-accounts.default_tax_profile`) that was
+deleted for having one writer and zero readers.
+
+```ts
+const TAXABLE_COA_TO_TAX_NAME: Readonly<Record<number, string | null>>;
+```
+
 ### `TAXABLE_REVENUE_COAS`
 
 The revenue COAs that sales/rental tax is actually owed on — 4000 Rental
@@ -22995,6 +23048,14 @@ interface TaxSourcingDestination {
 }
 ```
 
+### `assertCoaTaxMapCoversCore(): void`
+
+Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.
+
+A taxable COA with no entry there would be silently left **untaxed**, which is
+a money defect that looks like a clean run. Throws rather than exits so a
+script, a test and a client can all call it.
+
 ### `computeItemTaxAmountCents(tax: Pick<Tax, "rate" | "type">, subtotalDiscountedCents: number, quantity: number): number`
 
 Pure per-item tax amount for one tax against a given subtotal.
@@ -23020,6 +23081,19 @@ A negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat
 discount exceed its line rather than clamping — so the rounding is half *away
 from zero* and the tax carries the subtotal's sign, exactly as the currency.js
 form did.
+
+### `defaultTaxNameForLine(coaRevenue: number | null | undefined, type: string): string | null`
+
+**The one default-tax rule**: the tax NAME a newly authored line should
+carry, given its account and its type.
+
+`coa_revenue` decides wherever the line has one — that is the measured key
+(see {@link TAXABLE_COA_TO_TAX_NAME}). `type` is the fallback for a line that
+carries no account at all, which is every custom line.
+
+Returns `null` for "untaxed", which is a real answer rather than a miss: a
+non-taxable COA, a taxable COA with no tax in practice (4140), and the
+`service` / `surcharge` types under the fallback are all deliberately untaxed.
 
 ### `deriveOrderTaxAsOf(destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined, now: string): string`
 

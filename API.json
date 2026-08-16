@@ -11657,6 +11657,12 @@
       "symbols": [
         {
           "kind": "variable",
+          "name": "TAXABLE_COA_TO_TAX_NAME",
+          "declaration": "const TAXABLE_COA_TO_TAX_NAME: Readonly<Record<number, string | null>>;",
+          "doc": "**Which tax a newly authored line carries, keyed on `coa_revenue`** — the\nDEFAULT, as against `TAXABLE_REVENUE_COAS` above, which is the PERMISSIVE\nrule. The two answer different questions: *may* a line here carry tax, and\n*what does a new line here get*.\n\nMeasured over the whole prod corpus, restricted to `tax_applied` invoices,\nevery taxed line agrees:\n\n| coa | tax carried | lines | exceptions |\n|---|---|---|---|\n| 4000 | Chicago Rental Tax | 6,289 | 0 |\n| 4200 | Chicago Sales Tax  |   518 | 0 |\n| 4210 | Chicago Sales Tax  |   218 | 0 |\n\n⚠️ **`type` explicitly does NOT decide it, and that is measured in BOTH\ndirections** (re-measured over orders *and* invoices, 2026-08-16 — see\nmanager#297):\n\n- a taxable COA carries its tax on types the type-keyed map calls untaxed —\n  coa 4000 on **36** `service` lines, 4200 on **24**, 4210 on **4**;\n- and a NON-taxable COA stays untaxed on types the type-keyed map would tax —\n  **105** `sale` lines at coa 4700, all carrying no tax.\n\nThat second direction is the larger population and the one nobody had looked\nat. It is also the harmless one: `materializeDocumentTax` clears\n`price.taxes` outright when `isTaxableCoa` is false, so a client that seeds a\ntax there is corrected on save. **The first direction is NOT corrected** —\nthe gate passes and the materializer then prices whatever refs the line\ncarries, which is none. A client keyed on `type` alone therefore drops tax\nsilently on exactly the pairings this table exists to describe.\n\nThe **rate** is not here: it comes from the date-bracketed catalog via\n{@link findTaxAt} at the document's own date.\n\n⚠️ **A line with NO `coa_revenue` is not covered by this table** — custom\nlines (`buildCustomOrderLine` / `buildCustomInvoiceLine`) construct no such\nfield, so a type-keyed fallback is still required and is not a redundant\nsecond encoding. Prod carries **99** such lines. That is the whole reason\nthis is a default table rather than the only key.\n\n⚠️ **This lives in core because it has TWO consumers.** It was\n`api-cloudrun/src/lib/taxByCoa.ts`, unreachable from the manager, which is\nwhy the manager grew a type-keyed twin answering the same question. Moving it\nrather than copying it is the point — an earlier revision of its docblock\nrecords a *third* encoding (`chart-of-accounts.default_tax_profile`) that was\ndeleted for having one writer and zero readers."
+        },
+        {
+          "kind": "variable",
           "name": "TAXABLE_REVENUE_COAS",
           "declaration": "const TAXABLE_REVENUE_COAS: readonly number[];",
           "doc": "The revenue COAs that sales/rental tax is actually owed on — 4000 Rental\nIncome, 4140 Pass Through Income, 4200 Retail Sales Income, 4210 Replacement\nSales Income.\n\n**This is the single source of truth for line taxability**, and it has to be,\nbecause it previously existed only on the *Xero push* side and nowhere in the\nengine computing CFS's own totals. So CFS taxed lines it then told Xero were\nuntaxable (`TaxType: \"NONE\"`), inflating `total` and leaving the difference as\na phantom `amount_due`. Measured on prod 2026-07-30: **19 invoices /\n$2,741.78**, plus 9 orders / $453.50.\n\nEverything outside the set is a service or fee — Service Income, Delivery\nSurcharges, Transaction Fee, Other Income — and sales tax is not owed on it.\nXero was right and the engine was wrong, so there is no historical\nunder-collection: the customer was always billed the untaxed amount and CFS\nmerely displayed a balance that was never real.\n\n**4140 Pass Through Income was added 2026-08-02, and the direction matters.**\nEvery other member of this set was here because Xero disagreed with the engine\nand Xero was right. 4140 is the one case where the two agreed with each other\nand the constant was the outlier: prod invoice #1897 carries its SSD Card line\nat `AccountCode: 4140` in CFS *and* in Xero, taxed `TAX003` (Chicago Rental,\n11%) for $510.40 in both, paid in full. Excluding 4140 meant the next reprice\nof that invoice would have deleted tax that was charged, collected and\nremitted. Operator decision: pass-through income is taxable.\n\n`api-cloudrun/src/lib/xeroTax.ts` consumes this same constant so the push and\nthe totals cannot drift apart again."
@@ -11681,9 +11687,25 @@
         },
         {
           "kind": "function",
+          "name": "assertCoaTaxMapCoversCore",
+          "signature": "assertCoaTaxMapCoversCore(): void",
+          "doc": "Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.\n\nA taxable COA with no entry there would be silently left **untaxed**, which is\na money defect that looks like a clean run. Throws rather than exits so a\nscript, a test and a client can all call it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "computeItemTaxAmountCents",
           "signature": "computeItemTaxAmountCents(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscountedCents: number, quantity: number): number",
           "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.\n\nExact: both factors are applied as `× n ÷ d` over integer cents and rounded\nhalf-up exactly once (core#47). The form this replaced was\n`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float\nratio, and **the one percent-of-money path that never migrated to integer\ncents**: inside a single `calculateItemPrice` call the discount on a line was\nalready exact BigInt while the tax on that same line was not. It was measured\nbenign across CFS's six live rates, which is precisely why it survived; the\nsweep in `tests/orders.test.ts` is what makes a future rate or magnitude\nunable to change that silently.\n\nA negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat\ndiscount exceed its line rather than clamping — so the rounding is half *away\nfrom zero* and the tax carries the subtotal's sign, exactly as the currency.js\nform did.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "defaultTaxNameForLine",
+          "signature": "defaultTaxNameForLine(coaRevenue: number | null | undefined, type: string): string | null",
+          "doc": "**The one default-tax rule**: the tax NAME a newly authored line should\ncarry, given its account and its type.\n\n`coa_revenue` decides wherever the line has one — that is the measured key\n(see {@link TAXABLE_COA_TO_TAX_NAME}). `type` is the fallback for a line that\ncarries no account at all, which is every custom line.\n\nReturns `null` for \"untaxed\", which is a real answer rather than a miss: a\nnon-taxable COA, a taxable COA with no tax in practice (4140), and the\n`service` / `surcharge` types under the fallback are all deliberately untaxed.",
           "paramTags": [],
           "returnsTag": null
         },

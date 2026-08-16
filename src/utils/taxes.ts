@@ -34,6 +34,117 @@ export { computeItemTaxAmountCents, type Tax };
 export { isTaxableCoa, TAXABLE_REVENUE_COAS };
 
 /**
+ * **Which tax a newly authored line carries, keyed on `coa_revenue`** — the
+ * DEFAULT, as against `TAXABLE_REVENUE_COAS` above, which is the PERMISSIVE
+ * rule. The two answer different questions: *may* a line here carry tax, and
+ * *what does a new line here get*.
+ *
+ * Measured over the whole prod corpus, restricted to `tax_applied` invoices,
+ * every taxed line agrees:
+ *
+ * | coa | tax carried | lines | exceptions |
+ * |---|---|---|---|
+ * | 4000 | Chicago Rental Tax | 6,289 | 0 |
+ * | 4200 | Chicago Sales Tax  |   518 | 0 |
+ * | 4210 | Chicago Sales Tax  |   218 | 0 |
+ *
+ * ⚠️ **`type` explicitly does NOT decide it, and that is measured in BOTH
+ * directions** (re-measured over orders *and* invoices, 2026-08-16 — see
+ * manager#297):
+ *
+ * - a taxable COA carries its tax on types the type-keyed map calls untaxed —
+ *   coa 4000 on **36** `service` lines, 4200 on **24**, 4210 on **4**;
+ * - and a NON-taxable COA stays untaxed on types the type-keyed map would tax —
+ *   **105** `sale` lines at coa 4700, all carrying no tax.
+ *
+ * That second direction is the larger population and the one nobody had looked
+ * at. It is also the harmless one: `materializeDocumentTax` clears
+ * `price.taxes` outright when `isTaxableCoa` is false, so a client that seeds a
+ * tax there is corrected on save. **The first direction is NOT corrected** —
+ * the gate passes and the materializer then prices whatever refs the line
+ * carries, which is none. A client keyed on `type` alone therefore drops tax
+ * silently on exactly the pairings this table exists to describe.
+ *
+ * The **rate** is not here: it comes from the date-bracketed catalog via
+ * {@link findTaxAt} at the document's own date.
+ *
+ * ⚠️ **A line with NO `coa_revenue` is not covered by this table** — custom
+ * lines (`buildCustomOrderLine` / `buildCustomInvoiceLine`) construct no such
+ * field, so a type-keyed fallback is still required and is not a redundant
+ * second encoding. Prod carries **99** such lines. That is the whole reason
+ * this is a default table rather than the only key.
+ *
+ * ⚠️ **This lives in core because it has TWO consumers.** It was
+ * `api-cloudrun/src/lib/taxByCoa.ts`, unreachable from the manager, which is
+ * why the manager grew a type-keyed twin answering the same question. Moving it
+ * rather than copying it is the point — an earlier revision of its docblock
+ * records a *third* encoding (`chart-of-accounts.default_tax_profile`) that was
+ * deleted for having one writer and zero readers.
+ */
+export const TAXABLE_COA_TO_TAX_NAME: Readonly<Record<number, string | null>> = {
+  4000: "Chicago Rental Tax",
+  4140: null,
+  4200: "Chicago Sales Tax",
+  4210: "Chicago Sales Tax",
+};
+
+/**
+ * Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.
+ *
+ * A taxable COA with no entry there would be silently left **untaxed**, which is
+ * a money defect that looks like a clean run. Throws rather than exits so a
+ * script, a test and a client can all call it.
+ */
+export function assertCoaTaxMapCoversCore(): void {
+  const declared = Object.keys(TAXABLE_COA_TO_TAX_NAME).map(Number).sort();
+  const expected = [...TAXABLE_REVENUE_COAS].sort();
+  if (JSON.stringify(declared) !== JSON.stringify(expected)) {
+    throw new Error(
+      `TAXABLE_COA_TO_TAX_NAME [${declared}] no longer covers TAXABLE_REVENUE_COAS ` +
+        `[${expected}]. A taxable COA with no tax name would be silently left ` +
+        `untaxed — add the mapping (and re-measure the corpus) first.`,
+    );
+  }
+}
+
+/**
+ * **The one default-tax rule**: the tax NAME a newly authored line should
+ * carry, given its account and its type.
+ *
+ * `coa_revenue` decides wherever the line has one — that is the measured key
+ * (see {@link TAXABLE_COA_TO_TAX_NAME}). `type` is the fallback for a line that
+ * carries no account at all, which is every custom line.
+ *
+ * Returns `null` for "untaxed", which is a real answer rather than a miss: a
+ * non-taxable COA, a taxable COA with no tax in practice (4140), and the
+ * `service` / `surcharge` types under the fallback are all deliberately untaxed.
+ */
+export function defaultTaxNameForLine(
+  coaRevenue: number | null | undefined,
+  type: string,
+): string | null {
+  if (coaRevenue != null) {
+    return Object.hasOwn(TAXABLE_COA_TO_TAX_NAME, coaRevenue)
+      ? TAXABLE_COA_TO_TAX_NAME[coaRevenue]
+      : null;
+  }
+  return DEFAULT_TAX_NAME_BY_TYPE[type] ?? null;
+}
+
+/**
+ * The type-keyed fallback, for lines with no `coa_revenue`.
+ *
+ * ⚠️ **Not a second encoding of the table above** — it answers the case that
+ * table cannot: a custom line has no account. A type absent here is untaxed by
+ * design (`service`, `surcharge`), not a miss.
+ */
+const DEFAULT_TAX_NAME_BY_TYPE: Readonly<Record<string, string>> = {
+  rental: "Chicago Rental Tax",
+  sale: "Chicago Sales Tax",
+  replacement: "Chicago Sales Tax",
+};
+
+/**
  * Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched
  * by exact `name`. Returns null when nothing matches (e.g. `asOf` before any
  * historical doc). Throws on catalog drift (two same-name docs bracket the same
