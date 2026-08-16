@@ -79,12 +79,16 @@ export function isUploadcareCandidate(leaf: LeafPath): boolean {
  * Candidate leaves the lint should not flag. Keyed `<collection>::<leaf path>`.
  *
  * Two kinds live here. Most are leaves that simply are **not** CDN file ids
- * (`alt`, `filename`, `mime_type`). A few — the `uploadcare_files[].uuid` work
- * lists — genuinely **are** CDN ids and are exempted anyway, because annotating
- * them would enlist a transient producer work list into the hand-written
- * extractors, the `.select()` projections and the `EXPECTED_REF_PATHS` snapshot,
- * and so into the `refCounts` scan-anomaly canary. Their protection comes from
- * the value harvest, which does not consult this map at all.
+ * (`alt`, `filename`, `mime_type`). One — `uploadcare-worklist::uuid` —
+ * genuinely **is** a CDN id and is exempted anyway, because annotating it would
+ * enlist a transient producer work list into the hand-written extractors, the
+ * `.select()` projections and the `EXPECTED_REF_PATHS` snapshot, and so into the
+ * `refCounts` scan-anomaly canary.
+ *
+ * ⚠️ Its protection does NOT come from the value harvest, unlike every other
+ * entry here: `uploadcare-worklist` is excluded from that harvest on purpose
+ * (an entry names a file that is usually about to be deleted). What protects a
+ * work-listed file is the LIVE reference on its owning document.
  *
  * A stale entry here is an ergonomics bug, never a data-loss bug — the harvest
  * protects files regardless of what this map says. `uploadcareRef.test.ts`
@@ -108,18 +112,9 @@ export const UPLOADCARE_CANDIDATE_EXEMPTIONS: ReadonlyMap<string, string> = new 
     "recurrences::prototype.attachments[].mime_type",
     "same CardAttachment node as cards",
   ],
-  [
-    "invoices::uploadcare_files[].uuid",
-    "CDN id held as a producer work-list entry; protection comes from the value harvest, attribution deliberately excluded from the refCounts canary — decision 5",
-  ],
-  [
-    "quotes::uploadcare_files[].uuid",
-    "CDN id held as a producer work-list entry; protection comes from the value harvest, attribution deliberately excluded from the refCounts canary — decision 5",
-  ],
-  // The same decision, once the work list moves out of the two documents above
-  // and into its own collection (api-cloudrun#535). Delete the two entries
-  // above in the commit that removes those fields — assertion 2 fails on an
-  // exemption whose candidate is gone.
+  // The work list lives in its own collection now (api-cloudrun#535); the two
+  // `uploadcare_files[].uuid` entries that stood here died with the fields, and
+  // assertion 2 would have failed on an exemption whose candidate is gone.
   [
     "uploadcare-worklist::uuid",
     "the work list's own entry id; a record of an upload that is usually about to be deleted, not a stable reference — same reasoning as the two fields it replaces",

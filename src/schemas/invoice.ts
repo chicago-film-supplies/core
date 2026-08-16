@@ -518,26 +518,6 @@ export interface Invoice {
     created_by: ActorRefType;
     deleted_at: FirestoreTimestampType | null;
   }>;
-  /**
-   * CDN uploads this doc owns pending reconcile — the producer work list that
-   * makes a displaced draft render collectable in-band instead of by the weekly
-   * sweep.
-   *
-   * ABSENT on every doc written before this field existed and on any writer that
-   * doesn't construct it — always read as `(doc.uploadcare_files ?? [])`.
-   * `.default([])` does not materialize: `validateBeforeWrite` discards
-   * `result.data` and callers write the RAW doc.
-   *
-   * `version_source` is the writer's snapshot of `invoice.version` (for quotes,
-   * of `order.version`) — the staleness filter that decides which of N racing
-   * renders promotes to `uploadcare_uuid`. Deliberately not named `version`:
-   * `pdf_versions[].version` above already means a user-facing sequence number.
-   */
-  uploadcare_files?: Array<{
-    uuid: string;
-    version_source: number;
-    created_at: FirestoreTimestampType;
-  }>;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   crms_id?: number | null;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
@@ -587,16 +567,6 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     // invoice's, and it sits inside an array nothing tabulates.
     created_by: ActorRef,
     deleted_at: FirestoreTimestamp.nullable(),
-  })).optional(),
-  // `uuid` is a plain string, deliberately NOT `uploadcareRef()`: the sweep's
-  // value harvest already protects it (full-document read, recursing arrays), so
-  // tagging would only enlist a transient work list into the hand-written
-  // extractors and the `refCounts` scan-anomaly canary. Exempted by name in
-  // `uploadcare/dictionary.ts`.
-  uploadcare_files: z.array(z.strictObject({
-    uuid: z.string(),
-    version_source: z.int().min(0),
-    created_at: FirestoreTimestamp,
   })).optional(),
   crms_id: z.int().nullable().optional(),
   crms_opportunity_ids: z.array(z.int()).optional(),
