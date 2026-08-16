@@ -549,7 +549,7 @@
         {
           "kind": "interface",
           "name": "CollectionDocs",
-          "declaration": "interface CollectionDocs {\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  tax: Tax;\n  taxes: Tax;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
+          "declaration": "interface CollectionDocs {\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  tax: Tax;\n  taxes: Tax;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
           "doc": "The ONE place a collection name is bound to its document type.\n\n`schemas` below is annotated by a mapped type over this interface, so the two\ncannot drift: a key here with no entry there is an error at the object\nliteral, and an entry there with no key here is an excess property. That is\nthe compiler enforcing the parity — not a test that can go stale, and not the\n\"parity assertion between two hand-maintained lists\" the workspace rules warn\nabout. It fails at `deno task check`.\n\n⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's\nnpm declaration emit is SYNTACTIC — it writes declarations without running\ninference — so a type it has to COMPUTE from an initializer can publish\nwrongly to npm consumers while Deno consumers, this suite, `deno task check`\nand `deno publish --dry-run` all agree with the source. That is core#43: nine\n`as const` members emitted as one, and 57 phantom type errors on manager's\nnext pin bump. An interface and a written mapped-type annotation are text the\nemitter copies verbatim, so neither needs expanding.\n\n⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the\ninference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus\n`keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.\nPassing that check is NOT evidence the emit is right — core#44 closed as \"no\npost-publish declaration gate\", so nothing here can see a wrong published\ndeclaration. The explicit form is chosen because it needs no expansion at all,\nwhich is a reasoned preference rather than a measured one.\n\nSingular and plural both appear because the registry has always carried both.\n⚠️ The singular half may be vestigial — there are zero literal `schemas[\"order\"]`\n-style lookups across api-cloudrun, manager and templates, and every call site\nfound passes a plural or the literal `\"events\"`. Removing them would halve this\nfile's hand-written surface, but it is a breaking change to a published API and\nwants the dynamic callers' domain established first. Not folded in here."
         },
         {
@@ -3069,7 +3069,7 @@
         {
           "kind": "typeAlias",
           "name": "SchemaDocType",
-          "declaration": "type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;",
+          "declaration": "type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | UploadcareWorkListEntry | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;",
           "doc": "Union of all Firestore document types. Use with validateBeforeWrite.\n\n**`TemplateVersion` and `TemplateComponent` were the only two schema-backed\ndocument types missing from this union**, and their absence was the whole\nreason for 43 `as unknown as SchemaDocType` casts in `api-cloudrun`. The\nproof it was the union and not the pattern: `Template` IS a member and writes\nuncast, while its sibling `TemplateComponent` was not and writes cast — same\nthree-collection family, different treatment, no stated reason.\n\nWidening is safe by construction rather than by review: there is no\ndiscriminant to switch on (these types share no common `type` tag, so a\ndiscriminated union over `SchemaDocType` is not expressible), and a\nworkspace-wide grep finds no `Extract<SchemaDocType…>`, no\n`keyof SchemaDocType` and no exhaustive switch. Every one of the 126\nreferences lives in `api-cloudrun`; `manager` and `templates` have none.\n\nThe one thing it gives up is real and was never a guarantee: `tx.set(ref,\ntemplateVersionDoc)` used to be a compile error absent a cast. That caught\nnothing 51 of 53 doc types were not already free to do, and the runtime guard\nin `validateBeforeWrite` still rejects every doc/collection mismatch with a\n`collection/id` label."
         },
         {
@@ -3943,6 +3943,18 @@
           "doc": "Input type for updating a variable-date holiday (full rule replacement)."
         },
         {
+          "kind": "variable",
+          "name": "UploadcareOwnerCollectionEnum",
+          "declaration": "const UploadcareOwnerCollectionEnum: z.ZodType<UploadcareOwnerCollectionType>;",
+          "doc": "Zod schema for {@link UploadcareOwnerCollectionType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UploadcareOwnerCollectionType",
+          "declaration": "type UploadcareOwnerCollectionType = indexedAccess;",
+          "doc": "Which collection the owning document lives in."
+        },
+        {
           "kind": "interface",
           "name": "UploadcareSweepRun",
           "declaration": "interface UploadcareSweepRun {\n  ref_counts: Record<string, number>;\n  recorded_at: FirestoreTimestampType;\n}",
@@ -3953,6 +3965,30 @@
           "name": "UploadcareSweepRunSchema",
           "declaration": "const UploadcareSweepRunSchema: z.ZodType<UploadcareSweepRun>;",
           "doc": "Zod schema for UploadcareSweepRun."
+        },
+        {
+          "kind": "variable",
+          "name": "UploadcareUploadKindEnum",
+          "declaration": "const UploadcareUploadKindEnum: z.ZodType<UploadcareUploadKindType>;",
+          "doc": "Zod schema for {@link UploadcareUploadKindType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UploadcareUploadKindType",
+          "declaration": "type UploadcareUploadKindType = indexedAccess;",
+          "doc": "What produced the file."
+        },
+        {
+          "kind": "interface",
+          "name": "UploadcareWorkListEntry",
+          "declaration": "interface UploadcareWorkListEntry {\n  uuid: string;\n  uid_document: string;\n  collection: UploadcareOwnerCollectionType;\n  kind: UploadcareUploadKindType;\n  filename: string;\n  version_source: number | null;\n  created_at: FirestoreTimestampType;\n  expires_at: FirestoreTimestampType;\n}",
+          "doc": "One uploaded CDN file, recorded by the producer that uploaded it."
+        },
+        {
+          "kind": "variable",
+          "name": "UploadcareWorkListEntrySchema",
+          "declaration": "const UploadcareWorkListEntrySchema: z.ZodType<UploadcareWorkListEntry>;",
+          "doc": "Zod schema for {@link UploadcareWorkListEntry}.\n\nNo `env` field, deliberately. The collection is excluded from the prod → dev\nmirror, so every entry in a database was written by that database and the\nfield could only ever restate which project you are already talking to — a\ncopy that can drift, for a fact that cannot. The one thing it would buy is\nletting dev skip `isDevOwnedFile`'s metadata round trip before a delete, which\nis not worth a redundant column."
         },
         {
           "kind": "interface",
@@ -9417,6 +9453,48 @@
           "name": "UploadcareSweepRunSchema",
           "declaration": "const UploadcareSweepRunSchema: z.ZodType<UploadcareSweepRun>;",
           "doc": "Zod schema for UploadcareSweepRun."
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/uploadcare-worklist",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "UploadcareOwnerCollectionEnum",
+          "declaration": "const UploadcareOwnerCollectionEnum: z.ZodType<UploadcareOwnerCollectionType>;",
+          "doc": "Zod schema for {@link UploadcareOwnerCollectionType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UploadcareOwnerCollectionType",
+          "declaration": "type UploadcareOwnerCollectionType = indexedAccess;",
+          "doc": "Which collection the owning document lives in."
+        },
+        {
+          "kind": "variable",
+          "name": "UploadcareUploadKindEnum",
+          "declaration": "const UploadcareUploadKindEnum: z.ZodType<UploadcareUploadKindType>;",
+          "doc": "Zod schema for {@link UploadcareUploadKindType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UploadcareUploadKindType",
+          "declaration": "type UploadcareUploadKindType = indexedAccess;",
+          "doc": "What produced the file."
+        },
+        {
+          "kind": "interface",
+          "name": "UploadcareWorkListEntry",
+          "declaration": "interface UploadcareWorkListEntry {\n  uuid: string;\n  uid_document: string;\n  collection: UploadcareOwnerCollectionType;\n  kind: UploadcareUploadKindType;\n  filename: string;\n  version_source: number | null;\n  created_at: FirestoreTimestampType;\n  expires_at: FirestoreTimestampType;\n}",
+          "doc": "One uploaded CDN file, recorded by the producer that uploaded it."
+        },
+        {
+          "kind": "variable",
+          "name": "UploadcareWorkListEntrySchema",
+          "declaration": "const UploadcareWorkListEntrySchema: z.ZodType<UploadcareWorkListEntry>;",
+          "doc": "Zod schema for {@link UploadcareWorkListEntry}.\n\nNo `env` field, deliberately. The collection is excluded from the prod → dev\nmirror, so every entry in a database was written by that database and the\nfield could only ever restate which project you are already talking to — a\ncopy that can drift, for a fact that cannot. The one thing it would buy is\nletting dev skip `isDevOwnedFile`'s metadata round trip before a delete, which\nis not worth a redundant column."
         }
       ]
     },

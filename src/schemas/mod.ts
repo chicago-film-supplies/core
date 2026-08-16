@@ -738,6 +738,15 @@ export {
 } from "./uploadcare-sweep.ts";
 
 export {
+  UploadcareOwnerCollectionEnum,
+  type UploadcareOwnerCollectionType,
+  UploadcareUploadKindEnum,
+  type UploadcareUploadKindType,
+  type UploadcareWorkListEntry,
+  UploadcareWorkListEntrySchema,
+} from "./uploadcare-worklist.ts";
+
+export {
   WebhookEventSchema,
   type WebhookEvent,
 } from "./webhook-event.ts";
@@ -1038,6 +1047,7 @@ import type { TrackingCategory } from "./tracking-category.ts";
 import type { Movement } from "./transaction.ts";
 import type { TypesenseConfig } from "./typesense-config.ts";
 import type { UploadcareSweepRun } from "./uploadcare-sweep.ts";
+import type { UploadcareWorkListEntry } from "./uploadcare-worklist.ts";
 import type { User } from "./user.ts";
 import type { Destination } from "./destination.ts";
 import type { WebhookEvent } from "./webhook-event.ts";
@@ -1083,7 +1093,7 @@ export type SchemaDocType =
   | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session
   | Stock | StockLock | Tax | Template
   | TemplateComponent | TemplateVersion
-  | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User
+  | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | UploadcareWorkListEntry | User
   | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState
   | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 
@@ -1135,6 +1145,7 @@ import { MovementSchema } from "./transaction.ts";
 import { UserSchema } from "./user.ts";
 import { TypesenseConfigSchema } from "./typesense-config.ts";
 import { UploadcareSweepRunSchema } from "./uploadcare-sweep.ts";
+import { UploadcareWorkListEntrySchema } from "./uploadcare-worklist.ts";
 import { WebhookEventSchema as WebhookEventSchema_ } from "./webhook-event.ts";
 import { WebshopProductSchema } from "./webshop-product.ts";
 import { XeroBudgetSchema as XeroBudgetSchema_ } from "./xero-budget.ts";
@@ -1270,6 +1281,7 @@ export interface CollectionDocs {
   "typesense-config": TypesenseConfig;
   typesense: TypesenseConfig;
   "uploadcare-sweep": UploadcareSweepRun;
+  "uploadcare-worklist": UploadcareWorkListEntry;
   "xero-budget": XeroBudget;
   "xero-sync": XeroSyncState;
   documents: OrderDocument;
@@ -1350,6 +1362,9 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "webshop-product": WebshopProductSchema, "webshop-products": WebshopProductSchema,
   "typesense-config": TypesenseConfigSchema, "typesense": TypesenseConfigSchema,
   "uploadcare-sweep": UploadcareSweepRunSchema,
+  // One key rather than the usual singular/plural pair: "worklist" already
+  // reads as both, the way `stock` does.
+  "uploadcare-worklist": UploadcareWorkListEntrySchema,
   // Singleton `xero-budget/current` — the persisted daily-quota snapshot the
   // Xero gate reads pre-flight. Deliberately NOT a `config/…` doc: `config` is
   // in api-cloudrun's UNVALIDATED_COLLECTIONS, which would exempt it from

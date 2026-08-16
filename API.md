@@ -1223,6 +1223,7 @@ interface CollectionDocs {
   typesense-config: TypesenseConfig;
   typesense: TypesenseConfig;
   uploadcare-sweep: UploadcareSweepRun;
+  uploadcare-worklist: UploadcareWorkListEntry;
   xero-budget: XeroBudget;
   xero-sync: XeroSyncState;
   documents: OrderDocument;
@@ -6407,7 +6408,7 @@ in `validateBeforeWrite` still rejects every doc/collection mismatch with a
 `collection/id` label.
 
 ```ts
-type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+type SchemaDocType = Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session | Stock | StockLock | Tax | Template | TemplateComponent | TemplateVersion | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | UploadcareWorkListEntry | User | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
 ```
 
 ### `SchemaField`
@@ -8215,6 +8216,22 @@ interface UpdateVariableHolidayInputType {
 }
 ```
 
+### `UploadcareOwnerCollectionEnum`
+
+Zod schema for {@link UploadcareOwnerCollectionType}.
+
+```ts
+const UploadcareOwnerCollectionEnum: z.ZodType<UploadcareOwnerCollectionType>;
+```
+
+### `UploadcareOwnerCollectionType`
+
+Which collection the owning document lives in.
+
+```ts
+type UploadcareOwnerCollectionType = indexedAccess;
+```
+
 ### `UploadcareSweepRun`
 
 One recorded sweep run.
@@ -8232,6 +8249,54 @@ Zod schema for UploadcareSweepRun.
 
 ```ts
 const UploadcareSweepRunSchema: z.ZodType<UploadcareSweepRun>;
+```
+
+### `UploadcareUploadKindEnum`
+
+Zod schema for {@link UploadcareUploadKindType}.
+
+```ts
+const UploadcareUploadKindEnum: z.ZodType<UploadcareUploadKindType>;
+```
+
+### `UploadcareUploadKindType`
+
+What produced the file.
+
+```ts
+type UploadcareUploadKindType = indexedAccess;
+```
+
+### `UploadcareWorkListEntry`
+
+One uploaded CDN file, recorded by the producer that uploaded it.
+
+```ts
+interface UploadcareWorkListEntry {
+  uuid: string;
+  uid_document: string;
+  collection: UploadcareOwnerCollectionType;
+  kind: UploadcareUploadKindType;
+  filename: string;
+  version_source: number | null;
+  created_at: FirestoreTimestampType;
+  expires_at: FirestoreTimestampType;
+}
+```
+
+### `UploadcareWorkListEntrySchema`
+
+Zod schema for {@link UploadcareWorkListEntry}.
+
+No `env` field, deliberately. The collection is excluded from the prod → dev
+mirror, so every entry in a database was written by that database and the
+field could only ever restate which project you are already talking to — a
+copy that can drift, for a fact that cannot. The one thing it would buy is
+letting dev skip `isDevOwnedFile`'s metadata round trip before a delete, which
+is not worth a redundant column.
+
+```ts
+const UploadcareWorkListEntrySchema: z.ZodType<UploadcareWorkListEntry>;
 ```
 
 ### `User`
@@ -19055,6 +19120,72 @@ Zod schema for UploadcareSweepRun.
 
 ```ts
 const UploadcareSweepRunSchema: z.ZodType<UploadcareSweepRun>;
+```
+
+## `@cfs/core/schemas/uploadcare-worklist`
+
+### `UploadcareOwnerCollectionEnum`
+
+Zod schema for {@link UploadcareOwnerCollectionType}.
+
+```ts
+const UploadcareOwnerCollectionEnum: z.ZodType<UploadcareOwnerCollectionType>;
+```
+
+### `UploadcareOwnerCollectionType`
+
+Which collection the owning document lives in.
+
+```ts
+type UploadcareOwnerCollectionType = indexedAccess;
+```
+
+### `UploadcareUploadKindEnum`
+
+Zod schema for {@link UploadcareUploadKindType}.
+
+```ts
+const UploadcareUploadKindEnum: z.ZodType<UploadcareUploadKindType>;
+```
+
+### `UploadcareUploadKindType`
+
+What produced the file.
+
+```ts
+type UploadcareUploadKindType = indexedAccess;
+```
+
+### `UploadcareWorkListEntry`
+
+One uploaded CDN file, recorded by the producer that uploaded it.
+
+```ts
+interface UploadcareWorkListEntry {
+  uuid: string;
+  uid_document: string;
+  collection: UploadcareOwnerCollectionType;
+  kind: UploadcareUploadKindType;
+  filename: string;
+  version_source: number | null;
+  created_at: FirestoreTimestampType;
+  expires_at: FirestoreTimestampType;
+}
+```
+
+### `UploadcareWorkListEntrySchema`
+
+Zod schema for {@link UploadcareWorkListEntry}.
+
+No `env` field, deliberately. The collection is excluded from the prod → dev
+mirror, so every entry in a database was written by that database and the
+field could only ever restate which project you are already talking to — a
+copy that can drift, for a fact that cannot. The one thing it would buy is
+letting dev skip `isDevOwnedFile`'s metadata round trip before a delete, which
+is not worth a redundant column.
+
+```ts
+const UploadcareWorkListEntrySchema: z.ZodType<UploadcareWorkListEntry>;
 ```
 
 ## `@cfs/core/schemas/role`

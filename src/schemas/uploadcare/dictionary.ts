@@ -116,4 +116,12 @@ export const UPLOADCARE_CANDIDATE_EXEMPTIONS: ReadonlyMap<string, string> = new 
     "quotes::uploadcare_files[].uuid",
     "CDN id held as a producer work-list entry; protection comes from the value harvest, attribution deliberately excluded from the refCounts canary — decision 5",
   ],
+  // The same decision, once the work list moves out of the two documents above
+  // and into its own collection (api-cloudrun#535). Delete the two entries
+  // above in the commit that removes those fields — assertion 2 fails on an
+  // exemption whose candidate is gone.
+  [
+    "uploadcare-worklist::uuid",
+    "the work list's own entry id; a record of an upload that is usually about to be deleted, not a stable reference — same reasoning as the two fields it replaces",
+  ],
 ]);

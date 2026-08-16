@@ -50,6 +50,7 @@
     "./schemas/pii/hash-node": "./src/schemas/pii/hash-node.ts",
     "./schemas/uploadcare": "./src/schemas/uploadcare/mod.ts",
     "./schemas/uploadcare-sweep": "./src/schemas/uploadcare-sweep.ts",
+    "./schemas/uploadcare-worklist": "./src/schemas/uploadcare-worklist.ts",
     "./schemas/role": "./src/schemas/role.ts",
     "./schemas/permissions": "./src/schemas/permissions.ts",
     "./schemas/thread": "./src/schemas/thread.ts",
