@@ -845,7 +845,9 @@ export type {
   FieldPath,
   PropagationMode,
   PropagationModule,
+  RuleId,
   TransactionDefinition,
+  TransactionId,
 } from "./propagation/mod.ts";
 
 // ⚠️ The propagation graph reaches consumers through THREE values, and that is

@@ -21,14 +21,37 @@ import type {
   PropagationModule,
   TransactionDefinition,
 } from "./types.ts";
+import type { TransactionId } from "./ids.ts";
 
 // ── Cowrite helper ──────────────────────────────────────────────────
 
+/**
+ * The eight source entities that get a default thread cowritten here.
+ *
+ * ⚠️ **Enumerated, not `string`, and that is what makes the factory safe.** The
+ * two ids it mints are template literals over this union, so TypeScript expands
+ * them to the sixteen concrete ids and checks each against `RuleId` — add a
+ * ninth entity without declaring its two ids in `ids.ts` and the factory stops
+ * compiling. With `collection: string` the composed id widened to `string` and
+ * nothing downstream could see it. `cards` is deliberately absent: its two
+ * cowrite rules are declared literally in `cards.ts`, because a rule id is owned
+ * by the file that declares it.
+ */
+type ThreadSourceCollection =
+  | "orders"
+  | "invoices"
+  | "contacts"
+  | "organizations"
+  | "products"
+  | "out-of-service"
+  | "credit-notes"
+  | "roles";
+
 interface ThreadCowriteConfig {
   /** Plural Firestore collection name of the source doc. */
-  collection: string;
+  collection: ThreadSourceCollection;
   /** Transaction id in which the cowrite fires. */
-  transaction: string;
+  transaction: TransactionId;
 }
 
 /**

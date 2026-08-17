@@ -103,14 +103,28 @@ const LEDGER_NON_NEGATIVE: EnforcementRef = {
   gates: true,
 };
 
+/**
+ * The two transactions that share the edges below.
+ *
+ * ⚠️ **Enumerated, not `string`.** Both factories mint their rule id as a
+ * template literal over this union, so TypeScript expands it to the four
+ * concrete ids and checks each against `RuleId` — a third caller without its two
+ * ids declared in `ids.ts` stops compiling. `create-store-transfer` is
+ * deliberately absent: it declares its own two edges in `store-transfers.ts`,
+ * because a rule id is owned by the file that declares it.
+ */
+type MovementTransactionId = "create-transaction" | "reverse-transaction";
+
 /** The ledger edge, shared by the forward and the reversing transaction. */
 function ledgerRule(
-  transactionId: string,
+  transactionId: MovementTransactionId,
   invariant: string,
   enforced_by: EnforcementRef[],
 ): CollectionRule {
   return {
-    id: transactionId + ":transaction-to-ledger",
+    // A template literal, not `+` — concatenation widens to `string` and the id
+    // stops being checked against `RuleId`.
+    id: `${transactionId}:transaction-to-ledger`,
     source: "transactions",
     target: "inventory-ledgers",
     mode: "co-write",
@@ -172,12 +186,12 @@ function ledgerRule(
 
 /** The locations edge, shared by the forward and the reversing transaction. */
 function locationsRule(
-  transactionId: string,
+  transactionId: MovementTransactionId,
   invariant: string,
   enforced_by: EnforcementRef[],
 ): CollectionRule {
   return {
-    id: transactionId + ":transaction-to-locations",
+    id: `${transactionId}:transaction-to-locations`,
     source: "transactions",
     target: "locations",
     mode: "co-write",

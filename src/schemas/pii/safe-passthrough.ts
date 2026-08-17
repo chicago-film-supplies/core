@@ -34,7 +34,7 @@ export const SAFE_PASSTHROUGH: ReadonlySet<string> = new Set([
   "duration_ms",
   "write_count",
   "estimated_json_bytes",
-  "fields_mapped",
+  "fields_declared",
   "rules_fired_count",
   "rules_expected",
   "target_count",

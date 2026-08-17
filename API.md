@@ -1249,13 +1249,13 @@ One edge in the propagation graph — describes data flow between two collection
 
 ```ts
 interface CollectionRule {
-  id: string;
+  id: RuleId;
   source: string;
   target: string;
   mode: PropagationMode;
   invariant?: string;
   enforced_by?: EnforcementRef[];
-  transaction?: string;
+  transaction?: TransactionId;
   trigger?: string;
   fields: FieldMapping[];
 }
@@ -5808,19 +5808,36 @@ interface ProductWebshop {
 
 ### `PropagationLogRecord`
 
-Structured log entry for a single propagation rule execution.
+Structured log entry for a propagation event.
+
+⚠️ **Two record shapes share this arm, and the five rule-derived fields are
+what tell them apart.** A RULE record (`rule_id`, `source`, `target`, `mode`,
+`fields_declared`) describes one edge; a TRANSACTION record describes a
+transaction that legitimately propagated nothing and therefore has no rule to
+derive them from.
+
+Those five used to be REQUIRED, which made *"this path ran and correctly
+cascaded nothing"* unrepresentable — and the three spellings that grew around
+the hole are the evidence it mattered. `logTransactionPropagation`
+short-circuited an empty `rules_fired` into a bare `log.warn`, so
+`createTransaction`/`reverseTransaction`/`createStoreTransfer` reported an
+idempotent replay as **drift** (*"No propagation rules fired but transaction
+expects 2"*); `syncXeroPayments` suppressed the record entirely and the replay
+became invisible; and `updateFulfillmentItems` gave up and emitted under a
+different archetype. `status: "skipped"` was in the enum the whole time and
+no transaction could reach it.
 
 ```ts
 interface PropagationLogRecord {
   level: LogLevelType;
   msg: "propagation";
   ts: string;
-  rule_id: string;
-  source: string;
-  target: string;
-  mode: PropagationModeType;
+  rule_id?: string;
+  source?: string;
+  target?: string;
+  mode?: PropagationModeType;
   transaction?: string;
-  fields_mapped: number;
+  fields_declared?: number;
   source_doc_id?: string;
   target_doc_id?: string;
   status: PropagationStatusType;
@@ -6363,6 +6380,20 @@ HTTP methods accepted by the runtime route manifest.
 
 ```ts
 type RouteMethod = "get" | "post" | "put" | "delete" | "patch";
+```
+
+### `RuleId`
+
+Every `CollectionRule.id` in the catalog.
+
+A rule id is NOT always prefixed with the transaction that fires it — 19 rules
+are standalone single-rule cascades with no transaction at all
+(`update-tax:*`, `holiday-*`, `generate-*-pdf:*`), and several prefixes are
+deliberately shorter than the transaction name (`create-org:*` under
+`create-organization`). Read the prefix as a namespace, never as a join key.
+
+```ts
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:order-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:order-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "process-order-docs:doc-to-cards" | "create-out-of-service-record:sources-to-record" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "update-org:name-to-contacts" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:billing-to-invoices" | "update-org:tax-profile-to-orders" | "update-org:contacts-change" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-crms:reap-settlements" | "void-invoice-from-crms:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-tax:to-products" | "update-tax:to-webshop-products" | "update-tax:to-orders" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
 ```
 
 ### `SETTLED_STATUSES`
@@ -7510,10 +7541,22 @@ Groups CollectionRules into a named atomic operation.
 
 ```ts
 interface TransactionDefinition {
-  id: string;
+  id: TransactionId;
   description: string;
-  steps: string[];
+  steps: RuleId[];
 }
+```
+
+### `TransactionId`
+
+Every `TransactionDefinition.id` in the catalog.
+
+⚠️ Disjoint from {@link RuleId} — verified, and asserted in
+`tests/propagation.test.ts`. The two namespaces are told apart by their type
+now, not by the shape of the call that consumes them.
+
+```ts
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-organization" | "update-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
 ```
 
 ### `TransactionLogRecord`
@@ -17762,19 +17805,36 @@ type PiiClassification = "none" | "mask" | "hash" | "redact";
 
 ### `PropagationLogRecord`
 
-Structured log entry for a single propagation rule execution.
+Structured log entry for a propagation event.
+
+⚠️ **Two record shapes share this arm, and the five rule-derived fields are
+what tell them apart.** A RULE record (`rule_id`, `source`, `target`, `mode`,
+`fields_declared`) describes one edge; a TRANSACTION record describes a
+transaction that legitimately propagated nothing and therefore has no rule to
+derive them from.
+
+Those five used to be REQUIRED, which made *"this path ran and correctly
+cascaded nothing"* unrepresentable — and the three spellings that grew around
+the hole are the evidence it mattered. `logTransactionPropagation`
+short-circuited an empty `rules_fired` into a bare `log.warn`, so
+`createTransaction`/`reverseTransaction`/`createStoreTransfer` reported an
+idempotent replay as **drift** (*"No propagation rules fired but transaction
+expects 2"*); `syncXeroPayments` suppressed the record entirely and the replay
+became invisible; and `updateFulfillmentItems` gave up and emitted under a
+different archetype. `status: "skipped"` was in the enum the whole time and
+no transaction could reach it.
 
 ```ts
 interface PropagationLogRecord {
   level: LogLevelType;
   msg: "propagation";
   ts: string;
-  rule_id: string;
-  source: string;
-  target: string;
-  mode: PropagationModeType;
+  rule_id?: string;
+  source?: string;
+  target?: string;
+  mode?: PropagationModeType;
   transaction?: string;
-  fields_mapped: number;
+  fields_declared?: number;
   source_doc_id?: string;
   target_doc_id?: string;
   status: PropagationStatusType;

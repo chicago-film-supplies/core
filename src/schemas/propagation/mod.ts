@@ -64,6 +64,13 @@ export type {
   TransactionDefinition,
 } from "./types.ts";
 
+/**
+ * The two id namespaces. Consumers write these ids far more often than they
+ * construct a rule — `rules_fired`, `logPropagation`, `getPropagationMarkdown` —
+ * so they are part of the public surface, not an implementation detail.
+ */
+export type { RuleId, TransactionId } from "./ids.ts";
+
 // ── Aggregates ───────────────────────────────────────────────────────
 
 export { aggregates } from "./aggregates.ts";

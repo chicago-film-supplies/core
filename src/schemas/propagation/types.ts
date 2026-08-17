@@ -6,6 +6,8 @@
  * The doc generator walks rules built from these types to produce Mermaid diagrams.
  */
 
+import type { RuleId, TransactionId } from "./ids.ts";
+
 // ── Propagation modes ───────────────────────────────────────────────
 
 /** How a field value moves from one document to another. */
@@ -80,8 +82,15 @@ export interface EnforcementRef {
 
 /** One edge in the propagation graph — describes data flow between two collections. */
 export interface CollectionRule {
-  /** Stable identifier (e.g. "products-to-webshop-fan-out") */
-  id: string;
+  /**
+   * Stable identifier (e.g. "create-order:org-to-order").
+   *
+   * Typed, so a rule declared under an id `ids.ts` does not carry is a compile
+   * error rather than something a regex over `src/` might notice. Adding a rule
+   * means adding its id there too — see that file for why the union cannot be
+   * derived from this array.
+   */
+  id: RuleId;
   /** Source collection */
   source: string;
   /** Target collection (can equal source for intra-document derive) */
@@ -103,7 +112,7 @@ export interface CollectionRule {
    */
   enforced_by?: EnforcementRef[];
   /** TransactionDefinition ID — groups co-writes and embeds into atomic operations */
-  transaction?: string;
+  transaction?: TransactionId;
   /** What triggers this rule (for fan-out), e.g. "onUpdate:products" */
   trigger?: string;
   /** Field-level mappings — what data actually moves */
@@ -115,11 +124,20 @@ export interface CollectionRule {
 /** Groups CollectionRules into a named atomic operation. */
 export interface TransactionDefinition {
   /** Stable identifier (e.g. "create-order") */
-  id: string;
+  id: TransactionId;
   /** What this transaction does */
   description: string;
-  /** Ordered CollectionRule IDs — the sequence of operations */
-  steps: string[];
+  /**
+   * Ordered CollectionRule IDs — the sequence of operations.
+   *
+   * Typed at {@link RuleId}, so a step naming an id no rule declares is a
+   * compile error. ⚠️ That is weaker than *"this transaction declares this
+   * rule"* — a step naming a real rule belonging to a different transaction
+   * still compiles, and catching THAT needs the per-transaction step unions
+   * (campaign §6 step 3). The runtime arm in `tests/propagation.test.ts` is what
+   * covers the gap between this file's union and the catalog.
+   */
+  steps: RuleId[];
 }
 
 // ── Module ──────────────────────────────────────────────────────────

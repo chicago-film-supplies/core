@@ -18,17 +18,48 @@ export type PropagationStatusType = (typeof PROPAGATION_STATUSES)[number];
 /** Propagation strategy used by a rule. */
 export type PropagationModeType = (typeof PROPAGATION_MODES)[number];
 
-/** Structured log entry for a single propagation rule execution. */
+/**
+ * Structured log entry for a propagation event.
+ *
+ * ⚠️ **Two record shapes share this arm, and the five rule-derived fields are
+ * what tell them apart.** A RULE record (`rule_id`, `source`, `target`, `mode`,
+ * `fields_declared`) describes one edge; a TRANSACTION record describes a
+ * transaction that legitimately propagated nothing and therefore has no rule to
+ * derive them from.
+ *
+ * Those five used to be REQUIRED, which made *"this path ran and correctly
+ * cascaded nothing"* unrepresentable — and the three spellings that grew around
+ * the hole are the evidence it mattered. `logTransactionPropagation`
+ * short-circuited an empty `rules_fired` into a bare `log.warn`, so
+ * `createTransaction`/`reverseTransaction`/`createStoreTransfer` reported an
+ * idempotent replay as **drift** (*"No propagation rules fired but transaction
+ * expects 2"*); `syncXeroPayments` suppressed the record entirely and the replay
+ * became invisible; and `updateFulfillmentItems` gave up and emitted under a
+ * different archetype. `status: "skipped"` was in the enum the whole time and
+ * no transaction could reach it.
+ */
 export interface PropagationLogRecord {
   level: LogLevelType;
   msg: "propagation";
   ts: string;
-  rule_id: string;
-  source: string;
-  target: string;
-  mode: PropagationModeType;
+  /** Absent on a transaction record that fired no rules. */
+  rule_id?: string;
+  /** Absent on a transaction record that fired no rules. */
+  source?: string;
+  /** Absent on a transaction record that fired no rules. */
+  target?: string;
+  /** Absent on a transaction record that fired no rules. */
+  mode?: PropagationModeType;
   transaction?: string;
-  fields_mapped: number;
+  /**
+   * How many field mappings the fired rule DECLARES.
+   *
+   * ⚠️ Renamed from `fields_mapped`, which read as a measurement and was a
+   * declaration echo: its one producer is `rule.fields.length`, so it is a
+   * constant per rule id and identical on every record forever. It can never
+   * disagree with anything. Absent on a transaction record that fired no rules.
+   */
+  fields_declared?: number;
   source_doc_id?: string;
   target_doc_id?: string;
   status: PropagationStatusType;
@@ -53,12 +84,12 @@ export interface PropagationLogRecord {
 export const PropagationLogRecordSchema: z.ZodType<PropagationLogRecord> = z.object({
   ...baseLogFields,
   msg: z.literal("propagation"),
-  rule_id: z.string(),
-  source: z.string(),
-  target: z.string(),
-  mode: z.enum(PROPAGATION_MODES),
+  rule_id: z.string().optional(),
+  source: z.string().optional(),
+  target: z.string().optional(),
+  mode: z.enum(PROPAGATION_MODES).optional(),
   transaction: z.string().optional(),
-  fields_mapped: z.number(),
+  fields_declared: z.number().optional(),
   source_doc_id: z.string().optional(),
   target_doc_id: z.string().optional(),
   status: z.enum(PROPAGATION_STATUSES),
