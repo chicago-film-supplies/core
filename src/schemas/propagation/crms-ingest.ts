@@ -52,7 +52,7 @@
  * per run which of them moved, exactly as the `cowrite-thread:*` create-arm
  * steps already do.
  */
-import { stockSteps } from "./stock.ts";
+import { STOCK_STEPS } from "./stock.ts";
 import type {
   PropagationModule,
   TransactionDefinition,
@@ -77,7 +77,7 @@ const crmsOpportunityOrderTransaction: TransactionDefinition = {
     "update-order:order-self-derive",
     "update-order:order-to-bookings",
     "update-order:ledger-to-bookings",
-    ...stockSteps("update-order"),
+    ...STOCK_STEPS,
     "update-order:order-to-cards",
     "update-order:order-to-fulfillment",
     // api-cloudrun#501. Conditional, like the two create-arm thread cowrites

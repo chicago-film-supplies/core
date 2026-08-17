@@ -50,6 +50,7 @@ import { templates } from "./templates.ts";
 import { recurrences } from "./recurrences.ts";
 import { uploadcare } from "./uploadcare.ts";
 import { crmsIngest } from "./crms-ingest.ts";
+import { stock } from "./stock.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -72,11 +73,10 @@ export { aggregates } from "./aggregates.ts";
 /**
  * Every propagation source file, in declaration order.
  *
- * ⚠️ `stock.ts` is deliberately absent: it declares no rules of its own. It
- * mints them into the modules that fire them, via `stockRules()`. That is the
- * one file in this directory not yet on the one-module-per-file convention,
- * and collapsing it is Tier 1 item 3 of the campaign — see
- * `api-cloudrun/.claude/plans/propagation-rules-and-formal-models.md`.
+ * `stock.ts` declares the four stock edges once and exports `STOCK_STEPS`, the
+ * shared step tuple its seven firing transactions reference. It is the only
+ * file that exports anything besides its module, and that is deliberate — see
+ * its own docstring.
  */
 const MODULES: readonly PropagationModule[] = [
   orders,
@@ -101,6 +101,7 @@ const MODULES: readonly PropagationModule[] = [
   recurrences,
   uploadcare,
   crmsIngest,
+  stock,
 ];
 
 /** Every transaction across every module. */

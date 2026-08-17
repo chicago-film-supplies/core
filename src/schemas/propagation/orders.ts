@@ -9,7 +9,7 @@ import type {
   PropagationModule,
   TransactionDefinition,
 } from "./types.ts";
-import { stockRules, stockSteps } from "./stock.ts";
+import { STOCK_STEPS } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -348,7 +348,6 @@ const createOrderRules: CollectionRule[] = [
       { source: ["store_breakdown"], target: ["shortage"], transform: "remaining quantity that couldn't be allocated" },
     ],
   },
-  ...stockRules("create-order", "Creating an order's bookings"),
   {
     id: "create-order:order-to-cards",
     source: "orders",
@@ -401,14 +400,14 @@ const createOrderRules: CollectionRule[] = [
 
 const createOrderTransaction: TransactionDefinition = {
   id: "create-order",
-  description: "Creates an order with bookings, the `stock/{P}` projection, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view).",
+  description: "Creates an order with bookings, the `stock/{P}` projection, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view). Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an order's bookings.",
   steps: [
     "create-order:org-to-order",
     "create-order:products-to-order-items",
     "create-order:order-self-derive",
     "create-order:order-to-bookings",
     "create-order:ledger-to-bookings",
-    ...stockSteps("create-order"),
+    ...STOCK_STEPS,
     "create-order:order-to-cards",
     "create-order:order-to-fulfillment",
     "cowrite-thread:orders-to-thread",
@@ -490,10 +489,6 @@ const updateOrderRules: CollectionRule[] = [
       { source: ["store_breakdown"], target: ["shortage"] },
     ],
   },
-  ...stockRules(
-    "update-order",
-    "Adding, changing or removing an order's bookings (a removed booking is simply absent from the rebuilt array)",
-  ),
   {
     id: "update-order:order-to-cards",
     source: "orders",
@@ -544,13 +539,13 @@ const updateOrderRules: CollectionRule[] = [
 
 const updateOrderTransaction: TransactionDefinition = {
   id: "update-order",
-  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, rebuild the `stock/{P}` projection, rebuild event cards, and refresh the fulfillment view.",
+  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, rebuild the `stock/{P}` projection, rebuild event cards, and refresh the fulfillment view. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Adding, changing or removing an order's bookings — a removed booking is simply absent from the rebuilt array.",
   steps: [
     "update-order:org-to-order",
     "update-order:order-self-derive",
     "update-order:order-to-bookings",
     "update-order:ledger-to-bookings",
-    ...stockSteps("update-order"),
+    ...STOCK_STEPS,
     "update-order:order-to-cards",
     "update-order:order-to-fulfillment",
     "update-order:items-to-invoices",
@@ -599,7 +594,6 @@ const updateBookingRules: CollectionRule[] = [
       { source: [], target: ["version"], transform: "version + 1 (optimistic concurrency)" },
     ],
   },
-  ...stockRules("update-booking", "Every booking breakdown change"),
   {
     id: "update-booking:booking-to-out-of-service",
     source: "bookings",
@@ -700,10 +694,10 @@ const updateBookingRules: CollectionRule[] = [
 
 const updateBookingTransaction: TransactionDefinition = {
   id: "update-booking",
-  description: "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates `stock/{P}` projections FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of `stock/{P}` projections and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings.",
+  description: "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates `stock/{P}` projections FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of `stock/{P}` projections and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Every booking breakdown change.",
   steps: [
     "update-booking:booking-to-self",
-    ...stockSteps("update-booking"),
+    ...STOCK_STEPS,
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-transactions",
     "update-booking:transactions-to-ledger",
@@ -712,7 +706,6 @@ const updateBookingTransaction: TransactionDefinition = {
     "update-booking:booking-to-cards",
     // OOS cowrites pull these in when a new OOS record is created:
     "create-out-of-service-record:sources-to-record",
-    ...stockSteps("create-out-of-service-record"),
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],
@@ -731,7 +724,7 @@ const bulkCheckoutOrderTransaction: TransactionDefinition = {
   description: "Flip every booking on an order from reserved/prepped to active and move quantities into breakdown.out in one Firestore transaction. Reuses update-booking rules per row, including the per-destination card status recompute.",
   steps: [
     "update-booking:booking-to-self",
-    ...stockSteps("update-booking"),
+    ...STOCK_STEPS,
     "update-booking:booking-to-transactions",
     "update-booking:transactions-to-ledger",
     "update-booking:transactions-to-locations",
@@ -745,7 +738,7 @@ const bulkReturnOrderTransaction: TransactionDefinition = {
   description: "Apply per-booking returned/lost/damaged deltas across the order in one Firestore transaction. Reuses update-booking rules per row, including OOS cowrite for any lost/damaged deltas and the per-destination card status recompute; final state may auto-complete the order.",
   steps: [
     "update-booking:booking-to-self",
-    ...stockSteps("update-booking"),
+    ...STOCK_STEPS,
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-transactions",
     "update-booking:transactions-to-ledger",
@@ -753,7 +746,6 @@ const bulkReturnOrderTransaction: TransactionDefinition = {
     "update-booking:booking-to-order",
     "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
-    ...stockSteps("create-out-of-service-record"),
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],
@@ -771,7 +763,7 @@ const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
   description: "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock rebuilds per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
   steps: [
     "update-booking:booking-to-self",
-    ...stockSteps("update-booking"),
+    ...STOCK_STEPS,
     "update-booking:booking-to-out-of-service",
     "update-booking:booking-to-transactions",
     "update-booking:transactions-to-ledger",
@@ -779,7 +771,6 @@ const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
     "update-booking:booking-to-order",
     "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
-    ...stockSteps("create-out-of-service-record"),
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],

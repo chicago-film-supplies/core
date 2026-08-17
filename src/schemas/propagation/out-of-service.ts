@@ -23,7 +23,7 @@ import type {
   PropagationModule,
   TransactionDefinition,
 } from "./types.ts";
-import { stockRules, stockSteps } from "./stock.ts";
+import { STOCK_STEPS } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 
@@ -87,25 +87,20 @@ const createOutOfServiceRules: CollectionRule[] = [
       { source: [], target: ["stores"] },
     ],
   },
-  ...stockRules("create-out-of-service-record", "Creating an OOS record"),
 ];
 
 const createOutOfServiceTransaction: TransactionDefinition = {
   id: "create-out-of-service-record",
-  description: "Creates an out-of-service record, rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record.",
+  description: "Creates an out-of-service record, rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an OOS record.",
   steps: [
     "create-out-of-service-record:sources-to-record",
-    ...stockSteps("create-out-of-service-record"),
+    ...STOCK_STEPS,
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
   ],
 };
 
 const updateOutOfServiceRules: CollectionRule[] = [
-  ...stockRules(
-    "update-out-of-service-record",
-    "Any OOS quantity/date/status change (including a cancel, which drops the record from the array entirely)",
-  ),
   {
     id: "update-out-of-service-record:record-to-transactions",
     source: "out-of-service",
@@ -140,9 +135,9 @@ const updateOutOfServiceRules: CollectionRule[] = [
 
 const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
-  description: "Updates an out-of-service record. Quantity changes rebuild the product's `stock/{P}` projection. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown.",
+  description: "Updates an out-of-service record. Quantity changes rebuild the product's `stock/{P}` projection. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
   steps: [
-    ...stockSteps("update-out-of-service-record"),
+    ...STOCK_STEPS,
     "update-out-of-service-record:record-to-transactions",
     "update-out-of-service-record:transactions-to-ledger",
   ],

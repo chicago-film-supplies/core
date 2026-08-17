@@ -9,7 +9,6 @@ import type {
   PropagationModule,
   TransactionDefinition,
 } from "./types.ts";
-import { seedStockRules } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -248,10 +247,6 @@ const createProductRules: CollectionRule[] = [
       { source: ["stock_method"], target: ["stock_method"] },
     ],
   },
-  ...seedStockRules(
-    "create-product",
-    "A product that gets an inventory ledger gets a `stock/{P}` projection and a `stock-locks/{P}` token in the same transaction — all three are created and destroyed together. The projection starts empty (no bookings, no OOS) and carries the ledger's quantity_held.",
-  ),
   {
     id: "create-product:product-to-webshop",
     source: "products",
@@ -289,7 +284,7 @@ const createProductTransaction: TransactionDefinition = {
     "create-product:product-to-tracking-categories",
     "create-product:product-to-components",
     "create-product:product-to-ledger",
-    "create-product:ledger-to-stock",
+    "stock:seed-ledger-to-stock",
     "create-product:product-to-webshop",
     "cowrite-thread:products-to-thread",
     "cowrite-thread:thread-to-products",
@@ -470,7 +465,7 @@ const updateProductRules: CollectionRule[] = [
     source: "products",
     target: "inventory-ledgers",
     mode: "co-write",
-    invariant: "Changing stock_method to 'none' deletes the ledger AND the product's `stock/{P}` projection and its `stock-locks/{P}` token; changing away from 'none' creates all three. The projection and the token exist if and only if the ledger does — see seedStockRules. The old rule described only the ledger, while the code also deleted summaries (and leaked their public twins).",
+    invariant: "Changing stock_method to 'none' deletes the ledger AND the product's `stock/{P}` projection and its `stock-locks/{P}` token; changing away from 'none' creates all three. The projection and the token exist if and only if the ledger does — see `stock:seed-ledger-to-stock`. The old rule described only the ledger, while the code also deleted summaries (and leaked their public twins).",
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [

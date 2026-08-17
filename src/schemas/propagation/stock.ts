@@ -27,12 +27,12 @@
  * Traced from: api-cloudrun/src/lib/stockSummary.ts (`buildStockSummary` →
  * `assembleStockResult`).
  */
-import type { CollectionRule, EnforcementRef } from "./types.ts";
+import type { CollectionRule, EnforcementRef, PropagationModule } from "./types.ts";
 
 // ── What checks these three edges ───────────────────────────────────
 //
-// All three are minted per transaction, so their enforcement is minted here too
-// — one edit site, ~24 rules. Each pointer below was opened and read against
+// All three edges are declared ONCE and fired by seven transactions, so their
+// enforcement is declared once too — one edit site, four rules. Each pointer below was opened and read against
 // `audit-stock.ts` as it stands, NOT translated from the `audit-stock-summaries.ts`
 // refs it replaces: that audit checked a different document with a different
 // shape, and two of its invariants have no counterpart here.
@@ -103,75 +103,27 @@ const STOCK_BICONDITIONAL: EnforcementRef = {
   gates: true,
 };
 
-/** The three edge suffixes, in the order `assembleStockResult` performs them. */
-const EDGES = [
-  "ledger-to-stock",
-  "bookings-to-stock",
-  "oos-to-stock",
+/**
+ * The three shared stock edges, in the order `assembleStockResult` performs them.
+ *
+ * ⚠️ **These are STEP IDS other modules reference, and that is why this file has
+ * a second export.** The one-module-per-file convention (`types.ts`
+ * `PropagationModule`) is about what a file contributes to the *catalog*; a
+ * shared `as const` step tuple is the sanctioned companion, because the
+ * alternative is 39 string literals hand-copied across seven transactions in
+ * four files — the exact defect the convention exists to remove.
+ *
+ * A plain literal, deliberately: `[...X, "y"] as const` is the spread form that
+ * JSR's declaration emitter truncates (core#43), and this has no spread.
+ */
+export const STOCK_STEPS = [
+  "stock:ledger-to-stock",
+  "stock:bookings-to-stock",
+  "stock:oos-to-stock",
 ] as const;
 
 /**
- * The rule IDs this transaction fires when it rebuilds the stock projection —
- * the `steps` entries and the `rules_fired` array in the service must both use
- * these.
- */
-export function stockSteps(transactionId: string): string[] {
-  return EDGES.map((edge) => transactionId + ":" + edge);
-}
-
-/**
- * The seed/teardown pair, for transactions that create or destroy the projection
- * rather than rebuild it from bookings + OOS.
- *
- * **The invariant: `stock/{P}` and `stock-locks/{P}` exist if and only if an
- * inventory ledger exists.** Under the old window-keyed design a missing summary
- * was self-healing — an unauthenticated `GET /availability` would mint it on
- * read — so deleting one and not recreating it was invisible. There is no
- * mint-on-read any more, so a delete without a matching create is a *permanent*
- * hole: the manager's `onSnapshot` would sit on a doc that never appears.
- * A missing TOKEN is worse than a hole, since the product cannot be claimed at
- * all. `audit-stock.ts` enforces every leg in both directions.
- *
- * A brand-new product has no bookings and no OOS records by construction, so the
- * seed writes an empty `unavailable[]` with no queries — only the ledger embed
- * actually moves data.
- */
-export function seedStockRules(
-  transactionId: string,
-  invariant: string,
-): CollectionRule[] {
-  const [ledgerEdge] = EDGES;
-  return [
-    {
-      id: transactionId + ":" + ledgerEdge,
-      source: "inventory-ledgers",
-      target: "stock",
-      mode: "co-write",
-      invariant,
-      enforced_by: [STOCK_BICONDITIONAL, LEDGER_EMBED],
-      transaction: transactionId,
-      fields: [
-        { source: ["uid"], target: ["uid"], transform: "the projection's doc id IS the product uid" },
-        { source: ["uid"], target: ["uid_product"] },
-        { source: ["quantity_held"], target: ["quantity_held"] },
-        {
-          source: [],
-          target: ["unavailable"],
-          transform: "[] — a product with no bookings and no OOS records yet",
-        },
-        {
-          source: [],
-          target: ["claim_seq"],
-          transform:
-            "0 — matching the token `seedStockLock` writes alongside. It has never been claimed, so the projection is trivially current.",
-        },
-      ],
-    },
-  ];
-}
-
-/**
- * Where the rebuild actually runs — the `trigger` on all three edges.
+ * Where the rebuild actually runs — the `trigger` on all three shared edges.
  *
  * ⚠️ **INLINE, post-commit, in the same request** — not on the queue. This used
  * to read `cloud-task:/tasks/rebuild-stock-summary`, and that was true of the
@@ -184,7 +136,24 @@ export function seedStockRules(
 const REBUILD_TRIGGER = "inline:post-commit (retry ladder: cloud-task:/tasks/rebuild-stock-summary)";
 
 /**
- * The three stock rules for one transaction.
+ * The stock projection's edges — THREE rules fired by seven transactions, plus
+ * the seed.
+ *
+ * ⚠️ **These used to be minted PER TRANSACTION, and were 21 of the corpus's
+ * 173 rules.** `stockRules(transactionId, trigger)` produced seven
+ * near-identical copies of the same three edges: every `enforced_by` ref was a
+ * shared module const, `trigger` was a shared constant, and only the id prefix
+ * and one prose fragment varied. They were never 21 rules — they are three
+ * rules with seven firing contexts, and that relation was *already* modelled by
+ * `TransactionDefinition.steps[]`, which is where it now lives alone.
+ *
+ * **The varying prose moved to the transactions.** A string like *"Every
+ * booking breakdown change"* answers **when this fires**, not **what must be
+ * true** — it is a trigger wearing an invariant's clothes. Each transaction's
+ * `description` now carries its own gating condition, including the two that
+ * are load-bearing: a pure placement movement leaves `quantity_held` untouched
+ * and skips the rebuild, and cancelling an OOS record drops it from the array
+ * entirely.
  *
  * **These are `fan-out`, not co-writes (api-cloudrun#358).** The rebuild used to
  * run inside the originating Firestore transaction, where it issued `bookings
@@ -203,112 +172,130 @@ const REBUILD_TRIGGER = "inline:post-commit (retry ladder: cloud-task:/tasks/reb
  * inputs under a `stock-locks/{P}` precondition rather than reading this
  * document. So the atomicity traded bought display consistency, not an invariant.
  *
- * What that means for these declarations:
- *
- *  - `mode: "fan-out"` — "source changes propagate to targets via events", which
- *    is literally true. The old `embed`/`derive` said the value moved as part of
- *    the same write.
- *  - `trigger` names WHERE it runs — see {@link REBUILD_TRIGGER}; it is inline
- *    post-commit, and saying "cloud task" there was stale.
- *  - **`transaction` is dropped.** That field means "grouped into this atomic
- *    operation" and would be the one outright false claim left. The ids stay in
- *    the owning definition's `steps` (the operation genuinely still causes them,
- *    and `getPropagationMarkdown`/the diagram generator both resolve rules by
- *    step id, so the edges keep rendering) — but nothing asserts atomicity.
- *
- * {@link seedStockRules} is deliberately NOT changed: the create-product seed
- * still writes the projection inside its own transaction, and it can, because a
- * brand-new product has no bookings and no OOS records so the seed issues no
- * queries at all. It is the co-write it says it is.
- *
- * @param transactionId - the TransactionDefinition id that CAUSES the rebuild,
- *   e.g. "create-order". Kept in the rule ids, since that is what the api-cloudrun
- *   service logs and what `propagationCoverage` greps for.
- * @param trigger - what causes the rebuild, woven into the invariants
+ * ⚠️ **`transaction` is deliberately absent on the three shared edges.** That
+ * field means "grouped into this atomic operation", and with seven firing
+ * contexts it could only ever name one of them — it would be the single
+ * outright false claim in the file. The ids live in each owning definition's
+ * `steps`, and `getPropagationMarkdown` and the diagram generator both resolve
+ * rules by step id, so every edge still renders under every transaction.
  */
-export function stockRules(
-  transactionId: string,
-  trigger: string,
-): CollectionRule[] {
-  return [
-    {
-      id: transactionId + ":ledger-to-stock",
-      source: "inventory-ledgers",
-      target: "stock",
-      mode: "fan-out",
-      invariant:
-        "The projection embeds the ledger's current quantity_held. That is the only ledger field availability needs — store_breakdown is NOT copied (no client reads a per-store split; the manager reads inventory-ledgers directly for that), so a store transfer, which moves stock between stores without changing quantity_held, correctly leaves the projection untouched. `type` is not copied either: the ledger's existence already answers the only question a projection needed it for.",
-      enforced_by: [LEDGER_EMBED, NO_STORE_BREAKDOWN],
-      trigger: REBUILD_TRIGGER,
-      fields: [
-        { source: ["quantity_held"], target: ["quantity_held"] },
-      ],
-    },
-    {
-      id: transactionId + ":bookings-to-stock",
-      source: "bookings",
-      target: "stock",
-      mode: "fan-out",
-      invariant:
-        trigger +
-        " re-derives the booking half of stock.unavailable[] — every live booking for the product, PRE-REDUCED to an anonymous {start, end, quantity, kind:\"booking\"} interval by `unavailableFromBooking` (@cfs/core/utils/stock). Stored as raw intervals, never as a per-window answer: quantity_booked for ANY window is Σ quantity over the entries overlapping it, so no window is privileged and none needs its own document. A sale booking carries end: null (a sold unit does not come back) and so keeps consuming stock in every later window until it completes. Entries are ANONYMOUS by design — a booking's doc id is orderUid:productUid:destUid, so a uid-keyed entry would let an anonymous reader join across products and read off who booked what.",
-      enforced_by: [FOLD, INTERVAL_MODEL],
-      trigger: REBUILD_TRIGGER,
-      fields: [
-        { source: ["dates", "start"], target: ["unavailable", "start"] },
-        { source: ["dates", "end"], target: ["unavailable", "end"] },
-        {
-          source: ["breakdown"],
-          target: ["unavailable", "quantity"],
-          transform:
-            "reserved + prepped, PLUS out unless type === \"sale\" — a sale's out units left ownership at the sale movement, which already dropped quantity_held, so counting them again double-subtracts. The rule lives in `unavailableFromBooking` and ONLY there, shared verbatim with the browser and the oversell gate.",
-        },
-        {
-          source: ["status"],
-          target: [],
-          transform:
-            "the LIVENESS filter, not a stored field — a `complete` booking reduces to null and the entry is DROPPED rather than stored as a zero (it would affect no answer while disclosing that something exists). Folding liveness and zero-quantity into one function is the point: as two separate rules they could disagree, and a completed sale left in the array consumes stock forever.",
-        },
-        {
-          source: [],
-          target: ["unavailable", "kind"],
-          transform:
-            "\"booking\" — the ONE non-quantitative fact a public reader learns, kept so the operator stock panel can split Booked from Out Of Service without a second document",
-        },
-      ],
-    },
-    {
-      id: transactionId + ":oos-to-stock",
-      source: "out-of-service",
-      target: "stock",
-      mode: "fan-out",
-      invariant:
-        trigger +
-        " re-derives the OOS half of stock.unavailable[] — every non-terminal (not complete/canceled) OOS record for the product, pre-reduced by `unavailableFromOOS` to the same anonymous interval shape. Same interval model as bookings; an open-ended record (end: null) reduces availability in every window from its start onward. ⚠️ An OOS record claims its FULL quantity until terminal: a 5-unit record with breakdown.returned_to_service = 3 still claims 5, and reducing from the breakdown looks like a cleanup and is a live oversell.",
-      enforced_by: [FOLD, INTERVAL_MODEL],
-      trigger: REBUILD_TRIGGER,
-      fields: [
-        { source: ["dates", "start"], target: ["unavailable", "start"] },
-        { source: ["dates", "end"], target: ["unavailable", "end"] },
-        { source: ["quantity"], target: ["unavailable", "quantity"] },
-        {
-          source: ["status"],
-          target: [],
-          transform:
-            "the liveness filter — `complete` (every unit written off or returned to service) and `canceled` (the operator voided the record) both hold zero units, so neither survives the reducer",
-        },
-        {
-          source: ["reason"],
-          target: [],
-          transform:
-            "DELIBERATELY DROPPED. It was the twin's whole reason for existing: an outsider must not be able to tell `booked` from `in for repair`. `kind` says only which of the two it is.",
-        },
-        {
-          source: [],
-          target: ["unavailable", "kind"],
-          transform: "\"oos\"",
-        },
-      ],
-    },
-  ];
-}
+const rules: CollectionRule[] = [
+  {
+    id: "stock:ledger-to-stock",
+    source: "inventory-ledgers",
+    target: "stock",
+    mode: "fan-out",
+    invariant:
+      "The projection embeds the ledger's current quantity_held. That is the only ledger field availability needs — store_breakdown is NOT copied (no client reads a per-store split; the manager reads inventory-ledgers directly for that), so a store transfer, which moves stock between stores without changing quantity_held, correctly leaves the projection untouched. `type` is not copied either: the ledger's existence already answers the only question a projection needed it for.",
+    enforced_by: [LEDGER_EMBED, NO_STORE_BREAKDOWN],
+    trigger: REBUILD_TRIGGER,
+    fields: [
+      { source: ["quantity_held"], target: ["quantity_held"] },
+    ],
+  },
+  {
+    id: "stock:bookings-to-stock",
+    source: "bookings",
+    target: "stock",
+    mode: "fan-out",
+    invariant:
+      "The booking half of stock.unavailable[] is re-derived from every live booking for the product, PRE-REDUCED to an anonymous {start, end, quantity, kind:\"booking\"} interval by `unavailableFromBooking` (@cfs/core/utils/stock). Stored as raw intervals, never as a per-window answer: quantity_booked for ANY window is Σ quantity over the entries overlapping it, so no window is privileged and none needs its own document. A sale booking carries end: null (a sold unit does not come back) and so keeps consuming stock in every later window until it completes. Entries are ANONYMOUS by design — a booking's doc id is orderUid:productUid:destUid, so a uid-keyed entry would let an anonymous reader join across products and read off who booked what.",
+    enforced_by: [FOLD, INTERVAL_MODEL],
+    trigger: REBUILD_TRIGGER,
+    fields: [
+      { source: ["dates", "start"], target: ["unavailable", "start"] },
+      { source: ["dates", "end"], target: ["unavailable", "end"] },
+      {
+        source: ["breakdown"],
+        target: ["unavailable", "quantity"],
+        transform:
+          "reserved + prepped, PLUS out unless type === \"sale\" — a sale's out units left ownership at the sale movement, which already dropped quantity_held, so counting them again double-subtracts. The rule lives in `unavailableFromBooking` and ONLY there, shared verbatim with the browser and the oversell gate.",
+      },
+      {
+        source: ["status"],
+        target: [],
+        transform:
+          "the LIVENESS filter, not a stored field — a `complete` booking reduces to null and the entry is DROPPED rather than stored as a zero (it would affect no answer while disclosing that something exists). Folding liveness and zero-quantity into one function is the point: as two separate rules they could disagree, and a completed sale left in the array consumes stock forever.",
+      },
+      {
+        source: [],
+        target: ["unavailable", "kind"],
+        transform:
+          "\"booking\" — the ONE non-quantitative fact a public reader learns, kept so the operator stock panel can split Booked from Out Of Service without a second document",
+      },
+    ],
+  },
+  {
+    id: "stock:oos-to-stock",
+    source: "out-of-service",
+    target: "stock",
+    mode: "fan-out",
+    invariant:
+      "The OOS half of stock.unavailable[] is re-derived from every non-terminal (not complete/canceled) OOS record for the product, pre-reduced by `unavailableFromOOS` to the same anonymous interval shape. Same interval model as bookings; an open-ended record (end: null) reduces availability in every window from its start onward. ⚠️ An OOS record claims its FULL quantity until terminal: a 5-unit record with breakdown.returned_to_service = 3 still claims 5, and reducing from the breakdown looks like a cleanup and is a live oversell.",
+    enforced_by: [FOLD, INTERVAL_MODEL],
+    trigger: REBUILD_TRIGGER,
+    fields: [
+      { source: ["dates", "start"], target: ["unavailable", "start"] },
+      { source: ["dates", "end"], target: ["unavailable", "end"] },
+      { source: ["quantity"], target: ["unavailable", "quantity"] },
+      {
+        source: ["status"],
+        target: [],
+        transform:
+          "the liveness filter — `complete` (every unit written off or returned to service) and `canceled` (the operator voided the record) both hold zero units, so neither survives the reducer",
+      },
+      {
+        source: ["reason"],
+        target: [],
+        transform:
+          "DELIBERATELY DROPPED. It was the twin's whole reason for existing: an outsider must not be able to tell `booked` from `in for repair`. `kind` says only which of the two it is.",
+      },
+      {
+        source: [],
+        target: ["unavailable", "kind"],
+        transform: "\"oos\"",
+      },
+    ],
+  },
+  {
+    // The seed/teardown edge. Inlined here from the former `seedStockRules()`
+    // factory, and re-prefixed `stock:` so no file declares another file's id.
+    //
+    // ⚠️ **Kept SEPARATE from the three above, and it is a co-write, not a
+    // fan-out.** The create-product seed writes the projection inside its own
+    // transaction and legitimately can: a brand-new product has no bookings and
+    // no OOS records, so the seed issues no queries at all and none of #358's
+    // lock shape applies. It is the co-write it says it is.
+    id: "stock:seed-ledger-to-stock",
+    source: "inventory-ledgers",
+    target: "stock",
+    mode: "co-write",
+    invariant:
+      "A product that gets an inventory ledger gets a `stock/{P}` projection and a `stock-locks/{P}` token in the same transaction — all three are created and destroyed together. The projection starts empty (no bookings, no OOS) and carries the ledger's quantity_held. Under the old window-keyed design a missing summary was self-healing, because an unauthenticated `GET /availability` minted it on read; there is no mint-on-read any more, so a delete without a matching create is a PERMANENT hole and the manager's `onSnapshot` would sit on a document that never appears. A missing TOKEN is worse than a hole, since the product cannot be claimed at all.",
+    enforced_by: [STOCK_BICONDITIONAL, LEDGER_EMBED],
+    fields: [
+      { source: ["uid"], target: ["uid"], transform: "the projection's doc id IS the product uid" },
+      { source: ["uid"], target: ["uid_product"] },
+      { source: ["quantity_held"], target: ["quantity_held"] },
+      {
+        source: [],
+        target: ["unavailable"],
+        transform: "[] — a product with no bookings and no OOS records yet",
+      },
+      {
+        source: [],
+        target: ["claim_seq"],
+        transform:
+          "0 — matching the token `seedStockLock` writes alongside. It has never been claimed, so the projection is trivially current.",
+      },
+    ],
+  },
+];
+
+// ── Module ──────────────────────────────────────────────────────────
+
+/** Everything `stock.ts` contributes to the propagation catalog. */
+export const stock: PropagationModule = {
+  rules,
+  transactions: [],
+};

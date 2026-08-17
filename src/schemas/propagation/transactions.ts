@@ -31,7 +31,7 @@ import type {
   PropagationModule,
   TransactionDefinition,
 } from "./types.ts";
-import { stockRules, stockSteps } from "./stock.ts";
+import { STOCK_STEPS } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -216,20 +216,16 @@ const createTransactionRules: CollectionRule[] = [
     "Locations track which products sit on which shelf. A movement writes ONLY products[]/query_by_products/updated_at — never name, active, default, uid_location_type or the capacities, which belong to createLocation/updateLocation. A movement cannot create a location either: it references one by uid, and a missing one is a 404.",
     [MOVEMENT_LOCATION_STAGING],
   ),
-  ...stockRules(
-    "create-transaction",
-    "A movement that moves quantity_held (a pure placement move, which leaves quantity_held untouched, skips the rebuild)",
-  ),
 ];
 
 const createTransactionTransaction: TransactionDefinition = {
   id: "create-transaction",
   description:
-    "Appends a movement to the journal, folds its lines onto the inventory ledger and the location documents, and rebuilds the product's `stock/{P}` projection when quantity_held actually moved. The document id is the derived {uid_session}|{type}|{subject}, so a retried create resolves to the same document instead of appending a second event.",
+    "Appends a movement to the journal, folds its lines onto the inventory ledger and the location documents, and rebuilds the product's `stock/{P}` projection when quantity_held actually moved. The document id is the derived {uid_session}|{type}|{subject}, so a retried create resolves to the same document instead of appending a second event. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: A movement that moves quantity_held — a pure placement move leaves quantity_held untouched and SKIPS the rebuild.",
   steps: [
     "create-transaction:transaction-to-ledger",
     "create-transaction:transaction-to-locations",
-    ...stockSteps("create-transaction"),
+    ...STOCK_STEPS,
   ],
 };
 
@@ -246,20 +242,16 @@ const reverseTransactionRules: CollectionRule[] = [
     "The negated lines put the units back on the shelves they came from. An outbound side may name a deactivated bin: pulling stock out of a dead or mis-stored location is exactly the corrective action, so only an INBOUND side into an inactive location is rejected.",
     [REVERSAL_LOCATIONS, MOVEMENT_LOCATION_STAGING],
   ),
-  ...stockRules(
-    "reverse-transaction",
-    "A reversal that moves quantity_held (reversing a pure placement move leaves quantity_held untouched and skips the rebuild)",
-  ),
 ];
 
 const reverseTransactionTransaction: TransactionDefinition = {
   id: "reverse-transaction",
   description:
-    "Negates a movement by appending a new one whose lines are the original's, swapped. The original document is never touched — that is the difference between a journal and an editable ledger. Nothing about the effect is client-supplied, so a reversal cannot silently disagree with what it reverses; the caller supplies only a session, a reference and an optional date.",
+    "Negates a movement by appending a new one whose lines are the original's, swapped. The original document is never touched — that is the difference between a journal and an editable ledger. Nothing about the effect is client-supplied, so a reversal cannot silently disagree with what it reverses; the caller supplies only a session, a reference and an optional date. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: A reversal that moves quantity_held — reversing a pure placement move leaves quantity_held untouched and SKIPS the rebuild.",
   steps: [
     "reverse-transaction:transaction-to-ledger",
     "reverse-transaction:transaction-to-locations",
-    ...stockSteps("reverse-transaction"),
+    ...STOCK_STEPS,
   ],
 };
 
