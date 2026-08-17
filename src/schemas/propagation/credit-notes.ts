@@ -229,14 +229,15 @@ const allocateCreditNoteRules: CollectionRule[] = [
     target: "credit-notes",
     mode: "co-write",
     invariant:
-      "The note's `remaining_credit_cents` is a projection of the same settlements that moved the invoices, co-written in the same transaction — so the note and its invoices can never disagree about how much of it has been consumed. `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
+      "The note's `remaining_credit_cents` is reduced by exactly what this request's settlements consumed — a DELTA applied under compare-and-set, outside the per-invoice transactions, so two concurrent allocations compose instead of clobbering (api-cloudrun#545). It is NOT a fold over the journal and must never become one: a cash refund consumes a note without touching any invoice, so it appends no settlement row, and a rebuild would hand that credit back (api-cloudrun#469). `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
     enforced_by: [CREDIT_NOTE_STATUS_REFINE],
     transaction: "allocate-credit-note",
     fields: [
       {
         source: ["amount_cents"],
         target: ["remaining_credit_cents"],
-        transform: "total minus every unreversed allocation minus any cash refunded",
+        transform:
+          "the stored value minus this request's consumption, re-read and re-applied under a lastUpdateTime precondition. A negative result is WRITTEN, not clamped: by then the settlements are durable on their invoices, so it is the true projection of an over-allocation and the operator's signal.",
       },
       {
         source: [],
