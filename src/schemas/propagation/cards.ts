@@ -9,7 +9,12 @@
  * also references its parent order). The cowrite helper takes the card's
  * `sources[]` as-is plus the card itself; both wires are described below.
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 /**
  * The delete cascade is asserted from both ends, which matters because the
@@ -39,7 +44,7 @@ const NO_DANGLING_THREAD_POINTER: EnforcementRef = {
 
 // ── create-card ─────────────────────────────────────────────────────
 
-export const createCardRules: CollectionRule[] = [
+const createCardRules: CollectionRule[] = [
   {
     id: "cowrite-thread:cards-to-thread",
     source: "cards",
@@ -98,7 +103,7 @@ export const createCardRules: CollectionRule[] = [
   },
 ];
 
-export const createCardTransaction: TransactionDefinition = {
+const createCardTransaction: TransactionDefinition = {
   id: "create-card",
   description:
     "Creates a card and cowrites its default thread so the card's Notes tab can accept comments immediately. Extra polymorphic sources (e.g. parent order) flow through to the thread so it surfaces on every linked detail view.",
@@ -110,7 +115,7 @@ export const createCardTransaction: TransactionDefinition = {
 
 // ── delete-card cascade ─────────────────────────────────────────────
 
-export const deleteCardRules: CollectionRule[] = [
+const deleteCardRules: CollectionRule[] = [
   {
     id: "delete-card:cascade-thread",
     source: "cards",
@@ -141,7 +146,7 @@ export const deleteCardRules: CollectionRule[] = [
   },
 ];
 
-export const deleteCardTransaction: TransactionDefinition = {
+const deleteCardTransaction: TransactionDefinition = {
   id: "delete-card",
   description:
     "Deletes a card and cascades its thread + comments. The card's presence is removed from every thread that referenced it; threads left without any sources are hard-deleted along with all their comments.",
@@ -150,11 +155,15 @@ export const deleteCardTransaction: TransactionDefinition = {
     "delete-card:cascade-comments",
   ],
 };
-
-// ── Flat exports ────────────────────────────────────────────────────
-
-/** All card-related propagation rules. */
-export const cardRules: CollectionRule[] = [
-  ...createCardRules,
-  ...deleteCardRules,
-];
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `cards.ts` contributes to the propagation catalog. */
+export const cards: PropagationModule = {
+  rules: [
+    ...createCardRules,
+    ...deleteCardRules,
+  ],
+  transactions: [
+    createCardTransaction,
+    deleteCardTransaction,
+  ],
+};

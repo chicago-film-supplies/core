@@ -25,7 +25,12 @@
  *
  * Traced from: api-cloudrun/src/services/transactions.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 import { stockRules, stockSteps } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
@@ -200,7 +205,7 @@ function locationsRule(
   };
 }
 
-export const createTransactionRules: CollectionRule[] = [
+const createTransactionRules: CollectionRule[] = [
   ledgerRule(
     "create-transaction",
     "Every movement immediately folds onto the ledger: quantity from its lines, cost from its cost object. The ledger is the source of truth for current stock levels, and it is a fold over the journal rather than a separately-maintained total.",
@@ -217,7 +222,7 @@ export const createTransactionRules: CollectionRule[] = [
   ),
 ];
 
-export const createTransactionTransaction: TransactionDefinition = {
+const createTransactionTransaction: TransactionDefinition = {
   id: "create-transaction",
   description:
     "Appends a movement to the journal, folds its lines onto the inventory ledger and the location documents, and rebuilds the product's `stock/{P}` projection when quantity_held actually moved. The document id is the derived {uid_session}|{type}|{subject}, so a retried create resolves to the same document instead of appending a second event.",
@@ -230,7 +235,7 @@ export const createTransactionTransaction: TransactionDefinition = {
 
 // ── Reverse transaction ─────────────────────────────────────────
 
-export const reverseTransactionRules: CollectionRule[] = [
+const reverseTransactionRules: CollectionRule[] = [
   ledgerRule(
     "reverse-transaction",
     "A reversal restores the ledger exactly, because its lines ARE the original's with `from` and `to` swapped and its cost is the basis the applier actually moved (not the number the operator typed). It is applied FORWARD through the same fold — there is no reversing code path to keep in step with the forward one.",
@@ -247,7 +252,7 @@ export const reverseTransactionRules: CollectionRule[] = [
   ),
 ];
 
-export const reverseTransactionTransaction: TransactionDefinition = {
+const reverseTransactionTransaction: TransactionDefinition = {
   id: "reverse-transaction",
   description:
     "Negates a movement by appending a new one whose lines are the original's, swapped. The original document is never touched — that is the difference between a journal and an editable ledger. Nothing about the effect is client-supplied, so a reversal cannot silently disagree with what it reverses; the caller supplies only a session, a reference and an optional date.",
@@ -255,5 +260,18 @@ export const reverseTransactionTransaction: TransactionDefinition = {
     "reverse-transaction:transaction-to-ledger",
     "reverse-transaction:transaction-to-locations",
     ...stockSteps("reverse-transaction"),
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `transactions.ts` contributes to the propagation catalog. */
+export const transactions: PropagationModule = {
+  rules: [
+    ...createTransactionRules,
+    ...reverseTransactionRules,
+  ],
+  transactions: [
+    createTransactionTransaction,
+    reverseTransactionTransaction,
   ],
 };

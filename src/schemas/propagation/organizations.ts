@@ -3,7 +3,12 @@
  *
  * Traced from: api-cloudrun/src/services/organizations.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -76,7 +81,7 @@ const ORG_TAX_PROFILE_TO_ORDERS: EnforcementRef = {
 
 // ── create-organization ──────────────────────────────────────────
 
-export const createOrganizationRules: CollectionRule[] = [
+const createOrganizationRules: CollectionRule[] = [
   {
     id: "create-org:org-to-contacts",
     source: "organizations",
@@ -93,7 +98,7 @@ export const createOrganizationRules: CollectionRule[] = [
   },
 ];
 
-export const createOrganizationTransaction: TransactionDefinition = {
+const createOrganizationTransaction: TransactionDefinition = {
   id: "create-organization",
   description: "Creates an organization with bidirectional contact cross-references and a cowritten default thread. CRMS + Xero sync runs pre/post-transaction.",
   steps: [
@@ -105,7 +110,7 @@ export const createOrganizationTransaction: TransactionDefinition = {
 
 // ── update-organization ──────────────────────────────────────────
 
-export const updateOrganizationRules: CollectionRule[] = [
+const updateOrganizationRules: CollectionRule[] = [
   {
     id: "update-org:name-to-contacts",
     source: "organizations",
@@ -209,7 +214,7 @@ export const updateOrganizationRules: CollectionRule[] = [
   },
 ];
 
-export const updateOrganizationTransaction: TransactionDefinition = {
+const updateOrganizationTransaction: TransactionDefinition = {
   id: "update-organization",
   description: "Updates an organization with name/billing cascades to contacts, active orders, and active invoices. CRMS + Xero sync post-transaction.",
   steps: [
@@ -220,5 +225,18 @@ export const updateOrganizationTransaction: TransactionDefinition = {
     "update-org:billing-to-invoices",
     "update-org:tax-profile-to-orders",
     "update-org:contacts-change",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `organizations.ts` contributes to the propagation catalog. */
+export const organizations: PropagationModule = {
+  rules: [
+    ...createOrganizationRules,
+    ...updateOrganizationRules,
+  ],
+  transactions: [
+    createOrganizationTransaction,
+    updateOrganizationTransaction,
   ],
 };

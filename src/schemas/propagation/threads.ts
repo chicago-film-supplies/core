@@ -15,7 +15,12 @@
  * the thread cascade (remove the source from `thread.sources[]`; if empty,
  * hard-delete thread + comments). Transactional with the parent delete.
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── Cowrite helper ──────────────────────────────────────────────────
 
@@ -85,27 +90,27 @@ function cowriteRulesFor({ collection, transaction }: ThreadCowriteConfig): Coll
 
 // ── Per-entity rules ────────────────────────────────────────────────
 
-export const threadOrderRules: CollectionRule[] = cowriteRulesFor({
+const threadOrderRules: CollectionRule[] = cowriteRulesFor({
   collection: "orders",
   transaction: "create-order",
 });
 
-export const threadInvoiceRules: CollectionRule[] = cowriteRulesFor({
+const threadInvoiceRules: CollectionRule[] = cowriteRulesFor({
   collection: "invoices",
   transaction: "create-invoice",
 });
 
-export const threadContactRules: CollectionRule[] = cowriteRulesFor({
+const threadContactRules: CollectionRule[] = cowriteRulesFor({
   collection: "contacts",
   transaction: "create-contact",
 });
 
-export const threadOrganizationRules: CollectionRule[] = cowriteRulesFor({
+const threadOrganizationRules: CollectionRule[] = cowriteRulesFor({
   collection: "organizations",
   transaction: "create-organization",
 });
 
-export const threadProductRules: CollectionRule[] = cowriteRulesFor({
+const threadProductRules: CollectionRule[] = cowriteRulesFor({
   collection: "products",
   transaction: "create-product",
 });
@@ -120,7 +125,7 @@ export const threadProductRules: CollectionRule[] = cowriteRulesFor({
 // or the OOS record it references through `sources[]`, both of which do have a
 // thread.
 
-export const threadOutOfServiceRules: CollectionRule[] = cowriteRulesFor({
+const threadOutOfServiceRules: CollectionRule[] = cowriteRulesFor({
   collection: "out-of-service",
   transaction: "create-out-of-service-record",
 });
@@ -136,14 +141,14 @@ export const threadOutOfServiceRules: CollectionRule[] = cowriteRulesFor({
  * different posting account than Xero does, and that comment has nowhere else to
  * live.
  */
-export const threadCreditNoteRules: CollectionRule[] = cowriteRulesFor({
+const threadCreditNoteRules: CollectionRule[] = cowriteRulesFor({
   collection: "credit-notes",
   transaction: "create-credit-note",
 });
 
 // ── Role transaction (new — role creation is promoted to a transaction) ─
 
-export const threadRoleRules: CollectionRule[] = cowriteRulesFor({
+const threadRoleRules: CollectionRule[] = cowriteRulesFor({
   collection: "roles",
   transaction: "create-role",
 });
@@ -153,7 +158,7 @@ export const threadRoleRules: CollectionRule[] = cowriteRulesFor({
  * role creation was a direct `ref.set(role)` before, promoted to a Firestore
  * transaction so the cowrite of the default thread happens atomically.
  */
-export const createRoleTransaction: TransactionDefinition = {
+const createRoleTransaction: TransactionDefinition = {
   id: "create-role",
   description: "Creates a role document and cowrites its default thread so the role detail view can start accepting comments immediately.",
   steps: [
@@ -162,23 +167,9 @@ export const createRoleTransaction: TransactionDefinition = {
   ],
 };
 
-// ── Flat exports for propagation/mod.ts consolidation ──────────────
-
-/** All create-<X> cowrite rules across every entity that gets a default thread. */
-export const threadCowriteRules: CollectionRule[] = [
-  ...threadOrderRules,
-  ...threadInvoiceRules,
-  ...threadContactRules,
-  ...threadOrganizationRules,
-  ...threadProductRules,
-  ...threadRoleRules,
-  ...threadOutOfServiceRules,
-  ...threadCreditNoteRules,
-];
-
 // ── create-comment transaction ──────────────────────────────────────
 
-export const createCommentRules: CollectionRule[] = [
+const createCommentRules: CollectionRule[] = [
   {
     id: "create-comment:thread-to-comment",
     source: "threads",
@@ -212,7 +203,7 @@ export const createCommentRules: CollectionRule[] = [
   },
 ];
 
-export const createCommentTransaction: TransactionDefinition = {
+const createCommentTransaction: TransactionDefinition = {
   id: "create-comment",
   description: "Creates a comment attached to a thread, embedding the thread's sources on the comment and deriving the parent thread's counter and preview fields.",
   steps: [
@@ -244,7 +235,7 @@ export const createCommentTransaction: TransactionDefinition = {
  * query for the newest live comment, which is a range read this transaction
  * does not take.
  */
-export const deleteCommentRules: CollectionRule[] = [
+const deleteCommentRules: CollectionRule[] = [
   {
     id: "delete-comment:comment-to-thread",
     source: "comments",
@@ -261,11 +252,33 @@ export const deleteCommentRules: CollectionRule[] = [
   },
 ];
 
-export const deleteCommentTransaction: TransactionDefinition = {
+const deleteCommentTransaction: TransactionDefinition = {
   id: "delete-comment",
   description:
     "Soft-deletes a comment (stamping deleted_at/deleted_by rather than removing it) and decrements the parent thread's live-comment count.",
   steps: [
     "delete-comment:comment-to-thread",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `threads.ts` contributes to the propagation catalog. */
+export const threads: PropagationModule = {
+  rules: [
+    ...threadOrderRules,
+    ...threadInvoiceRules,
+    ...threadContactRules,
+    ...threadOrganizationRules,
+    ...threadProductRules,
+    ...threadRoleRules,
+    ...threadOutOfServiceRules,
+    ...threadCreditNoteRules,
+    ...createCommentRules,
+    ...deleteCommentRules,
+  ],
+  transactions: [
+    createRoleTransaction,
+    createCommentTransaction,
+    deleteCommentTransaction,
   ],
 };

@@ -29,7 +29,12 @@
  *
  * Traced from: api-cloudrun/src/services/storeTransfers.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 
@@ -74,7 +79,7 @@ const TRANSFER_SAME_LOCATION_COMPOSES: EnforcementRef = {
   gates: true,
 };
 
-export const createStoreTransferRules: CollectionRule[] = [
+const createStoreTransferRules: CollectionRule[] = [
   {
     id: "create-store-transfer:transaction-to-ledger",
     source: "transactions",
@@ -127,12 +132,23 @@ export const createStoreTransferRules: CollectionRule[] = [
   },
 ];
 
-export const createStoreTransferTransaction: TransactionDefinition = {
+const createStoreTransferTransaction: TransactionDefinition = {
   id: "create-store-transfer",
   description:
     "Moves stock between stores/locations as a single `transfer` movement whose lines pair each source location with a destination, applying them to the ledger (net zero on quantity_held) and rewriting the affected location documents. Deliberately touches neither `stock` (a transfer changes no availability answer) nor the cost basis (it has no cost object to mis-gate).",
   steps: [
     "create-store-transfer:transaction-to-ledger",
     "create-store-transfer:transaction-to-locations",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `store-transfers.ts` contributes to the propagation catalog. */
+export const storeTransfers: PropagationModule = {
+  rules: [
+    ...createStoreTransferRules,
+  ],
+  transactions: [
+    createStoreTransferTransaction,
   ],
 };

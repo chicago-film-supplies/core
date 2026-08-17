@@ -3,7 +3,12 @@
  *
  * Traced from: api-cloudrun/src/services/users.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 
@@ -34,7 +39,7 @@ const USER_LINKED_TO_CONTACT_AT_REGISTER: EnforcementRef = {
 
 // ── create-user ───────────────────────────────────────────────────
 
-export const createUserRules: CollectionRule[] = [
+const createUserRules: CollectionRule[] = [
   {
     id: "create-user:link-to-contact",
     source: "users",
@@ -49,7 +54,7 @@ export const createUserRules: CollectionRule[] = [
   },
 ];
 
-export const createUserTransaction: TransactionDefinition = {
+const createUserTransaction: TransactionDefinition = {
   id: "create-user",
   description: "Creates a user; if email matches an existing contact, links bidirectionally.",
   steps: ["create-user:link-to-contact"],
@@ -57,7 +62,7 @@ export const createUserTransaction: TransactionDefinition = {
 
 // ── update-user ───────────────────────────────────────────────────
 
-export const updateUserRules: CollectionRule[] = [
+const updateUserRules: CollectionRule[] = [
   {
     id: "update-user:name-to-contact",
     source: "users",
@@ -102,7 +107,7 @@ export const updateUserRules: CollectionRule[] = [
   },
 ];
 
-export const updateUserTransaction: TransactionDefinition = {
+const updateUserTransaction: TransactionDefinition = {
   id: "update-user",
   description: "Updates a user with name cascade to a linked contact (if any) and fan-out to ActorRef names on every doc carrying created_by/updated_by/deleted_by.",
   steps: ["update-user:name-to-contact", "update-user:name-to-actor-refs"],
@@ -110,7 +115,7 @@ export const updateUserTransaction: TransactionDefinition = {
 
 // ── delete-user ───────────────────────────────────────────────────
 
-export const deleteUserRules: CollectionRule[] = [
+const deleteUserRules: CollectionRule[] = [
   {
     id: "delete-user:unlink-contact",
     source: "users",
@@ -124,8 +129,23 @@ export const deleteUserRules: CollectionRule[] = [
   },
 ];
 
-export const deleteUserTransaction: TransactionDefinition = {
+const deleteUserTransaction: TransactionDefinition = {
   id: "delete-user",
   description: "Soft-deletes a user and clears the linked contact's uid_user back-reference.",
   steps: ["delete-user:unlink-contact"],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `users.ts` contributes to the propagation catalog. */
+export const users: PropagationModule = {
+  rules: [
+    ...createUserRules,
+    ...updateUserRules,
+    ...deleteUserRules,
+  ],
+  transactions: [
+    createUserTransaction,
+    updateUserTransaction,
+    deleteUserTransaction,
+  ],
 };

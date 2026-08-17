@@ -17,7 +17,12 @@
  *   monotonic). `publishFromMerge.ts` must call
  *   `logTransactionPropagation("publish-template", …)` once this lands.
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -89,7 +94,7 @@ const FAMILY_ROLLUP: EnforcementRef = {
 
 // ── create-template (family + default thread cowrite) ───────────────
 
-export const createTemplateRules: CollectionRule[] = [
+const createTemplateRules: CollectionRule[] = [
   {
     id: "create-template:thread",
     source: "templates",
@@ -122,7 +127,7 @@ export const createTemplateRules: CollectionRule[] = [
   },
 ];
 
-export const createTemplateTransaction: TransactionDefinition = {
+const createTemplateTransaction: TransactionDefinition = {
   id: "create-template",
   description:
     "Registers a template family and cowrites its default thread so the family's chat surface can accept comments immediately.",
@@ -134,7 +139,7 @@ export const createTemplateTransaction: TransactionDefinition = {
 
 // ── manage-draft (draft_uids rollup) ────────────────────────────────
 
-export const manageDraftRules: CollectionRule[] = [
+const manageDraftRules: CollectionRule[] = [
   {
     id: "manage-draft:family-rollup",
     source: "templates-versions",
@@ -150,7 +155,7 @@ export const manageDraftRules: CollectionRule[] = [
   },
 ];
 
-export const manageDraftTransaction: TransactionDefinition = {
+const manageDraftTransaction: TransactionDefinition = {
   id: "manage-draft",
   description:
     "Creates or abandons a draft template version, maintaining the family's draft_uids[] rollup atomically with the version write.",
@@ -161,7 +166,7 @@ export const manageDraftTransaction: TransactionDefinition = {
 
 // ── publish-template (merge → published flip) ───────────────────────
 
-export const publishTemplateRules: CollectionRule[] = [
+const publishTemplateRules: CollectionRule[] = [
   {
     id: "publish-template:seq",
     source: "counters",
@@ -210,7 +215,7 @@ export const publishTemplateRules: CollectionRule[] = [
   },
 ];
 
-export const publishTemplateTransaction: TransactionDefinition = {
+const publishTemplateTransaction: TransactionDefinition = {
   id: "publish-template",
   description:
     "Flips a merged draft version to published (content read from the merged git SHA, blobs resolved outside the txn), stamps sha/semver/seq, and repoints the family's uid_active monotonically by seq.",
@@ -220,12 +225,17 @@ export const publishTemplateTransaction: TransactionDefinition = {
     "publish-template:family-rollup",
   ],
 };
-
-// ── Flat exports ────────────────────────────────────────────────────
-
-/** All template-related propagation rules. */
-export const templateRules: CollectionRule[] = [
-  ...createTemplateRules,
-  ...manageDraftRules,
-  ...publishTemplateRules,
-];
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `templates.ts` contributes to the propagation catalog. */
+export const templates: PropagationModule = {
+  rules: [
+    ...createTemplateRules,
+    ...manageDraftRules,
+    ...publishTemplateRules,
+  ],
+  transactions: [
+    createTemplateTransaction,
+    manageDraftTransaction,
+    publishTemplateTransaction,
+  ],
+};

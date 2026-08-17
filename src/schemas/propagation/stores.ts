@@ -11,7 +11,11 @@
  * Traced from:
  *   api-cloudrun/src/services/stores.ts (createStore, updateStore)
  */
-import type { CollectionRule, EnforcementRef } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+} from "./types.ts";
 
 /**
  * The default-flip has both a writer test and a corpus detector, and the
@@ -34,7 +38,7 @@ const STORE_DEFAULT_CORPUS: EnforcementRef = {
   gates: true,
 };
 
-export const createStoreRules: CollectionRule[] = [
+const createStoreRules: CollectionRule[] = [
   {
     id: "create-store:unset-sibling-defaults",
     source: "stores",
@@ -50,7 +54,7 @@ export const createStoreRules: CollectionRule[] = [
   },
 ];
 
-export const updateStoreRules: CollectionRule[] = [
+const updateStoreRules: CollectionRule[] = [
   {
     id: "update-store:unset-sibling-defaults",
     source: "stores",
@@ -65,3 +69,13 @@ export const updateStoreRules: CollectionRule[] = [
     ],
   },
 ];
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `stores.ts` contributes to the propagation catalog. */
+export const stores: PropagationModule = {
+  rules: [
+    ...createStoreRules,
+    ...updateStoreRules,
+  ],
+  transactions: [],
+};

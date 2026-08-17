@@ -3,7 +3,12 @@
  *
  * Traced from: api-cloudrun/src/services/contacts.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -38,7 +43,7 @@ const CONTACT_NAME_TO_USER: EnforcementRef = {
 
 // ── create-contact ───────────────────────────────────────────────
 
-export const createContactRules: CollectionRule[] = [
+const createContactRules: CollectionRule[] = [
   {
     id: "create-contact:contact-to-orgs",
     source: "contacts",
@@ -69,7 +74,7 @@ export const createContactRules: CollectionRule[] = [
   },
 ];
 
-export const createContactTransaction: TransactionDefinition = {
+const createContactTransaction: TransactionDefinition = {
   id: "create-contact",
   description: "Creates a contact with bidirectional organization cross-references, optional user link, and a cowritten default thread.",
   steps: [
@@ -82,7 +87,7 @@ export const createContactTransaction: TransactionDefinition = {
 
 // ── update-contact ───────────────────────────────────────────────
 
-export const updateContactRules: CollectionRule[] = [
+const updateContactRules: CollectionRule[] = [
   {
     id: "update-contact:name-to-orgs",
     source: "contacts",
@@ -183,7 +188,7 @@ export const updateContactRules: CollectionRule[] = [
   },
 ];
 
-export const updateContactTransaction: TransactionDefinition = {
+const updateContactTransaction: TransactionDefinition = {
   id: "update-contact",
   description: "Updates a contact with name cascades to organizations, active order destinations, and linked user; phone cascades to active orders; and bidirectional org membership maintenance.",
   steps: [
@@ -192,5 +197,18 @@ export const updateContactTransaction: TransactionDefinition = {
     "update-contact:phones-to-orders",
     "update-contact:orgs-change",
     "update-contact:name-to-user",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `contacts.ts` contributes to the propagation catalog. */
+export const contacts: PropagationModule = {
+  rules: [
+    ...createContactRules,
+    ...updateContactRules,
+  ],
+  transactions: [
+    createContactTransaction,
+    updateContactTransaction,
   ],
 };

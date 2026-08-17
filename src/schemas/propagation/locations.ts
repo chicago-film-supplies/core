@@ -7,7 +7,12 @@
  * Traced from:
  *   api-cloudrun/src/services/locations.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -45,7 +50,7 @@ const FIRST_LOCATION_IS_DEFAULT: EnforcementRef = {
 
 // ── Create location ─────────────────────────────────────────────
 
-export const createLocationRules: CollectionRule[] = [
+const createLocationRules: CollectionRule[] = [
   {
     id: "create-location:default-location-to-store",
     source: "locations",
@@ -61,7 +66,7 @@ export const createLocationRules: CollectionRule[] = [
   },
 ];
 
-export const createLocationTransaction: TransactionDefinition = {
+const createLocationTransaction: TransactionDefinition = {
   id: "create-location",
   description: "Creates a location. If it is the first active location for the store, auto-sets default:true and co-writes default_location to the parent store.",
   steps: [
@@ -71,7 +76,7 @@ export const createLocationTransaction: TransactionDefinition = {
 
 // ── Update location ─────────────────────────────────────────────
 
-export const updateLocationTransactionalRules: CollectionRule[] = [
+const updateLocationTransactionalRules: CollectionRule[] = [
   {
     id: "update-location:set-default-to-store",
     source: "locations",
@@ -99,11 +104,24 @@ export const updateLocationTransactionalRules: CollectionRule[] = [
   },
 ];
 
-export const updateLocationTransaction: TransactionDefinition = {
+const updateLocationTransaction: TransactionDefinition = {
   id: "update-location",
   description: "Updates a location. If default is being set, unsets the previous default location and co-writes default_location to the parent store.",
   steps: [
     "update-location:set-default-to-store",
     "update-location:unset-previous-default",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `locations.ts` contributes to the propagation catalog. */
+export const locations: PropagationModule = {
+  rules: [
+    ...createLocationRules,
+    ...updateLocationTransactionalRules,
+  ],
+  transactions: [
+    createLocationTransaction,
+    updateLocationTransaction,
   ],
 };

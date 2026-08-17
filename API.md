@@ -5865,6 +5865,43 @@ Propagation strategy used by a rule.
 type PropagationModeType = indexedAccess;
 ```
 
+### `PropagationModule`
+
+Everything one propagation source file contributes to the catalog.
+
+⚠️ **Each file in this directory exports exactly ONE of these, and nothing
+else.** That is the whole convention, and it exists to make a class of drift
+unrepresentable rather than to police it: `mod.ts` used to re-export 141
+individual symbols by hand and `schemas/mod.ts` re-exported 81 of them, so
+**60 had silently drifted out of the barrel with nothing noticing.** A list
+that has to be maintained in four places is the defect; deriving a better
+list would have kept it.
+
+Consequences worth stating, because they are the point rather than side
+effects:
+
+- A file has ONE `rules` array, so **exporting both a member array and an
+  in-file aggregator of it is unrepresentable.** The four aggregators that
+  used to do this (`cardRules`, `templateRules`, `recurrenceRules`,
+  `threadCowriteRules`) are gone, and the "array in neither test mirror"
+  category ceased to exist rather than gaining a guard.
+- `mod.ts`'s import block and its `MODULES` array check each other for free:
+  a name in `MODULES` but not imported is a compile error, and an import not
+  in `MODULES` is a `deno lint` error. Only the directory listing itself
+  needs a test.
+
+⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `mod.ts` to close
+that last gap** — this module is imported by the browser via manager and
+over `https:` from JSR, where there is no directory to read and no `Deno`.
+`src/` is platform-free by deliberate policy.
+
+```ts
+interface PropagationModule {
+  rules: CollectionRule[];
+  transactions: TransactionDefinition[];
+}
+```
+
 ### `PropagationStatusType`
 
 Status outcome of a propagation rule execution.
@@ -8601,14 +8638,6 @@ Read this rather than the column, so the manager cannot offer a button the
 server will 400 — and so a status outside the vocabulary answers `false`
 instead of throwing on an undefined lookup.
 
-### `cardRules`
-
-All card-related propagation rules.
-
-```ts
-const cardRules: CollectionRule[];
-```
-
 ### `checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void`
 
 The full per-item contract check — {@link checkItemPriceFormula} plus the
@@ -8749,238 +8778,6 @@ deepest chain in core today measures 11, and an obvious-looking 12 would have
 been one `.optional().nullable()` away from silently truncating. Hitting the
 cap pushes a `__depth_cap__` entry into `unhandled` rather than returning
 quietly.
-
-### `createCardRules`
-
-```ts
-const createCardRules: CollectionRule[];
-```
-
-### `createCardTransaction`
-
-```ts
-const createCardTransaction: TransactionDefinition;
-```
-
-### `createCommentRules`
-
-```ts
-const createCommentRules: CollectionRule[];
-```
-
-### `createCommentTransaction`
-
-```ts
-const createCommentTransaction: TransactionDefinition;
-```
-
-### `createContactRules`
-
-```ts
-const createContactRules: CollectionRule[];
-```
-
-### `createContactTransaction`
-
-```ts
-const createContactTransaction: TransactionDefinition;
-```
-
-### `createInvoiceRules`
-
-```ts
-const createInvoiceRules: CollectionRule[];
-```
-
-### `createInvoiceTransaction`
-
-```ts
-const createInvoiceTransaction: TransactionDefinition;
-```
-
-### `createLocationRules`
-
-```ts
-const createLocationRules: CollectionRule[];
-```
-
-### `createLocationTransaction`
-
-```ts
-const createLocationTransaction: TransactionDefinition;
-```
-
-### `createOrderRules`
-
-```ts
-const createOrderRules: CollectionRule[];
-```
-
-### `createOrderTransaction`
-
-```ts
-const createOrderTransaction: TransactionDefinition;
-```
-
-### `createOrganizationRules`
-
-```ts
-const createOrganizationRules: CollectionRule[];
-```
-
-### `createOrganizationTransaction`
-
-```ts
-const createOrganizationTransaction: TransactionDefinition;
-```
-
-### `createProductRules`
-
-```ts
-const createProductRules: CollectionRule[];
-```
-
-### `createProductTransaction`
-
-```ts
-const createProductTransaction: TransactionDefinition;
-```
-
-### `createRecurrenceRules`
-
-```ts
-const createRecurrenceRules: CollectionRule[];
-```
-
-### `createRecurrenceTransaction`
-
-```ts
-const createRecurrenceTransaction: TransactionDefinition;
-```
-
-### `createRoleTransaction`
-
-`create-role` is a new named transaction introduced with Threads Phase 1 —
-role creation was a direct `ref.set(role)` before, promoted to a Firestore
-transaction so the cowrite of the default thread happens atomically.
-
-```ts
-const createRoleTransaction: TransactionDefinition;
-```
-
-### `createTemplateRules`
-
-```ts
-const createTemplateRules: CollectionRule[];
-```
-
-### `createTemplateTransaction`
-
-```ts
-const createTemplateTransaction: TransactionDefinition;
-```
-
-### `createTransactionRules`
-
-```ts
-const createTransactionRules: CollectionRule[];
-```
-
-### `createTransactionTransaction`
-
-```ts
-const createTransactionTransaction: TransactionDefinition;
-```
-
-### `createUserRules`
-
-```ts
-const createUserRules: CollectionRule[];
-```
-
-### `createUserTransaction`
-
-```ts
-const createUserTransaction: TransactionDefinition;
-```
-
-### `deleteCardRules`
-
-```ts
-const deleteCardRules: CollectionRule[];
-```
-
-### `deleteCardScopeAllRules`
-
-```ts
-const deleteCardScopeAllRules: CollectionRule[];
-```
-
-### `deleteCardScopeAllTransaction`
-
-```ts
-const deleteCardScopeAllTransaction: TransactionDefinition;
-```
-
-### `deleteCardScopeFollowingRules`
-
-```ts
-const deleteCardScopeFollowingRules: CollectionRule[];
-```
-
-### `deleteCardScopeFollowingTransaction`
-
-```ts
-const deleteCardScopeFollowingTransaction: TransactionDefinition;
-```
-
-### `deleteCardScopeThisRules`
-
-```ts
-const deleteCardScopeThisRules: CollectionRule[];
-```
-
-### `deleteCardScopeThisTransaction`
-
-```ts
-const deleteCardScopeThisTransaction: TransactionDefinition;
-```
-
-### `deleteCardTransaction`
-
-```ts
-const deleteCardTransaction: TransactionDefinition;
-```
-
-### `deleteRecurrenceRules`
-
-```ts
-const deleteRecurrenceRules: CollectionRule[];
-```
-
-### `deleteRecurrenceTransaction`
-
-```ts
-const deleteRecurrenceTransaction: TransactionDefinition;
-```
-
-### `deleteTagRules`
-
-```ts
-const deleteTagRules: CollectionRule[];
-```
-
-### `deleteUserRules`
-
-```ts
-const deleteUserRules: CollectionRule[];
-```
-
-### `deleteUserTransaction`
-
-```ts
-const deleteUserTransaction: TransactionDefinition;
-```
 
 ### `deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null`
 
@@ -9331,50 +9128,6 @@ The contract for an item `type`, or `undefined` for a value outside
 `@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
 contract and every derived predicate answers `false` for it.
 
-### `manageDraftRules`
-
-```ts
-const manageDraftRules: CollectionRule[];
-```
-
-### `manageDraftTransaction`
-
-```ts
-const manageDraftTransaction: TransactionDefinition;
-```
-
-### `materializeHorizonRules`
-
-```ts
-const materializeHorizonRules: CollectionRule[];
-```
-
-### `materializeHorizonTransaction`
-
-```ts
-const materializeHorizonTransaction: TransactionDefinition;
-```
-
-### `publishTemplateRules`
-
-```ts
-const publishTemplateRules: CollectionRule[];
-```
-
-### `publishTemplateTransaction`
-
-```ts
-const publishTemplateTransaction: TransactionDefinition;
-```
-
-### `recurrenceRules`
-
-All recurrence-related propagation rules.
-
-```ts
-const recurrenceRules: CollectionRule[];
-```
-
 ### `resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null`
 
 Convenience: resolve a dotted path and read its meta in one call. Returns
@@ -9458,14 +9211,6 @@ in `./template-context.ts`.
 const templateHelpers: Record<string, TemplateHelperEntry[]>;
 ```
 
-### `templateRules`
-
-All template-related propagation rules.
-
-```ts
-const templateRules: CollectionRule[];
-```
-
 ### `templateSchemaFields`
 
 Pre-compiled document field metadata for every template source and target
@@ -9474,50 +9219,6 @@ it has a walkable schema — `packing_lists` has none, hence `Partial`.
 
 ```ts
 const templateSchemaFields: Partial<Record<TemplateSourceCollectionType | TemplateTargetCollectionType, SchemaField[]>>;
-```
-
-### `threadContactRules`
-
-```ts
-const threadContactRules: CollectionRule[];
-```
-
-### `threadCowriteRules`
-
-All create-<X> cowrite rules across every entity that gets a default thread.
-
-```ts
-const threadCowriteRules: CollectionRule[];
-```
-
-### `threadInvoiceRules`
-
-```ts
-const threadInvoiceRules: CollectionRule[];
-```
-
-### `threadOrderRules`
-
-```ts
-const threadOrderRules: CollectionRule[];
-```
-
-### `threadOrganizationRules`
-
-```ts
-const threadOrganizationRules: CollectionRule[];
-```
-
-### `threadProductRules`
-
-```ts
-const threadProductRules: CollectionRule[];
-```
-
-### `threadRoleRules`
-
-```ts
-const threadRoleRules: CollectionRule[];
 ```
 
 ### `toRegionCode(input: string): string`
@@ -9545,6 +9246,8 @@ that stops collecting tax CFS owes.
 
 ### `transactions`
 
+Every transaction across every module.
+
 ```ts
 const transactions: TransactionDefinition[];
 ```
@@ -9568,150 +9271,6 @@ use this variant so the array node is preserved.
 Unwrap wrapper nodes (Optional, Default, Nullable, Prefault, Catch) to reach
 the inner schema where `.meta()` was called. Does not descend into arrays,
 records, or objects.
-
-### `updateCardScopeAllRules`
-
-```ts
-const updateCardScopeAllRules: CollectionRule[];
-```
-
-### `updateCardScopeAllTransaction`
-
-```ts
-const updateCardScopeAllTransaction: TransactionDefinition;
-```
-
-### `updateCardScopeFollowingRules`
-
-```ts
-const updateCardScopeFollowingRules: CollectionRule[];
-```
-
-### `updateCardScopeFollowingTransaction`
-
-```ts
-const updateCardScopeFollowingTransaction: TransactionDefinition;
-```
-
-### `updateContactRules`
-
-```ts
-const updateContactRules: CollectionRule[];
-```
-
-### `updateContactTransaction`
-
-```ts
-const updateContactTransaction: TransactionDefinition;
-```
-
-### `updateInvoiceOrderRules`
-
-```ts
-const updateInvoiceOrderRules: CollectionRule[];
-```
-
-### `updateLocationRules`
-
-```ts
-const updateLocationRules: CollectionRule[];
-```
-
-### `updateLocationTransaction`
-
-```ts
-const updateLocationTransaction: TransactionDefinition;
-```
-
-### `updateLocationTransactionalRules`
-
-```ts
-const updateLocationTransactionalRules: CollectionRule[];
-```
-
-### `updateLocationTypeRules`
-
-```ts
-const updateLocationTypeRules: CollectionRule[];
-```
-
-### `updateOrderInvoiceRules`
-
-```ts
-const updateOrderInvoiceRules: CollectionRule[];
-```
-
-### `updateOrderRules`
-
-```ts
-const updateOrderRules: CollectionRule[];
-```
-
-### `updateOrderTransaction`
-
-```ts
-const updateOrderTransaction: TransactionDefinition;
-```
-
-### `updateOrganizationRules`
-
-```ts
-const updateOrganizationRules: CollectionRule[];
-```
-
-### `updateOrganizationTransaction`
-
-```ts
-const updateOrganizationTransaction: TransactionDefinition;
-```
-
-### `updateProductRules`
-
-```ts
-const updateProductRules: CollectionRule[];
-```
-
-### `updateProductTransaction`
-
-```ts
-const updateProductTransaction: TransactionDefinition;
-```
-
-### `updateRecurrenceRules`
-
-```ts
-const updateRecurrenceRules: CollectionRule[];
-```
-
-### `updateRecurrenceTransaction`
-
-```ts
-const updateRecurrenceTransaction: TransactionDefinition;
-```
-
-### `updateTagRules`
-
-```ts
-const updateTagRules: CollectionRule[];
-```
-
-### `updateTrackingCategoryRules`
-
-```ts
-const updateTrackingCategoryRules: CollectionRule[];
-```
-
-### `updateUserRules`
-
-```ts
-const updateUserRules: CollectionRule[];
-```
-
-### `updateUserTransaction`
-
-```ts
-const updateUserTransaction: TransactionDefinition;
-```
 
 ### `usState(): z.ZodType<string, string>`
 

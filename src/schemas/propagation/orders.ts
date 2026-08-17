@@ -3,7 +3,12 @@
  *
  * Traced from: api-cloudrun/src/services/orders.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 import { stockRules, stockSteps } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
@@ -246,7 +251,7 @@ const ORDER_ROLLUP_DELTA: EnforcementRef = {
 
 // ── create-order ─────────────────────────────────────────────────
 
-export const createOrderRules: CollectionRule[] = [
+const createOrderRules: CollectionRule[] = [
   {
     id: "create-order:org-to-order",
     source: "organizations",
@@ -394,7 +399,7 @@ export const createOrderRules: CollectionRule[] = [
   },
 ];
 
-export const createOrderTransaction: TransactionDefinition = {
+const createOrderTransaction: TransactionDefinition = {
   id: "create-order",
   description: "Creates an order with bookings, the `stock/{P}` projection, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view).",
   steps: [
@@ -415,7 +420,7 @@ export const createOrderTransaction: TransactionDefinition = {
 
 // ── update-order ─────────────────────────────────────────────────
 
-export const updateOrderRules: CollectionRule[] = [
+const updateOrderRules: CollectionRule[] = [
   {
     id: "update-order:org-to-order",
     source: "organizations",
@@ -537,7 +542,7 @@ export const updateOrderRules: CollectionRule[] = [
   },
 ];
 
-export const updateOrderTransaction: TransactionDefinition = {
+const updateOrderTransaction: TransactionDefinition = {
   id: "update-order",
   description: "Updates an order, diffing items/status/dates to create/update/delete bookings, rebuild the `stock/{P}` projection, rebuild event cards, and refresh the fulfillment view.",
   steps: [
@@ -559,7 +564,7 @@ export const updateOrderTransaction: TransactionDefinition = {
 // to record returned/lost/damaged quantities. Co-located here (not in its
 // own file) because it lives entirely under the `order` aggregate root.
 
-export const updateBookingRules: CollectionRule[] = [
+const updateBookingRules: CollectionRule[] = [
   {
     id: "update-booking:booking-to-self",
     source: "bookings",
@@ -693,7 +698,7 @@ export const updateBookingRules: CollectionRule[] = [
   },
 ];
 
-export const updateBookingTransaction: TransactionDefinition = {
+const updateBookingTransaction: TransactionDefinition = {
   id: "update-booking",
   description: "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates `stock/{P}` projections FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of `stock/{P}` projections and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings.",
   steps: [
@@ -721,7 +726,7 @@ export const updateBookingTransaction: TransactionDefinition = {
 // /orders/{uid}/return applies caller-supplied returned/lost/damaged
 // deltas per booking.
 
-export const bulkCheckoutOrderTransaction: TransactionDefinition = {
+const bulkCheckoutOrderTransaction: TransactionDefinition = {
   id: "bulk-checkout-order",
   description: "Flip every booking on an order from reserved/prepped to active and move quantities into breakdown.out in one Firestore transaction. Reuses update-booking rules per row, including the per-destination card status recompute.",
   steps: [
@@ -735,7 +740,7 @@ export const bulkCheckoutOrderTransaction: TransactionDefinition = {
   ],
 };
 
-export const bulkReturnOrderTransaction: TransactionDefinition = {
+const bulkReturnOrderTransaction: TransactionDefinition = {
   id: "bulk-return-order",
   description: "Apply per-booking returned/lost/damaged deltas across the order in one Firestore transaction. Reuses update-booking rules per row, including OOS cowrite for any lost/damaged deltas and the per-destination card status recompute; final state may auto-complete the order.",
   steps: [
@@ -761,7 +766,7 @@ export const bulkReturnOrderTransaction: TransactionDefinition = {
 // deduped stock rebuild per product, single order roll-up delta +
 // auto-complete check, and one OOS counter allocation pass.
 
-export const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
+const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
   id: "bulk-fulfillment-bookings",
   description: "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock rebuilds per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
   steps: [
@@ -796,7 +801,7 @@ export const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
 // id reaches the logger through a variable (`options.transactionName ??
 // "finalize-order"`) rather than as a literal. api-cloudrun#503.
 
-export const finalizeOrderTransaction: TransactionDefinition = {
+const finalizeOrderTransaction: TransactionDefinition = {
   id: "finalize-order",
   description:
     "Recompute an order from its committed bookings: roll-up + auto-complete status, the sanitized fulfillment mirror, and per-destination event card status. Idempotent — re-running against unchanged bookings writes nothing. Runs in-request after a bulk booking write and again from the finalize Cloud Task.",
@@ -818,7 +823,7 @@ export const finalizeOrderTransaction: TransactionDefinition = {
 // processOrderDocs orphan-uuid sweep, so the card never references a deleted
 // file. Server-internal write — bypasses CARD_LOCK on `attachments`.
 
-export const processOrderDocsRules: CollectionRule[] = [
+const processOrderDocsRules: CollectionRule[] = [
   {
     id: "process-order-docs:doc-to-cards",
     source: "orders/documents",
@@ -843,10 +848,31 @@ export const processOrderDocsRules: CollectionRule[] = [
   },
 ];
 
-export const processOrderDocsTransaction: TransactionDefinition = {
+const processOrderDocsTransaction: TransactionDefinition = {
   id: "process-order-docs",
   description: "Async Cloud Task path: CRMS prepares the packing-list PDF, the API uploads it to Uploadcare, writes the order's documents subcollection, then fans the resulting Uploadcare uuid out to every order-derived event card so the picker UI can deep-link to the live PDF.",
   steps: [
     "process-order-docs:doc-to-cards",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `orders.ts` contributes to the propagation catalog. */
+export const orders: PropagationModule = {
+  rules: [
+    ...createOrderRules,
+    ...updateOrderRules,
+    ...updateBookingRules,
+    ...processOrderDocsRules,
+  ],
+  transactions: [
+    createOrderTransaction,
+    updateOrderTransaction,
+    updateBookingTransaction,
+    bulkCheckoutOrderTransaction,
+    bulkReturnOrderTransaction,
+    bulkFulfillmentBookingsTransaction,
+    finalizeOrderTransaction,
+    processOrderDocsTransaction,
   ],
 };

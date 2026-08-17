@@ -53,7 +53,10 @@
  * steps already do.
  */
 import { stockSteps } from "./stock.ts";
-import type { TransactionDefinition } from "./types.ts";
+import type {
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── crms-opportunity-order ──────────────────────────────────────────
 
@@ -65,7 +68,7 @@ import type { TransactionDefinition } from "./types.ts";
  * `cowrite-thread:*` steps that only a create fires: one transaction covers
  * both arms, and `rules_fired` reports per run which of them actually did.
  */
-export const crmsOpportunityOrderTransaction: TransactionDefinition = {
+const crmsOpportunityOrderTransaction: TransactionDefinition = {
   id: "crms-opportunity-order",
   description:
     "Rebuilds a CFS order from a CRMS opportunity — org snapshot, server-derived totals and query arrays, one booking per consolidated product per destination with store allocation drawn from the inventory ledger, the event-card projection with its per-card threads, and the sanitized fulfillment view. Cowrites the order's default thread on the create arm. Selectively syncs the rebuilt items, destinations, subject, reference and organization onto every linked non-terminal invoice, and strips this order's scope from them on a cancel — the same two edges the native PUT drives. Stock summaries are rebuilt post-commit via the coalesced `/tasks/rebuild-stock`, as on the native order path.",
@@ -105,7 +108,7 @@ export const crmsOpportunityOrderTransaction: TransactionDefinition = {
  * resync rather than from the status-40 webhook that owns that transaction id.
  * One void, one pair of rules, two entry points.
  */
-export const crmsInvoiceUpsertTransaction: TransactionDefinition = {
+const crmsInvoiceUpsertTransaction: TransactionDefinition = {
   id: "crms-invoice-upsert",
   description:
     "Creates or rebuilds a CFS invoice from a CRMS invoice — items resolved against the product catalog, day factors recovered from the linked order, and the order's `invoices[]` mirror added, converged or unlinked. Cowrites the invoice's default thread on the create arm, and re-derives the void settlement row when the CRMS document is void.",
@@ -161,7 +164,7 @@ export const crmsInvoiceUpsertTransaction: TransactionDefinition = {
  * zero drift on *both* sides is evidence the trigger has never fired — not
  * evidence the cascades were keeping up.
  */
-export const crmsMemberOrganizationTransaction: TransactionDefinition = {
+const crmsMemberOrganizationTransaction: TransactionDefinition = {
   id: "crms-member-organization",
   description:
     "Creates or updates a CFS organization from a CRMS member — geocoded billing address, emails/phones, tax profile derived from the CRMS sales-tax class, and the full child-contact set with bidirectional back-references maintained in both directions. Fans the org's name and billing address out to its live orders and invoices, reprices the live un-invoiced orders when the tax profile moves, and cowrites a default thread for the organization and for every contact it mints.",
@@ -215,7 +218,7 @@ export const crmsMemberOrganizationTransaction: TransactionDefinition = {
  * declaration fails the BUILD. Same instruction, different mechanism — and the
  * mechanism is what tells you where to look when it goes red.
  */
-export const crmsMemberContactTransaction: TransactionDefinition = {
+const crmsMemberContactTransaction: TransactionDefinition = {
   id: "crms-member-contact",
   description:
     "Creates or updates a CFS contact from a CRMS member — split name, emails/phones, and membership of every parent organization CRMS names, with each org's contacts[] and query_by_contacts back-reference maintained on join and on leave. A rename also reaches the destination legs of the contact's live orders and its linked user; a phone change reaches the same order legs. Cowrites a default thread on the create arm. An unresolvable parent org is a hard failure rather than a silent unlink.",
@@ -228,5 +231,17 @@ export const crmsMemberContactTransaction: TransactionDefinition = {
     "update-contact:name-to-user",
     "cowrite-thread:contacts-to-thread",
     "cowrite-thread:thread-to-contacts",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `crms-ingest.ts` contributes to the propagation catalog. */
+export const crmsIngest: PropagationModule = {
+  rules: [],
+  transactions: [
+    crmsInvoiceUpsertTransaction,
+    crmsOpportunityOrderTransaction,
+    crmsMemberOrganizationTransaction,
+    crmsMemberContactTransaction,
   ],
 };

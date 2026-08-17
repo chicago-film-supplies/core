@@ -3,7 +3,12 @@
  *
  * Traced from: api-cloudrun/src/services/products.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 import { seedStockRules } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
@@ -155,7 +160,7 @@ const WEBSHOP_SHAPE_IS_THE_SUBSET: EnforcementRef = {
 
 // ── create-product ───────────────────────────────────────────────
 
-export const createProductRules: CollectionRule[] = [
+const createProductRules: CollectionRule[] = [
   {
     id: "create-product:product-to-tags",
     source: "products",
@@ -276,7 +281,7 @@ export const createProductRules: CollectionRule[] = [
   },
 ];
 
-export const createProductTransaction: TransactionDefinition = {
+const createProductTransaction: TransactionDefinition = {
   id: "create-product",
   description: "Creates a product with tag/category cross-refs, optional inventory ledger, webshop fan-out, and a cowritten default thread. CRMS + Xero sync runs post-transaction.",
   steps: [
@@ -293,7 +298,7 @@ export const createProductTransaction: TransactionDefinition = {
 
 // ── update-product ───────────────────────────────────────────────
 
-export const updateProductRules: CollectionRule[] = [
+const updateProductRules: CollectionRule[] = [
   {
     id: "update-product:catalog-to-components",
     source: "products",
@@ -491,7 +496,7 @@ export const updateProductRules: CollectionRule[] = [
 
 // ── update-product fan-out to orders ─────────────────────────────
 
-export const updateProductOrderRules: CollectionRule[] = [
+const updateProductOrderRules: CollectionRule[] = [
   {
     id: "update-product:product-to-draft-orders",
     source: "products",
@@ -510,7 +515,7 @@ export const updateProductOrderRules: CollectionRule[] = [
   },
 ];
 
-export const updateProductTransaction: TransactionDefinition = {
+const updateProductTransaction: TransactionDefinition = {
   id: "update-product",
   description: "Updates a product with cascading name changes to components/alternates/locations/tags/tracking-categories, tag/category cross-ref diffs, and webshop fan-out.",
   steps: [
@@ -525,5 +530,19 @@ export const updateProductTransaction: TransactionDefinition = {
     "update-product:tracking-category-change",
     "update-product:stock-method-change",
     "update-product:type-change",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `products.ts` contributes to the propagation catalog. */
+export const products: PropagationModule = {
+  rules: [
+    ...createProductRules,
+    ...updateProductRules,
+    ...updateProductOrderRules,
+  ],
+  transactions: [
+    createProductTransaction,
+    updateProductTransaction,
   ],
 };

@@ -35,7 +35,12 @@
  *
  * @module
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 
@@ -70,7 +75,7 @@ const SETTLEMENT_BUMPS_VERSION: EnforcementRef = {
 
 // ── create-settlement ───────────────────────────────────────────────
 
-export const createSettlementRules: CollectionRule[] = [
+const createSettlementRules: CollectionRule[] = [
   {
     id: "create-settlement:settlement-to-invoice",
     source: "settlements",
@@ -108,7 +113,7 @@ export const createSettlementRules: CollectionRule[] = [
   },
 ];
 
-export const createSettlementTransaction: TransactionDefinition = {
+const createSettlementTransaction: TransactionDefinition = {
   id: "create-settlement",
   description:
     "Records a payment against an invoice: appends the settlement row, moves the invoice's projected totals and status by CAS, then co-writes the derived status to each linked order. THREE commits, not one — the invoice is the hot document on the money path and a transactional read+write would block every concurrent writer for the full 25s deadline. The order mirror is therefore convergent and backed by the eventarc reconciler, not merely co-written.",
@@ -120,7 +125,7 @@ export const createSettlementTransaction: TransactionDefinition = {
 
 // ── reverse-settlement ──────────────────────────────────────────────
 
-export const reverseSettlementRules: CollectionRule[] = [
+const reverseSettlementRules: CollectionRule[] = [
   {
     id: "reverse-settlement:reverser-to-invoice",
     source: "settlements",
@@ -144,7 +149,7 @@ export const reverseSettlementRules: CollectionRule[] = [
   },
 ];
 
-export const reverseSettlementTransaction: TransactionDefinition = {
+const reverseSettlementTransaction: TransactionDefinition = {
   id: "reverse-settlement",
   description:
     "Retracts one settlement: appends its reverser, re-folds the invoice's totals and status, and co-writes that status to each linked order. Single transaction, unlike create-settlement — the retraction path is not hot.",
@@ -156,7 +161,7 @@ export const reverseSettlementTransaction: TransactionDefinition = {
 
 // ── sync-xero-settlement ────────────────────────────────────────────
 
-export const syncXeroSettlementRules: CollectionRule[] = [
+const syncXeroSettlementRules: CollectionRule[] = [
   {
     id: "sync-xero-settlement:xero-to-settlements",
     source: "invoices",
@@ -196,7 +201,7 @@ export const syncXeroSettlementRules: CollectionRule[] = [
   },
 ];
 
-export const syncXeroSettlementTransaction: TransactionDefinition = {
+const syncXeroSettlementTransaction: TransactionDefinition = {
   id: "sync-xero-settlement",
   description:
     "Reconciles a Xero invoice webhook's payments and credit allocations into the settlements journal, re-folds the invoice's projection from it, and co-writes the resulting status to each linked order. Idempotent under redelivery by construction: matching is on Xero ids and the delta excludes rows already counted.",
@@ -270,7 +275,7 @@ const VOID_ROW_FIELDS = [
 
 // ── void-invoice (CFS-originated) ───────────────────────────────────
 
-export const voidInvoiceRules: CollectionRule[] = [
+const voidInvoiceRules: CollectionRule[] = [
   {
     id: "void-invoice:reap-settlements",
     source: "invoices",
@@ -295,7 +300,7 @@ export const voidInvoiceRules: CollectionRule[] = [
   },
 ];
 
-export const voidInvoiceTransaction: TransactionDefinition = {
+const voidInvoiceTransaction: TransactionDefinition = {
   id: "void-invoice",
   description:
     "An operator voids an invoice through `PUT /invoices/{uid}`: retracts every live settlement, appends the invoice's `void` row, folds the totals, and co-writes `void` to each linked order's invoices[] entry. CFS ORIGINATES this one, so the Xero void is pushed afterwards, outside the transaction (and deferred past a quota refusal rather than dropped — the CFS status flip has already committed and nothing re-pushes a non-draft invoice).",
@@ -308,7 +313,7 @@ export const voidInvoiceTransaction: TransactionDefinition = {
 
 // ── void-invoice-from-crms ──────────────────────────────────────────
 
-export const voidInvoiceFromCrmsRules: CollectionRule[] = [
+const voidInvoiceFromCrmsRules: CollectionRule[] = [
   {
     id: "void-invoice-from-crms:reap-settlements",
     source: "invoices",
@@ -333,7 +338,7 @@ export const voidInvoiceFromCrmsRules: CollectionRule[] = [
   },
 ];
 
-export const voidInvoiceFromCrmsTransaction: TransactionDefinition = {
+const voidInvoiceFromCrmsTransaction: TransactionDefinition = {
   id: "void-invoice-from-crms",
   description:
     "The CRMS invoice webhook reports status 40: same money as `void-invoice`, then the void is pushed on to Xero BY GUID (never by number — a CRMS renumber leaves the Xero record under its old number, and prod holds that trap at number 1859). Ingest from CRMS, egress to Xero.",
@@ -346,7 +351,7 @@ export const voidInvoiceFromCrmsTransaction: TransactionDefinition = {
 
 // ── void-invoice-from-xero ──────────────────────────────────────────
 
-export const voidInvoiceFromXeroRules: CollectionRule[] = [
+const voidInvoiceFromXeroRules: CollectionRule[] = [
   {
     id: "void-invoice-from-xero:reap-settlements",
     source: "invoices",
@@ -371,7 +376,7 @@ export const voidInvoiceFromXeroRules: CollectionRule[] = [
   },
 ];
 
-export const voidInvoiceFromXeroTransaction: TransactionDefinition = {
+const voidInvoiceFromXeroTransaction: TransactionDefinition = {
   id: "void-invoice-from-xero",
   description:
     "Marks an invoice void because Xero voided it: retracts every live settlement into the journal, appends the invoice's `void` row, folds the totals, and co-writes `void` to each linked order's invoices[] entry. Ingest only — CFS never pushes back on this arm. ⚠️ Its `status === \"void\"` early return no longer short-circuits the money: idempotency comes from the derived void-row id, and the old early return is exactly why three Xero-bot-voided invoices kept a balance Xero had closed.",
@@ -379,5 +384,26 @@ export const voidInvoiceFromXeroTransaction: TransactionDefinition = {
     "void-invoice-from-xero:reap-settlements",
     "void-invoice-from-xero:append-void-settlement",
     "update-invoice:status-to-orders",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `settlements.ts` contributes to the propagation catalog. */
+export const settlements: PropagationModule = {
+  rules: [
+    ...createSettlementRules,
+    ...reverseSettlementRules,
+    ...syncXeroSettlementRules,
+    ...voidInvoiceRules,
+    ...voidInvoiceFromCrmsRules,
+    ...voidInvoiceFromXeroRules,
+  ],
+  transactions: [
+    createSettlementTransaction,
+    reverseSettlementTransaction,
+    syncXeroSettlementTransaction,
+    voidInvoiceTransaction,
+    voidInvoiceFromCrmsTransaction,
+    voidInvoiceFromXeroTransaction,
   ],
 };

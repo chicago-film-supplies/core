@@ -8,7 +8,12 @@
  *   api-cloudrun/src/services/trackingCategories.ts
  *   api-cloudrun/src/services/locationTypes.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks the rules below that are not already linked ──────────
 
@@ -61,7 +66,7 @@ const HOLIDAY_DRAFT_RECOMPUTE: EnforcementRef = {
 
 // ── Tag cascades ─────────────────────────────────────────────────
 
-export const updateTagRules: CollectionRule[] = [
+const updateTagRules: CollectionRule[] = [
   {
     id: "update-tag:name-to-products",
     source: "tags",
@@ -82,7 +87,7 @@ export const updateTagRules: CollectionRule[] = [
   },
 ];
 
-export const deleteTagRules: CollectionRule[] = [
+const deleteTagRules: CollectionRule[] = [
   {
     id: "delete-tag:remove-from-products",
     source: "tags",
@@ -100,7 +105,7 @@ export const deleteTagRules: CollectionRule[] = [
 
 // ── Tracking category cascades ───────────────────────────────────
 
-export const updateTrackingCategoryRules: CollectionRule[] = [
+const updateTrackingCategoryRules: CollectionRule[] = [
   {
     id: "update-tracking-category:name-to-products",
     source: "tracking-categories",
@@ -123,7 +128,7 @@ export const updateTrackingCategoryRules: CollectionRule[] = [
 
 // ── Location type cascades ───────────────────────────────────────
 
-export const updateLocationTypeRules: CollectionRule[] = [
+const updateLocationTypeRules: CollectionRule[] = [
   {
     id: "update-location-type:capacities-to-locations",
     source: "location-types",
@@ -142,7 +147,7 @@ export const updateLocationTypeRules: CollectionRule[] = [
 
 // ── Location cascades ───────────────────────────────────────────
 
-export const updateLocationRules: CollectionRule[] = [
+const updateLocationRules: CollectionRule[] = [
   {
     id: "update-location:name-to-inventory-ledgers",
     source: "locations",
@@ -227,7 +232,7 @@ export const updateLocationRules: CollectionRule[] = [
 
 // ── Holiday cascades ─────────────────────────────────────────────
 
-export const rematerializeHolidaySnapshotRules: CollectionRule[] = [
+const rematerializeHolidaySnapshotRules: CollectionRule[] = [
   {
     id: "holiday-dates:rematerialize-snapshot",
     source: "holiday-dates",
@@ -263,7 +268,7 @@ export const rematerializeHolidaySnapshotRules: CollectionRule[] = [
  * not a formality — the repo's own rule is that a fixed-point check needs an
  * independent property beside it.
  */
-export const materializeHolidayDateRules: CollectionRule[] = [
+const materializeHolidayDateRules: CollectionRule[] = [
   {
     id: "holiday-definition:materialize-dates",
     source: "holiday-definitions",
@@ -334,28 +339,28 @@ export const materializeHolidayDateRules: CollectionRule[] = [
  * something the transaction's own commit either did or did not do. That is why
  * `holiday-change:recompute-draft-orders` has no `transaction` field.
  */
-export const createHolidayDefinitionTransaction: TransactionDefinition = {
+const createHolidayDefinitionTransaction: TransactionDefinition = {
   id: "create-holiday-definition",
   description:
     "Creates a holiday definition (fixed date or variable nth-weekday rule) and materializes its instances across the rolling forward window in the same commit, so a definition can never exist without the dates it implies. The snapshot rematerialize and the draft recompute follow post-commit.",
   steps: ["holiday-definition:materialize-dates"],
 };
 
-export const updateHolidayDefinitionTransaction: TransactionDefinition = {
+const updateHolidayDefinitionTransaction: TransactionDefinition = {
   id: "update-holiday-definition",
   description:
     "Version-checked in-place edit of a holiday rule. Full-replaces the definition document (so a fixed↔variable switch drops the stale variant fields) and regenerates only FUTURE instances — past ones are what historical orders were priced against and stay untouched.",
   steps: ["holiday-definition:materialize-dates"],
 };
 
-export const deleteHolidayDefinitionTransaction: TransactionDefinition = {
+const deleteHolidayDefinitionTransaction: TransactionDefinition = {
   id: "delete-holiday-definition",
   description:
     "Soft-deletes a holiday definition — marks it inactive rather than removing it, keeping the record for historical fidelity — and deletes only its FUTURE instances, so past holidays stay materialized.",
   steps: ["holiday-definition:materialize-dates"],
 };
 
-export const recomputeHolidayDraftOrderRules: CollectionRule[] = [
+const recomputeHolidayDraftOrderRules: CollectionRule[] = [
   {
     id: "holiday-change:recompute-draft-orders",
     source: "holiday-definitions",
@@ -370,7 +375,7 @@ export const recomputeHolidayDraftOrderRules: CollectionRule[] = [
   },
 ];
 
-export const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
+const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
   {
     id: "holiday-change:recompute-draft-invoices",
     source: "orders",
@@ -383,3 +388,24 @@ export const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
     ],
   },
 ];
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `reference-data.ts` contributes to the propagation catalog. */
+export const referenceData: PropagationModule = {
+  rules: [
+    ...updateTagRules,
+    ...deleteTagRules,
+    ...updateTrackingCategoryRules,
+    ...updateLocationTypeRules,
+    ...updateLocationRules,
+    ...materializeHolidayDateRules,
+    ...rematerializeHolidaySnapshotRules,
+    ...recomputeHolidayDraftOrderRules,
+    ...recomputeHolidayDraftInvoiceRules,
+  ],
+  transactions: [
+    createHolidayDefinitionTransaction,
+    updateHolidayDefinitionTransaction,
+    deleteHolidayDefinitionTransaction,
+  ],
+};

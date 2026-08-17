@@ -21,7 +21,12 @@
  *
  * Traced from: api-cloudrun/src/services/invoices.ts, orders.ts
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 
@@ -118,7 +123,7 @@ const ORDER_SCOPED_REMOVAL: EnforcementRef = {
 
 // ── create-invoice ──────────────────────────────────────────────────
 
-export const createInvoiceRules: CollectionRule[] = [
+const createInvoiceRules: CollectionRule[] = [
   {
     id: "create-invoice:invoice-to-orders",
     source: "invoices",
@@ -136,7 +141,7 @@ export const createInvoiceRules: CollectionRule[] = [
   },
 ];
 
-export const createInvoiceTransaction: TransactionDefinition = {
+const createInvoiceTransaction: TransactionDefinition = {
   id: "create-invoice",
   description: "Creates an invoice, co-writes invoice summary to each referenced order, and cowrites a default thread.",
   steps: [
@@ -148,7 +153,7 @@ export const createInvoiceTransaction: TransactionDefinition = {
 
 // ── update-invoice (status → orders) ────────────────────────────────
 
-export const updateInvoiceOrderRules: CollectionRule[] = [
+const updateInvoiceOrderRules: CollectionRule[] = [
   {
     id: "update-invoice:status-to-orders",
     source: "invoices",
@@ -187,7 +192,7 @@ export const updateInvoiceOrderRules: CollectionRule[] = [
   },
 ];
 
-export const updateInvoiceTransaction: TransactionDefinition = {
+const updateInvoiceTransaction: TransactionDefinition = {
   id: "update-invoice",
   description:
     "Updates an invoice's own fields and converges the invoices[] mirror on every referenced order. Fired by `updateInvoice` and by the CRMS void webhook. The settlement writers used to borrow this id and now declare their own — see `propagation/settlements.ts` for why that matters to the drift check.",
@@ -196,7 +201,7 @@ export const updateInvoiceTransaction: TransactionDefinition = {
 
 // ── update-order → invoices ────────────────────────────────────────
 
-export const updateOrderInvoiceRules: CollectionRule[] = [
+const updateOrderInvoiceRules: CollectionRule[] = [
   {
     id: "update-order:items-to-invoices",
     source: "orders",
@@ -231,3 +236,17 @@ export const updateOrderInvoiceRules: CollectionRule[] = [
     ],
   },
 ];
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `invoices.ts` contributes to the propagation catalog. */
+export const invoices: PropagationModule = {
+  rules: [
+    ...createInvoiceRules,
+    ...updateInvoiceOrderRules,
+    ...updateOrderInvoiceRules,
+  ],
+  transactions: [
+    createInvoiceTransaction,
+    updateInvoiceTransaction,
+  ],
+};

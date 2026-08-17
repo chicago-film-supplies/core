@@ -2773,6 +2773,12 @@
           "doc": "Propagation strategy used by a rule."
         },
         {
+          "kind": "interface",
+          "name": "PropagationModule",
+          "declaration": "interface PropagationModule {\n  rules: CollectionRule[];\n  transactions: TransactionDefinition[];\n}",
+          "doc": "Everything one propagation source file contributes to the catalog.\n\n⚠️ **Each file in this directory exports exactly ONE of these, and nothing\nelse.** That is the whole convention, and it exists to make a class of drift\nunrepresentable rather than to police it: `mod.ts` used to re-export 141\nindividual symbols by hand and `schemas/mod.ts` re-exported 81 of them, so\n**60 had silently drifted out of the barrel with nothing noticing.** A list\nthat has to be maintained in four places is the defect; deriving a better\nlist would have kept it.\n\nConsequences worth stating, because they are the point rather than side\neffects:\n\n- A file has ONE `rules` array, so **exporting both a member array and an\n  in-file aggregator of it is unrepresentable.** The four aggregators that\n  used to do this (`cardRules`, `templateRules`, `recurrenceRules`,\n  `threadCowriteRules`) are gone, and the \"array in neither test mirror\"\n  category ceased to exist rather than gaining a guard.\n- `mod.ts`'s import block and its `MODULES` array check each other for free:\n  a name in `MODULES` but not imported is a compile error, and an import not\n  in `MODULES` is a `deno lint` error. Only the directory listing itself\n  needs a test.\n\n⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `mod.ts` to close\nthat last gap** — this module is imported by the browser via manager and\nover `https:` from JSR, where there is no directory to read and no `Deno`.\n`src/` is platform-free by deliberate policy."
+        },
+        {
           "kind": "typeAlias",
           "name": "PropagationStatusType",
           "declaration": "type PropagationStatusType = indexedAccess;",
@@ -4136,12 +4142,6 @@
           "returnsTag": null
         },
         {
-          "kind": "variable",
-          "name": "cardRules",
-          "declaration": "const cardRules: CollectionRule[];",
-          "doc": "All card-related propagation rules."
-        },
-        {
           "kind": "function",
           "name": "checkItemContract",
           "signature": "checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void",
@@ -4172,234 +4172,6 @@
           "doc": "Walk a schema and collect every scalar leaf with its dotted path and merged\nmeta. Backs the Uploadcare authoring lint (`schemas/uploadcare/`) — a third\nmeta-collecting walker alongside `applyPii` and `getServerSortableColumns`,\nneither of which is reusable here (the latter is depth-capped at 1 and skips\narrays entirely).\n\n**It fails CLOSED.** A walker that emits unrecognised nodes as leaves would\nsilently swallow their subtree — a field named `attachments` typed\n`z.tuple([...])` would vanish from the walk and be invisible to every\nassertion built on it. So the type allowlist is two-sided: descend the known\ncontainers, emit the known scalars, and push everything else into\n`unhandled`, which callers are expected to assert is empty.\n\nTraversal:\n- **transparent wrappers** (`optional`, `default`, `nullable`, `prefault`,\n  `catch`, `readonly`, `nonoptional`) and **pipes** (`def.in` — the input side\n  of `chicagoInstant()` et al) are walked through, merging meta at each level;\n- **object** → each field, `path.key`;\n- **array** → the element, `path[]`;\n- **record** → the value type, `path.<key>` (dynamic keys aren't enumerable);\n- **union / discriminatedUnion** → every member at the *same* path, deduped by\n  (path, node identity) so shared nodes are visited once.\n\nMeta does **not** cross a container boundary by default: an object's\nschema-level `.meta({ title, collection })` must not leak onto its fields, and\nby symmetry an annotation on an array node does not reach its element.\nAnnotate the leaf.\n\n`opts.inherit` names the meta keys that DO cross, for annotations whose whole\npoint is to cover a subtree. `pii` is the motivating case: `Address` is tagged\n`.nullable().meta({ pii: \"mask\" })` on the object, and the runtime walker\n(`pii/walker.ts` `applyTagged`) pushes that tag down to every leaf, with a\nchild's own tag winning and `pii: \"none\"` opting back out — exactly the\n`{...inherited, ...own}` merge this function already performs through\nwrappers. Without it, the PII lint would report every leaf under a correctly\ntagged `Address` as a violation (measured: 213 of them).\n\nDefault `[]` — no key crosses, so every existing caller is bit-identical.\n\n`maxDepth` defaults to **24**. Wrappers are nodes, so depth counts them: the\ndeepest chain in core today measures 11, and an obvious-looking 12 would have\nbeen one `.optional().nullable()` away from silently truncating. Hitting the\ncap pushes a `__depth_cap__` entry into `unhandled` rather than returning\nquietly.",
           "paramTags": [],
           "returnsTag": null
-        },
-        {
-          "kind": "variable",
-          "name": "createCardRules",
-          "declaration": "const createCardRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createCardTransaction",
-          "declaration": "const createCardTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createCommentRules",
-          "declaration": "const createCommentRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createCommentTransaction",
-          "declaration": "const createCommentTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createContactRules",
-          "declaration": "const createContactRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createContactTransaction",
-          "declaration": "const createContactTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createInvoiceRules",
-          "declaration": "const createInvoiceRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createInvoiceTransaction",
-          "declaration": "const createInvoiceTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createLocationRules",
-          "declaration": "const createLocationRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createLocationTransaction",
-          "declaration": "const createLocationTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createOrderRules",
-          "declaration": "const createOrderRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createOrderTransaction",
-          "declaration": "const createOrderTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createOrganizationRules",
-          "declaration": "const createOrganizationRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createOrganizationTransaction",
-          "declaration": "const createOrganizationTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createProductRules",
-          "declaration": "const createProductRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createProductTransaction",
-          "declaration": "const createProductTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createRecurrenceRules",
-          "declaration": "const createRecurrenceRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createRecurrenceTransaction",
-          "declaration": "const createRecurrenceTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createRoleTransaction",
-          "declaration": "const createRoleTransaction: TransactionDefinition;",
-          "doc": "`create-role` is a new named transaction introduced with Threads Phase 1 —\nrole creation was a direct `ref.set(role)` before, promoted to a Firestore\ntransaction so the cowrite of the default thread happens atomically."
-        },
-        {
-          "kind": "variable",
-          "name": "createTemplateRules",
-          "declaration": "const createTemplateRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createTemplateTransaction",
-          "declaration": "const createTemplateTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createTransactionRules",
-          "declaration": "const createTransactionRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createTransactionTransaction",
-          "declaration": "const createTransactionTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createUserRules",
-          "declaration": "const createUserRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "createUserTransaction",
-          "declaration": "const createUserTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteCardRules",
-          "declaration": "const deleteCardRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteCardScopeAllRules",
-          "declaration": "const deleteCardScopeAllRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteCardScopeAllTransaction",
-          "declaration": "const deleteCardScopeAllTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteCardScopeFollowingRules",
-          "declaration": "const deleteCardScopeFollowingRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteCardScopeFollowingTransaction",
-          "declaration": "const deleteCardScopeFollowingTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteCardScopeThisRules",
-          "declaration": "const deleteCardScopeThisRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteCardScopeThisTransaction",
-          "declaration": "const deleteCardScopeThisTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteCardTransaction",
-          "declaration": "const deleteCardTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteRecurrenceRules",
-          "declaration": "const deleteRecurrenceRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteRecurrenceTransaction",
-          "declaration": "const deleteRecurrenceTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteTagRules",
-          "declaration": "const deleteTagRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteUserRules",
-          "declaration": "const deleteUserRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "deleteUserTransaction",
-          "declaration": "const deleteUserTransaction: TransactionDefinition;",
-          "doc": ""
         },
         {
           "kind": "function",
@@ -4632,48 +4404,6 @@
           "returnsTag": null
         },
         {
-          "kind": "variable",
-          "name": "manageDraftRules",
-          "declaration": "const manageDraftRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "manageDraftTransaction",
-          "declaration": "const manageDraftTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "materializeHorizonRules",
-          "declaration": "const materializeHorizonRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "materializeHorizonTransaction",
-          "declaration": "const materializeHorizonTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "publishTemplateRules",
-          "declaration": "const publishTemplateRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "publishTemplateTransaction",
-          "declaration": "const publishTemplateTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "recurrenceRules",
-          "declaration": "const recurrenceRules: CollectionRule[];",
-          "doc": "All recurrence-related propagation rules."
-        },
-        {
           "kind": "function",
           "name": "resolveFieldMeta",
           "signature": "resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null",
@@ -4725,57 +4455,9 @@
         },
         {
           "kind": "variable",
-          "name": "templateRules",
-          "declaration": "const templateRules: CollectionRule[];",
-          "doc": "All template-related propagation rules."
-        },
-        {
-          "kind": "variable",
           "name": "templateSchemaFields",
           "declaration": "const templateSchemaFields: Partial<Record<TemplateSourceCollectionType | TemplateTargetCollectionType, SchemaField[]>>;",
           "doc": "Pre-compiled document field metadata for every template source and target\ncollection. Source collections are always present; a target is present only if\nit has a walkable schema — `packing_lists` has none, hence `Partial`."
-        },
-        {
-          "kind": "variable",
-          "name": "threadContactRules",
-          "declaration": "const threadContactRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "threadCowriteRules",
-          "declaration": "const threadCowriteRules: CollectionRule[];",
-          "doc": "All create-<X> cowrite rules across every entity that gets a default thread."
-        },
-        {
-          "kind": "variable",
-          "name": "threadInvoiceRules",
-          "declaration": "const threadInvoiceRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "threadOrderRules",
-          "declaration": "const threadOrderRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "threadOrganizationRules",
-          "declaration": "const threadOrganizationRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "threadProductRules",
-          "declaration": "const threadProductRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "threadRoleRules",
-          "declaration": "const threadRoleRules: CollectionRule[];",
-          "doc": ""
         },
         {
           "kind": "function",
@@ -4797,7 +4479,7 @@
           "kind": "variable",
           "name": "transactions",
           "declaration": "const transactions: TransactionDefinition[];",
-          "doc": ""
+          "doc": "Every transaction across every module."
         },
         {
           "kind": "variable",
@@ -4820,150 +4502,6 @@
           "doc": "Unwrap wrapper nodes (Optional, Default, Nullable, Prefault, Catch) to reach\nthe inner schema where `.meta()` was called. Does not descend into arrays,\nrecords, or objects.",
           "paramTags": [],
           "returnsTag": null
-        },
-        {
-          "kind": "variable",
-          "name": "updateCardScopeAllRules",
-          "declaration": "const updateCardScopeAllRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateCardScopeAllTransaction",
-          "declaration": "const updateCardScopeAllTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateCardScopeFollowingRules",
-          "declaration": "const updateCardScopeFollowingRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateCardScopeFollowingTransaction",
-          "declaration": "const updateCardScopeFollowingTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateContactRules",
-          "declaration": "const updateContactRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateContactTransaction",
-          "declaration": "const updateContactTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateInvoiceOrderRules",
-          "declaration": "const updateInvoiceOrderRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateLocationRules",
-          "declaration": "const updateLocationRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateLocationTransaction",
-          "declaration": "const updateLocationTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateLocationTransactionalRules",
-          "declaration": "const updateLocationTransactionalRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateLocationTypeRules",
-          "declaration": "const updateLocationTypeRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateOrderInvoiceRules",
-          "declaration": "const updateOrderInvoiceRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateOrderRules",
-          "declaration": "const updateOrderRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateOrderTransaction",
-          "declaration": "const updateOrderTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateOrganizationRules",
-          "declaration": "const updateOrganizationRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateOrganizationTransaction",
-          "declaration": "const updateOrganizationTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateProductRules",
-          "declaration": "const updateProductRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateProductTransaction",
-          "declaration": "const updateProductTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateRecurrenceRules",
-          "declaration": "const updateRecurrenceRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateRecurrenceTransaction",
-          "declaration": "const updateRecurrenceTransaction: TransactionDefinition;",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateTagRules",
-          "declaration": "const updateTagRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateTrackingCategoryRules",
-          "declaration": "const updateTrackingCategoryRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateUserRules",
-          "declaration": "const updateUserRules: CollectionRule[];",
-          "doc": ""
-        },
-        {
-          "kind": "variable",
-          "name": "updateUserTransaction",
-          "declaration": "const updateUserTransaction: TransactionDefinition;",
-          "doc": ""
         },
         {
           "kind": "function",

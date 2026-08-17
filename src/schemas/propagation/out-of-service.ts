@@ -17,7 +17,12 @@
  * is NOT updated — the booking already records the loss in its own
  * breakdown.
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 import { stockRules, stockSteps } from "./stock.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
@@ -63,7 +68,7 @@ const OOS_LEDGER_PARTITION: EnforcementRef = {
   gates: true,
 };
 
-export const createOutOfServiceRules: CollectionRule[] = [
+const createOutOfServiceRules: CollectionRule[] = [
   {
     id: "create-out-of-service-record:sources-to-record",
     source: "out-of-service",
@@ -85,7 +90,7 @@ export const createOutOfServiceRules: CollectionRule[] = [
   ...stockRules("create-out-of-service-record", "Creating an OOS record"),
 ];
 
-export const createOutOfServiceTransaction: TransactionDefinition = {
+const createOutOfServiceTransaction: TransactionDefinition = {
   id: "create-out-of-service-record",
   description: "Creates an out-of-service record, rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record.",
   steps: [
@@ -96,7 +101,7 @@ export const createOutOfServiceTransaction: TransactionDefinition = {
   ],
 };
 
-export const updateOutOfServiceRules: CollectionRule[] = [
+const updateOutOfServiceRules: CollectionRule[] = [
   ...stockRules(
     "update-out-of-service-record",
     "Any OOS quantity/date/status change (including a cancel, which drops the record from the array entirely)",
@@ -133,12 +138,25 @@ export const updateOutOfServiceRules: CollectionRule[] = [
   },
 ];
 
-export const updateOutOfServiceTransaction: TransactionDefinition = {
+const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
   description: "Updates an out-of-service record. Quantity changes rebuild the product's `stock/{P}` projection. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown.",
   steps: [
     ...stockSteps("update-out-of-service-record"),
     "update-out-of-service-record:record-to-transactions",
     "update-out-of-service-record:transactions-to-ledger",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `out-of-service.ts` contributes to the propagation catalog. */
+export const outOfService: PropagationModule = {
+  rules: [
+    ...createOutOfServiceRules,
+    ...updateOutOfServiceRules,
+  ],
+  transactions: [
+    createOutOfServiceTransaction,
+    updateOutOfServiceTransaction,
   ],
 };

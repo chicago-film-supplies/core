@@ -5,7 +5,11 @@
  * the denormalized TaxRef / PriceModifier snapshots on products,
  * webshop-products, and incomplete orders are updated.
  */
-import type { CollectionRule, EnforcementRef } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -30,7 +34,7 @@ const TAX_TO_ORDERS: EnforcementRef = {
   gates: true,
 };
 
-export const updateTaxRules: CollectionRule[] = [
+const updateTaxRules: CollectionRule[] = [
   {
     id: "update-tax:to-products",
     source: "taxes",
@@ -85,3 +89,12 @@ export const updateTaxRules: CollectionRule[] = [
     ],
   },
 ];
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `taxes.ts` contributes to the propagation catalog. */
+export const taxes: PropagationModule = {
+  rules: [
+    ...updateTaxRules,
+  ],
+  transactions: [],
+};

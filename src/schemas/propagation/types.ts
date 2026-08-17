@@ -122,6 +122,44 @@ export interface TransactionDefinition {
   steps: string[];
 }
 
+// ── Module ──────────────────────────────────────────────────────────
+
+/**
+ * Everything one propagation source file contributes to the catalog.
+ *
+ * ⚠️ **Each file in this directory exports exactly ONE of these, and nothing
+ * else.** That is the whole convention, and it exists to make a class of drift
+ * unrepresentable rather than to police it: `mod.ts` used to re-export 141
+ * individual symbols by hand and `schemas/mod.ts` re-exported 81 of them, so
+ * **60 had silently drifted out of the barrel with nothing noticing.** A list
+ * that has to be maintained in four places is the defect; deriving a better
+ * list would have kept it.
+ *
+ * Consequences worth stating, because they are the point rather than side
+ * effects:
+ *
+ * - A file has ONE `rules` array, so **exporting both a member array and an
+ *   in-file aggregator of it is unrepresentable.** The four aggregators that
+ *   used to do this (`cardRules`, `templateRules`, `recurrenceRules`,
+ *   `threadCowriteRules`) are gone, and the "array in neither test mirror"
+ *   category ceased to exist rather than gaining a guard.
+ * - `mod.ts`'s import block and its `MODULES` array check each other for free:
+ *   a name in `MODULES` but not imported is a compile error, and an import not
+ *   in `MODULES` is a `deno lint` error. Only the directory listing itself
+ *   needs a test.
+ *
+ * ⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `mod.ts` to close
+ * that last gap** — this module is imported by the browser via manager and
+ * over `https:` from JSR, where there is no directory to read and no `Deno`.
+ * `src/` is platform-free by deliberate policy.
+ */
+export interface PropagationModule {
+  /** Every CollectionRule declared in this file. */
+  rules: CollectionRule[];
+  /** Every TransactionDefinition declared in this file. May be empty. */
+  transactions: TransactionDefinition[];
+}
+
 // ── Aggregate definition ────────────────────────────────────────────
 
 /** DDD aggregate boundary — groups collections under one consistency root. */

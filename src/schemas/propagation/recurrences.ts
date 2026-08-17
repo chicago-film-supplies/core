@@ -19,7 +19,12 @@
  * two exception mechanisms that keep user edits stable across re-runs of
  * the materializer.
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -98,7 +103,7 @@ const SCOPE_FOLLOWING_DELETE: EnforcementRef = {
 
 // ── create-recurrence ───────────────────────────────────────────────
 
-export const createRecurrenceRules: CollectionRule[] = [
+const createRecurrenceRules: CollectionRule[] = [
   {
     id: "create-recurrence:fan-out-cards",
     source: "recurrences",
@@ -127,7 +132,7 @@ export const createRecurrenceRules: CollectionRule[] = [
   },
 ];
 
-export const createRecurrenceTransaction: TransactionDefinition = {
+const createRecurrenceTransaction: TransactionDefinition = {
   id: "create-recurrence",
   description:
     "Creates a recurrence and synchronously materializes the first horizon of instance cards so the Dashboard lists upcoming occurrences without waiting for the nightly job.",
@@ -136,7 +141,7 @@ export const createRecurrenceTransaction: TransactionDefinition = {
 
 // ── materialize-horizon (cron-driven) ───────────────────────────────
 
-export const materializeHorizonRules: CollectionRule[] = [
+const materializeHorizonRules: CollectionRule[] = [
   {
     id: "materialize-horizon:fan-out-cards",
     source: "recurrences",
@@ -156,7 +161,7 @@ export const materializeHorizonRules: CollectionRule[] = [
   },
 ];
 
-export const materializeHorizonTransaction: TransactionDefinition = {
+const materializeHorizonTransaction: TransactionDefinition = {
   id: "materialize-horizon",
   description:
     "Nightly job that extends every active recurrence's materialization window, writing any new cards needed to fill the rolling horizon. Idempotent — re-running the same day is a no-op when the horizon is already covered.",
@@ -165,7 +170,7 @@ export const materializeHorizonTransaction: TransactionDefinition = {
 
 // ── update-recurrence ───────────────────────────────────────────────
 
-export const updateRecurrenceRules: CollectionRule[] = [
+const updateRecurrenceRules: CollectionRule[] = [
   {
     id: "update-recurrence:fan-out-prototype",
     source: "recurrences",
@@ -195,7 +200,7 @@ export const updateRecurrenceRules: CollectionRule[] = [
   },
 ];
 
-export const updateRecurrenceTransaction: TransactionDefinition = {
+const updateRecurrenceTransaction: TransactionDefinition = {
   id: "update-recurrence",
   description:
     "Applies prototype-field edits and/or rule changes to a recurrence, fanning the non-overridden updates out to instance cards. Rule changes re-materialize future instances; prototype changes patch them in place.",
@@ -207,7 +212,7 @@ export const updateRecurrenceTransaction: TransactionDefinition = {
 
 // ── delete-recurrence ───────────────────────────────────────────────
 
-export const deleteRecurrenceRules: CollectionRule[] = [
+const deleteRecurrenceRules: CollectionRule[] = [
   {
     id: "delete-recurrence:fan-out-cards",
     source: "recurrences",
@@ -224,7 +229,7 @@ export const deleteRecurrenceRules: CollectionRule[] = [
   },
 ];
 
-export const deleteRecurrenceTransaction: TransactionDefinition = {
+const deleteRecurrenceTransaction: TransactionDefinition = {
   id: "delete-recurrence",
   description:
     "Deletes a recurrence and every instance card it produced, tearing down each card's thread + comments as part of the delete.",
@@ -233,7 +238,7 @@ export const deleteRecurrenceTransaction: TransactionDefinition = {
 
 // ── update-card scope=following ─────────────────────────────────────
 
-export const updateCardScopeFollowingRules: CollectionRule[] = [
+const updateCardScopeFollowingRules: CollectionRule[] = [
   {
     id: "update-card-scope-following:cascade-future-siblings",
     source: "cards",
@@ -249,7 +254,7 @@ export const updateCardScopeFollowingRules: CollectionRule[] = [
   },
 ];
 
-export const updateCardScopeFollowingTransaction: TransactionDefinition = {
+const updateCardScopeFollowingTransaction: TransactionDefinition = {
   id: "update-card-scope-following",
   description:
     "Applies an instance-card edit to the edited card and every later sibling in the same recurrence series, respecting per-sibling field overrides.",
@@ -258,7 +263,7 @@ export const updateCardScopeFollowingTransaction: TransactionDefinition = {
 
 // ── update-card scope=all ───────────────────────────────────────────
 
-export const updateCardScopeAllRules: CollectionRule[] = [
+const updateCardScopeAllRules: CollectionRule[] = [
   {
     id: "update-card-scope-all:update-recurrence-prototype",
     source: "cards",
@@ -287,7 +292,7 @@ export const updateCardScopeAllRules: CollectionRule[] = [
   },
 ];
 
-export const updateCardScopeAllTransaction: TransactionDefinition = {
+const updateCardScopeAllTransaction: TransactionDefinition = {
   id: "update-card-scope-all",
   description:
     "Applies an instance-card edit to every card in the recurrence series and back-propagates the change to the parent prototype so future instances inherit it.",
@@ -299,7 +304,7 @@ export const updateCardScopeAllTransaction: TransactionDefinition = {
 
 // ── delete-card scope=this ──────────────────────────────────────────
 
-export const deleteCardScopeThisRules: CollectionRule[] = [
+const deleteCardScopeThisRules: CollectionRule[] = [
   {
     id: "delete-card-scope-this:append-exception-date",
     source: "cards",
@@ -315,7 +320,7 @@ export const deleteCardScopeThisRules: CollectionRule[] = [
   },
 ];
 
-export const deleteCardScopeThisTransaction: TransactionDefinition = {
+const deleteCardScopeThisTransaction: TransactionDefinition = {
   id: "delete-card-scope-this",
   description:
     "Deletes a single instance card from a recurrence series and records the date as an exception so future materializations skip it. The card's own thread + comments cascade fires via the existing delete-card rules.",
@@ -324,7 +329,7 @@ export const deleteCardScopeThisTransaction: TransactionDefinition = {
 
 // ── delete-card scope=following ─────────────────────────────────────
 
-export const deleteCardScopeFollowingRules: CollectionRule[] = [
+const deleteCardScopeFollowingRules: CollectionRule[] = [
   {
     id: "delete-card-scope-following:cascade-future-siblings",
     source: "cards",
@@ -353,7 +358,7 @@ export const deleteCardScopeFollowingRules: CollectionRule[] = [
   },
 ];
 
-export const deleteCardScopeFollowingTransaction: TransactionDefinition = {
+const deleteCardScopeFollowingTransaction: TransactionDefinition = {
   id: "delete-card-scope-following",
   description:
     "Deletes an instance card and every later sibling in the series, then truncates the parent recurrence so no future materialization rebuilds the deleted tail.",
@@ -365,7 +370,7 @@ export const deleteCardScopeFollowingTransaction: TransactionDefinition = {
 
 // ── delete-card scope=all ───────────────────────────────────────────
 
-export const deleteCardScopeAllRules: CollectionRule[] = [
+const deleteCardScopeAllRules: CollectionRule[] = [
   {
     id: "delete-card-scope-all:cascade-siblings",
     source: "cards",
@@ -392,7 +397,7 @@ export const deleteCardScopeAllRules: CollectionRule[] = [
   },
 ];
 
-export const deleteCardScopeAllTransaction: TransactionDefinition = {
+const deleteCardScopeAllTransaction: TransactionDefinition = {
   id: "delete-card-scope-all",
   description:
     "Deletes every instance card in a recurrence series and the parent recurrence itself. Equivalent to deleting the recurrence, just initiated from an instance card.",
@@ -401,18 +406,29 @@ export const deleteCardScopeAllTransaction: TransactionDefinition = {
     "delete-card-scope-all:delete-recurrence",
   ],
 };
-
-// ── Flat exports ────────────────────────────────────────────────────
-
-/** All recurrence-related propagation rules. */
-export const recurrenceRules: CollectionRule[] = [
-  ...createRecurrenceRules,
-  ...materializeHorizonRules,
-  ...updateRecurrenceRules,
-  ...deleteRecurrenceRules,
-  ...updateCardScopeFollowingRules,
-  ...updateCardScopeAllRules,
-  ...deleteCardScopeThisRules,
-  ...deleteCardScopeFollowingRules,
-  ...deleteCardScopeAllRules,
-];
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `recurrences.ts` contributes to the propagation catalog. */
+export const recurrences: PropagationModule = {
+  rules: [
+    ...createRecurrenceRules,
+    ...materializeHorizonRules,
+    ...updateRecurrenceRules,
+    ...deleteRecurrenceRules,
+    ...updateCardScopeFollowingRules,
+    ...updateCardScopeAllRules,
+    ...deleteCardScopeThisRules,
+    ...deleteCardScopeFollowingRules,
+    ...deleteCardScopeAllRules,
+  ],
+  transactions: [
+    createRecurrenceTransaction,
+    materializeHorizonTransaction,
+    updateRecurrenceTransaction,
+    deleteRecurrenceTransaction,
+    updateCardScopeFollowingTransaction,
+    updateCardScopeAllTransaction,
+    deleteCardScopeThisTransaction,
+    deleteCardScopeFollowingTransaction,
+    deleteCardScopeAllTransaction,
+  ],
+};

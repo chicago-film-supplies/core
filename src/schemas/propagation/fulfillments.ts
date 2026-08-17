@@ -11,7 +11,12 @@
  * Order-side projection writes to fulfillments (createOrder / updateOrder /
  * opportunity webhook) live under the order rules — see `update-order:order-to-fulfillment`.
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 /**
  * The positive half — items merged, `version` bumped, a stale version 409s.
@@ -41,7 +46,7 @@ const PICKER_WRITE_NO_CASCADE: EnforcementRef = {
 
 // ── update-fulfillment-items ─────────────────────────────────────────
 
-export const updateFulfillmentItemsRules: CollectionRule[] = [
+const updateFulfillmentItemsRules: CollectionRule[] = [
   {
     id: "update-fulfillment-items:items-self",
     source: "fulfillments",
@@ -62,7 +67,7 @@ export const updateFulfillmentItemsRules: CollectionRule[] = [
   },
 ];
 
-export const updateFulfillmentItemsTransaction: TransactionDefinition = {
+const updateFulfillmentItemsTransaction: TransactionDefinition = {
   id: "update-fulfillment-items",
   description:
     "Picker write to a fulfillment's items. Validates against the underlying order " +
@@ -70,5 +75,16 @@ export const updateFulfillmentItemsTransaction: TransactionDefinition = {
     "writes only the fulfillment doc itself — no cascade.",
   steps: [
     "update-fulfillment-items:items-self",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `fulfillments.ts` contributes to the propagation catalog. */
+export const fulfillments: PropagationModule = {
+  rules: [
+    ...updateFulfillmentItemsRules,
+  ],
+  transactions: [
+    updateFulfillmentItemsTransaction,
   ],
 };

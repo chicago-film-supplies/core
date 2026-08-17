@@ -1,483 +1,112 @@
 /**
  * Propagation rules — documents how data flows between Firestore collections.
  *
- * Re-exports types, aggregate definitions, and all concrete rules.
- * The doc generator imports `rules`, `transactions`, and `aggregates` from here.
+ * The catalog is assembled from one `PropagationModule` per source file. Adding
+ * a rule means editing exactly one file; nothing here has to be told about it.
+ *
+ * ⚠️ **This file used to re-export 141 symbols by hand, and `schemas/mod.ts`
+ * re-exported 81 of them — so 60 had silently drifted out of the barrel with
+ * nothing noticing.** The whole outside world reads three values (`rules`,
+ * `transactions`, `aggregates`), which is why the fix was to delete the thing
+ * that required a list rather than to derive a better list.
+ *
+ * The import block below and `MODULES` check each other for free: a name in
+ * `MODULES` that is not imported is a compile error, and an import that is not
+ * in `MODULES` is a `deno lint` error. Only the directory listing itself needs
+ * a test — `tests/propagation.test.ts` compares this file's source against
+ * `Deno.readDir`, with no dynamic import and no execution.
+ *
+ * ⚠️ **A runtime glob here would be fatal, not merely inelegant** — manager
+ * pulls this into a browser and JSR serves it over `https:`, and neither has a
+ * directory to read or a `Deno` global. See `types.ts`'s `PropagationModule`.
  */
+
+import type {
+  CollectionRule,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
+
+import { orders } from "./orders.ts";
+import { outOfService } from "./out-of-service.ts";
+// Aliased: this file exports a `transactions` array of its own, below.
+import { transactions as transactionsModule } from "./transactions.ts";
+import { storeTransfers } from "./store-transfers.ts";
+import { products } from "./products.ts";
+import { organizations } from "./organizations.ts";
+import { contacts } from "./contacts.ts";
+import { users } from "./users.ts";
+import { invoices } from "./invoices.ts";
+import { settlements } from "./settlements.ts";
+import { creditNotes } from "./credit-notes.ts";
+import { fulfillments } from "./fulfillments.ts";
+import { taxes } from "./taxes.ts";
+import { referenceData } from "./reference-data.ts";
+import { stores } from "./stores.ts";
+import { locations } from "./locations.ts";
+import { threads } from "./threads.ts";
+import { cards } from "./cards.ts";
+import { templates } from "./templates.ts";
+import { recurrences } from "./recurrences.ts";
+import { uploadcare } from "./uploadcare.ts";
+import { crmsIngest } from "./crms-ingest.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
 
 export type {
+  AggregateDefinition,
+  CollectionRule,
+  FieldMapping,
   FieldPath,
   PropagationMode,
-  FieldMapping,
-  CollectionRule,
+  PropagationModule,
   TransactionDefinition,
-  AggregateDefinition,
 } from "./types.ts";
 
 // ── Aggregates ───────────────────────────────────────────────────────
 
 export { aggregates } from "./aggregates.ts";
 
-// ── Order rules ──────────────────────────────────────────────────────
+// ── The catalog ──────────────────────────────────────────────────────
 
-export {
-  createOrderRules,
-  createOrderTransaction,
-  updateOrderRules,
-  updateOrderTransaction,
-  updateBookingRules,
-  updateBookingTransaction,
-  bulkCheckoutOrderTransaction,
-  bulkReturnOrderTransaction,
-  bulkFulfillmentBookingsTransaction,
-  finalizeOrderTransaction,
-  processOrderDocsRules,
-  processOrderDocsTransaction,
-} from "./orders.ts";
-
-// ── Out-of-service rules ─────────────────────────────────────────────
-
-export {
-  createOutOfServiceRules,
-  createOutOfServiceTransaction,
-  updateOutOfServiceRules,
-  updateOutOfServiceTransaction,
-} from "./out-of-service.ts";
-
-// ── Transaction rules ────────────────────────────────────────────────
-
-export {
-  createTransactionRules,
-  createTransactionTransaction,
-  reverseTransactionRules,
-  reverseTransactionTransaction,
-} from "./transactions.ts";
-
-// ── Product rules ────────────────────────────────────────────────────
-
-export {
-  createProductRules,
-  createProductTransaction,
-  updateProductRules,
-  updateProductOrderRules,
-  updateProductTransaction,
-} from "./products.ts";
-
-// ── Organization rules ───────────────────────────────────────────────
-
-export {
-  createOrganizationRules,
-  createOrganizationTransaction,
-  updateOrganizationRules,
-  updateOrganizationTransaction,
-} from "./organizations.ts";
-
-// ── Contact rules ────────────────────────────────────────────────────
-
-export {
-  createContactRules,
-  createContactTransaction,
-  updateContactRules,
-  updateContactTransaction,
-} from "./contacts.ts";
-
-// ── User rules ───────────────────────────────────────────────────────
-
-export {
-  createUserRules,
-  createUserTransaction,
-  updateUserRules,
-  updateUserTransaction,
-  deleteUserRules,
-  deleteUserTransaction,
-} from "./users.ts";
-
-// ── Invoice rules ───────────────────────────────────────────────────
-
-export {
-  createInvoiceRules,
-  createInvoiceTransaction,
-  updateInvoiceOrderRules,
-  updateInvoiceTransaction,
-  updateOrderInvoiceRules,
-} from "./invoices.ts";
-
-// ── CRMS ingest transactions (no rules of their own — they reuse) ────
-
-export {
-  crmsInvoiceUpsertTransaction,
-  crmsMemberContactTransaction,
-  crmsMemberOrganizationTransaction,
-  crmsOpportunityOrderTransaction,
-} from "./crms-ingest.ts";
-
-// ── Settlement rules ────────────────────────────────────────────────
-
-export {
-  createSettlementRules,
-  createSettlementTransaction,
-  reverseSettlementRules,
-  reverseSettlementTransaction,
-  syncXeroSettlementRules,
-  syncXeroSettlementTransaction,
-  voidInvoiceFromCrmsRules,
-  voidInvoiceFromCrmsTransaction,
-  voidInvoiceFromXeroRules,
-  voidInvoiceFromXeroTransaction,
-  voidInvoiceRules,
-  voidInvoiceTransaction,
-} from "./settlements.ts";
-
-// ── Fulfillment rules ───────────────────────────────────────────────
-
-export {
-  updateFulfillmentItemsRules,
-  updateFulfillmentItemsTransaction,
-} from "./fulfillments.ts";
-
-// ── Location rules ──────────────────────────────────────────────────
-
-export {
-  createLocationRules,
-  createLocationTransaction,
-  updateLocationTransactionalRules,
-  updateLocationTransaction,
-} from "./locations.ts";
-
-// ── Tax rules ───────────────────────────────────────────────────────
-
-export { updateTaxRules } from "./taxes.ts";
-
-// ── Reference data rules ─────────────────────────────────────────────
-
-export {
-  updateTagRules,
-  deleteTagRules,
-  updateTrackingCategoryRules,
-  updateLocationTypeRules,
-  updateLocationRules,
-  materializeHolidayDateRules,
-  createHolidayDefinitionTransaction,
-  updateHolidayDefinitionTransaction,
-  deleteHolidayDefinitionTransaction,
-  rematerializeHolidaySnapshotRules,
-  recomputeHolidayDraftOrderRules,
-  recomputeHolidayDraftInvoiceRules,
-} from "./reference-data.ts";
-
-// ── Store rules ──────────────────────────────────────────────────────
-
-export { createStoreRules, updateStoreRules } from "./stores.ts";
-
-// ── Store-transfer rules ─────────────────────────────────────────────
-
-export {
-  createStoreTransferRules,
-  createStoreTransferTransaction,
-} from "./store-transfers.ts";
-
-// ── Stock-summary rule factories ─────────────────────────────────────
-
-export { seedStockRules, stockRules, stockSteps } from "./stock.ts";
-
-// ── Credit-note rules ────────────────────────────────────────────────
-
-export {
-  createCreditNoteRules,
-  createCreditNoteTransaction,
-  allocateCreditNoteRules,
-  allocateCreditNoteTransaction,
-  voidCreditNoteRules,
-  voidCreditNoteTransaction,
-} from "./credit-notes.ts";
-
-// ── Threads & comments rules ─────────────────────────────────────────
-
-export {
-  threadCowriteRules,
-  threadOrderRules,
-  threadInvoiceRules,
-  threadContactRules,
-  threadOrganizationRules,
-  threadProductRules,
-  threadRoleRules,
-  threadOutOfServiceRules,
-  threadCreditNoteRules,
-  createRoleTransaction,
-  createCommentRules,
-  createCommentTransaction,
-  deleteCommentRules,
-  deleteCommentTransaction,
-} from "./threads.ts";
-
-// ── Cards rules ──────────────────────────────────────────────────────
-
-export {
-  cardRules,
-  createCardRules,
-  createCardTransaction,
-  deleteCardRules,
-  deleteCardTransaction,
-} from "./cards.ts";
-
-// ── Template (git-canonical) rules ───────────────────────────────────
-
-export {
-  templateRules,
-  createTemplateRules,
-  createTemplateTransaction,
-  manageDraftRules,
-  manageDraftTransaction,
-  publishTemplateRules,
-  publishTemplateTransaction,
-} from "./templates.ts";
-
-// ── Recurrences rules ────────────────────────────────────────────────
-
-export {
-  recurrenceRules,
-  createRecurrenceRules,
-  createRecurrenceTransaction,
-  materializeHorizonRules,
-  materializeHorizonTransaction,
-  updateRecurrenceRules,
-  updateRecurrenceTransaction,
-  deleteRecurrenceRules,
-  deleteRecurrenceTransaction,
-  updateCardScopeFollowingRules,
-  updateCardScopeFollowingTransaction,
-  updateCardScopeAllRules,
-  updateCardScopeAllTransaction,
-  deleteCardScopeThisRules,
-  deleteCardScopeThisTransaction,
-  deleteCardScopeFollowingRules,
-  deleteCardScopeFollowingTransaction,
-  deleteCardScopeAllRules,
-  deleteCardScopeAllTransaction,
-} from "./recurrences.ts";
-
-// ── Uploadcare work-list rules ───────────────────────────────────────
-
-export { uploadcareWorkListRules } from "./uploadcare.ts";
-
-// ── Convenience arrays ───────────────────────────────────────────────
-
-import type { CollectionRule, TransactionDefinition } from "./types.ts";
-
-import {
-  createOrderRules,
-  createOrderTransaction,
-  updateOrderRules,
-  updateOrderTransaction,
-  updateBookingRules,
-  updateBookingTransaction,
-  bulkCheckoutOrderTransaction,
-  bulkReturnOrderTransaction,
-  bulkFulfillmentBookingsTransaction,
-  finalizeOrderTransaction,
-  processOrderDocsRules,
-  processOrderDocsTransaction,
-} from "./orders.ts";
-import {
-  createOutOfServiceRules,
-  createOutOfServiceTransaction,
-  updateOutOfServiceRules,
-  updateOutOfServiceTransaction,
-} from "./out-of-service.ts";
-import { createTransactionRules, createTransactionTransaction, reverseTransactionRules, reverseTransactionTransaction } from "./transactions.ts";
-import { createProductRules, createProductTransaction, updateProductRules, updateProductOrderRules, updateProductTransaction } from "./products.ts";
-import { createOrganizationRules, createOrganizationTransaction, updateOrganizationRules, updateOrganizationTransaction } from "./organizations.ts";
-import { createContactRules, createContactTransaction, updateContactRules, updateContactTransaction } from "./contacts.ts";
-import { createUserRules, createUserTransaction, updateUserRules, updateUserTransaction, deleteUserRules, deleteUserTransaction } from "./users.ts";
-import { createLocationRules, createLocationTransaction, updateLocationTransactionalRules, updateLocationTransaction } from "./locations.ts";
-import { createInvoiceRules, createInvoiceTransaction, updateInvoiceOrderRules, updateInvoiceTransaction, updateOrderInvoiceRules } from "./invoices.ts";
-import {
-  createSettlementRules,
-  createSettlementTransaction,
-  reverseSettlementRules,
-  reverseSettlementTransaction,
-  syncXeroSettlementRules,
-  syncXeroSettlementTransaction,
-  voidInvoiceFromCrmsRules,
-  voidInvoiceFromCrmsTransaction,
-  voidInvoiceFromXeroRules,
-  voidInvoiceFromXeroTransaction,
-  voidInvoiceRules,
-  voidInvoiceTransaction,
-} from "./settlements.ts";
-import {
-  crmsInvoiceUpsertTransaction,
-  crmsMemberContactTransaction,
-  crmsMemberOrganizationTransaction,
-  crmsOpportunityOrderTransaction,
-} from "./crms-ingest.ts";
-import { updateFulfillmentItemsRules, updateFulfillmentItemsTransaction } from "./fulfillments.ts";
-import {
-  createCreditNoteRules,
-  createCreditNoteTransaction,
-  allocateCreditNoteRules,
-  allocateCreditNoteTransaction,
-  voidCreditNoteRules,
-  voidCreditNoteTransaction,
-} from "./credit-notes.ts";
-import { updateTaxRules } from "./taxes.ts";
-import { updateTagRules, deleteTagRules, updateTrackingCategoryRules, updateLocationTypeRules, updateLocationRules, materializeHolidayDateRules, createHolidayDefinitionTransaction, updateHolidayDefinitionTransaction, deleteHolidayDefinitionTransaction, rematerializeHolidaySnapshotRules, recomputeHolidayDraftOrderRules, recomputeHolidayDraftInvoiceRules } from "./reference-data.ts";
-import { createStoreRules, updateStoreRules } from "./stores.ts";
-import {
-  createStoreTransferRules,
-  createStoreTransferTransaction,
-} from "./store-transfers.ts";
-import {
-  threadCowriteRules,
-  createCommentRules,
-  createCommentTransaction,
-  deleteCommentRules,
-  deleteCommentTransaction,
-  createRoleTransaction,
-} from "./threads.ts";
-import {
-  cardRules,
-  createCardTransaction,
-  deleteCardTransaction,
-} from "./cards.ts";
-import {
-  templateRules,
-  createTemplateTransaction,
-  manageDraftTransaction,
-  publishTemplateTransaction,
-} from "./templates.ts";
-import {
-  recurrenceRules,
-  createRecurrenceTransaction,
-  materializeHorizonTransaction,
-  updateRecurrenceTransaction,
-  deleteRecurrenceTransaction,
-  updateCardScopeFollowingTransaction,
-  updateCardScopeAllTransaction,
-  deleteCardScopeThisTransaction,
-  deleteCardScopeFollowingTransaction,
-  deleteCardScopeAllTransaction,
-} from "./recurrences.ts";
-import { uploadcareWorkListRules } from "./uploadcare.ts";
-
-export const transactions: TransactionDefinition[] = [
-  createOrderTransaction,
-  updateOrderTransaction,
-  updateBookingTransaction,
-  bulkCheckoutOrderTransaction,
-  bulkReturnOrderTransaction,
-  bulkFulfillmentBookingsTransaction,
-  finalizeOrderTransaction,
-  processOrderDocsTransaction,
-  createOutOfServiceTransaction,
-  updateOutOfServiceTransaction,
-  createTransactionTransaction,
-  reverseTransactionTransaction,
-  createStoreTransferTransaction,
-  createProductTransaction,
-  updateProductTransaction,
-  createOrganizationTransaction,
-  updateOrganizationTransaction,
-  createContactTransaction,
-  updateContactTransaction,
-  createUserTransaction,
-  updateUserTransaction,
-  deleteUserTransaction,
-  createLocationTransaction,
-  updateLocationTransaction,
-  createInvoiceTransaction,
-  updateInvoiceTransaction,
-  createSettlementTransaction,
-  reverseSettlementTransaction,
-  syncXeroSettlementTransaction,
-  voidInvoiceTransaction,
-  voidInvoiceFromCrmsTransaction,
-  voidInvoiceFromXeroTransaction,
-  crmsInvoiceUpsertTransaction,
-  crmsOpportunityOrderTransaction,
-  crmsMemberOrganizationTransaction,
-  crmsMemberContactTransaction,
-  createCreditNoteTransaction,
-  allocateCreditNoteTransaction,
-  voidCreditNoteTransaction,
-  updateFulfillmentItemsTransaction,
-  createRoleTransaction,
-  createCommentTransaction,
-  deleteCommentTransaction,
-  createHolidayDefinitionTransaction,
-  updateHolidayDefinitionTransaction,
-  deleteHolidayDefinitionTransaction,
-  createCardTransaction,
-  deleteCardTransaction,
-  createTemplateTransaction,
-  manageDraftTransaction,
-  publishTemplateTransaction,
-  createRecurrenceTransaction,
-  materializeHorizonTransaction,
-  updateRecurrenceTransaction,
-  deleteRecurrenceTransaction,
-  updateCardScopeFollowingTransaction,
-  updateCardScopeAllTransaction,
-  deleteCardScopeThisTransaction,
-  deleteCardScopeFollowingTransaction,
-  deleteCardScopeAllTransaction,
+/**
+ * Every propagation source file, in declaration order.
+ *
+ * ⚠️ `stock.ts` is deliberately absent: it declares no rules of its own. It
+ * mints them into the modules that fire them, via `stockRules()`. That is the
+ * one file in this directory not yet on the one-module-per-file convention,
+ * and collapsing it is Tier 1 item 3 of the campaign — see
+ * `api-cloudrun/.claude/plans/propagation-rules-and-formal-models.md`.
+ */
+const MODULES: readonly PropagationModule[] = [
+  orders,
+  outOfService,
+  transactionsModule,
+  storeTransfers,
+  products,
+  organizations,
+  contacts,
+  users,
+  invoices,
+  settlements,
+  creditNotes,
+  fulfillments,
+  taxes,
+  referenceData,
+  stores,
+  locations,
+  threads,
+  cards,
+  templates,
+  recurrences,
+  uploadcare,
+  crmsIngest,
 ];
+
+/** Every transaction across every module. */
+export const transactions: TransactionDefinition[] = MODULES.flatMap((m) =>
+  m.transactions
+);
 
 /** All propagation rules across all transactions and cascades. */
-export const rules: CollectionRule[] = [
-  ...createOrderRules,
-  ...updateOrderRules,
-  ...updateBookingRules,
-  ...processOrderDocsRules,
-  ...createOutOfServiceRules,
-  ...updateOutOfServiceRules,
-  ...createTransactionRules,
-  ...reverseTransactionRules,
-  ...createStoreTransferRules,
-  ...createProductRules,
-  ...updateProductRules,
-  ...updateProductOrderRules,
-  ...createOrganizationRules,
-  ...updateOrganizationRules,
-  ...createContactRules,
-  ...updateContactRules,
-  ...createUserRules,
-  ...updateUserRules,
-  ...deleteUserRules,
-  ...createInvoiceRules,
-  ...updateInvoiceOrderRules,
-  ...updateOrderInvoiceRules,
-  ...createSettlementRules,
-  ...reverseSettlementRules,
-  ...syncXeroSettlementRules,
-  ...voidInvoiceRules,
-  ...voidInvoiceFromCrmsRules,
-  ...voidInvoiceFromXeroRules,
-  ...createCreditNoteRules,
-  ...allocateCreditNoteRules,
-  ...voidCreditNoteRules,
-  ...updateFulfillmentItemsRules,
-  ...updateTaxRules,
-  ...updateTagRules,
-  ...deleteTagRules,
-  ...updateTrackingCategoryRules,
-  ...updateLocationTypeRules,
-  ...createStoreRules,
-  ...updateStoreRules,
-  ...createLocationRules,
-  ...updateLocationTransactionalRules,
-  ...updateLocationRules,
-  ...materializeHolidayDateRules,
-  ...rematerializeHolidaySnapshotRules,
-  ...recomputeHolidayDraftOrderRules,
-  ...recomputeHolidayDraftInvoiceRules,
-  ...threadCowriteRules,
-  ...createCommentRules,
-  ...deleteCommentRules,
-  ...cardRules,
-  ...templateRules,
-  ...recurrenceRules,
-  ...uploadcareWorkListRules,
-];
+export const rules: CollectionRule[] = MODULES.flatMap((m) => m.rules);

@@ -32,7 +32,12 @@
  *
  * @module
  */
-import type { CollectionRule, EnforcementRef, TransactionDefinition } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+  TransactionDefinition,
+} from "./types.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 
@@ -107,7 +112,7 @@ const CREDIT_NOTE_STATUS_REFINE: EnforcementRef = {
  * conflating issue with allocation is what makes a partially-applied note
  * unrepresentable.
  */
-export const createCreditNoteRules: CollectionRule[] = [
+const createCreditNoteRules: CollectionRule[] = [
   {
     id: "create-credit-note:number-from-counter",
     source: "counters",
@@ -146,7 +151,7 @@ export const createCreditNoteRules: CollectionRule[] = [
   },
 ];
 
-export const createCreditNoteTransaction: TransactionDefinition = {
+const createCreditNoteTransaction: TransactionDefinition = {
   id: "create-credit-note",
   description:
     "Mints a credit note from the shared counter, derives each line's posting account, and cowrites its default thread. Allocates nothing — issuing and applying are separate acts.",
@@ -160,7 +165,7 @@ export const createCreditNoteTransaction: TransactionDefinition = {
 
 // ── allocate-credit-note ────────────────────────────────────────────
 
-export const allocateCreditNoteRules: CollectionRule[] = [
+const allocateCreditNoteRules: CollectionRule[] = [
   {
     id: "allocate-credit-note:note-to-settlements",
     source: "credit-notes",
@@ -242,7 +247,7 @@ export const allocateCreditNoteRules: CollectionRule[] = [
   },
 ];
 
-export const allocateCreditNoteTransaction: TransactionDefinition = {
+const allocateCreditNoteTransaction: TransactionDefinition = {
   id: "allocate-credit-note",
   description:
     "Applies a credit note to one or more invoices: appends a credit settlement per invoice, moves each invoice's projected totals and status, and co-writes the note's remaining credit. Fans out across N invoices and their orders.",
@@ -278,7 +283,7 @@ export const allocateCreditNoteTransaction: TransactionDefinition = {
 //
 // The operator path is `POST /settlements/{uid}/reverse` per allocation (already
 // live, already idempotent per row), then void.
-export const voidCreditNoteRules: CollectionRule[] = [
+const voidCreditNoteRules: CollectionRule[] = [
   {
     id: "void-credit-note:status",
     source: "credit-notes",
@@ -294,11 +299,26 @@ export const voidCreditNoteRules: CollectionRule[] = [
   },
 ];
 
-export const voidCreditNoteTransaction: TransactionDefinition = {
+const voidCreditNoteTransaction: TransactionDefinition = {
   id: "void-credit-note",
   description:
     "Voids a credit note. Refused with a 409 (`VOID_BLOCKED_BY_ALLOCATION`) when ANY allocation is unreversed — unconditionally, with no flag to override it, because Xero locks both ends of an allocation and CFS must not complete a retraction it cannot mirror. So a void that proceeds touches exactly ONE document: the note's own status. It moves no invoice balance and cascades to no order, because a note with no live allocation has no invoice to affect. Retract allocations first with `POST /settlements/{uid}/reverse`, then void.",
   steps: [
     "void-credit-note:status",
+  ],
+};
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `credit-notes.ts` contributes to the propagation catalog. */
+export const creditNotes: PropagationModule = {
+  rules: [
+    ...createCreditNoteRules,
+    ...allocateCreditNoteRules,
+    ...voidCreditNoteRules,
+  ],
+  transactions: [
+    createCreditNoteTransaction,
+    allocateCreditNoteTransaction,
+    voidCreditNoteTransaction,
   ],
 };

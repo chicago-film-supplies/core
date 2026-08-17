@@ -34,7 +34,11 @@
  * Traced from: api-cloudrun/src/services/invoicePdf.ts and
  * api-cloudrun/src/services/quotes.ts.
  */
-import type { CollectionRule, EnforcementRef } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+} from "./types.ts";
 
 /**
  * What checks these edges today, and — the part that matters — what it cannot.
@@ -72,7 +76,7 @@ const WORK_LIST_FIELDS: CollectionRule["fields"] = [
   { source: [], target: ["expires_at"], transform: "created_at + the work list's TTL horizon" },
 ];
 
-export const uploadcareWorkListRules: CollectionRule[] = [
+const uploadcareWorkListRules: CollectionRule[] = [
   {
     id: "generate-invoice-pdf:upload-to-worklist",
     source: "invoices",
@@ -94,3 +98,12 @@ export const uploadcareWorkListRules: CollectionRule[] = [
     fields: WORK_LIST_FIELDS,
   },
 ];
+
+// ── Module ──────────────────────────────────────────────────────────
+/** Everything `uploadcare.ts` contributes to the propagation catalog. */
+export const uploadcare: PropagationModule = {
+  rules: [
+    ...uploadcareWorkListRules,
+  ],
+  transactions: [],
+};

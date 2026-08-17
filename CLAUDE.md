@@ -140,9 +140,25 @@ For the full Zod 4 API reference, read `.claude/zod-llms.txt` (auto-fetched from
 - `src/schemas/contact.ts` — contact document + input schemas
 - `src/schemas/organization.ts` — organization document schema
 - `src/schemas/mod.ts` — re-exports everything (the `@cfs/core/schemas` barrel)
+- `src/schemas/propagation/` — the propagation catalog; **one module object per file**, see below
 - `src/utils/` — pure helper modules (`@cfs/core/utils/*`)
 
 Each schema file exports: Zod schema object, TypeScript interface, and input schemas (where applicable).
+
+### Propagation — one module per file, and no hand-maintained lists
+
+**Every file in `src/schemas/propagation/` exports exactly ONE value: a `PropagationModule`** (`{ rules, transactions }`, declared in `propagation/types.ts`). `mod.ts` imports them into a `MODULES` array and derives `rules` / `transactions` with `flatMap`. **The barrel exposes three values — `rules`, `transactions`, `aggregates` — and nothing else.**
+
+⚠️ **This replaced four hand-maintained copies of one list, and the drift it hid is the reason to keep it that way.** `propagation/mod.ts` re-exported **141** symbols by hand, `schemas/mod.ts` re-exported **81** of them, and `tests/propagation.test.ts` mirrored the membership twice more — so **60 exports had silently drifted out of the barrel with nothing noticing**, and two of the test's assertions were fixed-point checks that could only ever agree with the list they were derived from. The fix was to delete the thing that required a list, not to derive a better one.
+
+What follows from it, and what to do when adding a rule:
+
+- **Add the rule to its file's arrays and you are done.** Nothing else needs telling.
+- **A file has ONE `rules` array, so exporting both a member array and an in-file aggregator of it is unrepresentable.** The four aggregators that used to do this (`cardRules`, `templateRules`, `recurrenceRules`, `threadCowriteRules`) are gone.
+- **The import block and `MODULES` prove each other for free** — a name in `MODULES` that is not imported is a compile error; an import missing from `MODULES` is a `deno lint` error. The only residue is a file on disk nothing imports, which `tests/propagation.test.ts` catches by comparing `mod.ts`'s source against `Deno.readDir` (filename comparison only — no dynamic import, no execution).
+- 🔴 **Never put a runtime glob (`Deno.readDir`) inside `mod.ts`.** Manager pulls this into a **browser** and JSR serves it over `https:` — neither has a directory to read or a `Deno` global. `src/` is platform-free by deliberate policy.
+- **A rule factory is file-local and never exported**, its instantiations are exported from that same file, and **a rule id is owned by the file that declares it.** `cowriteRulesFor` (`propagation/threads.ts`) and `ledgerRule`/`locationsRule` (`propagation/transactions.ts`) already follow this. ⚠️ **`propagation/stock.ts` is the one exception left** — it exports `stockRules()`, which mints 21 of the corpus's 173 rules as seven near-identical copies across 5 files, so it declares no module and is absent from `MODULES`. Collapsing it to three rules fired by seven transactions is Tier 1 item 3 of the campaign (`api-cloudrun/.claude/plans/propagation-rules-and-formal-models.md`).
+- ⚠️ **Do not write structural counts into rule prose.** Several `invariant`/`trigger` strings carry stale ones (core#55).
 
 **A label on an object-valued key prefixes every descendant, and `.meta()` clones.**
 That pair is the non-obvious mechanic behind display columns (below) and is worth
