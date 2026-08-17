@@ -20,6 +20,7 @@ import {
   invoiceScopeDividersMatch,
   isItemSynced,
   type LineItem,
+  explainInvoiceItemDifferences,
   unexplainedInvoiceItemDifferences,
   type Tax,
   projectOrderItemToInvoiceItem,
@@ -2557,4 +2558,22 @@ Deno.test("#481 computeInvoiceSyncStatus goes GREEN on an explained line and RED
     computeInvoiceSyncStatus(taxed, changedOrderItems(), ORDER_DIV_1, FROZEN).get(KEY_A),
     "out_of_sync", // quantity moved — nothing explains that
   );
+});
+
+Deno.test("🔴 #481 no arm may fire when the tax ROWS agree — the 171-line cross-check finding", () => {
+  // Every arm is a statement about a tax-row difference. Without this gate the
+  // zero-money arm is trivially true on any untaxed line (both sides collect
+  // nothing) and goes on to "explain" an unrelated `taxes_base` difference that
+  // contains no tax question. Found by the audit cross-check on its first prod
+  // run: 171 lines where core fired an arm and the audit, which classifies only
+  // once the rows disagree, called the two identical.
+  const expected = taxedLine(TAX_CHI_V2, 15, 0);
+  const current = structuredClone(expected) as unknown as { price: Record<string, unknown> };
+  current.price.taxes_base = [{ uid: TAX_OTHER, name: "t", rate: 10, type: "percent" }];
+  const cur = current as unknown as InvoiceItem;
+
+  assertEquals(invoiceItemDifferences(expected, cur), ["price.taxes_base"]);
+  const verdict = explainInvoiceItemDifferences(expected, cur, invoiceItemDifferences(expected, cur), FROZEN);
+  assertEquals(verdict.arms, [], "an arm fired with no tax-row difference to explain");
+  assertEquals(verdict.unexplained, ["price.taxes_base"]);
 });

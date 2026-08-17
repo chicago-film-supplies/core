@@ -859,6 +859,17 @@ export function explainInvoiceItemDifferences(
   const taxFields = differences.filter((d) => TAX_EXPLAINABLE_FIELDS.has(d));
   if (taxFields.length === 0) return { unexplained: [...differences], arms: [] };
 
+  // ⚠️ **Every arm is a statement about a TAX-ROW difference, so none may fire
+  // when `price.taxes` agrees.** Without this the zero-money arm is trivially
+  // true on any untaxed line — both sides collect nothing — and would go on to
+  // "explain" an unrelated `price.taxes_base` difference that has no tax-row
+  // question in it at all. Measured on prod the moment the audit cross-check was
+  // wired: **171 lines** where this function fired an arm and the audit, which
+  // classifies only once the rows disagree, reported the two as agreeing. The
+  // conservative direction is the correct one — an unexplained line is merely
+  // badged, an over-explained one is invisible.
+  if (!differences.includes("price.taxes")) return { unexplained: [...differences], arms: [] };
+
   const expectedTax = taxAmountCents(expected);
   const currentTax = taxAmountCents(current);
 
