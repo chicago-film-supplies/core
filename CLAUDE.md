@@ -91,6 +91,10 @@ Every stored **amount** is a `z.int()` count of cents with a `_cents` suffix, so
 
 `price.base` split into **`base_cents`** (money) and **`base_percent`** (the `percent_of_total` fee percentage, 4dp), because it carried two units discriminated only by a sibling `formula`. `checkPriceBaseUnit` in `schemas/common.ts` enforces exactly-one-of, and `tests/common.test.ts` proves each arm fires.
 
+**The wider rule is that an INTEGRAL quantity is `z.int()`, not just money.** A count of things — units, documents, attempts, days — has no fractional value that means anything, and `z.number()` on one is a hole that admits a value nothing downstream can represent. Money was simply the first family to have this enforced. `quantity` is `z.int()` on orders, invoices and credit notes as of the integer-parity campaign (api-cloudrun#475); ⚠️ do **not** follow that up by deleting `QTY_SCALE` in `src/utils/orders.ts` — it exists for the arithmetic, not for the storage.
+
+⚠️ **Reach for `z.int()` when the field is a count, and stop to think when it is a measure.** A rate, a ratio, a percentage and a physical dimension are all legitimately fractional. The failure this rule prevents is a float reaching a consumer that indexes, compares or increments it; the failure it *causes*, applied to a measure, is the `beta.117` regression — a rate forced to a coarser quantum, losing information that was never a count.
+
 ### JSR imports over npm
 
 Prefer `jsr:` imports over `npm:` when a package is available on JSR. JSR packages are Deno-native, faster to install, and have better type integration.
@@ -125,6 +129,8 @@ This package uses Zod 4 (`jsr:@zod/zod@^4`), not Zod 3. Key differences from v3:
 - `z.strictObject()` instead of `z.object().strict()`
 - `z.email()` instead of `z.string().email()` (top-level string formats)
 - `z.infer<>` still works as a type utility but we define interfaces explicitly for JSR
+
+⚠️ **Zod 4 accepts TWO spellings for several constraints, and only one of them is what a downstream walker looks for.** `z.int()` and `z.number().int()` both validate identically at runtime, but they produce different schema *shapes* — so a guard that introspects the schema tree (the Typesense integer arm, the display-column resolver, `resolveZodField`) can match one and miss the other. **Prefer the top-level form** (`z.int()`, `z.email()`, `z.uuid()`), and when adding a static guard, decide deliberately whether it must match both — then test it against both, because a guard that silently sees only half its corpus reads exactly like a guard that found nothing wrong.
 
 For the full Zod 4 API reference, read `.claude/zod-llms.txt` (auto-fetched from zod.dev/llms.txt). For Deno runtime/API reference, read `.claude/deno-llms.txt` (auto-fetched from docs.deno.com). Run `deno task fetch-llms-docs` to refresh manually.
 
@@ -229,6 +235,24 @@ property arms pass vacuously over the empty set a deleted annotation produces.
 Resolving the unit is the **consumer's** job and needs its own value assertion
 there: the schema says `flat` means dollars, it cannot say what `$` the cell
 printed. See `manager/CLAUDE.md` § *Money in collection tables*.
+
+### Typesense — this package owns the configs, so it owns the guards
+
+`api-cloudrun/CLAUDE.md` says *"each side lives in the repo that owns it — core owns both the Typesense configs and the Zod schemas"*, and that is true: `src/schemas/typesense/` holds one config per collection beside the storage schema it indexes. It is written down **here** because every core-side Typesense step happens in a session that will never open that other file.
+
+**A declared Typesense field carries three duties, not two.** It must (1) resolve against a real leaf of the storage schema, (2) survive to index time rather than being stripped, and (3) **be backed by a leaf whose type can actually hold what it declares** — an `int32`/`int64` field must not sit over a leaf that admits a fraction. The third is the newest and the one people miss, because the first two fail loudly and this one does not: Typesense truncates, the value indexes, and searches quietly return the wrong row.
+
+The guards are all in `tests/typesenseFieldCoverage.test.ts`, named by the question they ask rather than by index. **Fold new Typesense invariants in there** rather than starting another walker.
+
+- **`every declared field resolves against the storage schema`** and **`no declared field is deleted at index time`** — duties 1 and 2.
+- **`every int declaration is backed by an integer-safe leaf`** — duty 3, and its inverse arm **`no rate-family field is declared as an integer`**, which exists because the fix for one is the defect for the other. A rate, a ratio or a percentage forced to an integer is the `beta.117` class.
+- **`ALL leaves must be safe, not ANY`** — a union whose arms disagree is unsafe, not half-safe.
+- **`FirestoreTimestamp is exempt by META, not by name`** — the exemption is structural, so a second timestamp-shaped type inherits it without an allowlist entry.
+- **`the predicate reads BOTH Zod 4 spellings`** — see the Zod 4 note above; `z.int()` and `z.number().int()` validate the same and introspect differently, so a guard matching one silently sees half its corpus.
+
+⚠️ **Several arms have companion tests that prove the arm can still fail** — a real schema loosened back, an integer-declared rate, a fractional literal. That pairing is the point: these arms have never gone red in anger, so nothing else distinguishes *"the corpus is clean"* from *"the walker stopped reaching it"*.
+
+⚠️ **`typesense-parity.test.ts` is a different question** and both are needed: field coverage asks whether a declaration is well-formed, parity asks whether the two environments' live indexes agree with the repo.
 
 ### Document vs input schemas
 
