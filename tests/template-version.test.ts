@@ -87,6 +87,7 @@ Deno.test("TemplateVersionSchema accepts a draft with golden_results array", () 
     git_branch: "draft/quote/abc",
     base_sha: "deadbeef",
     base_seq: 0,
+    committed_content_hash: "0badc0de0badc0de",
     golden_results: [
       {
         fixture: "order-841",
@@ -117,11 +118,69 @@ Deno.test("TemplateVersionSchema accepts a draft without golden_results (pre-fir
     git_branch: "draft/quote/abc",
     base_sha: "deadbeef",
     base_seq: 0,
+    committed_content_hash: "0badc0de0badc0de",
     written_by: { uid: "u1000000000000000000", name: "Tester" },
     version: 0,
     created_at: mockTimestamp,
     updated_at: mockTimestamp,
   });
   if (!res.success) console.log(res.error.message);
+  assertEquals(res.success, true);
+});
+
+// ── committed_content_hash is REQUIRED on a draft ───────────────────
+//
+// It was optional, so every reader had to decide what an ABSENT hash meant —
+// and the two live readers disagreed. The manager's merge guard read absent as
+// clean (publishing a never-committed draft's create-time seed over every
+// save); abandon consulted nothing and destroyed 18 uncommitted edits
+// (chicago-film-supplies/templates#79). Requiring it makes the absent case
+// unrepresentable rather than a judgement each call site re-makes.
+
+function draftDoc(over: Record<string, unknown> = {}) {
+  return {
+    uid: "tv100000000000000000",
+    uid_template: "t1000000000000000000",
+    status: "draft",
+    content: { "templates/quote.eta": "x" },
+    params: [],
+    consumed_components: [],
+    git_branch: "draft/quote/abc",
+    base_sha: "deadbeef",
+    base_seq: 0,
+    committed_content_hash: "0badc0de0badc0de",
+    written_by: { uid: "u1000000000000000000", name: "Tester" },
+    version: 0,
+    created_at: mockTimestamp,
+    updated_at: mockTimestamp,
+    ...over,
+  };
+}
+
+Deno.test("TemplateVersionSchema rejects a draft with no committed_content_hash", () => {
+  const res = TemplateVersionSchema.safeParse(draftDoc({ committed_content_hash: undefined }));
+  assertEquals(res.success, false);
+  if (!res.success) {
+    const issue = res.error.issues.find((i) => i.path[0] === "committed_content_hash");
+    assertEquals(issue?.message, 'draft version requires "committed_content_hash"');
+  }
+});
+
+Deno.test("TemplateVersionSchema: a STALE hash on a draft is still legal — it is the dirty signal", () => {
+  // The schema can only enforce presence. A hash that no longer matches the
+  // content is exactly what "saved but not committed" looks like, so rejecting
+  // it would make the state the guards exist to detect unrepresentable too.
+  const res = TemplateVersionSchema.safeParse(
+    draftDoc({ content: { "templates/quote.eta": "EDITED SINCE THE STAMP" } }),
+  );
+  assertEquals(res.success, true);
+});
+
+Deno.test("TemplateVersionSchema: archived keeps whatever it had, hash or not", () => {
+  // An abandoned draft is frozen as-is and is never written again, so demanding
+  // a field of it would strand the very docs abandon produces.
+  const res = TemplateVersionSchema.safeParse(
+    draftDoc({ status: "archived", committed_content_hash: undefined }),
+  );
   assertEquals(res.success, true);
 });

@@ -158,12 +158,29 @@ export interface TemplateVersion {
   /** uid of this version's per-branch comment thread (cowritten on draft create). */
   uid_thread?: string;
   /** Fingerprint (`hashTemplateContent`) of the draft content last pushed to its
-   * branch — stamped at commit and at release's implicit commit. The manager
-   * compares it against the hash of the live content to detect
-   * saved-but-uncommitted edits ("dirty since commit") and prompt at
-   * approve-to-merge. A content fingerprint (not a timestamp) so it's immune to
-   * non-content writes — rebase/release/rename/golden — that bump `updated_at`
-   * without changing content. Draft-only. */
+   * branch — stamped at **create** (the seed is committed to the branch before
+   * the doc is written), at commit, and at release's implicit commit. Readers
+   * compare it against the hash of the current content to detect
+   * saved-but-uncommitted edits: the manager prompts at approve-to-merge and
+   * badges the branch, and the API refuses an abandon that would discard them.
+   * A content fingerprint (not a timestamp) so it's immune to non-content
+   * writes — rebase/release/rename/golden — that bump `updated_at` without
+   * changing content.
+   *
+   * ⚠️ **REQUIRED on a draft** (enforced in the `superRefine` below), and that
+   * is the point rather than tidiness. While it was merely optional, every
+   * reader had to decide what an ABSENT hash meant, and the two live readers
+   * disagreed: the manager's merge guard read absent as *clean* and would
+   * publish a never-committed draft's create-time seed over every save, while
+   * abandon consulted nothing at all and destroyed 18 uncommitted edits
+   * (chicago-film-supplies/templates#79). Requiring it makes the absent case
+   * **unrepresentable on a draft** instead of a judgement each call site
+   * re-makes.
+   *
+   * Note the schema can only enforce PRESENCE — a stale hash stays legal, and
+   * must, because a stale hash *is* the dirty signal. Optional on
+   * `published`/`archived`: a publish flips the doc in place and drops the
+   * draft fields, and an archived draft keeps whatever it had. */
   committed_content_hash?: string;
 
   // ── published fields ──
@@ -225,7 +242,10 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
     }
   }
   if (doc.status === "draft") {
-    for (const field of ["git_branch", "base_sha"] as const) {
+    // `committed_content_hash` joined this list so that "no hash" stops being a
+    // question a reader has to answer — see its field docblock. Zero open
+    // drafts existed in either environment when it landed, so no migration.
+    for (const field of ["git_branch", "base_sha", "committed_content_hash"] as const) {
       if (doc[field] === undefined) {
         ctx.addIssue({ code: "custom", path: [field], message: `draft version requires "${field}"` });
       }
