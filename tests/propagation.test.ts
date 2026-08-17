@@ -114,7 +114,18 @@ Deno.test("enforced_by only appears on rules that state an invariant", () => {
 Deno.test("every enforced_by ref is a repo-relative path", () => {
   // A bare filename cannot be resolved from another repo, and this field is
   // read by humans in four of them.
-  const shape = /^[a-z0-9-]+\/[A-Za-z0-9_./-]+\.(ts|tsx|json|ya?ml)(:\d+)?$/;
+  //
+  // Three suffix forms are legal, and they are not equally good:
+  //   - `::<anchor>`  — the TARGET form. A test or symbol name, which survives
+  //                     insertions above it. Prefer this.
+  //   - `:<N>`        — legacy. A line number rots on any edit to the file, and
+  //                     a resolve-only check can only notice when the shift
+  //                     happens to land on whitespace; ~9% of them were already
+  //                     pointing at blank lines when this was measured.
+  //   - none          — path-only. Weakest, but honest: it claims existence and
+  //                     nothing more.
+  const shape =
+    /^[a-z0-9-]+\/[A-Za-z0-9_./-]+\.(ts|tsx|json|ya?ml)(:\d+(-\d+)?|::.+)?$/;
   for (const rule of rules) {
     for (const ref of rule.enforced_by ?? []) {
       assertEquals(
@@ -172,4 +183,49 @@ Deno.test("the enforced_by field is actually populated (non-vacuity)", () => {
     true,
     "No rule carries enforced_by — the guards above are testing nothing.",
   );
+});
+
+Deno.test("every enforced_by ref into core/ resolves", async () => {
+  // The mirror of api-cloudrun's `enforcedByCoverage.test.ts`, and the split is
+  // forced rather than chosen: 169 of the catalog's 196 `enforced_by`
+  // occurrences name an `api-cloudrun/` path, which this repo's CI has no
+  // checkout of and physically cannot resolve. So each repo checks the refs
+  // whose target it can actually see, and neither can check the other's.
+  //
+  // ⚠️ **Resolving is not supporting.** This proves the target exists, never
+  // that it still backs the clause citing it — a 13-ref sample found 2 pointing
+  // at the wrong assertion while resolving perfectly. A green here is a floor.
+  const ours = [
+    ...new Set(rules.flatMap((r) => (r.enforced_by ?? []).map((e) => e.ref))),
+  ].filter((ref) => ref.split("::")[0].split(":")[0].startsWith("core/"));
+
+  const broken: string[] = [];
+  for (const ref of ours) {
+    const [pathPart, anchor] = ref.split("::");
+    const m = pathPart.match(/^(.*):(\d+)(?:-\d+)?$/);
+    const path = m ? m[1] : pathPart;
+    let text: string;
+    try {
+      text = await Deno.readTextFile(
+        new URL("../" + path.slice("core/".length), import.meta.url),
+      );
+    } catch {
+      broken.push(`MISSING FILE   ${ref}`);
+      continue;
+    }
+    if (anchor !== undefined) {
+      // A named anchor survives insertions — which is why it is the target form.
+      if (!text.includes(anchor)) broken.push(`ANCHOR ABSENT  ${ref}`);
+    } else if (m) {
+      // Legacy `:N`, deliberately weak: it only catches a shift that happens to
+      // land on whitespace. A migration aid, not the guard.
+      const lines = text.split("\n");
+      const n = Number(m[2]);
+      if (n > lines.length) broken.push(`PAST EOF       ${ref}`);
+      else if (lines[n - 1].trim() === "") broken.push(`BLANK LINE     ${ref}`);
+    }
+  }
+
+  assertEquals(broken, [], "core-targeting enforced_by refs that do not resolve:\n" + broken.join("\n"));
+  assertEquals(ours.length > 10, true, `only ${ours.length} core-targeting refs found — expected >10 (20 at the time of writing); this guard has stopped asking its question`);
 });

@@ -27,7 +27,7 @@ const CONTACT_ORG_BACKREF: EnforcementRef = {
 
 const CONTACT_ORG_BACKREF_AT_CREATE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/contacts/contacts.test.ts:182",
+  ref: "api-cloudrun/tests/integration/contacts/contacts.test.ts::POST - creates a contact with organization cross-reference",
   clause:
     "the same membership at CREATE — a contact created with an organization cross-reference appears on the org side too",
   gates: true,

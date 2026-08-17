@@ -52,9 +52,9 @@ const ORG_SNAPSHOT_REFRESH: EnforcementRef = {
 
 const ORDER_TOTALS_MATH: EnforcementRef = {
   kind: "test",
-  ref: "core/tests/orders.test.ts:737",
+  ref: "core/tests/orders.test.ts::calculateOrderTotals",
   clause:
-    "the `totals` half — six `calculateOrderTotals` cases including the two-pass transaction fee off `subtotal_discounted`, over a `calculateItemSubtotal` verified against exact rational arithmetic on 300k random lines",
+    "the `totals` half — seven `calculateOrderTotals` cases including the two-pass transaction fee off `subtotal_discounted`, over a `calculateItemSubtotal` verified against exact rational arithmetic on 300k random lines",
   gates: true,
 };
 

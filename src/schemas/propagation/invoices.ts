@@ -107,7 +107,7 @@ const MIRROR_CONVERGES_WHEN_STALE: EnforcementRef = {
  */
 const SELECTIVE_SYNC_SEMANTICS: EnforcementRef = {
   kind: "test",
-  ref: "core/tests/invoices.test.ts:461",
+  ref: "core/tests/invoices.test.ts::syncOrderToInvoiceSelective",
   clause:
     "the override policy, per helper — `syncOrderToInvoiceSelective` and `syncOrderItems` (scoped replace + `carryForwardOverrides` keeping `coa_revenue`/`xero_id`), `syncOrderDestinationsSelective` (adds tagged with `uid_order`, keeps overridden pairs, drops non-overridden removals, leaves other orders' pairs untouched), and `syncScalarWithOverride` both directions. Does NOT cover the FREEZE predicate that decides which invoices are eligible.",
   gates: true,
@@ -115,7 +115,7 @@ const SELECTIVE_SYNC_SEMANTICS: EnforcementRef = {
 
 const ORDER_SCOPED_REMOVAL: EnforcementRef = {
   kind: "test",
-  ref: "core/tests/invoices.test.ts:244",
+  ref: "core/tests/invoices.test.ts::removeOrderScopedItems",
   clause:
     "the scoped-removal half — `removeOrderScopedItems` drops one order divider's whole subtree and keeps the other's. Says nothing about `query_by_orders` or the totals recompute that follow it.",
   gates: true,

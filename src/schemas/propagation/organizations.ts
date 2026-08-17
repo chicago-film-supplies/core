@@ -41,7 +41,7 @@ const ORG_NAME_TO_CONTACTS: EnforcementRef = {
 
 const ORG_NAME_TO_ORDERS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:767",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to active orders",
   clause:
     "the rename reaching an ACTIVE order's `organization.name`. Writer-path only; `audit-denorm-freshness.ts` has no organizations→orders row, so corpus staleness is undetected.",
   gates: true,
@@ -49,7 +49,7 @@ const ORG_NAME_TO_ORDERS: EnforcementRef = {
 
 const ORG_BILLING_TO_ORDERS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:676",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates billing_address change to active orders",
   clause:
     "the billing-address change reaching an active order's embedded snapshot. Writer-path only.",
   gates: true,

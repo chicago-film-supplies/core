@@ -106,7 +106,7 @@ const XERO_TRACKING_MEMBERSHIP: EnforcementRef = {
 /** The replacement-registration clause, asserted where it was broken. */
 const REPLACEMENT_REGISTRATION: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/products/products.test.ts:179",
+  ref: "api-cloudrun/tests/integration/products/products.test.ts::POST - creates a rental product with stock and replacement",
   clause:
     "the auto-minted-replacement clause specifically — the replacement doc carries the SAME `uid_tracking_category`, `tracking_category_name` and `xero_tracking_option_id` as the Replacements category, is present in that category's `products{}` under its own uid and name, and is counted. It also asserts NEGATIVELY against the hardcoded dead option uuid that produced the 8 broken prod replacements.",
   gates: true,
@@ -114,7 +114,7 @@ const REPLACEMENT_REGISTRATION: EnforcementRef = {
 
 const TAG_CASCADE_TESTED: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts:99",
+  ref: "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT tags [T1,T2]→[T2,T3] updates tag docs, counts, and the webshop mirror",
   clause:
     "the writer path — a tag-list change `[T1,T2] → [T2,T3]` updates the tag documents, their counts, and the webshop mirror in one write",
   gates: true,
@@ -122,7 +122,7 @@ const TAG_CASCADE_TESTED: EnforcementRef = {
 
 const TRACKING_CATEGORY_MOVE_TESTED: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts:206",
+  ref: "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT uid_tracking_category moves both denorms, not just the Xero option",
   clause:
     "all three arms of the reverse denorm — a category move rewrites BOTH `tracking_category_name` and `xero_tracking_option_id` (not just the Xero option), a `null` clear performs the two different operations the nullable/optional split requires, and a product missing its registration self-heals on the next name write",
   gates: true,
