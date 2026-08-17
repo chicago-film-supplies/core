@@ -82,7 +82,7 @@ const createSettlementRules: CollectionRule[] = [
     target: "invoices",
     mode: "co-write",
     invariant:
-      "An invoice's settled totals are the signed fold over its settlements — appending a payment row raises `amount_paid_cents` and lowers `amount_due_cents` by the same amount, while `total` is untouched because it derives from items[] and a payment changes what is OWED, not what was BILLED. The row is written BEFORE the projection: the journal is the truth and the projection is repairable, so a crash leaves stale totals over a real row rather than moved money with nothing behind it.",
+      "An invoice's settled totals are the signed fold over its settlements — appending a payment row raises `amount_paid_cents` and lowers `amount_due_cents` by the same amount, while `total` is untouched because it derives from items[] and a payment changes what is OWED, not what was BILLED. The row is written BEFORE the projection: the journal is the truth and the projection is repairable, so a crash leaves stale totals over a real row rather than moved money with nothing behind it. ⚠️ The row is written with `create`, NOT `set`, and that is the atomic claim on the session rather than a stylistic choice — the `existing.exists` pre-check is a read-then-act, so with a `set` two concurrent requests carrying one session both find the row absent, both write it, and both apply their own delta: one journal row, the money counted twice. Losing the create means a sibling is mid-flight and owns the projection, so the loser writes nothing; a row found ALREADY present at the start of a request is the different case, and it repairs.",
     enforced_by: [SETTLEMENT_TOTALS_FOLD, SETTLEMENT_BUMPS_VERSION],
     transaction: "create-settlement",
     fields: [
