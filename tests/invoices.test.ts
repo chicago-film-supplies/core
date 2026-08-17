@@ -20,6 +20,7 @@ import {
   invoiceScopeDividersMatch,
   isItemSynced,
   type LineItem,
+  unexplainedInvoiceItemDifferences,
   type Tax,
   projectOrderItemToInvoiceItem,
   recomputeSettlementTotals,
@@ -1536,6 +1537,17 @@ Deno.test("buildInvoiceDestinationDivider nulls missing collection, accepts expl
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
 });
 
+/**
+ * The sync context every `computeInvoiceSyncStatus` call needs (api-cloudrun#481).
+ *
+ * `NO_EXPLANATIONS` is the deliberate default for the pre-existing tests: an
+ * EMPTY tax map plus a LIVE order, so no explainer can fire and every assertion
+ * below still measures the raw comparison it was written to measure. A context
+ * that quietly explained things away would rewrite those tests without touching
+ * them.
+ */
+const NO_EXPLANATIONS = { taxNameByUid: new Map<string, string>(), orderFrozen: false };
+
 // ── resyncInvoiceLines + computeInvoiceSyncStatus ───────────────
 
 // Raw order items (order-root-relative paths, order-only fields present) that
@@ -1582,14 +1594,14 @@ function changedOrderItems(): LineItem[] {
 }
 
 Deno.test("computeInvoiceSyncStatus: all lines in_sync when invoice matches the order projection", () => {
-  const status = computeInvoiceSyncStatus(baselineInvoice(), RESYNC_ORDER_ITEMS, ORDER_DIV_1);
+  const status = computeInvoiceSyncStatus(baselineInvoice(), RESYNC_ORDER_ITEMS, ORDER_DIV_1, NO_EXPLANATIONS);
   assertEquals(status.get(KEY_DEST), "in_sync");
   assertEquals(status.get(KEY_A), "in_sync");
   assertEquals(status.get(KEY_B), "in_sync");
 });
 
 Deno.test("computeInvoiceSyncStatus: only the changed line is out_of_sync", () => {
-  const status = computeInvoiceSyncStatus(baselineInvoice(), changedOrderItems(), ORDER_DIV_1);
+  const status = computeInvoiceSyncStatus(baselineInvoice(), changedOrderItems(), ORDER_DIV_1, NO_EXPLANATIONS);
   assertEquals(status.get(KEY_A), "out_of_sync"); // qty changed on the order
   assertEquals(status.get(KEY_B), "in_sync"); // untouched
 });
@@ -1598,7 +1610,7 @@ Deno.test("computeInvoiceSyncStatus: invoice-only overrides do not count as drif
   const inv = baselineInvoice().map((it) =>
     it.uid === ITEM_1 ? ({ ...it, coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceItem) : it
   );
-  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1);
+  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1, NO_EXPLANATIONS);
   assertEquals(status.get(KEY_A), "in_sync"); // coa_revenue / xero_id excluded from comparison
 });
 
@@ -1611,7 +1623,7 @@ Deno.test("computeInvoiceSyncStatus: a CRMS-authored line is in_sync — the cor
   const inv = baselineInvoice().map((it) =>
     it.uid === ITEM_1 ? ({ ...it, crms_id: 8812, crms_opportunity_id: 5501 } as InvoiceItem) : it
   );
-  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1);
+  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1, NO_EXPLANATIONS);
   assertEquals(status.get(KEY_A), "in_sync");
   assertEquals(status.get(KEY_B), "in_sync"); // sibling without the field, unaffected
 });
@@ -1640,12 +1652,12 @@ Deno.test("fail-closed companion: excluding only the original four still reports
 
 Deno.test("computeInvoiceSyncStatus: order line missing from the invoice is out_of_sync", () => {
   const inv = baselineInvoice().filter((it) => it.uid !== ITEM_2);
-  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1);
+  const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1, NO_EXPLANATIONS);
   assertEquals(status.get(KEY_B), "out_of_sync");
 });
 
 Deno.test("computeInvoiceSyncStatus: invoice line the order dropped is out_of_sync", () => {
-  const status = computeInvoiceSyncStatus(baselineInvoice(), [RESYNC_DEST, RESYNC_LINE_A], ORDER_DIV_1);
+  const status = computeInvoiceSyncStatus(baselineInvoice(), [RESYNC_DEST, RESYNC_LINE_A], ORDER_DIV_1, NO_EXPLANATIONS);
   assertEquals(status.get(KEY_B), "out_of_sync");
 });
 
@@ -2362,7 +2374,7 @@ Deno.test("adoptOrderDividerStructure: an order line the invoice does not bill i
   // computeInvoiceSyncStatus, not a structural gap.
   assertEquals(invoiceScopeDividersMatch(items as InvoiceItem[], order, ORDER_DIV_1), true);
   assertEquals(
-    computeInvoiceSyncStatus(items as InvoiceItem[], order, ORDER_DIV_1).get(KEY_B_GROUPED),
+    computeInvoiceSyncStatus(items as InvoiceItem[], order, ORDER_DIV_1, NO_EXPLANATIONS).get(KEY_B_GROUPED),
     "out_of_sync",
   );
 });
@@ -2393,4 +2405,156 @@ Deno.test("adoptOrderDividerStructure: reads a parent from a PRE-NORMALIZED path
   const normalized = computeInvoiceItemPaths([orderDivider, ...items]);
   assertEquals(validateInvoiceItemPaths(normalized), []);
   assertEquals(validateInvoiceItemUniqueness(normalized), []);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// unexplainedInvoiceItemDifferences — badge only the UNEXPLAINED (#481)
+// ══════════════════════════════════════════════════════════════════
+//
+// The badge and `audit-draft-invoice-mirror.ts` were two comparators kept in
+// agreement by hand. The audit compared money and then EXPLAINED the difference;
+// the badge had no explainers, so it reported 8,792 prod lines of which the audit
+// called 0 real. These tests pin the three arms and — more importantly — the
+// cases each arm must NOT cover.
+
+const TAX_CHI = "00000000-0000-4000-8000-00000000ta01"; // Chicago Rental, v1 @ 9%
+const TAX_CHI_V2 = "00000000-0000-4000-8000-00000000ta02"; // Chicago Rental, v2 @ 15%
+const TAX_OTHER = "00000000-0000-4000-8000-00000000ta03"; // a genuinely different tax
+
+const TAX_NAMES = new Map([
+  [TAX_CHI, "Chicago Rental Tax"],
+  [TAX_CHI_V2, "Chicago Rental Tax"],
+  [TAX_OTHER, "Chicago Sales Tax"],
+]);
+const FROZEN = { taxNameByUid: TAX_NAMES, orderFrozen: true };
+const LIVE = { taxNameByUid: TAX_NAMES, orderFrozen: false };
+
+/** A line taxed by `uid` at `rate`, collecting `amount` cents, totalling accordingly. */
+function taxedLine(uid: string, rate: number, amount: number): InvoiceItem {
+  const base = projectedLineA();
+  const price = (base as unknown as { price: Record<string, unknown> }).price;
+  return {
+    ...base,
+    price: {
+      ...price,
+      taxes: [{ uid, name: "t", rate, type: "percent", amount_cents: amount }],
+      total_cents: (price.subtotal_discounted_cents as number) + amount,
+    },
+  } as unknown as InvoiceItem;
+}
+
+/** The differences, then the residue after explanation — the real call shape. */
+function residue(expected: InvoiceItem, current: InvoiceItem, ctx: typeof FROZEN): string[] {
+  return unexplainedInvoiceItemDifferences(expected, current, invoiceItemDifferences(expected, current), ctx);
+}
+
+Deno.test("#481 date-version: same tax NAME, different version, on a FROZEN order — explained", () => {
+  const expected = taxedLine(TAX_CHI_V2, 15, 3000);
+  const current = taxedLine(TAX_CHI, 9, 1800);
+  // Both the tax rows AND the total differ — the total only because the tax did.
+  assertEquals(invoiceItemDifferences(expected, current), ["price.taxes", "price.total_cents"]);
+  assertEquals(residue(expected, current, FROZEN), []);
+});
+
+Deno.test("🔴 #481 date-version REQUIRES a frozen order — the same difference on a LIVE order is drift", () => {
+  // The tightening. Both writers now resolve a tax by name at the delivery date,
+  // so this difference is expected history on a frozen order and a genuine
+  // regression on a live one. The audit only OBSERVED that all 5,119 prod lines
+  // sat on frozen orders; requiring it is what stops the explanation covering a
+  // case it was never true of.
+  const expected = taxedLine(TAX_CHI_V2, 15, 3000);
+  const current = taxedLine(TAX_CHI, 9, 1800);
+  assertEquals(residue(expected, current, LIVE), ["price.taxes", "price.total_cents"]);
+});
+
+Deno.test("🔴 #481 a genuinely DIFFERENT tax is never explained, frozen or not", () => {
+  // Different names, so the version story cannot apply. This is the arm that
+  // stops "explain the tax dimension" from collapsing into "ignore tax".
+  const expected = taxedLine(TAX_CHI_V2, 15, 3000);
+  const current = taxedLine(TAX_OTHER, 10, 2050);
+  assertEquals(residue(expected, current, FROZEN), ["price.taxes", "price.total_cents"]);
+});
+
+Deno.test("🔴 #481 an UNKNOWN tax uid is its own name — never explained away", () => {
+  // A uid missing from the map must not collide with another missing one, or two
+  // unrelated unknown taxes would explain each other.
+  const expected = taxedLine("00000000-0000-4000-8000-0000000missA", 15, 3000);
+  const current = taxedLine("00000000-0000-4000-8000-0000000missB", 9, 1800);
+  assertEquals(residue(expected, current, FROZEN).length > 0, true);
+});
+
+Deno.test("#481 zero-money: tax rows differ but neither side collects a cent — explained", () => {
+  const expected = taxedLine(TAX_CHI_V2, 15, 0);
+  const current = taxedLine(TAX_OTHER, 10, 0);
+  assertEquals(residue(expected, current, LIVE), []); // no freeze needed: $0 is $0
+});
+
+Deno.test("#481 coa: the invoice untaxes a line the order does not — explained", () => {
+  const expected = { ...taxedLine(TAX_CHI_V2, 15, 3000) } as unknown as Record<string, unknown>;
+  delete expected.coa_revenue; // the order line carries none
+  const current = { ...taxedLine(TAX_CHI_V2, 15, 0), coa_revenue: 6000 } as unknown as InvoiceItem;
+  (current as unknown as { price: Record<string, unknown> }).price.taxes = [];
+  const exp = expected as unknown as InvoiceItem;
+  assertEquals(residue(exp, current, LIVE), []);
+});
+
+Deno.test("🔴 #481 total_cents is covered ONLY when it moved by exactly the tax delta", () => {
+  // A tax difference necessarily moves the total, so refusing to cover it would
+  // leave every explained line red for a consequence of the thing just explained.
+  // Covering it unconditionally would hide a real total divergence behind an
+  // unrelated tax one. Exact integer cents — there is no tolerance to choose.
+  const expected = taxedLine(TAX_CHI_V2, 15, 3000);
+  const current = taxedLine(TAX_CHI, 9, 1800);
+  (current as unknown as { price: Record<string, unknown> }).price.total_cents = 999_999;
+  assertEquals(residue(expected, current, FROZEN), ["price.total_cents"]);
+});
+
+Deno.test("🔴 #481 a subtotal difference is NEVER explained — the money is the finding", () => {
+  // Prod order #765 <-> invoice #2162: CRMS holds $429.00 + $43.97, the order
+  // agrees, and the invoice line carries $222.97 and no tax — issued, pushed to
+  // Xero and PAID. A repriceability gate would have hidden it because the invoice
+  // is frozen; explaining rather than gating is what keeps it red.
+  const expected = taxedLine(TAX_CHI_V2, 15, 3000);
+  const current = taxedLine(TAX_CHI, 9, 1800);
+  (current as unknown as { price: Record<string, unknown> }).price.subtotal_discounted_cents = 22_297;
+  const left = residue(expected, current, FROZEN);
+  assertEquals(left.includes("price.subtotal_discounted_cents"), true, `stayed: ${left.join(", ")}`);
+});
+
+Deno.test("#481 a line with NO tax difference is passed through untouched", () => {
+  const expected = taxedLine(TAX_CHI_V2, 15, 3000);
+  const current = { ...taxedLine(TAX_CHI_V2, 15, 3000), name: "renamed" } as InvoiceItem;
+  assertEquals(residue(expected, current, FROZEN), ["name"]);
+});
+
+Deno.test("#481 an identical pair explains to nothing, in every context", () => {
+  const line = taxedLine(TAX_CHI_V2, 15, 3000);
+  for (const ctx of [FROZEN, LIVE, NO_EXPLANATIONS]) {
+    assertEquals(residue(line, line, ctx), []);
+  }
+});
+
+Deno.test("#481 computeInvoiceSyncStatus goes GREEN on an explained line and RED on a real one", () => {
+  // The end-to-end shape: the explainers have to reach the badge, not just exist.
+  const inv = baselineInvoice();
+  const taxed = inv.map((it) =>
+    it.uid === ITEM_1
+      ? ({
+        ...it,
+        price: {
+          ...(it as unknown as { price: Record<string, unknown> }).price,
+          taxes: [{ uid: TAX_CHI, name: "t", rate: 9, type: "percent", amount_cents: 0 }],
+        },
+      } as unknown as InvoiceItem)
+      : it
+  );
+  // The order projection carries no taxes; the invoice carries one collecting $0.
+  assertEquals(
+    computeInvoiceSyncStatus(taxed, RESYNC_ORDER_ITEMS, ORDER_DIV_1, FROZEN).get(KEY_A),
+    "in_sync",
+  );
+  assertEquals(
+    computeInvoiceSyncStatus(taxed, changedOrderItems(), ORDER_DIV_1, FROZEN).get(KEY_A),
+    "out_of_sync", // quantity moved — nothing explains that
+  );
 });

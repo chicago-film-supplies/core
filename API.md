@@ -20137,6 +20137,22 @@ interface InvoiceItem {
 }
 ```
 
+### `InvoiceSyncContext`
+
+What {@link computeInvoiceSyncStatus} needs in order to EXPLAIN a difference
+rather than merely report it (api-cloudrun#481).
+
+Required, never defaulted. An optional context would mean a caller that
+forgot it silently gets the naive comparator back — which is the exact
+regression this exists to remove, and it would be invisible.
+
+```ts
+interface InvoiceSyncContext {
+  taxNameByUid: ReadonlyMap<string, string>;
+  orderFrozen: boolean;
+}
+```
+
 ### `InvoiceTotals`
 
 ```ts
@@ -20519,15 +20535,24 @@ Generic in `T`, like every sibling here (`computeItemPaths`,
 caller holding the real `Invoice["items"]` gets it back rather than the loose
 `InvoiceItem[]`.
 
-### `computeInvoiceSyncStatus(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): Map<string, "in_sync" | "out_of_sync">`
+### `computeInvoiceSyncStatus(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string, context: InvoiceSyncContext): Map<string, "in_sync" | "out_of_sync">`
 
 Derive each order-scoped invoice line's sync status against the CURRENT order
 projection — no stored flag (minimal-state, derived). A line is `out_of_sync`
 when it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same
 `path`, ignoring the invoice-only override fields
-({@link INVOICE_ONLY_ITEM_FIELDS}); otherwise `in_sync`. Comparison is
-{@link invoiceItemsMatch}. Surfaced by `GET /invoices/{uid}/sync-status`, to
-badge lines and offer per-line/whole resync (see {@link resyncInvoiceLines}).
+({@link INVOICE_ONLY_ITEM_FIELDS}) **and ignoring any difference that is
+EXPLAINED** ({@link unexplainedInvoiceItemDifferences}); otherwise `in_sync`.
+Surfaced by `GET /invoices/{uid}/sync-status`, to badge lines and offer
+per-line/whole resync (see {@link resyncInvoiceLines}).
+
+⚠️ **A line goes green because its difference is EXPLAINED, never because a
+field was skipped** (api-cloudrun#481). The distinction is the whole design: an
+excluded field is blind forever, while an explained one goes red the moment
+its explanation stops holding — so a frozen invoice whose tax differs only by
+rate version reads clean, and prod order #765 ↔ invoice #2162, whose line money
+genuinely diverges, stays red. The naive form reported 8,792 prod lines of
+which the audit called **0** real, which is a badge no operator can use.
 
 ⚠️ **Meaningful only where the invoice is hung on the SAME divider skeleton as
 its order** — it is keyed on `path`, so if the two trees disagree structurally
@@ -21040,6 +21065,43 @@ invoice value (treated as an override, preserved).
 Values are compared by strict equality (`===`). Both `undefined` and `null`
 participate in the match — a field that was `null` on prev and is `null`
 on the invoice will accept a new non-null order value.
+
+### `unexplainedInvoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem, differences: readonly string[], context: InvoiceSyncContext): string[]`
+
+Strip the differences that are **explained** — leaving only the ones an
+operator should act on (api-cloudrun#481).
+
+The sync badge and `scripts/audit-draft-invoice-mirror.ts` were two
+comparators kept in agreement by hand, and they disagreed by construction: the
+audit compared money and then *explained* the difference through tested arms,
+while the badge had none and so reported every one of them. On prod that was
+8,792 lines flagged against **0** the audit called real. This is the audit's
+reasoning, moved to where both callers share it.
+
+Three arms, all narrow, and none of them a field exclusion — an excluded field
+is blind forever, whereas an explained one goes red the moment its explanation
+stops holding:
+
+1. **`coa_untaxes`** — the invoice knows the line is non-revenue and the order
+   does not, so the taxability gate fires on one side only.
+2. **`tax_date_version`** — the same tax NAMES at different rate versions, on a
+   **frozen** order. One materializer, two as-of instants; the decision not to
+   restate completed orders' quoted totals.
+3. **`tax_zero_money`** — the tax rows differ but neither side collects a cent.
+   Checked on the stored amounts, never inferred from `zero_priced`, so a
+   mislabelled line cannot hide in here.
+
+⚠️ **`price.total_cents` is covered only when it moved by EXACTLY the tax
+delta.** A tax difference necessarily moves the total, so refusing to cover it
+would leave every explained line red for a consequence of the thing just
+explained. Covering it unconditionally would hide a real total divergence
+behind an unrelated tax one. The equality is exact integer cents, so there is
+no tolerance to choose.
+
+`price.subtotal_cents` and `price.subtotal_discounted_cents` are deliberately
+NOT explainable: tax is a function of the discounted subtotal, so a line that
+disagrees there has no independent tax question — the money difference is the
+finding, and it stays.
 
 ### `validateInvoiceItemPaths(items: T[]): ItemPathIssue[]`
 

@@ -162,6 +162,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "computeInvoiceSyncStatus", // manager line-badging, not rendering
     "invoiceItemsMatch", // the one order↔invoice comparator — sync machinery
     "invoiceItemDifferences", // that comparator's substrate — audits + histograms
+    "unexplainedInvoiceItemDifferences", // the sync explainers — badge + audit machinery
     // Order → invoice projection. Exported for probes and audits
     // (api-cloudrun#481), NOT for rendering: it takes an ORDER line and an order
     // divider uid, and a template that has an order already has its items.

@@ -55,6 +55,7 @@ import {
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
 import {
   computeItemPaths,
+  isTaxableCoa,
   type ItemPathIssue,
   type ItemUniquenessIssue,
   type LineItem,
@@ -727,6 +728,132 @@ export function invoiceItemsMatch(expected: InvoiceItem, current: InvoiceItem): 
 }
 
 /**
+ * What {@link computeInvoiceSyncStatus} needs in order to EXPLAIN a difference
+ * rather than merely report it (api-cloudrun#481).
+ *
+ * Required, never defaulted. An optional context would mean a caller that
+ * forgot it silently gets the naive comparator back — which is the exact
+ * regression this exists to remove, and it would be invisible.
+ */
+export interface InvoiceSyncContext {
+  /**
+   * Tax uid → its `name`. Two taxes sharing a name are two *versions* of one
+   * tax, which is what makes a rate-version difference distinguishable from a
+   * genuinely different tax. A uid missing from the map is treated as its own
+   * name, so an unknown tax can never be explained away.
+   */
+  taxNameByUid: ReadonlyMap<string, string>;
+  /**
+   * Whether the SOURCE ORDER is frozen, i.e. no longer repriceable.
+   *
+   * ⚠️ **The date-version arm REQUIRES this, and that is a tightening, not
+   * bookkeeping.** Both writers now resolve a tax by name at the delivery date,
+   * so a same-name/different-version difference is expected history on a frozen
+   * order and is **genuine drift on a live one**. The audit that first measured
+   * this bucket only *observed* that all 5,119 prod lines sat on frozen orders;
+   * requiring it is what stops the explanation from covering a case it was
+   * never true of.
+   */
+  orderFrozen: boolean;
+}
+
+/** Whole-cent tax a line carries. Integer addition — closed under the quantum, exact. */
+function taxAmountCents(item: InvoiceItem): number {
+  const price = (item as unknown as { price?: { taxes?: Array<{ amount_cents?: number }> } }).price;
+  return (price?.taxes ?? []).reduce((n, t) => n + (t.amount_cents ?? 0), 0);
+}
+
+/** A line's tax identity — which tax at which rate, order-insensitive. */
+function taxIdentity(item: InvoiceItem): string[] {
+  const price = (item as unknown as { price?: { taxes?: Array<{ uid?: string; rate?: number }> } }).price;
+  return (price?.taxes ?? []).map((t) => `${t.uid}@${t.rate}`).sort();
+}
+
+/** The same identity with each uid replaced by its NAME — the version-blind form. */
+function taxNames(item: InvoiceItem, taxNameByUid: ReadonlyMap<string, string>): string[] {
+  const price = (item as unknown as { price?: { taxes?: Array<{ uid?: string }> } }).price;
+  return (price?.taxes ?? [])
+    .map((t) => taxNameByUid.get(t.uid ?? "") ?? `unknown:${t.uid}`)
+    .sort();
+}
+
+const sameList = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
+/** The price fields a TAX explanation is allowed to cover. */
+const TAX_EXPLAINABLE_FIELDS = new Set(["price.taxes", "price.taxes_base", "price.total_cents"]);
+
+/**
+ * Strip the differences that are **explained** — leaving only the ones an
+ * operator should act on (api-cloudrun#481).
+ *
+ * The sync badge and `scripts/audit-draft-invoice-mirror.ts` were two
+ * comparators kept in agreement by hand, and they disagreed by construction: the
+ * audit compared money and then *explained* the difference through tested arms,
+ * while the badge had none and so reported every one of them. On prod that was
+ * 8,792 lines flagged against **0** the audit called real. This is the audit's
+ * reasoning, moved to where both callers share it.
+ *
+ * Three arms, all narrow, and none of them a field exclusion — an excluded field
+ * is blind forever, whereas an explained one goes red the moment its explanation
+ * stops holding:
+ *
+ * 1. **`coa_untaxes`** — the invoice knows the line is non-revenue and the order
+ *    does not, so the taxability gate fires on one side only.
+ * 2. **`tax_date_version`** — the same tax NAMES at different rate versions, on a
+ *    **frozen** order. One materializer, two as-of instants; the decision not to
+ *    restate completed orders' quoted totals.
+ * 3. **`tax_zero_money`** — the tax rows differ but neither side collects a cent.
+ *    Checked on the stored amounts, never inferred from `zero_priced`, so a
+ *    mislabelled line cannot hide in here.
+ *
+ * ⚠️ **`price.total_cents` is covered only when it moved by EXACTLY the tax
+ * delta.** A tax difference necessarily moves the total, so refusing to cover it
+ * would leave every explained line red for a consequence of the thing just
+ * explained. Covering it unconditionally would hide a real total divergence
+ * behind an unrelated tax one. The equality is exact integer cents, so there is
+ * no tolerance to choose.
+ *
+ * `price.subtotal_cents` and `price.subtotal_discounted_cents` are deliberately
+ * NOT explainable: tax is a function of the discounted subtotal, so a line that
+ * disagrees there has no independent tax question — the money difference is the
+ * finding, and it stays.
+ */
+export function unexplainedInvoiceItemDifferences(
+  expected: InvoiceItem,
+  current: InvoiceItem,
+  differences: readonly string[],
+  context: InvoiceSyncContext,
+): string[] {
+  if (differences.length === 0) return [];
+  const taxFields = differences.filter((d) => TAX_EXPLAINABLE_FIELDS.has(d));
+  if (taxFields.length === 0) return [...differences];
+
+  const expectedTax = taxAmountCents(expected);
+  const currentTax = taxAmountCents(current);
+
+  const coaUntaxes = !isTaxableCoa((current as { coa_revenue?: COARevenueType | null }).coa_revenue) &&
+    (expected as { coa_revenue?: COARevenueType | null }).coa_revenue == null;
+  const dateVersion = context.orderFrozen &&
+    !sameList(taxIdentity(expected), taxIdentity(current)) &&
+    sameList(taxNames(expected, context.taxNameByUid), taxNames(current, context.taxNameByUid));
+  const zeroMoney = expectedTax === 0 && currentTax === 0;
+
+  if (!coaUntaxes && !dateVersion && !zeroMoney) return [...differences];
+
+  // The total moved by EXACTLY what the tax moved, and by nothing else.
+  const expectedTotal = (expected as { price?: { total_cents?: number } }).price?.total_cents ?? 0;
+  const currentTotal = (current as { price?: { total_cents?: number } }).price?.total_cents ?? 0;
+  const totalFollowsTax = currentTotal - expectedTotal === currentTax - expectedTax;
+
+  return differences.filter((d) => {
+    if (!TAX_EXPLAINABLE_FIELDS.has(d)) return true;
+    if (d === "price.total_cents") return !totalFollowsTax;
+    return false;
+  });
+}
+
+/**
  * Compare a previous order item to a current invoice item to detect overrides.
  * Returns true if the invoice item is "synced" (matches the order item on all
  * non-invoice-only fields), false if it has been manually overridden.
@@ -1356,9 +1483,18 @@ export function resyncInvoiceLines(
  * projection — no stored flag (minimal-state, derived). A line is `out_of_sync`
  * when it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same
  * `path`, ignoring the invoice-only override fields
- * ({@link INVOICE_ONLY_ITEM_FIELDS}); otherwise `in_sync`. Comparison is
- * {@link invoiceItemsMatch}. Surfaced by `GET /invoices/{uid}/sync-status`, to
- * badge lines and offer per-line/whole resync (see {@link resyncInvoiceLines}).
+ * ({@link INVOICE_ONLY_ITEM_FIELDS}) **and ignoring any difference that is
+ * EXPLAINED** ({@link unexplainedInvoiceItemDifferences}); otherwise `in_sync`.
+ * Surfaced by `GET /invoices/{uid}/sync-status`, to badge lines and offer
+ * per-line/whole resync (see {@link resyncInvoiceLines}).
+ *
+ * ⚠️ **A line goes green because its difference is EXPLAINED, never because a
+ * field was skipped** (api-cloudrun#481). The distinction is the whole design: an
+ * excluded field is blind forever, while an explained one goes red the moment
+ * its explanation stops holding — so a frozen invoice whose tax differs only by
+ * rate version reads clean, and prod order #765 ↔ invoice #2162, whose line money
+ * genuinely diverges, stays red. The naive form reported 8,792 prod lines of
+ * which the audit called **0** real, which is a badge no operator can use.
  *
  * ⚠️ **Meaningful only where the invoice is hung on the SAME divider skeleton as
  * its order** — it is keyed on `path`, so if the two trees disagree structurally
@@ -1376,6 +1512,7 @@ export function computeInvoiceSyncStatus(
   currentInvoiceItems: InvoiceItem[],
   orderItems: LineItem[],
   orderDividerUid: string,
+  context: InvoiceSyncContext,
 ): Map<string, "in_sync" | "out_of_sync"> {
   const status = new Map<string, "in_sync" | "out_of_sync">();
 
@@ -1398,7 +1535,13 @@ export function computeInvoiceSyncStatus(
       continue;
     }
     const expected = projectOrderItemToInvoiceItem(orderItem, orderDividerUid);
-    status.set(fullKey, invoiceItemsMatch(expected, current) ? "in_sync" : "out_of_sync");
+    const unexplained = unexplainedInvoiceItemDifferences(
+      expected,
+      current,
+      invoiceItemDifferences(expected, current),
+      context,
+    );
+    status.set(fullKey, unexplained.length === 0 ? "in_sync" : "out_of_sync");
   }
 
   // Invoice-scoped lines the order no longer has.
