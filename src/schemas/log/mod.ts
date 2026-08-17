@@ -144,9 +144,11 @@ export {
 } from "./template-event.ts";
 export {
   TYPESENSE_EVENT_MSGS,
+  TYPESENSE_SYNC_OUTCOMES,
   TypesenseEventLogRecordSchema,
   type TypesenseEventLogRecord,
   type TypesenseEventMsg,
+  type TypesenseSyncOutcome,
 } from "./typesense-event.ts";
 export {
   USER_SESSION_EVENT_MSGS,

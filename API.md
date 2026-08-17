@@ -7617,6 +7617,14 @@ interface TypesenseDisplayPrefs {
 const TypesenseDisplayPrefsSchema: z.ZodType<TypesenseDisplayPrefs>;
 ```
 
+### `TypesenseSyncOutcome`
+
+One collection's outcome in a sync pass.
+
+```ts
+type TypesenseSyncOutcome = indexedAccess;
+```
+
 ### `UidNameRef`
 
 Zod schema for a uid + name reference.
@@ -18372,7 +18380,26 @@ const TEMPLATE_EVENT_MSGS: "fixture_saved" | "fixture_deleted" | "template_aband
 Msg literals this archetype absorbs.
 
 ```ts
-const TYPESENSE_EVENT_MSGS: "typesense_alias_mismatch" | "typesense_batch_import_failed" | "typesense_build_delete_failed" | "typesense_cleanup_old_collections_failed" | "typesense_collection_created" | "typesense_count_mismatch" | "typesense_delete" | "typesense_import_failed" | "typesense_orphan_delete_failed" | "typesense_parent_keys_missing" | "typesense_parent_keys_parse_failed" | "typesense_purge_orphans_failed" | "typesense_reindex_enqueued" | "typesense_reindex_superseded" | "typesense_reindex_swapped" | "typesense_scoped_key_parent_missing" | "typesense_swap_alias_failed" | "typesense_sync_check_failed" | "typesense_sync_synonyms_failed" | "typesense_synonyms_synced" | "typesense_translate_failed" | "typesense_upsert"[];
+const TYPESENSE_EVENT_MSGS: "typesense_alias_mismatch" | "typesense_batch_import_failed" | "typesense_build_delete_failed" | "typesense_cleanup_old_collections_failed" | "typesense_collection_created" | "typesense_count_mismatch" | "typesense_delete" | "typesense_import_failed" | "typesense_orphan_delete_failed" | "typesense_parent_keys_missing" | "typesense_parent_keys_parse_failed" | "typesense_purge_orphans_failed" | "typesense_reindex_enqueued" | "typesense_reindex_superseded" | "typesense_reindex_swapped" | "typesense_scoped_key_parent_missing" | "typesense_swap_alias_failed" | "typesense_sync_check_failed" | "typesense_sync_state" | "typesense_sync_synonyms_failed" | "typesense_synonyms_synced" | "typesense_translate_failed" | "typesense_upsert"[];
+```
+
+### `TYPESENSE_SYNC_OUTCOMES`
+
+What one collection's sync pass did — the payload of `typesense_sync_state`.
+
+⚠️ **`"ok"` is the load-bearing member, not the boring one.** The whole reason
+this record exists is that the sync used to speak only when something went
+wrong, which makes a presence rule self-latch: it fires, the condition clears,
+and nothing ever says so. A state emitted on every pass lets a rule assert the
+healthy shape and — separately — assert that the pass ran at all.
+
+The members are the branches the check can take, and they are deliberately
+distinguishable rather than collapsed into ok/not-ok: `deferred` means the run
+hit its deadline or repair budget and this collection goes to the head of the
+next rotation, which is normal operation, while `repair_failed` is not.
+
+```ts
+const TYPESENSE_SYNC_OUTCOMES: "ok" | "enqueued" | "deduped" | "repaired" | "repair_failed" | "deferred" | "failed"[];
 ```
 
 ### `TemplateEventLogRecord`
@@ -18508,12 +18535,24 @@ interface TypesenseEventLogRecord {
   user_id?: string;
   trace_id?: string;
   span_id?: string;
+  outcome?: TypesenseSyncOutcome;
+  alias_current?: boolean;
+  reindex_attempts?: number;
+  updates?: number;
 }
 ```
 
 ### `TypesenseEventLogRecordSchema`
 
 Zod schema for {@link TypesenseEventLogRecord}.
+
+⚠️ **The four `typesense_sync_state` fields are declared rather than left to
+`.passthrough()`, and that is the point of declaring them.** An alert keys on
+`reindex_attempts`, so it must key on a field something constrains: passthrough
+would let a float or a string reach the rule, which then compares silently and
+wrongly. They stay OPTIONAL because this archetype absorbs 23 msgs and only one
+of them carries these — the constraint is on the shape when present, not on
+every record.
 
 ```ts
 const TypesenseEventLogRecordSchema: z.ZodType<TypesenseEventLogRecord>;
@@ -18525,6 +18564,14 @@ Discriminated msg union for Typesense-archetype log records.
 
 ```ts
 type TypesenseEventMsg = indexedAccess;
+```
+
+### `TypesenseSyncOutcome`
+
+One collection's outcome in a sync pass.
+
+```ts
+type TypesenseSyncOutcome = indexedAccess;
 ```
 
 ### `USER_SESSION_EVENT_MSGS`

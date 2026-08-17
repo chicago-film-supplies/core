@@ -350,6 +350,11 @@ export {
   // typed `logTyped` API in api-cloudrun.
   type TypedLogRecord,
   MSG_SCHEMA_REGISTRY,
+  // `typesense_sync_state`'s outcome. Exported so the emitter can ANNOTATE its
+  // variable rather than pass a bare string into a passthrough record — that is
+  // what makes a typo a compile error at the assignment instead of a row the
+  // alert silently never matches.
+  type TypesenseSyncOutcome,
 } from "./log/mod.ts";
 
 export {

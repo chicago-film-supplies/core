@@ -3655,6 +3655,12 @@
           "doc": ""
         },
         {
+          "kind": "typeAlias",
+          "name": "TypesenseSyncOutcome",
+          "declaration": "type TypesenseSyncOutcome = indexedAccess;",
+          "doc": "One collection's outcome in a sync pass."
+        },
+        {
           "kind": "variable",
           "name": "UidNameRef",
           "declaration": "const UidNameRef: z.ZodType<UidNameRefType>;",
@@ -9123,8 +9129,14 @@
         {
           "kind": "variable",
           "name": "TYPESENSE_EVENT_MSGS",
-          "declaration": "const TYPESENSE_EVENT_MSGS: \"typesense_alias_mismatch\" | \"typesense_batch_import_failed\" | \"typesense_build_delete_failed\" | \"typesense_cleanup_old_collections_failed\" | \"typesense_collection_created\" | \"typesense_count_mismatch\" | \"typesense_delete\" | \"typesense_import_failed\" | \"typesense_orphan_delete_failed\" | \"typesense_parent_keys_missing\" | \"typesense_parent_keys_parse_failed\" | \"typesense_purge_orphans_failed\" | \"typesense_reindex_enqueued\" | \"typesense_reindex_superseded\" | \"typesense_reindex_swapped\" | \"typesense_scoped_key_parent_missing\" | \"typesense_swap_alias_failed\" | \"typesense_sync_check_failed\" | \"typesense_sync_synonyms_failed\" | \"typesense_synonyms_synced\" | \"typesense_translate_failed\" | \"typesense_upsert\"[];",
+          "declaration": "const TYPESENSE_EVENT_MSGS: \"typesense_alias_mismatch\" | \"typesense_batch_import_failed\" | \"typesense_build_delete_failed\" | \"typesense_cleanup_old_collections_failed\" | \"typesense_collection_created\" | \"typesense_count_mismatch\" | \"typesense_delete\" | \"typesense_import_failed\" | \"typesense_orphan_delete_failed\" | \"typesense_parent_keys_missing\" | \"typesense_parent_keys_parse_failed\" | \"typesense_purge_orphans_failed\" | \"typesense_reindex_enqueued\" | \"typesense_reindex_superseded\" | \"typesense_reindex_swapped\" | \"typesense_scoped_key_parent_missing\" | \"typesense_swap_alias_failed\" | \"typesense_sync_check_failed\" | \"typesense_sync_state\" | \"typesense_sync_synonyms_failed\" | \"typesense_synonyms_synced\" | \"typesense_translate_failed\" | \"typesense_upsert\"[];",
           "doc": "Msg literals this archetype absorbs."
+        },
+        {
+          "kind": "variable",
+          "name": "TYPESENSE_SYNC_OUTCOMES",
+          "declaration": "const TYPESENSE_SYNC_OUTCOMES: \"ok\" | \"enqueued\" | \"deduped\" | \"repaired\" | \"repair_failed\" | \"deferred\" | \"failed\"[];",
+          "doc": "What one collection's sync pass did — the payload of `typesense_sync_state`.\n\n⚠️ **`\"ok\"` is the load-bearing member, not the boring one.** The whole reason\nthis record exists is that the sync used to speak only when something went\nwrong, which makes a presence rule self-latch: it fires, the condition clears,\nand nothing ever says so. A state emitted on every pass lets a rule assert the\nhealthy shape and — separately — assert that the pass ran at all.\n\nThe members are the branches the check can take, and they are deliberately\ndistinguishable rather than collapsed into ok/not-ok: `deferred` means the run\nhit its deadline or repair budget and this collection goes to the head of the\nnext rotation, which is normal operation, while `repair_failed` is not."
         },
         {
           "kind": "interface",
@@ -9171,20 +9183,26 @@
         {
           "kind": "interface",
           "name": "TypesenseEventLogRecord",
-          "declaration": "interface TypesenseEventLogRecord {\n  level: LogLevelType;\n  msg: TypesenseEventMsg;\n  ts: string;\n  collection?: string;\n  typesense_collection?: string;\n  document_id?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "declaration": "interface TypesenseEventLogRecord {\n  level: LogLevelType;\n  msg: TypesenseEventMsg;\n  ts: string;\n  collection?: string;\n  typesense_collection?: string;\n  document_id?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  outcome?: TypesenseSyncOutcome;\n  alias_current?: boolean;\n  reindex_attempts?: number;\n  updates?: number;\n}",
           "doc": "Structured log entry for any Typesense pipeline event."
         },
         {
           "kind": "variable",
           "name": "TypesenseEventLogRecordSchema",
           "declaration": "const TypesenseEventLogRecordSchema: z.ZodType<TypesenseEventLogRecord>;",
-          "doc": "Zod schema for {@link TypesenseEventLogRecord}."
+          "doc": "Zod schema for {@link TypesenseEventLogRecord}.\n\n⚠️ **The four `typesense_sync_state` fields are declared rather than left to\n`.passthrough()`, and that is the point of declaring them.** An alert keys on\n`reindex_attempts`, so it must key on a field something constrains: passthrough\nwould let a float or a string reach the rule, which then compares silently and\nwrongly. They stay OPTIONAL because this archetype absorbs 23 msgs and only one\nof them carries these — the constraint is on the shape when present, not on\nevery record."
         },
         {
           "kind": "typeAlias",
           "name": "TypesenseEventMsg",
           "declaration": "type TypesenseEventMsg = indexedAccess;",
           "doc": "Discriminated msg union for Typesense-archetype log records."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "TypesenseSyncOutcome",
+          "declaration": "type TypesenseSyncOutcome = indexedAccess;",
+          "doc": "One collection's outcome in a sync pass."
         },
         {
           "kind": "variable",
