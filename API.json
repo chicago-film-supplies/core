@@ -10080,10 +10080,22 @@
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPrice from schemas to avoid type drift."
         },
         {
+          "kind": "typeAlias",
+          "name": "InvoiceSyncArm",
+          "declaration": "type InvoiceSyncArm = \"coa_untaxes\" | \"tax_date_version\" | \"tax_zero_money\";",
+          "doc": "Which explanation accounted for a difference."
+        },
+        {
           "kind": "interface",
           "name": "InvoiceSyncContext",
           "declaration": "interface InvoiceSyncContext {\n  taxNameByUid: ReadonlyMap<string, string>;\n  orderFrozen: boolean;\n}",
           "doc": "What {@link computeInvoiceSyncStatus} needs in order to EXPLAIN a difference\nrather than merely report it (api-cloudrun#481).\n\nRequired, never defaulted. An optional context would mean a caller that\nforgot it silently gets the naive comparator back — which is the exact\nregression this exists to remove, and it would be invisible."
+        },
+        {
+          "kind": "interface",
+          "name": "InvoiceSyncExplanation",
+          "declaration": "interface InvoiceSyncExplanation {\n  unexplained: string[];\n  arms: InvoiceSyncArm[];\n}",
+          "doc": "{@link explainInvoiceItemDifferences}'s verdict: what is left, and what accounted for the rest."
         },
         {
           "kind": "typeAlias",
@@ -10341,6 +10353,14 @@
             }
           ],
           "returnsTag": "The derived status"
+        },
+        {
+          "kind": "function",
+          "name": "explainInvoiceItemDifferences",
+          "signature": "explainInvoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem, differences: readonly string[], context: InvoiceSyncContext): InvoiceSyncExplanation",
+          "doc": "{@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.\n\nThe residue alone is what the badge needs; a diagnostic needs the reason, and\n`scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning\nthe arm is what lets that audit be a pure CONSUMER of this function rather\nthan a second implementation of it — which is the defect api-cloudrun#481 is\nnamed after, and it had already produced two comparators that disagreed about\n8,792 prod lines.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",

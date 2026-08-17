@@ -825,9 +825,39 @@ export function unexplainedInvoiceItemDifferences(
   differences: readonly string[],
   context: InvoiceSyncContext,
 ): string[] {
-  if (differences.length === 0) return [];
+  return explainInvoiceItemDifferences(expected, current, differences, context).unexplained;
+}
+
+/** Which explanation accounted for a difference. */
+export type InvoiceSyncArm = "coa_untaxes" | "tax_date_version" | "tax_zero_money";
+
+/** {@link explainInvoiceItemDifferences}'s verdict: what is left, and what accounted for the rest. */
+export interface InvoiceSyncExplanation {
+  /** Differences no arm accounted for — the ones an operator should act on. */
+  unexplained: string[];
+  /** The arms that fired. Empty when nothing was explained. */
+  arms: InvoiceSyncArm[];
+}
+
+/**
+ * {@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.
+ *
+ * The residue alone is what the badge needs; a diagnostic needs the reason, and
+ * `scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning
+ * the arm is what lets that audit be a pure CONSUMER of this function rather
+ * than a second implementation of it — which is the defect api-cloudrun#481 is
+ * named after, and it had already produced two comparators that disagreed about
+ * 8,792 prod lines.
+ */
+export function explainInvoiceItemDifferences(
+  expected: InvoiceItem,
+  current: InvoiceItem,
+  differences: readonly string[],
+  context: InvoiceSyncContext,
+): InvoiceSyncExplanation {
+  if (differences.length === 0) return { unexplained: [], arms: [] };
   const taxFields = differences.filter((d) => TAX_EXPLAINABLE_FIELDS.has(d));
-  if (taxFields.length === 0) return [...differences];
+  if (taxFields.length === 0) return { unexplained: [...differences], arms: [] };
 
   const expectedTax = taxAmountCents(expected);
   const currentTax = taxAmountCents(current);
@@ -839,18 +869,27 @@ export function unexplainedInvoiceItemDifferences(
     sameList(taxNames(expected, context.taxNameByUid), taxNames(current, context.taxNameByUid));
   const zeroMoney = expectedTax === 0 && currentTax === 0;
 
-  if (!coaUntaxes && !dateVersion && !zeroMoney) return [...differences];
+  // Order matters only for REPORTING — the arms are independent, and a line can
+  // legitimately satisfy more than one. They are collected rather than
+  // short-circuited so a diagnostic can say so instead of silently picking the
+  // first, which is how a bucket count comes to misdescribe its own population.
+  const arms: InvoiceSyncArm[] = [];
+  if (coaUntaxes) arms.push("coa_untaxes");
+  if (dateVersion) arms.push("tax_date_version");
+  if (zeroMoney) arms.push("tax_zero_money");
+  if (arms.length === 0) return { unexplained: [...differences], arms };
 
   // The total moved by EXACTLY what the tax moved, and by nothing else.
   const expectedTotal = (expected as { price?: { total_cents?: number } }).price?.total_cents ?? 0;
   const currentTotal = (current as { price?: { total_cents?: number } }).price?.total_cents ?? 0;
   const totalFollowsTax = currentTotal - expectedTotal === currentTax - expectedTax;
 
-  return differences.filter((d) => {
+  const unexplained = differences.filter((d) => {
     if (!TAX_EXPLAINABLE_FIELDS.has(d)) return true;
     if (d === "price.total_cents") return !totalFollowsTax;
     return false;
   });
+  return { unexplained, arms };
 }
 
 /**

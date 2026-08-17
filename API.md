@@ -20137,6 +20137,14 @@ interface InvoiceItem {
 }
 ```
 
+### `InvoiceSyncArm`
+
+Which explanation accounted for a difference.
+
+```ts
+type InvoiceSyncArm = "coa_untaxes" | "tax_date_version" | "tax_zero_money";
+```
+
 ### `InvoiceSyncContext`
 
 What {@link computeInvoiceSyncStatus} needs in order to EXPLAIN a difference
@@ -20150,6 +20158,17 @@ regression this exists to remove, and it would be invisible.
 interface InvoiceSyncContext {
   taxNameByUid: ReadonlyMap<string, string>;
   orderFrozen: boolean;
+}
+```
+
+### `InvoiceSyncExplanation`
+
+{@link explainInvoiceItemDifferences}'s verdict: what is left, and what accounted for the rest.
+
+```ts
+interface InvoiceSyncExplanation {
+  unexplained: string[];
+  arms: InvoiceSyncArm[];
 }
 ```
 
@@ -20628,6 +20647,17 @@ says: #1751 and #1322 are both PAID there with `AmountPaid: 0`.
 - `amountCreditedCents` — Total settled by credit note, in integer cents
 
 **Returns** — The derived status
+
+### `explainInvoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem, differences: readonly string[], context: InvoiceSyncContext): InvoiceSyncExplanation`
+
+{@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.
+
+The residue alone is what the badge needs; a diagnostic needs the reason, and
+`scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning
+the arm is what lets that audit be a pure CONSUMER of this function rather
+than a second implementation of it — which is the defect api-cloudrun#481 is
+named after, and it had already produced two comparators that disagreed about
+8,792 prod lines.
 
 ### `flattenForXero(items: LineItem[]): LineItem[]`
 
