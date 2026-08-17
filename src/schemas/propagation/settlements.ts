@@ -123,6 +123,26 @@ const createSettlementTransaction: TransactionDefinition = {
   ],
 };
 
+/**
+ * The reversal's credit-note leg has ONE guard, and it is a test rather than a
+ * refine — deliberately.
+ *
+ * `CREDIT_NOTE_STATUS_REFINE` (declared in this directory's `credit-notes.ts`)
+ * only says a note is internally consistent: `applied` ⟺ zero balance, and the
+ * balance never exceeds the face value. A note that never got its credit back is
+ * internally consistent and completely wrong, so the refine cannot see this
+ * class at all. Naming it here would have looked like enforcement and provided
+ * none — the shape this campaign rejects everywhere else.
+ */
+const CREDIT_RELEASE_RESTORES_NOTE: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/creditNotes/creditNotes.test.ts::retracting an allocation gives the credit back to the note",
+  clause:
+    "end to end on the deterministic path — allocate a note to exhaustion, retract the allocation, and assert the note is back to its full balance and out of `applied`, so it can be allocated again. Says nothing about concurrent retractions.",
+  gates: true,
+};
+
 // ── reverse-settlement ──────────────────────────────────────────────
 
 const reverseSettlementRules: CollectionRule[] = [
@@ -147,14 +167,39 @@ const reverseSettlementRules: CollectionRule[] = [
       { source: [], target: ["version"], transform: "+1 — see create-settlement" },
     ],
   },
+  {
+    id: "reverse-settlement:release-to-credit-note",
+    source: "settlements",
+    target: "credit-notes",
+    mode: "co-write",
+    invariant:
+      "Retracting a CREDIT allocation gives the credit back to the note it drew on. This is the second half of `allocate-credit-note:remaining-credit`, and omitting it is not a cosmetic gap: the invoice is restored while the note still reports the credit as spent, so the credit is stranded — and a note the allocation had driven to zero stays `applied` with `remaining_credit_cents: 0`, which makes the over-allocation guard refuse every future allocation against it. The credit becomes permanently unusable. Fires only for `type: \"credit\"` rows carrying a `uid_credit_note`; a payment retraction has no note to restore and correctly writes nothing here.",
+    enforced_by: [CREDIT_RELEASE_RESTORES_NOTE],
+    transaction: "reverse-settlement",
+    fields: [
+      {
+        source: ["amount_cents"],
+        target: ["remaining_credit_cents"],
+        transform:
+          "added back as a DELTA under a lastUpdateTime precondition, post-commit — the note is a hot document and is deliberately never written inside the per-invoice transaction. Capped at `totals.total_cents`, because the schema refine rejects a note holding more than its own face value; a cap means the stored balance had already drifted and is reported rather than swallowed.",
+      },
+      {
+        source: [],
+        target: ["status"],
+        transform: "applied → issued once credit is back. A void note keeps `void`.",
+      },
+      { source: [], target: ["version"], transform: "+1" },
+    ],
+  },
 ];
 
 const reverseSettlementTransaction: TransactionDefinition = {
   id: "reverse-settlement",
   description:
-    "Retracts one settlement: appends its reverser, re-folds the invoice's totals and status, and co-writes that status to each linked order. Single transaction, unlike create-settlement — the retraction path is not hot.",
+    "Retracts one settlement: appends its reverser, re-folds the invoice's totals and status, co-writes that status to each linked order, and — for a credit allocation — releases the credit back to its note. Single transaction for the invoice half, unlike create-settlement; the note half is a post-commit CAS because the note is hot.",
   steps: [
     "reverse-settlement:reverser-to-invoice",
+    "reverse-settlement:release-to-credit-note",
     "update-invoice:status-to-orders",
   ],
 };

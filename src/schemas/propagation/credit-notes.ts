@@ -229,7 +229,7 @@ const allocateCreditNoteRules: CollectionRule[] = [
     target: "credit-notes",
     mode: "co-write",
     invariant:
-      "The note's `remaining_credit_cents` is reduced by exactly what this request's settlements consumed — a DELTA applied under compare-and-set, outside the per-invoice transactions, so two concurrent allocations compose instead of clobbering (api-cloudrun#545). It is NOT a fold over the journal and must never become one: a cash refund consumes a note without touching any invoice, so it appends no settlement row, and a rebuild would hand that credit back (api-cloudrun#469). `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
+      "The note's `remaining_credit_cents` tracks its UNREVERSED allocations, and it does so through two writers rather than one: `allocate-credit-note` subtracts what a request consumed, and `reverse-settlement` adds back what a retraction released. Both are DELTAS applied under compare-and-set, outside the per-invoice transactions, so concurrent writers compose instead of clobbering (api-cloudrun#545). ⚠️ The reversal leg is the half that is easy to omit — without it a retracted allocation restores the invoice and strands the note's credit forever, and a note driven to zero then refuses every future allocation. It is NOT a fold over the journal and must never become one: a cash refund consumes a note without touching any invoice, so it appends no settlement row, and a rebuild would hand that credit back (api-cloudrun#469). `applied` means remaining_credit_cents === 0 HOWEVER it got there, by allocation or by cash refund.",
     enforced_by: [CREDIT_NOTE_STATUS_REFINE],
     transaction: "allocate-credit-note",
     fields: [
@@ -237,12 +237,13 @@ const allocateCreditNoteRules: CollectionRule[] = [
         source: ["amount_cents"],
         target: ["remaining_credit_cents"],
         transform:
-          "the stored value minus this request's consumption, re-read and re-applied under a lastUpdateTime precondition. A negative result is WRITTEN, not clamped: by then the settlements are durable on their invoices, so it is the true projection of an over-allocation and the operator's signal.",
+          "allocation subtracts this request's consumption; retraction adds the released amount back. Each is re-read and re-applied under a lastUpdateTime precondition. A NEGATIVE result is written, not clamped — by then the settlements are durable on their invoices, so it is the true projection of an over-allocation and the operator's signal. A restore that would exceed `totals.total_cents` IS capped, because the schema refine rejects that document outright; the cap is reported rather than silent.",
       },
       {
         source: [],
         target: ["status"],
-        transform: "issued → applied when remaining_credit_cents reaches 0",
+        transform:
+          "derived from the resulting balance, both ways: issued → applied when it reaches 0, and applied → issued when a retraction puts credit back. A void note keeps `void` — voiding strands a balance rather than consuming it.",
       },
     ],
   },
