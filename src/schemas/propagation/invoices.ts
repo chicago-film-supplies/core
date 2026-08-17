@@ -81,7 +81,8 @@ const MIRROR_HAS_ONE_AUTHOR: EnforcementRef = {
 
 const INVOICE_BACKREF_STATUS_FOLLOWS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/invoices/invoices.test.ts:1053",
+  ref:
+    "api-cloudrun/tests/integration/invoices/invoices.test.ts::POST payment - paid status propagates to order invoices[]",
   clause:
     "one writer end-to-end — settling an issued invoice flips it to `paid` AND the order's `invoices[0].status` follows in the same request. The settlement path specifically; the other seven writers are covered by `MIRROR_CONVERGES` + `MIRROR_HAS_ONE_AUTHOR` rather than by this.",
   gates: true,
