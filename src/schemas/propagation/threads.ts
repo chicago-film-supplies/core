@@ -11,7 +11,7 @@
  * can be queried by source doc without a thread join.
  *
  * **Delete cascade — deferred.** Few delete endpoints exist today. When a
- * delete path is built for any of the 8 source entities, that PR owns wiring
+ * delete path is built for any of the 9 source entities, that PR owns wiring
  * the thread cascade (remove the source from `thread.sources[]`; if empty,
  * hard-delete thread + comments). Transactional with the parent delete.
  */
@@ -32,8 +32,10 @@ interface ThreadCowriteConfig {
 }
 
 /**
- * All 14 cowrite rules share one detector, so the pointer lives here rather than
- * being repeated per entity — one edit site, 14 rules.
+ * All 18 cowrite rules share one detector, so the pointer lives here rather than
+ * being repeated per entity — one edit site, 18 rules (9 entities × 2 directions).
+ * ⚠️ Said 14 until 2026-08-17. Do not write structural counts into prose without
+ * a way to fail — this file carried two wrong ones at once.
  *
  * `uid_thread` is `.optional()` on every carrier schema, so
  * `validateBeforeWrite` cannot see a doc that simply lacks one and a corpus walk

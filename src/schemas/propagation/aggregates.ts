@@ -63,7 +63,7 @@ export const aggregates: AggregateDefinition[] = [
     id: "threads",
     root: "threads",
     members: ["comments"],
-    description: "Conversation primitive — every order, invoice, contact, organization, card, product, transaction, and role carries a default thread cowritten on creation. Comments (Tiptap JSON + plain-text mirror) belong to a thread; threads carry 1..N polymorphic source refs so one conversation can surface on multiple detail pages (e.g. an event card's thread surfaces on both the card and its parent order).",
+    description: "Conversation primitive — every order, invoice, contact, organization, card, product, credit-note, out-of-service record and role — NINE entities — carries a default thread cowritten on creation. ⚠️ NOT movements: `threads.ts` records that they deliberately have none (900 of 917 stored transactions had an auto-cowritten thread and ZERO held a comment), and `TransactionSchema` carries no `uid_thread`, so a movement thread is unrepresentable rather than merely unwritten. This sentence named `transaction` and omitted `credit-notes` and `out-of-service` until 2026-08-17. Comments (Tiptap JSON + plain-text mirror) belong to a thread; threads carry 1..N polymorphic source refs so one conversation can surface on multiple detail pages (e.g. an event card's thread surfaces on both the card and its parent order).",
   },
   {
     id: "cards",

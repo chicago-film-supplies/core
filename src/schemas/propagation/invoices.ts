@@ -109,7 +109,7 @@ const SELECTIVE_SYNC_SEMANTICS: EnforcementRef = {
   kind: "test",
   ref: "core/tests/invoices.test.ts::syncOrderToInvoiceSelective",
   clause:
-    "the override policy, per helper — `syncOrderToInvoiceSelective` and `syncOrderItems` (scoped replace + `carryForwardOverrides` keeping `coa_revenue`/`xero_id`), `syncOrderDestinationsSelective` (adds tagged with `uid_order`, keeps overridden pairs, drops non-overridden removals, leaves other orders' pairs untouched), and `syncScalarWithOverride` both directions. Does NOT cover the FREEZE predicate that decides which invoices are eligible.",
+    "the override policy, per helper — `syncOrderToInvoiceSelective` and `syncOrderItems` (scoped replace + `carryForwardOverrides` keeping all SIX invoice-only fields — `coa_revenue`, `tracking_category`, `xero_id`, `xero_tracking_option_id`, `crms_id`, `crms_opportunity_id`; this clause said TWO and the transform below said FOUR until 2026-08-17, and `INVOICE_ONLY_ITEM_FIELDS` has been six since 2026-08-10), `syncOrderDestinationsSelective` (adds tagged with `uid_order`, keeps overridden pairs, drops non-overridden removals, leaves other orders' pairs untouched), and `syncScalarWithOverride` both directions. Does NOT cover the FREEZE predicate that decides which invoices are eligible.",
   gates: true,
 };
 

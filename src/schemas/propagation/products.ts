@@ -410,7 +410,7 @@ const updateProductRules: CollectionRule[] = [
     source: "products",
     target: "webshop-products",
     mode: "co-write",
-    invariant: "All public-facing product fields propagate to the webshop on every update",
+    invariant: "Public-facing product fields propagate to the webshop mirror on update. ⚠️ NOT `price` — it is never mirrored on an update path; the only writers that refresh `webshop-products.price` are a TAX edit (`update-tax:to-webshop-products`) and a full re-create when `webshop.available` flips false→true. `query_by_components` and `query_by_component_of` are likewise never mirrored, while `query_by_tags` IS mirrored and was not declared. Said \"ALL public-facing fields\" until 2026-08-17, which was false in three directions at once.",
     enforced_by: [WEBSHOP_SHAPE_IS_THE_SUBSET, WEBSHOP_MIRROR_TESTED],
     transaction: "update-product",
     fields: [
@@ -482,9 +482,18 @@ const updateProductRules: CollectionRule[] = [
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [
-      { source: ["type"], target: [], transform: "delete ledger + summary + public twin for service/surcharge/replacement" },
-      { source: ["type"], target: [], transform: "create ledger + summary + public twin when entering rental/sale from a non-stock type" },
-      { source: ["type"], target: ["type"], transform: "the summary's type field tracks the product's on a rental↔sale flip" },
+      // ⚠️ **No "public twin" and no `type` half — both were declared here long
+      // after they stopped existing (corrected 2026-08-17, core#55).**
+      // `public-stock-summaries` collapsed into `stock/{P}` and the
+      // `stock-summary-to-public` edge was deleted outright — `stock.ts` in this
+      // directory says so. And `StockSchema` is a `z.strictObject` whose header
+      // reads "**No `type`.**", so a projection carrying one is a
+      // `validateBeforeWrite` REJECTION, not a drift: the old
+      // `{ source: ["type"], target: ["type"] }` mapping declared a write the
+      // schema cannot accept. `update-product:stock-method-change` directly above
+      // was rewritten for the collapsed model in the same pass; this rule was not.
+      { source: ["type"], target: [], transform: "delete the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token for service/surcharge/replacement" },
+      { source: ["type"], target: [], transform: "create all three when entering rental/sale from a non-stock type" },
     ],
   },
 ];

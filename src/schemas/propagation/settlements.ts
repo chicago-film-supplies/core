@@ -107,7 +107,7 @@ const createSettlementRules: CollectionRule[] = [
         source: [],
         target: ["version"],
         transform:
-          "+1. The only server-side check that can reject an item edit authored before the settlement flipped the invoice to `paid` — `updateInvoice` has no settled-invoice guard of its own. Gated on the write actually moving money: a replay zeroed by `withoutAlreadyCounted` must NOT bump, or an idempotent call becomes observable as a 409 to a concurrent editor.",
+          "+1. The only server-side check that can reject an item edit authored before the settlement flipped the invoice to `paid` — ⚠️ NOT the only one any more — `updateInvoice` gained its own settled guard in api-cloudrun `61b52d03` (2026-08-10), one day after this file was last touched, and it throws `Cannot reprice a settled invoice`. The version bump is still the check that catches a NON-money edit the reprice gate deliberately admits. Gated on the write actually moving money: a replay zeroed by `withoutAlreadyCounted` must NOT bump, or an idempotent call becomes observable as a 409 to a concurrent editor.",
       },
     ],
   },
