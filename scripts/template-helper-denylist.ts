@@ -161,6 +161,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "resyncInvoiceLines", // operator-triggered resync (write-path)
     "computeInvoiceSyncStatus", // manager line-badging, not rendering
     "invoiceItemsMatch", // the one order↔invoice comparator — sync machinery
+    "invoiceItemDifferences", // that comparator's substrate — audits + histograms
+    // Order → invoice projection. Exported for probes and audits
+    // (api-cloudrun#481), NOT for rendering: it takes an ORDER line and an order
+    // divider uid, and a template that has an order already has its items.
+    "projectOrderItemToInvoiceItem",
     "adoptOrderDividerStructure", // re-hangs an invoice on the order's dividers (write-path)
     "invoiceScopeDividersMatch", // structural alignment predicate — audit + endpoint
   ],

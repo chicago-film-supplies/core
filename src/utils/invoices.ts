@@ -457,8 +457,18 @@ export function buildInvoiceDestinationDivider(
  *
  * Mirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`
  * (`createInvoice`) so sync output is shape-consistent with create output.
+ *
+ * ⚠️ **Exported for probes and audits, and that is the point** (api-cloudrun#481).
+ * Anything asking *"does this invoice line equal its order line?"* has to compare
+ * against the PROJECTION, not the raw order item — the two differ by exactly the
+ * order-only fields this function drops. A prod probe that compared raw order
+ * prices invented a phantom `taxes_base: 8,360` difference across the corpus,
+ * because `taxes_base` is order-only and never reaches an invoice line. There is
+ * no way to reimplement this faithfully outside the module, so the answer is to
+ * export it rather than to keep re-deriving it. Paired with
+ * {@link invoiceItemDifferences}, which is the other half a probe needs.
  */
-function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType {
+export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType {
   const basePath = item.path ?? [];
   const path = [orderDividerUid, ...basePath];
 
@@ -502,7 +512,7 @@ function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string):
       // The intrinsic-tax snapshot inherits, so an invoice's `tax_profile`
       // revert is lossless the way an order's already is. Spread
       // CONDITIONALLY, twice over: an explicit `undefined` trips
-      // `validateBeforeWrite`'s no-undefined guard, and `invoicePricesMatch`
+      // `validateBeforeWrite`'s no-undefined guard, and `invoicePriceDifferences`
       // compares price KEY SETS — emitting the key unconditionally would make
       // every pre-2026-08 invoice line differ from its order line on a field
       // neither of them ever set.
@@ -578,7 +588,10 @@ function stableStringify(value: unknown): string {
 }
 
 /**
- * Compare two `price` objects **structurally**, key by key.
+ * Which `price` keys two price objects differ on, compared **structurally**, key
+ * by key — `[]` when they agree. Members are returned already qualified
+ * (`price.taxes`, `price.total_cents`), so the caller never re-prefixes them;
+ * the whole-value fallback below returns the bare `price`.
  *
  * ⚠️ **This is the half that made the sync badge lie for the whole corpus.**
  * `price` used to be compared as one `JSON.stringify` blob, so ANY key
@@ -606,7 +619,7 @@ function stableStringify(value: unknown): string {
  * defect class that can be made unrepresentable. Keep it that way: the fix for
  * a future legacy key is a contraction, not an entry in a skip list.
  */
-function invoicePricesMatch(expected: unknown, current: unknown): boolean {
+function invoicePriceDifferences(expected: unknown, current: unknown): string[] {
   const normalize = (p: unknown): Record<string, unknown> | null => {
     if (p === null || typeof p !== "object" || Array.isArray(p)) return null;
     const out: Record<string, unknown> = {};
@@ -620,16 +633,77 @@ function invoicePricesMatch(expected: unknown, current: unknown): boolean {
   const e = normalize(expected);
   const c = normalize(current);
   // One side isn't a price object at all (a divider, or a malformed line) —
-  // fall back to whole-value equality rather than pretending they agree.
-  if (e === null || c === null) return stableStringify(expected) === stableStringify(current);
-
-  const eKeys = Object.keys(e);
-  if (eKeys.length !== Object.keys(c).length) return false;
-  for (const k of eKeys) {
-    if (!(k in c)) return false;
-    if (stableStringify(e[k]) !== stableStringify(c[k])) return false;
+  // fall back to whole-value equality rather than pretending they agree. There
+  // is no sub-key to name in that case, so the difference is the whole field.
+  if (e === null || c === null) {
+    return stableStringify(expected) === stableStringify(current) ? [] : ["price"];
   }
-  return true;
+
+  const differing = new Set<string>();
+  for (const k of Object.keys(e)) {
+    if (!(k in c)) differing.add(`price.${k}`);
+    else if (stableStringify(e[k]) !== stableStringify(c[k])) differing.add(`price.${k}`);
+  }
+  // A key the CURRENT line carries and the projection does not is equally a
+  // difference — the count check this replaced caught it only in aggregate, and
+  // a histogram has to be able to name it.
+  for (const k of Object.keys(c)) if (!(k in e)) differing.add(`price.${k}`);
+  return [...differing];
+}
+
+/**
+ * **Which fields two invoice-shaped items differ on** — the substrate of
+ * {@link invoiceItemsMatch}, and the reason there is only one comparator.
+ *
+ * Returns sorted, qualified field names (`name`, `price.taxes`,
+ * `price.chargeable_days`); `[]` means the rows agree. Invoice-only fields
+ * ({@link INVOICE_ONLY_ITEM_FIELDS}) are filtered out of both sides first, so an
+ * override is never a difference.
+ *
+ * ⚠️ **This exists because the boolean could not be bucketed** (api-cloudrun#481).
+ * The badge reported thousands of `out_of_sync` lines with no way to say what
+ * they differed ON, so the question *"which of these are real drift?"* could only
+ * be answered by a probe reimplementing the comparison — and a reimplementation
+ * is what invented a phantom `taxes_base` slice across the whole corpus. A
+ * histogram taken through this function agrees with the badge **by construction**,
+ * because the badge is defined in terms of it.
+ *
+ * Both arguments must already be invoice-shaped, with full (divider-scoped)
+ * paths — project an order item with {@link projectOrderItemToInvoiceItem} first.
+ * Comparison is:
+ *
+ * - **top-level keys** present on one side and not the other, minus the
+ *   invoice-only fields (a key whose value is `undefined` does not count as
+ *   present — Firestore stores no such value, so it can only come from a
+ *   caller's partially-built object);
+ * - **`price` structurally** ({@link invoicePriceDifferences}), with absent ≡
+ *   null on the keys the schema blesses both encodings of;
+ * - **every other key by canonical value** ({@link stableStringify}).
+ */
+export function invoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem): string[] {
+  const comparableKeys = (it: InvoiceItem) => {
+    const rec = it as unknown as Record<string, unknown>;
+    return new Set(Object.keys(rec).filter((k) => !INVOICE_ONLY_ITEM_FIELD_SET.has(k) && rec[k] !== undefined));
+  };
+  const eKeys = comparableKeys(expected);
+  const cKeys = comparableKeys(current);
+
+  const e = expected as unknown as Record<string, unknown>;
+  const c = current as unknown as Record<string, unknown>;
+  const differing = new Set<string>();
+
+  for (const k of eKeys) if (!cKeys.has(k)) differing.add(k);
+  for (const k of cKeys) if (!eKeys.has(k)) differing.add(k);
+
+  for (const k of eKeys) {
+    if (!cKeys.has(k)) continue; // already reported as a key-set difference
+    if (k === "price") {
+      for (const pk of invoicePriceDifferences(e[k], c[k])) differing.add(pk);
+      continue;
+    }
+    if (stableStringify(e[k]) !== stableStringify(c[k])) differing.add(k);
+  }
+  return [...differing].sort();
 }
 
 /**
@@ -642,38 +716,14 @@ function invoicePricesMatch(expected: unknown, current: unknown): boolean {
  * drifted into disagreeing about what "the same line" means. Both now call
  * this; {@link isItemSynced} projects its order item first.
  *
- * Both arguments must already be invoice-shaped, with full (divider-scoped)
- * paths. Comparison is:
- *
- * - **top-level key sets** must be equal, minus the invoice-only fields, on
- *   both sides (a key whose value is `undefined` does not count as present —
- *   Firestore stores no such value, so it can only come from a caller's
- *   partially-built object);
- * - **`price` structurally** ({@link invoicePricesMatch}), with absent ≡ null
- *   on the keys the schema blesses both encodings of;
- * - **every other key by canonical value** ({@link stableStringify}).
+ * The comparison rules live in {@link invoiceItemDifferences}; this is that
+ * function's emptiness. Keeping the boolean as the derived half rather than the
+ * other way round is deliberate — two implementations of "the same row" is the
+ * exact defect this function was created to remove, and a separate boolean pass
+ * would be a second one.
  */
 export function invoiceItemsMatch(expected: InvoiceItem, current: InvoiceItem): boolean {
-  const comparableKeys = (it: InvoiceItem) => {
-    const rec = it as unknown as Record<string, unknown>;
-    return Object.keys(rec).filter((k) => !INVOICE_ONLY_ITEM_FIELD_SET.has(k) && rec[k] !== undefined);
-  };
-  const eKeys = comparableKeys(expected);
-  const cKeys = comparableKeys(current);
-  if (eKeys.length !== cKeys.length) return false;
-  const cSet = new Set(cKeys);
-  for (const k of eKeys) if (!cSet.has(k)) return false;
-
-  const e = expected as unknown as Record<string, unknown>;
-  const c = current as unknown as Record<string, unknown>;
-  for (const k of eKeys) {
-    if (k === "price") {
-      if (!invoicePricesMatch(e[k], c[k])) return false;
-      continue;
-    }
-    if (stableStringify(e[k]) !== stableStringify(c[k])) return false;
-  }
-  return true;
+  return invoiceItemDifferences(expected, current).length === 0;
 }
 
 /**

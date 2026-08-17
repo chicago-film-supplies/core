@@ -20722,6 +20722,36 @@ narrowed, so a non-integer cannot throw on the Xero push path.
 
 **Returns** — Per-unit amount for Xero **in dollars**, or 0 if quantity is 0
 
+### `invoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem): string[]`
+
+**Which fields two invoice-shaped items differ on** — the substrate of
+{@link invoiceItemsMatch}, and the reason there is only one comparator.
+
+Returns sorted, qualified field names (`name`, `price.taxes`,
+`price.chargeable_days`); `[]` means the rows agree. Invoice-only fields
+({@link INVOICE_ONLY_ITEM_FIELDS}) are filtered out of both sides first, so an
+override is never a difference.
+
+⚠️ **This exists because the boolean could not be bucketed** (api-cloudrun#481).
+The badge reported thousands of `out_of_sync` lines with no way to say what
+they differed ON, so the question *"which of these are real drift?"* could only
+be answered by a probe reimplementing the comparison — and a reimplementation
+is what invented a phantom `taxes_base` slice across the whole corpus. A
+histogram taken through this function agrees with the badge **by construction**,
+because the badge is defined in terms of it.
+
+Both arguments must already be invoice-shaped, with full (divider-scoped)
+paths — project an order item with {@link projectOrderItemToInvoiceItem} first.
+Comparison is:
+
+- **top-level keys** present on one side and not the other, minus the
+  invoice-only fields (a key whose value is `undefined` does not count as
+  present — Firestore stores no such value, so it can only come from a
+  caller's partially-built object);
+- **`price` structurally** ({@link invoicePriceDifferences}), with absent ≡
+  null on the keys the schema blesses both encodings of;
+- **every other key by canonical value** ({@link stableStringify}).
+
 ### `invoiceItemsMatch(expected: InvoiceItem, current: InvoiceItem): boolean`
 
 **The one comparator.** Are two invoice-shaped items the same row, ignoring
@@ -20733,16 +20763,11 @@ It replaced two near-duplicate comparisons — the private
 drifted into disagreeing about what "the same line" means. Both now call
 this; {@link isItemSynced} projects its order item first.
 
-Both arguments must already be invoice-shaped, with full (divider-scoped)
-paths. Comparison is:
-
-- **top-level key sets** must be equal, minus the invoice-only fields, on
-  both sides (a key whose value is `undefined` does not count as present —
-  Firestore stores no such value, so it can only come from a caller's
-  partially-built object);
-- **`price` structurally** ({@link invoicePricesMatch}), with absent ≡ null
-  on the keys the schema blesses both encodings of;
-- **every other key by canonical value** ({@link stableStringify}).
+The comparison rules live in {@link invoiceItemDifferences}; this is that
+function's emptiness. Keeping the boolean as the derived half rather than the
+other way round is deliberate — two implementations of "the same row" is the
+exact defect this function was created to remove, and a separate boolean pass
+would be a second one.
 
 ### `invoiceScopeDividersMatch(scopedInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): boolean`
 
@@ -20814,6 +20839,40 @@ Determine whether a line item is priceable (has a price object, not a structural
 ### `isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem`
 
 Determine whether a line item is a transaction fee.
+
+### `projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType`
+
+Project an order item to its invoice-item shape, scoped under an order divider.
+
+Order items carry fields (`stock_method`, `order_number`, `uid_order`,
+`inclusion_type`, `zero_priced`, `uid_delivery`/`uid_collection` on line items,
+`price.replacement`) that `InvoiceDocLineItemSchema` (strict) rejects. Spreading
+`...orderItem` into an invoice item leaks them. Call this helper at every
+order → invoice boundary instead.
+
+`destination` and `group` items share their shape with the order doc, so they
+pass through. Line items (and `transaction_fee`, which is stored as a
+line-item-shaped invoice item) are narrowed to the invoice-line-item keys.
+
+The divider/line split is `ITEM_CONTRACTS[type].kind`, not a list of type
+literals — so a new line type projects correctly the day it is added to the
+table, instead of silently falling through to whichever branch happened to be
+last. The per-branch KEY sets stay hand-written on purpose: they mirror
+`InvoiceDocLineItemSchema`'s strict shape, and deriving them from the contract
+would make the table a second source of truth for the schema.
+
+Mirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`
+(`createInvoice`) so sync output is shape-consistent with create output.
+
+⚠️ **Exported for probes and audits, and that is the point** (api-cloudrun#481).
+Anything asking *"does this invoice line equal its order line?"* has to compare
+against the PROJECTION, not the raw order item — the two differ by exactly the
+order-only fields this function drops. A prod probe that compared raw order
+prices invented a phantom `taxes_base: 8,360` difference across the corpus,
+because `taxes_base` is order-only and never reaches an invoice line. There is
+no way to reimplement this faithfully outside the module, so the answer is to
+export it rather than to keep re-deriving it. Paired with
+{@link invoiceItemDifferences}, which is the other half a probe needs.
 
 ### `recomputeSettlementTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral`
 

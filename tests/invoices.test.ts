@@ -15,11 +15,13 @@ import {
   getXeroUnitAmountFromCents,
   type InvoiceDestinationPair,
   type InvoiceItem,
+  invoiceItemDifferences,
   invoiceItemsMatch,
   invoiceScopeDividersMatch,
   isItemSynced,
   type LineItem,
   type Tax,
+  projectOrderItemToInvoiceItem,
   recomputeSettlementTotals,
   removeOrderScopedDestinations,
   removeOrderScopedItems,
@@ -708,7 +710,7 @@ Deno.test("projection: `price.taxes_base` inherits, so an invoice profile revert
 
 Deno.test("projection: an order line with NO taxes_base emits no `taxes_base` key at all", () => {
   // ⚠️ Not cosmetic, twice over. An explicit `undefined` trips
-  // `validateBeforeWrite`'s no-undefined guard; and `invoicePricesMatch`
+  // `validateBeforeWrite`'s no-undefined guard; and `invoicePriceDifferences`
   // compares price KEY SETS, so an unconditionally-emitted key would differ from
   // every stored invoice line written before this field existed.
   const item = orderShapedLine();
@@ -720,7 +722,7 @@ Deno.test("projection: an order line with NO taxes_base emits no `taxes_base` ke
 Deno.test("⚠️ projection: a NEW taxes_base makes a previously-synced line read OVERRIDDEN", () => {
   // THE TRANSITION HAZARD, stated as a test rather than left to be discovered.
   //
-  // `invoicePricesMatch` compares the price key sets for equality. Every stored
+  // `invoicePriceDifferences` compares the price key sets for equality. Every stored
   // ORDER line has carried `taxes_base` since 2026-07; no stored INVOICE line
   // carries it, because the projection dropped it until now. So on the first
   // deploy after this change, an untouched pair differs by exactly one key and
@@ -1974,6 +1976,185 @@ Deno.test("invoiceItemsMatch: a real value change on any compared price key stil
   }
   // …and a non-price key too, so the structural branch has not swallowed the rest.
   assertEquals(invoiceItemsMatch(expected, { ...expected, quantity: 99 } as InvoiceItem), false);
+});
+
+// ══════════════════════════════════════════════════════════════════
+// invoiceItemDifferences — the comparator's substrate (api-cloudrun#481)
+// ══════════════════════════════════════════════════════════════════
+
+/**
+ * The comparator EXACTLY as it stood before `invoiceItemDifferences` existed,
+ * executed for real.
+ *
+ * ⚠️ Asserting `invoiceItemsMatch(a,b) === (invoiceItemDifferences(a,b).length
+ * === 0)` would prove nothing — the boolean is now DEFINED as that emptiness, so
+ * the two agree by construction. A behaviour-preservation claim needs an oracle
+ * that is not the implementation, which is what this is.
+ */
+function legacyItemsMatch(expected: InvoiceItem, current: InvoiceItem): boolean {
+  const INVOICE_ONLY = new Set([
+    "coa_revenue", "tracking_category", "xero_id", "xero_tracking_option_id", "crms_id", "crms_opportunity_id",
+  ]);
+  const stable = (v: unknown): string => {
+    if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "undefined";
+    if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
+    return "{" + Object.entries(v as Record<string, unknown>)
+      .filter(([, x]) => x !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, x]) => JSON.stringify(k) + ":" + stable(x)).join(",") + "}";
+  };
+  const pricesMatch = (e0: unknown, c0: unknown): boolean => {
+    const norm = (p: unknown): Record<string, unknown> | null => {
+      if (p === null || typeof p !== "object" || Array.isArray(p)) return null;
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(p as Record<string, unknown>)) {
+        if (v === undefined || v === null) continue;
+        out[k] = v;
+      }
+      return out;
+    };
+    const e1 = norm(e0), c1 = norm(c0);
+    if (e1 === null || c1 === null) return stable(e0) === stable(c0);
+    const ks = Object.keys(e1);
+    if (ks.length !== Object.keys(c1).length) return false;
+    for (const k of ks) {
+      if (!(k in c1)) return false;
+      if (stable(e1[k]) !== stable(c1[k])) return false;
+    }
+    return true;
+  };
+  const comparable = (it: InvoiceItem) => {
+    const rec = it as unknown as Record<string, unknown>;
+    return Object.keys(rec).filter((k) => !INVOICE_ONLY.has(k) && rec[k] !== undefined);
+  };
+  const eKeys = comparable(expected), cKeys = comparable(current);
+  if (eKeys.length !== cKeys.length) return false;
+  const cSet = new Set(cKeys);
+  for (const k of eKeys) if (!cSet.has(k)) return false;
+  const e = expected as unknown as Record<string, unknown>;
+  const c = current as unknown as Record<string, unknown>;
+  for (const k of eKeys) {
+    if (k === "price") {
+      if (!pricesMatch(e[k], c[k])) return false;
+      continue;
+    }
+    if (stable(e[k]) !== stable(c[k])) return false;
+  }
+  return true;
+}
+
+/** Every mutation the sweep below applies, as (label, mutate) pairs. */
+function mutations(): Array<[string, (it: InvoiceItem) => InvoiceItem]> {
+  const withPrice = (fn: (p: Record<string, unknown>) => void) => (it: InvoiceItem): InvoiceItem => {
+    const next = structuredClone(it) as unknown as { price: Record<string, unknown> };
+    fn(next.price);
+    return next as unknown as InvoiceItem;
+  };
+  return [
+    ["unchanged", (it) => structuredClone(it)],
+    ["quantity changed", (it) => ({ ...it, quantity: 99 } as InvoiceItem)],
+    ["name changed", (it) => ({ ...it, name: "Something else" } as InvoiceItem)],
+    ["price.total_cents changed", withPrice((p) => { p.total_cents = 12345; })],
+    ["price.taxes changed", withPrice((p) => { p.taxes = [{ uid: "x", name: "T", rate: 9, amount_cents: 1 }]; })],
+    ["price.base_percent dropped (absent ≡ null)", withPrice((p) => { delete p.base_percent; })],
+    ["price.chargeable_days nulled", withPrice((p) => { p.chargeable_days = null; })],
+    ["an unknown price key added", withPrice((p) => { p.legacy_unknown_key = 0; })],
+    ["price key order reversed", (it) => {
+      const p = (it as unknown as { price: Record<string, unknown> }).price;
+      return { ...it, price: Object.fromEntries(Object.entries(p).reverse()) } as unknown as InvoiceItem;
+    }],
+    ["a top-level key dropped", (it) => {
+      const next = structuredClone(it) as unknown as Record<string, unknown>;
+      delete next.description;
+      return next as unknown as InvoiceItem;
+    }],
+    ["a top-level key added", (it) => ({ ...it, unexpected_key: 1 } as unknown as InvoiceItem)],
+    ["invoice-only fields set", (it) => ({
+      ...it,
+      coa_revenue: 4100,
+      xero_id: "00000000-0000-4000-8000-000000000abc",
+      crms_id: 55,
+    } as unknown as InvoiceItem)],
+    ["price replaced by a non-object", (it) => ({ ...it, price: 7 } as unknown as InvoiceItem)],
+  ];
+}
+
+Deno.test("invoiceItemDifferences: empty EXACTLY when the pre-refactor comparator agreed", () => {
+  const expected = projectedLineA();
+  for (const [label, mutate] of mutations()) {
+    const current = mutate(expected);
+    assertEquals(
+      invoiceItemDifferences(expected, current).length === 0,
+      legacyItemsMatch(expected, current),
+      `"${label}": the differences form disagrees with the comparator it replaced`,
+    );
+  }
+});
+
+Deno.test("invoiceItemDifferences: names the field, and only the field, that differs", () => {
+  const expected = projectedLineA();
+  assertEquals(invoiceItemDifferences(expected, expected), []);
+  assertEquals(invoiceItemDifferences(expected, { ...expected, quantity: 99 } as InvoiceItem), ["quantity"]);
+
+  const priced = structuredClone(expected) as unknown as { price: Record<string, unknown> };
+  priced.price.total_cents = 12345;
+  assertEquals(invoiceItemDifferences(expected, priced as unknown as InvoiceItem), ["price.total_cents"]);
+});
+
+Deno.test("invoiceItemDifferences: a key the CURRENT line carries and the projection does not is named", () => {
+  // The count check this replaced could see that the key sets differed but not
+  // which key it was — and a histogram exists to answer exactly that. Both
+  // directions, because only one of them was ever iterated.
+  const expected = projectedLineA();
+  const stored = structuredClone(expected) as unknown as { price: Record<string, unknown> };
+  stored.price.legacy_unknown_key = 0;
+  assertEquals(invoiceItemDifferences(expected, stored as unknown as InvoiceItem), ["price.legacy_unknown_key"]);
+
+  const extra = { ...expected, unexpected_key: 1 } as unknown as InvoiceItem;
+  assertEquals(invoiceItemDifferences(expected, extra), ["unexpected_key"]);
+});
+
+Deno.test("invoiceItemDifferences: an invoice-only override is never a difference", () => {
+  const expected = projectedLineA();
+  const overridden = {
+    ...expected,
+    coa_revenue: 4100,
+    xero_id: "00000000-0000-4000-8000-000000000abc",
+    crms_id: 55,
+  } as unknown as InvoiceItem;
+  assertEquals(invoiceItemDifferences(expected, overridden), []);
+});
+
+Deno.test("invoiceItemDifferences: every compared price key is reachable, none collapse into `price`", () => {
+  // The bare `price` member is the non-object fallback ONLY. If a real key
+  // change reported `price`, a histogram would bucket the whole money surface
+  // into one bar and say nothing.
+  const expected = projectedLineA();
+  for (const [k, v] of Object.entries((expected as unknown as { price: Record<string, unknown> }).price)) {
+    const stored = structuredClone(expected) as unknown as { price: Record<string, unknown> };
+    stored.price[k] = typeof v === "number" ? v + 1 : v === null ? 7 : Array.isArray(v) ? [{ uid: "x" }] : "changed";
+    assertEquals(
+      invoiceItemDifferences(expected, stored as unknown as InvoiceItem),
+      [`price.${k}`],
+      `price.${k} changed and the differences form did not name it`,
+    );
+  }
+  // …and the fallback still reports the bare field when `price` is not an object.
+  assertEquals(invoiceItemDifferences(expected, { ...expected, price: 7 } as unknown as InvoiceItem), ["price"]);
+});
+
+Deno.test("projectOrderItemToInvoiceItem: the export IS what the sync path compares against", () => {
+  // The whole reason it is exported (api-cloudrun#481): a probe comparing an
+  // invoice line to `projectOrderItemToInvoiceItem(orderLine)` must be asking
+  // the same question the badge asks. If these two ever diverged, every probe
+  // and audit built on the export would be measuring something else.
+  for (const orderItem of RESYNC_ORDER_ITEMS) {
+    assertEquals(
+      projectOrderItemToInvoiceItem(orderItem, ORDER_DIV_1),
+      buildOrderScopedItems([orderItem], ORDER_DIV_1)[0],
+      `projection drifted from buildOrderScopedItems for ${orderItem.type}`,
+    );
+  }
 });
 
 Deno.test("isItemSynced: an ORDER-shaped line matches its own projection — core#52", () => {
