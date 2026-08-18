@@ -36,7 +36,8 @@ import type {
  */
 const INVOICE_BACKREF_CREATED: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/invoices/invoices.test.ts:217",
+  ref:
+    "api-cloudrun/tests/integration/invoices/invoices.test.ts::POST /invoices - creates a draft invoice",
   clause:
     "3 of the entry's 4 fields — `invoices.length`, `invoices[0].uid`, `invoices[0].status` and the whole `query_by_invoices` array. `invoices[0].number` is not asserted. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
@@ -56,7 +57,8 @@ const INVOICE_BACKREF_CREATED: EnforcementRef = {
  */
 const MIRROR_CONVERGES: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/unit/orderInvoiceMirror.test.ts:42",
+  ref:
+    "api-cloudrun/tests/unit/orderInvoiceMirror.test.ts::convergeInvoiceRefs: returns the INPUT ARRAY IDENTITY when the mirror agrees",
   clause:
     "the merge, writer-independently — the named entry is rewritten when (and only when) it disagrees, the INPUT ARRAY IDENTITY comes back when it agrees (the no-write contract every caller gates on), no ref is added or removed, and `number` converges without reporting a status change. Hermetic, in `deno task gate`. Says nothing about whether any given writer calls it — that is what `MIRROR_HAS_ONE_AUTHOR` is for.",
   gates: true,

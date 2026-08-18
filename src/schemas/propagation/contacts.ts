@@ -19,9 +19,10 @@ import type {
 
 const CONTACT_ORG_BACKREF: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/contacts/contacts.test.ts:560",
+  ref:
+    "api-cloudrun/tests/integration/contacts/contacts.test.ts::PUT - removing an org strips the contact back-ref",
   clause:
-    "the org-list diff, all three shapes — removing an org strips the contact back-ref, adding one pushes it, and swapping in a single call does both. A nonexistent org 404s rather than silently linking. No corpus detector covers the resulting membership. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the org-list diff, all three shapes, across four steps — the anchored one removes; `PUT - adding an org pushes the contact back-ref`, `PUT - swapping orgs in one call removes old + adds new back-refs` and `PUT - adding a nonexistent org returns 404` carry the rest. No corpus detector covers the resulting membership. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
@@ -36,7 +37,8 @@ const CONTACT_ORG_BACKREF_AT_CREATE: EnforcementRef = {
 
 const CONTACT_NAME_TO_USER: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/contacts/contacts.test.ts:535",
+  ref:
+    "api-cloudrun/tests/integration/contacts/contacts.test.ts::PUT - propagates name change to the linked user",
   clause:
     "the rename reaching the linked user's `name`. Writer-path only — `audit-actor-ref-names.ts` audits the ActorRef denorms fanned out FROM a user, not the contact→user edge feeding it.",
   gates: true,

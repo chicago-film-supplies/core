@@ -119,7 +119,22 @@ export interface FieldMapping {
 export interface EnforcementRef {
   /** How the check works. `construction` = the shape makes violation unrepresentable. */
   kind: "audit" | "zod" | "assertion" | "test" | "construction";
-  /** Repo-relative path, with `:line` where it pins a specific check. */
+  /**
+   * Repo-relative path, optionally `::<anchor>` where it pins a specific check.
+   *
+   * ⚠️ **A `:<line>` suffix is BANNED, and the ban is the finding.** A line
+   * number rots on any edit above it, and a resolve-only gate notices that only
+   * when the shift happens to land on whitespace — so a rotted ref reads as a
+   * pass. Measured while converting the last 105 of them (2026-08-18): 11 of the
+   * first 33 read were pointing at the WRONG assertion while resolving cleanly,
+   * including four clauses about contacts and invoices whose line sat one step
+   * above, in the orders step. `tests/propagation.test.ts` rejects the form.
+   *
+   * An anchor is a literal that must OCCUR in the file — a `Deno.test` name, a
+   * `t.step` name, an exported symbol, a finding code, a section header. Prefer
+   * whatever a reader would grep for. Path-only stays legal and is the honest
+   * choice for a ref whose clause covers a whole file.
+   */
   ref: string;
   /**
    * WHICH clause of the invariant this covers. Most invariant strings assert

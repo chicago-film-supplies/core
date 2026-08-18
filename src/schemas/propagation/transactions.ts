@@ -60,7 +60,8 @@ const MOVEMENT_FOLD: EnforcementRef = {
 /** The reversal's own identity, asserted on the negation itself. */
 const REVERSAL_IS_THE_NEGATION: EnforcementRef = {
   kind: "test",
-  ref: "core/tests/movements.test.ts:82",
+  ref:
+    "core/tests/movements.test.ts::negateLines swaps both sides and is its own inverse",
   clause:
     "the `lines ARE the original's, swapped` half — `negateLines` swaps both sides and is its own inverse, and a reversal exactly cancels the original's held delta. This is what makes `applied FORWARD through the same fold` true rather than aspirational.",
   gates: true,
@@ -78,7 +79,7 @@ const MOVEMENT_LOCATION_STAGING: EnforcementRef = {
 const REVERSAL_LOCATIONS: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/transactions/reversalLocations.test.ts:75",
+    "api-cloudrun/tests/integration/transactions/reversalLocations.test.ts::reversal restores the location documents (#284)",
   clause:
     "the reversal's locations clause end-to-end — every touched shelf returns to its prior count, stock may be pulled back OUT of a deactivated bin, stock may never be placed INTO one, and a uid-drifted location doc is repointed rather than wedged shut",
   gates: true,
@@ -91,7 +92,8 @@ const REVERSAL_LOCATIONS: EnforcementRef = {
  */
 const LEDGER_REPLAY: EnforcementRef = {
   kind: "audit",
-  ref: "api-cloudrun/scripts/audit-ledger-replay.ts:238",
+  ref:
+    "api-cloudrun/scripts/audit-ledger-replay.ts::const failed = strict && findings.length > 0",
   clause:
     "the corpus half of `the ledger is a fold over the journal` — replays every product's movements through `applyMovementToLedger` into an empty ledger and diffs against what is stored. Exits non-zero ONLY with `--strict`; the default run exits 0 against a standing baseline of 39 prod / 36 dev non-reconciling ledgers.",
   gates: false,

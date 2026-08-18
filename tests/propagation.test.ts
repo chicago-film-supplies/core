@@ -364,28 +364,36 @@ Deno.test("enforced_by only appears on rules that state an invariant", () => {
   }
 });
 
-Deno.test("every enforced_by ref is a repo-relative path", () => {
+Deno.test("every enforced_by ref is a repo-relative path, and never a line number", () => {
   // A bare filename cannot be resolved from another repo, and this field is
   // read by humans in four of them.
   //
-  // Three suffix forms are legal, and they are not equally good:
-  //   - `::<anchor>`  — the TARGET form. A test or symbol name, which survives
-  //                     insertions above it. Prefer this.
-  //   - `:<N>`        — legacy. A line number rots on any edit to the file, and
-  //                     a resolve-only check can only notice when the shift
-  //                     happens to land on whitespace; ~9% of them were already
-  //                     pointing at blank lines when this was measured.
-  //   - none          — path-only. Weakest, but honest: it claims existence and
-  //                     nothing more.
-  const shape =
-    /^[a-z0-9-]+\/[A-Za-z0-9_./-]+\.(ts|tsx|json|ya?ml)(:\d+(-\d+)?|::.+)?$/;
+  // TWO suffix forms are legal, and the `:<N>` third is now BANNED rather than
+  // merely discouraged:
+  //   - `::<anchor>`  — the target form. A test or symbol name, which survives
+  //                     insertions above it.
+  //   - none          — path-only. Weaker, but honest: it claims existence and
+  //                     nothing more, which is right for a ref that covers a
+  //                     whole file.
+  //
+  // ⚠️ **`:<N>` is unrepresentable now, and that is the whole point.** A line
+  // number rots on any edit above it, and a resolve-only check notices only when
+  // the shift happens to land on whitespace — so a rotted ref reads as a pass.
+  // Measured while converting the last 105 of them (2026-08-18): 11 of 33 read
+  // in the first batch were pointing at the wrong assertion WHILE RESOLVING
+  // CLEANLY, including four clauses about contacts and invoices whose line sat
+  // in the orders step one above. Converting them was hand work precisely
+  // because a script would have re-derived whatever the rotted line now names.
+  // Banning the form is what stops the population growing back.
+  const shape = /^[a-z0-9-]+\/[A-Za-z0-9_./-]+\.(ts|tsx|json|ya?ml)(::.+)?$/;
   for (const rule of rules) {
     for (const ref of rule.enforced_by ?? []) {
       assertEquals(
         shape.test(ref.ref),
         true,
-        `Rule ${rule.id}: enforced_by ref "${ref.ref}" is not a repo-relative path ` +
-          `(expected e.g. "api-cloudrun/scripts/audit-x.ts:42").`,
+        `Rule ${rule.id}: enforced_by ref "${ref.ref}" is not a repo-relative path with an ` +
+          `optional "::anchor" (e.g. "api-cloudrun/scripts/audit-x.ts::product_without_ledger"). ` +
+          `A ":<line>" suffix is no longer accepted — anchor on a test name or symbol instead.`,
       );
     }
   }

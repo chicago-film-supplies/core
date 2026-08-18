@@ -54,7 +54,7 @@ const COMPONENT_ENTRY_CATALOG_ONLY: EnforcementRef = {
 const COMPONENT_RECIPROCITY_TESTED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts:556",
+    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT components add/remove maintains component_of back-refs incl. the webshop mirror",
   clause:
     "the writer path — adding and removing components maintains `component_of` back-refs on the affected products, including the webshop mirror. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
@@ -76,17 +76,23 @@ const DENORM_COUNT: EnforcementRef = {
 };
 
 /**
- * ⚠️ NOT A GATE. `audit-data-integrity.ts` really does check membership in both
- * directions (its sections 2, 4 and 5: tracking-category→product stale entries,
- * product→tag orphan refs, tag→product stale entries) — and it ends on a bare
- * `Deno.exit()`, which is exit 0 unconditionally. It reports; it cannot fail.
+ * `audit-data-integrity.ts` checks membership in both directions — its sections
+ * 2, 4 and 5: tracking-category→product stale entries, product→tag orphan refs,
+ * tag→product stale entries.
+ *
+ * ⚠️ **It USED to end on a bare `Deno.exit()`** — exit 0 unconditionally, however
+ * many issues it had just printed — and this entry carried `gates: false` for
+ * that reason. api-cloudrun fixed it on 2026-08-12 (`0 clean / 1 error / 2
+ * drift`, with the reasoning at the call site) and nothing propagated the change
+ * back here, so the catalog under-claimed a live gate for six days. Corrected
+ * 2026-08-18 while converting the ref to an anchor.
  */
 const DENORM_MEMBERSHIP: EnforcementRef = {
   kind: "audit",
-  ref: "api-cloudrun/scripts/audit-data-integrity.ts:104",
+  ref: "api-cloudrun/scripts/audit-data-integrity.ts::── 4. Products → Tags",
   clause:
-    "the `track which products reference them` half — orphan and stale entries in both directions. But the script closes with a bare `Deno.exit()`, so it ALWAYS exits 0: read its output, never its status.",
-  gates: false,
+    "the `track which products reference them` half — orphan and stale entries in both directions, and it exits 2 on any finding.",
+  gates: true,
 };
 
 /**
@@ -135,17 +141,18 @@ const TRACKING_CATEGORY_MOVE_TESTED: EnforcementRef = {
 const SUMMARY_BICONDITIONAL_TESTED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts:360",
+    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT stock_method bulk→none deletes the inventory ledger and stock summaries",
   clause:
-    "both branches, in both directions — `bulk→none` deletes the ledger AND the summaries, `none→bulk` creates a ledger on a rental and nothing on a non-stock type, `surcharge→rental` at `stock_method:'none'` is a 200 rather than a 500, and `rental→sale` carrying `stock_method:'none'` drops the stale ledger",
+    "both branches, in both directions, across five steps of that suite — the anchored one is `bulk→none` deleting the ledger AND the summaries; `PUT stock_method none→bulk on a rental creates an empty inventory ledger`, `PUT stock_method none→bulk on a NON-stock type creates nothing`, `PUT type surcharge→rental with stock_method 'none' is a 200, not a 500` and `PUT type rental→sale carrying stock_method 'none' drops the stale ledger` carry the rest",
   gates: true,
 };
 
 const WEBSHOP_MIRROR_TESTED: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/products/products.test.ts:791",
+  ref:
+    "api-cloudrun/tests/integration/products/products.test.ts::PUT - creates webshop-product when webshop.available set to true",
   clause:
-    "the twin's lifecycle and one field — `webshop.available` true creates the mirror, false deletes it, and a description edit reaches it; a name change reaches the mirrors of RELATED products too (updateProductPropagation.test.ts:670). Which fields are public-safe is the schema's business, not this test's.",
+    "the twin's lifecycle and one field, across three steps — the anchored one creates the mirror on `webshop.available: true`; `PUT - deletes webshop-product when webshop.available set to false` and `PUT - updates webshop description` carry the rest. A name change reaches the mirrors of RELATED products too (`updateProductPropagation.test.ts::PUT name change cascades into the webshop mirror of related products`). Which fields are public-safe is the schema's business, not this test's.",
   gates: true,
 };
 

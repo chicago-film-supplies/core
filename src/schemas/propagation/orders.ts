@@ -182,7 +182,8 @@ const EVENT_CARD_PRESERVED_ON_UPDATE: EnforcementRef = {
 
 const OOS_COWRITTEN_FROM_BOOKING: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/bookings/bookings.test.ts:211",
+  ref:
+    "api-cloudrun/tests/integration/bookings/bookings.test.ts::returns 1 + loses 1 + damages 1 → cowrites two OOS records and auto-completes order",
   clause:
     "the CREATE branch — one PUT returning 1, losing 1 and damaging 1 cowrites TWO OOS records, one per reason. The GROW branch (an existing non-complete record for the same (booking, reason) having its quantity raised by the delta) is not exercised.",
   gates: true,
@@ -211,7 +212,8 @@ const CUSTODY_REPLAY: EnforcementRef = {
  */
 const LEDGER_REPLAY: EnforcementRef = {
   kind: "audit",
-  ref: "api-cloudrun/scripts/audit-ledger-replay.ts:238",
+  ref:
+    "api-cloudrun/scripts/audit-ledger-replay.ts::const failed = strict && findings.length > 0",
   clause:
     "the `ledger is a fold over the journal` half — replays every product's movements through `applyMovementToLedger` into an empty ledger and diffs. Exits non-zero ONLY with `--strict`; the default run exits 0 against a standing baseline of 39 prod / 36 dev non-reconciling ledgers.",
   gates: false,
@@ -249,9 +251,10 @@ const CARD_STATUS_MATH: EnforcementRef = {
 
 const ORDER_ROLLUP_DELTA: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/bookings/bookings.test.ts:189",
+  ref:
+    "api-cloudrun/tests/integration/bookings/bookings.test.ts::returns 1 + loses 1 + damages 1 → cowrites two OOS records and auto-completes order",
   clause:
-    "the delta + auto-complete half — a partial return moves `order.bookings_breakdown` by exactly the delta and does not complete; a return + loss + damage closes every quantity and DOES auto-complete. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the delta + auto-complete half — the anchored step closes every quantity (return + loss + damage) and DOES auto-complete; the sibling step `returns 1 of 3 — order roll-up updated, no OOS, no auto-complete` is the partial return that moves `order.bookings_breakdown` by exactly the delta and does not complete. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
@@ -913,7 +916,8 @@ const updateBookingRules: CollectionRule[] = [
     transaction: "update-booking",
     enforced_by: [{
       kind: "assertion",
-      ref: "api-cloudrun/src/services/bookings.ts:591",
+      ref:
+        "api-cloudrun/src/services/bookings.ts::async function applyBookingUpdate",
       clause:
         "all three guards, at the single write path — ValidationError on each",
       gates: true,

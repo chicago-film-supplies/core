@@ -34,15 +34,17 @@ const LOCATION_DEFAULT_POINTER: EnforcementRef = {
 
 const LOCATION_DEFAULT_WRITER: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/locations/locations.test.ts:544",
+  ref:
+    "api-cloudrun/tests/integration/locations/locations.test.ts::PUT - setting default:true updates store default_location and unsets previous default",
   clause:
-    "the writer path and its three refusals — setting `default: true` updates the store pointer and unsets the previous default; deactivating the default 409s; unsetting it is rejected; and `default:false` then `active:false` cannot orphan the pointer (:657). A rename of the default reaches `store.default_location.name` and a non-default rename does NOT (:975, :989). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the writer path and its three refusals — setting `default: true` updates the store pointer and unsets the previous default; deactivating the default 409s; unsetting it is rejected; and `default:false` then `active:false` cannot orphan the pointer (`PUT - default:false then active:false cannot orphan the store pointer`). A rename of the default reaches `store.default_location.name` (`PUT - cascades default location name to store via afterLocationWrite`) and a non-default rename does NOT (`PUT - does NOT cascade non-default location name to store`). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
 const FIRST_LOCATION_IS_DEFAULT: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/locations/locations.test.ts:137",
+  ref:
+    "api-cloudrun/tests/integration/locations/locations.test.ts::POST - second location for same store is not default",
   clause:
     "the first-location clause, from its complement — a SECOND location for the same store is not default, which is what makes the first one's default meaningful",
   gates: true,

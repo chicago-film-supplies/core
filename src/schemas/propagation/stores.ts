@@ -24,9 +24,23 @@ import type {
  */
 const ONE_DEFAULT_STORE_TESTED: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/stores/stores.test.ts:129",
+  ref:
+    "api-cloudrun/tests/integration/stores/stores.test.ts::POST - sets default and cascades to other stores",
   clause:
-    "the writer path — creating a second `default: true` store unsets the first, asserted on BOTH documents. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the CREATE writer path — creating a second `default: true` store unsets the first, asserted on BOTH documents. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+/**
+ * ⚠️ The PUT path has its own step, and until 2026-08-18 `update-store` cited
+ * the CREATE one — a rule pointing at a test that never exercises its writer.
+ */
+const ONE_DEFAULT_STORE_TESTED_ON_UPDATE: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/stores/stores.test.ts::PUT - cascades default flag to other stores",
+  clause:
+    "the UPDATE writer path — PUTting `default: true` on a second store unsets the first, asserted on BOTH documents. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
@@ -67,7 +81,7 @@ const updateStoreRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "Only one store can be the default — promoting a store to default:true must unset default on every other active store, in the same transaction",
-    enforced_by: [ONE_DEFAULT_STORE_TESTED, STORE_DEFAULT_CORPUS],
+    enforced_by: [ONE_DEFAULT_STORE_TESTED_ON_UPDATE, STORE_DEFAULT_CORPUS],
     trigger:
       "default flips false→true — in-transaction fan-out over active stores where default:true (excluding self)",
     fields: [

@@ -20,7 +20,8 @@ import type {
 
 const TAX_TO_PRODUCTS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/taxes/taxes.test.ts:275",
+  ref:
+    "api-cloudrun/tests/integration/taxes/taxes.test.ts::PUT - cascades name change to products",
   clause:
     "the rename reaching a product's embedded `price.taxes[]` entry. Writer-path only; no corpus detector walks the tax denorms. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
@@ -28,9 +29,10 @@ const TAX_TO_PRODUCTS: EnforcementRef = {
 
 const TAX_TO_ORDERS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/taxes/taxes.test.ts:316",
+  ref:
+    "api-cloudrun/tests/integration/taxes/taxes.test.ts::PUT - cascades a NAME change to incomplete orders without moving their money",
   clause:
-    "the recompute AND its fail-closed arm — a rate change reaches an incomplete order's PriceModifiers and recomputes the amounts, and the cascade REJECTS an order it would leave violating the item invariants (:380) rather than writing it",
+    "the NAME change and the fail-closed arm — the rename reaches an incomplete order's PriceModifiers and the recompute leaves the money exactly where it was, and the sibling step `PUT - cascade rejects an order that violates the item invariants` asserts the cascade REFUSES an order it would leave violating the item invariants rather than writing it. ⚠️ **No test covers a RATE change reaching an order, and none can: `PUT /taxes/{uid}` REFUSES an in-place rate or type change with a 400 naming supersede** (`PUT - REFUSES an in-place rate or type change, pointing at supersede`). This rule's own invariant and trigger still describe that refused edit — see core#55.",
   gates: true,
 };
 

@@ -31,7 +31,8 @@ const ACTOR_REF_NAMES: EnforcementRef = {
 
 const USER_LINKED_TO_CONTACT_AT_REGISTER: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/auth/auth.test.ts:1100",
+  ref:
+    "api-cloudrun/tests/integration/auth/auth.test.ts::register: links user to existing contact by email",
   clause:
     "the register path — a new user whose email matches an existing contact links to it. The reverse direction (a CONTACT created against an existing user) is asserted nowhere. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,

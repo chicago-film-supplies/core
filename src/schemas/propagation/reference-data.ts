@@ -19,18 +19,19 @@ import type {
 
 const TAG_DELETE_CASCADE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/tags/tags.test.ts:335",
+  ref:
+    "api-cloudrun/tests/integration/tags/tags.test.ts::DELETE - cascades removal from products",
   clause:
-    "the cascade on delete — the tag's references are removed from the products carrying them. The orphan-ref sweep that would catch a MISSED cascade in the corpus is `audit-data-integrity.ts` sections 4 + 5, which always exits 0. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the cascade on delete — the tag's references are removed from the products carrying them. The orphan-ref sweep that would catch a MISSED cascade in the corpus is `audit-data-integrity.ts` sections 4 + 5, which exit 2 on any finding since 2026-08-12. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
 const LOCATION_TYPE_CAPACITIES: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/location-types/locationTypes.test.ts:301",
+    "api-cloudrun/tests/integration/location-types/locationTypes.test.ts::PUT - cascades product_capacities to locations using default max",
   clause:
-    "both halves, as two tests — the default cascade reaches the type's locations (asserting `locationsUpdated`, `max` and `max_default`), and a location carrying a CUSTOM max keeps it (:341). The override-preservation half is the one worth having: a cascade that clobbered it would still look like a working cascade.",
+    "both halves, as two tests — the default cascade reaches the type's locations (asserting `locationsUpdated`, `max` and `max_default`), and a location carrying a CUSTOM max keeps it (`PUT - preserves custom max on locations`). The override-preservation half is the one worth having: a cascade that clobbered it would still look like a working cascade.",
   gates: true,
 };
 
@@ -44,7 +45,8 @@ const HOLIDAY_SNAPSHOT_CORPUS: EnforcementRef = {
 
 const HOLIDAY_SNAPSHOT_WRITER: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:84",
+  ref:
+    "api-cloudrun/tests/integration/holidays/holidays.test.ts::snapshot materialized from instances",
   clause:
     "the write-time half — the snapshot is materialized from the instances a holiday create produced",
   gates: true,
@@ -59,7 +61,8 @@ const HOLIDAY_SNAPSHOT_WRITER: EnforcementRef = {
  */
 const HOLIDAY_DRAFT_RECOMPUTE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/holidays/draftRecompute.test.ts:22",
+  ref:
+    "api-cloudrun/tests/integration/holidays/draftRecompute.test.ts::recomputes a draft order's charge days + item prices",
   clause:
     "the ORDER side and its frozen complement — a draft order's charge days and item prices are recomputed, and a non-draft order comes back byte-unchanged. The invoice-sync half of the same cascade is NOT exercised: the fixture deliberately strips `query_by_invoices`.",
   gates: true,
@@ -338,21 +341,24 @@ const materializeHolidayDateRules: CollectionRule[] = [
     enforced_by: [
       {
         kind: "test",
-        ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:62",
+        ref:
+          "api-cloudrun/tests/integration/holidays/holidays.test.ts::POST /holidays — creates a fixed holiday + forward-window instances",
         clause:
           "create — a fixed definition writes its forward-window instances",
         gates: true,
       },
       {
         kind: "test",
-        ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:115",
+        ref:
+          "api-cloudrun/tests/integration/holidays/holidays.test.ts::PUT /holidays/{uid} — version-checked update regenerates future instances",
         clause:
           "update — a version-checked edit REGENERATES future instances onto the new date",
         gates: true,
       },
       {
         kind: "test",
-        ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:143",
+        ref:
+          "api-cloudrun/tests/integration/holidays/holidays.test.ts::immutable past — regenerate keeps past instances, refreshes future",
         clause:
           "immutable past — regenerate keeps past instances and refreshes only future ones. NOT covered corpus-wide: see this block's note.",
         gates: true,

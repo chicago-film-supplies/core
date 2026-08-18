@@ -24,9 +24,9 @@ import type {
 const PICKER_WRITE_ATOMIC: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts:123",
+    "api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts::PUT /items reduces qty + bumps version",
   clause:
-    "the `items + version` half — a quantity reduction lands and bumps `version`, and a stale `version` is rejected 409. The `query_by_*` recompute is not asserted.",
+    "the `items + version` half — the anchored step lands a quantity reduction and bumps `version`; the sibling step `PUT /items with stale version returns 409` rejects a stale one. The `query_by_*` recompute is not asserted.",
   gates: true,
 };
 
@@ -40,7 +40,7 @@ const PICKER_WRITE_ATOMIC: EnforcementRef = {
 const PICKER_WRITE_NO_CASCADE: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts:320",
+    "api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts::picker writes do NOT cascade to bookings/stock",
   clause:
     "the `no cascade` half, for BOOKINGS ONLY — booking count and per-booking `version` are unchanged after a picker write. Despite the step's name it reads neither `stock` nor `inventory-ledgers`, so those two thirds of the claim are unmeasured.",
   gates: true,

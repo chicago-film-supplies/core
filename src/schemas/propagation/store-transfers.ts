@@ -45,7 +45,8 @@ import type {
  */
 const TRANSFER_NETS_TO_ZERO: EnforcementRef = {
   kind: "test",
-  ref: "core/tests/movements.test.ts:399",
+  ref:
+    "core/tests/movements.test.ts::a transfer leaves the basis exactly where it was (#286 defect 1)",
   clause:
     "the `neither creates nor destroys` half — a transfer leaves the basis exactly where it was (#286 defect 1) and a full-quantity transfer through `held = 0` preserves it (defect 2); upstream, a line that moves rather than enters or leaves ownership contributes nothing to the held delta",
   gates: true,
