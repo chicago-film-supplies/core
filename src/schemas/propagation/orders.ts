@@ -917,7 +917,7 @@ const updateBookingRules: CollectionRule[] = [
     enforced_by: [{
       kind: "assertion",
       ref:
-        "api-cloudrun/src/services/bookings.ts::async function applyBookingUpdate",
+        "api-cloudrun/src/services/bookings.ts::async function applyBookingUpdate(",
       clause:
         "all three guards, at the single write path — ValidationError on each",
       gates: true,
