@@ -98,9 +98,10 @@ const CREDIT_NOTE_NUMBER_AHEAD: EnforcementRef = {
  */
 const CREDIT_NOTE_STATUS_REFINE: EnforcementRef = {
   kind: "zod",
-  ref: "core/src/schemas/credit-note.ts:347",
+  ref:
+    "core/src/schemas/credit-note.ts::an applied credit note has no remaining credit",
   clause:
-    "`applied` ⟺ `remaining_credit_cents === 0` (void exempt), and `remaining_credit_cents <= totals.total_cents`. Says nothing about whether the stored `remaining_credit_cents` matches the settlements that produced it.",
+    "`applied` ⟺ `remaining_credit_cents === 0` (void exempt) — the anchored `superRefine` issue — plus its neighbour `remaining_credit_cents cannot exceed the credit note's total_cents`. Says nothing about whether the stored `remaining_credit_cents` matches the settlements that produced it.",
   gates: true,
 };
 
@@ -178,7 +179,11 @@ const allocateCreditNoteRules: CollectionRule[] = [
     fields: [
       { source: ["uid"], target: ["uid_credit_note"] },
       { source: ["number"], target: ["number_credit_note"] },
-      { source: ["reason"], target: ["reason"], transform: "denormalized from the note" },
+      {
+        source: ["reason"],
+        target: ["reason"],
+        transform: "denormalized from the note",
+      },
       { source: ["xero_credit_note_id"], target: ["xero_credit_note_id"] },
       {
         source: [],
@@ -213,7 +218,8 @@ const allocateCreditNoteRules: CollectionRule[] = [
       {
         source: ["amount_cents"],
         target: ["totals", "amount_due_cents"],
-        transform: "recomputeSettlementTotals(total, rows) — total − paid − credited",
+        transform:
+          "recomputeSettlementTotals(total, rows) — total − paid − credited",
       },
       {
         source: [],
@@ -296,7 +302,7 @@ const voidCreditNoteRules: CollectionRule[] = [
     enforced_by: [CREDIT_NOTE_STATUS_REFINE, CREDIT_NOTE_NUMBER_AHEAD],
     transaction: "void-credit-note",
     fields: [
-      { source: [], target: ["status"], transform: "literal \"void\"" },
+      { source: [], target: ["status"], transform: 'literal "void"' },
     ],
   },
 ];

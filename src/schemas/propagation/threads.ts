@@ -86,14 +86,16 @@ interface ThreadCowriteConfig {
 const THREAD_FORWARD: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-default-threads.ts",
-  clause: "property 1 (FORWARD) — the parent's pointer resolves to a thread whose sources[] names it",
+  clause:
+    "property 1 (FORWARD) — the parent's pointer resolves to a thread whose sources[] names it",
   gates: true,
 };
 
 const THREAD_REVERSE: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-default-threads.ts",
-  clause: "property 2 (REVERSE) — the thread's sources[0] parent points back at it",
+  clause:
+    "property 2 (REVERSE) — the thread's sources[0] parent points back at it",
   gates: true,
 };
 
@@ -107,13 +109,22 @@ function cowriteRulesFor(
       source: collection,
       target: "threads",
       mode: "co-write",
-      invariant: `Every ${collection} doc gets a default thread cowritten on creation so the manager's Notes tab always has a target`,
+      invariant:
+        `Every ${collection} doc gets a default thread cowritten on creation so the manager's Notes tab always has a target`,
       transaction,
       enforced_by: [THREAD_FORWARD],
       fields: [
         { source: [idField], target: ["sources", "uid"] },
-        { source: [], target: ["sources", "collection"], transform: `literal "${collection}"` },
-        { source: [], target: ["created_by"], transform: "ActorRef of acting user from session ({uid, name})" },
+        {
+          source: [],
+          target: ["sources", "collection"],
+          transform: `literal "${collection}"`,
+        },
+        {
+          source: [],
+          target: ["created_by"],
+          transform: "ActorRef of acting user from session ({uid, name})",
+        },
         { source: [], target: ["title"], transform: "null — default thread" },
         { source: [], target: ["comment_count"], transform: "0" },
       ],
@@ -123,7 +134,8 @@ function cowriteRulesFor(
       source: "threads",
       target: collection,
       mode: "embed",
-      invariant: `The cowritten thread's uid is embedded on the parent ${collection} doc so the detail view can resolve its default thread without a query`,
+      invariant:
+        `The cowritten thread's uid is embedded on the parent ${collection} doc so the detail view can resolve its default thread without a query`,
       transaction,
       enforced_by: [THREAD_REVERSE],
       fields: [
@@ -207,7 +219,8 @@ const threadRoleRules: CollectionRule[] = cowriteRulesFor({
  */
 const createRoleTransaction: TransactionDefinition = {
   id: "create-role",
-  description: "Creates a role document and cowrites its default thread so the role detail view can start accepting comments immediately.",
+  description:
+    "Creates a role document and cowrites its default thread so the role detail view can start accepting comments immediately.",
   steps: [
     "cowrite-thread:roles-to-thread",
     "cowrite-thread:thread-to-roles",
@@ -222,7 +235,8 @@ const createCommentRules: CollectionRule[] = [
     source: "threads",
     target: "comments",
     mode: "embed",
-    invariant: "Comments carry a denormalized copy of the parent thread's sources so they can be queried by source doc without a thread join (for Typesense and direct Firestore queries)",
+    invariant:
+      "Comments carry a denormalized copy of the parent thread's sources so they can be queried by source doc without a thread join (for Typesense and direct Firestore queries)",
     transaction: "create-comment",
     enforced_by: [{
       kind: "audit",
@@ -232,7 +246,11 @@ const createCommentRules: CollectionRule[] = [
       gates: true,
     }],
     fields: [
-      { source: ["sources"], target: ["sources"], transform: "full copy of thread.sources[] — {collection, uid} entries" },
+      {
+        source: ["sources"],
+        target: ["sources"],
+        transform: "full copy of thread.sources[] — {collection, uid} entries",
+      },
     ],
   },
   {
@@ -240,19 +258,29 @@ const createCommentRules: CollectionRule[] = [
     source: "comments",
     target: "threads",
     mode: "derive",
-    invariant: "Every comment write bumps the parent thread's comment_count (soft-deletes excluded) and refreshes last_message_at and last_message_preview so the thread list renders without a per-thread subquery",
+    invariant:
+      "Every comment write bumps the parent thread's comment_count (soft-deletes excluded) and refreshes last_message_at and last_message_preview so the thread list renders without a per-thread subquery",
     transaction: "create-comment",
     fields: [
-      { source: [], target: ["comment_count"], transform: "FieldValue.increment(1) — undone by soft delete" },
+      {
+        source: [],
+        target: ["comment_count"],
+        transform: "FieldValue.increment(1) — undone by soft delete",
+      },
       { source: ["created_at"], target: ["last_message_at"] },
-      { source: ["body_text"], target: ["last_message_preview"], transform: "truncate to 280 chars" },
+      {
+        source: ["body_text"],
+        target: ["last_message_preview"],
+        transform: "truncate to 280 chars",
+      },
     ],
   },
 ];
 
 const createCommentTransaction: TransactionDefinition = {
   id: "create-comment",
-  description: "Creates a comment attached to a thread, embedding the thread's sources on the comment and deriving the parent thread's counter and preview fields.",
+  description:
+    "Creates a comment attached to a thread, embedding the thread's sources on the comment and deriving the parent thread's counter and preview fields.",
   steps: [
     "create-comment:thread-to-comment",
     "create-comment:comment-to-thread",
@@ -294,7 +322,12 @@ const deleteCommentRules: CollectionRule[] = [
     trigger:
       "first soft delete only — `deleteComment` returns early on an already-deleted comment, so a repeated DELETE cannot double-decrement",
     fields: [
-      { source: [], target: ["comment_count"], transform: "FieldValue.increment(-1) — the undo of create-comment:comment-to-thread" },
+      {
+        source: [],
+        target: ["comment_count"],
+        transform:
+          "FieldValue.increment(-1) — the undo of create-comment:comment-to-thread",
+      },
     ],
   },
 ];

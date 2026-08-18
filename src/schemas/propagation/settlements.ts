@@ -95,7 +95,8 @@ const createSettlementRules: CollectionRule[] = [
       {
         source: ["amount_cents"],
         target: ["totals", "amount_due_cents"],
-        transform: "recomputeSettlementTotals(total, rows) — total − paid − credited",
+        transform:
+          "recomputeSettlementTotals(total, rows) — total − paid − credited",
       },
       {
         source: [],
@@ -166,11 +167,25 @@ const reverseSettlementRules: CollectionRule[] = [
       {
         source: ["amount_cents"],
         target: ["totals", "amount_paid_cents"],
-        transform: "negated delta — applySettlementDelta over the reverser alone",
+        transform:
+          "negated delta — applySettlementDelta over the reverser alone",
       },
-      { source: ["amount_cents"], target: ["totals", "amount_due_cents"], transform: "total − paid − credited" },
-      { source: [], target: ["status"], transform: "derivePaymentStatus over the folded totals — typically paid → part_paid or issued" },
-      { source: [], target: ["version"], transform: "+1 — see create-settlement" },
+      {
+        source: ["amount_cents"],
+        target: ["totals", "amount_due_cents"],
+        transform: "total − paid − credited",
+      },
+      {
+        source: [],
+        target: ["status"],
+        transform:
+          "derivePaymentStatus over the folded totals — typically paid → part_paid or issued",
+      },
+      {
+        source: [],
+        target: ["version"],
+        transform: "+1 — see create-settlement",
+      },
     ],
   },
   {
@@ -179,7 +194,7 @@ const reverseSettlementRules: CollectionRule[] = [
     target: "credit-notes",
     mode: "co-write",
     invariant:
-      "Retracting a CREDIT allocation gives the credit back to the note it drew on. This is the second half of `allocate-credit-note:remaining-credit`, and omitting it is not a cosmetic gap: the invoice is restored while the note still reports the credit as spent, so the credit is stranded — and a note the allocation had driven to zero stays `applied` with `remaining_credit_cents: 0`, which makes the over-allocation guard refuse every future allocation against it. The credit becomes permanently unusable. Fires only for `type: \"credit\"` rows carrying a `uid_credit_note`; a payment retraction has no note to restore and correctly writes nothing here.",
+      'Retracting a CREDIT allocation gives the credit back to the note it drew on. This is the second half of `allocate-credit-note:remaining-credit`, and omitting it is not a cosmetic gap: the invoice is restored while the note still reports the credit as spent, so the credit is stranded — and a note the allocation had driven to zero stays `applied` with `remaining_credit_cents: 0`, which makes the over-allocation guard refuse every future allocation against it. The credit becomes permanently unusable. Fires only for `type: "credit"` rows carrying a `uid_credit_note`; a payment retraction has no note to restore and correctly writes nothing here.',
     enforced_by: [CREDIT_RELEASE_RESTORES_NOTE],
     transaction: "reverse-settlement",
     fields: [
@@ -192,7 +207,8 @@ const reverseSettlementRules: CollectionRule[] = [
       {
         source: [],
         target: ["status"],
-        transform: "applied → issued once credit is back. A void note keeps `void`.",
+        transform:
+          "applied → issued once credit is back. A void note keeps `void`.",
       },
       { source: [], target: ["version"], transform: "+1" },
     ],
@@ -223,8 +239,18 @@ const syncXeroSettlementRules: CollectionRule[] = [
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "sync-xero-settlement",
     fields: [
-      { source: [], target: ["xero_payment_id"], transform: "the match key — appended rows carry it so a redelivery matches instead of duplicating" },
-      { source: [], target: ["xero_credit_note_id"], transform: "same, for a credit note allocated in Xero and unknown to CFS" },
+      {
+        source: [],
+        target: ["xero_payment_id"],
+        transform:
+          "the match key — appended rows carry it so a redelivery matches instead of duplicating",
+      },
+      {
+        source: [],
+        target: ["xero_credit_note_id"],
+        transform:
+          "same, for a credit note allocated in Xero and unknown to CFS",
+      },
       {
         source: [],
         target: ["reverses"],
@@ -243,11 +269,31 @@ const syncXeroSettlementRules: CollectionRule[] = [
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "sync-xero-settlement",
     fields: [
-      { source: ["amount_cents"], target: ["totals", "amount_paid_cents"], transform: "delta over the genuinely-new rows only" },
-      { source: ["amount_cents"], target: ["totals", "amount_credited_cents"], transform: "same, for credit allocations Xero reports" },
-      { source: ["amount_cents"], target: ["totals", "amount_due_cents"], transform: "total − paid − credited" },
-      { source: [], target: ["status"], transform: "derivePaymentStatus over the folded totals" },
-      { source: [], target: ["version"], transform: "+1 — see create-settlement" },
+      {
+        source: ["amount_cents"],
+        target: ["totals", "amount_paid_cents"],
+        transform: "delta over the genuinely-new rows only",
+      },
+      {
+        source: ["amount_cents"],
+        target: ["totals", "amount_credited_cents"],
+        transform: "same, for credit allocations Xero reports",
+      },
+      {
+        source: ["amount_cents"],
+        target: ["totals", "amount_due_cents"],
+        transform: "total − paid − credited",
+      },
+      {
+        source: [],
+        target: ["status"],
+        transform: "derivePaymentStatus over the folded totals",
+      },
+      {
+        source: [],
+        target: ["version"],
+        transform: "+1 — see create-settlement",
+      },
     ],
   },
 ];
@@ -326,12 +372,18 @@ const VOID_ROW_INVARIANT =
  * slots that should have described them were describing the invoice.
  */
 const VOID_ROW_FIELDS = [
-  { source: [], target: ["type"], transform: "literal \"void\" — the settlement bucket that folds into `amount_void_cents`" },
-  { source: [], target: ["reason"], transform: "literal \"invoice_voided\"" },
+  {
+    source: [],
+    target: ["type"],
+    transform:
+      'literal "void" — the settlement bucket that folds into `amount_void_cents`',
+  },
+  { source: [], target: ["reason"], transform: 'literal "invoice_voided"' },
   {
     source: ["totals", "total_cents"],
     target: ["amount_cents"],
-    transform: "the void settlement's amount IS the invoice total — a void annuls everything billed",
+    transform:
+      "the void settlement's amount IS the invoice total — a void annuls everything billed",
   },
 ];
 
@@ -347,7 +399,12 @@ const voidInvoiceRules: CollectionRule[] = [
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "void-invoice",
     fields: [
-      { source: ["uid"], target: ["reverses"], transform: "one reverser per unreversed settlement, sharing one uid_session" },
+      {
+        source: ["uid"],
+        target: ["reverses"],
+        transform:
+          "one reverser per unreversed settlement, sharing one uid_session",
+      },
     ],
   },
   {
@@ -385,7 +442,12 @@ const voidInvoiceFromCrmsRules: CollectionRule[] = [
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "void-invoice-from-crms",
     fields: [
-      { source: ["uid"], target: ["reverses"], transform: "one reverser per unreversed settlement, sharing one uid_session" },
+      {
+        source: ["uid"],
+        target: ["reverses"],
+        transform:
+          "one reverser per unreversed settlement, sharing one uid_session",
+      },
     ],
   },
   {
@@ -423,7 +485,12 @@ const voidInvoiceFromXeroRules: CollectionRule[] = [
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "void-invoice-from-xero",
     fields: [
-      { source: ["uid"], target: ["reverses"], transform: "one reverser per unreversed settlement, sharing one uid_session" },
+      {
+        source: ["uid"],
+        target: ["reverses"],
+        transform:
+          "one reverser per unreversed settlement, sharing one uid_session",
+      },
     ],
   },
   {

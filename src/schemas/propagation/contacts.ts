@@ -27,7 +27,8 @@ const CONTACT_ORG_BACKREF: EnforcementRef = {
 
 const CONTACT_ORG_BACKREF_AT_CREATE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/contacts/contacts.test.ts::POST - creates a contact with organization cross-reference",
+  ref:
+    "api-cloudrun/tests/integration/contacts/contacts.test.ts::POST - creates a contact with organization cross-reference",
   clause:
     "the same membership at CREATE — a contact created with an organization cross-reference appears on the org side too",
   gates: true,
@@ -49,7 +50,8 @@ const createContactRules: CollectionRule[] = [
     source: "contacts",
     target: "organizations",
     mode: "co-write",
-    invariant: "Organizations maintain a list of contacts for bidirectional navigation",
+    invariant:
+      "Organizations maintain a list of contacts for bidirectional navigation",
     enforced_by: [CONTACT_ORG_BACKREF_AT_CREATE],
     transaction: "create-contact",
     fields: [
@@ -66,7 +68,8 @@ const createContactRules: CollectionRule[] = [
     source: "contacts",
     target: "users",
     mode: "co-write",
-    invariant: "When a contact is created with an email matching an existing user, link bidirectionally",
+    invariant:
+      "When a contact is created with an email matching an existing user, link bidirectionally",
     transaction: "create-contact",
     fields: [
       { source: ["uid"], target: ["uid_contact"] },
@@ -76,7 +79,8 @@ const createContactRules: CollectionRule[] = [
 
 const createContactTransaction: TransactionDefinition = {
   id: "create-contact",
-  description: "Creates a contact with bidirectional organization cross-references, optional user link, and a cowritten default thread.",
+  description:
+    "Creates a contact with bidirectional organization cross-references, optional user link, and a cowritten default thread.",
   steps: [
     "create-contact:contact-to-orgs",
     "create-contact:link-to-user",
@@ -114,7 +118,8 @@ const updateContactRules: CollectionRule[] = [
     source: "contacts",
     target: "orders",
     mode: "fan-out",
-    invariant: "Active orders embed delivery/collection contact names in destinations",
+    invariant:
+      "Active orders embed delivery/collection contact names in destinations",
     transaction: "update-contact",
     trigger: "name change — targets active orders (not canceled/complete)",
     enforced_by: [{
@@ -125,14 +130,38 @@ const updateContactRules: CollectionRule[] = [
       gates: false,
     }],
     fields: [
-      { source: ["first_name"], target: ["destinations", "delivery", "contact", "first_name"] },
-      { source: ["middle_name"], target: ["destinations", "delivery", "contact", "middle_name"] },
-      { source: ["last_name"], target: ["destinations", "delivery", "contact", "last_name"] },
-      { source: ["pronunciation"], target: ["destinations", "delivery", "contact", "pronunciation"] },
-      { source: ["first_name"], target: ["destinations", "collection", "contact", "first_name"] },
-      { source: ["middle_name"], target: ["destinations", "collection", "contact", "middle_name"] },
-      { source: ["last_name"], target: ["destinations", "collection", "contact", "last_name"] },
-      { source: ["pronunciation"], target: ["destinations", "collection", "contact", "pronunciation"] },
+      {
+        source: ["first_name"],
+        target: ["destinations", "delivery", "contact", "first_name"],
+      },
+      {
+        source: ["middle_name"],
+        target: ["destinations", "delivery", "contact", "middle_name"],
+      },
+      {
+        source: ["last_name"],
+        target: ["destinations", "delivery", "contact", "last_name"],
+      },
+      {
+        source: ["pronunciation"],
+        target: ["destinations", "delivery", "contact", "pronunciation"],
+      },
+      {
+        source: ["first_name"],
+        target: ["destinations", "collection", "contact", "first_name"],
+      },
+      {
+        source: ["middle_name"],
+        target: ["destinations", "collection", "contact", "middle_name"],
+      },
+      {
+        source: ["last_name"],
+        target: ["destinations", "collection", "contact", "last_name"],
+      },
+      {
+        source: ["pronunciation"],
+        target: ["destinations", "collection", "contact", "pronunciation"],
+      },
     ],
   },
   {
@@ -140,7 +169,8 @@ const updateContactRules: CollectionRule[] = [
     source: "contacts",
     target: "orders",
     mode: "fan-out",
-    invariant: "Active orders embed delivery/collection contact phones for logistics",
+    invariant:
+      "Active orders embed delivery/collection contact phones for logistics",
     transaction: "update-contact",
     trigger: "phones change — targets active orders",
     enforced_by: [{
@@ -151,8 +181,14 @@ const updateContactRules: CollectionRule[] = [
       gates: false,
     }],
     fields: [
-      { source: ["phones"], target: ["destinations", "delivery", "contact", "phones"] },
-      { source: ["phones"], target: ["destinations", "collection", "contact", "phones"] },
+      {
+        source: ["phones"],
+        target: ["destinations", "delivery", "contact", "phones"],
+      },
+      {
+        source: ["phones"],
+        target: ["destinations", "collection", "contact", "phones"],
+      },
     ],
   },
   {
@@ -160,14 +196,32 @@ const updateContactRules: CollectionRule[] = [
     source: "contacts",
     target: "organizations",
     mode: "co-write",
-    invariant: "When a contact's org list changes, added/removed orgs update their contact back-references",
+    invariant:
+      "When a contact's org list changes, added/removed orgs update their contact back-references",
     enforced_by: [CONTACT_ORG_BACKREF],
     transaction: "update-contact",
     fields: [
-      { source: [], target: ["contacts"], transform: "orgs added → add contact ref {uid, first_name, middle_name, last_name, pronunciation, roles: []}" },
-      { source: [], target: ["contacts"], transform: "orgs removed → remove contact ref" },
-      { source: [], target: ["query_by_contacts"], transform: "orgs added → add contact uid" },
-      { source: [], target: ["query_by_contacts"], transform: "orgs removed → remove contact uid" },
+      {
+        source: [],
+        target: ["contacts"],
+        transform:
+          "orgs added → add contact ref {uid, first_name, middle_name, last_name, pronunciation, roles: []}",
+      },
+      {
+        source: [],
+        target: ["contacts"],
+        transform: "orgs removed → remove contact ref",
+      },
+      {
+        source: [],
+        target: ["query_by_contacts"],
+        transform: "orgs added → add contact uid",
+      },
+      {
+        source: [],
+        target: ["query_by_contacts"],
+        transform: "orgs removed → remove contact uid",
+      },
     ],
   },
   {
@@ -178,7 +232,8 @@ const updateContactRules: CollectionRule[] = [
     invariant: "A contact's name stays in sync with its linked user's name",
     enforced_by: [CONTACT_NAME_TO_USER],
     transaction: "update-contact",
-    trigger: "first_name/middle_name/last_name/pronunciation change on a contact with uid_user set",
+    trigger:
+      "first_name/middle_name/last_name/pronunciation change on a contact with uid_user set",
     fields: [
       { source: ["first_name"], target: ["first_name"] },
       { source: ["middle_name"], target: ["middle_name"] },
@@ -190,7 +245,8 @@ const updateContactRules: CollectionRule[] = [
 
 const updateContactTransaction: TransactionDefinition = {
   id: "update-contact",
-  description: "Updates a contact with name cascades to organizations, active order destinations, and linked user; phone cascades to active orders; and bidirectional org membership maintenance.",
+  description:
+    "Updates a contact with name cascades to organizations, active order destinations, and linked user; phone cascades to active orders; and bidirectional org membership maintenance.",
   steps: [
     "update-contact:name-to-orgs",
     "update-contact:name-to-orders",

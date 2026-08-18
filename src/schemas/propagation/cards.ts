@@ -24,9 +24,10 @@ import type {
  */
 const CARD_DELETE_CASCADE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/recurrences/recurrences.test.ts:750",
+  ref:
+    "api-cloudrun/tests/integration/recurrences/recurrences.test.ts::Recurrences: delete batches a large-horizon cascade (cards + threads + comments gone)",
   clause:
-    "the teardown and its complement — a large-horizon recurrence delete removes cards, threads AND comments in batches; a scope=following card delete tears down the deleted siblings' threads + comments (:867); and a thread that survives with other sources keeps its comment counters through the narrow `sources[]` patch (:803). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the teardown and its complement — a large-horizon recurrence delete removes cards, threads AND comments in batches; the sibling test `Cards DELETE scope=following tears down deleted siblings' threads + comments` covers the scope=following card delete; and `Recurrences: delete preserves a surviving thread's comment counters (narrow sources patch)` covers the thread that survives with other sources and keeps its comment counters through the narrow `sources[]` patch. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
@@ -57,7 +58,8 @@ const createCardRules: CollectionRule[] = [
       {
         kind: "audit",
         ref: "api-cloudrun/scripts/audit-default-threads.ts",
-        clause: "property 1 (FORWARD) — the card's uid_thread resolves to a thread whose sources[] names it",
+        clause:
+          "property 1 (FORWARD) — the card's uid_thread resolves to a thread whose sources[] names it",
         gates: true,
       },
       {
@@ -69,16 +71,33 @@ const createCardRules: CollectionRule[] = [
       },
       {
         kind: "zod",
-        ref: "core/src/schemas/card.ts:210",
-        clause: "`uid_thread` is required, so a card with no pointer at all cannot be written",
+        ref: "core/src/schemas/card.ts::uid_thread: ThreadId",
+        clause:
+          "`uid_thread` is required, so a card with no pointer at all cannot be written",
         gates: true,
       },
     ],
     fields: [
-      { source: ["uid"], target: ["sources", "uid"], transform: `sources[0] — the card itself` },
-      { source: [], target: ["sources", "collection"], transform: `sources[0].collection — literal "cards"` },
-      { source: ["sources"], target: ["sources"], transform: "extra sources appended (e.g. [{collection:'orders', uid}])" },
-      { source: [], target: ["created_by"], transform: "ActorRef of acting user from session" },
+      {
+        source: ["uid"],
+        target: ["sources", "uid"],
+        transform: `sources[0] — the card itself`,
+      },
+      {
+        source: [],
+        target: ["sources", "collection"],
+        transform: `sources[0].collection — literal "cards"`,
+      },
+      {
+        source: ["sources"],
+        target: ["sources"],
+        transform: "extra sources appended (e.g. [{collection:'orders', uid}])",
+      },
+      {
+        source: [],
+        target: ["created_by"],
+        transform: "ActorRef of acting user from session",
+      },
       { source: [], target: ["title"], transform: "null — default thread" },
       { source: [], target: ["comment_count"], transform: "0" },
     ],
@@ -94,7 +113,8 @@ const createCardRules: CollectionRule[] = [
     enforced_by: [{
       kind: "audit",
       ref: "api-cloudrun/scripts/audit-default-threads.ts",
-      clause: "property 2 (REVERSE) — the thread's sources[0] card points back at it via uid_thread",
+      clause:
+        "property 2 (REVERSE) — the thread's sources[0] card points back at it via uid_thread",
       gates: true,
     }],
     fields: [
@@ -127,7 +147,11 @@ const deleteCardRules: CollectionRule[] = [
     transaction: "delete-card",
     trigger: "onDelete:cards",
     fields: [
-      { source: ["uid"], target: ["sources"], transform: "remove {collection:'cards', uid} from thread.sources[]" },
+      {
+        source: ["uid"],
+        target: ["sources"],
+        transform: "remove {collection:'cards', uid} from thread.sources[]",
+      },
     ],
   },
   {
@@ -141,7 +165,11 @@ const deleteCardRules: CollectionRule[] = [
     transaction: "delete-card",
     trigger: "onDelete:cards",
     fields: [
-      { source: ["uid_thread"], target: ["uid_thread"], transform: "delete comments where uid_thread == deletedThread.uid" },
+      {
+        source: ["uid_thread"],
+        target: ["uid_thread"],
+        transform: "delete comments where uid_thread == deletedThread.uid",
+      },
     ],
   },
 ];

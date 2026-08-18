@@ -28,9 +28,9 @@ import { STOCK_STEPS } from "./stock.ts";
  */
 const ORDER_INPUT_HAS_NO_CHANNEL: EnforcementRef = {
   kind: "construction",
-  ref: "core/src/schemas/order.ts:573",
+  ref: "core/src/schemas/order.ts::export const CreateOrderInput",
   clause:
-    "the `server-side, not client-supplied` half — the input schema exposes no key for the derived values, so tampering is unrepresentable rather than rejected",
+    "the `server-side, not client-supplied` half — `CreateOrderInput` (anchored) and its update twin `UpdateOrderInput` expose no key for any derived value, so tampering is unrepresentable rather than rejected",
   gates: true,
 };
 
@@ -44,9 +44,10 @@ const ORDER_INPUT_HAS_NO_CHANNEL: EnforcementRef = {
  */
 const ORG_SNAPSHOT_REFRESH: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:1220",
+  ref:
+    "api-cloudrun/tests/integration/orders/orders.test.ts::PUT - updates organization on order",
   clause:
-    "2 of the snapshot's 5 fields — `organization.uid` and `.name` are re-read when the reference changes. `crms_id`, `xero_id` and `billing_address` are asserted nowhere, and no corpus detector covers their freshness. Runs in `deno task test` (pre-push), not in CI.",
+    "2 of the snapshot's 5 fields — `organization.uid` and `.name` are re-read when the reference changes. `crms_id`, `xero_id` and `billing_address` are asserted nowhere, and no corpus detector covers their freshness. Runs in `deno task test` (pre-push), not in CI. ⚠️ The line number this ref carried until 2026-08-18 sat in an unrelated step's request payload (`PUT - destination-only edit rebuilds bookings at new UID`) and resolved cleanly the whole time.",
   gates: true,
 };
 
@@ -66,9 +67,10 @@ const ORDER_TOTALS_MATH: EnforcementRef = {
  */
 const ORDER_NUMBER_COUNTER: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:1472",
+  ref:
+    "api-cloudrun/tests/integration/orders/orders.test.ts::overlapping creates are gap-free and duplicate-free",
   clause:
-    "the `order number` half only — allocation is gap-free and duplicate-free under concurrent creates. Says nothing about totals or the query arrays.",
+    "the `order number` half only — allocation is gap-free and duplicate-free under overlapping creates, and exactly one number is burned per committed order. Says nothing about totals or the query arrays. Three sibling steps in the same `Order number sequence` test carry the read position, the throw-after-allocation case and the dry-run.",
   gates: true,
 };
 
@@ -81,7 +83,7 @@ const ORDER_NUMBER_COUNTER: EnforcementRef = {
  */
 const BOOKING_ID_IS_THE_CARDINALITY: EnforcementRef = {
   kind: "construction",
-  ref: "core/src/schemas/_uid.ts:70",
+  ref: "core/src/schemas/_uid.ts::export const BookingId",
   clause:
     "the `one booking per consolidated product per destination` half — the doc id is the triple, so a duplicate is an overwrite rather than a second row",
   gates: true,
@@ -89,9 +91,10 @@ const BOOKING_ID_IS_THE_CARDINALITY: EnforcementRef = {
 
 const BOOKING_DIFF_TESTS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:1001",
+  ref:
+    "api-cloudrun/tests/integration/orders/orders.test.ts::PUT - canceling order deletes EVERY booking, incl. non-item-matched ones (#722)",
   clause:
-    "the diff half — items recalculated, a destination uid change deleting orphan bookings, a destination-only edit rebuilding at the new uid, and cancel deleting EVERY booking including non-item-matched ones",
+    "the diff half, across four steps of `Orders CRUD` — the anchored one is cancel deleting EVERY booking including non-item-matched ones; `PUT - updates items and recalculates bookings`, `PUT - destination UID change deletes orphan bookings` and `PUT - destination-only edit rebuilds bookings at new UID` carry the rest",
   gates: true,
 };
 
@@ -108,7 +111,7 @@ const BOOKING_DIFF_TESTS: EnforcementRef = {
  */
 const ORPHAN_BOOKING_LEAVES_NO_STOCK_ENTRY: EnforcementRef = {
   kind: "audit",
-  ref: "api-cloudrun/scripts/audit-stock.ts:306",
+  ref: "api-cloudrun/scripts/audit-stock.ts::unavailable_stale",
   clause:
     "the `stock projection zeroed` half — invariant 4's `extra` side (`unavailable_stale`) fires on any `stock/{P}` carrying an interval the live bookings and OOS records do not account for, which is exactly what an un-zeroed orphan leaves behind",
   gates: true,
@@ -138,7 +141,7 @@ const BOOKING_ALLOCATION_DIAGNOSTIC: EnforcementRef = {
  */
 const FULFILLMENT_SHAPE_STRIPS: EnforcementRef = {
   kind: "construction",
-  ref: "core/src/schemas/fulfillment.ts:187",
+  ref: "core/src/schemas/fulfillment.ts::export const FulfillmentSchema",
   clause:
     "every `stripped` clause — the strictObject has no key for the financial fields and `FULFILLMENT_LINE_ITEM_TYPES` has no `transaction_fee` member, so both the field strip and the item drop are write rejections",
   gates: true,
@@ -146,9 +149,10 @@ const FULFILLMENT_SHAPE_STRIPS: EnforcementRef = {
 
 const FULFILLMENT_STRIP_ASSERTED: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:194",
+  ref:
+    "api-cloudrun/tests/integration/orders/orders.test.ts::POST - creates a quoted order with a rental item and generates bookings",
   clause:
-    "the same strip, asserted positively on a real create — `totals`/`invoices`/`tax_profile`/`notes` absent from the projection and `price` absent from its line item",
+    "the same strip, asserted positively on a real create — `totals`/`invoices`/`tax_profile`/`notes` absent from the projection and `price` absent from its line item. ⚠️ The line number this ref carried until 2026-08-18 sat in the PRECEDING step (`POST - creates a draft order with no items`), which asserts none of that.",
   gates: true,
 };
 
@@ -169,7 +173,8 @@ const EVENT_CARD_RECONCILE: EnforcementRef = {
 /** The preservation half, end-to-end against real Firestore. */
 const EVENT_CARD_PRESERVED_ON_UPDATE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/orders/orders.test.ts:503",
+  ref:
+    "api-cloudrun/tests/integration/orders/orders.test.ts::PUT - non-items update preserves event cards + their deterministic threads (#227)",
   clause:
     "the `preserves user-editable fields` half at its hardest case — a subject-only PUT leaves the booking rebuild EMPTY, and the cards and their deterministic threads must survive it rather than being torn down (#227). Does not cover the per-field preservation of body/attachments/assignees individually.",
   gates: true,
@@ -227,9 +232,10 @@ const MOVEMENT_APPLIER: EnforcementRef = {
 
 const LEDGER_NON_NEGATIVE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:232",
+  ref:
+    "api-cloudrun/tests/unit/movementApplier.test.ts::assertLedgerNonNegative rejects an oversell at every level",
   clause:
-    "the `assertLedgerNonNegative runs on the FINAL state` half — the assertion rejects an oversell at every level, so an intermediate leg may dip without tripping it",
+    "the `assertLedgerNonNegative` half ONLY — the assertion itself rejects a negative at all four levels (held, in-service, per-store, per-location). ⚠️ **`runs on the FINAL state` is NOT covered by it**: that an intermediate leg may dip without tripping the check is a property of the CALL SITE (`api-cloudrun/src/services/bookings.ts`, the loop over `ctx.ledgersTouched` after every `applyBookingUpdate` in the chunk), and no test asserts a sequence whose intermediate ledger goes negative.",
   gates: true,
 };
 
@@ -257,7 +263,8 @@ const createOrderRules: CollectionRule[] = [
     source: "organizations",
     target: "orders",
     mode: "embed",
-    invariant: "Orders carry a denormalized org snapshot so the UI never needs a join to display org name/billing",
+    invariant:
+      "Orders carry a denormalized org snapshot so the UI never needs a join to display org name/billing",
     enforced_by: [ORDER_INPUT_HAS_NO_CHANNEL, ORG_SNAPSHOT_REFRESH],
     transaction: "create-order",
     fields: [
@@ -265,7 +272,10 @@ const createOrderRules: CollectionRule[] = [
       { source: ["name"], target: ["organization", "name"] },
       { source: ["crms_id"], target: ["organization", "crms_id"] },
       { source: ["xero_id"], target: ["organization", "xero_id"] },
-      { source: ["billing_address"], target: ["organization", "billing_address"] },
+      {
+        source: ["billing_address"],
+        target: ["organization", "billing_address"],
+      },
     ],
   },
   {
@@ -273,15 +283,33 @@ const createOrderRules: CollectionRule[] = [
     source: "products",
     target: "orders",
     mode: "embed",
-    invariant: "Line items inherit product type, stock_method, and default price from the product catalog",
+    invariant:
+      "Line items inherit product type, stock_method, and default price from the product catalog",
     transaction: "create-order",
     fields: [
       { source: ["type"], target: ["items", "type"] },
       { source: ["stock_method"], target: ["items", "stock_method"] },
-      { source: ["price", "base_cents"], target: ["items", "price", "base_cents"], transform: "fallback — used only when input omits price" },
-      { source: ["price", "replacement_cents"], target: ["items", "price", "replacement_cents"], transform: "fallback — used only when input omits replacement" },
-      { source: ["price", "taxes"], target: ["items", "price", "taxes"], transform: "fallback — denormalized TaxRef[] from product catalog, used when input omits taxes" },
-      { source: ["name"], target: ["items", "name"], transform: "fallback — input name takes precedence" },
+      {
+        source: ["price", "base_cents"],
+        target: ["items", "price", "base_cents"],
+        transform: "fallback — used only when input omits price",
+      },
+      {
+        source: ["price", "replacement_cents"],
+        target: ["items", "price", "replacement_cents"],
+        transform: "fallback — used only when input omits replacement",
+      },
+      {
+        source: ["price", "taxes"],
+        target: ["items", "price", "taxes"],
+        transform:
+          "fallback — denormalized TaxRef[] from product catalog, used when input omits taxes",
+      },
+      {
+        source: ["name"],
+        target: ["items", "name"],
+        transform: "fallback — input name takes precedence",
+      },
     ],
   },
   {
@@ -289,17 +317,55 @@ const createOrderRules: CollectionRule[] = [
     source: "orders",
     target: "orders",
     mode: "derive",
-    invariant: "Totals, query arrays, and order number are computed server-side to prevent client tampering",
-    enforced_by: [ORDER_INPUT_HAS_NO_CHANNEL, ORDER_TOTALS_MATH, ORDER_NUMBER_COUNTER],
+    invariant:
+      "Totals, query arrays, and order number are computed server-side to prevent client tampering",
+    enforced_by: [
+      ORDER_INPUT_HAS_NO_CHANNEL,
+      ORDER_TOTALS_MATH,
+      ORDER_NUMBER_COUNTER,
+    ],
     transaction: "create-order",
     fields: [
-      { source: ["items"], target: ["totals"], transform: "calculateOrderTotals(items, taxes) → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}. Two-pass: computes pre-tax items first, then transaction fees from subtotal_discounted. transaction_fee items excluded from bookings/stock." },
-      { source: ["items"], target: ["query_by_items"], transform: "consolidateItems(items) → product uids for search" },
-      { source: ["destinations"], target: ["query_by_contacts"], transform: "flatten all contact uids from delivery/collection endpoints" },
-      { source: ["destinations"], target: ["query_by_dates"], transform: "buildQueryByDates(destinations) — deduped Chicago YYYY-MM-DD boundary days across every destination's delivery + collection" },
-      { source: [], target: ["number"], transform: "atomic increment of counters/orders.count" },
-      { source: ["destinations"], target: ["destinations"], transform: "per-destination dates: each ISO string gets a Firestore timestamp companion (*_fs); getDuration → days_active/days_charged" },
-      { source: [], target: ["bookings_breakdown"], transform: "sum of breakdowns across all freshly-built bookings — initial roll-up, maintained incrementally by update-booking thereafter. Sum of all values === sum of booking.quantity (invariant)." },
+      {
+        source: ["items"],
+        target: ["totals"],
+        transform:
+          "calculateOrderTotals(items, taxes) → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}. Two-pass: computes pre-tax items first, then transaction fees from subtotal_discounted. transaction_fee items excluded from bookings/stock.",
+      },
+      {
+        source: ["items"],
+        target: ["query_by_items"],
+        transform: "consolidateItems(items) → product uids for search",
+      },
+      {
+        source: ["destinations"],
+        target: ["query_by_contacts"],
+        transform:
+          "flatten all contact uids from delivery/collection endpoints",
+      },
+      {
+        source: ["destinations"],
+        target: ["query_by_dates"],
+        transform:
+          "buildQueryByDates(destinations) — deduped Chicago YYYY-MM-DD boundary days across every destination's delivery + collection",
+      },
+      {
+        source: [],
+        target: ["number"],
+        transform: "atomic increment of counters/orders.count",
+      },
+      {
+        source: ["destinations"],
+        target: ["destinations"],
+        transform:
+          "per-destination dates: each ISO string gets a Firestore timestamp companion (*_fs); getDuration → days_active/days_charged",
+      },
+      {
+        source: [],
+        target: ["bookings_breakdown"],
+        transform:
+          "sum of breakdowns across all freshly-built bookings — initial roll-up, maintained incrementally by update-booking thereafter. Sum of all values === sum of booking.quantity (invariant).",
+      },
     ],
   },
   {
@@ -307,7 +373,8 @@ const createOrderRules: CollectionRule[] = [
     source: "orders",
     target: "bookings",
     mode: "co-write",
-    invariant: "One booking per consolidated product per destination — tracks per-product stock lifecycle",
+    invariant:
+      "One booking per consolidated product per destination — tracks per-product stock lifecycle",
     enforced_by: [BOOKING_ID_IS_THE_CARDINALITY],
     transaction: "create-order",
     fields: [
@@ -317,21 +384,77 @@ const createOrderRules: CollectionRule[] = [
       { source: ["subject"], target: ["subject"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
       { source: ["organization", "name"], target: ["organization", "name"] },
-      { source: ["organization", "crms_id"], target: ["organization", "crms_id"] },
-      { source: ["destinations", "delivery", "uid"], target: ["uid_destination_delivery"] },
-      { source: ["destinations", "delivery", "uid"], target: ["destinations", "delivery", "uid"] },
-      { source: ["destinations", "delivery", "address"], target: ["destinations", "delivery", "address"] },
-      { source: ["destinations", "collection", "uid"], target: ["uid_destination_collection"] },
-      { source: ["destinations", "collection", "uid"], target: ["destinations", "collection", "uid"] },
-      { source: ["destinations", "collection", "address"], target: ["destinations", "collection", "address"] },
-      { source: ["destinations", "dates"], target: ["dates"], transform: "buildBookingDates(destination.dates) — per booking's own destination. rental: delivery_start→start, collection_start→end; sale: delivery_start→start, end=null" },
-      { source: ["items", "uid"], target: ["uid_product"], transform: "consolidated item uid (the product uid)" },
-      { source: ["items", "name"], target: ["name"], transform: "from consolidated item" },
-      { source: ["items", "quantity"], target: ["quantity"], transform: "sum of duplicate line items via consolidateItems()" },
-      { source: ["items", "type"], target: ["type"], transform: "from consolidated item" },
-      { source: ["items", "price", "total_cents"], target: ["total_price_cents"], transform: "sum across consolidated duplicates" },
-      { source: ["items", "price", "total_cents"], target: ["unit_price_cents"], transform: "consolidateItems() — total_price_cents ÷ quantity, rounded once, half away from zero. A stored denorm for the per-line fact table: unit_price_cents × quantity ≠ total_price_cents and the residual is discarded on purpose (total_price_cents is the authoritative figure)" },
-      { source: [], target: ["breakdown"], transform: "calculateBreakdown(status, type, quantity) — distributes quantity into status buckets (quoted/reserved/prepped/out/returned/lost/damaged)" },
+      {
+        source: ["organization", "crms_id"],
+        target: ["organization", "crms_id"],
+      },
+      {
+        source: ["destinations", "delivery", "uid"],
+        target: ["uid_destination_delivery"],
+      },
+      {
+        source: ["destinations", "delivery", "uid"],
+        target: ["destinations", "delivery", "uid"],
+      },
+      {
+        source: ["destinations", "delivery", "address"],
+        target: ["destinations", "delivery", "address"],
+      },
+      {
+        source: ["destinations", "collection", "uid"],
+        target: ["uid_destination_collection"],
+      },
+      {
+        source: ["destinations", "collection", "uid"],
+        target: ["destinations", "collection", "uid"],
+      },
+      {
+        source: ["destinations", "collection", "address"],
+        target: ["destinations", "collection", "address"],
+      },
+      {
+        source: ["destinations", "dates"],
+        target: ["dates"],
+        transform:
+          "buildBookingDates(destination.dates) — per booking's own destination. rental: delivery_start→start, collection_start→end; sale: delivery_start→start, end=null",
+      },
+      {
+        source: ["items", "uid"],
+        target: ["uid_product"],
+        transform: "consolidated item uid (the product uid)",
+      },
+      {
+        source: ["items", "name"],
+        target: ["name"],
+        transform: "from consolidated item",
+      },
+      {
+        source: ["items", "quantity"],
+        target: ["quantity"],
+        transform: "sum of duplicate line items via consolidateItems()",
+      },
+      {
+        source: ["items", "type"],
+        target: ["type"],
+        transform: "from consolidated item",
+      },
+      {
+        source: ["items", "price", "total_cents"],
+        target: ["total_price_cents"],
+        transform: "sum across consolidated duplicates",
+      },
+      {
+        source: ["items", "price", "total_cents"],
+        target: ["unit_price_cents"],
+        transform:
+          "consolidateItems() — total_price_cents ÷ quantity, rounded once, half away from zero. A stored denorm for the per-line fact table: unit_price_cents × quantity ≠ total_price_cents and the residual is discarded on purpose (total_price_cents is the authoritative figure)",
+      },
+      {
+        source: [],
+        target: ["breakdown"],
+        transform:
+          "calculateBreakdown(status, type, quantity) — distributes quantity into status buckets (quoted/reserved/prepped/out/returned/lost/damaged)",
+      },
     ],
   },
   {
@@ -339,13 +462,27 @@ const createOrderRules: CollectionRule[] = [
     source: "inventory-ledgers",
     target: "bookings",
     mode: "embed",
-    invariant: "Bookings get store allocation from the inventory ledger to track where stock is drawn from",
+    invariant:
+      "Bookings get store allocation from the inventory ledger to track where stock is drawn from",
     enforced_by: [BOOKING_ALLOCATION_DIAGNOSTIC],
     transaction: "create-order",
     fields: [
-      { source: ["store_breakdown"], target: ["stores"], transform: "allocateBookingToStores() — draws quantity from default store first, then alphabetical" },
-      { source: ["store_breakdown"], target: ["query_by_uid_store"], transform: "allocated store uids for search" },
-      { source: ["store_breakdown"], target: ["shortage"], transform: "remaining quantity that couldn't be allocated" },
+      {
+        source: ["store_breakdown"],
+        target: ["stores"],
+        transform:
+          "allocateBookingToStores() — draws quantity from default store first, then alphabetical",
+      },
+      {
+        source: ["store_breakdown"],
+        target: ["query_by_uid_store"],
+        transform: "allocated store uids for search",
+      },
+      {
+        source: ["store_breakdown"],
+        target: ["shortage"],
+        transform: "remaining quantity that couldn't be allocated",
+      },
     ],
   },
   {
@@ -353,28 +490,86 @@ const createOrderRules: CollectionRule[] = [
     source: "orders",
     target: "cards",
     mode: "co-write",
-    invariant: "Schedule projection — one event card per destination per position (start/end) drives the Dashboard's list/kanban/calendar/map views",
+    invariant:
+      "Schedule projection — one event card per destination per position (start/end) drives the Dashboard's list/kanban/calendar/map views",
     enforced_by: [EVENT_CARD_RECONCILE],
     transaction: "create-order",
     fields: [
-      { source: ["uid"], target: ["sources"], transform: "[{collection:'orders', uid}] — event card links back to its parent order" },
-      { source: ["status"], target: ["status"], transform: "mapped: reserved/quoted→planned, active→active, complete→complete, canceled→canceled, draft→draft" },
-      { source: ["number"], target: ["subject"], transform: "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'; action in {Deliver, Pickup, Return, Canceled} per (position, customer_collecting/returning, status)" },
+      {
+        source: ["uid"],
+        target: ["sources"],
+        transform:
+          "[{collection:'orders', uid}] — event card links back to its parent order",
+      },
+      {
+        source: ["status"],
+        target: ["status"],
+        transform:
+          "mapped: reserved/quoted→planned, active→active, complete→complete, canceled→canceled, draft→draft",
+      },
+      {
+        source: ["number"],
+        target: ["subject"],
+        transform:
+          "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'; action in {Deliver, Pickup, Return, Canceled} per (position, customer_collecting/returning, status)",
+      },
       { source: ["subject"], target: ["subject"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
       { source: ["organization", "name"], target: ["organization", "name"] },
-      { source: ["destinations", "delivery"], target: ["destination"], transform: "full DocDestinationEndpointType for start events" },
-      { source: ["destinations", "collection"], target: ["destination"], transform: "full DocDestinationEndpointType for end events" },
-      { source: ["destinations", "dates", "delivery_start"], target: ["dates", "start"], transform: "start event start instant (from the card's own destination)" },
-      { source: ["destinations", "dates", "delivery_end"], target: ["dates", "end"], transform: "start event end instant (from the card's own destination)" },
-      { source: ["destinations", "dates", "collection_start"], target: ["dates", "start"], transform: "end event start instant (rental items only, from the card's own destination)" },
-      { source: ["destinations", "dates", "collection_end"], target: ["dates", "end"], transform: "end event end instant (rental items only, from the card's own destination)" },
+      {
+        source: ["destinations", "delivery"],
+        target: ["destination"],
+        transform: "full DocDestinationEndpointType for start events",
+      },
+      {
+        source: ["destinations", "collection"],
+        target: ["destination"],
+        transform: "full DocDestinationEndpointType for end events",
+      },
+      {
+        source: ["destinations", "dates", "delivery_start"],
+        target: ["dates", "start"],
+        transform:
+          "start event start instant (from the card's own destination)",
+      },
+      {
+        source: ["destinations", "dates", "delivery_end"],
+        target: ["dates", "end"],
+        transform: "start event end instant (from the card's own destination)",
+      },
+      {
+        source: ["destinations", "dates", "collection_start"],
+        target: ["dates", "start"],
+        transform:
+          "end event start instant (rental items only, from the card's own destination)",
+      },
+      {
+        source: ["destinations", "dates", "collection_end"],
+        target: ["dates", "end"],
+        transform:
+          "end event end instant (rental items only, from the card's own destination)",
+      },
       // ⚠️ One mapping listing a parent and two of its children as if they were
       // a path. They are siblings UNDER a destination, so each is its own
       // mapping (#568).
-      { source: ["destinations", "customer_collecting"], target: ["uid_list"], transform: "per-pair flag drives card list — field-service for deliver, in-store for in_store_pickup" },
-      { source: ["destinations", "customer_returning"], target: ["uid_list"], transform: "per-pair flag drives card list — field-service for pick_up, in-store for in_store_return" },
-      { source: [], target: ["locked"], transform: "['card','subject','sources','destination','organization','attachments','status_auto'] — order-derived cards cannot be deleted, status follows pick progress, label/sources/destination/org/attachments cannot be edited via PATCH" },
+      {
+        source: ["destinations", "customer_collecting"],
+        target: ["uid_list"],
+        transform:
+          "per-pair flag drives card list — field-service for deliver, in-store for in_store_pickup",
+      },
+      {
+        source: ["destinations", "customer_returning"],
+        target: ["uid_list"],
+        transform:
+          "per-pair flag drives card list — field-service for pick_up, in-store for in_store_return",
+      },
+      {
+        source: [],
+        target: ["locked"],
+        transform:
+          "['card','subject','sources','destination','organization','attachments','status_auto'] — order-derived cards cannot be deleted, status follows pick progress, label/sources/destination/org/attachments cannot be edited via PATCH",
+      },
     ],
   },
   {
@@ -382,7 +577,8 @@ const createOrderRules: CollectionRule[] = [
     source: "orders",
     target: "fulfillments",
     mode: "co-write",
-    invariant: "Fulfillment clients see a sanitized order view — pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items are stripped",
+    invariant:
+      "Fulfillment clients see a sanitized order view — pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items are stripped",
     enforced_by: [FULFILLMENT_SHAPE_STRIPS, FULFILLMENT_STRIP_ASSERTED],
     transaction: "create-order",
     fields: [
@@ -391,8 +587,18 @@ const createOrderRules: CollectionRule[] = [
       { source: ["status"], target: ["status"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
       { source: ["organization", "name"], target: ["organization", "name"] },
-      { source: ["destinations"], target: ["destinations"], transform: "full DocDestination with per-destination dates + contacts retained" },
-      { source: ["items"], target: ["items"], transform: "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely" },
+      {
+        source: ["destinations"],
+        target: ["destinations"],
+        transform:
+          "full DocDestination with per-destination dates + contacts retained",
+      },
+      {
+        source: ["items"],
+        target: ["items"],
+        transform:
+          "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely",
+      },
       { source: ["subject"], target: ["subject"] },
       { source: ["reference"], target: ["reference"] },
       { source: ["query_by_items"], target: ["query_by_items"] },
@@ -404,7 +610,8 @@ const createOrderRules: CollectionRule[] = [
 
 const createOrderTransaction: TransactionDefinition = {
   id: "create-order",
-  description: "Creates an order with bookings, the `stock/{P}` projection, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view). Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an order's bookings.",
+  description:
+    "Creates an order with bookings, the `stock/{P}` projection, event cards, and the sanitized fulfillment view in a single Firestore transaction. Skips bookings/cards for draft/canceled status. Cowrites default threads for the order and each event card (card threads carry two sources so they surface on both the card and its parent order's detail view). Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an order's bookings.",
   steps: [
     "create-order:org-to-order",
     "create-order:products-to-order-items",
@@ -429,7 +636,8 @@ const updateOrderRules: CollectionRule[] = [
     source: "organizations",
     target: "orders",
     mode: "embed",
-    invariant: "When the order's org reference changes, fetch fresh org data to keep the denormalized snapshot current",
+    invariant:
+      "When the order's org reference changes, fetch fresh org data to keep the denormalized snapshot current",
     enforced_by: [ORDER_INPUT_HAS_NO_CHANNEL, ORG_SNAPSHOT_REFRESH],
     transaction: "update-order",
     fields: [
@@ -437,7 +645,10 @@ const updateOrderRules: CollectionRule[] = [
       { source: ["name"], target: ["organization", "name"] },
       { source: ["crms_id"], target: ["organization", "crms_id"] },
       { source: ["xero_id"], target: ["organization", "xero_id"] },
-      { source: ["billing_address"], target: ["organization", "billing_address"] },
+      {
+        source: ["billing_address"],
+        target: ["organization", "billing_address"],
+      },
     ],
   },
   {
@@ -445,15 +656,38 @@ const updateOrderRules: CollectionRule[] = [
     source: "orders",
     target: "orders",
     mode: "derive",
-    invariant: "Totals, query arrays, and date timestamps recomputed on every update",
+    invariant:
+      "Totals, query arrays, and date timestamps recomputed on every update",
     enforced_by: [ORDER_INPUT_HAS_NO_CHANNEL, ORDER_TOTALS_MATH],
     transaction: "update-order",
     fields: [
-      { source: ["items"], target: ["totals"], transform: "calculateOrderTotals(items, taxes) → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}" },
-      { source: ["items"], target: ["query_by_items"], transform: "consolidateItems(items) → product uids" },
-      { source: ["destinations"], target: ["query_by_contacts"], transform: "flatten contact uids" },
-      { source: ["destinations"], target: ["query_by_dates"], transform: "buildQueryByDates(destinations)" },
-      { source: ["destinations"], target: ["destinations"], transform: "per-destination dates recanonicalized: Timestamp.fromDate() companions (*_fs) + getDuration recompute" },
+      {
+        source: ["items"],
+        target: ["totals"],
+        transform:
+          "calculateOrderTotals(items, taxes) → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}",
+      },
+      {
+        source: ["items"],
+        target: ["query_by_items"],
+        transform: "consolidateItems(items) → product uids",
+      },
+      {
+        source: ["destinations"],
+        target: ["query_by_contacts"],
+        transform: "flatten contact uids",
+      },
+      {
+        source: ["destinations"],
+        target: ["query_by_dates"],
+        transform: "buildQueryByDates(destinations)",
+      },
+      {
+        source: ["destinations"],
+        target: ["destinations"],
+        transform:
+          "per-destination dates recanonicalized: Timestamp.fromDate() companions (*_fs) + getDuration recompute",
+      },
     ],
   },
   {
@@ -461,8 +695,13 @@ const updateOrderRules: CollectionRule[] = [
     source: "orders",
     target: "bookings",
     mode: "co-write",
-    invariant: "Bookings are diffed — created, updated, or deleted based on item/status/date/destination changes. Orphan bookings (bookings whose {order,product,destination} composite id no longer appears in the order) are deleted and their `stock/{P}` projections zeroed.",
-    enforced_by: [BOOKING_ID_IS_THE_CARDINALITY, BOOKING_DIFF_TESTS, ORPHAN_BOOKING_LEAVES_NO_STOCK_ENTRY],
+    invariant:
+      "Bookings are diffed — created, updated, or deleted based on item/status/date/destination changes. Orphan bookings (bookings whose {order,product,destination} composite id no longer appears in the order) are deleted and their `stock/{P}` projections zeroed.",
+    enforced_by: [
+      BOOKING_ID_IS_THE_CARDINALITY,
+      BOOKING_DIFF_TESTS,
+      ORPHAN_BOOKING_LEAVES_NO_STOCK_ENTRY,
+    ],
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["uid_order"] },
@@ -471,12 +710,38 @@ const updateOrderRules: CollectionRule[] = [
       { source: ["subject"], target: ["subject"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
       { source: ["organization", "name"], target: ["organization", "name"] },
-      { source: ["organization", "crms_id"], target: ["organization", "crms_id"] },
-      { source: ["destinations", "delivery"], target: ["destinations", "delivery"], transform: "{uid, address}" },
-      { source: ["destinations", "collection"], target: ["destinations", "collection"], transform: "{uid, address}" },
-      { source: ["destinations", "dates"], target: ["dates"], transform: "buildBookingDates(destination.dates) — per booking's own destination, same logic as create" },
-      { source: ["items"], target: [], transform: "consolidated items → uid_product, name, quantity, type, total_price_cents, unit_price_cents" },
-      { source: [], target: ["breakdown"], transform: "calculateBreakdown(status, type, quantity) — preserves existing prepped/out/returned/lost/damaged counts" },
+      {
+        source: ["organization", "crms_id"],
+        target: ["organization", "crms_id"],
+      },
+      {
+        source: ["destinations", "delivery"],
+        target: ["destinations", "delivery"],
+        transform: "{uid, address}",
+      },
+      {
+        source: ["destinations", "collection"],
+        target: ["destinations", "collection"],
+        transform: "{uid, address}",
+      },
+      {
+        source: ["destinations", "dates"],
+        target: ["dates"],
+        transform:
+          "buildBookingDates(destination.dates) — per booking's own destination, same logic as create",
+      },
+      {
+        source: ["items"],
+        target: [],
+        transform:
+          "consolidated items → uid_product, name, quantity, type, total_price_cents, unit_price_cents",
+      },
+      {
+        source: [],
+        target: ["breakdown"],
+        transform:
+          "calculateBreakdown(status, type, quantity) — preserves existing prepped/out/returned/lost/damaged counts",
+      },
     ],
   },
   {
@@ -488,7 +753,12 @@ const updateOrderRules: CollectionRule[] = [
     enforced_by: [BOOKING_ALLOCATION_DIAGNOSTIC],
     transaction: "update-order",
     fields: [
-      { source: ["store_breakdown"], target: ["stores"], transform: "allocateBookingToStores() — only for part-prepped/prepped/active status" },
+      {
+        source: ["store_breakdown"],
+        target: ["stores"],
+        transform:
+          "allocateBookingToStores() — only for part-prepped/prepped/active status",
+      },
       { source: ["store_breakdown"], target: ["query_by_uid_store"] },
       { source: ["store_breakdown"], target: ["shortage"] },
     ],
@@ -498,22 +768,58 @@ const updateOrderRules: CollectionRule[] = [
     source: "orders",
     target: "cards",
     mode: "co-write",
-    invariant: "Event cards are rebuilt on every update — cards for removed destinations are deleted (and their threads cascade), cards for existing destinations are upserted in place. Preserves each card's user-editable fields (body, attachments, assignees) AND any progress-derived status (planned/active/complete/blocked) — order.status is only forced onto the card when the order transitions to draft or canceled (terminal). Active/reserved/quoted/complete order statuses don't clobber the card's per-pick auto-computed status (see update-booking:booking-to-cards).",
+    invariant:
+      "Event cards are rebuilt on every update — cards for removed destinations are deleted (and their threads cascade), cards for existing destinations are upserted in place. Preserves each card's user-editable fields (body, attachments, assignees) AND any progress-derived status (planned/active/complete/blocked) — order.status is only forced onto the card when the order transitions to draft or canceled (terminal). Active/reserved/quoted/complete order statuses don't clobber the card's per-pick auto-computed status (see update-booking:booking-to-cards).",
     enforced_by: [EVENT_CARD_RECONCILE, EVENT_CARD_PRESERVED_ON_UPDATE],
     transaction: "update-order",
     fields: [
-      { source: ["uid"], target: ["sources"], transform: "[{collection:'orders', uid}] — regenerated event cards link back to the parent order" },
-      { source: ["status"], target: ["status"], transform: "draft→draft, canceled→canceled (force-override); other statuses preserve the card's existing progress-derived status" },
-      { source: ["number"], target: ["subject"], transform: "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'" },
+      {
+        source: ["uid"],
+        target: ["sources"],
+        transform:
+          "[{collection:'orders', uid}] — regenerated event cards link back to the parent order",
+      },
+      {
+        source: ["status"],
+        target: ["status"],
+        transform:
+          "draft→draft, canceled→canceled (force-override); other statuses preserve the card's existing progress-derived status",
+      },
+      {
+        source: ["number"],
+        target: ["subject"],
+        transform:
+          "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'",
+      },
       { source: ["subject"], target: ["subject"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
       { source: ["organization", "name"], target: ["organization", "name"] },
-      { source: ["destinations", "delivery"], target: ["destination"], transform: "full DocDestinationEndpointType for start events" },
-      { source: ["destinations", "collection"], target: ["destination"], transform: "full DocDestinationEndpointType for end events" },
-      { source: ["destinations", "dates", "delivery_start"], target: ["dates", "start"] },
-      { source: ["destinations", "dates", "delivery_end"], target: ["dates", "end"] },
-      { source: ["destinations", "dates", "collection_start"], target: ["dates", "start"] },
-      { source: ["destinations", "dates", "collection_end"], target: ["dates", "end"] },
+      {
+        source: ["destinations", "delivery"],
+        target: ["destination"],
+        transform: "full DocDestinationEndpointType for start events",
+      },
+      {
+        source: ["destinations", "collection"],
+        target: ["destination"],
+        transform: "full DocDestinationEndpointType for end events",
+      },
+      {
+        source: ["destinations", "dates", "delivery_start"],
+        target: ["dates", "start"],
+      },
+      {
+        source: ["destinations", "dates", "delivery_end"],
+        target: ["dates", "end"],
+      },
+      {
+        source: ["destinations", "dates", "collection_start"],
+        target: ["dates", "start"],
+      },
+      {
+        source: ["destinations", "dates", "collection_end"],
+        target: ["dates", "end"],
+      },
     ],
   },
   {
@@ -521,7 +827,8 @@ const updateOrderRules: CollectionRule[] = [
     source: "orders",
     target: "fulfillments",
     mode: "co-write",
-    invariant: "Fulfillment view mirrors the order on every update — stripped of pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items",
+    invariant:
+      "Fulfillment view mirrors the order on every update — stripped of pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items",
     enforced_by: [FULFILLMENT_SHAPE_STRIPS, FULFILLMENT_STRIP_ASSERTED],
     transaction: "update-order",
     fields: [
@@ -530,8 +837,18 @@ const updateOrderRules: CollectionRule[] = [
       { source: ["status"], target: ["status"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
       { source: ["organization", "name"], target: ["organization", "name"] },
-      { source: ["destinations"], target: ["destinations"], transform: "full DocDestination with per-destination dates + contacts retained" },
-      { source: ["items"], target: ["items"], transform: "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely" },
+      {
+        source: ["destinations"],
+        target: ["destinations"],
+        transform:
+          "full DocDestination with per-destination dates + contacts retained",
+      },
+      {
+        source: ["items"],
+        target: ["items"],
+        transform:
+          "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely",
+      },
       { source: ["subject"], target: ["subject"] },
       { source: ["reference"], target: ["reference"] },
       { source: ["query_by_items"], target: ["query_by_items"] },
@@ -543,7 +860,8 @@ const updateOrderRules: CollectionRule[] = [
 
 const updateOrderTransaction: TransactionDefinition = {
   id: "update-order",
-  description: "Updates an order, diffing items/status/dates to create/update/delete bookings, rebuild the `stock/{P}` projection, rebuild event cards, and refresh the fulfillment view. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Adding, changing or removing an order's bookings — a removed booking is simply absent from the rebuilt array.",
+  description:
+    "Updates an order, diffing items/status/dates to create/update/delete bookings, rebuild the `stock/{P}` projection, rebuild event cards, and refresh the fulfillment view. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Adding, changing or removing an order's bookings — a removed booking is simply absent from the rebuilt array.",
   steps: [
     "update-order:org-to-order",
     "update-order:order-self-derive",
@@ -596,13 +914,27 @@ const updateBookingRules: CollectionRule[] = [
     enforced_by: [{
       kind: "assertion",
       ref: "api-cloudrun/src/services/bookings.ts:591",
-      clause: "all three guards, at the single write path — ValidationError on each",
+      clause:
+        "all three guards, at the single write path — ValidationError on each",
       gates: true,
     }],
     fields: [
-      { source: [], target: ["status"], transform: "from input.status (defaults to current)" },
-      { source: [], target: ["breakdown"], transform: "merge of input.breakdown over current; deltas must be ≥ 0 for lost/damaged" },
-      { source: [], target: ["version"], transform: "version + 1 (optimistic concurrency)" },
+      {
+        source: [],
+        target: ["status"],
+        transform: "from input.status (defaults to current)",
+      },
+      {
+        source: [],
+        target: ["breakdown"],
+        transform:
+          "merge of input.breakdown over current; deltas must be ≥ 0 for lost/damaged",
+      },
+      {
+        source: [],
+        target: ["version"],
+        transform: "version + 1 (optimistic concurrency)",
+      },
     ],
   },
   {
@@ -610,17 +942,44 @@ const updateBookingRules: CollectionRule[] = [
     source: "bookings",
     target: "out-of-service",
     mode: "co-write",
-    invariant: "Non-zero increase in breakdown.lost or breakdown.damaged writes one OOS record per (booking, reason). If a non-complete OOS already exists for that pair (located via where('query_by_sources', 'array-contains', 'bookings:' + booking.uid) filtered by reason), its quantity is grown by the delta and a row appended to transactions[]. Otherwise a new OOS doc is cowritten with sources=[bookings, orders] and its default thread.",
+    invariant:
+      "Non-zero increase in breakdown.lost or breakdown.damaged writes one OOS record per (booking, reason). If a non-complete OOS already exists for that pair (located via where('query_by_sources', 'array-contains', 'bookings:' + booking.uid) filtered by reason), its quantity is grown by the delta and a row appended to transactions[]. Otherwise a new OOS doc is cowritten with sources=[bookings, orders] and its default thread.",
     enforced_by: [OOS_COWRITTEN_FROM_BOOKING],
     transaction: "update-booking",
     fields: [
-      { source: [], target: ["sources"], transform: "[{collection:'bookings', uid: booking.uid, label: 'Booking #' + booking.number}, {collection:'orders', uid: booking.uid_order, label: 'Order #' + order.number}]" },
-      { source: [], target: ["query_by_sources"], transform: "['bookings:' + booking.uid, 'orders:' + booking.uid_order]" },
+      {
+        source: [],
+        target: ["sources"],
+        transform:
+          "[{collection:'bookings', uid: booking.uid, label: 'Booking #' + booking.number}, {collection:'orders', uid: booking.uid_order, label: 'Order #' + order.number}]",
+      },
+      {
+        source: [],
+        target: ["query_by_sources"],
+        transform: "['bookings:' + booking.uid, 'orders:' + booking.uid_order]",
+      },
       { source: ["uid_product"], target: ["uid_product"] },
-      { source: [], target: ["reason"], transform: "'lost' or 'damaged' depending on which delta fired" },
-      { source: [], target: ["quantity"], transform: "delta (or current quantity + delta when growing an existing record)" },
-      { source: ["stores"], target: ["stores"], transform: "copied from booking.stores" },
-      { source: [], target: ["dates", "start"], transform: "now (chicagoInstant)" },
+      {
+        source: [],
+        target: ["reason"],
+        transform: "'lost' or 'damaged' depending on which delta fired",
+      },
+      {
+        source: [],
+        target: ["quantity"],
+        transform:
+          "delta (or current quantity + delta when growing an existing record)",
+      },
+      {
+        source: ["stores"],
+        target: ["stores"],
+        transform: "copied from booking.stores",
+      },
+      {
+        source: [],
+        target: ["dates", "start"],
+        transform: "now (chicagoInstant)",
+      },
     ],
   },
   {
@@ -635,11 +994,34 @@ const updateBookingRules: CollectionRule[] = [
     fields: [
       { source: ["uid_product"], target: ["uid_product"] },
       { source: ["uid"], target: ["uid_booking"] },
-      { source: ["breakdown"], target: ["custody"], transform: "{from, to} breakdown keys of the transition" },
-      { source: ["breakdown"], target: ["quantity"], transform: "units the transition moved" },
-      { source: ["stores"], target: ["lines"], transform: "the booking's own allocation where it still holds, else allocateBookingToStores over the live ledger; placed on `from` or `to` per the type's MOVEMENT_CONTRACTS entry" },
-      { source: [], target: ["number"], transform: "one contiguous allocateNumbers('transactions') range per chunk" },
-      { source: [], target: ["sources"], transform: "[{collection:'orders', …}, {collection:'bookings', …}] plus the OOS record for a mark_lost/mark_damaged" },
+      {
+        source: ["breakdown"],
+        target: ["custody"],
+        transform: "{from, to} breakdown keys of the transition",
+      },
+      {
+        source: ["breakdown"],
+        target: ["quantity"],
+        transform: "units the transition moved",
+      },
+      {
+        source: ["stores"],
+        target: ["lines"],
+        transform:
+          "the booking's own allocation where it still holds, else allocateBookingToStores over the live ledger; placed on `from` or `to` per the type's MOVEMENT_CONTRACTS entry",
+      },
+      {
+        source: [],
+        target: ["number"],
+        transform:
+          "one contiguous allocateNumbers('transactions') range per chunk",
+      },
+      {
+        source: [],
+        target: ["sources"],
+        transform:
+          "[{collection:'orders', …}, {collection:'bookings', …}] plus the OOS record for a mark_lost/mark_damaged",
+      },
     ],
   },
   {
@@ -652,12 +1034,40 @@ const updateBookingRules: CollectionRule[] = [
     enforced_by: [LEDGER_REPLAY, LEDGER_NON_NEGATIVE],
     transaction: "update-booking",
     fields: [
-      { source: ["lines"], target: ["quantity_held"], transform: "Σ (to ? +q : 0) + (from ? −q : 0) — conservation is structural" },
-      { source: ["lines"], target: ["quantity_in_service"], transform: "quantity_held − quantity_out_of_service" },
-      { source: ["lines"], target: ["quantity_out_of_service"], transform: "units at an out-of-service record" },
-      { source: ["lines"], target: ["store_breakdown"], transform: "per-location quantity, with store name/default refreshed from the store document" },
-      { source: ["cost"], target: ["total_cost_basis_cents"], transform: "sale only: −costOfUnits(basis, held, units), computed in integer cents before the quantity moves" },
-      { source: ["cost"], target: ["average_unit_cost"], transform: "total_cost_basis_cents ÷ quantity_held, rounded once — a 4dp RATE, not cents" },
+      {
+        source: ["lines"],
+        target: ["quantity_held"],
+        transform:
+          "Σ (to ? +q : 0) + (from ? −q : 0) — conservation is structural",
+      },
+      {
+        source: ["lines"],
+        target: ["quantity_in_service"],
+        transform: "quantity_held − quantity_out_of_service",
+      },
+      {
+        source: ["lines"],
+        target: ["quantity_out_of_service"],
+        transform: "units at an out-of-service record",
+      },
+      {
+        source: ["lines"],
+        target: ["store_breakdown"],
+        transform:
+          "per-location quantity, with store name/default refreshed from the store document",
+      },
+      {
+        source: ["cost"],
+        target: ["total_cost_basis_cents"],
+        transform:
+          "sale only: −costOfUnits(basis, held, units), computed in integer cents before the quantity moves",
+      },
+      {
+        source: ["cost"],
+        target: ["average_unit_cost"],
+        transform:
+          "total_cost_basis_cents ÷ quantity_held, rounded once — a 4dp RATE, not cents",
+      },
     ],
   },
   {
@@ -670,8 +1080,17 @@ const updateBookingRules: CollectionRule[] = [
     enforced_by: [MOVEMENT_APPLIER],
     transaction: "update-booking",
     fields: [
-      { source: ["lines"], target: ["products"], transform: "quantity += (to ? +q : 0) + (from ? −q : 0) for the movement's product" },
-      { source: ["uid_product"], target: ["query_by_products"], transform: "appended when the shelf has not held this product before" },
+      {
+        source: ["lines"],
+        target: ["products"],
+        transform:
+          "quantity += (to ? +q : 0) + (from ? −q : 0) for the movement's product",
+      },
+      {
+        source: ["uid_product"],
+        target: ["query_by_products"],
+        transform: "appended when the shelf has not held this product before",
+      },
     ],
   },
   {
@@ -679,12 +1098,22 @@ const updateBookingRules: CollectionRule[] = [
     source: "bookings",
     target: "orders",
     mode: "co-write",
-    invariant: "Every booking update applies a delta to order.bookings_breakdown ('+= next.breakdown[k] - prev.breakdown[k]' for each key). Same transaction may also flip order.status: (a) reserved → active when the post-delta bookings_breakdown.out > 0 and order.status === 'reserved' (one-way; out returning to 0 does NOT revert to reserved), (b) active/reserved → complete when bookings_breakdown.quoted + reserved + prepped + out === 0 (every quantity has reached a terminal state). Single order read + write per booking PUT — no sibling-bookings query.",
+    invariant:
+      "Every booking update applies a delta to order.bookings_breakdown ('+= next.breakdown[k] - prev.breakdown[k]' for each key). Same transaction may also flip order.status: (a) reserved → active when the post-delta bookings_breakdown.out > 0 and order.status === 'reserved' (one-way; out returning to 0 does NOT revert to reserved), (b) active/reserved → complete when bookings_breakdown.quoted + reserved + prepped + out === 0 (every quantity has reached a terminal state). Single order read + write per booking PUT — no sibling-bookings query.",
     enforced_by: [ORDER_ROLLUP_DELTA],
     transaction: "update-booking",
     fields: [
-      { source: ["breakdown"], target: ["bookings_breakdown"], transform: "delta-applied roll-up across all bookings on this order" },
-      { source: [], target: ["status"], transform: "complete iff bookings_breakdown.{quoted,reserved,prepped,out} === 0; else active iff bookings_breakdown.out > 0 and prev status === 'reserved'" },
+      {
+        source: ["breakdown"],
+        target: ["bookings_breakdown"],
+        transform: "delta-applied roll-up across all bookings on this order",
+      },
+      {
+        source: [],
+        target: ["status"],
+        transform:
+          "complete iff bookings_breakdown.{quoted,reserved,prepped,out} === 0; else active iff bookings_breakdown.out > 0 and prev status === 'reserved'",
+      },
     ],
   },
   {
@@ -692,12 +1121,23 @@ const updateBookingRules: CollectionRule[] = [
     source: "bookings",
     target: "cards",
     mode: "co-write",
-    invariant: "Per-destination event card status follows pick progress. For each destination touched by a booking write, query sibling bookings for that destination per side (delivery for `:start` cards, collection for `:end` cards) and recompute status: start: pre_delivery=Σ(quoted+reserved+prepped); pre_delivery===0 → complete; out>0 → active; else planned. end: terminal=Σ(returned+lost+damaged); terminal===Σquantity → complete; (terminal>0 || still_out>0) → active; else planned. Manual `blocked` status is preserved (pick-progress writes never overwrite blocked unless the parent order itself transitions to canceled, which lives on update-order). `canceled` status is sourced exclusively from order.status. Sale-only destinations exclude their bookings from the end-side roll-up so the end card stays planned↔complete based on rental siblings only. Card writes bump version and validate via CardSchema; the lock value `status_auto` permits this server-internal write while still rejecting external PATCH attempts to change `status` to anything other than `blocked`.",
+    invariant:
+      "Per-destination event card status follows pick progress. For each destination touched by a booking write, query sibling bookings for that destination per side (delivery for `:start` cards, collection for `:end` cards) and recompute status: start: pre_delivery=Σ(quoted+reserved+prepped); pre_delivery===0 → complete; out>0 → active; else planned. end: terminal=Σ(returned+lost+damaged); terminal===Σquantity → complete; (terminal>0 || still_out>0) → active; else planned. Manual `blocked` status is preserved (pick-progress writes never overwrite blocked unless the parent order itself transitions to canceled, which lives on update-order). `canceled` status is sourced exclusively from order.status. Sale-only destinations exclude their bookings from the end-side roll-up so the end card stays planned↔complete based on rental siblings only. Card writes bump version and validate via CardSchema; the lock value `status_auto` permits this server-internal write while still rejecting external PATCH attempts to change `status` to anything other than `blocked`.",
     enforced_by: [CARD_STATUS_MATH],
     transaction: "update-booking",
     fields: [
-      { source: ["breakdown"], target: ["status"], transform: "computeCardStatusFromBookings(side, siblings, current) — see invariant" },
-      { source: ["breakdown"], target: ["action"], transform: "computeCardActionFromBookings(side, siblings, current) — denormalized next fulfillment step for the card button: {source:'fulfillment', value:'prep'|'checkout'|'return'} or null on terminal/non-actionable status. start: reserved>0→prep; else prepped>0→checkout; else null. end (rentals only): out>0→return; else null." },
+      {
+        source: ["breakdown"],
+        target: ["status"],
+        transform:
+          "computeCardStatusFromBookings(side, siblings, current) — see invariant",
+      },
+      {
+        source: ["breakdown"],
+        target: ["action"],
+        transform:
+          "computeCardActionFromBookings(side, siblings, current) — denormalized next fulfillment step for the card button: {source:'fulfillment', value:'prep'|'checkout'|'return'} or null on terminal/non-actionable status. start: reserved>0→prep; else prepped>0→checkout; else null. end (rentals only): out>0→return; else null.",
+      },
       { source: [], target: ["version"], transform: "incremented" },
     ],
   },
@@ -705,7 +1145,8 @@ const updateBookingRules: CollectionRule[] = [
 
 const updateBookingTransaction: TransactionDefinition = {
   id: "update-booking",
-  description: "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates `stock/{P}` projections FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of `stock/{P}` projections and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Every booking breakdown change.",
+  description:
+    "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates `stock/{P}` projections FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of `stock/{P}` projections and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Every booking breakdown change.",
   steps: [
     "update-booking:booking-to-self",
     ...STOCK_STEPS,
@@ -732,7 +1173,8 @@ const updateBookingTransaction: TransactionDefinition = {
 
 const bulkCheckoutOrderTransaction: TransactionDefinition = {
   id: "bulk-checkout-order",
-  description: "Flip every booking on an order from reserved/prepped to active and move quantities into breakdown.out in one Firestore transaction. Reuses update-booking rules per row, including the per-destination card status recompute.",
+  description:
+    "Flip every booking on an order from reserved/prepped to active and move quantities into breakdown.out in one Firestore transaction. Reuses update-booking rules per row, including the per-destination card status recompute.",
   steps: [
     "update-booking:booking-to-self",
     ...STOCK_STEPS,
@@ -746,7 +1188,8 @@ const bulkCheckoutOrderTransaction: TransactionDefinition = {
 
 const bulkReturnOrderTransaction: TransactionDefinition = {
   id: "bulk-return-order",
-  description: "Apply per-booking returned/lost/damaged deltas across the order in one Firestore transaction. Reuses update-booking rules per row, including OOS cowrite for any lost/damaged deltas and the per-destination card status recompute; final state may auto-complete the order.",
+  description:
+    "Apply per-booking returned/lost/damaged deltas across the order in one Firestore transaction. Reuses update-booking rules per row, including OOS cowrite for any lost/damaged deltas and the per-destination card status recompute; final state may auto-complete the order.",
   steps: [
     "update-booking:booking-to-self",
     ...STOCK_STEPS,
@@ -771,7 +1214,8 @@ const bulkReturnOrderTransaction: TransactionDefinition = {
 
 const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
   id: "bulk-fulfillment-bookings",
-  description: "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock rebuilds per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
+  description:
+    "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock rebuilds per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
   steps: [
     "update-booking:booking-to-self",
     ...STOCK_STEPS,
@@ -831,7 +1275,8 @@ const processOrderDocsRules: CollectionRule[] = [
     source: "orders/documents",
     target: "cards",
     mode: "fan-out",
-    invariant: "After the packing-list PDF is uploaded to Uploadcare, the resulting uuid is written into the `attachments[]` of every order-derived card (sources contains {collection:'orders', uid: order.uid}). One attachment per card, identified by `type === 'packing'`. Replaces in place on each regeneration; locked from picker writes (server-internal write bypasses the `attachments` lock).",
+    invariant:
+      "After the packing-list PDF is uploaded to Uploadcare, the resulting uuid is written into the `attachments[]` of every order-derived card (sources contains {collection:'orders', uid: order.uid}). One attachment per card, identified by `type === 'packing'`. Replaces in place on each regeneration; locked from picker writes (server-internal write bypasses the `attachments` lock).",
     transaction: "process-order-docs",
     enforced_by: [{
       kind: "audit",
@@ -843,16 +1288,29 @@ const processOrderDocsRules: CollectionRule[] = [
     fields: [
       { source: ["uuid"], target: ["attachments", "uid"] },
       { source: ["mime"], target: ["attachments", "mime_type"] },
-      { source: [], target: ["attachments", "type"], transform: "'packing' (constant)" },
-      { source: [], target: ["attachments", "filename"], transform: "`Packing List #${order.number}.pdf`" },
-      { source: [], target: ["attachments", "locked"], transform: "true (server-managed)" },
+      {
+        source: [],
+        target: ["attachments", "type"],
+        transform: "'packing' (constant)",
+      },
+      {
+        source: [],
+        target: ["attachments", "filename"],
+        transform: "`Packing List #${order.number}.pdf`",
+      },
+      {
+        source: [],
+        target: ["attachments", "locked"],
+        transform: "true (server-managed)",
+      },
     ],
   },
 ];
 
 const processOrderDocsTransaction: TransactionDefinition = {
   id: "process-order-docs",
-  description: "Async Cloud Task path: CRMS prepares the packing-list PDF, the API uploads it to Uploadcare, writes the order's documents subcollection, then fans the resulting Uploadcare uuid out to every order-derived event card so the picker UI can deep-link to the live PDF.",
+  description:
+    "Async Cloud Task path: CRMS prepares the packing-list PDF, the API uploads it to Uploadcare, writes the order's documents subcollection, then fans the resulting Uploadcare uuid out to every order-derived event card so the picker UI can deep-link to the live PDF.",
   steps: [
     "process-order-docs:doc-to-cards",
   ],

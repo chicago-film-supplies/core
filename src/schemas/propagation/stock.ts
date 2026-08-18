@@ -27,7 +27,11 @@
  * Traced from: api-cloudrun/src/lib/stockSummary.ts (`buildStockSummary` →
  * `assembleStockResult`).
  */
-import type { CollectionRule, EnforcementRef, PropagationModule } from "./types.ts";
+import type {
+  CollectionRule,
+  EnforcementRef,
+  PropagationModule,
+} from "./types.ts";
 
 // ── What checks these three edges ───────────────────────────────────
 //
@@ -48,7 +52,7 @@ import type { CollectionRule, EnforcementRef, PropagationModule } from "./types.
  */
 const LEDGER_EMBED: EnforcementRef = {
   kind: "audit",
-  ref: "api-cloudrun/scripts/audit-stock.ts:297",
+  ref: "api-cloudrun/scripts/audit-stock.ts::quantity_held_stale",
   clause:
     "invariant 3 — `quantity_held` equals the ledger's, corpus-wide (`quantity_held_stale`). ⚠️ There is NO `type` half any more: `stock/{P}` carries no `type` field, which is what makes the old `type_stale` drift unrepresentable rather than merely unchecked.",
   gates: true,
@@ -61,7 +65,7 @@ const LEDGER_EMBED: EnforcementRef = {
  */
 const NO_STORE_BREAKDOWN: EnforcementRef = {
   kind: "construction",
-  ref: "core/src/schemas/stock.ts:221",
+  ref: "core/src/schemas/stock.ts::export const StockSchema",
   clause:
     "the `store_breakdown is NOT copied` half — the strictObject has no such key, so copying it is a write rejection, not a drift",
   gates: true,
@@ -75,7 +79,7 @@ const NO_STORE_BREAKDOWN: EnforcementRef = {
  */
 const FOLD: EnforcementRef = {
   kind: "audit",
-  ref: "api-cloudrun/scripts/audit-stock.ts:306",
+  ref: "api-cloudrun/scripts/audit-stock.ts::unavailable_stale",
   clause:
     "invariant 4 — `unavailable[]` is multiset-equal to the fold recomputed from the product's live (non-complete) bookings AND its non-terminal OOS records, in BOTH directions (`missing` / `extra`, reported as `unavailable_stale`). Covers the booking and OOS edges together, since the reduced entries are indistinguishable by shape.",
   gates: true,
@@ -101,7 +105,8 @@ const INTERVAL_MODEL: EnforcementRef = {
  */
 const STOCK_BICONDITIONAL: EnforcementRef = {
   kind: "audit",
-  ref: "api-cloudrun/scripts/audit-stock.ts:222",
+  ref:
+    "api-cloudrun/scripts/audit-stock.ts::── 1. The biconditional, all four legs",
   clause:
     "invariant 1, every leg in both directions — `productHoldsStock` ⟺ ledger ⟺ `stock/{P}` ⟺ `stock-locks/{P}`, each reported separately (`product_without_ledger`, `ledger_without_stock_product`, `ledger_without_stock`, `ledger_without_token`, `stock_without_ledger`, `token_without_ledger`). The TOKEN leg is the one with teeth: `stageStockClaim` PATCHES `stock-locks/{P}` and Firestore's `update` does not upsert, so a ledger without a token fails every claim against that product with NOT_FOUND.",
   gates: true,
@@ -139,7 +144,8 @@ export const STOCK_STEPS = [
  * try/catch on both arms. Naming the task here would put the wrong location in
  * the propagation graph.
  */
-const REBUILD_TRIGGER = "inline:post-commit (retry ladder: cloud-task:/tasks/rebuild-stock-summary)";
+const REBUILD_TRIGGER =
+  "inline:post-commit (retry ladder: cloud-task:/tasks/rebuild-stock-summary)";
 
 /**
  * The stock projection's edges — THREE rules, fired by every transaction that
@@ -209,7 +215,7 @@ const rules: CollectionRule[] = [
     target: "stock",
     mode: "fan-out",
     invariant:
-      "The booking half of stock.unavailable[] is re-derived from every live booking for the product, PRE-REDUCED to an anonymous {start, end, quantity, kind:\"booking\"} interval by `unavailableFromBooking` (@cfs/core/utils/stock). Stored as raw intervals, never as a per-window answer: quantity_booked for ANY window is Σ quantity over the entries overlapping it, so no window is privileged and none needs its own document. A sale booking carries end: null (a sold unit does not come back) and so keeps consuming stock in every later window until it completes. Entries are ANONYMOUS by design — a booking's doc id is orderUid:productUid:destUid, so a uid-keyed entry would let an anonymous reader join across products and read off who booked what.",
+      'The booking half of stock.unavailable[] is re-derived from every live booking for the product, PRE-REDUCED to an anonymous {start, end, quantity, kind:"booking"} interval by `unavailableFromBooking` (@cfs/core/utils/stock). Stored as raw intervals, never as a per-window answer: quantity_booked for ANY window is Σ quantity over the entries overlapping it, so no window is privileged and none needs its own document. A sale booking carries end: null (a sold unit does not come back) and so keeps consuming stock in every later window until it completes. Entries are ANONYMOUS by design — a booking\'s doc id is orderUid:productUid:destUid, so a uid-keyed entry would let an anonymous reader join across products and read off who booked what.',
     enforced_by: [FOLD, INTERVAL_MODEL],
     trigger: REBUILD_TRIGGER,
     fields: [
@@ -219,7 +225,7 @@ const rules: CollectionRule[] = [
         source: ["breakdown"],
         target: ["unavailable", "quantity"],
         transform:
-          "reserved + prepped, PLUS out unless type === \"sale\" — a sale's out units left ownership at the sale movement, which already dropped quantity_held, so counting them again double-subtracts. The rule lives in `unavailableFromBooking` and ONLY there, shared verbatim with the browser and the oversell gate.",
+          'reserved + prepped, PLUS out unless type === "sale" — a sale\'s out units left ownership at the sale movement, which already dropped quantity_held, so counting them again double-subtracts. The rule lives in `unavailableFromBooking` and ONLY there, shared verbatim with the browser and the oversell gate.',
       },
       {
         source: ["status"],
@@ -231,7 +237,7 @@ const rules: CollectionRule[] = [
         source: [],
         target: ["unavailable", "kind"],
         transform:
-          "\"booking\" — the ONE non-quantitative fact a public reader learns, kept so the operator stock panel can split Booked from Out Of Service without a second document",
+          '"booking" — the ONE non-quantitative fact a public reader learns, kept so the operator stock panel can split Booked from Out Of Service without a second document',
       },
     ],
   },
@@ -263,7 +269,7 @@ const rules: CollectionRule[] = [
       {
         source: [],
         target: ["unavailable", "kind"],
-        transform: "\"oos\"",
+        transform: '"oos"',
       },
     ],
   },
@@ -284,7 +290,11 @@ const rules: CollectionRule[] = [
       "A product that gets an inventory ledger gets a `stock/{P}` projection and a `stock-locks/{P}` token in the same transaction — all three are created and destroyed together. The projection starts empty (no bookings, no OOS) and carries the ledger's quantity_held. Under the old window-keyed design a missing summary was self-healing, because an unauthenticated `GET /availability` minted it on read; there is no mint-on-read any more, so a delete without a matching create is a PERMANENT hole and the manager's `onSnapshot` would sit on a document that never appears. A missing TOKEN is worse than a hole, since the product cannot be claimed at all.",
     enforced_by: [STOCK_BICONDITIONAL, LEDGER_EMBED],
     fields: [
-      { source: ["uid"], target: ["uid"], transform: "the projection's doc id IS the product uid" },
+      {
+        source: ["uid"],
+        target: ["uid"],
+        transform: "the projection's doc id IS the product uid",
+      },
       { source: ["uid"], target: ["uid_product"] },
       { source: ["quantity_held"], target: ["quantity_held"] },
       {

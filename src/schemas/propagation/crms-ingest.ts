@@ -53,10 +53,7 @@
  * steps already do.
  */
 import { STOCK_STEPS } from "./stock.ts";
-import type {
-  PropagationModule,
-  TransactionDefinition,
-} from "./types.ts";
+import type { PropagationModule, TransactionDefinition } from "./types.ts";
 
 // ── crms-opportunity-order ──────────────────────────────────────────
 

@@ -56,7 +56,8 @@ const createLocationRules: CollectionRule[] = [
     source: "locations",
     target: "stores",
     mode: "co-write",
-    invariant: "When the first active location is created for a store, it becomes the default and the store's default_location is set so clients don't need a global locations listener",
+    invariant:
+      "When the first active location is created for a store, it becomes the default and the store's default_location is set so clients don't need a global locations listener",
     enforced_by: [FIRST_LOCATION_IS_DEFAULT, LOCATION_DEFAULT_POINTER],
     transaction: "create-location",
     fields: [
@@ -68,7 +69,8 @@ const createLocationRules: CollectionRule[] = [
 
 const createLocationTransaction: TransactionDefinition = {
   id: "create-location",
-  description: "Creates a location. If it is the first active location for the store, auto-sets default:true and co-writes default_location to the parent store.",
+  description:
+    "Creates a location. If it is the first active location for the store, auto-sets default:true and co-writes default_location to the parent store.",
   steps: [
     "create-location:default-location-to-store",
   ],
@@ -82,7 +84,8 @@ const updateLocationTransactionalRules: CollectionRule[] = [
     source: "locations",
     target: "stores",
     mode: "co-write",
-    invariant: "Setting default:true on a location co-writes default_location {uid, name} to the parent store and unsets default on the previous default location",
+    invariant:
+      "Setting default:true on a location co-writes default_location {uid, name} to the parent store and unsets default on the previous default location",
     enforced_by: [LOCATION_DEFAULT_WRITER, LOCATION_DEFAULT_POINTER],
     transaction: "update-location",
     fields: [
@@ -95,18 +98,25 @@ const updateLocationTransactionalRules: CollectionRule[] = [
     source: "locations",
     target: "locations",
     mode: "co-write",
-    invariant: "Only one location per store can be default — setting a new default must unset the previous one in the same transaction",
+    invariant:
+      "Only one location per store can be default — setting a new default must unset the previous one in the same transaction",
     enforced_by: [LOCATION_DEFAULT_WRITER, LOCATION_DEFAULT_POINTER],
     transaction: "update-location",
     fields: [
-      { source: [], target: ["default"], transform: "set false on previous default location (looked up by uid_store + default:true)" },
+      {
+        source: [],
+        target: ["default"],
+        transform:
+          "set false on previous default location (looked up by uid_store + default:true)",
+      },
     ],
   },
 ];
 
 const updateLocationTransaction: TransactionDefinition = {
   id: "update-location",
-  description: "Updates a location. If default is being set, unsets the previous default location and co-writes default_location to the parent store.",
+  description:
+    "Updates a location. If default is being set, unsets the previous default location and co-writes default_location to the parent store.",
   steps: [
     "update-location:set-default-to-store",
     "update-location:unset-previous-default",

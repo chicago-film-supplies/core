@@ -47,9 +47,14 @@ const createStoreRules: CollectionRule[] = [
     invariant:
       "Only one store can be the default — creating a store with default:true must unset default on every other active store, in the same transaction",
     enforced_by: [ONE_DEFAULT_STORE_TESTED, STORE_DEFAULT_CORPUS],
-    trigger: "create with default:true — in-transaction fan-out over active stores where default:true",
+    trigger:
+      "create with default:true — in-transaction fan-out over active stores where default:true",
     fields: [
-      { source: [], target: ["default"], transform: "set false on every other active store where default:true" },
+      {
+        source: [],
+        target: ["default"],
+        transform: "set false on every other active store where default:true",
+      },
     ],
   },
 ];
@@ -63,9 +68,14 @@ const updateStoreRules: CollectionRule[] = [
     invariant:
       "Only one store can be the default — promoting a store to default:true must unset default on every other active store, in the same transaction",
     enforced_by: [ONE_DEFAULT_STORE_TESTED, STORE_DEFAULT_CORPUS],
-    trigger: "default flips false→true — in-transaction fan-out over active stores where default:true (excluding self)",
+    trigger:
+      "default flips false→true — in-transaction fan-out over active stores where default:true (excluding self)",
     fields: [
-      { source: [], target: ["default"], transform: "set false on every other active store where default:true" },
+      {
+        source: [],
+        target: ["default"],
+        transform: "set false on every other active store where default:true",
+      },
     ],
   },
 ];

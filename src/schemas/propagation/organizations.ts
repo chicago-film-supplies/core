@@ -25,15 +25,17 @@ import type {
 
 const ORG_CONTACT_BACKREF: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:327",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - adds a contact and cross-references it",
   clause:
-    "the membership half in both directions — adding a contact cross-references it, removing one cleans the cross-reference, an inline `newContacts` entry is created and linked, and an unknown uid is created rather than rejected. No corpus detector covers the back-reference. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the membership half in both directions, across four steps of `Organizations CRUD` — the anchored one adds a contact and cross-references it; `PUT - removes a contact and cleans cross-reference`, `PUT - creates a new contact inline via newContacts` and `POST - an unknown contact uid is created, not rejected (#364)` carry the rest. No corpus detector covers the back-reference. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
 const ORG_NAME_TO_CONTACTS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:727",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to linked contacts",
   clause:
     "the rename reaching the linked contacts' embedded org entry. Writer-path only — no corpus walk exists for this denorm.",
   gates: true,
@@ -41,7 +43,8 @@ const ORG_NAME_TO_CONTACTS: EnforcementRef = {
 
 const ORG_NAME_TO_ORDERS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to active orders",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to active orders",
   clause:
     "the rename reaching an ACTIVE order's `organization.name`. Writer-path only; `audit-denorm-freshness.ts` has no organizations→orders row, so corpus staleness is undetected.",
   gates: true,
@@ -49,7 +52,8 @@ const ORG_NAME_TO_ORDERS: EnforcementRef = {
 
 const ORG_BILLING_TO_ORDERS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates billing_address change to active orders",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates billing_address change to active orders",
   clause:
     "the billing-address change reaching an active order's embedded snapshot. Writer-path only.",
   gates: true,
@@ -57,7 +61,8 @@ const ORG_BILLING_TO_ORDERS: EnforcementRef = {
 
 const ORG_NAME_TO_INVOICES: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:806",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to active invoices",
   clause:
     "the rename reaching an active invoice's `organization.name`. Writer-path only.",
   gates: true,
@@ -65,7 +70,8 @@ const ORG_NAME_TO_INVOICES: EnforcementRef = {
 
 const ORG_BILLING_TO_INVOICES: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts:832",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates billing_address change to active invoices",
   clause:
     "the billing-address change reaching an active invoice. Writer-path only.",
   gates: true,
@@ -87,7 +93,8 @@ const createOrganizationRules: CollectionRule[] = [
     source: "organizations",
     target: "contacts",
     mode: "co-write",
-    invariant: "Contacts maintain a list of orgs they belong to for bidirectional navigation",
+    invariant:
+      "Contacts maintain a list of orgs they belong to for bidirectional navigation",
     enforced_by: [ORG_CONTACT_BACKREF],
     transaction: "create-organization",
     fields: [
@@ -100,7 +107,8 @@ const createOrganizationRules: CollectionRule[] = [
 
 const createOrganizationTransaction: TransactionDefinition = {
   id: "create-organization",
-  description: "Creates an organization with bidirectional contact cross-references and a cowritten default thread. CRMS + Xero sync runs pre/post-transaction.",
+  description:
+    "Creates an organization with bidirectional contact cross-references and a cowritten default thread. CRMS + Xero sync runs pre/post-transaction.",
   steps: [
     "create-org:org-to-contacts",
     "cowrite-thread:organizations-to-thread",
@@ -116,7 +124,8 @@ const updateOrganizationRules: CollectionRule[] = [
     source: "organizations",
     target: "contacts",
     mode: "fan-out",
-    invariant: "Contacts display their org names — must stay current when org is renamed",
+    invariant:
+      "Contacts display their org names — must stay current when org is renamed",
     enforced_by: [ORG_NAME_TO_CONTACTS],
     transaction: "update-organization",
     fields: [
@@ -128,7 +137,8 @@ const updateOrganizationRules: CollectionRule[] = [
     source: "organizations",
     target: "orders",
     mode: "fan-out",
-    invariant: "Active orders carry a denormalized org name that must stay current",
+    invariant:
+      "Active orders carry a denormalized org name that must stay current",
     enforced_by: [ORG_NAME_TO_ORDERS],
     transaction: "update-organization",
     trigger: "name change — targets active orders (not complete/canceled)",
@@ -141,12 +151,16 @@ const updateOrganizationRules: CollectionRule[] = [
     source: "organizations",
     target: "orders",
     mode: "fan-out",
-    invariant: "Active orders carry the org billing address for quote/invoice generation",
+    invariant:
+      "Active orders carry the org billing address for quote/invoice generation",
     enforced_by: [ORG_BILLING_TO_ORDERS],
     transaction: "update-organization",
     trigger: "billing_address change — targets active orders",
     fields: [
-      { source: ["billing_address"], target: ["organization", "billing_address"] },
+      {
+        source: ["billing_address"],
+        target: ["organization", "billing_address"],
+      },
     ],
   },
   {
@@ -172,7 +186,10 @@ const updateOrganizationRules: CollectionRule[] = [
     transaction: "update-organization",
     trigger: "billing_address change — targets active invoices",
     fields: [
-      { source: ["billing_address"], target: ["organization", "billing_address"] },
+      {
+        source: ["billing_address"],
+        target: ["organization", "billing_address"],
+      },
     ],
   },
   {
@@ -194,7 +211,11 @@ const updateOrganizationRules: CollectionRule[] = [
         transform:
           "materializeDocumentTax(items, org.tax_profile, order.tax_profile, taxCatalog, deriveOrderTaxAsOf(destinations)) — a PURE function of (items, orgProfile, docProfile, catalog, asOf), which is what makes it safe under `convergeCascade`'s idempotent-apply contract",
       },
-      { source: ["tax_profile"], target: ["totals"], transform: "calculateOrderTotals after the reprice" },
+      {
+        source: ["tax_profile"],
+        target: ["totals"],
+        transform: "calculateOrderTotals after the reprice",
+      },
     ],
   },
   {
@@ -202,21 +223,39 @@ const updateOrganizationRules: CollectionRule[] = [
     source: "organizations",
     target: "contacts",
     mode: "co-write",
-    invariant: "When an org's contact list changes, added/removed contacts update their org back-references",
+    invariant:
+      "When an org's contact list changes, added/removed contacts update their org back-references",
     enforced_by: [ORG_CONTACT_BACKREF],
     transaction: "update-organization",
     fields: [
-      { source: [], target: ["organizations"], transform: "contacts added → add org ref {uid, name}" },
-      { source: [], target: ["organizations"], transform: "contacts removed → remove org ref" },
-      { source: [], target: ["query_by_organizations"], transform: "contacts added → add org uid" },
-      { source: [], target: ["query_by_organizations"], transform: "contacts removed → remove org uid" },
+      {
+        source: [],
+        target: ["organizations"],
+        transform: "contacts added → add org ref {uid, name}",
+      },
+      {
+        source: [],
+        target: ["organizations"],
+        transform: "contacts removed → remove org ref",
+      },
+      {
+        source: [],
+        target: ["query_by_organizations"],
+        transform: "contacts added → add org uid",
+      },
+      {
+        source: [],
+        target: ["query_by_organizations"],
+        transform: "contacts removed → remove org uid",
+      },
     ],
   },
 ];
 
 const updateOrganizationTransaction: TransactionDefinition = {
   id: "update-organization",
-  description: "Updates an organization with name/billing cascades to contacts, active orders, and active invoices. CRMS + Xero sync post-transaction.",
+  description:
+    "Updates an organization with name/billing cascades to contacts, active orders, and active invoices. CRMS + Xero sync post-transaction.",
   steps: [
     "update-org:name-to-contacts",
     "update-org:name-to-orders",

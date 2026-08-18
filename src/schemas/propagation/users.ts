@@ -45,7 +45,8 @@ const createUserRules: CollectionRule[] = [
     source: "users",
     target: "contacts",
     mode: "co-write",
-    invariant: "A new user with an email matching an existing contact links bidirectionally",
+    invariant:
+      "A new user with an email matching an existing contact links bidirectionally",
     enforced_by: [USER_LINKED_TO_CONTACT_AT_REGISTER],
     transaction: "create-user",
     fields: [
@@ -56,7 +57,8 @@ const createUserRules: CollectionRule[] = [
 
 const createUserTransaction: TransactionDefinition = {
   id: "create-user",
-  description: "Creates a user; if email matches an existing contact, links bidirectionally.",
+  description:
+    "Creates a user; if email matches an existing contact, links bidirectionally.",
   steps: ["create-user:link-to-contact"],
 };
 
@@ -70,7 +72,8 @@ const updateUserRules: CollectionRule[] = [
     mode: "fan-out",
     invariant: "A user's name stays in sync with its linked contact's name",
     transaction: "update-user",
-    trigger: "first_name/middle_name/last_name/pronunciation change on a user with uid_contact set",
+    trigger:
+      "first_name/middle_name/last_name/pronunciation change on a user with uid_contact set",
     fields: [
       { source: ["first_name"], target: ["first_name"] },
       { source: ["middle_name"], target: ["middle_name"] },
@@ -90,10 +93,12 @@ const updateUserRules: CollectionRule[] = [
     // field is cascaded the day it is added, under any name, with no edit here.
     // Three names in the invariant invited the reader to assume the opposite,
     // and to "complete" the list by hand when a fourth appeared. core#46.
-    invariant: "A user's display name stays in sync with EVERY ActorRef-shaped field on every document, whatever it is called — the target set is derived by walking the schema registry for nodes identical to ActorRef, not from a list of field names — so activity feeds, threads, and comments never render a stale name",
+    invariant:
+      "A user's display name stays in sync with EVERY ActorRef-shaped field on every document, whatever it is called — the target set is derived by walking the schema registry for nodes identical to ActorRef, not from a list of field names — so activity feeds, threads, and comments never render a stale name",
     enforced_by: [ACTOR_REF_NAMES],
     transaction: "update-user",
-    trigger: "first_name/middle_name/last_name/pronunciation change on a user — rewrite actor.name wherever actor.uid matches, at every discovered ActorRef path",
+    trigger:
+      "first_name/middle_name/last_name/pronunciation change on a user — rewrite actor.name wherever actor.uid matches, at every discovered ActorRef path",
     fields: [
       // Illustrative, NOT exhaustive: these are the ActorRef nodes present at the
       // time of writing. The two entries below them are the genuine exceptions —
@@ -107,18 +112,43 @@ const updateUserRules: CollectionRule[] = [
       // COMPOSED from all four by the formula below, which is what `source: []`
       // plus a transform already exists to say. The four field names are not
       // lost: `trigger` above names them, and so does the formula.
-      { source: [], target: ["created_by", "name"], transform: "ActorRef.name — [first_name, middle_name, last_name].filter(Boolean).join(\" \") with \" (pronunciation)\" appended when pronunciation is set. One example of the derived set, not a declaration of it" },
-      { source: [], target: ["updated_by", "name"], transform: "same formula as created_by.name" },
-      { source: [], target: ["deleted_by", "name"], transform: "same formula as created_by.name; only where deleted_by is non-null" },
-      { source: [], target: ["pdf_versions", "created_by", "name"], transform: "invoices-only — rewrite the name on matching pdf_versions[].created_by entries" },
-      { source: [], target: ["reactions", "name"], transform: "comments-only — rewrite the name on every reactions[emoji][uid] entry where uid matches the renamed user" },
+      {
+        source: [],
+        target: ["created_by", "name"],
+        transform:
+          'ActorRef.name — [first_name, middle_name, last_name].filter(Boolean).join(" ") with " (pronunciation)" appended when pronunciation is set. One example of the derived set, not a declaration of it',
+      },
+      {
+        source: [],
+        target: ["updated_by", "name"],
+        transform: "same formula as created_by.name",
+      },
+      {
+        source: [],
+        target: ["deleted_by", "name"],
+        transform:
+          "same formula as created_by.name; only where deleted_by is non-null",
+      },
+      {
+        source: [],
+        target: ["pdf_versions", "created_by", "name"],
+        transform:
+          "invoices-only — rewrite the name on matching pdf_versions[].created_by entries",
+      },
+      {
+        source: [],
+        target: ["reactions", "name"],
+        transform:
+          "comments-only — rewrite the name on every reactions[emoji][uid] entry where uid matches the renamed user",
+      },
     ],
   },
 ];
 
 const updateUserTransaction: TransactionDefinition = {
   id: "update-user",
-  description: "Updates a user with name cascade to a linked contact (if any) and fan-out to ActorRef names on every doc carrying created_by/updated_by/deleted_by.",
+  description:
+    "Updates a user with name cascade to a linked contact (if any) and fan-out to ActorRef names on every doc carrying created_by/updated_by/deleted_by.",
   steps: ["update-user:name-to-contact", "update-user:name-to-actor-refs"],
 };
 
@@ -140,7 +170,8 @@ const deleteUserRules: CollectionRule[] = [
 
 const deleteUserTransaction: TransactionDefinition = {
   id: "delete-user",
-  description: "Soft-deletes a user and clears the linked contact's uid_user back-reference.",
+  description:
+    "Soft-deletes a user and clears the linked contact's uid_user back-reference.",
   steps: ["delete-user:unlink-contact"],
 };
 

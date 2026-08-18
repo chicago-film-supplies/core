@@ -27,7 +27,8 @@ const TAG_DELETE_CASCADE: EnforcementRef = {
 
 const LOCATION_TYPE_CAPACITIES: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/location-types/locationTypes.test.ts:301",
+  ref:
+    "api-cloudrun/tests/integration/location-types/locationTypes.test.ts:301",
   clause:
     "both halves, as two tests — the default cascade reaches the type's locations (asserting `locationsUpdated`, `max` and `max_default`), and a location carrying a CUSTOM max keeps it (:341). The override-preservation half is the one worth having: a cascade that clobbered it would still look like a working cascade.",
   gates: true,
@@ -72,8 +73,10 @@ const updateTagRules: CollectionRule[] = [
     source: "tags",
     target: "products",
     mode: "fan-out",
-    invariant: "Products embed tag names — a tag rename must cascade to all tagged products",
-    trigger: "name change — post-transaction two-pass batch (arrayRemove old, arrayUnion new)",
+    invariant:
+      "Products embed tag names — a tag rename must cascade to all tagged products",
+    trigger:
+      "name change — post-transaction two-pass batch (arrayRemove old, arrayUnion new)",
     enforced_by: [{
       kind: "audit",
       ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
@@ -82,7 +85,12 @@ const updateTagRules: CollectionRule[] = [
       gates: true,
     }],
     fields: [
-      { source: ["name"], target: ["tags", "name"], transform: "two-pass idempotent: pass 1 removes {uid, oldName}, pass 2 adds {uid, newName}" },
+      {
+        source: ["name"],
+        target: ["tags", "name"],
+        transform:
+          "two-pass idempotent: pass 1 removes {uid, oldName}, pass 2 adds {uid, newName}",
+      },
     ],
   },
 ];
@@ -93,12 +101,17 @@ const deleteTagRules: CollectionRule[] = [
     source: "tags",
     target: "products",
     mode: "fan-out",
-    invariant: "Deleting a tag must clean up all product references to prevent orphan refs",
+    invariant:
+      "Deleting a tag must clean up all product references to prevent orphan refs",
     enforced_by: [TAG_DELETE_CASCADE],
     trigger: "delete — post-transaction batch",
     fields: [
       { source: ["uid"], target: ["tags"], transform: "arrayRemove tag ref" },
-      { source: ["uid"], target: ["query_by_tags"], transform: "arrayRemove tag uid" },
+      {
+        source: ["uid"],
+        target: ["query_by_tags"],
+        transform: "arrayRemove tag uid",
+      },
     ],
   },
 ];
@@ -111,7 +124,8 @@ const updateTrackingCategoryRules: CollectionRule[] = [
     source: "tracking-categories",
     target: "products",
     mode: "fan-out",
-    invariant: "Products store tracking category name for display — must cascade on rename",
+    invariant:
+      "Products store tracking category name for display — must cascade on rename",
     trigger: "name change — post-transaction batch with existence check",
     enforced_by: [{
       kind: "audit",
@@ -134,13 +148,28 @@ const updateLocationTypeRules: CollectionRule[] = [
     source: "location-types",
     target: "locations",
     mode: "fan-out",
-    invariant: "Location-type capacity defaults cascade to all locations of that type — custom overrides are preserved",
+    invariant:
+      "Location-type capacity defaults cascade to all locations of that type — custom overrides are preserved",
     enforced_by: [LOCATION_TYPE_CAPACITIES],
-    trigger: "product_capacities change — post-transaction batch (chunks of 400)",
+    trigger:
+      "product_capacities change — post-transaction batch (chunks of 400)",
     fields: [
-      { source: ["product_capacities", "max"], target: ["product_capacities", "max"], transform: "only if location cap matches old default; otherwise updates max_default only" },
-      { source: ["product_capacities", "max"], target: ["product_capacities", "max_default"], transform: "always updated to new type default" },
-      { source: ["product_capacities"], target: ["product_capacities"], transform: "new products added with type defaults" },
+      {
+        source: ["product_capacities", "max"],
+        target: ["product_capacities", "max"],
+        transform:
+          "only if location cap matches old default; otherwise updates max_default only",
+      },
+      {
+        source: ["product_capacities", "max"],
+        target: ["product_capacities", "max_default"],
+        transform: "always updated to new type default",
+      },
+      {
+        source: ["product_capacities"],
+        target: ["product_capacities"],
+        transform: "new products added with type defaults",
+      },
     ],
   },
 ];
@@ -153,8 +182,10 @@ const updateLocationRules: CollectionRule[] = [
     source: "locations",
     target: "inventory-ledgers",
     mode: "fan-out",
-    invariant: "Inventory ledgers embed location names in store_breakdown — a location rename must cascade to all ledgers containing that location",
-    trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
+    invariant:
+      "Inventory ledgers embed location names in store_breakdown — a location rename must cascade to all ledgers containing that location",
+    trigger:
+      "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
     enforced_by: [{
       kind: "audit",
       ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
@@ -163,7 +194,12 @@ const updateLocationRules: CollectionRule[] = [
       gates: true,
     }],
     fields: [
-      { source: ["name"], target: ["store_breakdown", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
+      {
+        source: ["name"],
+        target: ["store_breakdown", "locations", "name"],
+        transform:
+          "updates name where uid_location matches within each store's location array",
+      },
     ],
   },
   // No `update-location:name-to-stock` rule, deliberately. Stock
@@ -179,8 +215,10 @@ const updateLocationRules: CollectionRule[] = [
     source: "locations",
     target: "bookings",
     mode: "fan-out",
-    invariant: "Bookings embed location names in stores — a location rename must cascade to all non-complete bookings containing that location",
-    trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition, filtered to status != 'complete'",
+    invariant:
+      "Bookings embed location names in stores — a location rename must cascade to all non-complete bookings containing that location",
+    trigger:
+      "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition, filtered to status != 'complete'",
     enforced_by: [{
       kind: "audit",
       ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
@@ -189,7 +227,12 @@ const updateLocationRules: CollectionRule[] = [
       gates: true,
     }],
     fields: [
-      { source: ["name"], target: ["stores", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
+      {
+        source: ["name"],
+        target: ["stores", "locations", "name"],
+        transform:
+          "updates name where uid_location matches within each store's location array",
+      },
     ],
   },
   {
@@ -197,8 +240,10 @@ const updateLocationRules: CollectionRule[] = [
     source: "locations",
     target: "out-of-service",
     mode: "fan-out",
-    invariant: "Out-of-service records embed location names in stores — a location rename must cascade to every OOS record containing that location, including terminal (complete/canceled) ones, so list views and detail pages stay consistent",
-    trigger: "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
+    invariant:
+      "Out-of-service records embed location names in stores — a location rename must cascade to every OOS record containing that location, including terminal (complete/canceled) ones, so list views and detail pages stay consistent",
+    trigger:
+      "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
     enforced_by: [{
       kind: "audit",
       ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
@@ -207,7 +252,12 @@ const updateLocationRules: CollectionRule[] = [
       gates: true,
     }],
     fields: [
-      { source: ["name"], target: ["stores", "locations", "name"], transform: "updates name where uid_location matches within each store's location array" },
+      {
+        source: ["name"],
+        target: ["stores", "locations", "name"],
+        transform:
+          "updates name where uid_location matches within each store's location array",
+      },
     ],
   },
   {
@@ -215,8 +265,10 @@ const updateLocationRules: CollectionRule[] = [
     source: "locations",
     target: "stores",
     mode: "fan-out",
-    invariant: "If the default location is renamed, Eventarc cascades the new name to the store's default_location",
-    trigger: "name change on default location — Eventarc on location write, only if location.default === true",
+    invariant:
+      "If the default location is renamed, Eventarc cascades the new name to the store's default_location",
+    trigger:
+      "name change on default location — Eventarc on location write, only if location.default === true",
     enforced_by: [{
       kind: "audit",
       ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
@@ -238,11 +290,18 @@ const rematerializeHolidaySnapshotRules: CollectionRule[] = [
     source: "holiday-dates",
     target: "holiday-snapshot",
     mode: "derive",
-    invariant: "holiday-snapshot/current is the per-render hot-path read (1 doc + TTL cache); it must be recomputed from the full holiday-dates set on every holiday-dates write so getHolidayDates() never scans the instance collection",
+    invariant:
+      "holiday-snapshot/current is the per-render hot-path read (1 doc + TTL cache); it must be recomputed from the full holiday-dates set on every holiday-dates write so getHolidayDates() never scans the instance collection",
     enforced_by: [HOLIDAY_SNAPSHOT_CORPUS, HOLIDAY_SNAPSHOT_WRITER],
-    trigger: "holiday definition create/update/soft-delete/regenerate + monthly horizon cron — post-transaction recompute-from-source",
+    trigger:
+      "holiday definition create/update/soft-delete/regenerate + monthly horizon cron — post-transaction recompute-from-source",
     fields: [
-      { source: ["date"], target: ["materialized_dates"], transform: "sorted-unique ISO array of every holiday-dates.date; also stamps materialized_count + materialized_year_range" },
+      {
+        source: ["date"],
+        target: ["materialized_dates"],
+        transform:
+          "sorted-unique ISO array of every holiday-dates.date; also stamps materialized_count + materialized_year_range",
+      },
     ],
   },
 ];
@@ -280,13 +339,15 @@ const materializeHolidayDateRules: CollectionRule[] = [
       {
         kind: "test",
         ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:62",
-        clause: "create — a fixed definition writes its forward-window instances",
+        clause:
+          "create — a fixed definition writes its forward-window instances",
         gates: true,
       },
       {
         kind: "test",
         ref: "api-cloudrun/tests/integration/holidays/holidays.test.ts:115",
-        clause: "update — a version-checked edit REGENERATES future instances onto the new date",
+        clause:
+          "update — a version-checked edit REGENERATES future instances onto the new date",
         gates: true,
       },
       {
@@ -313,9 +374,17 @@ const materializeHolidayDateRules: CollectionRule[] = [
         transform:
           "expanded, not copied: the fixed rule (`js_month` + `date`) or the variable rule (`js_month` + `day` + `week`) is projected across the rolling forward window, one instance per occurrence. `active: false` materializes none — see the invariant.",
       },
-      { source: ["uid"], target: ["uid_holiday"], transform: "the instance's back-reference to its definition" },
+      {
+        source: ["uid"],
+        target: ["uid_holiday"],
+        transform: "the instance's back-reference to its definition",
+      },
       { source: ["name"], target: ["name"] },
-      { source: ["type"], target: ["type"], transform: "fixed | variable, carried onto the instance" },
+      {
+        source: ["type"],
+        target: ["type"],
+        transform: "fixed | variable, carried onto the instance",
+      },
     ],
   },
 ];
@@ -376,11 +445,18 @@ const recomputeHolidayDraftOrderRules: CollectionRule[] = [
     source: "holiday-definitions",
     target: "orders",
     mode: "fan-out",
-    invariant: "A draft order is not committed, so a holiday change must re-run its destination date/duration math (durations drive prices/totals); finalized (non-draft) orders stay frozen for historical fidelity",
+    invariant:
+      "A draft order is not committed, so a holiday change must re-run its destination date/duration math (durations drive prices/totals); finalized (non-draft) orders stay frozen for historical fidelity",
     enforced_by: [HOLIDAY_DRAFT_RECOMPUTE],
-    trigger: "holiday definition create/update/soft-delete/regenerate — coalesced Cloud Task, status == 'draft' only (the monthly horizon cron does NOT enqueue — its far-future additions don't affect current drafts)",
+    trigger:
+      "holiday definition create/update/soft-delete/regenerate — coalesced Cloud Task, status == 'draft' only (the monthly horizon cron does NOT enqueue — its far-future additions don't affect current drafts)",
     fields: [
-      { source: [], target: ["destinations", "dates"], transform: "re-run canonicalizeDestinationDates → getDuration with the new holiday set, then syncChargeDaysToItems + recompute totals" },
+      {
+        source: [],
+        target: ["destinations", "dates"],
+        transform:
+          "re-run canonicalizeDestinationDates → getDuration with the new holiday set, then syncChargeDaysToItems + recompute totals",
+      },
     ],
   },
 ];
@@ -391,14 +467,21 @@ const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
     source: "orders",
     target: "invoices",
     mode: "fan-out",
-    invariant: "A recomputed draft order must re-sync its draft invoices' chargeable_days/prices; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
-    trigger: "draft-order recompute — transitive via updateOrder's existing draft-invoice sync (projectOrderItemToInvoiceItem inherits the recomputed durations)",
+    invariant:
+      "A recomputed draft order must re-sync its draft invoices' chargeable_days/prices; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
+    trigger:
+      "draft-order recompute — transitive via updateOrder's existing draft-invoice sync (projectOrderItemToInvoiceItem inherits the recomputed durations)",
     fields: [
       // ⚠️ One segment short on both sides until 2026-08-17 — `chargeable_days`
       // lives under the item's `price`, on the order and on the invoice alike.
       // The same shape as the `enforced_by` drift the campaign measured: a ref
       // that names the right thing and stops just above it.
-      { source: ["items", "price", "chargeable_days"], target: ["items", "price", "chargeable_days"], transform: "inherited via projectOrderItemToInvoiceItem; draft invoices only — terminal ones skipped" },
+      {
+        source: ["items", "price", "chargeable_days"],
+        target: ["items", "price", "chargeable_days"],
+        transform:
+          "inherited via projectOrderItemToInvoiceItem; draft invoices only — terminal ones skipped",
+      },
     ],
   },
 ];

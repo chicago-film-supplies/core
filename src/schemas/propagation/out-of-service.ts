@@ -74,12 +74,22 @@ const createOutOfServiceRules: CollectionRule[] = [
     source: "out-of-service",
     target: "out-of-service",
     mode: "co-write",
-    invariant: "Sources are a 0..N polymorphic list ({collection, uid, label}) — empty for ad-hoc, [orders] for manually-attached, [bookings, orders] when born from a booking PUT. query_by_sources is rebuilt from sources on every write for Firestore array-contains filtering.",
+    invariant:
+      "Sources are a 0..N polymorphic list ({collection, uid, label}) — empty for ad-hoc, [orders] for manually-attached, [bookings, orders] when born from a booking PUT. query_by_sources is rebuilt from sources on every write for Firestore array-contains filtering.",
     enforced_by: [OOS_SOURCES_SHAPE],
     transaction: "create-out-of-service-record",
     fields: [
-      { source: [], target: ["sources"], transform: "from input — caller supplies up to N {collection, uid, label} entries" },
-      { source: ["sources"], target: ["query_by_sources"], transform: "sources.map(s => `${s.collection}:${s.uid}`)" },
+      {
+        source: [],
+        target: ["sources"],
+        transform:
+          "from input — caller supplies up to N {collection, uid, label} entries",
+      },
+      {
+        source: ["sources"],
+        target: ["query_by_sources"],
+        transform: "sources.map(s => `${s.collection}:${s.uid}`)",
+      },
       { source: [], target: ["uid_product"] },
       { source: [], target: ["reason"] },
       { source: [], target: ["quantity"] },
@@ -91,7 +101,8 @@ const createOutOfServiceRules: CollectionRule[] = [
 
 const createOutOfServiceTransaction: TransactionDefinition = {
   id: "create-out-of-service-record",
-  description: "Creates an out-of-service record, rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an OOS record.",
+  description:
+    "Creates an out-of-service record, rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an OOS record.",
   steps: [
     "create-out-of-service-record:sources-to-record",
     ...STOCK_STEPS,
@@ -106,19 +117,37 @@ const updateOutOfServiceRules: CollectionRule[] = [
     source: "out-of-service",
     target: "transactions",
     mode: "co-write",
-    invariant: "Once derived status === 'complete' (breakdown.returned_to_service + breakdown.written_off === quantity), cowrite an inventory transaction in the same Firestore transaction — a 'return-to-service' for breakdown.returned_to_service > 0 and/or a 'write-off' for breakdown.written_off > 0. Each cowritten transaction follows the standard create-transaction rules (ledger update + locations update + stock recalc).",
+    invariant:
+      "Once derived status === 'complete' (breakdown.returned_to_service + breakdown.written_off === quantity), cowrite an inventory transaction in the same Firestore transaction — a 'return-to-service' for breakdown.returned_to_service > 0 and/or a 'write-off' for breakdown.written_off > 0. Each cowritten transaction follows the standard create-transaction rules (ledger update + locations update + stock recalc).",
     enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "update-out-of-service-record",
     fields: [
       { source: ["uid_product"], target: ["uid_product"] },
-      { source: ["breakdown", "returned_to_service"], target: ["quantity"], transform: "if > 0, build a return-to-service transaction" },
-      { source: ["breakdown", "written_off"], target: ["quantity"], transform: "if > 0, build a write-off transaction" },
+      {
+        source: ["breakdown", "returned_to_service"],
+        target: ["quantity"],
+        transform: "if > 0, build a return-to-service transaction",
+      },
+      {
+        source: ["breakdown", "written_off"],
+        target: ["quantity"],
+        transform: "if > 0, build a write-off transaction",
+      },
       // ⚠️ Both targets drifted behind the movement-journal rebuild and resolved
       // against nothing until 2026-08-17: a Movement has `lines[]` and
       // `sources[]`, never `stores` or a singular `source`. The SOURCE side
       // (`oos.stores`) is still right — only the movement's half moved.
-      { source: ["stores"], target: ["lines"], transform: "store/location allocation copied from oos.stores into the movement's lines[]" },
-      { source: ["uid"], target: ["sources", "uid"], transform: "the movement's sources[] points back at the OOS record" },
+      {
+        source: ["stores"],
+        target: ["lines"],
+        transform:
+          "store/location allocation copied from oos.stores into the movement's lines[]",
+      },
+      {
+        source: ["uid"],
+        target: ["sources", "uid"],
+        transform: "the movement's sources[] points back at the OOS record",
+      },
     ],
   },
   {
@@ -126,20 +155,35 @@ const updateOutOfServiceRules: CollectionRule[] = [
     source: "transactions",
     target: "inventory-ledgers",
     mode: "derive",
-    invariant: "Cowritten transactions cascade through the standard create-transaction:transaction-to-ledger path — applyTransactionToLedger updates quantity_held / quantity_in_service / quantity_out_of_service.",
+    invariant:
+      "Cowritten transactions cascade through the standard create-transaction:transaction-to-ledger path — applyTransactionToLedger updates quantity_held / quantity_in_service / quantity_out_of_service.",
     enforced_by: [OOS_LEDGER_PARTITION],
     transaction: "update-out-of-service-record",
     fields: [
-      { source: ["quantity"], target: ["quantity_held"], transform: "± based on transaction type multiplier" },
-      { source: ["quantity"], target: ["quantity_in_service"], transform: "+ for return-to-service; − for write-off" },
-      { source: ["quantity"], target: ["quantity_out_of_service"], transform: "− on either return-to-service or write-off (the OOS bucket empties)" },
+      {
+        source: ["quantity"],
+        target: ["quantity_held"],
+        transform: "± based on transaction type multiplier",
+      },
+      {
+        source: ["quantity"],
+        target: ["quantity_in_service"],
+        transform: "+ for return-to-service; − for write-off",
+      },
+      {
+        source: ["quantity"],
+        target: ["quantity_out_of_service"],
+        transform:
+          "− on either return-to-service or write-off (the OOS bucket empties)",
+      },
     ],
   },
 ];
 
 const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
-  description: "Updates an out-of-service record. Quantity changes rebuild the product's `stock/{P}` projection. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
+  description:
+    "Updates an out-of-service record. Quantity changes rebuild the product's `stock/{P}` projection. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
   steps: [
     ...STOCK_STEPS,
     "update-out-of-service-record:record-to-transactions",

@@ -130,21 +130,27 @@ const createInvoiceRules: CollectionRule[] = [
     source: "invoices",
     target: "orders",
     mode: "co-write",
-    invariant: "Orders carry a denormalized array of their invoices so the UI can show invoice status without a collection-group query",
+    invariant:
+      "Orders carry a denormalized array of their invoices so the UI can show invoice status without a collection-group query",
     enforced_by: [INVOICE_BACKREF_CREATED],
     transaction: "create-invoice",
     fields: [
       { source: ["uid"], target: ["invoices", "uid"] },
       { source: ["number"], target: ["invoices", "number"] },
       { source: ["status"], target: ["invoices", "status"] },
-      { source: ["uid"], target: ["query_by_invoices"], transform: "append invoice uid to array" },
+      {
+        source: ["uid"],
+        target: ["query_by_invoices"],
+        transform: "append invoice uid to array",
+      },
     ],
   },
 ];
 
 const createInvoiceTransaction: TransactionDefinition = {
   id: "create-invoice",
-  description: "Creates an invoice, co-writes invoice summary to each referenced order, and cowrites a default thread.",
+  description:
+    "Creates an invoice, co-writes invoice summary to each referenced order, and cowrites a default thread.",
   steps: [
     "create-invoice:invoice-to-orders",
     "cowrite-thread:invoices-to-thread",
@@ -208,17 +214,52 @@ const updateOrderInvoiceRules: CollectionRule[] = [
     source: "orders",
     target: "invoices",
     mode: "co-write",
-    invariant: "Unpaid invoices stay in sync with their source orders — items and destinations scoped by order are selectively synced (respecting invoice-side overrides); scalar fields (subject, reference, organization) co-write only while the invoice value still matches the prev order value",
+    invariant:
+      "Unpaid invoices stay in sync with their source orders — items and destinations scoped by order are selectively synced (respecting invoice-side overrides); scalar fields (subject, reference, organization) co-write only while the invoice value still matches the prev order value",
     enforced_by: [SELECTIVE_SYNC_SEMANTICS],
-    trigger: "items, destinations, subject, reference, or organization change on order — targets invoices where query_by_orders contains order uid AND the invoice has no unreversed settlement (an active CREDIT freezes it too: re-syncing items under a credit re-bakes the drift the credit exists to separate)",
+    trigger:
+      "items, destinations, subject, reference, or organization change on order — targets invoices where query_by_orders contains order uid AND the invoice has no unreversed settlement (an active CREDIT freezes it too: re-syncing items under a credit re-bakes the drift the credit exists to separate)",
     fields: [
-      { source: ["uid"], target: ["items", "uid"], transform: "match order divider by uid (= source order id) to scope item removal/rebuild" },
-      { source: ["items"], target: ["items"], transform: "selective sync: compare prev order items to current invoice items by path — update only non-overridden items, add new items, remove deleted non-overridden items. Invoice-only fields (coa_revenue, tracking_category, xero_id, xero_tracking_option_id) are preserved." },
-      { source: ["items"], target: ["totals"], transform: "recalculate totals server-side after item sync" },
-      { source: ["destinations"], target: ["destinations"], transform: "selective sync within uid_order scope: match pairs by (delivery.uid, collection.uid) — update only non-overridden pairs, add new pairs (tagged with uid_order), remove deleted non-overridden pairs. Leaves pairs from other orders untouched." },
-      { source: ["subject"], target: ["subject"], transform: "scalar co-write: overwrite only if invoice.subject deep-equals the prev order.subject; mismatch is treated as an invoice-side override and kept" },
-      { source: ["reference"], target: ["reference"], transform: "scalar co-write: same override policy as subject" },
-      { source: ["organization"], target: ["organization"], transform: "object co-write on (uid, name, xero_id, billing_address): overwrite only if the compared shape matches the prev order.organization snapshot; invoice.organization.tax_profile is preserved (invoice-owned)" },
+      {
+        source: ["uid"],
+        target: ["items", "uid"],
+        transform:
+          "match order divider by uid (= source order id) to scope item removal/rebuild",
+      },
+      {
+        source: ["items"],
+        target: ["items"],
+        transform:
+          "selective sync: compare prev order items to current invoice items by path — update only non-overridden items, add new items, remove deleted non-overridden items. Invoice-only fields (coa_revenue, tracking_category, xero_id, xero_tracking_option_id) are preserved.",
+      },
+      {
+        source: ["items"],
+        target: ["totals"],
+        transform: "recalculate totals server-side after item sync",
+      },
+      {
+        source: ["destinations"],
+        target: ["destinations"],
+        transform:
+          "selective sync within uid_order scope: match pairs by (delivery.uid, collection.uid) — update only non-overridden pairs, add new pairs (tagged with uid_order), remove deleted non-overridden pairs. Leaves pairs from other orders untouched.",
+      },
+      {
+        source: ["subject"],
+        target: ["subject"],
+        transform:
+          "scalar co-write: overwrite only if invoice.subject deep-equals the prev order.subject; mismatch is treated as an invoice-side override and kept",
+      },
+      {
+        source: ["reference"],
+        target: ["reference"],
+        transform: "scalar co-write: same override policy as subject",
+      },
+      {
+        source: ["organization"],
+        target: ["organization"],
+        transform:
+          "object co-write on (uid, name, xero_id, billing_address): overwrite only if the compared shape matches the prev order.organization snapshot; invoice.organization.tax_profile is preserved (invoice-owned)",
+      },
     ],
   },
   {
@@ -226,14 +267,33 @@ const updateOrderInvoiceRules: CollectionRule[] = [
     source: "orders",
     target: "invoices",
     mode: "co-write",
-    invariant: "When an order is canceled, unpaid invoices referencing it remove the order's scoped items, destinations, and uid from query_by_orders",
+    invariant:
+      "When an order is canceled, unpaid invoices referencing it remove the order's scoped items, destinations, and uid from query_by_orders",
     enforced_by: [ORDER_SCOPED_REMOVAL],
-    trigger: "status change to canceled — targets invoices where query_by_orders contains order uid AND the invoice has no unreversed settlement (payment or credit)",
+    trigger:
+      "status change to canceled — targets invoices where query_by_orders contains order uid AND the invoice has no unreversed settlement (payment or credit)",
     fields: [
-      { source: ["uid"], target: ["query_by_orders"], transform: "remove order uid from query_by_orders array" },
-      { source: ["uid"], target: ["items"], transform: "remove order divider and all items under its path scope" },
-      { source: ["uid"], target: ["destinations"], transform: "remove destination pairs scoped to this order (uid_order match)" },
-      { source: [], target: ["totals"], transform: "recalculate totals after scoped removal" },
+      {
+        source: ["uid"],
+        target: ["query_by_orders"],
+        transform: "remove order uid from query_by_orders array",
+      },
+      {
+        source: ["uid"],
+        target: ["items"],
+        transform: "remove order divider and all items under its path scope",
+      },
+      {
+        source: ["uid"],
+        target: ["destinations"],
+        transform:
+          "remove destination pairs scoped to this order (uid_order match)",
+      },
+      {
+        source: [],
+        target: ["totals"],
+        transform: "recalculate totals after scoped removal",
+      },
     ],
   },
 ];

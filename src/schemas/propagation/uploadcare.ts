@@ -67,13 +67,34 @@ const DISPLACEMENT_SIGNAL: EnforcementRef = {
 
 /** The uuid and its provenance, identical on both edges. */
 const WORK_LIST_FIELDS: CollectionRule["fields"] = [
-  { source: [], target: ["uuid"], transform: "the Uploadcare uuid this render uploaded — and the entry's document id" },
+  {
+    source: [],
+    target: ["uuid"],
+    transform:
+      "the Uploadcare uuid this render uploaded — and the entry's document id",
+  },
   { source: ["uid"], target: ["uid_document"] },
-  { source: [], target: ["collection"], transform: "the owning collection (constant per producer)" },
-  { source: [], target: ["kind"], transform: "'draft_pdf' | 'versioned_pdf', by producer path" },
-  { source: [], target: ["filename"], transform: "the rendered filename as uploaded" },
+  {
+    source: [],
+    target: ["collection"],
+    transform: "the owning collection (constant per producer)",
+  },
+  {
+    source: [],
+    target: ["kind"],
+    transform: "'draft_pdf' | 'versioned_pdf', by producer path",
+  },
+  {
+    source: [],
+    target: ["filename"],
+    transform: "the rendered filename as uploaded",
+  },
   { source: ["version"], target: ["version_source"] },
-  { source: [], target: ["expires_at"], transform: "created_at + the work list's TTL horizon" },
+  {
+    source: [],
+    target: ["expires_at"],
+    transform: "created_at + the work list's TTL horizon",
+  },
 ];
 
 const uploadcareWorkListRules: CollectionRule[] = [

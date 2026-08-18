@@ -68,15 +68,17 @@ const REVERSAL_IS_THE_NEGATION: EnforcementRef = {
 
 const MOVEMENT_LOCATION_STAGING: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:176",
+  ref:
+    "api-cloudrun/tests/unit/movementApplier.test.ts::the location document's product row moves by the line's signed quantity",
   clause:
-    "the locations edge — the product row moves by the line's signed quantity, staging never rewrites name/type/default, an unknown location throws rather than being created, and two lines on one location compose into ONE staged write (#287). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the locations edge, across four named tests in that file — the anchored one asserts the product row moving by the line's signed quantity; `staging never rewrites a location's name, type or default`, `a movement referencing an unknown location throws rather than creating one` and `two lines on one location compose into ONE staged write (#287)` carry the rest. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
 const REVERSAL_LOCATIONS: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/transactions/reversalLocations.test.ts:75",
+  ref:
+    "api-cloudrun/tests/integration/transactions/reversalLocations.test.ts:75",
   clause:
     "the reversal's locations clause end-to-end — every touched shelf returns to its prior count, stock may be pulled back OUT of a deactivated bin, stock may never be placed INTO one, and a uid-drifted location doc is repointed rather than wedged shut",
   gates: true,
@@ -97,9 +99,10 @@ const LEDGER_REPLAY: EnforcementRef = {
 
 const LEDGER_NON_NEGATIVE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:232",
+  ref:
+    "api-cloudrun/tests/unit/movementApplier.test.ts::assertLedgerNonNegative rejects an oversell at every level",
   clause:
-    "the `assertLedgerNonNegative` half — the assertion rejects an oversell at every level (held, in-service, per-store, per-location)",
+    "the `assertLedgerNonNegative` half — the assertion rejects an oversell at all four levels (held, in-service, per-store, per-location). ⚠️ Two of those four arms were unasserted until 2026-08-18 while this clause already claimed them; the test now covers each.",
   gates: true,
 };
 
@@ -162,7 +165,8 @@ function ledgerRule(
       {
         source: ["cost", "amount_cents"],
         target: ["average_unit_cost"],
-        transform: "total_cost_basis_cents ÷ quantity_held, rounded half-up once, at the end — a 4dp RATE, not cents",
+        transform:
+          "total_cost_basis_cents ÷ quantity_held, rounded half-up once, at the end — a 4dp RATE, not cents",
       },
       {
         source: ["lines", "location"],
@@ -208,7 +212,8 @@ function locationsRule(
       {
         source: ["lines", "location"],
         target: ["products", "quantity"],
-        transform: "+quantity at the line's `to` location, −quantity at its `from`",
+        transform:
+          "+quantity at the line's `to` location, −quantity at its `from`",
       },
       {
         source: ["uid_product"],

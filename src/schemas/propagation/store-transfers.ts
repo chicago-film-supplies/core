@@ -53,15 +53,17 @@ const TRANSFER_NETS_TO_ZERO: EnforcementRef = {
 
 const TRANSFER_PAIRS_WHOLE_LINES: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:337",
+  ref:
+    "api-cloudrun/tests/unit/movementApplier.test.ts::a transfer pairs both sides into whole lines and rejects an imbalance",
   clause:
-    "the `every line carries both endpoints` half — the writer pairs both sides into whole lines and REJECTS an imbalance, which is what makes the net-zero structural rather than incidental. Its end-to-end twin asserts one movement carrying both endpoints and a 400 when the two sides disagree on quantity (integration/transactions/createStoreTransfer.test.ts:41).",
+    "the `every line carries both endpoints` half — the writer pairs both sides into whole lines and REJECTS an imbalance, which is what makes the net-zero structural rather than incidental. Its end-to-end twin is `api-cloudrun/tests/integration/transactions/createStoreTransfer.test.ts`, steps `creates ONE transfer movement carrying both endpoints` and `rejects a transfer whose two sides disagree on quantity`.",
   gates: true,
 };
 
 const TRANSFER_NON_NEGATIVE: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:232",
+  ref:
+    "api-cloudrun/tests/unit/movementApplier.test.ts::assertLedgerNonNegative rejects an oversell at every level",
   clause:
     "the `assertLedgerNonNegative still runs` half — the assertion rejects an oversell at every level, so a transfer drawing more than a source shelf holds is refused",
   gates: true,
@@ -73,9 +75,10 @@ const TRANSFER_NON_NEGATIVE: EnforcementRef = {
  */
 const TRANSFER_SAME_LOCATION_COMPOSES: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/unit/movementApplier.test.ts:217",
+  ref:
+    "api-cloudrun/tests/unit/movementApplier.test.ts::two lines on one location compose into ONE staged write (#287)",
   clause:
-    "the `ONE staging pass, same location composes to net zero` half — two lines on one location compose into ONE staged write (#287), and in the ledger fold two lines naming the same location sum rather than collide (core/tests/movements.test.ts:497)",
+    "the `ONE staging pass, same location composes to net zero` half — two lines on one location compose into ONE staged write (#287), and in the ledger fold two lines naming the same location sum rather than collide, in `core/tests/movements.test.ts::two lines naming the same location sum rather than collide (#287)`",
   gates: true,
 };
 
@@ -87,13 +90,18 @@ const createStoreTransferRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "quantity_held and quantity_in_service net to ZERO by construction — every line carries both endpoints, so a transfer moves stock and can neither create nor destroy it. Only store_breakdown actually moves. assertLedgerNonNegative still runs: a transfer taking more than a source location holds is rejected, because a shelf cannot go to −4 units.",
-    enforced_by: [TRANSFER_NETS_TO_ZERO, TRANSFER_PAIRS_WHOLE_LINES, TRANSFER_NON_NEGATIVE],
+    enforced_by: [
+      TRANSFER_NETS_TO_ZERO,
+      TRANSFER_PAIRS_WHOLE_LINES,
+      TRANSFER_NON_NEGATIVE,
+    ],
     transaction: "create-store-transfer",
     fields: [
       {
         source: ["lines"],
         target: ["quantity_held"],
-        transform: "net zero — each line subtracts at `from` and adds the same quantity at `to`",
+        transform:
+          "net zero — each line subtracts at `from` and adds the same quantity at `to`",
       },
       {
         source: ["lines", "location"],
@@ -121,7 +129,8 @@ const createStoreTransferRules: CollectionRule[] = [
       {
         source: ["lines", "location"],
         target: ["products", "quantity"],
-        transform: "−quantity at the line's `from` location, +quantity at its `to`",
+        transform:
+          "−quantity at the line's `from` location, +quantity at its `to`",
       },
       {
         source: ["uid_product"],

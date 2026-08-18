@@ -40,9 +40,11 @@ const updateTaxRules: CollectionRule[] = [
     source: "taxes",
     target: "products",
     mode: "fan-out",
-    invariant: "Products embed tax name/rate/type in price.taxes — must stay current",
+    invariant:
+      "Products embed tax name/rate/type in price.taxes — must stay current",
     enforced_by: [TAX_TO_PRODUCTS],
-    trigger: "name, rate, or type change — post-transaction batch matched by tax uid",
+    trigger:
+      "name, rate, or type change — post-transaction batch matched by tax uid",
     fields: [
       { source: ["name"], target: ["price", "taxes", "name"] },
       { source: ["rate"], target: ["price", "taxes", "rate"] },
@@ -57,8 +59,10 @@ const updateTaxRules: CollectionRule[] = [
     source: "taxes",
     target: "webshop-products",
     mode: "fan-out",
-    invariant: "Webshop products embed tax name/rate/type in price.taxes — must stay current",
-    trigger: "name, rate, or type change — post-transaction batch matched by tax uid",
+    invariant:
+      "Webshop products embed tax name/rate/type in price.taxes — must stay current",
+    trigger:
+      "name, rate, or type change — post-transaction batch matched by tax uid",
     fields: [
       { source: ["name"], target: ["price", "taxes", "name"] },
       { source: ["rate"], target: ["price", "taxes", "rate"] },
@@ -73,19 +77,34 @@ const updateTaxRules: CollectionRule[] = [
     source: "taxes",
     target: "orders",
     mode: "fan-out",
-    invariant: "Incomplete orders embed tax data as PriceModifiers — rate changes must recompute amounts and totals",
+    invariant:
+      "Incomplete orders embed tax data as PriceModifiers — rate changes must recompute amounts and totals",
     enforced_by: [TAX_TO_ORDERS],
-    trigger: "name, rate, or type change — post-transaction batch filtered to incomplete orders, matched by tax uid",
+    trigger:
+      "name, rate, or type change — post-transaction batch filtered to incomplete orders, matched by tax uid",
     fields: [
       { source: ["name"], target: ["items", "price", "taxes", "name"] },
       { source: ["rate"], target: ["items", "price", "taxes", "rate"] },
       { source: ["type"], target: ["items", "price", "taxes", "type"] },
-      { source: ["rate"], target: ["items", "price", "taxes", "amount_cents"], transform: "recomputed from new rate × item base_cents price" },
+      {
+        source: ["rate"],
+        target: ["items", "price", "taxes", "amount_cents"],
+        transform: "recomputed from new rate × item base_cents price",
+      },
       { source: ["name"], target: ["totals", "taxes", "name"] },
       { source: ["rate"], target: ["totals", "taxes", "rate"] },
       { source: ["type"], target: ["totals", "taxes", "type"] },
-      { source: ["rate"], target: ["totals", "taxes", "amount_cents"], transform: "recomputed from new rate × subtotal_discounted_cents" },
-      { source: [], target: ["totals", "total_cents"], transform: "recalculated: subtotal_discounted_cents + sum(taxes.amount_cents) + sum(transaction_fees.amount_cents)" },
+      {
+        source: ["rate"],
+        target: ["totals", "taxes", "amount_cents"],
+        transform: "recomputed from new rate × subtotal_discounted_cents",
+      },
+      {
+        source: [],
+        target: ["totals", "total_cents"],
+        transform:
+          "recalculated: subtotal_discounted_cents + sum(taxes.amount_cents) + sum(transaction_fees.amount_cents)",
+      },
     ],
   },
 ];

@@ -34,9 +34,10 @@ import type {
 
 const FAMILY_REGISTER_COWRITES_THREAD: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/templates/publish.test.ts:255",
+  ref:
+    "api-cloudrun/tests/integration/templates/publish.test.ts::publishResolvedTemplates: register → family + version + thread",
   clause:
-    "the cowrite at register — family + version + thread land together, and the dual-uniqueness 409s that guard the family are asserted on the draft path (drafts.test.ts:108). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the cowrite at register — family + version + thread land together, and the dual-uniqueness 409s that guard the family are asserted on the draft path (`drafts.test.ts::POST /templates — register family + thread, dual-uniqueness 409s`). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
@@ -47,7 +48,7 @@ const FAMILY_REGISTER_COWRITES_THREAD: EnforcementRef = {
  */
 const FAMILY_THREAD_POINTER_REQUIRED: EnforcementRef = {
   kind: "zod",
-  ref: "core/src/schemas/template.ts:136",
+  ref: "core/src/schemas/template.ts::uid_thread: FirestoreId",
   clause:
     "the back-embed's presence — `uid_thread` is required on the family document, so a register that failed to cowrite the thread cannot produce a valid family. Says nothing about whether the uid RESOLVES.",
   gates: true,
@@ -55,25 +56,28 @@ const FAMILY_THREAD_POINTER_REQUIRED: EnforcementRef = {
 
 const DRAFT_ROLLUP: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/templates/drafts.test.ts:327",
+  ref:
+    "api-cloudrun/tests/integration/templates/drafts.test.ts::POST /templates-versions/{uid}/abandon — draft → archived, removed from draft_uids",
   clause:
-    "both directions of `draft_uids[]` — abandoning archives the version AND removes it from the rollup, and a publish on a draft's branch flips the version in place and cleans the rollup (publish.test.ts:174). The component family gets the same pair (components.test.ts:189).",
+    "both directions of `draft_uids[]` — abandoning archives the version AND removes it from the rollup, and a publish on a draft's branch flips the version in place and cleans the rollup (`publish.test.ts::publishResolvedTemplates: publish on a draft's branch flips it in place + cleans draft_uids`). The component family gets the same pair (`components.test.ts::abandon a COMPONENT draft → archived + dropped from the component family rollup`).",
   gates: true,
 };
 
 const PUBLISH_SEQ: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/templates/publish.test.ts:322",
+  ref:
+    "api-cloudrun/tests/integration/templates/publish.test.ts::publishResolvedTemplates: second publish advances version_count + seq + uid_active",
   clause:
-    "the counter's forward motion and its self-heal — a second publish advances `version_count`, `seq` and `uid_active`, and a lagging counter is seeded from the max active seq rather than silently refusing the flip (:802). Concurrency is not constructed here; the counter increment is inside the publish transaction.",
+    "the counter's forward motion and its self-heal — a second publish advances `version_count`, `seq` and `uid_active`, and a lagging counter is seeded from the max active seq rather than silently refusing the flip, in the sibling test `publishResolvedTemplates: seeds seq from max active seq when the counter lags (#191 §4 self-heal)`. Concurrency is not constructed here; the counter increment is inside the publish transaction.",
   gates: true,
 };
 
 const VERSION_FLIP: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/templates/publish.test.ts:174",
+  ref:
+    "api-cloudrun/tests/integration/templates/publish.test.ts::publishResolvedTemplates: publish on a draft's branch flips it in place + cleans draft_uids",
   clause:
-    "the in-place flip and its idempotence — a publish on a draft's branch flips the SAME version doc draft→published, and a re-publish at the same sha is a no-op (:412). A metadata-only diff projects identity WITHOUT a version bump (:452) and its redelivery is also a no-op (:502).",
+    "the in-place flip and its idempotence — a publish on a draft's branch flips the SAME version doc draft→published, and sibling tests carry the rest — `publishResolvedTemplates: idempotent re-publish (same sha) is a noop`, `publishResolvedTemplates: metadata-only diff projects identity without a version bump`, and `publishResolvedTemplates: metadata-only redelivery is a no-op`.",
   gates: true,
 };
 
@@ -86,9 +90,10 @@ const VERSION_FLIP: EnforcementRef = {
  */
 const FAMILY_ROLLUP: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/templates/publish.test.ts:322",
+  ref:
+    "api-cloudrun/tests/integration/templates/publish.test.ts::publishResolvedTemplates: second publish advances version_count + seq + uid_active",
   clause:
-    "the rollup's fields — `uid_active` repointed, `version_count` incremented, the version dropped from `draft_uids[]`, and the archive path nulling `uid_active` while archiving the active version (:747). The S3 monotonic COMPARISON is asserted at the unit level instead; the integration suite's own header records that it cannot construct a regression because `seq` is globally monotonic.",
+    "the rollup's fields — `uid_active` repointed, `version_count` incremented, the version dropped from `draft_uids[]`, and the archive path nulling `uid_active` while archiving the active version, in the sibling test `publishResolvedTemplates: archive nulls uid_active + archives the active version`. The S3 monotonic COMPARISON is asserted at the unit level instead; the integration suite's own header records that it cannot construct a regression because `seq` is globally monotonic.",
   gates: true,
 };
 
@@ -105,9 +110,21 @@ const createTemplateRules: CollectionRule[] = [
     enforced_by: [FAMILY_REGISTER_COWRITES_THREAD],
     transaction: "create-template",
     fields: [
-      { source: ["uid"], target: ["sources", "uid"], transform: "sources[0] — the family itself" },
-      { source: [], target: ["sources", "collection"], transform: `literal "templates"` },
-      { source: [], target: ["created_by"], transform: "ActorRef of acting user from session" },
+      {
+        source: ["uid"],
+        target: ["sources", "uid"],
+        transform: "sources[0] — the family itself",
+      },
+      {
+        source: [],
+        target: ["sources", "collection"],
+        transform: `literal "templates"`,
+      },
+      {
+        source: [],
+        target: ["created_by"],
+        transform: "ActorRef of acting user from session",
+      },
       { source: [], target: ["title"], transform: "null — default thread" },
       { source: [], target: ["comment_count"], transform: "0" },
     ],
@@ -119,7 +136,10 @@ const createTemplateRules: CollectionRule[] = [
     mode: "embed",
     invariant:
       "The cowritten thread's uid is embedded on the family as `uid_thread` so the detail surface resolves its default thread without a query.",
-    enforced_by: [FAMILY_THREAD_POINTER_REQUIRED, FAMILY_REGISTER_COWRITES_THREAD],
+    enforced_by: [
+      FAMILY_THREAD_POINTER_REQUIRED,
+      FAMILY_REGISTER_COWRITES_THREAD,
+    ],
     transaction: "create-template",
     fields: [
       { source: ["uid"], target: ["uid_thread"] },
@@ -150,7 +170,11 @@ const manageDraftRules: CollectionRule[] = [
     enforced_by: [DRAFT_ROLLUP],
     transaction: "manage-draft",
     fields: [
-      { source: ["uid"], target: ["draft_uids"], transform: "arrayUnion on create / arrayRemove on archive" },
+      {
+        source: ["uid"],
+        target: ["draft_uids"],
+        transform: "arrayUnion on create / arrayRemove on archive",
+      },
     ],
   },
   {
@@ -169,7 +193,11 @@ const manageDraftRules: CollectionRule[] = [
     enforced_by: [DRAFT_ROLLUP],
     transaction: "manage-draft",
     fields: [
-      { source: ["uid"], target: ["draft_uids"], transform: "arrayUnion on create / arrayRemove on archive" },
+      {
+        source: ["uid"],
+        target: ["draft_uids"],
+        transform: "arrayUnion on create / arrayRemove on archive",
+      },
     ],
   },
   {
@@ -187,9 +215,22 @@ const manageDraftRules: CollectionRule[] = [
     enforced_by: [DRAFT_ROLLUP],
     transaction: "manage-draft",
     fields: [
-      { source: ["uid"], target: ["sources", "uid"], transform: "sources[0] — the draft version" },
-      { source: [], target: ["sources", "collection"], transform: `literal "templates-versions", then the family as sources[1]` },
-      { source: [], target: ["created_by"], transform: "ActorRef of acting user from session" },
+      {
+        source: ["uid"],
+        target: ["sources", "uid"],
+        transform: "sources[0] — the draft version",
+      },
+      {
+        source: [],
+        target: ["sources", "collection"],
+        transform:
+          `literal "templates-versions", then the family as sources[1]`,
+      },
+      {
+        source: [],
+        target: ["created_by"],
+        transform: "ActorRef of acting user from session",
+      },
       { source: [], target: ["title"], transform: "null — default thread" },
       { source: [], target: ["comment_count"], transform: "0" },
     ],
@@ -234,7 +275,11 @@ const publishTemplateRules: CollectionRule[] = [
     enforced_by: [PUBLISH_SEQ],
     transaction: "publish-template",
     fields: [
-      { source: ["count"], target: ["seq"], transform: "FieldValue.increment(1) → stamped as version.seq" },
+      {
+        source: ["count"],
+        target: ["seq"],
+        transform: "FieldValue.increment(1) → stamped as version.seq",
+      },
     ],
   },
   {
@@ -248,10 +293,27 @@ const publishTemplateRules: CollectionRule[] = [
     transaction: "publish-template",
     fields: [
       { source: [], target: ["status"], transform: `draft → "published"` },
-      { source: [], target: ["sha"], transform: "merged commit SHA (resolved outside txn)" },
-      { source: [], target: ["semver"], transform: "deriveBump(commit_meta.type, breaking) applied to the family's last semver" },
-      { source: [], target: ["commit_meta"], transform: "conventional-commit metadata from the merged PR" },
-      { source: [], target: ["content"], transform: "full content map read from the merged SHA's blobs" },
+      {
+        source: [],
+        target: ["sha"],
+        transform: "merged commit SHA (resolved outside txn)",
+      },
+      {
+        source: [],
+        target: ["semver"],
+        transform:
+          "deriveBump(commit_meta.type, breaking) applied to the family's last semver",
+      },
+      {
+        source: [],
+        target: ["commit_meta"],
+        transform: "conventional-commit metadata from the merged PR",
+      },
+      {
+        source: [],
+        target: ["content"],
+        transform: "full content map read from the merged SHA's blobs",
+      },
     ],
   },
   {
@@ -264,10 +326,26 @@ const publishTemplateRules: CollectionRule[] = [
     enforced_by: [FAMILY_ROLLUP],
     transaction: "publish-template",
     fields: [
-      { source: ["uid"], target: ["uid_active"], transform: "repoint only if newSeq > active.seq" },
-      { source: [], target: ["version_count"], transform: "FieldValue.increment(1)" },
-      { source: [], target: ["last_published_at"], transform: "publish timestamp" },
-      { source: ["uid"], target: ["draft_uids"], transform: "arrayRemove — no longer a draft" },
+      {
+        source: ["uid"],
+        target: ["uid_active"],
+        transform: "repoint only if newSeq > active.seq",
+      },
+      {
+        source: [],
+        target: ["version_count"],
+        transform: "FieldValue.increment(1)",
+      },
+      {
+        source: [],
+        target: ["last_published_at"],
+        transform: "publish timestamp",
+      },
+      {
+        source: ["uid"],
+        target: ["draft_uids"],
+        transform: "arrayRemove — no longer a draft",
+      },
     ],
   },
   {
@@ -284,10 +362,26 @@ const publishTemplateRules: CollectionRule[] = [
     enforced_by: [FAMILY_ROLLUP],
     transaction: "publish-template",
     fields: [
-      { source: ["uid"], target: ["uid_active"], transform: "repoint only if newSeq > active.seq" },
-      { source: [], target: ["version_count"], transform: "FieldValue.increment(1)" },
-      { source: [], target: ["last_published_at"], transform: "publish timestamp" },
-      { source: ["uid"], target: ["draft_uids"], transform: "arrayRemove — no longer a draft" },
+      {
+        source: ["uid"],
+        target: ["uid_active"],
+        transform: "repoint only if newSeq > active.seq",
+      },
+      {
+        source: [],
+        target: ["version_count"],
+        transform: "FieldValue.increment(1)",
+      },
+      {
+        source: [],
+        target: ["last_published_at"],
+        transform: "publish timestamp",
+      },
+      {
+        source: ["uid"],
+        target: ["draft_uids"],
+        transform: "arrayRemove — no longer a draft",
+      },
     ],
   },
 ];
