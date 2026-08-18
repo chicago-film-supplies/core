@@ -96,7 +96,7 @@ const SCOPE_THIS_DELETE: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/recurrences/recurrences.test.ts::Cards DELETE scope=this appends card.date to parent.exception_dates",
   clause:
-    "the exception-date append — deleting one card appends its Chicago calendar day to the parent's `exception_dates[]`, which is what stops the nightly materializer resurrecting it",
+    "the exception-date append — deleting one card appends its Chicago calendar day to the parent's `exception_dates[]`, which is what stops `update-recurrence:rematerialize-future` resurrecting it",
   gates: true,
 };
 
@@ -412,7 +412,7 @@ const deleteCardScopeThisRules: CollectionRule[] = [
     target: "recurrences",
     mode: "derive",
     invariant:
-      "`DELETE /cards/{uid}?recurrence_scope=this` deletes the single card and appends the Chicago calendar day of its `dates.start` to the parent recurrence's `exception_dates[]` (YYYY-MM-DD strings) so the nightly materializer never resurrects that occurrence.",
+      "`DELETE /cards/{uid}?recurrence_scope=this` deletes the single card and appends the Chicago calendar day of its `dates.start` to the parent recurrence's `exception_dates[]` (YYYY-MM-DD strings) so that occurrence is never re-materialized. ⚠️ The resurrecting actor is `update-recurrence:rematerialize-future`, NOT the nightly materializer, which this clause named until api-cloudrun#549 measured it: `materializeHorizonForRecurrence` expands only `[horizon_through + 1, newHorizon]` and returns early when the horizon has not moved, so it can never re-expand a day it has already materialized. `updateRecurrence` can — a rule/bounds edit or an unpause sets `needRematerialize` and re-expands from TODAY against `after.exception_dates`, which is the read this append exists to feed. Naming the wrong actor mattered: it made the append look like a guard against a job that runs nightly rather than against an operator edit, and the write that produces it is ordered accordingly (api-cloudrun#549 D4).",
     enforced_by: [SCOPE_THIS_DELETE],
     transaction: "delete-card-scope-this",
     fields: [

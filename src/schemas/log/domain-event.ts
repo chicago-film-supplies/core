@@ -109,6 +109,24 @@ export const DOMAIN_EVENT_MSGS = [
   // the override is lossy — this is the explicit warning trail. Emitted
   // from `src/services/fulfillmentEdits.ts` in api-cloudrun.
   "fulfillment_custom_item_qty_override",
+  // One recurrence threw while the nightly sweep advanced its horizon
+  // (api-cloudrun#549 D6-B). `materializeHorizonAll` absorbs the throw and
+  // carries on — correct, because `recurrence-horizon-nightly` retries the
+  // WHOLE sweep (`retry_count = 3`) and a 5xx would redo every recurrence that
+  // had just succeeded. The retry unit and the failure unit are different sizes.
+  //
+  // ⚠️ **The swallow was SILENT until this arm existed**: `services/recurrences.ts`
+  // imported no logger at all, the handler returns 200 unconditionally, and the
+  // only trace was an `errors` count in a response body nothing reads. So
+  // `retry_count = 3` is dead config for this failure mode and a recurrence could
+  // stop advancing EVERY NIGHT, FOREVER, with nothing errored, logged or alerted.
+  // The alert (`RecurrenceHorizonFailed`) groups by `recurrence_uid`, because
+  // "one failed once" and "the same one has failed for a month" are the same
+  // count and completely different incidents.
+  //
+  // `{ recurrence_uid, error_name, error_message, error_stack }`, at `error`.
+  // Emitted from `src/services/recurrences.ts` in api-cloudrun.
+  "recurrence_horizon_failed",
 ] as const;
 
 /** Discriminated msg union for Domain-archetype log records. */
@@ -123,6 +141,16 @@ export interface DomainEventLogRecord {
   invoice_uid?: string;
   product_uid?: string;
   organization_uid?: string;
+  /**
+   * The recurrence a record is about. Declared rather than left to the index
+   * signature below: it is CALLER-supplied, and the #22 ruling is that a
+   * caller-supplied field earns a declaration whatever `[key: string]: unknown`
+   * would tolerate. ⚠️ The declaration buys type-safety and discoverability on
+   * this name only — `recurrence_uidd` still compiles, because the index
+   * signature admits any name. Deleting that signature is the real fix and is
+   * not this field's to make.
+   */
+  recurrence_uid?: string;
   document_path?: string;
   request_id?: string;
   method?: string;
@@ -142,5 +170,6 @@ export const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord> = z.obj
   invoice_uid: z.string().optional(),
   product_uid: z.string().optional(),
   organization_uid: z.string().optional(),
+  recurrence_uid: z.string().optional(),
   document_path: z.string().optional(),
 }).passthrough().meta({ title: "DomainEventLogRecord" });
