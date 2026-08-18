@@ -5,6 +5,7 @@
   "description": "Shared Zod 4 schemas and pure utility helpers for CFS: Firestore/Typesense collection schemas, propagation rules, domain events, and date/order/invoice/product helpers.",
   "exports": {
     "./schemas": "./src/schemas/mod.ts",
+    "./schemas/propagation": "./src/schemas/propagation/mod.ts",
     "./schemas/common": "./src/schemas/common.ts",
     "./schemas/booking": "./src/schemas/booking.ts",
     "./schemas/cache-geocodes": "./src/schemas/cache-geocodes.ts",

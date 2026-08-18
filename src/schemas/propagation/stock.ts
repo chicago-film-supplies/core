@@ -160,7 +160,7 @@ const REBUILD_TRIGGER =
  * near-identical copies of the same three edges: every `enforced_by` ref was a
  * shared module const, `trigger` was a shared constant, and only the id prefix
  * and one prose fragment varied. They were never 21 rules — they are three
- * rules with seven firing contexts, and that relation was *already* modelled by
+ * rules fired from many transactions, and that relation was *already* modelled by
  * `TransactionDefinition.steps[]`, which is where it now lives alone.
  *
  * **The varying prose moved to the transactions.** A string like *"Every
@@ -189,7 +189,7 @@ const REBUILD_TRIGGER =
  * document. So the atomicity traded bought display consistency, not an invariant.
  *
  * ⚠️ **`transaction` is deliberately absent on the three shared edges.** That
- * field means "grouped into this atomic operation", and with seven firing
+ * field means "grouped into this atomic operation", and with many firing
  * contexts it could only ever name one of them — it would be the single
  * outright false claim in the file. The ids live in each owning definition's
  * `steps`, and `getPropagationMarkdown` and the diagram generator both resolve

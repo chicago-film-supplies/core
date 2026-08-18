@@ -850,13 +850,27 @@ export type {
   TransactionId,
 } from "./propagation/mod.ts";
 
-// ⚠️ The propagation graph reaches consumers through THREE values, and that is
-// the entire public surface. This block used to re-export 81 individual rule
-// and transaction symbols; `propagation/mod.ts` exported 141, so 60 had
-// silently drifted out with nothing noticing. Do not re-add named symbols here
-// — one module object per file is the convention now (see
+// 🔴 **The three VALUES are deliberately NOT re-exported here — import them from
+// `@cfs/core/schemas/propagation` instead** (Tier 1 item 4).
+//
+// This barrel used to carry `export { aggregates, rules, transactions }`, and
+// **176 manager files import the bare `@cfs/core/schemas` barrel**. That pulled
+// 161 rule objects — whose `invariant` fields are paragraphs of prose — into a
+// browser bundle that reads **none** of them. The JSR npm shim does not declare
+// `sideEffects: false`, so Rollup cannot reliably drop it. Measured before
+// removing: zero propagation value imports in manager, zero in templates, nine
+// in api-cloudrun — so the entire cost was carried for one consumer that never
+// asked for it.
+//
+// ⚠️ **The TYPES above stay, and that is not an inconsistency.** `export type`
+// is erased at build, so it costs a bundle nothing; the values are the whole
+// weight. Moving the types too would break consumers for no gain.
+//
+// Do not re-add the values here, and do not re-add named rule/transaction
+// symbols either — this block used to re-export 81 of them while
+// `propagation/mod.ts` exported 141, so 60 had silently drifted out with nothing
+// noticing. One module object per file is the convention now (see
 // `propagation/types.ts`), and a hand-maintained list is the defect it removes.
-export { aggregates, rules, transactions } from "./propagation/mod.ts";
 
 // ── Domain events ───────────────────────────────────────────────────
 

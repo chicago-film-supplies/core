@@ -36,10 +36,11 @@ import type { CollectionName } from "../mod.ts";
  * records it at {@link CollectionDocs}.
  *
  * ⚠️ **The import is `import type` and must stay that way.** It is erased at
- * emit, so `@cfs/core/schemas/propagation` still pulls no runtime code out of
- * `mod.ts` — which is what keeps Tier 1 item 4 (getting the catalog out of
- * manager's browser bundle) worth doing. A value import here would quietly
- * defeat it.
+ * emit, so `@cfs/core/schemas/propagation` pulls no runtime code out of
+ * `mod.ts` — which is what makes the subpath worth having at all. **That subpath
+ * now exists and the barrel no longer re-exports the three values** (Tier 1
+ * item 4, landed 2026-08-18), so a value import here would drag the whole schema
+ * barrel back into every consumer of the catalog and undo it.
  */
 export type PropagationEndpoint = CollectionName | "*" | "orders/documents";
 
