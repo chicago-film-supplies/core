@@ -618,26 +618,41 @@ const updateProductRules: CollectionRule[] = [
       'Public-facing product fields propagate to the webshop mirror on update. ⚠️ NOT `price` — it is never mirrored on an update path; the only writers that refresh `webshop-products.price` are a TAX edit (`update-tax:to-webshop-products`) and a full re-create when `webshop.available` flips false→true. `query_by_components` and `query_by_component_of` are likewise never mirrored, while `query_by_tags` IS mirrored and was not declared. Said "ALL public-facing fields" until 2026-08-17, which was false in three directions at once.',
     enforced_by: [WEBSHOP_SHAPE_IS_THE_SUBSET, WEBSHOP_MIRROR_TESTED],
     transaction: "update-product",
+    // ⚠️ **The mappings below were measured against every `webshop-products`
+    // write in `updateProduct` on 2026-08-18, and three came off** (core#55
+    // item 3). `price` never moves on this path — the price block sets flags and
+    // touches no webshop doc — and `query_by_components` /
+    // `query_by_component_of` have no webshop writer at all. `query_by_tags` was
+    // the opposite error and is added: it is maintained on both the add and the
+    // remove branch of the tags cascade, beside the `tags` array it mirrors.
+    //
+    // ⭐ The invariant above was corrected on 2026-08-17 and this array was not,
+    // which is the same defect as `update-product:type-change` directly below —
+    // there, the array was corrected and the prose was not. **A rule describes
+    // itself twice, and correcting one description is not correcting the rule.**
     fields: [
       { source: ["name"], target: ["name"] },
       { source: ["active"], target: ["active"] },
-      { source: ["price"], target: ["price"], transform: "strips coa_revenue" },
       { source: ["tags"], target: ["tags"] },
+      { source: ["query_by_tags"], target: ["query_by_tags"] },
       {
         source: ["components"],
         target: ["components"],
-        transform: "strips crms fields from component entries",
+        transform:
+          "strips crms fields from component entries. Written onto the RELATED product's mirror (the parent's `components`, the child's `component_of`), not the primary's — the primary's arrays are normalized by the flush hook and the mirror follows them.",
       },
       {
         source: ["component_of"],
         target: ["component_of"],
         transform: "strips crms fields from component_of entries",
       },
-      { source: ["query_by_components"], target: ["query_by_components"] },
-      { source: ["query_by_component_of"], target: ["query_by_component_of"] },
       { source: ["alternates"], target: ["alternates"] },
       { source: ["query_by_alternates"], target: ["query_by_alternates"] },
-      { source: ["webshop"], target: ["webshop"] },
+      {
+        source: ["webshop"],
+        target: ["webshop"],
+        transform: "`webshop.description` only on this path",
+      },
     ],
   },
   {
@@ -745,7 +760,7 @@ const updateProductRules: CollectionRule[] = [
     // recurs". An enumeration re-opens on every new member; a predicate does not.
     // Type names below are illustration, never the rule. (core#55's class.)
     invariant:
-      "A product holds an inventory ledger exactly when `productHoldsStock` says so — type is 'rental' or 'sale' AND stock_method is not 'none'. A type change that makes the predicate FALSE deletes the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token together (service, surcharge, replacement and transaction_fee all fail it, whatever their stock_method); a change that makes it TRUE creates the ledger. Read the predicate, not the type names: a new member of PRODUCT_TYPES is governed the day it is added, with no edit here. When the predicate holds on BOTH sides the summary is (re)seeded rather than deleted — a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. The summary's `type` field follows the product's.",
+      "A product holds an inventory ledger exactly when `productHoldsStock` says so — type is 'rental' or 'sale' AND stock_method is not 'none'. A type change that makes the predicate FALSE deletes the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token together (service, surcharge, replacement and transaction_fee all fail it, whatever their stock_method); a change that makes it TRUE creates the ledger. Read the predicate, not the type names: a new member of PRODUCT_TYPES is governed the day it is added, with no edit here. When the predicate holds on BOTH sides the summary is (re)seeded rather than deleted — a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. ⚠️ **The projection carries NO `type`**, so nothing about it follows the product's — `StockSchema`'s own header says so, and a projection carrying one is a `validateBeforeWrite` rejection rather than a drift. This sentence claimed the opposite until 2026-08-18: the `fields[]` mapping below was corrected on 2026-08-17 and the prose describing it was not (core#55 item 2).",
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [

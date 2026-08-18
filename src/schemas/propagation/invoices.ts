@@ -232,7 +232,7 @@ const updateOrderInvoiceRules: CollectionRule[] = [
         source: ["items"],
         target: ["items"],
         transform:
-          "selective sync: compare prev order items to current invoice items by path — update only non-overridden items, add new items, remove deleted non-overridden items. Invoice-only fields (coa_revenue, tracking_category, xero_id, xero_tracking_option_id) are preserved.",
+          "selective sync: compare prev order items to current invoice items by path — update only non-overridden items, add new items, remove deleted non-overridden items. All SIX invoice-only fields are preserved: coa_revenue, tracking_category, xero_id, xero_tracking_option_id, crms_id, crms_opportunity_id. ⚠️ This listed FOUR until 2026-08-18 — `INVOICE_ONLY_ITEM_FIELDS` (`core/src/utils/invoices.ts`) has been six since 2026-08-10, and `SELECTIVE_SYNC_SEMANTICS`' clause above was corrected on 2026-08-17 while ASSERTING that this transform had been corrected too. It had not been: the clause and the transform are two descriptions of one rule, and fixing one is not fixing the rule (core#55 item 1, arity half). Ownership — whether these are invoice-owned at all, given `productLineDenorms` documents itself as their sole author — is the OTHER half and is blocked on api-cloudrun#537.",
       },
       {
         source: ["items"],
