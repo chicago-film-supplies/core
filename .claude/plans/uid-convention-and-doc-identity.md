@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-17 • **Repo:** core (+ api-cloudrun, manager) • **Status:** ⏳ planned, nothing implemented
 **Origin:** an audit of "which Firestore and Typesense doc types have no `uid`, and should each get one?" — the full census is below, executed against `CollectionDocs` and the 22 Typesense configs.
-**Related:** `.claude/plans/roles-campaign.md` (the sibling campaign; `roles.name` is a carve-out declared here and defended there)
+**Tracking issue:** core#58
+**Related:** `.claude/plans/roles-campaign.md` + core#59 (the sibling campaign; `roles.name` is a carve-out declared here and defended there) • core#60 (the `TypesenseDocumentMap` gap this audit surfaced) • api-cloudrun#506 (`uid_session` holds a UUID — the same convention, opposite direction; Phase 0 is its shared premise) • manager#300 (which side wins when a stored `uid` disagrees with the snapshot id — wants an answer before Phase 4)
 
 ## START HERE
 
@@ -27,8 +28,8 @@ Read Findings 1–3 for the evidence, then Phase 0. The one thing to internalise
 
 **No action.** Two adjacent gaps surfaced, neither about `uid` — both filed as issues rather than folded in:
 
-- `TypesenseDocumentMap` (`core/src/schemas/typesense/documents.ts:863`) covers 20 of 22 aliases — `cards` and `threads` have configs but no typed search-hit shape. Latent (both `enabled: false`).
-- `api-cloudrun/scripts/reindexTypesense.ts:118` builds its orphan-purge set from the **Firestore doc id** while the import keys on **`data.uid`**; they agree only because of the write guard.
+- `TypesenseDocumentMap` (`core/src/schemas/typesense/documents.ts:878`) covers 20 of 22 aliases — `cards` and `threads` have configs but no typed search-hit shape, and no `CardDocument` / `ThreadDocument` exists at all. ⚠️ **Not latent for `cards`**: `cards.ts:26` is `enabled: true` (only `threads` and `bookings` are `enabled: false`, and `bookings` *is* in the map), so a live index is unreachable from manager's typed search surface, which is generic over `keyof TypesenseDocumentMap`.
+- (core#60) `api-cloudrun/scripts/reindexTypesense.ts:118` builds its orphan-purge set from the **Firestore doc id** while the import keys on **`data.uid`**; they agree only because of the write guard.
 
 ---
 

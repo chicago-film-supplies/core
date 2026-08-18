@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-17 • **Repo:** core (+ api-cloudrun, manager) • **Status:** ⏳ planned, nothing implemented
 **Origin:** the question "is keying `roles` by `name` a mistake — what does renaming cost, should it move to a generated auto-id?" The answer is **no**, and the evidence is recorded below so no future session re-litigates it. What the audit *did* find is that the role surface is missing operations and that a role's id shape is defined nine times across three repos, two of which disagree.
-**Related:** `.claude/plans/uid-convention-and-doc-identity.md` (declares `roles.name` as a carve-out and points here for the reason)
+**Tracking issue:** core#59
+**Related:** `.claude/plans/uid-convention-and-doc-identity.md` + core#58 (declares `roles.name` as a carve-out and points here for the reason; its Phase 4 is what finally *guards* that carve-out) • api-cloudrun#574 (`POST /users` writes roles unchecked, and the absent-role skip has no log or metric — the same silent de-privileging this campaign's rename must avoid) • api-cloudrun#548 (`cleanup-orphan-threads` can delete a thread that still has comments — blocks one option in Phase 3a)
 
 ## START HERE
 
