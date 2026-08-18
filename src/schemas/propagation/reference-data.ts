@@ -128,7 +128,7 @@ const updateTrackingCategoryRules: CollectionRule[] = [
     target: "products",
     mode: "fan-out",
     invariant:
-      "Products store tracking category name for display — must cascade on rename",
+      "Products store tracking category name for display — must cascade on rename. 🔴 **The cascade STOPS at products, and that is a ruling rather than an omission** (api-cloudrun#537, Alex 2026-08-18: point-in-time wins). It does NOT reach `invoices.items[].tracking_category`: an invoice is a point-in-time document, so a category renamed after a line was written leaves that line alone. `api-cloudrun/src/lib/invoiceLineDenorms.ts::preserveStoredTrackingCategory` is what makes it true — a stored non-null value is never overwritten, and a null one is still filled from the product, because \"never overwrite\" and \"never write\" are different rules and taking the first for the second re-opens #473. ⚠️ Before the ruling the live path `tracking-categories → products → invoices.items[]` ran on EVERY invoice write, contradicting this rule, both `*-invoice-line-denorms.ts` scripts, erp-spec's `dimensions.yaml` + `product-line-pl.yaml`, and `update-order:items-to-invoices`' own preservation clause — four artifacts against one writer. A deliberate rename cascade into issued invoices, if one is ever wanted, is a NAMED pass with its own rule; the shape exists as `repair-invoice-line-denorms.ts`' `retire` arm.",
     trigger: "name change — post-transaction batch with existence check",
     enforced_by: [{
       kind: "audit",
