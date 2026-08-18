@@ -168,6 +168,42 @@ export interface IntegrationEventLogRecord {
   user_id?: string;
   trace_id?: string;
   span_id?: string;
+  /**
+   * Convergence lag in milliseconds — **source commit → cascade complete**.
+   *
+   * Emitted by `eventarc_processed` only (api-cloudrun `routes/eventarc.ts`),
+   * as `Date.now() - Date.parse(ce-time)`. It is the only convergence latency
+   * this system records, and it is what campaign Tier 2 #22 exists to collect:
+   * without it, *"how stale may a denorm legitimately be before it is a bug?"*
+   * has no answer and every async repair's SLA is a guess.
+   *
+   * ⚠️ **Not handler duration.** `msg:"request"` already carries that for the
+   * same events and it answers a different question. ⚠️ **Absent rather than
+   * zero** when `ce-time` is missing or unparseable — a zero would sit in the
+   * distribution as a real, impossibly-fast convergence.
+   *
+   * ⚠️ **DECLARED HERE ON PURPOSE, rather than riding `.passthrough()`.** The
+   * first cut of #22 leaned on the index signature below. Openness on this
+   * record is meant for what the LOGGER merges from AsyncLocalStorage; a
+   * caller-supplied field earns a declaration — the same argument §6b of the
+   * propagation campaign made about `PropagationContext`, where 46 call sites
+   * satisfied a "required" field through an index signature rather than because
+   * of it.
+   *
+   * ⚠️ **Be precise about what this buys, because it is less than it looks.**
+   * Measured, not assumed: `lag_ms: "5"` is a compile error (TS2322) and the
+   * Zod arm rejects a negative — but **`lag_msec: 5` still compiles**, because
+   * `[key: string]: unknown` below admits any name. So this declaration gives
+   * type-safety and discoverability on the RIGHT name, and **no protection
+   * against a misspelling**. The only fix for that is deleting the index
+   * signature, which ~100 message types currently depend on — including this
+   * record's own `collection`, `doc_id` and `operation`. Worth doing; not worth
+   * smuggling into a two-week measurement.
+   *
+   * 🔴 Time-boxed — api-cloudrun#573 decides keep-or-revert by ~2026-09-01 or
+   * when #556 lands, whichever is first.
+   */
+  lag_ms?: number;
   [key: string]: unknown;
 }
 
@@ -177,4 +213,7 @@ export const IntegrationEventLogRecordSchema: z.ZodType<IntegrationEventLogRecor
   msg: z.enum(INTEGRATION_EVENT_MSGS),
   service: z.string().optional(),
   document_path: z.string().optional(),
+  // See the field's docstring on the interface: declared rather than passed
+  // through, so a misspelling fails instead of silently collecting nothing.
+  lag_ms: z.number().nonnegative().optional(),
 }).passthrough().meta({ title: "IntegrationEventLogRecord" });

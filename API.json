@@ -8487,7 +8487,7 @@
         {
           "kind": "interface",
           "name": "IntegrationEventLogRecord",
-          "declaration": "interface IntegrationEventLogRecord {\n  level: LogLevelType;\n  msg: IntegrationEventMsg;\n  ts: string;\n  service?: string;\n  document_path?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "declaration": "interface IntegrationEventLogRecord {\n  level: LogLevelType;\n  msg: IntegrationEventMsg;\n  ts: string;\n  service?: string;\n  document_path?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  lag_ms?: number;\n}",
           "doc": "Structured log entry for any external-integration event."
         },
         {

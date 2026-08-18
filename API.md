@@ -17595,6 +17595,7 @@ interface IntegrationEventLogRecord {
   user_id?: string;
   trace_id?: string;
   span_id?: string;
+  lag_ms?: number;
 }
 ```
 
