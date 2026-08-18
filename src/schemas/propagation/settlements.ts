@@ -156,7 +156,13 @@ const reverseSettlementRules: CollectionRule[] = [
     enforced_by: [SETTLEMENT_TOTALS_FOLD],
     transaction: "reverse-settlement",
     fields: [
-      { source: ["uid"], target: ["reverses"], transform: "the reversed row's uid, on the reverser" },
+      // ⚠️ A `{ source: ["uid"], target: ["reverses"] }` mapping sat here and was
+      // deleted 2026-08-17: `reverses` is a field of the REVERSER ROW, not of the
+      // invoice this rule targets. Appending that row is `reverse-settlement`'s
+      // own root write (`settlements` is the source of both its steps and the
+      // target of neither), so under the root-write ruling it is deliberately
+      // undeclared — and the invariant above already says the reverser "names the
+      // row it reverses".
       {
         source: ["amount_cents"],
         target: ["totals", "amount_paid_cents"],
@@ -297,25 +303,36 @@ const REAP_INVARIANT =
 const VOID_ROW_INVARIANT =
   "A void is a SETTLEMENT, not a field override. Exactly one `void` row per invoice — id derived from the invoice uid — carrying `total_cents` and reason `invoice_voided`, so `amount_void_cents` folds to `total` and `amount_due_cents` falls out of the ordinary identity as 0. Xero reports `AmountDue: 0` on a voided invoice and is right; what changed is that CFS now DERIVES that 0 instead of assigning it, which is what lets the corpus audit see a void that was never released.";
 
-/** The field mappings for the void row, shared by all three origins. */
+/**
+ * The field mappings for the void row, shared by all three origins.
+ *
+ * ⚠️ **These describe the SETTLEMENT ROW and nothing else.** Until 2026-08-17
+ * this array also carried `status`, `totals.amount_void_cents`,
+ * `totals.amount_due_cents` and a `version` bump — every one of them a field of
+ * the INVOICE, declared against a `settlements` target. `Settlement` has no
+ * `status` and no `totals`, so those three paths resolved against nothing, which
+ * is how the field-path ratchet found them (api-cloudrun#568).
+ *
+ * `applyInvoiceVoid` really does make two writes — it appends this row AND
+ * re-folds the invoice — and one rule was describing both. The invoice half
+ * needs no rule of its own: the invoice is `void-invoice`'s OWN ROOT (it is the
+ * `source` of all three of that transaction's steps and the target of none), and
+ * the 2026-08-17 ruling is that a transaction does not declare the write to its
+ * root. So the repair is a DELETION, not a second rule — and the fold is already
+ * stated where it belongs, in {@link VOID_ROW_INVARIANT}.
+ *
+ * ⭐ `type` and `reason` are ADDED here rather than merely surviving: the row's
+ * two most identifying fields were undeclared the whole time, because the three
+ * slots that should have described them were describing the invoice.
+ */
 const VOID_ROW_FIELDS = [
-  { source: [], target: ["status"], transform: "literal \"void\"" },
+  { source: [], target: ["type"], transform: "literal \"void\" — the settlement bucket that folds into `amount_void_cents`" },
+  { source: [], target: ["reason"], transform: "literal \"invoice_voided\"" },
   {
     source: ["totals", "total_cents"],
     target: ["amount_cents"],
     transform: "the void settlement's amount IS the invoice total — a void annuls everything billed",
   },
-  {
-    source: [],
-    target: ["totals", "amount_void_cents"],
-    transform: "folded, never assigned — `recomputeSettlementTotals` sums the void bucket",
-  },
-  {
-    source: [],
-    target: ["totals", "amount_due_cents"],
-    transform: "total − paid − credited − voided, i.e. 0. DERIVED, not overridden.",
-  },
-  { source: [], target: ["version"], transform: "+1 — see create-settlement" },
 ];
 
 // ── void-invoice (CFS-originated) ───────────────────────────────────

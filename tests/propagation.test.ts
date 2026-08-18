@@ -188,8 +188,24 @@ Deno.test("aggregate member collections exist in schemas", () => {
 //    Handling that needs distributive `keyof` plus a depth bound — clever type
 //    machinery on the one surface this package cannot verify locally.
 // 3. **A type fails the build at the first violation; a test enumerates all of
-//    them.** There are 24, in two distinct classes, and seeing both classes at
-//    once is what made them classifiable at all.
+//    them.** There were 24 occurrences over 20 distinct paths, in two classes,
+//    and seeing both classes at once is what made them classifiable at all.
+//
+// ⭐ **All 20 are repaired and the allowlist is DELETED, not emptied**
+// (api-cloudrun#568). An empty allowlist would still be a place to put the next
+// one, and its companion arm — 'every entry is still unresolved' — would be
+// vacuous over nothing. This test now has no escape hatch, which is the
+// strongest form available and the same argument as deleting `formatCurrency`
+// rather than inverting it to the identity.
+//
+// ⚠️ **The two classes had DIFFERENT repairs, and neither was 'fix the path'.**
+// Class B (16) was a path against the wrong collection, and most of it resolved
+// by DELETING mappings rather than correcting them: `void-*:append-void-settlement`
+// declared four INVOICE fields against a `settlements` target because one rule
+// was describing both halves of `applyInvoiceVoid`, and the invoice half is that
+// transaction's own ROOT — undeclared by the 2026-08-17 ruling. Class A (4 sites)
+// was a LIST of sibling fields written into a slot that means a PATH; three split
+// per field and one became `source: []`, the declared spelling of 'computed'.
 //
 // The resolver below is deliberately NOT `resolveZodField` from
 // `schemas/zod-walk.ts`. That walker's docstring says an array segment is "not
@@ -259,55 +275,6 @@ function pathResolves(schema: z.ZodType, path: readonly string[]): boolean {
   return true;
 }
 
-/**
- * ⚠️ **An allowlist that must only ever SHRINK — api-cloudrun#568 drains it.**
- * These are pre-existing and each needs its WRITER read before it is touched.
- * The campaign's standing rule is why they are not repaired here: "when you
- * correct a declaration to match the writer, check FIRST whether the mismatch
- * was the bug." A `target: "settlements"` rule whose fields describe the INVOICE
- * may be a mis-modelled rule rather than a mistyped path, and rewriting the
- * paths to fit the declared target would destroy the evidence of which.
- *
- * Two classes, and they have different repairs:
- *
- * **(A) a LIST of sibling fields written as one PATH.** `FieldPath` is "path
- * segments into a document", and `["first_name", "middle_name", "last_name",
- * "pronunciation"]` is four sibling fields, not a four-deep descent. The repair
- * is one `FieldMapping` per field, and it changes what `/openapi.json` renders.
- *
- * **(B) a path against the WRONG collection.** This is core#55 item 2's class,
- * which was found by a human reading prose — `void-invoice:append-void-settlement`
- * declares `status` and `totals.*` against `settlements`, and those are INVOICE
- * fields. `cowrite-thread:roles-to-thread` is the sharpest: the `cowriteRulesFor`
- * factory emits `source: ["uid"]` for every entity, and `roles` is the one entity
- * whose document has no `uid` (its id IS its name) — a factory minting an invalid
- * path for exactly one of its instantiations.
- */
-const UNRESOLVED_FIELD_PATHS: ReadonlySet<string> = new Set([
-  // (A) sibling-list-as-path
-  'create-order:order-to-cards source ["destinations","customer_collecting","customer_returning"]',
-  'create-product:product-to-components source ["uid","name","type","stock_method","price"]',
-  'update-user:name-to-actor-refs source ["first_name","middle_name","last_name","pronunciation"]',
-  'holiday-definition:materialize-dates source ["rule","month","day","weekday","occurrence","active"]',
-  'holiday-definition:materialize-dates target ["date","uid_definition","name"]',
-  // (B) path against the wrong collection
-  'update-out-of-service-record:record-to-transactions target ["stores"]',
-  'update-out-of-service-record:record-to-transactions target ["source","uid"]',
-  'reverse-settlement:reverser-to-invoice target ["reverses"]',
-  'void-invoice:append-void-settlement target ["status"]',
-  'void-invoice:append-void-settlement target ["totals","amount_void_cents"]',
-  'void-invoice:append-void-settlement target ["totals","amount_due_cents"]',
-  'void-invoice-from-crms:append-void-settlement target ["status"]',
-  'void-invoice-from-crms:append-void-settlement target ["totals","amount_void_cents"]',
-  'void-invoice-from-crms:append-void-settlement target ["totals","amount_due_cents"]',
-  'void-invoice-from-xero:append-void-settlement target ["status"]',
-  'void-invoice-from-xero:append-void-settlement target ["totals","amount_void_cents"]',
-  'void-invoice-from-xero:append-void-settlement target ["totals","amount_due_cents"]',
-  'holiday-change:recompute-draft-invoices source ["items","chargeable_days"]',
-  'holiday-change:recompute-draft-invoices target ["items","chargeable_days"]',
-  'cowrite-thread:roles-to-thread source ["uid"]',
-]);
-
 Deno.test("every declared field path resolves against its endpoint's schema", () => {
   const offenders: string[] = [];
   let checked = 0;
@@ -326,34 +293,12 @@ Deno.test("every declared field path resolves against its endpoint's schema", ()
         if (!Array.isArray(path) || path.length === 0) continue;
         checked++;
         const key = `${rule.id} ${side} ${JSON.stringify(path)}`;
-        if (!pathResolves(schema, path) && !UNRESOLVED_FIELD_PATHS.has(key)) offenders.push(key);
+        if (!pathResolves(schema, path)) offenders.push(key);
       }
     }
   }
   assertEquals(checked > 900, true, `expected ~1020 field paths, walked ${checked} — the walker stopped reaching the corpus`);
   assertEquals(offenders, [], `Field paths that resolve against no field of their endpoint:\n  ${offenders.join("\n  ")}`);
-});
-
-Deno.test("every UNRESOLVED_FIELD_PATHS entry is still unresolved", () => {
-  // The ratchet's other direction: an entry that has been repaired must be
-  // DELETED, not left to make the allowlist look like it is still doing work.
-  const stale: string[] = [];
-  const live = new Set<string>();
-  for (const rule of rules) {
-    for (const side of ["source", "target"] as const) {
-      const collection = rule[side];
-      if (collection === "*" || collection === "orders/documents") continue;
-      const schema = (schemas as Record<string, z.ZodType>)[collection];
-      if (!schema) continue;
-      for (const mapping of rule.fields) {
-        const path = mapping[side];
-        if (!Array.isArray(path) || path.length === 0) continue;
-        if (!pathResolves(schema, path)) live.add(`${rule.id} ${side} ${JSON.stringify(path)}`);
-      }
-    }
-  }
-  for (const entry of UNRESOLVED_FIELD_PATHS) if (!live.has(entry)) stale.push(entry);
-  assertEquals(stale, [], `Repaired — delete these from UNRESOLVED_FIELD_PATHS:\n  ${stale.join("\n  ")}`);
 });
 
 // ── endpoint integrity ───────────────────────────────────────────

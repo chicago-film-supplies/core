@@ -301,11 +301,21 @@ const materializeHolidayDateRules: CollectionRule[] = [
       "holiday definition create/update/soft-delete/regenerate, plus the monthly extend-holiday-horizon cron which advances the window without touching existing instances",
     fields: [
       {
-        source: ["rule", "month", "day", "weekday", "occurrence", "active"],
-        target: ["date", "uid_definition", "name"],
+        // ⚠️ This was ONE mapping carrying six sources and three targets, and
+        // most of the names were not fields of either document: there is no
+        // `rule`, `month`, `weekday` or `occurrence` on a HolidayDefinition (they
+        // are `js_month`/`display_month`, `date`, `day`, `week`), and the
+        // instance's back-reference is **`uid_holiday`, not `uid_definition`** —
+        // so a reader following this declaration looked for a field that has
+        // never existed. Split per target, with the real names (#568).
+        source: [],
+        target: ["date"],
         transform:
-          "expand the fixed/variable rule across the forward window into one dated instance per occurrence; an inactive definition materializes none",
+          "expanded, not copied: the fixed rule (`js_month` + `date`) or the variable rule (`js_month` + `day` + `week`) is projected across the rolling forward window, one instance per occurrence. `active: false` materializes none — see the invariant.",
       },
+      { source: ["uid"], target: ["uid_holiday"], transform: "the instance's back-reference to its definition" },
+      { source: ["name"], target: ["name"] },
+      { source: ["type"], target: ["type"], transform: "fixed | variable, carried onto the instance" },
     ],
   },
 ];
@@ -384,7 +394,11 @@ const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
     invariant: "A recomputed draft order must re-sync its draft invoices' chargeable_days/prices; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
     trigger: "draft-order recompute — transitive via updateOrder's existing draft-invoice sync (projectOrderItemToInvoiceItem inherits the recomputed durations)",
     fields: [
-      { source: ["items", "chargeable_days"], target: ["items", "chargeable_days"], transform: "inherited via projectOrderItemToInvoiceItem; draft invoices only — terminal ones skipped" },
+      // ⚠️ One segment short on both sides until 2026-08-17 — `chargeable_days`
+      // lives under the item's `price`, on the order and on the invoice alike.
+      // The same shape as the `enforced_by` drift the campaign measured: a ref
+      // that names the right thing and stops just above it.
+      { source: ["items", "price", "chargeable_days"], target: ["items", "price", "chargeable_days"], transform: "inherited via projectOrderItemToInvoiceItem; draft invoices only — terminal ones skipped" },
     ],
   },
 ];

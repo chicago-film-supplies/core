@@ -52,6 +52,24 @@ interface ThreadCowriteConfig {
   collection: ThreadSourceCollection;
   /** Transaction id in which the cowrite fires. */
   transaction: TransactionId;
+  /**
+   * The source document's identity field, when it is not `uid`.
+   *
+   * ⚠️ **This exists for exactly one entity, and that is the finding rather than
+   * the exception.** Every carrier here keys on `uid` except `roles`, whose id IS
+   * its `name` (`roles/{name}` = `{ name, label, permissions[] }` — `Role` has no
+   * `uid` field at all). So the factory minted `source: ["uid"]` for one of its
+   * eight instantiations against a document that cannot supply it, and the path
+   * resolved against nothing until the field-path ratchet found it
+   * (api-cloudrun#568).
+   *
+   * ⭐ The general shape is worth keeping: a factory whose form is right for its
+   * population MINUS ONE MEMBER. §1 item 5's convention says a rule factory is
+   * file-local and its ids are owned here — it says nothing about a member that
+   * does not fit, and the honest fix is a named per-entity override rather than
+   * either forking the factory or letting one instantiation stay wrong.
+   */
+  idField?: "uid" | "name";
 }
 
 /**
@@ -80,7 +98,9 @@ const THREAD_REVERSE: EnforcementRef = {
 };
 
 /** Build the cowrite-thread + back-embed rules for one source entity. */
-function cowriteRulesFor({ collection, transaction }: ThreadCowriteConfig): CollectionRule[] {
+function cowriteRulesFor(
+  { collection, transaction, idField = "uid" }: ThreadCowriteConfig,
+): CollectionRule[] {
   return [
     {
       id: `cowrite-thread:${collection}-to-thread`,
@@ -91,7 +111,7 @@ function cowriteRulesFor({ collection, transaction }: ThreadCowriteConfig): Coll
       transaction,
       enforced_by: [THREAD_FORWARD],
       fields: [
-        { source: ["uid"], target: ["sources", "uid"] },
+        { source: [idField], target: ["sources", "uid"] },
         { source: [], target: ["sources", "collection"], transform: `literal "${collection}"` },
         { source: [], target: ["created_by"], transform: "ActorRef of acting user from session ({uid, name})" },
         { source: [], target: ["title"], transform: "null — default thread" },
@@ -176,6 +196,8 @@ const threadCreditNoteRules: CollectionRule[] = cowriteRulesFor({
 const threadRoleRules: CollectionRule[] = cowriteRulesFor({
   collection: "roles",
   transaction: "create-role",
+  // A role's document id IS its name; `Role` carries no `uid`.
+  idField: "name",
 });
 
 /**

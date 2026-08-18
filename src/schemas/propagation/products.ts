@@ -203,7 +203,15 @@ const createProductRules: CollectionRule[] = [
     enforced_by: [COMPONENT_RECIPROCITY, COMPONENT_RECIPROCITY_TESTED],
     transaction: "create-product",
     fields: [
-      { source: ["uid", "name", "type", "stock_method", "price"], target: ["component_of"], transform: "adds full ProductComponent entry to component_of array with path" },
+      // ⚠️ These five were one mapping whose `source` held a LIST of siblings
+      // rather than a path, so it resolved against nothing. Split one per
+      // contributing field — they all land in the same `component_of` entry,
+      // which several mappings sharing a target expresses fine (#568).
+      { source: ["uid"], target: ["component_of"], transform: "part of the ProductComponent entry, with its path" },
+      { source: ["name"], target: ["component_of"], transform: "part of the ProductComponent entry" },
+      { source: ["type"], target: ["component_of"], transform: "part of the ProductComponent entry" },
+      { source: ["stock_method"], target: ["component_of"], transform: "part of the ProductComponent entry" },
+      { source: ["price"], target: ["component_of"], transform: "part of the ProductComponent entry" },
       { source: ["uid"], target: ["query_by_component_of"], transform: "appends parent uid to query_by_component_of array" },
     ],
   },

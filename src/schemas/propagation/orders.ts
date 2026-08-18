@@ -369,7 +369,11 @@ const createOrderRules: CollectionRule[] = [
       { source: ["destinations", "dates", "delivery_end"], target: ["dates", "end"], transform: "start event end instant (from the card's own destination)" },
       { source: ["destinations", "dates", "collection_start"], target: ["dates", "start"], transform: "end event start instant (rental items only, from the card's own destination)" },
       { source: ["destinations", "dates", "collection_end"], target: ["dates", "end"], transform: "end event end instant (rental items only, from the card's own destination)" },
-      { source: ["destinations", "customer_collecting", "customer_returning"], target: ["uid_list"], transform: "per-pair flag drives card list — field-service for deliver/pick_up, in-store for in_store_pickup/in_store_return" },
+      // ⚠️ One mapping listing a parent and two of its children as if they were
+      // a path. They are siblings UNDER a destination, so each is its own
+      // mapping (#568).
+      { source: ["destinations", "customer_collecting"], target: ["uid_list"], transform: "per-pair flag drives card list — field-service for deliver, in-store for in_store_pickup" },
+      { source: ["destinations", "customer_returning"], target: ["uid_list"], transform: "per-pair flag drives card list — field-service for pick_up, in-store for in_store_return" },
       { source: [], target: ["locked"], transform: "['card','subject','sources','destination','organization','attachments','status_auto'] — order-derived cards cannot be deleted, status follows pick progress, label/sources/destination/org/attachments cannot be edited via PATCH" },
     ],
   },

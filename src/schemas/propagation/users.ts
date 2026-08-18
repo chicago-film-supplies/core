@@ -98,11 +98,20 @@ const updateUserRules: CollectionRule[] = [
       // Illustrative, NOT exhaustive: these are the ActorRef nodes present at the
       // time of writing. The two entries below them are the genuine exceptions —
       // shapes the registry walk cannot reach on its own.
-      { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["created_by", "name"], transform: "ActorRef.name — [first, middle, last].filter(Boolean).join(\" \") with \" (pronunciation)\" appended when pronunciation is set. One example of the derived set, not a declaration of it" },
-      { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["updated_by", "name"], transform: "same formula as created_by.name" },
-      { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["deleted_by", "name"], transform: "same formula as created_by.name; only where deleted_by is non-null" },
-      { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["pdf_versions", "created_by", "name"], transform: "invoices-only — rewrite the name on matching pdf_versions[].created_by entries" },
-      { source: ["first_name", "middle_name", "last_name", "pronunciation"], target: ["reactions", "name"], transform: "comments-only — rewrite the name on every reactions[emoji][uid] entry where uid matches the renamed user" },
+      //
+      // ⚠️ **`source: []` is the declared spelling of "computed", and it is the
+      // honest one here.** Every entry carried
+      // `["first_name","middle_name","last_name","pronunciation"]` — a LIST of
+      // four siblings in a slot that means a PATH, so it resolved against
+      // nothing (#568). The value is not copied from any one of them; it is
+      // COMPOSED from all four by the formula below, which is what `source: []`
+      // plus a transform already exists to say. The four field names are not
+      // lost: `trigger` above names them, and so does the formula.
+      { source: [], target: ["created_by", "name"], transform: "ActorRef.name — [first_name, middle_name, last_name].filter(Boolean).join(\" \") with \" (pronunciation)\" appended when pronunciation is set. One example of the derived set, not a declaration of it" },
+      { source: [], target: ["updated_by", "name"], transform: "same formula as created_by.name" },
+      { source: [], target: ["deleted_by", "name"], transform: "same formula as created_by.name; only where deleted_by is non-null" },
+      { source: [], target: ["pdf_versions", "created_by", "name"], transform: "invoices-only — rewrite the name on matching pdf_versions[].created_by entries" },
+      { source: [], target: ["reactions", "name"], transform: "comments-only — rewrite the name on every reactions[emoji][uid] entry where uid matches the renamed user" },
     ],
   },
 ];

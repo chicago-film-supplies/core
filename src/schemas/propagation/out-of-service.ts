@@ -113,8 +113,12 @@ const updateOutOfServiceRules: CollectionRule[] = [
       { source: ["uid_product"], target: ["uid_product"] },
       { source: ["breakdown", "returned_to_service"], target: ["quantity"], transform: "if > 0, build a return-to-service transaction" },
       { source: ["breakdown", "written_off"], target: ["quantity"], transform: "if > 0, build a write-off transaction" },
-      { source: ["stores"], target: ["stores"], transform: "store/location allocation copied from oos.stores" },
-      { source: ["uid"], target: ["source", "uid"], transform: "transaction.source points back at the OOS record" },
+      // ⚠️ Both targets drifted behind the movement-journal rebuild and resolved
+      // against nothing until 2026-08-17: a Movement has `lines[]` and
+      // `sources[]`, never `stores` or a singular `source`. The SOURCE side
+      // (`oos.stores`) is still right — only the movement's half moved.
+      { source: ["stores"], target: ["lines"], transform: "store/location allocation copied from oos.stores into the movement's lines[]" },
+      { source: ["uid"], target: ["sources", "uid"], transform: "the movement's sources[] points back at the OOS record" },
     ],
   },
   {
