@@ -7738,8 +7738,8 @@
         {
           "kind": "interface",
           "name": "TemplateDocument",
-          "declaration": "interface TemplateDocument {\n  id: string;\n  uid: string;\n  uid_template: string;\n  name: string;\n  collection_source: string;\n  collection_target: string;\n  scope: string;\n  version: number;\n  version_str?: string;\n  source_filename?: string;\n  created_at: number;\n  updated_at: number;\n}",
-          "doc": "Typesense document type for templates."
+          "declaration": "interface TemplateDocument {\n  id: string;\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: string;\n  collection_target: string;\n  surfaces: string[];\n  uid_active?: string;\n  version_count: number;\n  version: number;\n  created_at: number;\n  updated_at: number;\n}",
+          "doc": "⚠️ **Rebuilt 2026-08-18 against the index config — it had drifted in BOTH\ndirections and described a superseded model** (core#57, found by the new\n`typesense document parity` guard on its first clean run).\n\nIt declared `uid_template`, `scope`, `version_str` and `source_filename`,\nnone of which the index has — so a consumer reading any of them type-checked\nand got `undefined`. And it omitted `git_path`, `surfaces`, `uid_active` and\n`version_count`, which the index does have — so those were unreachable\nwithout a cast. All four phantoms are pre-git-canonical-rebuild concepts;\nthis interface was a mirror of the template model that rebuild replaced.\n\n**The config is the authority here**, and the guard now enforces that\nrelationship rather than leaving it to be noticed."
         },
         {
           "kind": "interface",

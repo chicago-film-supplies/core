@@ -16103,20 +16103,32 @@ interface TemplateComponentDocument {
 
 ### `TemplateDocument`
 
-Typesense document type for templates.
+⚠️ **Rebuilt 2026-08-18 against the index config — it had drifted in BOTH
+directions and described a superseded model** (core#57, found by the new
+`typesense document parity` guard on its first clean run).
+
+It declared `uid_template`, `scope`, `version_str` and `source_filename`,
+none of which the index has — so a consumer reading any of them type-checked
+and got `undefined`. And it omitted `git_path`, `surfaces`, `uid_active` and
+`version_count`, which the index does have — so those were unreachable
+without a cast. All four phantoms are pre-git-canonical-rebuild concepts;
+this interface was a mirror of the template model that rebuild replaced.
+
+**The config is the authority here**, and the guard now enforces that
+relationship rather than leaving it to be noticed.
 
 ```ts
 interface TemplateDocument {
   id: string;
   uid: string;
-  uid_template: string;
+  git_path: string;
   name: string;
   collection_source: string;
   collection_target: string;
-  scope: string;
+  surfaces: string[];
+  uid_active?: string;
+  version_count: number;
   version: number;
-  version_str?: string;
-  source_filename?: string;
   created_at: number;
   updated_at: number;
 }

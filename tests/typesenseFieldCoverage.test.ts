@@ -704,3 +704,120 @@ Deno.test("typesense integer parity: the census, so an inert walker cannot repor
   );
   assertEquals(floatDeclared > 0, true, "no float declarations seen at all");
 });
+
+
+// ── document parity: the THIRD declaration ──────────────────────────
+//
+// ⭐ **This file's other arms all compare CONFIG ↔ STORAGE SCHEMA. Nothing
+// compared either against `typesense/documents.ts`, and that is a third
+// declaration of the same fact.** The consequence was core#57: the cents
+// migration renamed money fields to `_cents`, the storage schema and the config
+// both moved, and the hand-written document types did not — so manager read
+// `.amount`, type-checked, and got `undefined` forever.
+//
+// ⚠️ **The reason it survived is worth keeping.** The rename made every NAMED
+// reader a compile error exactly as designed, and this file has no reader inside
+// the package:
+//
+//     $ grep -rln "typesense/documents" tests/ src/     # (nothing)
+//
+// It is consumed only downstream, so `core` never type-checked it against
+// anything. Its population of in-package readers was zero, and a population of
+// zero is why nothing objected.
+//
+// ⚠️ **A full type-level derive was considered and REJECTED on a measurement.**
+// Deriving `XDocument` from its config would need `as const` on a published
+// export — but the configs are annotated `: TypesenseCollectionConfig` precisely
+// because JSR's `no-slow-types` requires it, which erases every literal field
+// name to `string`. That is the same wall that disqualified a path type for the
+// propagation catalog's `fields[]`. Deriving from the STORAGE schema instead is
+// only half available: the `_str` mirrors, `_fs` timestamps and computed rollups
+// have no storage counterpart by design. So the CHECK is derived even though the
+// type cannot be.
+
+/**
+ * Typesense's own document id — never a declared config field, since the indexer
+ * sets it from the doc's uid. One named exemption rather than a set: a second
+ * entry here would mean the mapping is wrong, not that a second such field exists.
+ */
+const TYPESENSE_DOC_ID = "id";
+
+/** `OutOfServiceDocument` → `out-of-service`, `UserDocument` → `users`, … */
+function aliasCandidatesFor(interfaceName: string): string[] {
+  const base = interfaceName
+    .replace(/Document$/, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .toLowerCase();
+  return [base, `${base}s`, base.replace(/y$/, "ies")];
+}
+
+Deno.test("typesense document parity: every hand-written document field is a declared config field", async () => {
+  const source = await Deno.readTextFile(
+    new URL("../src/schemas/typesense/documents.ts", import.meta.url),
+  );
+  const blocks = [...source.matchAll(/export interface (\w+Document)\b([\s\S]*?)\n}\n/g)];
+
+  // Vacuity guards FIRST. If the block regex or the property regex stops
+  // matching, every assertion below passes over an empty set and this arm reads
+  // green while checking nothing — which is the exact defect it exists to catch.
+  assertEquals(
+    blocks.length >= 18,
+    true,
+    `only ${blocks.length} document interfaces matched — the block regex stopped reaching them`,
+  );
+
+  const offenders: string[] = [];
+  const unmapped: string[] = [];
+  let checkedProps = 0;
+
+  for (const [, interfaceName, body] of blocks) {
+    const alias = aliasCandidatesFor(interfaceName).find((a) => a in typesenseSchemas);
+    if (!alias) {
+      unmapped.push(`${interfaceName} → tried ${aliasCandidatesFor(interfaceName).join(", ")}`);
+      continue;
+    }
+    const legalLeaves = new Set<string>();
+    for (const field of typesenseSchemas[alias as keyof typeof typesenseSchemas].schema.fields) {
+      for (const segment of field.name.split(".")) legalLeaves.add(segment);
+    }
+    // Property names anywhere in the interface, INCLUDING inside inline nested
+    // object and array literals — `taxes?: Array<{ amount_cents?: number }>` has
+    // to yield `amount_cents`, because that is where core#57's drift lived.
+    for (const prop of new Set([...body.matchAll(/([A-Za-z_]\w*)\??:/g)].map((m) => m[1]))) {
+      if (prop === TYPESENSE_DOC_ID) continue;
+      checkedProps++;
+      if (!legalLeaves.has(prop)) offenders.push(`${interfaceName}.${prop} (config: ${alias})`);
+    }
+  }
+
+  // An interface nothing maps to is NOT benign — it is this arm silently
+  // skipping the interface most likely to have drifted.
+  assertEquals(unmapped, [], `document interfaces with no matching config:\n  ${unmapped.join("\n  ")}`);
+  assertEquals(
+    checkedProps > 400,
+    true,
+    `only ${checkedProps} properties checked — the property regex stopped reaching them`,
+  );
+  assertEquals(
+    offenders,
+    [],
+    `Hand-written document fields that no config declares — a consumer reads these and gets undefined:\n  ` +
+      offenders.join("\n  "),
+  );
+});
+
+Deno.test("typesense document parity companion: the arm reports a field the config does not declare", () => {
+  // Proves the check can fire on core#57's exact drift. Every money field on the
+  // orders config is `amount_cents`, so the un-suffixed form must be absent —
+  // if it ever becomes legal, the arm above stops being able to see that class.
+  const legalLeaves = new Set<string>();
+  for (const field of typesenseSchemas.orders.schema.fields) {
+    for (const segment of field.name.split(".")) legalLeaves.add(segment);
+  }
+  assertEquals(legalLeaves.has("amount_cents"), true, "orders should declare amount_cents");
+  assertEquals(
+    legalLeaves.has("amount"),
+    false,
+    "orders must NOT declare a bare `amount` — if it does, core#57's drift is undetectable",
+  );
+});
