@@ -7,6 +7,39 @@
  */
 
 import type { RuleId, TransactionId } from "./ids.ts";
+import type { CollectionName } from "../mod.ts";
+
+/**
+ * Where a propagation edge starts or ends.
+ *
+ * ⚠️ **Typed against core's OWN collection registry, not a list repeated here.**
+ * `CollectionName` is `keyof CollectionDocs`, the same union `schemas` and
+ * `DocFor<C>` are keyed by — so a rule naming a collection that does not exist
+ * is a compile error, and it cannot drift, because there is no second copy to
+ * drift from. Measured before typing: all 156 rules already conform, so this was
+ * a pure tightening with zero catalog edits.
+ *
+ * Two non-collection endpoints occur and both are real:
+ * - `"*"` — every collection (`update-user`'s ActorRef fan-out).
+ * - `"orders/documents"` — the only subcollection endpoint in the corpus.
+ *
+ * ⚠️ **The type is looser than it looks, and the gap is closed by a test rather
+ * than by narrowing.** `CollectionDocs` carries a singular alias beside every
+ * plural (`booking` as well as `bookings`), so `source: "booking"` type-checks
+ * while every real endpoint is plural. Narrowing here would mean writing the
+ * plural list a second time — the defect this whole campaign deletes — so
+ * `tests/propagation.test.ts` asserts it instead, deriving "is a singular alias"
+ * as "appending an s yields another CollectionName". Purging the singular half
+ * of the registry is the real fix and is a separate breaking change; `mod.ts`
+ * records it at {@link CollectionDocs}.
+ *
+ * ⚠️ **The import is `import type` and must stay that way.** It is erased at
+ * emit, so `@cfs/core/schemas/propagation` still pulls no runtime code out of
+ * `mod.ts` — which is what keeps Tier 1 item 4 (getting the catalog out of
+ * manager's browser bundle) worth doing. A value import here would quietly
+ * defeat it.
+ */
+export type PropagationEndpoint = CollectionName | "*" | "orders/documents";
 
 // ── Propagation modes ───────────────────────────────────────────────
 
@@ -92,9 +125,9 @@ export interface CollectionRule {
    */
   id: RuleId;
   /** Source collection */
-  source: string;
+  source: PropagationEndpoint;
   /** Target collection (can equal source for intra-document derive) */
-  target: string;
+  target: PropagationEndpoint;
   /** How the data propagates */
   mode: PropagationMode;
   /** Why this rule exists — the business reason (most valuable field for docs) */

@@ -136,7 +136,16 @@ const createRecurrenceTransaction: TransactionDefinition = {
   id: "create-recurrence",
   description:
     "Creates a recurrence and synchronously materializes the first horizon of instance cards so the Dashboard lists upcoming occurrences without waiting for the nightly job.",
-  steps: ["create-recurrence:fan-out-cards"],
+  steps: [
+    "create-recurrence:fan-out-cards",
+    // Shared steps, declared in `cards.ts`: every minted card gets its thread
+    // cowritten by the same helper `create-card` uses. Declaring them here is
+    // what makes the write visible to the catalog — the class §3c calls "every
+    // co-write helper shared between two transactions is declared on one and
+    // undeclared on the other".
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
+  ],
 };
 
 // ── materialize-horizon (cron-driven) ───────────────────────────────
@@ -165,7 +174,16 @@ const materializeHorizonTransaction: TransactionDefinition = {
   id: "materialize-horizon",
   description:
     "Nightly job that extends every active recurrence's materialization window, writing any new cards needed to fill the rolling horizon. Idempotent — re-running the same day is a no-op when the horizon is already covered.",
-  steps: ["materialize-horizon:fan-out-cards"],
+  steps: [
+    "materialize-horizon:fan-out-cards",
+    // Shared steps, declared in `cards.ts`: every minted card gets its thread
+    // cowritten by the same helper `create-card` uses. Declaring them here is
+    // what makes the write visible to the catalog — the class §3c calls "every
+    // co-write helper shared between two transactions is declared on one and
+    // undeclared on the other".
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
+  ],
 };
 
 // ── update-recurrence ───────────────────────────────────────────────
@@ -207,6 +225,12 @@ const updateRecurrenceTransaction: TransactionDefinition = {
   steps: [
     "update-recurrence:fan-out-prototype",
     "update-recurrence:rematerialize-future",
+    // Shared steps, declared in `cards.ts`: this path routes through
+    // `cascadeDeleteCards`, which unlinks each card from its thread and deletes
+    // the thread's comments. Declared on `delete-card` and — until 2026-08-17 —
+    // undeclared on every other caller of that helper.
+    "delete-card:cascade-thread",
+    "delete-card:cascade-comments",
   ],
 };
 
@@ -233,7 +257,15 @@ const deleteRecurrenceTransaction: TransactionDefinition = {
   id: "delete-recurrence",
   description:
     "Deletes a recurrence and every instance card it produced, tearing down each card's thread + comments as part of the delete.",
-  steps: ["delete-recurrence:fan-out-cards"],
+  steps: [
+    "delete-recurrence:fan-out-cards",
+    // Shared steps, declared in `cards.ts`: this path routes through
+    // `cascadeDeleteCards`, which unlinks each card from its thread and deletes
+    // the thread's comments. Declared on `delete-card` and — until 2026-08-17 —
+    // undeclared on every other caller of that helper.
+    "delete-card:cascade-thread",
+    "delete-card:cascade-comments",
+  ],
 };
 
 // ── update-card scope=following ─────────────────────────────────────
@@ -365,6 +397,12 @@ const deleteCardScopeFollowingTransaction: TransactionDefinition = {
   steps: [
     "delete-card-scope-following:cascade-future-siblings",
     "delete-card-scope-following:truncate-recurrence",
+    // Shared steps, declared in `cards.ts`: this path routes through
+    // `cascadeDeleteCards`, which unlinks each card from its thread and deletes
+    // the thread's comments. Declared on `delete-card` and — until 2026-08-17 —
+    // undeclared on every other caller of that helper.
+    "delete-card:cascade-thread",
+    "delete-card:cascade-comments",
   ],
 };
 

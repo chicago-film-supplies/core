@@ -168,6 +168,237 @@ Deno.test("aggregate member collections exist in schemas", () => {
   }
 });
 
+// ── field-path integrity ─────────────────────────────────────────
+//
+// ⭐ **This is the campaign's step 3, built as a TEST rather than as the type
+// the plan sketched, and the reversal is a measured one.** The sketch was to
+// type `FieldMapping.source`/`.target` as paths into `DocFor<C>` so a rule
+// naming a field its target schema lacks would stop compiling. Three findings
+// against that:
+//
+// 1. **The type buys nothing at the publish boundary.** `mod.ts` must declare
+//    `export const rules: CollectionRule[]` for JSR's `no-slow-types`, which
+//    erases every generic parameter — the same erasure `ids.ts` documents for
+//    rule ids. So a generic `CollectionRule<S, T>` protects only inside this
+//    package, which is exactly where this test runs. Same coverage, none of the
+//    publish-boundary risk that cost core#43 and core#44.
+// 2. **A path type breaks on `items[]`, the corpus's most-referenced array.**
+//    Order and invoice items are a discriminated union, so `keyof` yields only
+//    the members' COMMON keys and every line-only field reads as absent.
+//    Handling that needs distributive `keyof` plus a depth bound — clever type
+//    machinery on the one surface this package cannot verify locally.
+// 3. **A type fails the build at the first violation; a test enumerates all of
+//    them.** There are 24, in two distinct classes, and seeing both classes at
+//    once is what made them classifiable at all.
+//
+// The resolver below is deliberately NOT `resolveZodField` from
+// `schemas/zod-walk.ts`. That walker's docstring says an array segment is "not
+// modelled" and it does not fan out unions, because its callers (display
+// columns, the Typesense field guard) ask a different question: they resolve a
+// path to ONE leaf whose `.meta()` they read. A propagation path means "this
+// field of each element", so `["items", "price", "base_cents"]` must traverse
+// the array and try every union arm. Pointing the display walker at this
+// question reported 209 of 1020 paths broken, every one of them an array
+// traversal — a walker answering the wrong question, not a corpus of defects.
+
+import type { z } from "zod";
+
+const ZOD_WRAPPERS: ReadonlySet<string> = new Set([
+  "optional",
+  "default",
+  "nullable",
+  "prefault",
+  "catch",
+  "readonly",
+  "nonoptional",
+]);
+
+// deno-lint-ignore no-explicit-any
+function zodDef(node: any): any {
+  return node?._zod?.def ?? {};
+}
+
+/** Every schema a segment could legitimately be read against. */
+// deno-lint-ignore no-explicit-any
+function candidates(node: any, seen = new Set<unknown>()): any[] {
+  if (!node || seen.has(node)) return [];
+  seen.add(node);
+  const d = zodDef(node);
+  if (ZOD_WRAPPERS.has(d.type)) return candidates(d.innerType, seen);
+  if (d.type === "array") return candidates(d.element, seen);
+  if (d.type === "pipe") return [...candidates(d.in, seen), ...candidates(d.out, seen)];
+  // A union arm that HAS the field is enough: `items[]` is divider | line, and a
+  // line-only field is legitimately absent from the divider arm.
+  if (d.type === "union") {
+    // deno-lint-ignore no-explicit-any
+    return (d.options ?? []).flatMap((o: any) => candidates(o, seen));
+  }
+  if (d.type === "lazy") {
+    try {
+      return candidates(d.getter?.(), seen);
+    } catch {
+      return [];
+    }
+  }
+  return [node];
+}
+
+function pathResolves(schema: z.ZodType, path: readonly string[]): boolean {
+  let nodes = candidates(schema);
+  for (const seg of path) {
+    const next = [];
+    for (const n of nodes) {
+      const d = zodDef(n);
+      // A record's keys are dynamic, so any segment resolves against its value.
+      if (d.type === "record") next.push(...candidates(d.valueType));
+      else if (d.shape?.[seg]) next.push(...candidates(d.shape[seg]));
+    }
+    if (next.length === 0) return false;
+    nodes = next;
+  }
+  return true;
+}
+
+/**
+ * ⚠️ **An allowlist that must only ever SHRINK — api-cloudrun#568 drains it.**
+ * These are pre-existing and each needs its WRITER read before it is touched.
+ * The campaign's standing rule is why they are not repaired here: "when you
+ * correct a declaration to match the writer, check FIRST whether the mismatch
+ * was the bug." A `target: "settlements"` rule whose fields describe the INVOICE
+ * may be a mis-modelled rule rather than a mistyped path, and rewriting the
+ * paths to fit the declared target would destroy the evidence of which.
+ *
+ * Two classes, and they have different repairs:
+ *
+ * **(A) a LIST of sibling fields written as one PATH.** `FieldPath` is "path
+ * segments into a document", and `["first_name", "middle_name", "last_name",
+ * "pronunciation"]` is four sibling fields, not a four-deep descent. The repair
+ * is one `FieldMapping` per field, and it changes what `/openapi.json` renders.
+ *
+ * **(B) a path against the WRONG collection.** This is core#55 item 2's class,
+ * which was found by a human reading prose — `void-invoice:append-void-settlement`
+ * declares `status` and `totals.*` against `settlements`, and those are INVOICE
+ * fields. `cowrite-thread:roles-to-thread` is the sharpest: the `cowriteRulesFor`
+ * factory emits `source: ["uid"]` for every entity, and `roles` is the one entity
+ * whose document has no `uid` (its id IS its name) — a factory minting an invalid
+ * path for exactly one of its instantiations.
+ */
+const UNRESOLVED_FIELD_PATHS: ReadonlySet<string> = new Set([
+  // (A) sibling-list-as-path
+  'create-order:order-to-cards source ["destinations","customer_collecting","customer_returning"]',
+  'create-product:product-to-components source ["uid","name","type","stock_method","price"]',
+  'update-user:name-to-actor-refs source ["first_name","middle_name","last_name","pronunciation"]',
+  'holiday-definition:materialize-dates source ["rule","month","day","weekday","occurrence","active"]',
+  'holiday-definition:materialize-dates target ["date","uid_definition","name"]',
+  // (B) path against the wrong collection
+  'update-out-of-service-record:record-to-transactions target ["stores"]',
+  'update-out-of-service-record:record-to-transactions target ["source","uid"]',
+  'reverse-settlement:reverser-to-invoice target ["reverses"]',
+  'void-invoice:append-void-settlement target ["status"]',
+  'void-invoice:append-void-settlement target ["totals","amount_void_cents"]',
+  'void-invoice:append-void-settlement target ["totals","amount_due_cents"]',
+  'void-invoice-from-crms:append-void-settlement target ["status"]',
+  'void-invoice-from-crms:append-void-settlement target ["totals","amount_void_cents"]',
+  'void-invoice-from-crms:append-void-settlement target ["totals","amount_due_cents"]',
+  'void-invoice-from-xero:append-void-settlement target ["status"]',
+  'void-invoice-from-xero:append-void-settlement target ["totals","amount_void_cents"]',
+  'void-invoice-from-xero:append-void-settlement target ["totals","amount_due_cents"]',
+  'holiday-change:recompute-draft-invoices source ["items","chargeable_days"]',
+  'holiday-change:recompute-draft-invoices target ["items","chargeable_days"]',
+  'cowrite-thread:roles-to-thread source ["uid"]',
+]);
+
+Deno.test("every declared field path resolves against its endpoint's schema", () => {
+  const offenders: string[] = [];
+  let checked = 0;
+  for (const rule of rules) {
+    for (const side of ["source", "target"] as const) {
+      const collection = rule[side];
+      if (collection === "*" || collection === "orders/documents") continue;
+      const schema = (schemas as Record<string, z.ZodType>)[collection];
+      if (!schema) {
+        offenders.push(`${rule.id} ${side}: no schema registered for "${collection}"`);
+        continue;
+      }
+      for (const mapping of rule.fields) {
+        const path = mapping[side];
+        // An empty path is the declared spelling of "computed / metadata".
+        if (!Array.isArray(path) || path.length === 0) continue;
+        checked++;
+        const key = `${rule.id} ${side} ${JSON.stringify(path)}`;
+        if (!pathResolves(schema, path) && !UNRESOLVED_FIELD_PATHS.has(key)) offenders.push(key);
+      }
+    }
+  }
+  assertEquals(checked > 900, true, `expected ~1020 field paths, walked ${checked} — the walker stopped reaching the corpus`);
+  assertEquals(offenders, [], `Field paths that resolve against no field of their endpoint:\n  ${offenders.join("\n  ")}`);
+});
+
+Deno.test("every UNRESOLVED_FIELD_PATHS entry is still unresolved", () => {
+  // The ratchet's other direction: an entry that has been repaired must be
+  // DELETED, not left to make the allowlist look like it is still doing work.
+  const stale: string[] = [];
+  const live = new Set<string>();
+  for (const rule of rules) {
+    for (const side of ["source", "target"] as const) {
+      const collection = rule[side];
+      if (collection === "*" || collection === "orders/documents") continue;
+      const schema = (schemas as Record<string, z.ZodType>)[collection];
+      if (!schema) continue;
+      for (const mapping of rule.fields) {
+        const path = mapping[side];
+        if (!Array.isArray(path) || path.length === 0) continue;
+        if (!pathResolves(schema, path)) live.add(`${rule.id} ${side} ${JSON.stringify(path)}`);
+      }
+    }
+  }
+  for (const entry of UNRESOLVED_FIELD_PATHS) if (!live.has(entry)) stale.push(entry);
+  assertEquals(stale, [], `Repaired — delete these from UNRESOLVED_FIELD_PATHS:\n  ${stale.join("\n  ")}`);
+});
+
+// ── endpoint integrity ───────────────────────────────────────────
+//
+// `CollectionRule.source`/`.target` are typed `PropagationEndpoint`
+// (`CollectionName | "*" | "orders/documents"`), so an endpoint naming no
+// collection at all is already a compile error. What the TYPE cannot say is
+// that the endpoint is the PLURAL name: `CollectionDocs` carries a singular
+// alias beside every plural (`booking` as well as `bookings`), so
+// `source: "booking"` type-checks and would silently name a collection nothing
+// writes under that spelling.
+//
+// ⚠️ **This is the population assertion the type owes**, and it derives
+// "is a singular alias" rather than listing the plurals — a second copy of the
+// plural list is exactly the hand-maintained surface the catalog is being
+// collapsed to remove.
+
+Deno.test("no rule endpoint is a singular collection alias", () => {
+  const offenders: string[] = [];
+  for (const rule of rules) {
+    for (const [side, name] of [["source", rule.source], ["target", rule.target]] as const) {
+      if (name === "*" || name === "orders/documents") continue;
+      // The registry answers for both `booking` and `bookings`. A name whose
+      // plural is ALSO a registry key is therefore the singular of a pair.
+      if (`${name}s` in schemas) {
+        offenders.push(`${rule.id}.${side} = "${name}" (singular of "${name}s")`);
+      }
+    }
+  }
+  assertEquals(offenders, [], `Propagation endpoints must be plural collection names:\n  ${offenders.join("\n  ")}`);
+});
+
+Deno.test("the singular-alias detector can actually fire", () => {
+  // Guards the test above against becoming vacuous: if the singular half of
+  // CollectionDocs is ever purged (mod.ts records that as wanted but breaking),
+  // the assertion above passes for a NEW reason and would stop checking
+  // anything. This fails at that moment and says so.
+  assertEquals(
+    "bookings" in schemas && "booking" in schemas,
+    true,
+    "CollectionDocs no longer carries singular aliases — the singular-alias test above is now vacuous. " +
+      "Either delete it (the type alone is then sufficient) or re-derive what it should check.",
+  );
+});
+
 // ── enforced_by integrity ────────────────────────────────────────
 //
 // `enforced_by` is a CLAIM about what checks a rule's `invariant`, and it is

@@ -276,6 +276,48 @@ const createProductRules: CollectionRule[] = [
   },
 ];
 
+/**
+ * The opening-balance movement.
+ *
+ * ⚠️ **This edge is `transactions`-as-a-CASCADE-TARGET, which `create-transaction`
+ * does not need and cannot supply.** Under the 2026-08-17 root-write ruling a
+ * transaction does not declare the write to its own root, so
+ * `create-transaction` declares the ledger and location folds and never the
+ * movement itself. `create-product` writes the same movement document as a
+ * consequence of creating a product, which is a genuine cascade — so the edge
+ * exists here and nowhere else. **The ruling is per transaction, not per
+ * collection**, and this is the case that shows why.
+ *
+ * Measured undeclared in prod 2026-08-17: `create-product` wrote `transactions`
+ * 11 times in 30 days while declaring no rule with that target. Its own
+ * hand-written `target_counts` did not name it either, so only the measured
+ * write side could see it.
+ */
+const createProductMovementRule: CollectionRule = {
+  id: "create-product:product-to-opening-movement",
+  source: "products",
+  target: "transactions",
+  mode: "co-write",
+  invariant:
+    "A product created with an opening balance appends ONE movement to the journal in the same transaction, at the derived id {uid_session}|{type}|{subject} — so a retried create resolves to the same document instead of appending a second opening balance. Absent when the product opens at zero.",
+  transaction: "create-product",
+  enforced_by: [
+    {
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-stock.ts",
+      clause:
+        "the ledger's quantity_held equals the fold of its movements — an opening balance that failed to append shows up as a ledger ahead of its journal",
+      gates: true,
+    },
+  ],
+  fields: [
+    { source: ["uid"], target: ["uid_product"] },
+    { source: [], target: ["uid"], transform: "movementId(uid_session, type, uid_product) — derived, so a retry is idempotent" },
+    { source: [], target: ["lines"], transform: "linesFromAllocations(type, allocations) — the units land on the `to` side" },
+    { source: [], target: ["cost", "amount_cents"], transform: "total_cost_cents from the create input" },
+  ],
+};
+
 const createProductTransaction: TransactionDefinition = {
   id: "create-product",
   description: "Creates a product with tag/category cross-refs, optional inventory ledger, webshop fan-out, and a cowritten default thread. CRMS + Xero sync runs post-transaction.",
@@ -284,6 +326,11 @@ const createProductTransaction: TransactionDefinition = {
     "create-product:product-to-tracking-categories",
     "create-product:product-to-components",
     "create-product:product-to-ledger",
+    "create-product:product-to-opening-movement",
+    // Shared step, declared in `transactions.ts`: the opening movement folds
+    // onto the location documents through the same applier `create-transaction`
+    // uses. Measured undeclared in prod 2026-08-17 (`locations`, 11 records).
+    "create-transaction:transaction-to-locations",
     "stock:seed-ledger-to-stock",
     "create-product:product-to-webshop",
     "cowrite-thread:products-to-thread",
@@ -542,6 +589,7 @@ const updateProductTransaction: TransactionDefinition = {
 export const products: PropagationModule = {
   rules: [
     ...createProductRules,
+    createProductMovementRule,
     ...updateProductRules,
     ...updateProductOrderRules,
   ],

@@ -547,6 +547,13 @@ const updateOrderTransaction: TransactionDefinition = {
     "update-order:ledger-to-bookings",
     ...STOCK_STEPS,
     "update-order:order-to-cards",
+    // Shared steps, declared in `cards.ts` and fired here: a minted event card
+    // gets its thread cowritten by the same helper `create-card` uses. Measured
+    // undeclared in prod 2026-08-17 (`update-order` wrote `threads`), and
+    // `services/orders.ts` was already PUSHING both ids into `rules_fired`
+    // against a definition that declared neither.
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
     "update-order:order-to-fulfillment",
     "update-order:items-to-invoices",
     "update-order:status-to-invoices",

@@ -153,6 +153,60 @@ const manageDraftRules: CollectionRule[] = [
       { source: ["uid"], target: ["draft_uids"], transform: "arrayUnion on create / arrayRemove on archive" },
     ],
   },
+  {
+    // ⚠️ A SECOND rule rather than a widened target, because `target` names ONE
+    // collection. The writer resolves the owning family by kind and rolls up
+    // into `templates` OR `template-components` — never both — so exactly one of
+    // this pair fires per run. `DRAFT_ROLLUP`'s clause already named the
+    // component half ("components.test.ts:189"); only the declaration was
+    // missing, which is why the test could pass while the catalog was silent.
+    id: "manage-draft:component-family-rollup",
+    source: "templates-versions",
+    target: "template-components",
+    mode: "derive",
+    invariant:
+      "The same draft_uids[] rollup as `manage-draft:family-rollup`, for a version whose owning family is a COMPONENT family rather than a template family. Exactly one of the two fires per run, decided by the resolved family's kind.",
+    enforced_by: [DRAFT_ROLLUP],
+    transaction: "manage-draft",
+    fields: [
+      { source: ["uid"], target: ["draft_uids"], transform: "arrayUnion on create / arrayRemove on archive" },
+    ],
+  },
+  {
+    // Measured undeclared in prod 2026-08-17: `manage-draft` wrote `threads` 5
+    // times in 30 days against a definition declaring only `templates`. The
+    // record's own hand-written `target_counts` said `threads: 1` at the call
+    // site — the gap was written down beside `rules_fired` and nothing compared
+    // the two.
+    id: "manage-draft:version-to-thread",
+    source: "templates-versions",
+    target: "threads",
+    mode: "co-write",
+    invariant:
+      "Creating a draft TEMPLATE version cowrites a per-branch comment thread carrying TWO sources — the version first (primary/identity) and the owning family second — so one family-scoped feed surfaces every version's branch thread. Component versions get no thread: components are not a chat surface.",
+    enforced_by: [DRAFT_ROLLUP],
+    transaction: "manage-draft",
+    fields: [
+      { source: ["uid"], target: ["sources", "uid"], transform: "sources[0] — the draft version" },
+      { source: [], target: ["sources", "collection"], transform: `literal "templates-versions", then the family as sources[1]` },
+      { source: [], target: ["created_by"], transform: "ActorRef of acting user from session" },
+      { source: [], target: ["title"], transform: "null — default thread" },
+      { source: [], target: ["comment_count"], transform: "0" },
+    ],
+  },
+  {
+    id: "manage-draft:thread-to-version",
+    source: "threads",
+    target: "templates-versions",
+    mode: "embed",
+    invariant:
+      "The cowritten branch thread's uid is embedded on the draft version as `uid_thread` so the draft surface resolves its thread without a query. Optional on the schema, because a component version legitimately has none — so `validateBeforeWrite` cannot see a template version that lost its pointer.",
+    enforced_by: [DRAFT_ROLLUP],
+    transaction: "manage-draft",
+    fields: [
+      { source: ["uid"], target: ["uid_thread"] },
+    ],
+  },
 ];
 
 const manageDraftTransaction: TransactionDefinition = {
@@ -161,6 +215,9 @@ const manageDraftTransaction: TransactionDefinition = {
     "Creates or abandons a draft template version, maintaining the family's draft_uids[] rollup atomically with the version write.",
   steps: [
     "manage-draft:family-rollup",
+    "manage-draft:component-family-rollup",
+    "manage-draft:version-to-thread",
+    "manage-draft:thread-to-version",
   ],
 };
 
@@ -213,6 +270,26 @@ const publishTemplateRules: CollectionRule[] = [
       { source: ["uid"], target: ["draft_uids"], transform: "arrayRemove — no longer a draft" },
     ],
   },
+  {
+    // The component-family twin of the rollup above — same reason as
+    // `manage-draft:component-family-rollup`: `target` names one collection and
+    // the writer picks by family kind. Measured in dev 2026-08-17,
+    // `publish-template` wrote `template-components` 20 times in 30 days.
+    id: "publish-template:component-family-rollup",
+    source: "templates-versions",
+    target: "template-components",
+    mode: "derive",
+    invariant:
+      "The same monotonic-by-seq active repoint, version_count increment and draft_uids[] removal as `publish-template:family-rollup`, for a version owned by a COMPONENT family. Exactly one of the two fires per publish.",
+    enforced_by: [FAMILY_ROLLUP],
+    transaction: "publish-template",
+    fields: [
+      { source: ["uid"], target: ["uid_active"], transform: "repoint only if newSeq > active.seq" },
+      { source: [], target: ["version_count"], transform: "FieldValue.increment(1)" },
+      { source: [], target: ["last_published_at"], transform: "publish timestamp" },
+      { source: ["uid"], target: ["draft_uids"], transform: "arrayRemove — no longer a draft" },
+    ],
+  },
 ];
 
 const publishTemplateTransaction: TransactionDefinition = {
@@ -223,6 +300,7 @@ const publishTemplateTransaction: TransactionDefinition = {
     "publish-template:seq",
     "publish-template:version-flip",
     "publish-template:family-rollup",
+    "publish-template:component-family-rollup",
   ],
 };
 // ── Module ──────────────────────────────────────────────────────────
