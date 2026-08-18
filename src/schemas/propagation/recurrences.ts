@@ -225,6 +225,10 @@ const updateRecurrenceTransaction: TransactionDefinition = {
   steps: [
     "update-recurrence:fan-out-prototype",
     "update-recurrence:rematerialize-future",
+    // Rematerialize MINTS cards as well as reaping them, so this transaction is
+    // the one that needs both pairs.
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
     // Shared steps, declared in `cards.ts`: this path routes through
     // `cascadeDeleteCards`, which unlinks each card from its thread and deletes
     // the thread's comments. Declared on `delete-card` and — until 2026-08-17 —
