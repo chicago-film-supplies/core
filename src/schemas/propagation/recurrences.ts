@@ -78,7 +78,7 @@ const SCOPE_FOLLOWING_PATCH: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/recurrences/recurrences.test.ts::Cards PATCH scope=following cascades status to later siblings only",
   clause:
-    "the date-bounded fan-out ONLY — a scope=following PATCH reaches later siblings and not earlier ones. ⚠️ The invariant's second sentence is UNENFORCED: nothing asserts that a sibling's own `recurrence_overrides` blocks a scope=following or scope=all card patch. The only override-blocking assertion in the suite is on the PROTOTYPE fan-out (`Recurrences: update fans prototype changes to siblings, skipping overrides`), which is a different writer.",
+    "the date-bounded fan-out ONLY — a scope=following PATCH reaches later siblings and not earlier ones. The invariant's second sentence (a sibling's own `recurrence_overrides` blocks the field) is covered by the scope=all sibling test `Cards PATCH scope=all skips a sibling that pins the field, and keeps its pin`, which exercises the same writer — `buildSeriesPatch` is shared by both scopes and is where the skip lives. ⚠️ This clause read \"UNENFORCED\" until api-cloudrun#549 D5, and it was accurate: the only override-blocking assertion in the suite was on the PROTOTYPE fan-out (`Recurrences: update fans prototype changes to siblings, skipping overrides`), which is a different writer entirely.",
   gates: true,
 };
 
@@ -87,7 +87,7 @@ const SCOPE_ALL_PATCH: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/recurrences/recurrences.test.ts::Cards PATCH scope=all back-propagates to prototype + cascades siblings",
   clause:
-    "both steps of scope=all in one test — the patch back-propagates to the parent recurrence's prototype AND cascades to every sibling",
+    "both steps of scope=all in one test — the patch back-propagates to the parent recurrence's prototype AND cascades to every sibling. Two sibling tests carry the api-cloudrun#549 D5 properties: `Cards PATCH scope=all skips a sibling that pins the field, and keeps its pin` (the override skip, and that the pin SURVIVES the fan-out) and `Cards PATCH scope=all writes nothing when no card's value would change` (a re-sent patch bumps no version, on any card or on the recurrence). ⚠️ The clobber D5 is really about needs a CONCURRENT writer, so no integration test can see it; the write SHAPE that makes it unrepresentable is asserted in `api-cloudrun/tests/unit/recurrenceDurability.test.ts::a series patch writes only the fields it means to change`.",
   gates: true,
 };
 
@@ -331,7 +331,7 @@ const updateCardScopeFollowingRules: CollectionRule[] = [
     target: "cards",
     mode: "fan-out",
     invariant:
-      "`PATCH /cards/{uid}?recurrence_scope=following` applies the edit to the target card plus every sibling card in the same series (recurrence_parent_uid matches) with `dates.start >= target.dates.start` (instant-level comparison). Siblings' own `recurrence_overrides` still block per-field updates.",
+      "`PATCH /cards/{uid}?recurrence_scope=following` applies the edit to the target card plus every sibling card in the same series (recurrence_parent_uid matches) with `dates.start >= target.dates.start` (instant-level comparison). Siblings' own `recurrence_overrides` still block per-field updates. ⚠️ Each sibling receives a CHANGE SET, never a document: only fields whose value actually moves are written, so no other field on the sibling — `position`, `uid_list`, and above all its own `recurrence_overrides` — can be regressed by the fan-out, and `version` moves by a server-side increment rather than a read-modify-write off a snapshot read outside the transaction. Until api-cloudrun#549 D5 the writer set a whole stale clone, which reverted all of them; clobbering the override array was the self-propagating half, because the pin is the only thing that would have refused the NEXT fan-out too. The step fires only when at least one card is written — a no-op patch records `status: \"skipped\"`, not a cascade with a zero count.",
     enforced_by: [SCOPE_FOLLOWING_PATCH],
     transaction: "update-card-scope-following",
     fields: [
@@ -361,7 +361,7 @@ const updateCardScopeAllRules: CollectionRule[] = [
     target: "recurrences",
     mode: "derive",
     invariant:
-      "`PATCH /cards/{uid}?recurrence_scope=all` back-propagates the patched fields to the parent recurrence's prototype so that future materializations and newly-created siblings inherit the edit.",
+      "`PATCH /cards/{uid}?recurrence_scope=all` back-propagates the patched fields to the parent recurrence's prototype so that future materializations and newly-created siblings inherit the edit. ⚠️ The write is a MERGE at dotted `prototype.<field>` keys, not a document write: prototype fields the patch does not name (`locked`) survive, and — because the parent is read outside any transaction — `horizon_through`, `active_until`, `exception_dates` and `rule` cannot be reverted to their read-time values by it. Reverting `exception_dates` would resurrect deleted occurrences, which is exactly the invariant `delete-card-scope-this:append-exception-date` exists to hold; the whole-document form did that until api-cloudrun#549 D5. The step fires only when a prototype field actually changes.",
     enforced_by: [SCOPE_ALL_PATCH],
     transaction: "update-card-scope-all",
     fields: [
@@ -379,7 +379,7 @@ const updateCardScopeAllRules: CollectionRule[] = [
     target: "cards",
     mode: "fan-out",
     invariant:
-      "After updating the parent prototype, every sibling card in the series (regardless of date) receives the patched fields — except where a sibling's `recurrence_overrides` pins that field.",
+      "After updating the parent prototype, every sibling card in the series (regardless of date) receives the patched fields — except where a sibling's `recurrence_overrides` pins that field. Same change-set write as `update-card-scope-following:cascade-future-siblings` (they share `api-cloudrun/src/services/seriesPatch.ts::buildSeriesPatch`), and the same consequences: no unnamed field is regressed, the pin survives the fan-out, `version` is a server-side increment, and a field already holding the requested value is not a write at all. The step fires only when at least one card is written.",
     enforced_by: [SCOPE_ALL_PATCH],
     transaction: "update-card-scope-all",
     fields: [
