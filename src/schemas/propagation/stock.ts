@@ -31,8 +31,12 @@ import type { CollectionRule, EnforcementRef, PropagationModule } from "./types.
 
 // ── What checks these three edges ───────────────────────────────────
 //
-// All three edges are declared ONCE and fired by seven transactions, so their
-// enforcement is declared once too — one edit site, four rules. Each pointer below was opened and read against
+// All three edges are declared ONCE and fired by many transactions, so their
+// enforcement is declared once too — one edit site, four rules. ⚠️ This said
+// "seven transactions" until 2026-08-18 and the real figure was ELEVEN by then:
+// a count of firing contexts goes stale every time a transaction adds
+// {@link STOCK_STEPS}, which is precisely why it should not be written here.
+// `scripts/audit-propagation-corpus.ts` derives it. Each pointer below was opened and read against
 // `audit-stock.ts` as it stands, NOT translated from the `audit-stock-summaries.ts`
 // refs it replaces: that audit checked a different document with a different
 // shape, and two of its invariants have no counterpart here.
@@ -110,8 +114,10 @@ const STOCK_BICONDITIONAL: EnforcementRef = {
  * a second export.** The one-module-per-file convention (`types.ts`
  * `PropagationModule`) is about what a file contributes to the *catalog*; a
  * shared `as const` step tuple is the sanctioned companion, because the
- * alternative is 39 string literals hand-copied across seven transactions in
- * four files — the exact defect the convention exists to remove.
+ * alternative is the same three ids hand-copied into every transaction that
+ * rebuilds the projection, across four files — the exact defect the convention
+ * exists to remove, and a cost that GROWS with each new firing context rather
+ * than sitting at the "39 across seven transactions" this line used to assert.
  *
  * A plain literal, deliberately: `[...X, "y"] as const` is the spread form that
  * JSR's declaration emitter truncates (core#43), and this has no spread.
@@ -136,11 +142,15 @@ export const STOCK_STEPS = [
 const REBUILD_TRIGGER = "inline:post-commit (retry ladder: cloud-task:/tasks/rebuild-stock-summary)";
 
 /**
- * The stock projection's edges — THREE rules fired by seven transactions, plus
- * the seed.
+ * The stock projection's edges — THREE rules, fired by every transaction that
+ * moves stock, plus the seed. **Do not write the number of them here** (item 17):
+ * it was "seven" and was eleven by 2026-08-18. Derive it with
+ * `scripts/audit-propagation-corpus.ts`.
  *
- * ⚠️ **These used to be minted PER TRANSACTION, and were 21 of the corpus's
- * 173 rules.** `stockRules(transactionId, trigger)` produced seven
+ * ⚠️ **These used to be minted PER TRANSACTION, and were 21 rules of a corpus
+ * that stood at 173 when the collapse landed (2026-08-17; it has moved since —
+ * this is history, not a current figure).** `stockRules(transactionId, trigger)`
+ * produced seven
  * near-identical copies of the same three edges: every `enforced_by` ref was a
  * shared module const, `trigger` was a shared constant, and only the id prefix
  * and one prose fragment varied. They were never 21 rules — they are three

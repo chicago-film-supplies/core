@@ -5871,7 +5871,7 @@ const PropagationLogRecordSchema: z.ZodType<PropagationLogRecord>;
 How a field value moves from one document to another.
 
 ```ts
-type PropagationMode = "embed" | "fan-out" | "co-write" | "derive" | "reference";
+type PropagationMode = indexedAccess;
 ```
 
 ### `PropagationModeType`

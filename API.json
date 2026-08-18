@@ -2763,7 +2763,7 @@
         {
           "kind": "typeAlias",
           "name": "PropagationMode",
-          "declaration": "type PropagationMode = \"embed\" | \"fan-out\" | \"co-write\" | \"derive\" | \"reference\";",
+          "declaration": "type PropagationMode = indexedAccess;",
           "doc": "How a field value moves from one document to another."
         },
         {

@@ -533,7 +533,22 @@ const updateProductRules: CollectionRule[] = [
     source: "products",
     target: "inventory-ledgers",
     mode: "co-write",
-    invariant: "Changing type to service/surcharge/replacement deletes the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token — none of those types hold stock. Changing to rental/sale creates the ledger when moving from a non-stock type, and the summary is (re)seeded rather than deleted: a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. The summary's `type` field follows the product's.",
+    // ⚠️ **Stated as the PREDICATE, not as a list of type names, and that is a
+    // correction rather than a rewording (2026-08-17).** This string used to read
+    // "changing type to service/surcharge/replacement deletes… changing to
+    // rental/sale creates", which enumerated FIVE of the six members of
+    // `PRODUCT_TYPES` — `transaction_fee` appeared in neither branch, so the
+    // prose was silent about a type the enum has carried all along. It is about
+    // to stop being silent and start being wrong: api-cloudrun#401 makes
+    // `transaction_fee` a live product type.
+    //
+    // ⭐ Adding the sixth name to one of the two lists is the defect, not the
+    // fix. `create-product:product-to-ledger` in this same file already records
+    // why — `productHoldsStock` is the ONE predicate, and that rule's comment
+    // says in terms that "adding a fourth answer is how the drift in #310
+    // recurs". An enumeration re-opens on every new member; a predicate does not.
+    // Type names below are illustration, never the rule. (core#55's class.)
+    invariant: "A product holds an inventory ledger exactly when `productHoldsStock` says so — type is 'rental' or 'sale' AND stock_method is not 'none'. A type change that makes the predicate FALSE deletes the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token together (service, surcharge, replacement and transaction_fee all fail it, whatever their stock_method); a change that makes it TRUE creates the ledger. Read the predicate, not the type names: a new member of PRODUCT_TYPES is governed the day it is added, with no edit here. When the predicate holds on BOTH sides the summary is (re)seeded rather than deleted — a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. The summary's `type` field follows the product's.",
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [

@@ -9,8 +9,12 @@
 
 import { z } from "zod";
 import { baseLogFields, type LogLevelType } from "./base.ts";
+// ⚠️ Imported, not redeclared. These five used to be written out again here, so
+// the catalog's vocabulary and this record's enum agreed by coincidence and a
+// sixth mode added to one would not have failed anything (Tier 1 item 9). The
+// catalog DEFINES a propagation mode; this record only reports one.
+import { PROPAGATION_MODES } from "../propagation/types.ts";
 
-const PROPAGATION_MODES = ["embed", "fan-out", "co-write", "derive", "reference"] as const;
 const PROPAGATION_STATUSES = ["completed", "skipped", "failed"] as const;
 
 /** Status outcome of a propagation rule execution. */

@@ -16,8 +16,10 @@ import type { CollectionName } from "../mod.ts";
  * `CollectionName` is `keyof CollectionDocs`, the same union `schemas` and
  * `DocFor<C>` are keyed by — so a rule naming a collection that does not exist
  * is a compile error, and it cannot drift, because there is no second copy to
- * drift from. Measured before typing: all 156 rules already conform, so this was
- * a pure tightening with zero catalog edits.
+ * drift from. Measured before typing (2026-08-17, corpus of 156): every rule
+ * already conformed, so this was a pure tightening with zero catalog edits. The
+ * corpus has grown since — that figure dates the MEASUREMENT and is not a live
+ * count.
  *
  * Two non-collection endpoints occur and both are real:
  * - `"*"` — every collection (`update-user`'s ActorRef fan-out).
@@ -43,13 +45,36 @@ export type PropagationEndpoint = CollectionName | "*" | "orders/documents";
 
 // ── Propagation modes ───────────────────────────────────────────────
 
+/**
+ * How a field value moves from one document to another.
+ *
+ * ⚠️ **ONE declaration, and this is it.** `log/propagation.ts` used to declare
+ * the same five members independently as `PROPAGATION_MODES`, so the catalog's
+ * vocabulary and the log record's enum agreed only by coincidence — nothing
+ * would have failed if a sixth mode had been added to one of them (Tier 1 item
+ * 9). The log module now imports this array for its Zod enum.
+ *
+ * **The catalog owns it because the catalog DEFINES it**; a log record reports a
+ * mode, it does not decide what modes exist. Ownership direction matters here
+ * even though either direction removes the duplication — the wrong one leaves
+ * the next reader looking for the vocabulary in the wrong module.
+ *
+ * ⚠️ **Plain `as const`, no spread — deliberately.** §5's measured guardrail is
+ * that JSR's declaration emitter truncates `[...X, "y"] as const` (core#43) and
+ * emits a non-spread one verbatim; `ITEM_TYPES` publishes all nine members. This
+ * has no spread, and it is the same shape as `stock.ts`'s `STOCK_STEPS`, the
+ * already-sanctioned value export from this directory.
+ */
+export const PROPAGATION_MODES = [
+  "embed", // copied at creation, target owns it
+  "fan-out", // source changes propagate to targets via events
+  "co-write", // written atomically in same transaction
+  "derive", // computed from other fields (can be same doc)
+  "reference", // just a UID, resolved at read time
+] as const;
+
 /** How a field value moves from one document to another. */
-export type PropagationMode =
-  | "embed"       // copied at creation, target owns it
-  | "fan-out"     // source changes propagate to targets via events
-  | "co-write"    // written atomically in same transaction
-  | "derive"      // computed from other fields (can be same doc)
-  | "reference";  // just a UID, resolved at read time
+export type PropagationMode = typeof PROPAGATION_MODES[number];
 
 // ── Field mapping ───────────────────────────────────────────────────
 
