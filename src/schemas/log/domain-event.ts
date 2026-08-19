@@ -18,6 +18,15 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 /** Msg literals this archetype absorbs. */
 export const DOMAIN_EVENT_MSGS = [
   "afterOrderWrite_order_not_found",
+  // `readStoreDestination` found NO default store, so an order carrying
+  // `uid_store: null` fell back to the customer's own address rather than the
+  // store's. ⚠️ Emitted at `warn` rather than thrown deliberately: in prod a
+  // refusal would take out every customer-pickup order, so the fallback stands
+  // and the condition is reported instead. It used to be entirely silent, which
+  // is why api-cloudrun#586 sat unnoticed in dev — a harness clobber was
+  // invisible until someone read an affected order. `{ store_uid }` names the
+  // store that was ASKED for, absent when the lookup was "whichever is default".
+  "store_destination_no_default",
   // The order fan-out's change guard declined a write that touched only
   // excluded fields (api-cloudrun#407). Sibling of the product one below, and
   // the same `debug` level: it is a development aid, suppressed in prod by
@@ -170,6 +179,7 @@ export const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord> = z.obj
   invoice_uid: z.string().optional(),
   product_uid: z.string().optional(),
   organization_uid: z.string().optional(),
+  store_uid: z.string().optional(),
   recurrence_uid: z.string().optional(),
   document_path: z.string().optional(),
 }).passthrough().meta({ title: "DomainEventLogRecord" });
