@@ -113,6 +113,13 @@ const updateTaxRules: CollectionRule[] = [
 
 // ── The supersede draft-recompute ────────────────────────────────
 //
+// ⚠️ **"live", not "draft".** The holiday pair next door recomputes `status ==
+// "draft"` only, because a holiday moves a DATE and a quoted order's dates are
+// what the customer was shown. A tax version is different: `orderTaxVersionFor`
+// already declares `draft`/`quoted`/`reserved` repriceable, so all three
+// re-resolve on their next write regardless. Recomputing them here changes
+// WHEN, not WHETHER.
+//
 // ⚠️ **This REVERSES the conclusion `supersedeTax`'s own docblock reached**, and
 // the reversal is narrower than it looks. That docblock argued there is nothing
 // to propagate because "the order writers re-resolve by name at `asOf`, so a
@@ -135,14 +142,14 @@ const updateTaxRules: CollectionRule[] = [
 
 const supersedeTaxDraftRecomputeRules: CollectionRule[] = [
   {
-    id: "supersede-tax:recompute-draft-orders",
+    id: "supersede-tax:recompute-live-orders",
     source: "taxes",
     target: "orders",
     mode: "fan-out",
     invariant:
-      "A draft order is not committed to a customer, so a new tax version must reach its stored PriceModifiers and totals; finalized orders stay frozen, keeping what was quoted and billed",
+      "An order that still re-resolves its tax version on write must have a new version reach its stored PriceModifiers and totals NOW rather than on whatever write happens to come next; frozen orders stay frozen, keeping what was quoted and billed",
     trigger:
-      "POST /taxes/{uid}/supersede — coalesced Cloud Task, status == 'draft' only. Recomputes UNCONDITIONALLY rather than filtering to orders that name the superseded tax: a no-op recompute writes nothing and bumps nothing, so a filter only adds a predicate that can be wrong.",
+      "POST /taxes/{uid}/supersede — coalesced Cloud Task over REPRICEABLE_ORDER_STATUSES (draft, quoted, reserved). ⚠️ NOT 'draft' alone, and the wider set is the point: `orderTaxVersionFor` already declares those three repriceable, so this recompute applies the rule the next ordinary write would apply anyway — it makes the repricing happen VISIBLY now instead of invisibly when a customer accepts a quote. Narrowing it to draft would be a second, disagreeing copy of the freeze rule. Recomputes UNCONDITIONALLY rather than filtering to orders that name the superseded tax: a no-op recompute writes nothing and bumps nothing, so a filter only adds a predicate that can be wrong.",
     fields: [
       {
         source: [],
@@ -164,14 +171,14 @@ const supersedeTaxDraftRecomputeRules: CollectionRule[] = [
     ],
   },
   {
-    id: "supersede-tax:recompute-draft-invoices",
+    id: "supersede-tax:recompute-live-invoices",
     source: "orders",
     target: "invoices",
     mode: "fan-out",
     invariant:
-      "A recomputed draft order must re-sync its non-terminal invoices' tax amounts; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
+      "A recomputed order must re-sync its non-terminal invoices' tax amounts; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
     trigger:
-      "draft-order recompute — transitive via updateOrder's existing draft-invoice sync, exactly as the holiday cascade reaches invoices",
+      "order recompute — transitive via `stageOrderInvoiceSync`, exactly as the holiday cascade reaches invoices. The terminal-invoice freeze is that function's own, not a second predicate here.",
     fields: [
       {
         source: ["items", "price", "taxes"],
