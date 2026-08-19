@@ -132,6 +132,12 @@ export const XERO_EVENT_MSGS = [
   "xero_write_deferred",
   "xero_defer_escalated",
   "xero_tracking_option_create_failed",
+  // `PUT /TaxRates` (Xero's createTaxRates) failed, or the read-before-create
+  // that precedes it did. Warn rather than throw, matching the sibling above:
+  // the caller returns `null` and the operator retries from the manager, and a
+  // half-created tax rate costs nothing — it is inert clutter in a dropdown
+  // until something stores its `TaxType`, not a duplicated money record.
+  "xero_tax_rate_create_failed",
   // A line was about to be pushed carrying an `xero_tracking_option_id` that
   // matches no known Xero tracking option, so CFS omitted the `Tracking`
   // element rather than sending it. This log is the ONLY signal that the line
