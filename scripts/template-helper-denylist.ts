@@ -203,6 +203,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // That is why the sibling stays emitted and this does not; the line is
     // "recomputes money from base inputs", not "is a write-path helper".
     "materializeDocumentTax",
+    // A MIGRATION-WINDOW internal, not a rendering fact. It exists only so that
+    // `findTaxAt` / `findTaxFor` / api-cloudrun's window guards read
+    // `applied_from ?? valid_from` identically while api-cloudrun#409 Phase 1
+    // has both field pairs in the corpus, and it is deleted with the fallback in
+    // Phase 2. It is exported for those guards, not for templates — a template
+    // asking a tax for its own window bounds should read the fields.
+    //
+    // It also returns an anonymous object type, which the generator can only
+    // describe as `typeLiteral`. That is a symptom rather than the reason:
+    // naming the type would make it emit cleanly and it would still be an
+    // internal.
+    "taxAppliedWindow",
   ],
   // No `it.dates.*` exports are hidden today.
   dates: [],

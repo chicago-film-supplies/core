@@ -10,7 +10,13 @@
  */
 
 import { compareAsc, parseISO } from "date-fns";
-import { DEFAULT_TAX_PROFILE, type TaxProfileType, toUsStateCode } from "../schemas/mod.ts";
+import {
+  DEFAULT_TAX_PROFILE,
+  type JurisdictionType,
+  type PreTaxItemType,
+  type TaxProfileType,
+  toUsStateCode,
+} from "../schemas/mod.ts";
 import {
   calculateItemPrice,
   computeItemTaxAmountCents,
@@ -145,14 +151,57 @@ const DEFAULT_TAX_NAME_BY_TYPE: Readonly<Record<string, string>> = {
 };
 
 /**
- * Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched
- * by exact `name`. Returns null when nothing matches (e.g. `asOf` before any
- * historical doc). Throws on catalog drift (two same-name docs bracket the same
- * instant). A missing `valid_from` is treated as an open start; missing/null
- * `valid_to` as an open end.
+ * The APPLIED window of a tax version, dual-reading the old field names.
+ *
+ * ⚠️ **`applied_from ?? valid_from`, and the `??` is load-bearing.**
+ * api-cloudrun#409 renames the pair, and deploy and document-migration cannot
+ * be simultaneous. Reading only the new name against a document still holding
+ * only the old one yields a MISSING bound — which every bracket check below
+ * treats as OPEN, so every version brackets every instant and {@link findTaxAt}
+ * throws `Tax catalog drift`. That throw is on the pricing path, and out of a
+ * CRMS Cloud Task handler it retries forever. Phase 2 deletes the fallback and
+ * the old fields together.
+ *
+ * Note the ASYMMETRY: `applied_to` is legitimately `null` (open-ended), so it
+ * falls back only when *absent*, never when explicitly null. `applied_from` has
+ * no meaningful null.
+ */
+export function taxAppliedWindow(tax: Tax): { from: string | null; to: string | null } {
+  return {
+    from: tax.applied_from ?? tax.valid_from ?? null,
+    to: tax.applied_to !== undefined ? tax.applied_to : (tax.valid_to ?? null),
+  };
+}
+
+/**
+ * Does this tax version's half-open applied window contain `asOf`?
  *
  * Comparison is by instant (ms since epoch), so Chicago-offset strings with
- * heterogeneous DST (-05:00 vs -06:00) compare correctly.
+ * heterogeneous DST (-05:00 vs -06:00) compare correctly. Half-open
+ * `[from, to)` is what makes a supersede's boundary unambiguous: the successor
+ * opens at exactly the instant the incumbent closes, and neither the last
+ * millisecond of one nor the first of the other is claimed twice.
+ */
+function windowContains(tax: Tax, t: number): boolean {
+  const { from, to } = taxAppliedWindow(tax);
+  if (from != null && t < new Date(from).getTime()) return false;
+  if (to != null && t >= new Date(to).getTime()) return false;
+  return true;
+}
+
+/** `uid@[from,to)` for a drift message. */
+function windowLabel(tax: Tax): string {
+  const { from, to } = taxAppliedWindow(tax);
+  return `${tax.uid}@[${from ?? "-∞"},${to ?? "∞"})`;
+}
+
+/**
+ * Pick the Tax whose applied window contains `asOf`, matched by exact `name`.
+ * Returns null when nothing matches (e.g. `asOf` before any historical doc).
+ * Throws on catalog drift (two same-name docs bracket the same instant).
+ *
+ * @see {@link taxAppliedWindow} for the Phase-1 dual-read and why a missing
+ * bound is dangerous rather than merely permissive.
  */
 export function findTaxAt(
   taxes: Tax[],
@@ -160,23 +209,76 @@ export function findTaxAt(
   asOf: string,
 ): Tax | null {
   const t = new Date(asOf).getTime();
-  const matches = taxes.filter((tax) => {
-    if (tax.name !== name) return false;
-    if (tax.valid_from != null && t < new Date(tax.valid_from).getTime()) {
-      return false;
-    }
-    if (tax.valid_to != null && t >= new Date(tax.valid_to).getTime()) {
-      return false;
-    }
-    return true;
-  });
+  const matches = taxes.filter((tax) => tax.name === name && windowContains(tax, t));
   if (matches.length === 0) return null;
   if (matches.length > 1) {
-    const detail = matches
-      .map((m) => `${m.uid}@[${m.valid_from ?? "-∞"},${m.valid_to ?? "∞"})`)
-      .join(", ");
     throw new Error(
-      `Tax catalog drift: multiple "${name}" docs bracket ${asOf}: ${detail}`,
+      `Tax catalog drift: multiple "${name}" docs bracket ${asOf}: ` +
+        matches.map(windowLabel).join(", "),
+    );
+  }
+  return matches[0];
+}
+
+/**
+ * **The tax rule: `(jurisdiction × item type)`, as of a date.**
+ *
+ * Pick the one Tax covering `itemType` in `jurisdiction` whose applied window
+ * contains `asOf`. `null` means *this line is untaxed*, which is a real answer
+ * rather than a miss — a line is untaxed **iff no tax in its jurisdiction lists
+ * its type**.
+ *
+ * One mechanism, which is the point. What this replaces was two: a
+ * `coa_revenue` permissive gate (`isTaxableCoa`) and a separate name-keyed
+ * default table, each of which could say "taxable" while the other said
+ * "untaxed". api-cloudrun#409 measured that drift at 19 invoices and $2,741.78
+ * of phantom receivable — CFS taxing lines it told Xero were `TaxType: NONE`.
+ *
+ * ⚠️ **A `null` jurisdiction is NEVER a wildcard, on either side.**
+ * - A `null` ARGUMENT means *no nexus* (delivered outside Illinois): nothing is
+ *   collected, so the answer is `null` without consulting the catalog.
+ * - A `null` on a tax DOCUMENT marks the **explicit-only** class — a tax
+ *   reachable by uid alone, never by this rule. Prod has exactly two (`No Tax`
+ *   and `Water Bottle Tax`), and treating either as matching every jurisdiction
+ *   would apply a $0.05/unit bottle tax to every line in the corpus.
+ *
+ * Throws on catalog drift, for the same reason {@link findTaxAt} does: two
+ * taxes covering one `(jurisdiction, type, instant)` is a configuration error
+ * with no correct silent resolution, and picking either one bills a number
+ * nobody chose.
+ *
+ * @param taxes The `taxes` collection, unfiltered — historical versions
+ *   included, since the window is what selects among them.
+ * @param jurisdiction Where the goods went, already resolved through the
+ *   destination → organization → {@link deriveJurisdiction} precedence.
+ * @param itemType The line's `taxed_as ?? type`. A type no tax lists is
+ *   untaxed, which is how `service`, `surcharge` and `transaction_fee` stay
+ *   untaxed without a second rule naming them.
+ * @param asOf Instant to resolve the catalog at.
+ */
+export function findTaxFor(
+  taxes: Tax[],
+  jurisdiction: JurisdictionType | null,
+  itemType: string,
+  asOf: string,
+): Tax | null {
+  // No nexus — nothing is collected, and no catalog lookup can change that.
+  if (jurisdiction === null) return null;
+
+  const t = new Date(asOf).getTime();
+  const matches = taxes.filter((tax) => {
+    // Skips the explicit-only class by construction: `null !== jurisdiction`
+    // for every real jurisdiction, so it can never read as a wildcard.
+    if (tax.jurisdiction !== jurisdiction) return false;
+    if (!tax.item_types?.includes(itemType as PreTaxItemType)) return false;
+    return windowContains(tax, t);
+  });
+
+  if (matches.length === 0) return null;
+  if (matches.length > 1) {
+    throw new Error(
+      `Tax catalog drift: multiple taxes cover (${jurisdiction}, ${itemType}) ` +
+        `at ${asOf}: ${matches.map((m) => `${m.name} ${windowLabel(m)}`).join(", ")}`,
     );
   }
   return matches[0];
@@ -422,6 +524,102 @@ export function materializeDocumentTax(
       total_cents: computed.total_cents,
     };
   }
+}
+
+// ── Jurisdiction derivation ──────────────────────────────────────
+
+/**
+ * The Illinois municipalities CFS is **registered to collect in**, by
+ * upper-cased city name.
+ *
+ * A jurisdiction is a registration, not a place — which is why this is a short
+ * closed list and not a geography lookup. Deriving forty jurisdictions from an
+ * address is explicitly unwanted (api-cloudrun#237, closed won't-do); an
+ * Illinois address outside these sources to the store instead.
+ *
+ * ⚠️ **`paxton` is absent, deliberately.** CFS no longer delivers there, so it
+ * must not be *derived* — but it stays a {@link JurisdictionType} member
+ * because one prod order and one invoice embed the Paxton tax uid and
+ * `calculateItemTax` throws `Unknown tax uid` on a missing one. Closed, not
+ * erased.
+ */
+const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>> = {
+  CHICAGO: "chicago",
+  RANTOUL: "rantoul",
+  FRANKFORT: "frankfort",
+};
+
+/**
+ * **Where a delivery address sources to** — the bottom of the three-level
+ * jurisdiction precedence, below a destination's explicit `jurisdiction` and
+ * an organization's `default_jurisdiction`.
+ *
+ * ## Three cases, three DIFFERENT legal reasons
+ *
+ * | # | address | result | why |
+ * |---|---|---|---|
+ * | 1 | outside Illinois | `null` | **nexus** — no obligation in another state |
+ * | 2 | an Illinois city CFS collects in | that jurisdiction | **destination sourcing** |
+ * | 3 | any other Illinois municipality | `origin` | **origin sourcing** — the sale is deemed to occur at our selling location |
+ *
+ * ⚠️ **Case 3 is a RULE, not a fallback, and cases 1 and 3 are not the same
+ * thing.** Merging them — "we don't collect there, so no tax" — untaxes every
+ * non-Chicago Illinois delivery, which is under-collection on a real
+ * obligation. The asymmetry is why `origin` is a named required parameter
+ * rather than a default: a reader has to see that a Naperville delivery is
+ * taxed, and taxed at *our store's* rate.
+ *
+ * ## Conservative in the same two directions as {@link isEntirelyOutOfIllinois}
+ *
+ * An **unresolvable** region falls to case 3, not case 1. `toUsStateCode`
+ * returns `null` for *unknown*, never for *not Illinois*, and 18 of the 48
+ * non-`"IL"` prod destinations are Illinois spelled `"Illinois"` — 13 of them
+ * in Chicago. Reading unknown as out-of-state would have stopped collecting tax
+ * CFS owes on all 18. Under-collecting is the expensive error.
+ *
+ * ## Matching
+ *
+ * ⚠️ **The city is matched EXACTLY (trimmed, case-folded), never by prefix.**
+ * *Chicago Heights* and *West Frankfort* are distinct Illinois municipalities
+ * with their own rates; a `startsWith` would bill both at Chicago's.
+ *
+ * ⚠️ **`mapbox_id` is deliberately NOT the key**, though it is present on many
+ * addresses. It identifies an *address*, not a municipality — there is no
+ * city→id table to match against — and prod's geocodes are demonstrably wrong:
+ * CFS's own warehouse at 3100 W Fillmore St resolves to "Palos Township /
+ * 60480", and another destination sits at "Grant Park / 60612". Which is also
+ * the reason this derivation is the LOWEST precedence level: it is a
+ * convenience, and an explicit `destination.jurisdiction` or an organization
+ * default outranks it.
+ *
+ * Pure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager
+ * reaches the same answer as the API without a round trip.
+ *
+ * @param address The destination's delivery address.
+ * @param origin The selling store's own jurisdiction, resolved by the caller
+ *   through `Order.uid_store` → `Store.uid_destination` →
+ *   `Destination.jurisdiction`. **Not a constant** — CFS sells from a store,
+ *   and a second store in another jurisdiction changes the answer for every
+ *   case-3 address without touching this function.
+ */
+export function deriveJurisdiction(
+  address: { city?: string; region?: string } | null | undefined,
+  origin: JurisdictionType,
+): JurisdictionType | null {
+  // 1. NEXUS. Only a POSITIVELY resolved non-Illinois state exits here; an
+  //    unrecognized region is unknown, not out of state.
+  const code = toUsStateCode(address?.region);
+  if (code !== null && code !== "IL") return null;
+
+  // 2. DESTINATION SOURCING — an exact municipality CFS collects for.
+  const city = (address?.city ?? "").trim().toUpperCase();
+  if (Object.hasOwn(COLLECTING_JURISDICTION_BY_CITY, city)) {
+    return COLLECTING_JURISDICTION_BY_CITY[city];
+  }
+
+  // 3. ORIGIN SOURCING — in Illinois, but not somewhere CFS collects, so the
+  //    sale is deemed to occur at the selling location.
+  return origin;
 }
 
 // ── Out-of-state sourcing ────────────────────────────────────────

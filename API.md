@@ -1773,6 +1773,8 @@ interface CreateOrganizationInputType {
   uid: string;
   name: string;
   tax_profile: TaxProfileType;
+  default_jurisdiction?: JurisdictionType | null;
+  tax_exempt?: boolean;
   billing_address: AddressType | null;
   contacts?: OrganizationContactType[];
   newContacts?: NewContactInputType[] | null;
@@ -1951,6 +1953,13 @@ const CreateTaxInput: z.ZodType<CreateTaxInputType>;
 
 Input for creating a new tax definition.
 
+⚠️ **`valid_from` / `valid_to` are the Phase-1 wire names for the APPLIED
+window** (api-cloudrun#409). The writer derives `applied_from` /`applied_to`
+from them — snapped to Chicago midnight, because a rate boundary is a
+calendar date — and writes both, so a reader on either name agrees. They are
+renamed on the wire in Phase 2, once no stored document still carries the old
+pair. Two names for one bound is a transitional cost, not a design.
+
 ```ts
 interface CreateTaxInputType {
   name: string;
@@ -1959,6 +1968,11 @@ interface CreateTaxInputType {
   active?: boolean;
   valid_from: string;
   valid_to?: string | null;
+  jurisdiction?: JurisdictionType | null;
+  item_types?: PreTaxItemType[];
+  effective_from?: string | null;
+  xero_tax_type?: string | null;
+  xero_components?: XeroTaxComponentType[];
 }
 ```
 
@@ -2329,6 +2343,7 @@ interface DestinationDoc {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
+  jurisdiction?: JurisdictionType | null;
   organizations?: UidNameRefType[];
   query_by_organizations?: string[];
   products?: UidNameRefType[];
@@ -3504,6 +3519,7 @@ interface Invoice {
   query_by_orders: string[];
   number_orders: number[];
   tax_profile: TaxProfileType;
+  tax_exempt?: boolean | null;
   date: string;
   date_fs: FirestoreTimestampType;
   due_date?: string;
@@ -3609,6 +3625,7 @@ interface InvoiceDocLineItem {
   price: InvoiceDocItemPrice;
   path: string[];
   coa_revenue?: COARevenueType | null;
+  taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
   xero_id?: string | null;
   xero_tracking_option_id?: string | null;
@@ -3758,6 +3775,7 @@ interface InvoiceItemInputLineType {
   price?: InvoiceItemInputPrice;
   path?: string[];
   coa_revenue?: COARevenueType | null;
+  taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
 }
 ```
@@ -3937,6 +3955,22 @@ documents: a product's Firestore id, a divider UUID, or a custom-product id.
 
 ```ts
 const ItemUid: z.ZodType<string>;
+```
+
+### `JurisdictionEnum`
+
+Zod schema for JurisdictionType.
+
+```ts
+const JurisdictionEnum: z.ZodType<JurisdictionType>;
+```
+
+### `JurisdictionType`
+
+Allowed values for tax jurisdiction.
+
+```ts
+type JurisdictionType = indexedAccess;
 ```
 
 ### `LIVE_IN_XERO_STATUSES`
@@ -4872,6 +4906,8 @@ interface Order {
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
   tax_profile: TaxProfileType | null;
+  tax_exempt?: boolean | null;
+  uid_store?: string | null;
   totals: OrderDocTotalsType;
   invoices: Array<typeLiteral>;
   query_by_invoices: string[];
@@ -5108,6 +5144,7 @@ interface OrderDocLineItemType {
   zero_priced?: boolean | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
+  taxed_as?: TaxedAsType | null;
 }
 ```
 
@@ -5262,6 +5299,7 @@ interface OrderItemLineType {
   zero_priced?: boolean | null;
   order_number?: number;
   uid_order?: string;
+  taxed_as?: TaxedAsType | null;
 }
 ```
 
@@ -5316,6 +5354,8 @@ interface Organization {
   crms_id: number;
   xero_id: string | null;
   tax_profile: TaxProfileType;
+  default_jurisdiction?: JurisdictionType | null;
+  tax_exempt?: boolean;
   description?: string;
   emails: string[];
   phones: string[];
@@ -5538,6 +5578,14 @@ a sixth place to remember when a type is added.
 
 ```ts
 type PreTaxItemType = indexedAccess;
+```
+
+### `PreTaxItemTypeEnum`
+
+Zod schema for PreTaxItemType. @see {@link PRE_TAX_ITEM_TYPES}
+
+```ts
+const PreTaxItemTypeEnum: z.ZodType<PreTaxItemType>;
 ```
 
 ### `PreviewRecord`
@@ -6753,6 +6801,7 @@ interface Store {
   name: string;
   default: boolean;
   default_location: UidNameRefType | null;
+  uid_destination?: string | null;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -6872,6 +6921,19 @@ that throw. One transaction makes the overlap unrepresentable instead.
 incumbent's `valid_to` — because they are the same instant by definition.
 Two fields would be two chances to disagree.
 
+## `effective_from` is the OTHER date, and it is not this one
+
+`valid_from` (→ `applied_from`) is when **CFS** starts pricing at the new
+rate. {@link Tax.effective_from} is when the rate **legally** took effect.
+They coincided on every change before 2026-08 and nothing forced them apart;
+the NITA increase arrived in a special-district bulletin CFS read weeks late,
+so the two are genuinely different dates and the lag is a fact worth storing.
+
+⚠️ **Open the applied window at the CUTOVER, not at `effective_from`.**
+Backdating it re-rates every unsettled invoice already billed at the old rate
+on its next CRMS edit. The service refuses `effective_from > applied_from`,
+which is the only ordering that is incoherent rather than merely late.
+
 ```ts
 interface SupersedeTaxInputType {
   uid: string;
@@ -6880,6 +6942,11 @@ interface SupersedeTaxInputType {
   rate: number;
   type?: RateType;
   valid_to?: string | null;
+  effective_from?: string | null;
+  xero_tax_type?: string | null;
+  xero_components?: XeroTaxComponentType[];
+  jurisdiction?: JurisdictionType | null;
+  item_types?: PreTaxItemType[];
 }
 ```
 
@@ -7097,6 +7164,15 @@ interface Tax {
   valid_from_fs: FirestoreTimestampType;
   valid_to: string | null;
   valid_to_fs: FirestoreTimestampType | null;
+  jurisdiction?: JurisdictionType | null;
+  item_types?: PreTaxItemType[];
+  applied_from?: string;
+  applied_from_fs?: FirestoreTimestampType;
+  applied_to?: string | null;
+  applied_to_fs?: FirestoreTimestampType | null;
+  effective_from?: string | null;
+  xero_tax_type?: string | null;
+  xero_components?: XeroTaxComponentType[];
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -7149,6 +7225,22 @@ Zod schema for Tax.
 
 ```ts
 const TaxSchema: z.ZodType<Tax>;
+```
+
+### `TaxedAsEnum`
+
+Zod schema for TaxedAsType.
+
+```ts
+const TaxedAsEnum: z.ZodType<TaxedAsType>;
+```
+
+### `TaxedAsType`
+
+Allowed values for a line's tax-type override.
+
+```ts
+type TaxedAsType = indexedAccess;
 ```
 
 ### `Template`
@@ -8000,6 +8092,8 @@ interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
   tax_profile?: TaxProfileType;
+  default_jurisdiction?: JurisdictionType | null;
+  tax_exempt?: boolean;
   description?: string;
   billing_address?: AddressType | null;
   contacts?: OrganizationContactType[];
@@ -8165,6 +8259,11 @@ const UpdateTaxInput: z.ZodType<UpdateTaxInputType>;
 
 Input for updating an existing tax definition.
 
+`rate` and `type` are accepted here and **refused by the service** — an
+in-place rate edit re-prices history, so the sanctioned move is
+{@link SupersedeTaxInput}. They stay on the input so the refusal can name what
+the caller asked for.
+
 ```ts
 interface UpdateTaxInputType {
   uid: string;
@@ -8174,6 +8273,11 @@ interface UpdateTaxInputType {
   active?: boolean;
   valid_from?: string;
   valid_to?: string | null;
+  jurisdiction?: JurisdictionType | null;
+  item_types?: PreTaxItemType[];
+  effective_from?: string | null;
+  xero_tax_type?: string | null;
+  xero_components?: XeroTaxComponentType[];
   version: number;
 }
 ```
@@ -8622,6 +8726,36 @@ Zod schema for XeroSyncState.
 
 ```ts
 const XeroSyncStateSchema: z.ZodType<XeroSyncState>;
+```
+
+### `XeroTaxComponent`
+
+Zod schema for XeroTaxComponent.
+
+```ts
+const XeroTaxComponent: z.ZodType<XeroTaxComponentType>;
+```
+
+### `XeroTaxComponentType`
+
+One component of a Xero tax rate — the state / transit-authority / county /
+city split a filed return reads.
+
+Xero's `DisplayTaxRate` and `EffectiveRate` are **readOnly**: it computes them
+from `TaxComponents[]`. So a CFS-authored rate that flattens four components
+into one total is accepted, prices correctly, and destroys the breakdown an
+ST-1 return is filed from. Carrying the components on the Tax document is what
+lets `xeroTaxRateCreate` reproduce them.
+
+`rate` states its unit outright rather than inheriting one: unlike
+`PriceModifier`, this shape has no sibling `type` to discriminate on, and a
+tax component is always a **percent**.
+
+```ts
+interface XeroTaxComponentType {
+  name: string;
+  rate: number;
+}
 ```
 
 ### `XeroThrottleResetsAtSource`
@@ -10046,6 +10180,22 @@ documents: a product's Firestore id, a divider UUID, or a custom-product id.
 const ItemUid: z.ZodType<string>;
 ```
 
+### `JurisdictionEnum`
+
+Zod schema for JurisdictionType.
+
+```ts
+const JurisdictionEnum: z.ZodType<JurisdictionType>;
+```
+
+### `JurisdictionType`
+
+Allowed values for tax jurisdiction.
+
+```ts
+type JurisdictionType = indexedAccess;
+```
+
 ### `ListId`
 
 `lists.uid` (and `uid_list` references) — a Firestore auto-id (user-created
@@ -10165,6 +10315,14 @@ a sixth place to remember when a type is added.
 
 ```ts
 type PreTaxItemType = indexedAccess;
+```
+
+### `PreTaxItemTypeEnum`
+
+Zod schema for PreTaxItemType. @see {@link PRE_TAX_ITEM_TYPES}
+
+```ts
+const PreTaxItemTypeEnum: z.ZodType<PreTaxItemType>;
 ```
 
 ### `PriceFormulaEnum`
@@ -10388,6 +10546,22 @@ Allowed values for organization-level tax profile.
 
 ```ts
 type TaxProfileType = indexedAccess;
+```
+
+### `TaxedAsEnum`
+
+Zod schema for TaxedAsType.
+
+```ts
+const TaxedAsEnum: z.ZodType<TaxedAsType>;
+```
+
+### `TaxedAsType`
+
+Allowed values for a line's tax-type override.
+
+```ts
+type TaxedAsType = indexedAccess;
 ```
 
 ### `ThreadId`
@@ -11431,6 +11605,7 @@ interface Destination {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
+  jurisdiction?: JurisdictionType | null;
   organizations?: UidNameRefType[];
   query_by_organizations?: string[];
   products?: UidNameRefType[];
@@ -11883,6 +12058,7 @@ interface Invoice {
   query_by_orders: string[];
   number_orders: number[];
   tax_profile: TaxProfileType;
+  tax_exempt?: boolean | null;
   date: string;
   date_fs: FirestoreTimestampType;
   due_date?: string;
@@ -11982,6 +12158,7 @@ interface InvoiceDocLineItem {
   price: InvoiceDocItemPrice;
   path: string[];
   coa_revenue?: COARevenueType | null;
+  taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
   xero_id?: string | null;
   xero_tracking_option_id?: string | null;
@@ -12125,6 +12302,7 @@ interface InvoiceItemInputLineType {
   price?: InvoiceItemInputPrice;
   path?: string[];
   coa_revenue?: COARevenueType | null;
+  taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
 }
 ```
@@ -12885,6 +13063,8 @@ interface Order {
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
   tax_profile: TaxProfileType | null;
+  tax_exempt?: boolean | null;
+  uid_store?: string | null;
   totals: OrderDocTotalsType;
   invoices: Array<typeLiteral>;
   query_by_invoices: string[];
@@ -13109,6 +13289,7 @@ interface OrderDocLineItemType {
   zero_priced?: boolean | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
+  taxed_as?: TaxedAsType | null;
 }
 ```
 
@@ -13242,6 +13423,7 @@ interface OrderItemLineType {
   zero_priced?: boolean | null;
   order_number?: number;
   uid_order?: string;
+  taxed_as?: TaxedAsType | null;
 }
 ```
 
@@ -13523,6 +13705,8 @@ interface CreateOrganizationInputType {
   uid: string;
   name: string;
   tax_profile: TaxProfileType;
+  default_jurisdiction?: JurisdictionType | null;
+  tax_exempt?: boolean;
   billing_address: AddressType | null;
   contacts?: OrganizationContactType[];
   newContacts?: NewContactInputType[] | null;
@@ -13562,6 +13746,8 @@ interface Organization {
   crms_id: number;
   xero_id: string | null;
   tax_profile: TaxProfileType;
+  default_jurisdiction?: JurisdictionType | null;
+  tax_exempt?: boolean;
   description?: string;
   emails: string[];
   phones: string[];
@@ -13624,6 +13810,8 @@ interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
   tax_profile?: TaxProfileType;
+  default_jurisdiction?: JurisdictionType | null;
+  tax_exempt?: boolean;
   description?: string;
   billing_address?: AddressType | null;
   contacts?: OrganizationContactType[];
@@ -14901,6 +15089,7 @@ interface Store {
   name: string;
   default: boolean;
   default_location: UidNameRefType | null;
+  uid_destination?: string | null;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -20124,12 +20313,23 @@ interface StructuralItem {
 ### `Tax`
 
 Subset of the full Tax document needed by utility functions.
-`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in
-`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so
-partial `Tax` literals in tests/callers keep type-checking.
+
+Only `uid`/`name`/`rate`/`type` are required — those are what the pricing
+helpers read. Everything else is resolution metadata that only the as-of
+resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
+it stays optional so partial `Tax` literals in tests and callers keep
+type-checking.
+
+⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on
+purpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read
+`applied_from ?? valid_from` so a deploy can precede the document migration:
+code reading only the new name against a document holding only the old one
+sees a missing bound, treats it as OPEN, and every version then brackets
+every instant — which throws `Tax catalog drift` on the pricing path, out of
+a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_components">>;
 ```
 
 ### `TransactionFeeLineItem`
@@ -22367,12 +22567,23 @@ const TAXABLE_REVENUE_COAS: readonly number[];
 ### `Tax`
 
 Subset of the full Tax document needed by utility functions.
-`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in
-`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so
-partial `Tax` literals in tests/callers keep type-checking.
+
+Only `uid`/`name`/`rate`/`type` are required — those are what the pricing
+helpers read. Everything else is resolution metadata that only the as-of
+resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
+it stays optional so partial `Tax` literals in tests and callers keep
+type-checking.
+
+⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on
+purpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read
+`applied_from ?? valid_from` so a deploy can precede the document migration:
+code reading only the new name against a document holding only the old one
+sees a missing bound, treats it as OPEN, and every version then brackets
+every instant — which throws `Tax catalog drift` on the pricing path, out of
+a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_components">>;
 ```
 
 ### `TransactionFeeLineItem`
@@ -23121,12 +23332,23 @@ const TAX_PROFILE_OVERRIDE_NAME: Partial<Record<TaxProfileType, string>>;
 ### `Tax`
 
 Subset of the full Tax document needed by utility functions.
-`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in
-`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so
-partial `Tax` literals in tests/callers keep type-checking.
+
+Only `uid`/`name`/`rate`/`type` are required — those are what the pricing
+helpers read. Everything else is resolution metadata that only the as-of
+resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
+it stays optional so partial `Tax` literals in tests and callers keep
+type-checking.
+
+⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on
+purpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read
+`applied_from ?? valid_from` so a deploy can precede the document migration:
+code reading only the new name against a document holding only the old one
+sees a missing bound, treats it as OPEN, and every version then brackets
+every instant — which throws `Tax catalog drift` on the pricing path, out of
+a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_components">>;
 ```
 
 ### `TaxSourcingDestination`
@@ -23193,6 +23415,62 @@ Returns `null` for "untaxed", which is a real answer rather than a miss: a
 non-taxable COA, a taxable COA with no tax in practice (4140), and the
 `service` / `surcharge` types under the fallback are all deliberately untaxed.
 
+### `deriveJurisdiction(address: typeLiteral | null | undefined, origin: JurisdictionType): JurisdictionType | null`
+
+**Where a delivery address sources to** — the bottom of the three-level
+jurisdiction precedence, below a destination's explicit `jurisdiction` and
+an organization's `default_jurisdiction`.
+
+## Three cases, three DIFFERENT legal reasons
+
+| # | address | result | why |
+|---|---|---|---|
+| 1 | outside Illinois | `null` | **nexus** — no obligation in another state |
+| 2 | an Illinois city CFS collects in | that jurisdiction | **destination sourcing** |
+| 3 | any other Illinois municipality | `origin` | **origin sourcing** — the sale is deemed to occur at our selling location |
+
+⚠️ **Case 3 is a RULE, not a fallback, and cases 1 and 3 are not the same
+thing.** Merging them — "we don't collect there, so no tax" — untaxes every
+non-Chicago Illinois delivery, which is under-collection on a real
+obligation. The asymmetry is why `origin` is a named required parameter
+rather than a default: a reader has to see that a Naperville delivery is
+taxed, and taxed at *our store's* rate.
+
+## Conservative in the same two directions as {@link isEntirelyOutOfIllinois}
+
+An **unresolvable** region falls to case 3, not case 1. `toUsStateCode`
+returns `null` for *unknown*, never for *not Illinois*, and 18 of the 48
+non-`"IL"` prod destinations are Illinois spelled `"Illinois"` — 13 of them
+in Chicago. Reading unknown as out-of-state would have stopped collecting tax
+CFS owes on all 18. Under-collecting is the expensive error.
+
+## Matching
+
+⚠️ **The city is matched EXACTLY (trimmed, case-folded), never by prefix.**
+*Chicago Heights* and *West Frankfort* are distinct Illinois municipalities
+with their own rates; a `startsWith` would bill both at Chicago's.
+
+⚠️ **`mapbox_id` is deliberately NOT the key**, though it is present on many
+addresses. It identifies an *address*, not a municipality — there is no
+city→id table to match against — and prod's geocodes are demonstrably wrong:
+CFS's own warehouse at 3100 W Fillmore St resolves to "Palos Township /
+60480", and another destination sits at "Grant Park / 60612". Which is also
+the reason this derivation is the LOWEST precedence level: it is a
+convenience, and an explicit `destination.jurisdiction` or an organization
+default outranks it.
+
+Pure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager
+reaches the same answer as the API without a round trip.
+
+**Parameters**
+
+- `address` — The destination's delivery address.
+- `origin` — The selling store's own jurisdiction, resolved by the caller
+through `Order.uid_store` → `Store.uid_destination` →
+`Destination.jurisdiction`. **Not a constant** — CFS sells from a store,
+and a second store in another jurisdiction changes the answer for every
+case-3 address without touching this function.
+
 ### `deriveOrderTaxAsOf(destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined, now: string): string`
 
 As-of instant for resolving an order's taxes: the earliest destination
@@ -23226,14 +23504,48 @@ are all canonical, so no persisted order was ever affected.
 
 ### `findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null`
 
-Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched
-by exact `name`. Returns null when nothing matches (e.g. `asOf` before any
-historical doc). Throws on catalog drift (two same-name docs bracket the same
-instant). A missing `valid_from` is treated as an open start; missing/null
-`valid_to` as an open end.
+Pick the Tax whose applied window contains `asOf`, matched by exact `name`.
+Returns null when nothing matches (e.g. `asOf` before any historical doc).
+Throws on catalog drift (two same-name docs bracket the same instant).
 
-Comparison is by instant (ms since epoch), so Chicago-offset strings with
-heterogeneous DST (-05:00 vs -06:00) compare correctly.
+### `findTaxFor(taxes: Tax[], jurisdiction: JurisdictionType | null, itemType: string, asOf: string): Tax | null`
+
+**The tax rule: `(jurisdiction × item type)`, as of a date.**
+
+Pick the one Tax covering `itemType` in `jurisdiction` whose applied window
+contains `asOf`. `null` means *this line is untaxed*, which is a real answer
+rather than a miss — a line is untaxed **iff no tax in its jurisdiction lists
+its type**.
+
+One mechanism, which is the point. What this replaces was two: a
+`coa_revenue` permissive gate (`isTaxableCoa`) and a separate name-keyed
+default table, each of which could say "taxable" while the other said
+"untaxed". api-cloudrun#409 measured that drift at 19 invoices and $2,741.78
+of phantom receivable — CFS taxing lines it told Xero were `TaxType: NONE`.
+
+⚠️ **A `null` jurisdiction is NEVER a wildcard, on either side.**
+- A `null` ARGUMENT means *no nexus* (delivered outside Illinois): nothing is
+  collected, so the answer is `null` without consulting the catalog.
+- A `null` on a tax DOCUMENT marks the **explicit-only** class — a tax
+  reachable by uid alone, never by this rule. Prod has exactly two (`No Tax`
+  and `Water Bottle Tax`), and treating either as matching every jurisdiction
+  would apply a $0.05/unit bottle tax to every line in the corpus.
+
+Throws on catalog drift, for the same reason {@link findTaxAt} does: two
+taxes covering one `(jurisdiction, type, instant)` is a configuration error
+with no correct silent resolution, and picking either one bills a number
+nobody chose.
+
+**Parameters**
+
+- `taxes` — The `taxes` collection, unfiltered — historical versions
+included, since the window is what selects among them.
+- `jurisdiction` — Where the goods went, already resolved through the
+destination → organization → {@link deriveJurisdiction} precedence.
+- `itemType` — The line's `taxed_as ?? type`. A type no tax lists is
+untaxed, which is how `service`, `surcharge` and `transaction_fee` stay
+untaxed without a second rule naming them.
+- `asOf` — Instant to resolve the catalog at.
 
 ### `getEffectiveProfileTax(orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, taxCatalog: Tax[], asOf: string): Tax | "exempt" | null`
 
@@ -23446,6 +23758,23 @@ phantom receivable when this function's taxable-COA set was a second copy
 
 So the Xero side resolves the profile through *this* and passes the single
 answer, rather than restating the precedence over an array.
+
+### `taxAppliedWindow(tax: Tax): typeLiteral`
+
+The APPLIED window of a tax version, dual-reading the old field names.
+
+⚠️ **`applied_from ?? valid_from`, and the `??` is load-bearing.**
+api-cloudrun#409 renames the pair, and deploy and document-migration cannot
+be simultaneous. Reading only the new name against a document still holding
+only the old one yields a MISSING bound — which every bracket check below
+treats as OPEN, so every version brackets every instant and {@link findTaxAt}
+throws `Tax catalog drift`. That throw is on the pricing path, and out of a
+CRMS Cloud Task handler it retries forever. Phase 2 deletes the fallback and
+the old fields together.
+
+Note the ASYMMETRY: `applied_to` is legitimately `null` (open-ended), so it
+falls back only when *absent*, never when explicitly null. `applied_from` has
+no meaningful null.
 
 ## `@cfs/core/utils/templates`
 

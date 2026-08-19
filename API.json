@@ -849,7 +849,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -933,8 +933,8 @@
         {
           "kind": "interface",
           "name": "CreateTaxInputType",
-          "declaration": "interface CreateTaxInputType {\n  name: string;\n  rate: number;\n  type: RateType;\n  active?: boolean;\n  valid_from: string;\n  valid_to?: string | null;\n}",
-          "doc": "Input for creating a new tax definition."
+          "declaration": "interface CreateTaxInputType {\n  name: string;\n  rate: number;\n  type: RateType;\n  active?: boolean;\n  valid_from: string;\n  valid_to?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_components?: XeroTaxComponentType[];\n}",
+          "doc": "Input for creating a new tax definition.\n\n⚠️ **`valid_from` / `valid_to` are the Phase-1 wire names for the APPLIED\nwindow** (api-cloudrun#409). The writer derives `applied_from` /`applied_to`\nfrom them — snapped to Chicago midnight, because a rate boundary is a\ncalendar date — and writes both, so a reader on either name agrees. They are\nrenamed on the wire in Phase 2, once no stored document still carries the old\npair. Two names for one bound is a transitional cost, not a design."
         },
         {
           "kind": "variable",
@@ -1095,7 +1095,7 @@
         {
           "kind": "interface",
           "name": "DestinationDoc",
-          "declaration": "interface DestinationDoc {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface DestinationDoc {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  jurisdiction?: JurisdictionType | null;\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a destination (a physical address used in orders)."
         },
         {
@@ -1665,7 +1665,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -1707,7 +1707,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItem",
-          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n}",
+          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -1773,7 +1773,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItemSchema`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -1865,6 +1865,18 @@
           "name": "ItemUid",
           "declaration": "const ItemUid: z.ZodType<string>;",
           "doc": "Polymorphic `items[].uid` + `path[]` segment in order/invoice/fulfillment\ndocuments: a product's Firestore id, a divider UUID, or a custom-product id."
+        },
+        {
+          "kind": "variable",
+          "name": "JurisdictionEnum",
+          "declaration": "const JurisdictionEnum: z.ZodType<JurisdictionType>;",
+          "doc": "Zod schema for JurisdictionType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "JurisdictionType",
+          "declaration": "type JurisdictionType = indexedAccess;",
+          "doc": "Allowed values for tax jurisdiction."
         },
         {
           "kind": "variable",
@@ -2319,7 +2331,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType | null;\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -2421,7 +2433,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced?: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced?: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -2481,7 +2493,7 @@
         {
           "kind": "interface",
           "name": "OrderItemLineType",
-          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n}",
+          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\nDeliberately permissive about what may be OMITTED: the server fills `name`,\n`stock_method` and the whole price from the backing product doc, and a custom\nline supplies them itself. What it is no longer permissive about is what a\nline may CLAIM — see {@link OrderItem} for why the arms exist.\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
         },
         {
@@ -2523,7 +2535,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -2639,6 +2651,12 @@
           "name": "PreTaxItemType",
           "declaration": "type PreTaxItemType = indexedAccess;",
           "doc": "The `pricing: \"pre_tax\"` members — every type that counts INTO the document\nsubtotal.\n\nDerived from {@link ITEM_CONTRACTS} rather than listed. A hand-written copy of\nthis union is exactly the drift the parity assertions above exist to prevent,\nand `@cfs/core/utils/orders` carried one — `PreTaxLineItem[\"type\"]` was the\nliteral list `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\na sixth place to remember when a type is added."
+        },
+        {
+          "kind": "variable",
+          "name": "PreTaxItemTypeEnum",
+          "declaration": "const PreTaxItemTypeEnum: z.ZodType<PreTaxItemType>;",
+          "doc": "Zod schema for PreTaxItemType. @see {@link PRE_TAX_ITEM_TYPES}"
         },
         {
           "kind": "interface",
@@ -3207,7 +3225,7 @@
         {
           "kind": "interface",
           "name": "Store",
-          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  uid_destination?: string | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A store document in Firestore."
         },
         {
@@ -3261,8 +3279,8 @@
         {
           "kind": "interface",
           "name": "SupersedeTaxInputType",
-          "declaration": "interface SupersedeTaxInputType {\n  uid: string;\n  version: number;\n  valid_from: string;\n  rate: number;\n  type?: RateType;\n  valid_to?: string | null;\n}",
-          "doc": "Input for superseding a tax — closing the incumbent's window and opening its\nsuccessor's, in one write (api-cloudrun#495).\n\n## Why this is not two calls\n\nA rate change is retroactive by nature, so the correct model is a new\n*version* rather than an edit — but the sanctioned way to reach it was\n`POST /taxes` followed by `PUT /taxes/{old}`, and **between those two calls\nboth versions are open-ended**. {@link findTaxAt} does not pick one when two\nsame-name docs bracket an instant, it THROWS `Tax catalog drift` — on the\npricing path, for every order and invoice write touching that name. So the\ndocumented workflow had a window in which pricing was down, and the operator\ngetting the order wrong was the only thing standing between the catalog and\nthat throw. One transaction makes the overlap unrepresentable instead.\n\n## What is deliberately absent\n\n- **No `name`.** A supersede is by construction the next version of the same\n  tax, and `findTaxAt` matches by name — so a caller-supplied name would let\n  one call close this series and open a different one, which is two edits\n  wearing one verb.\n- **No way to deactivate the incumbent.** A closed version must stay in the\n  catalog: `getTaxDocs()` reads the collection unfiltered and `findTaxAt`\n  resolves *historical* instants off it, so retiring the incumbent would\n  re-price every past document that names it. It is also what keeps a\n  consumer holding a pinned uid working — manager pins `RENTAL_TAX_UID` as a\n  constant and `getDefaultTaxesForType` returns `[]` on a miss, so a\n  deactivated incumbent creates every new rental line **untaxed, silently**.\n  The line still prices correctly because the order writers re-resolve by\n  name at `asOf` (`resolveTaxRefsAt`); that resolution is the reason this\n  endpoint is safe to ship before manager stops pinning uids.\n\n`valid_from` is one field doing two jobs — the successor's start AND the\nincumbent's `valid_to` — because they are the same instant by definition.\nTwo fields would be two chances to disagree."
+          "declaration": "interface SupersedeTaxInputType {\n  uid: string;\n  version: number;\n  valid_from: string;\n  rate: number;\n  type?: RateType;\n  valid_to?: string | null;\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n}",
+          "doc": "Input for superseding a tax — closing the incumbent's window and opening its\nsuccessor's, in one write (api-cloudrun#495).\n\n## Why this is not two calls\n\nA rate change is retroactive by nature, so the correct model is a new\n*version* rather than an edit — but the sanctioned way to reach it was\n`POST /taxes` followed by `PUT /taxes/{old}`, and **between those two calls\nboth versions are open-ended**. {@link findTaxAt} does not pick one when two\nsame-name docs bracket an instant, it THROWS `Tax catalog drift` — on the\npricing path, for every order and invoice write touching that name. So the\ndocumented workflow had a window in which pricing was down, and the operator\ngetting the order wrong was the only thing standing between the catalog and\nthat throw. One transaction makes the overlap unrepresentable instead.\n\n## What is deliberately absent\n\n- **No `name`.** A supersede is by construction the next version of the same\n  tax, and `findTaxAt` matches by name — so a caller-supplied name would let\n  one call close this series and open a different one, which is two edits\n  wearing one verb.\n- **No way to deactivate the incumbent.** A closed version must stay in the\n  catalog: `getTaxDocs()` reads the collection unfiltered and `findTaxAt`\n  resolves *historical* instants off it, so retiring the incumbent would\n  re-price every past document that names it. It is also what keeps a\n  consumer holding a pinned uid working — manager pins `RENTAL_TAX_UID` as a\n  constant and `getDefaultTaxesForType` returns `[]` on a miss, so a\n  deactivated incumbent creates every new rental line **untaxed, silently**.\n  The line still prices correctly because the order writers re-resolve by\n  name at `asOf` (`resolveTaxRefsAt`); that resolution is the reason this\n  endpoint is safe to ship before manager stops pinning uids.\n\n`valid_from` is one field doing two jobs — the successor's start AND the\nincumbent's `valid_to` — because they are the same instant by definition.\nTwo fields would be two chances to disagree.\n\n## `effective_from` is the OTHER date, and it is not this one\n\n`valid_from` (→ `applied_from`) is when **CFS** starts pricing at the new\nrate. {@link Tax.effective_from} is when the rate **legally** took effect.\nThey coincided on every change before 2026-08 and nothing forced them apart;\nthe NITA increase arrived in a special-district bulletin CFS read weeks late,\nso the two are genuinely different dates and the lag is a fact worth storing.\n\n⚠️ **Open the applied window at the CUTOVER, not at `effective_from`.**\nBackdating it re-rates every unsettled invoice already billed at the old rate\non its next CRMS edit. The service refuses `effective_from > applied_from`,\nwhich is the only ordering that is incoherent rather than merely late."
         },
         {
           "kind": "interface",
@@ -3363,7 +3381,7 @@
         {
           "kind": "interface",
           "name": "Tax",
-          "declaration": "interface Tax {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  active: boolean;\n  crms_id: number | null;\n  valid_from: string;\n  valid_from_fs: FirestoreTimestampType;\n  valid_to: string | null;\n  valid_to_fs: FirestoreTimestampType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Tax {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  active: boolean;\n  crms_id: number | null;\n  valid_from: string;\n  valid_from_fs: FirestoreTimestampType;\n  valid_to: string | null;\n  valid_to_fs: FirestoreTimestampType | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  applied_from?: string;\n  applied_from_fs?: FirestoreTimestampType;\n  applied_to?: string | null;\n  applied_to_fs?: FirestoreTimestampType | null;\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tax definition used for computing item-level and order-level tax amounts."
         },
         {
@@ -3395,6 +3413,18 @@
           "name": "TaxSchema",
           "declaration": "const TaxSchema: z.ZodType<Tax>;",
           "doc": "Zod schema for Tax."
+        },
+        {
+          "kind": "variable",
+          "name": "TaxedAsEnum",
+          "declaration": "const TaxedAsEnum: z.ZodType<TaxedAsType>;",
+          "doc": "Zod schema for TaxedAsType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "TaxedAsType",
+          "declaration": "type TaxedAsType = indexedAccess;",
+          "doc": "Allowed values for a line's tax-type override."
         },
         {
           "kind": "interface",
@@ -3825,7 +3855,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         },
         {
@@ -3897,8 +3927,8 @@
         {
           "kind": "interface",
           "name": "UpdateTaxInputType",
-          "declaration": "interface UpdateTaxInputType {\n  uid: string;\n  name?: string;\n  rate?: number;\n  type?: RateType;\n  active?: boolean;\n  valid_from?: string;\n  valid_to?: string | null;\n  version: number;\n}",
-          "doc": "Input for updating an existing tax definition."
+          "declaration": "interface UpdateTaxInputType {\n  uid: string;\n  name?: string;\n  rate?: number;\n  type?: RateType;\n  active?: boolean;\n  valid_from?: string;\n  valid_to?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  version: number;\n}",
+          "doc": "Input for updating an existing tax definition.\n\n`rate` and `type` are accepted here and **refused by the service** — an\nin-place rate edit re-prices history, so the sanctioned move is\n{@link SupersedeTaxInput}. They stay on the input so the refusal can name what\nthe caller asked for."
         },
         {
           "kind": "variable",
@@ -4115,6 +4145,18 @@
           "name": "XeroSyncStateSchema",
           "declaration": "const XeroSyncStateSchema: z.ZodType<XeroSyncState>;",
           "doc": "Zod schema for XeroSyncState."
+        },
+        {
+          "kind": "variable",
+          "name": "XeroTaxComponent",
+          "declaration": "const XeroTaxComponent: z.ZodType<XeroTaxComponentType>;",
+          "doc": "Zod schema for XeroTaxComponent."
+        },
+        {
+          "kind": "interface",
+          "name": "XeroTaxComponentType",
+          "declaration": "interface XeroTaxComponentType {\n  name: string;\n  rate: number;\n}",
+          "doc": "One component of a Xero tax rate — the state / transit-authority / county /\ncity split a filed return reads.\n\nXero's `DisplayTaxRate` and `EffectiveRate` are **readOnly**: it computes them\nfrom `TaxComponents[]`. So a CFS-authored rate that flattens four components\ninto one total is accepted, prices correctly, and destroys the breakdown an\nST-1 return is filed from. Carrying the components on the Tax document is what\nlets `xeroTaxRateCreate` reproduce them.\n\n`rate` states its unit outright rather than inheriting one: unlike\n`PriceModifier`, this shape has no sibling `type` to discriminate on, and a\ntax component is always a **percent**."
         },
         {
           "kind": "typeAlias",
@@ -4873,6 +4915,18 @@
         },
         {
           "kind": "variable",
+          "name": "JurisdictionEnum",
+          "declaration": "const JurisdictionEnum: z.ZodType<JurisdictionType>;",
+          "doc": "Zod schema for JurisdictionType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "JurisdictionType",
+          "declaration": "type JurisdictionType = indexedAccess;",
+          "doc": "Allowed values for tax jurisdiction."
+        },
+        {
+          "kind": "variable",
           "name": "ListId",
           "declaration": "const ListId: z.ZodType<string>;",
           "doc": "`lists.uid` (and `uid_list` references) — a Firestore auto-id (user-created\nlists) or a lowercase-kebab slug (seeded/system lists, e.g. `in-store`,\n`field-service`)."
@@ -4930,6 +4984,12 @@
           "name": "PreTaxItemType",
           "declaration": "type PreTaxItemType = indexedAccess;",
           "doc": "The `pricing: \"pre_tax\"` members — every type that counts INTO the document\nsubtotal.\n\nDerived from {@link ITEM_CONTRACTS} rather than listed. A hand-written copy of\nthis union is exactly the drift the parity assertions above exist to prevent,\nand `@cfs/core/utils/orders` carried one — `PreTaxLineItem[\"type\"]` was the\nliteral list `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\na sixth place to remember when a type is added."
+        },
+        {
+          "kind": "variable",
+          "name": "PreTaxItemTypeEnum",
+          "declaration": "const PreTaxItemTypeEnum: z.ZodType<PreTaxItemType>;",
+          "doc": "Zod schema for PreTaxItemType. @see {@link PRE_TAX_ITEM_TYPES}"
         },
         {
           "kind": "variable",
@@ -5062,6 +5122,18 @@
           "name": "TaxProfileType",
           "declaration": "type TaxProfileType = indexedAccess;",
           "doc": "Allowed values for organization-level tax profile."
+        },
+        {
+          "kind": "variable",
+          "name": "TaxedAsEnum",
+          "declaration": "const TaxedAsEnum: z.ZodType<TaxedAsType>;",
+          "doc": "Zod schema for TaxedAsType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "TaxedAsType",
+          "declaration": "type TaxedAsType = indexedAccess;",
+          "doc": "Allowed values for a line's tax-type override."
         },
         {
           "kind": "variable",
@@ -5622,7 +5694,7 @@
         {
           "kind": "interface",
           "name": "Destination",
-          "declaration": "interface Destination {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Destination {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  jurisdiction?: JurisdictionType | null;\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a destination (a physical address used in orders)."
         },
         {
@@ -5874,7 +5946,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -5910,7 +5982,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItem",
-          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n}",
+          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -5970,7 +6042,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItemSchema`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -6382,7 +6454,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType | null;\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -6472,7 +6544,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced?: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced?: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -6520,7 +6592,7 @@
         {
           "kind": "interface",
           "name": "OrderItemLineType",
-          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n}",
+          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\nDeliberately permissive about what may be OMITTED: the server fills `name`,\n`stock_method` and the whole price from the backing product doc, and a custom\nline supplies them itself. What it is no longer permissive about is what a\nline may CLAIM — see {@link OrderItem} for why the arms exist.\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
         },
         {
@@ -6696,7 +6768,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -6714,7 +6786,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -6744,7 +6816,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         }
       ]
@@ -7258,7 +7330,7 @@
         {
           "kind": "interface",
           "name": "Store",
-          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  uid_destination?: string | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A store document in Firestore."
         },
         {
@@ -9782,8 +9854,8 @@
         {
           "kind": "typeAlias",
           "name": "Tax",
-          "declaration": "type Tax = Pick<SchemaTax, \"uid\" | \"name\" | \"rate\" | \"type\"> & Partial<Pick<SchemaTax, \"valid_from\" | \"valid_to\">>;",
-          "doc": "Subset of the full Tax document needed by utility functions.\n`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in\n`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so\npartial `Tax` literals in tests/callers keep type-checking."
+          "declaration": "type Tax = Pick<SchemaTax, \"uid\" | \"name\" | \"rate\" | \"type\"> & Partial<Pick<SchemaTax, \"valid_from\" | \"valid_to\" | \"applied_from\" | \"applied_to\" | \"effective_from\" | \"jurisdiction\" | \"item_types\" | \"xero_tax_type\" | \"xero_components\">>;",
+          "doc": "Subset of the full Tax document needed by utility functions.\n\nOnly `uid`/`name`/`rate`/`type` are required — those are what the pricing\nhelpers read. Everything else is resolution metadata that only the as-of\nresolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and\nit stays optional so partial `Tax` literals in tests and callers keep\ntype-checking.\n\n⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on\npurpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read\n`applied_from ?? valid_from` so a deploy can precede the document migration:\ncode reading only the new name against a document holding only the old one\nsees a missing bound, treats it as OPEN, and every version then brackets\nevery instant — which throws `Tax catalog drift` on the pricing path, out of\na CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair."
         },
         {
           "kind": "interface",
@@ -10958,8 +11030,8 @@
         {
           "kind": "typeAlias",
           "name": "Tax",
-          "declaration": "type Tax = Pick<SchemaTax, \"uid\" | \"name\" | \"rate\" | \"type\"> & Partial<Pick<SchemaTax, \"valid_from\" | \"valid_to\">>;",
-          "doc": "Subset of the full Tax document needed by utility functions.\n`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in\n`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so\npartial `Tax` literals in tests/callers keep type-checking."
+          "declaration": "type Tax = Pick<SchemaTax, \"uid\" | \"name\" | \"rate\" | \"type\"> & Partial<Pick<SchemaTax, \"valid_from\" | \"valid_to\" | \"applied_from\" | \"applied_to\" | \"effective_from\" | \"jurisdiction\" | \"item_types\" | \"xero_tax_type\" | \"xero_components\">>;",
+          "doc": "Subset of the full Tax document needed by utility functions.\n\nOnly `uid`/`name`/`rate`/`type` are required — those are what the pricing\nhelpers read. Everything else is resolution metadata that only the as-of\nresolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and\nit stays optional so partial `Tax` literals in tests and callers keep\ntype-checking.\n\n⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on\npurpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read\n`applied_from ?? valid_from` so a deploy can precede the document migration:\ncode reading only the new name against a document holding only the old one\nsees a missing bound, treats it as OPEN, and every version then brackets\nevery instant — which throws `Tax catalog drift` on the pricing path, out of\na CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair."
         },
         {
           "kind": "interface",
@@ -11432,8 +11504,8 @@
         {
           "kind": "typeAlias",
           "name": "Tax",
-          "declaration": "type Tax = Pick<SchemaTax, \"uid\" | \"name\" | \"rate\" | \"type\"> & Partial<Pick<SchemaTax, \"valid_from\" | \"valid_to\">>;",
-          "doc": "Subset of the full Tax document needed by utility functions.\n`valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in\n`@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so\npartial `Tax` literals in tests/callers keep type-checking."
+          "declaration": "type Tax = Pick<SchemaTax, \"uid\" | \"name\" | \"rate\" | \"type\"> & Partial<Pick<SchemaTax, \"valid_from\" | \"valid_to\" | \"applied_from\" | \"applied_to\" | \"effective_from\" | \"jurisdiction\" | \"item_types\" | \"xero_tax_type\" | \"xero_components\">>;",
+          "doc": "Subset of the full Tax document needed by utility functions.\n\nOnly `uid`/`name`/`rate`/`type` are required — those are what the pricing\nhelpers read. Everything else is resolution metadata that only the as-of\nresolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and\nit stays optional so partial `Tax` literals in tests and callers keep\ntype-checking.\n\n⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on\npurpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read\n`applied_from ?? valid_from` so a deploy can precede the document migration:\ncode reading only the new name against a document holding only the old one\nsees a missing bound, treats it as OPEN, and every version then brackets\nevery instant — which throws `Tax catalog drift` on the pricing path, out of\na CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair."
         },
         {
           "kind": "interface",
@@ -11467,6 +11539,23 @@
         },
         {
           "kind": "function",
+          "name": "deriveJurisdiction",
+          "signature": "deriveJurisdiction(address: typeLiteral | null | undefined, origin: JurisdictionType): JurisdictionType | null",
+          "doc": "**Where a delivery address sources to** — the bottom of the three-level\njurisdiction precedence, below a destination's explicit `jurisdiction` and\nan organization's `default_jurisdiction`.\n\n## Three cases, three DIFFERENT legal reasons\n\n| # | address | result | why |\n|---|---|---|---|\n| 1 | outside Illinois | `null` | **nexus** — no obligation in another state |\n| 2 | an Illinois city CFS collects in | that jurisdiction | **destination sourcing** |\n| 3 | any other Illinois municipality | `origin` | **origin sourcing** — the sale is deemed to occur at our selling location |\n\n⚠️ **Case 3 is a RULE, not a fallback, and cases 1 and 3 are not the same\nthing.** Merging them — \"we don't collect there, so no tax\" — untaxes every\nnon-Chicago Illinois delivery, which is under-collection on a real\nobligation. The asymmetry is why `origin` is a named required parameter\nrather than a default: a reader has to see that a Naperville delivery is\ntaxed, and taxed at *our store's* rate.\n\n## Conservative in the same two directions as {@link isEntirelyOutOfIllinois}\n\nAn **unresolvable** region falls to case 3, not case 1. `toUsStateCode`\nreturns `null` for *unknown*, never for *not Illinois*, and 18 of the 48\nnon-`\"IL\"` prod destinations are Illinois spelled `\"Illinois\"` — 13 of them\nin Chicago. Reading unknown as out-of-state would have stopped collecting tax\nCFS owes on all 18. Under-collecting is the expensive error.\n\n## Matching\n\n⚠️ **The city is matched EXACTLY (trimmed, case-folded), never by prefix.**\n*Chicago Heights* and *West Frankfort* are distinct Illinois municipalities\nwith their own rates; a `startsWith` would bill both at Chicago's.\n\n⚠️ **`mapbox_id` is deliberately NOT the key**, though it is present on many\naddresses. It identifies an *address*, not a municipality — there is no\ncity→id table to match against — and prod's geocodes are demonstrably wrong:\nCFS's own warehouse at 3100 W Fillmore St resolves to \"Palos Township /\n60480\", and another destination sits at \"Grant Park / 60612\". Which is also\nthe reason this derivation is the LOWEST precedence level: it is a\nconvenience, and an explicit `destination.jurisdiction` or an organization\ndefault outranks it.\n\nPure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager\nreaches the same answer as the API without a round trip.",
+          "paramTags": [
+            {
+              "name": "address",
+              "doc": "The destination's delivery address."
+            },
+            {
+              "name": "origin",
+              "doc": "The selling store's own jurisdiction, resolved by the caller\nthrough `Order.uid_store` → `Store.uid_destination` →\n`Destination.jurisdiction`. **Not a constant** — CFS sells from a store,\nand a second store in another jurisdiction changes the answer for every\ncase-3 address without touching this function."
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "deriveOrderTaxAsOf",
           "signature": "deriveOrderTaxAsOf(destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined, now: string): string",
           "doc": "As-of instant for resolving an order's taxes: the earliest destination\ndelivery start, falling back to `now`.\n\n**`now` is injected, and that is the whole reason this can live in `core`.**\nThe two callers reach for different clocks — api-cloudrun's\n`Timestamp.now().toDate().toISOString()`, the manager's\n`new Date().toISOString()` — and both produce the same UTC-Z form, so the\nfallback resolves identically on either side.\n\n⚠️ **Not the banned business-date anti-pattern.** `asOf` is a resolution\ninstant handed to {@link findTaxAt}, never written to a document. Emitting\nChicago offset form here would make the server and the client resolve\ndifferently for an instant near midnight, which is the failure this note\nexists to prevent.\n\n⚠️ **\"Earliest\" is by INSTANT, and a `.sort()` over the strings is not that.**\nThe form this replaced sorted the ISO text. For CANONICAL Chicago values that\nhappens to be correct — canonicalization makes the wall-clock text monotonic\nwith the instant, including across a DST switch, because everything before it\nreads `≤ 01:59:59.999-06:00` and everything after reads `≥ 03:00:00.000-05:00`\n(measured; the earlier draft of this note claimed a DST inversion and was\nwrong). It breaks on a MIXED set: `2026-06-01T08:00:00.000-05:00` sorts before\n`2026-06-01T12:00:00.000Z` while being an hour LATER.\n\nThat is reachable, and specifically on the client: the manager calls this\nagainst an in-memory, mid-edit order, where a date picker can supply a raw\n`Z` value that has not been through `toChicagoInstant` yet. Stored documents\nare all canonical, so no persisted order was ever affected.",
@@ -11477,8 +11566,33 @@
           "kind": "function",
           "name": "findTaxAt",
           "signature": "findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null",
-          "doc": "Pick the Tax whose `[valid_from, valid_to)` bracket contains `asOf`, matched\nby exact `name`. Returns null when nothing matches (e.g. `asOf` before any\nhistorical doc). Throws on catalog drift (two same-name docs bracket the same\ninstant). A missing `valid_from` is treated as an open start; missing/null\n`valid_to` as an open end.\n\nComparison is by instant (ms since epoch), so Chicago-offset strings with\nheterogeneous DST (-05:00 vs -06:00) compare correctly.",
+          "doc": "Pick the Tax whose applied window contains `asOf`, matched by exact `name`.\nReturns null when nothing matches (e.g. `asOf` before any historical doc).\nThrows on catalog drift (two same-name docs bracket the same instant).",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "findTaxFor",
+          "signature": "findTaxFor(taxes: Tax[], jurisdiction: JurisdictionType | null, itemType: string, asOf: string): Tax | null",
+          "doc": "**The tax rule: `(jurisdiction × item type)`, as of a date.**\n\nPick the one Tax covering `itemType` in `jurisdiction` whose applied window\ncontains `asOf`. `null` means *this line is untaxed*, which is a real answer\nrather than a miss — a line is untaxed **iff no tax in its jurisdiction lists\nits type**.\n\nOne mechanism, which is the point. What this replaces was two: a\n`coa_revenue` permissive gate (`isTaxableCoa`) and a separate name-keyed\ndefault table, each of which could say \"taxable\" while the other said\n\"untaxed\". api-cloudrun#409 measured that drift at 19 invoices and $2,741.78\nof phantom receivable — CFS taxing lines it told Xero were `TaxType: NONE`.\n\n⚠️ **A `null` jurisdiction is NEVER a wildcard, on either side.**\n- A `null` ARGUMENT means *no nexus* (delivered outside Illinois): nothing is\n  collected, so the answer is `null` without consulting the catalog.\n- A `null` on a tax DOCUMENT marks the **explicit-only** class — a tax\n  reachable by uid alone, never by this rule. Prod has exactly two (`No Tax`\n  and `Water Bottle Tax`), and treating either as matching every jurisdiction\n  would apply a $0.05/unit bottle tax to every line in the corpus.\n\nThrows on catalog drift, for the same reason {@link findTaxAt} does: two\ntaxes covering one `(jurisdiction, type, instant)` is a configuration error\nwith no correct silent resolution, and picking either one bills a number\nnobody chose.",
+          "paramTags": [
+            {
+              "name": "taxes",
+              "doc": "The `taxes` collection, unfiltered — historical versions\nincluded, since the window is what selects among them."
+            },
+            {
+              "name": "jurisdiction",
+              "doc": "Where the goods went, already resolved through the\ndestination → organization → {@link deriveJurisdiction} precedence."
+            },
+            {
+              "name": "itemType",
+              "doc": "The line's `taxed_as ?? type`. A type no tax lists is\nuntaxed, which is how `service`, `surcharge` and `transaction_fee` stay\nuntaxed without a second rule naming them."
+            },
+            {
+              "name": "asOf",
+              "doc": "Instant to resolve the catalog at."
+            }
+          ],
           "returnsTag": null
         },
         {
@@ -11555,6 +11669,14 @@
           "name": "resolveEffectiveProfile",
           "signature": "resolveEffectiveProfile(orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null): TaxProfileType",
           "doc": "The **one precedence rule**, as a profile rather than as a resolved Tax:\nexemption from either side wins, then the document's profile, then the\norganization's.\n\nExtracted because two consumers need the same answer in different currencies\nand had grown two rules. {@link getEffectiveProfileTax} answers *\"which Tax\ndocument prices this line?\"*; `resolveXeroTaxType` (api-cloudrun\n`src/lib/xeroTax.ts`) answers *\"which Xero `TaxType` does the line carry?\"* —\nand it did so with its own `taxProfiles.includes(\"tax_frankfort\")` scan over\n`[org, doc]`. Under the `??` precedence those two disagree exactly where it\ncosts money: a document-level `\"tax_applied\"` under a Frankfort organization\nnow prices Chicago in CFS while the scan still stamps Xero `TAX007`. CFS has\npaid for that class of divergence once already — 19 invoices and $2,741.78 of\nphantom receivable when this function's taxable-COA set was a second copy\n(api-cloudrun#409).\n\nSo the Xero side resolves the profile through *this* and passes the single\nanswer, rather than restating the precedence over an array.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "taxAppliedWindow",
+          "signature": "taxAppliedWindow(tax: Tax): typeLiteral",
+          "doc": "The APPLIED window of a tax version, dual-reading the old field names.\n\n⚠️ **`applied_from ?? valid_from`, and the `??` is load-bearing.**\napi-cloudrun#409 renames the pair, and deploy and document-migration cannot\nbe simultaneous. Reading only the new name against a document still holding\nonly the old one yields a MISSING bound — which every bracket check below\ntreats as OPEN, so every version brackets every instant and {@link findTaxAt}\nthrows `Tax catalog drift`. That throw is on the pricing path, and out of a\nCRMS Cloud Task handler it retries forever. Phase 2 deletes the fallback and\nthe old fields together.\n\nNote the ASYMMETRY: `applied_to` is legitimately `null` (open-ended), so it\nfalls back only when *absent*, never when explicitly null. `applied_from` has\nno meaningful null.",
           "paramTags": [],
           "returnsTag": null
         }

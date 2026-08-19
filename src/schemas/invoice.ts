@@ -22,6 +22,8 @@ import {
   PriceFormulaEnum,
   type PriceFormulaType,
   TaxProfileEnum,
+  TaxedAsEnum,
+  type TaxedAsType,
   type InvoiceStatusType,
   InvoiceStatusEnum,
   type TaxProfileType,
@@ -299,6 +301,15 @@ export interface InvoiceDocLineItem {
   price: InvoiceDocItemPrice;
   path: string[];
   coa_revenue?: COARevenueType | null;
+  /**
+   * @see `OrderDocLineItemType.taxed_as`. Mirrored onto the invoice so an
+   * order→invoice projection round-trips it, and so `invoiceItemsMatch` can
+   * compare it rather than report every affected line `out_of_sync` forever —
+   * that comparator matches on KEY SETS, and a comparable field present on one
+   * side only has caused exactly that three times (`base_percent`, `crms_id`,
+   * `price.discount_percent`: 8,015 of 8,978 paired lines).
+   */
+  taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
   xero_id?: string | null;
   xero_tracking_option_id?: string | null;
@@ -321,6 +332,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   price: InvoiceDocItemPriceSchema,
   path: z.array(ItemUid).default([]),
   coa_revenue: COARevenueEnum.nullable().optional(),
+  taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
   tracking_category: z.string().nullable().optional(),
   xero_id: z.uuid().nullable().optional(),
   xero_tracking_option_id: z.uuid().nullable().optional(),
@@ -496,6 +508,16 @@ export interface Invoice {
   query_by_orders: string[];
   number_orders: number[];
   tax_profile: TaxProfileType;
+  /**
+   * This invoice's exemption, or `null` to inherit the organization's.
+   *
+   * ⚠️ **Sticky**: `org.tax_exempt || doc.tax_exempt === true`, never
+   * `doc ?? org` — see `Order.tax_exempt` for the full rule and why `false`
+   * asserts nothing rather than un-exempting.
+   *
+   * Optional through api-cloudrun#409 Phase 1.
+   */
+  tax_exempt?: boolean | null;
   date: string;
   date_fs: FirestoreTimestampType;
   due_date?: string;
@@ -538,6 +560,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   query_by_orders: z.array(z.string()).default([]),
   number_orders: z.array(z.int()).default([]).meta({ column: true, label: "Order #" }),
   tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+  tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),
   // The ISO field carries the annotation; its `_fs` Timestamp mirror is the
   // same column under the other encoding — see `FS_MIRROR_SUFFIX`.
   date: chicagoStartOfDay().meta({ column: true, label: "Date", serverSortVia: "date_fs" }),
@@ -655,6 +678,8 @@ export interface InvoiceItemInputLineType {
   price?: InvoiceItemInputPrice;
   path?: string[];
   coa_revenue?: COARevenueType | null;
+  /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
+  taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
 }
 
@@ -671,6 +696,7 @@ const InvoiceItemInputLineInner = z.object({
   price: InvoiceItemInputPriceSchema.optional(),
   path: z.array(ItemUid).optional(),
   coa_revenue: COARevenueEnum.nullable().optional(),
+  taxed_as: TaxedAsEnum.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
 }).superRefine(checkItemPriceFormula);
 

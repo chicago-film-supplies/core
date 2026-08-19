@@ -228,6 +228,9 @@ export {
   StockMethodEnum,
   TaxProfileEnum,
   DEFAULT_TAX_PROFILE,
+  JurisdictionEnum,
+  PreTaxItemTypeEnum,
+  TaxedAsEnum,
   DocumentOrganizationSnapshot,
   toRegionCode,
   toUsStateCode,
@@ -275,6 +278,8 @@ export {
   type ProductTypeType,
   type StockMethodType,
   type TaxProfileType,
+  type JurisdictionType,
+  type TaxedAsType,
   type PriceFormulaType,
   type InclusionTypeType,
   type ComponentTypeType,
@@ -641,10 +646,12 @@ export {
   CreateTaxInput,
   UpdateTaxInput,
   SupersedeTaxInput,
+  XeroTaxComponent,
   type Tax,
   type CreateTaxInputType,
   type UpdateTaxInputType,
   type SupersedeTaxInputType,
+  type XeroTaxComponentType,
 } from "./tax.ts";
 
 export {

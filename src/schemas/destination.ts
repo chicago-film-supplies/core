@@ -7,6 +7,8 @@ import {
   Address,
   type AddressType,
   type FirestoreTimestampType,
+  JurisdictionEnum,
+  type JurisdictionType,
   NameField,
   type NameParts,
   NamePartsFields,
@@ -40,6 +42,25 @@ export interface Destination {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
+  /**
+   * The tax jurisdiction goods delivered here are sourced to — the **most
+   * specific** of the three levels, and the only one an operator authors
+   * directly. `null`/absent falls through to the organization's
+   * `default_jurisdiction`, then to `deriveJurisdiction(address)`.
+   *
+   * ⚠️ **ONE nullable field, not a derived/override pair.** Derivation never
+   * writes here, so it cannot clobber an operator's value, and there is nothing
+   * for a stored derived copy to go stale against — `deriveJurisdiction` is
+   * pure and runs at read time.
+   *
+   * ⚠️ **A destination is SHARED.** It carries `organizations[]`/`contacts[]`
+   * back-refs, so editing this affects every FUTURE document using the address.
+   * Existing documents are protected by the snapshot on `order.destinations[]`
+   * — reprice a live order from the snapshot, never from the master.
+   *
+   * Optional through api-cloudrun#409 Phase 1: every new tax field is additive.
+   */
+  jurisdiction?: JurisdictionType | null;
   organizations?: UidNameRefType[];
   query_by_organizations?: string[];
   products?: UidNameRefType[];
@@ -58,6 +79,10 @@ export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   // Required (no `.default([])`): the Typesense config declares it so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
   mapbox_ids: z.array(z.string()),
+  jurisdiction: JurisdictionEnum.nullable().optional().meta({
+    column: true,
+    label: "Jurisdiction",
+  }),
   organizations: z.array(UidNameRef).default([]).optional().meta({ label: "Organizations" }),
   query_by_organizations: z.array(z.string()).default([]).optional(),
   products: z.array(UidNameRef).default([]).optional().meta({ label: "Products" }),

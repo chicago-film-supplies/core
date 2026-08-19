@@ -11,6 +11,28 @@ export interface Store {
   name: string;
   default: boolean;
   default_location: UidNameRefType | null;
+  /**
+   * The `destinations/{uid}` this store sells FROM — its origin for sourcing.
+   *
+   * Illinois **origin sourcing**: where CFS is not registered to collect in the
+   * destination's jurisdiction, the sale is deemed to occur at the selling
+   * location, so a Naperville delivery is taxed at this store's jurisdiction.
+   * That is a rule, not a fallback — merging it with the out-of-state case
+   * (which is **nexus**, a genuinely different legal reason) untaxes every
+   * non-Chicago Illinois delivery.
+   *
+   * ⚠️ **A bare `uid_x`, deliberately NOT a `UidNameRef` like its sibling
+   * `default_location`.** A `Destination` has no `name` field to denormalize;
+   * `address.full` is the closest thing and it both exceeds the 100-char cap
+   * and is `pii: "mask"`.
+   *
+   * ⚠️ **Not the same fact as `booking.uid_store`**, which records *which
+   * store's stock filled this line*, per line, from `storeAllocation`. Origin
+   * sourcing is a property of the DOCUMENT.
+   *
+   * Optional through api-cloudrun#409 Phase 1.
+   */
+  uid_destination?: string | null;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -28,6 +50,9 @@ export const StoreSchema: z.ZodType<Store> = z.strictObject({
   // `true`.
   default: z.boolean().meta({ column: true, label: "Default" }),
   default_location: UidNameRef.nullable().default(null).meta({ label: "Default Location" }),
+  // No `column: true` — `display-columns.test.ts` bans a heading ending in
+  // "Uid", and there is no name to show in its place (see the docblock).
+  uid_destination: FirestoreId.nullable().optional(),
   crms_store_id: z.int(),
   version: z.int().min(0).default(0),
   active: z.boolean().meta({ initial: true, column: true, label: "Active" }),

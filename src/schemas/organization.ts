@@ -11,6 +11,8 @@ import {
   Email,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  JurisdictionEnum,
+  type JurisdictionType,
   NameField,
   type NameParts,
   NamePartsFields,
@@ -47,6 +49,36 @@ export interface Organization {
   crms_id: number;
   xero_id: string | null;
   tax_profile: TaxProfileType;
+  /**
+   * This customer's standing jurisdiction — the middle of the three levels,
+   * below a destination's explicit `jurisdiction` and above
+   * `deriveJurisdiction(address)`.
+   *
+   * ⚠️ **A standing CLAIM, not a hint.** A Rantoul-defaulted organization
+   * taking a one-off Chicago delivery gets Rantoul unless that destination
+   * carries an explicit jurisdiction — the destination is the more specific
+   * assertion and wins, but nothing about this level is a guess. The order form
+   * must therefore show WHICH level supplied each destination's answer.
+   *
+   * Optional through api-cloudrun#409 Phase 1.
+   */
+  default_jurisdiction?: JurisdictionType | null;
+  /**
+   * Whether this customer is tax-exempt — a property of the CUSTOMER, which is
+   * the half {@link TaxProfileType} welds to jurisdiction and cannot separate.
+   *
+   * ⚠️ **Exemption is STICKY from either side**: the rule is
+   * `org.tax_exempt || doc.tax_exempt === true`, never `doc ?? org`. A `false`
+   * on a document must not un-exempt an exempt customer — that is a legal fact
+   * about the buyer, not a per-order preference.
+   *
+   * ⚠️ **No `.default(false)`.** `organization.ts` deleted exactly that, on
+   * exactly this shape, because the Typesense config declares the field
+   * required and a `.default()` never materializes under `validateBeforeWrite`.
+   *
+   * Optional through api-cloudrun#409 Phase 1.
+   */
+  tax_exempt?: boolean;
   description?: string;
   emails: string[];
   phones: string[];
@@ -73,6 +105,11 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   // `product.ts`. TAX_PROFILES[0] is "tax_applied", so the enum's
   // type-derived seed already equals the dropped default.
   tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+  default_jurisdiction: JurisdictionEnum.nullable().optional().meta({
+    column: true,
+    label: "Default Jurisdiction",
+  }),
+  tax_exempt: z.boolean().optional().meta({ column: true, label: "Tax Exempt" }),
   description: z.string().default("").optional().meta({ column: true, label: "Description" }),
   emails: z.array(Email).default([]).meta({ column: true, label: "Emails" }),
   phones: z.array(Phone).default([]).meta({ column: true, label: "Phones" }),
@@ -122,6 +159,8 @@ export interface CreateOrganizationInputType {
   uid: string;
   name: string;
   tax_profile: TaxProfileType;
+  default_jurisdiction?: JurisdictionType | null;
+  tax_exempt?: boolean;
   billing_address: AddressType | null;
   contacts?: OrganizationContactType[];
   newContacts?: NewContactInputType[] | null;
@@ -134,6 +173,8 @@ export const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType> = z
   uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
   tax_profile: TaxProfileEnum,
+  default_jurisdiction: JurisdictionEnum.nullable().optional(),
+  tax_exempt: z.boolean().optional(),
   billing_address: Address,
   contacts: z.array(OrganizationContact).optional(),
   newContacts: z.array(NewContactInput).nullable().optional(),
@@ -148,6 +189,8 @@ export interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
   tax_profile?: TaxProfileType;
+  default_jurisdiction?: JurisdictionType | null;
+  tax_exempt?: boolean;
   description?: string;
   billing_address?: AddressType | null;
   contacts?: OrganizationContactType[];
@@ -162,6 +205,8 @@ export const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType> = z
   uid: FirestoreId.optional(),
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }).optional(),
   tax_profile: TaxProfileEnum.optional(),
+  default_jurisdiction: JurisdictionEnum.nullable().optional(),
+  tax_exempt: z.boolean().optional(),
   description: z.string().optional(),
   billing_address: Address.optional(),
   contacts: z.array(OrganizationContact).optional(),

@@ -423,6 +423,36 @@ export type TaxProfileType = typeof TAX_PROFILES[number];
 export const TaxProfileEnum: z.ZodType<TaxProfileType> = z.enum(TAX_PROFILES);
 
 /**
+ * **Where the goods went** — the tax jurisdiction CFS collects for.
+ *
+ * This is the axis {@link TAX_PROFILES} welds to exemption and cannot separate.
+ * `TaxProfileType` mixes a property of the *customer* (`tax_exempt`) with a
+ * property of *where the goods went* (`tax_rantoul`, `tax_frankfort`,
+ * `tax_paxton`) in one enum, so a document gets exactly one of them — which is
+ * why jurisdiction is document-scoped today, why a mixed Chicago/Frankfort
+ * order cannot be priced, and why an exempt customer's jurisdiction is
+ * unrecordable. Splitting the two axes is what makes a per-destination answer
+ * expressible at all.
+ *
+ * A jurisdiction is a **registration**, not a place: CFS is registered to
+ * collect in exactly these, and an address outside them does not get its own
+ * rate — it sources to the store (origin sourcing) or attracts nothing (no
+ * nexus outside Illinois). See `deriveJurisdiction` in `@cfs/core/utils/taxes`
+ * for the three cases and their distinct legal reasons.
+ *
+ * ⚠️ **`paxton` stays a member although CFS no longer delivers there.** Prod
+ * holds one `complete` order and one invoice under it, both embedding the
+ * Paxton tax uid, and `calculateItemTax` throws `Unknown tax uid` on a missing
+ * one. The member is what keeps that history re-derivable; it is removed from
+ * the manager picker and from the derivation rule, not from the vocabulary.
+ */
+const JURISDICTIONS = ["chicago", "rantoul", "frankfort", "paxton"] as const;
+/** Allowed values for tax jurisdiction. */
+export type JurisdictionType = typeof JURISDICTIONS[number];
+/** Zod schema for JurisdictionType. */
+export const JurisdictionEnum: z.ZodType<JurisdictionType> = z.enum(JURISDICTIONS);
+
+/**
  * How a line's `price.base` becomes money.
  *
  * - `five_day_week` — `base × quantity × max(chargeable_days / 5, 1)`.
@@ -825,6 +855,64 @@ void _lineParity;
 export type PreTaxItemType = {
   [K in ItemTypeType]: typeof ITEM_CONTRACTS_INNER[K]["pricing"] extends "pre_tax" ? K : never;
 }[ItemTypeType];
+
+/**
+ * The {@link PreTaxItemType} members as a runtime enum — the vocabulary of
+ * `Tax.item_types`, i.e. *which line types a tax covers*.
+ *
+ * 🔑 **`PreTaxItemType`, not {@link DocLineItemTypeType}, and the difference is
+ * the whole point.** `transaction_fee` is `pricing: "from_total"`, and
+ * `calculateItemTax` **throws** `Item is not priceable` on it. Typing the field
+ * at the pre-tax subset makes *"a tax that covers transaction fees"*
+ * unrepresentable rather than merely absent from a list, and keeps
+ * {@link ITEM_CONTRACTS} the single author of what is priceable. The
+ * `destination` / `group` dividers fall out for free.
+ *
+ * ⚠️ **Written out rather than derived, deliberately** — JSR's npm declaration
+ * emit truncates a spread inside an `as const` array (core#43), so a
+ * `[...X] as const` here would publish a different, wrong type to the manager
+ * only. `_preTaxParity` below is the mechanism that keeps the hand-written list
+ * honest, checked in BOTH directions.
+ */
+const PRE_TAX_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
+/** Zod schema for PreTaxItemType. @see {@link PRE_TAX_ITEM_TYPES} */
+export const PreTaxItemTypeEnum: z.ZodType<PreTaxItemType> = z.enum(PRE_TAX_ITEM_TYPES);
+
+type _PreTaxListed = typeof PRE_TAX_ITEM_TYPES[number];
+type _PreTaxParity = [_PreTaxListed] extends [PreTaxItemType]
+  ? [PreTaxItemType] extends [_PreTaxListed] ? true : never
+  : never;
+const _preTaxParity: _PreTaxParity = true;
+void _preTaxParity;
+
+/**
+ * What a line is TAXED AS — the pre-tax types plus `"none"`.
+ *
+ * The value of `items[].taxed_as`, a per-line override of the type the tax
+ * engine keys on. `null`/absent means *use `item.type`*; `"none"` means *this
+ * line is untaxed regardless of what its type would attract*, which is the one
+ * answer `item.type` cannot express without lying about what the line is.
+ *
+ * ⚠️ **It overrides the TYPE used for tax, never the tax itself.** There is
+ * deliberately no per-line tax reference: a line naming its own tax uid is a
+ * second copy of the catalog that drifts from the jurisdiction rule, which is
+ * the api-cloudrun#409 class ($2,741.78 of phantom receivable) in miniature.
+ *
+ * Written out rather than spread for the same JSR-emit reason as
+ * {@link PRE_TAX_ITEM_TYPES}; `_taxedAsParity` pins it.
+ */
+const TAXED_AS = ["rental", "replacement", "sale", "service", "surcharge", "none"] as const;
+/** Allowed values for a line's tax-type override. */
+export type TaxedAsType = typeof TAXED_AS[number];
+/** Zod schema for TaxedAsType. */
+export const TaxedAsEnum: z.ZodType<TaxedAsType> = z.enum(TAXED_AS);
+
+type _TaxedAsListed = Exclude<TaxedAsType, "none">;
+type _TaxedAsParity = [_TaxedAsListed] extends [PreTaxItemType]
+  ? [PreTaxItemType] extends [_TaxedAsListed] ? true : never
+  : never;
+const _taxedAsParity: _TaxedAsParity = true;
+void _taxedAsParity;
 
 /**
  * The `pricing: "from_total"` members — priced FROM the document total rather

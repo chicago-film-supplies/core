@@ -70,13 +70,37 @@ export type PriceObject = OrderDocItemPriceType;
 
 /**
  * Subset of the full Tax document needed by utility functions.
- * `valid_from`/`valid_to` are optional — only the as-of resolver (`findTaxAt` in
- * `@cfs/core/utils/taxes`) reads them; pricing helpers ignore them. Optional so
- * partial `Tax` literals in tests/callers keep type-checking.
+ *
+ * Only `uid`/`name`/`rate`/`type` are required — those are what the pricing
+ * helpers read. Everything else is resolution metadata that only the as-of
+ * resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
+ * it stays optional so partial `Tax` literals in tests and callers keep
+ * type-checking.
+ *
+ * ⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on
+ * purpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read
+ * `applied_from ?? valid_from` so a deploy can precede the document migration:
+ * code reading only the new name against a document holding only the old one
+ * sees a missing bound, treats it as OPEN, and every version then brackets
+ * every instant — which throws `Tax catalog drift` on the pricing path, out of
+ * a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
  */
 export type Tax =
   & Pick<SchemaTax, "uid" | "name" | "rate" | "type">
-  & Partial<Pick<SchemaTax, "valid_from" | "valid_to">>;
+  & Partial<
+    Pick<
+      SchemaTax,
+      | "valid_from"
+      | "valid_to"
+      | "applied_from"
+      | "applied_to"
+      | "effective_from"
+      | "jurisdiction"
+      | "item_types"
+      | "xero_tax_type"
+      | "xero_components"
+    >
+  >;
 
 /**
  * A single item in an order/invoice/fulfillment array — product, divider,

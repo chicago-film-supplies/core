@@ -32,6 +32,8 @@ import {
   StockMethodEnum,
   type StockMethodType,
   TaxProfileEnum,
+  TaxedAsEnum,
+  type TaxedAsType,
   type InvoiceStatusType,
   InvoiceStatusEnum,
   type TaxProfileType,
@@ -472,6 +474,8 @@ export interface OrderItemLineType {
   zero_priced?: boolean | null;
   order_number?: number;
   uid_order?: string;
+  /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
+  taxed_as?: TaxedAsType | null;
 }
 
 // Un-annotated for `_zod.propValues` — see `_dividers.ts`. `z.object`, not
@@ -496,6 +500,7 @@ const OrderItemLineInner = z.object({
   zero_priced: z.boolean().nullable().optional(),
   order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
+  taxed_as: TaxedAsEnum.nullable().optional(),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable order line (input). */
@@ -787,6 +792,26 @@ export interface OrderDocLineItemType {
    * server re-derives it.
    */
   coa_revenue?: COARevenueType | null;
+  /**
+   * Per-line override of the item TYPE the tax engine keys on. Absent/`null`
+   * means *use `type`*; `"none"` means *this line is untaxed* regardless of
+   * what its type would attract.
+   *
+   * ⚠️ **It overrides the TYPE, never the tax.** There is deliberately no
+   * per-line tax reference — a line naming its own tax uid is a second copy of
+   * the catalog, free to drift from the jurisdiction rule, which is the
+   * api-cloudrun#409 class ($2,741.78 of phantom receivable) in miniature.
+   *
+   * ⚠️ **`.optional()`, never `.default(null)`** — ~9,300 existing prod lines
+   * are genuinely absent, and `validateBeforeWrite` persists the RAW doc, so a
+   * `.default()` would never materialize while the published type promised one.
+   *
+   * ⚠️ **A CRMS rebuild must CARRY THIS FORWARD from the stored row.**
+   * `createUpdateInvoiceFromCrms` and the opportunity webhook rebuild `items`
+   * from scratch on every event, so a CFS-authored line fact that is not
+   * re-read is destroyed — the same shape as api-cloudrun#480's uid churn.
+   */
+  taxed_as?: TaxedAsType | null;
 }
 
 // Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;
@@ -847,6 +872,10 @@ const OrderDocLineItemInner = z.strictObject({
   // never materializes, and every line written before beta.120 is genuinely
   // absent rather than null.
   coa_revenue: COARevenueEnum.nullable().optional(),
+  // Operator-authored, unlike `coa_revenue` beside it — so it IS on the input
+  // schema. See the interface docblock for why it is optional rather than
+  // defaulted, and why a CRMS rebuild has to carry it forward.
+  taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
 }).superRefine(checkItemContract);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
@@ -985,6 +1014,34 @@ export interface Order {
    * stored fact, and no comparison against the org snapshot.
    */
   tax_profile: TaxProfileType | null;
+  /**
+   * This order's exemption, or `null` to inherit the organization's.
+   *
+   * ⚠️ **Exemption is STICKY**: the rule is `org.tax_exempt || doc.tax_exempt
+   * === true`, never `doc ?? org`. A `false` here must not un-exempt an exempt
+   * customer — that is a legal fact about the buyer, not a per-order choice.
+   * Which is why the type is `boolean | null` and not `boolean`: `null` is
+   * "inherit", `true` is "exempt this document too", and `false` is "this
+   * document asserts nothing", NOT "tax this exempt customer".
+   *
+   * Splitting this out of `tax_profile` is what lets an exempt customer still
+   * carry a jurisdiction — the welded enum gives a document exactly one of the
+   * two facts.
+   *
+   * Optional through api-cloudrun#409 Phase 1.
+   */
+  tax_exempt?: boolean | null;
+  /**
+   * Which store this order sells FROM — the origin for Illinois origin
+   * sourcing. `null`/absent means the `default: true` store.
+   *
+   * ⚠️ **Not `booking.uid_store`**, which is per-line and records which store's
+   * stock filled that line (`storeAllocation`). Origin sourcing is a property
+   * of the DOCUMENT, and the two answer different questions.
+   *
+   * Optional through api-cloudrun#409 Phase 1.
+   */
+  uid_store?: string | null;
   totals: OrderDocTotalsType;
   invoices: Array<{ uid: string; number: number; status: InvoiceStatusType }>;
   query_by_invoices: string[];
@@ -1064,6 +1121,11 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // no `.default()`: one never materializes on a write (see the note in
   // `product.ts`), and the Typesense config declares the field required.
   tax_profile: TaxProfileEnum.nullable().meta({ column: true, label: "Tax Profile" }),
+  // Nullable AND optional, unlike `tax_profile` above: `null` is the meaningful
+  // "inherit" value, and `undefined` is every order written before #409 Phase 1.
+  tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),
+  // No `column: true` — `display-columns.test.ts` bans a heading ending in "Uid".
+  uid_store: FirestoreId.nullable().optional(),
   totals: OrderDocTotals,
   invoices: z.array(z.strictObject({
     uid: FirestoreId,
