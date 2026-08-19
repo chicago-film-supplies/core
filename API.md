@@ -19521,10 +19521,27 @@ type BookingBreakdownKeyType = indexedAccess;
 Apply a per-key delta to an order's bookings_breakdown roll-up in place.
 
 Given a booking's previous and next breakdown, mutate the order roll-up by
-`+= next[k] - prev[k]` for each key. Useful both server-side (where
-`updateBooking` applies a single-doc delta to avoid reading every sibling
-booking) and client-side (where the manager can apply the same delta
-locally for instant feedback).
+`+= next[k] - prev[k]` for each key.
+
+⚠️ **This is NOT how the server maintains the roll-up, and has not been since
+`finalizeOrderBookings` landed.** The docblock used to say it was — *"useful
+server-side, where `updateBooking` applies a single-doc delta to avoid reading
+every sibling booking"* — and that is precisely the mechanism the API replaced
+with a fold over the order's full booking set, on the house rule *"recompute,
+never a delta"*. `applyBookingBreakdownDelta` has **zero call sites** in
+`api-cloudrun/src/`.
+
+Two live consumer classes remain, and neither is the cascade:
+
+- **The manager's optimistic UI**, which applies the delta locally for instant
+  feedback and lets the server's authoritative fold land after.
+- **api-cloudrun's operational repair scripts** (`repair-booking-breakdowns.ts`,
+  `complete-stale-bookings.ts`), which move one booking and adjust its parent
+  by exactly that booking's delta rather than re-folding the whole order.
+
+So it is kept deliberately. **Do not reach for it to maintain a roll-up in a
+writer** — a delta is lossy the moment one is dropped, which is the failure
+`sumBookingsBreakdown` exists to make unrepresentable.
 
 ### `calculateBookingBreakdown(status: OrderStatusType, type: ComponentTypeType, quantity: number, existingBreakdown?: indexedAccess): indexedAccess`
 

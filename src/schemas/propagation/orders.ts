@@ -249,12 +249,12 @@ const CARD_STATUS_MATH: EnforcementRef = {
   gates: true,
 };
 
-const ORDER_ROLLUP_DELTA: EnforcementRef = {
+const ORDER_ROLLUP_FOLD: EnforcementRef = {
   kind: "test",
   ref:
     "api-cloudrun/tests/integration/bookings/bookings.test.ts::returns 1 + loses 1 + damages 1 → cowrites two OOS records and auto-completes order",
   clause:
-    "the delta + auto-complete half — the anchored step closes every quantity (return + loss + damage) and DOES auto-complete; the sibling step `returns 1 of 3 — order roll-up updated, no OOS, no auto-complete` is the partial return that moves `order.bookings_breakdown` by exactly the delta and does not complete. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the roll-up + auto-complete half — the anchored step closes every quantity (return + loss + damage) and DOES auto-complete; the sibling step `returns 1 of 3 — order roll-up updated, no OOS, no auto-complete` is the partial return that does not. ⚠️ Both assert ABSOLUTE roll-up values read back off the order (`bookings_breakdown.out === 2`, `.returned === 1`, …), which is what makes them a check on the fold rather than on the delta this ref used to name — a delta-shaped assertion would have passed against either mechanism and told you nothing about which one ran. Covers neither the sibling-bookings READ that feeds the fold nor the `orderChanged` gate that decides whether the order is written at all. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
@@ -1101,16 +1101,25 @@ const updateBookingRules: CollectionRule[] = [
     id: "update-booking:booking-to-order",
     source: "bookings",
     target: "orders",
-    mode: "co-write",
+    // NOT `co-write`. That mode means "written atomically in same transaction",
+    // and the order is no longer written in the transaction that writes the
+    // booking — `finalizeOrderBookings` opens its own, after the chunks commit.
+    // NOT `fan-out` either, despite the queue backstop: a fan-out is convergent
+    // by definition, and the auto-complete below is NOT — `complete` is
+    // terminal, which is exactly why finalize's sibling read is a
+    // completeness-claimed `getComplete` rather than a hoisted one. `derive` is
+    // the honest slot, and the same one the templates family-rollups use for
+    // "recompute the parent's denormalized roll-up from its children".
+    mode: "derive",
     invariant:
-      "Every booking update applies a delta to order.bookings_breakdown ('+= next.breakdown[k] - prev.breakdown[k]' for each key). Same transaction may also flip order.status: (a) reserved → active when the post-delta bookings_breakdown.out > 0 and order.status === 'reserved' (one-way; out returning to 0 does NOT revert to reserved), (b) active/reserved → complete when bookings_breakdown.quoted + reserved + prepped + out === 0 (every quantity has reached a terminal state). Single order read + write per booking PUT — no sibling-bookings query.",
-    enforced_by: [ORDER_ROLLUP_DELTA],
+      "order.bookings_breakdown is RECOMPUTED as a fold over EVERY booking on the order — `sumBookingsBreakdown(bookings)` — never a delta. It runs in `finalizeOrderBookings`'s own transaction AFTER the booking write commits, over siblings read under a completeness-claimed `getComplete`; there is no per-PUT shortcut, because a single-booking PUT is `applyBookingUpdates` with one row. The same transaction may also flip order.status, in this evaluation order: (a) active/reserved → complete when `isOrderBookingsClosed(bookings)` — every booking closed judged PER BOOKING, and at least one booking exists (an order with none never auto-completes). ⚠️ That is not an arithmetic test on the roll-up: `out` blocks closure only for a `rental` booking, so a sale-only order completes while `bookings_breakdown.out > 0`; (b) else reserved → active when the recomputed bookings_breakdown.out > 0 and order.status === 'reserved' (one-way; out returning to 0 does NOT revert to reserved). The order is written only when the recomputed roll-up or the status actually differs, so an idempotent replay costs no write and no version bump.",
+    enforced_by: [ORDER_ROLLUP_FOLD],
     transaction: "update-booking",
     fields: [
       {
         source: ["breakdown"],
         target: ["bookings_breakdown"],
-        transform: "delta-applied roll-up across all bookings on this order",
+        transform: "fold over every booking on this order — sumBookingsBreakdown, never a delta",
       },
       {
         source: [],
@@ -1150,7 +1159,7 @@ const updateBookingRules: CollectionRule[] = [
 const updateBookingTransaction: TransactionDefinition = {
   id: "update-booking",
   description:
-    "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates `stock/{P}` projections FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of `stock/{P}` projections and cowrite a default thread); applies a delta to order.bookings_breakdown and auto-completes the parent order when the roll-up shows every quantity has closed; recomputes per-destination event card status from sibling bookings. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Every booking breakdown change.",
+    "Update a single booking's status or breakdown. Appends the movement events the breakdown change represents and folds them onto the product's inventory ledger and its location documents — the fulfillment ladder's half of the journal. Recalculates `stock/{P}` projections FROM the post-movement ledger; cowrites/grows OOS records for new lost/damaged deltas (which themselves recalculate the OOS-side of `stock/{P}` projections and cowrite a default thread); recomputes order.bookings_breakdown as a fold over the order's full booking set and auto-completes the parent order when every booking has closed; recomputes per-destination event card status from sibling bookings. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Every booking breakdown change.",
   steps: [
     "update-booking:booking-to-self",
     ...STOCK_STEPS,
@@ -1213,13 +1222,13 @@ const bulkReturnOrderTransaction: TransactionDefinition = {
 //
 // PUT /fulfillments/{uid}/bookings — picker UI applies N booking transitions
 // in one Firestore transaction. Reuses update-booking rules per row but with
-// deduped stock rebuild per product, single order roll-up delta +
+// deduped stock rebuild per product, single order roll-up fold +
 // auto-complete check, and one OOS counter allocation pass.
 
 const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
   id: "bulk-fulfillment-bookings",
   description:
-    "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock rebuilds per product (one unified-overlays call carrying both booking-side and OOS-side overlays), single order roll-up delta + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
+    "Apply N booking transitions for one order via the picker UI in one Firestore transaction. Reuses update-booking rules per row but with deduped stock rebuilds per product (one unified-overlays call carrying both booking-side and OOS-side overlays), a single order roll-up fold + auto-complete check, one OOS counter allocation pass, and one per-destination card status recompute pass.",
   steps: [
     "update-booking:booking-to-self",
     ...STOCK_STEPS,
