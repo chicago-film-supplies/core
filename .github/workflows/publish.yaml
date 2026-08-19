@@ -76,8 +76,36 @@ jobs:
         with:
           node-version: "22"
 
+      # PINNED EXACTLY, and the preset is deliberately a major behind.
+      #
+      # This line was unpinned and a transitive dependency published on
+      # 2026-08-18T21:37Z broke every publish three hours later:
+      # `@conventional-changelog/template@1.4.0` added a guard that REFUSES
+      # `conventional-changelog-writer@8`, and `release-notes-generator@14.1.1`
+      # — the current latest — still depends on `^8.0.0`. The run died at
+      # `generateNotes` with `Missing helper: "conventional-changelog-
+      # conventionalcommits requires conventional-changelog-writer@9 or newer"`.
+      #
+      # ⚠️ `conventional-changelog-conventionalcommits` is held at **9.3.1**,
+      # not at latest. Its 10.x line depends on `@conventional-changelog/
+      # template ^1.x` and so drags that floating chain back in; 9.3.1 depends
+      # on `compare-func` alone and pairs with writer@8. Bump it only together
+      # with a `release-notes-generator` that has moved to writer@9.
+      #
+      # Nothing about the failure was visible before the push: the release job
+      # resolves these at run time, so a green local tree and a green CI job say
+      # nothing about whether a publish will succeed. Pinning is what makes the
+      # answer a property of this file.
       - name: Install semantic-release
-        run: npm install -g semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/exec @semantic-release/git @semantic-release/github conventional-changelog-conventionalcommits
+        run: |
+          npm install -g \
+            semantic-release@25.0.9 \
+            @semantic-release/commit-analyzer@13.0.1 \
+            @semantic-release/release-notes-generator@14.1.1 \
+            @semantic-release/exec@7.1.0 \
+            @semantic-release/git@11.0.1 \
+            @semantic-release/github@12.0.9 \
+            conventional-changelog-conventionalcommits@9.3.1
 
       - name: Release
         env:
