@@ -243,6 +243,8 @@ export type RuleId =
   | "update-tax:to-products"
   | "update-tax:to-webshop-products"
   | "update-tax:to-orders"
+  | "supersede-tax:recompute-draft-orders"
+  | "supersede-tax:recompute-draft-invoices"
   // reference-data.ts
   | "update-tag:name-to-products"
   | "delete-tag:remove-from-products"

@@ -46,7 +46,7 @@ const updateTaxRules: CollectionRule[] = [
       "Products embed tax name/rate/type in price.taxes — must stay current",
     enforced_by: [TAX_TO_PRODUCTS],
     trigger:
-      "name, rate, or type change — post-transaction batch matched by tax uid",
+      "NAME change — post-transaction batch matched by tax uid. ⚠️ Said \"name, rate, or type\" until 2026-08-18, which no writer could produce: `PUT /taxes/{uid}` has refused an in-place rate or type edit since api-cloudrun#495, pointing at supersede. core#55's class — one half of a rule corrected and the other left describing the refused edit. A `jurisdiction` / `item_types` edit deliberately does NOT fire it either: those axes do not price anything until #409 Phase 2 makes `findTaxFor` the pricing path.",
     fields: [
       { source: ["name"], target: ["price", "taxes", "name"] },
       { source: ["rate"], target: ["price", "taxes", "rate"] },
@@ -64,7 +64,7 @@ const updateTaxRules: CollectionRule[] = [
     invariant:
       "Webshop products embed tax name/rate/type in price.taxes — must stay current",
     trigger:
-      "name, rate, or type change — post-transaction batch matched by tax uid",
+      "NAME change — post-transaction batch matched by tax uid. ⚠️ Said \"name, rate, or type\" until 2026-08-18, which no writer could produce: `PUT /taxes/{uid}` has refused an in-place rate or type edit since api-cloudrun#495, pointing at supersede. core#55's class — one half of a rule corrected and the other left describing the refused edit. A `jurisdiction` / `item_types` edit deliberately does NOT fire it either: those axes do not price anything until #409 Phase 2 makes `findTaxFor` the pricing path.",
     fields: [
       { source: ["name"], target: ["price", "taxes", "name"] },
       { source: ["rate"], target: ["price", "taxes", "rate"] },
@@ -83,7 +83,7 @@ const updateTaxRules: CollectionRule[] = [
       "Incomplete orders embed tax data as PriceModifiers — rate changes must recompute amounts and totals",
     enforced_by: [TAX_TO_ORDERS],
     trigger:
-      "name, rate, or type change — post-transaction batch filtered to incomplete orders, matched by tax uid",
+      "NAME change — post-transaction batch filtered to incomplete orders, matched by tax uid. ⚠️ See the sibling rules' trigger: rate and type are unreachable here since api-cloudrun#495, which is why the `rate`-sourced field mappings below can only ever be exercised by the recompute path, never by this one. They are kept because they describe what the cascade WOULD write, and the enforcement ref says outright that no test covers a rate change and none can.",
     fields: [
       { source: ["name"], target: ["items", "price", "taxes", "name"] },
       { source: ["rate"], target: ["items", "price", "taxes", "rate"] },
@@ -111,11 +111,84 @@ const updateTaxRules: CollectionRule[] = [
   },
 ];
 
+// ── The supersede draft-recompute ────────────────────────────────
+//
+// ⚠️ **This REVERSES the conclusion `supersedeTax`'s own docblock reached**, and
+// the reversal is narrower than it looks. That docblock argued there is nothing
+// to propagate because "the order writers re-resolve by name at `asOf`, so a
+// document written after `valid_from` picks up the successor on its own". Every
+// word of that is true — *at the document's next write*. The gap is a draft that
+// nobody touches: it keeps showing the old total until someone opens it, and if
+// a customer ACCEPTS that quote, the very next write silently reprices it.
+//
+// Recomputing `status == "draft"` orders is not the retroactive re-pricing the
+// supersede endpoint exists to avoid. Those documents are not committed to
+// anyone; finalized ones stay frozen, which is the same line
+// `holiday-change:recompute-draft-orders` draws for the same reason. The two
+// cascades solve one problem — a change to a shared pricing input that must
+// reach live drafts and must never touch history — so this copies that one in
+// shape rather than inventing a second.
+//
+// ⚠️ **Neither rule carries a `transaction` field**, matching the holiday pair:
+// they run post-commit off a coalesced Cloud Task, so they are single-rule
+// cascades logged with `logPropagation`, not steps of `supersede-tax`.
+
+const supersedeTaxDraftRecomputeRules: CollectionRule[] = [
+  {
+    id: "supersede-tax:recompute-draft-orders",
+    source: "taxes",
+    target: "orders",
+    mode: "fan-out",
+    invariant:
+      "A draft order is not committed to a customer, so a new tax version must reach its stored PriceModifiers and totals; finalized orders stay frozen, keeping what was quoted and billed",
+    trigger:
+      "POST /taxes/{uid}/supersede — coalesced Cloud Task, status == 'draft' only. Recomputes UNCONDITIONALLY rather than filtering to orders that name the superseded tax: a no-op recompute writes nothing and bumps nothing, so a filter only adds a predicate that can be wrong.",
+    fields: [
+      {
+        source: [],
+        target: ["items", "price", "taxes"],
+        transform:
+          "re-resolve each line's tax refs at the order's asOf (resolveTaxRefsAt picks the version whose applied window contains it), then recompute item and document totals",
+      },
+      {
+        source: [],
+        target: ["totals", "taxes"],
+        transform: "recomputed from the re-resolved item taxes",
+      },
+      {
+        source: [],
+        target: ["totals", "total_cents"],
+        transform:
+          "recalculated: subtotal_discounted_cents + sum(taxes.amount_cents) + sum(transaction_fees.amount_cents)",
+      },
+    ],
+  },
+  {
+    id: "supersede-tax:recompute-draft-invoices",
+    source: "orders",
+    target: "invoices",
+    mode: "fan-out",
+    invariant:
+      "A recomputed draft order must re-sync its non-terminal invoices' tax amounts; terminal invoices (any unreversed settlement, or status in {paid, void}) stay frozen",
+    trigger:
+      "draft-order recompute — transitive via updateOrder's existing draft-invoice sync, exactly as the holiday cascade reaches invoices",
+    fields: [
+      {
+        source: ["items", "price", "taxes"],
+        target: ["items", "price", "taxes"],
+        transform:
+          "inherited via projectOrderItemToInvoiceItem; non-terminal invoices only",
+      },
+    ],
+  },
+];
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `taxes.ts` contributes to the propagation catalog. */
 export const taxes: PropagationModule = {
   rules: [
     ...updateTaxRules,
+    ...supersedeTaxDraftRecomputeRules,
   ],
   transactions: [],
 };
