@@ -2641,3 +2641,23 @@ Deno.test("pairsMatch is insensitive to KEY ORDER", () => {
   const result = syncOrderDestinationsSelective([built], next, invoice, "o1");
   assertEquals(result[0].delivery.instructions, "new");
 });
+
+Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () => {
+  // 🔴 Firestore refuses `undefined` outright — the write fails, it does not
+  // drop the key — so a projection that spells `jurisdiction: pair.jurisdiction`
+  // from a pair that has no such key breaks every invoice write. Caught in
+  // api-cloudrun by `scanForUndefined` on six CRMS invoice tests; this is the
+  // same defect one layer up, where it is cheap to see.
+  const { jurisdiction: _absent, ...noJurisdiction } = makePair("d1", "c1");
+  const result = syncOrderDestinationsSelective(
+    [],
+    [noJurisdiction as ReturnType<typeof makePair>],
+    [],
+    "o1",
+  );
+  assertEquals(result.length, 1);
+  for (const [key, value] of Object.entries(result[0])) {
+    assertEquals(value === undefined, false, `${key} is undefined — Firestore will refuse the write`);
+  }
+  assertEquals(result[0].jurisdiction, null);
+});

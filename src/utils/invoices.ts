@@ -1749,7 +1749,13 @@ export function syncOrderDestinationsSelective(
         collection: newPair.collection,
         customer_collecting: newPair.customer_collecting,
         customer_returning: newPair.customer_returning,
-        jurisdiction: newPair.jurisdiction,
+        // `?? null`, never the bare field. An order pair carrying no
+        // jurisdiction has no such KEY, and projecting it spells an explicit
+        // `undefined` — which Firestore REFUSES to store, so the invoice write
+        // fails outright rather than dropping a field. `null` and absent mean
+        // the same thing at every level of the chain, so normalizing here
+        // costs no information.
+        jurisdiction: newPair.jurisdiction ?? null,
       });
     } else if (prev && pairsMatch(prev, inv)) {
       // Not overridden — replace with new order pair.
@@ -1760,7 +1766,13 @@ export function syncOrderDestinationsSelective(
         collection: newPair.collection,
         customer_collecting: newPair.customer_collecting,
         customer_returning: newPair.customer_returning,
-        jurisdiction: newPair.jurisdiction,
+        // `?? null`, never the bare field. An order pair carrying no
+        // jurisdiction has no such KEY, and projecting it spells an explicit
+        // `undefined` — which Firestore REFUSES to store, so the invoice write
+        // fails outright rather than dropping a field. `null` and absent mean
+        // the same thing at every level of the chain, so normalizing here
+        // costs no information.
+        jurisdiction: newPair.jurisdiction ?? null,
       });
     } else {
       // Overridden (or prev missing) — keep invoice version.
