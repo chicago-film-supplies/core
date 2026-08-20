@@ -819,7 +819,7 @@ Deno.test("calculateInvoiceTotals computes totals from billable items only", () 
     ),
   ];
 
-  const result = calculateInvoiceTotals(items, []);
+  const result = calculateInvoiceTotals(items, [], []);
   assertEquals(result.subtotal_cents, 50000);
   assertEquals(result.subtotal_discounted_cents, 50000);
   assertEquals(result.discount_amount_cents, 0);
@@ -837,7 +837,7 @@ Deno.test("calculateInvoiceTotals applies discount", () => {
       { base_cents: 10000, chargeable_days: 5, discount: { type: "percent", rate: 10, amount_cents: 1000 }, subtotal_cents: 10000, subtotal_discounted_cents: 9000, total_cents: 9000 },
     ),
   ];
-  const result = calculateInvoiceTotals(items, []);
+  const result = calculateInvoiceTotals(items, [], []);
   assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.subtotal_discounted_cents, 9000);
   assertEquals(result.discount_amount_cents, 1000);
@@ -851,7 +851,7 @@ Deno.test("calculateInvoiceTotals with taxes", () => {
       { base_cents: 10000, chargeable_days: 5, taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 1500 }], subtotal_cents: 10000, subtotal_discounted_cents: 10000, total_cents: 11500 },
     ),
   ];
-  const result = calculateInvoiceTotals(items, TAXES);
+  const result = calculateInvoiceTotals(items, TAXES, []);
   assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.total_cents, 11500);
   assertEquals(result.taxes.length, 1);
@@ -882,7 +882,7 @@ Deno.test("calculateInvoiceTotals with payments reduces amount_due", () => {
 });
 
 Deno.test("calculateInvoiceTotals with empty items returns zeros", () => {
-  const result = calculateInvoiceTotals([], []);
+  const result = calculateInvoiceTotals([], [], []);
   assertEquals(result.subtotal_cents, 0);
   assertEquals(result.subtotal_discounted_cents, 0);
   assertEquals(result.discount_amount_cents, 0);
@@ -903,7 +903,7 @@ Deno.test("calculateInvoiceTotals with transaction fee", () => {
       { base_cents: 0, base_percent: 3, formula: "percent_of_total" },
     ),
   ];
-  const result = calculateInvoiceTotals(items, []);
+  const result = calculateInvoiceTotals(items, [], []);
   assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.transaction_fees.length, 1);
   assertEquals(result.transaction_fees[0].name, "Credit Card Fee");
@@ -1810,7 +1810,7 @@ Deno.test("order and invoice totals agree on their six shared fields over 20k ra
   let first: string | null = null;
   for (const doc of DOC_SWEEP) {
     const fromOrder = core(calculateOrderTotals(doc.items, TAXES) as unknown as Record<string, unknown>);
-    const fromInvoice = core(calculateInvoiceTotals(doc.items, TAXES) as unknown as Record<string, unknown>);
+    const fromInvoice = core(calculateInvoiceTotals(doc.items, TAXES, []) as unknown as Record<string, unknown>);
     const fromCore = core(sumDocumentTotals(doc.items, TAXES) as unknown as Record<string, unknown>);
     if (fromOrder !== fromInvoice || fromOrder !== fromCore) {
       disagreements++;
@@ -1831,7 +1831,7 @@ Deno.test("…and the sweep is not vacuous — dividers, discounts, taxes, fees 
   let nonZero = 0;
   for (const doc of DOC_SWEEP) {
     if (flattenForXero(doc.items).length < doc.items.length) dropped++;
-    const t = calculateInvoiceTotals(doc.items, TAXES);
+    const t = calculateInvoiceTotals(doc.items, TAXES, []);
     if (t.discount_amount_cents !== 0) discounted++;
     if (t.taxes.length > 0) taxed++;
     if (t.transaction_fees.length > 0) feed++;

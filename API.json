@@ -9912,7 +9912,7 @@
         {
           "kind": "function",
           "name": "calculateInvoiceTotals",
-          "signature": "calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], settlements?: readonly typeLiteral[]): InvoiceTotals",
+          "signature": "calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], settlements: readonly typeLiteral[]): InvoiceTotals",
           "doc": "Calculate aggregated pricing totals for an invoice.\n\nThe six-field arithmetic core is {@link sumDocumentTotals}, shared with\n`calculateOrderTotals` — it was ~35 byte-identical lines in each, and\n\"assembled independently so invoices can diverge later\" was a licence for\nsilent drift, not an insurance policy. What genuinely differs is here: the\n`flattenForXero` prefilter (inert on the arithmetic — see\n`sumDocumentTotals`) and the settlement projection below, which is what a\ncredit note or a partial billing actually changes.",
           "paramTags": [
             {

@@ -20480,7 +20480,7 @@ divider uid to its path.
 
 **Returns** — Items projected to invoice shape with path prepended by orderDividerUid
 
-### `calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], settlements?: readonly typeLiteral[]): InvoiceTotals`
+### `calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], settlements: readonly typeLiteral[]): InvoiceTotals`
 
 Calculate aggregated pricing totals for an invoice.
 

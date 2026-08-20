@@ -128,12 +128,30 @@ export type InvoiceTotals = InvoiceDocTotals;
 export function calculateInvoiceTotals(
   items: InvoiceItem[],
   taxes: Tax[],
-  // BREAKING, deliberately. An optional param means any un-updated call site
-  // silently computes `amount_credited_cents: 0` and re-inflates
-  // `amount_due_cents` — the exact class that flipped 14 invoices in #409.
-  // Renaming the parameter and changing its element shape turns every one of
-  // the 11 call sites into a compile error instead.
-  settlements?: readonly {
+  // 🔴 REQUIRED, and it was `settlements?:` until 2026-08-20 while this very
+  // comment claimed the opposite — "an optional param means any un-updated call
+  // site silently computes `amount_credited_cents: 0`". The comment described a
+  // guarantee the signature did not provide, and the guarantee is the whole
+  // point: with a default, a 2-arg call returns
+  // `paid: 0, credited: 0, void: 0, due: total` and a caller that spreads the
+  // result over stored totals ERASES the projection.
+  //
+  // That is not hypothetical. `migrate-card-fee-to-transaction-fee.ts` (#401)
+  // called it 2-arg on 2026-08-18 and zeroed **120 prod invoices'**
+  // `amount_paid_cents`, taking $123,684.19 of recorded payments off the books
+  // until they were rebuilt from the journal.
+  //
+  // ⚠️ **A required param is necessary and NOT sufficient.** That migrator
+  // hoisted `calculateOrderTotals | calculateInvoiceTotals` into ONE binding,
+  // which collapses the union's call signature to the 2-parameter one — so it
+  // would still have type-checked. The companion guard is the ternary-hoist arm
+  // of `api-cloudrun`'s `moneyArithmeticCoverage`.
+  //
+  // ⚠️ And the write guard cannot see it either: the `Invoice` identity refine
+  // is `paid + credited + voided + due === total`, which `0 + 0 + 0 + total`
+  // satisfies exactly. Pass `[]` explicitly when a document genuinely has no
+  // settlements; never let the default decide.
+  settlements: readonly {
     type: SettlementTypeType;
     reason: SettlementReasonType;
     amount_cents: number;
@@ -143,7 +161,7 @@ export function calculateInvoiceTotals(
 
   // Settlement accounting — the projection of the journal onto this document.
   const { amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents } =
-    recomputeSettlementTotals(core.total_cents, settlements ?? []);
+    recomputeSettlementTotals(core.total_cents, settlements);
 
   return { ...core, amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents };
 }
