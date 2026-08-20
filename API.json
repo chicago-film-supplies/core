@@ -11610,6 +11610,14 @@
         },
         {
           "kind": "function",
+          "name": "destinationJurisdictions",
+          "signature": "destinationJurisdictions(ctx: DocumentTaxContext): ResolvedJurisdiction[]",
+          "doc": "**The jurisdiction each of a document's destinations resolves to**, with the\nlevel that answered — one entry per `destinations[]` entry, in document\norder.\n\nThe order form renders exactly this (chicago-film-supplies/manager#304): a\njurisdiction per destination, and *which rung supplied it*, so an operator\ncan see that a value came from the customer's standing claim rather than\nfrom the address. Exposed as a function rather than left to the caller\nbecause a second implementation of the precedence — even a two-line one over\n`resolveJurisdiction` — is the drift this module exists to prevent.\n\n⚠️ **Per DESTINATION, not per line.** A `replacement` line ignores this and\nsources to the origin ({@link resolveLineTax}), so a UI that labels lines\nfrom these values alone will mislabel every replacement.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "destinationsForItems",
           "signature": "destinationsForItems(items: readonly LineItem[], destinations: ReadonlyArray<TaxDestination | null | undefined>): Array<TaxDestination | null>",
           "doc": "The `destinations[]` entry each item is billed under — **one array, parallel\nto `items`**, so the caller walks the document once rather than per line.\n\n## Reached by `path` ancestry, never by a fixed depth\n\n`item.path` is the row identity and its ancestors are addressable exactly\n(`path.slice(0, k)`), which is what makes this level-agnostic: an order's\nhierarchy is `[destination, group]` and an invoice's is\n`[order, destination, group]`, so anything keyed on a depth would find the\ndestination on one document and the ORDER divider on the other.\n\nThen the divider names its endpoint (`uid_delivery`) and the entry answers\nfor it (`delivery.uid`) — the same key the CRMS carry-forwards use, and\ndeliberately not the array index, which moves when CRMS reorders.\n\n## Three fallbacks, each measured rather than assumed\n\nMeasured over the whole prod corpus (18,958 priceable lines,\n`scripts/audit-tax-key.ts`, 2026-08-20):\n\n| rung | lines | when it fires |\n|---|---|---|\n| `uid_delivery` ↔ `delivery.uid` | 18,755 | the ordinary case |\n| divider index among dividers | 198 | a divider naming no endpoint |\n| the single entry | 5 | a divider-less items array |\n| `null` — no destinations at all | 88 | 31 CRMS invoices with no source order |\n\n`null` is a DEFINED answer, not a failure: a document with no destination\nsources entirely to the origin. Nothing in the corpus reaches a fifth case,\nwhich is why there is no guessing rung.",

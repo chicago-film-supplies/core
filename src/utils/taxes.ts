@@ -717,6 +717,33 @@ export function destinationsForItems(
   });
 }
 
+/**
+ * **The jurisdiction each of a document's destinations resolves to**, with the
+ * level that answered — one entry per `destinations[]` entry, in document
+ * order.
+ *
+ * The order form renders exactly this (chicago-film-supplies/manager#304): a
+ * jurisdiction per destination, and *which rung supplied it*, so an operator
+ * can see that a value came from the customer's standing claim rather than
+ * from the address. Exposed as a function rather than left to the caller
+ * because a second implementation of the precedence — even a two-line one over
+ * `resolveJurisdiction` — is the drift this module exists to prevent.
+ *
+ * ⚠️ **Per DESTINATION, not per line.** A `replacement` line ignores this and
+ * sources to the origin ({@link resolveLineTax}), so a UI that labels lines
+ * from these values alone will mislabel every replacement.
+ */
+export function destinationJurisdictions(ctx: DocumentTaxContext): ResolvedJurisdiction[] {
+  return ctx.destinations.map((destination) =>
+    resolveJurisdiction({
+      documentDestination: destination?.jurisdiction,
+      organization: ctx.organizationClaim,
+      address: destination?.delivery?.address,
+      origin: ctx.origin,
+    })
+  );
+}
+
 /** The tax one line resolves to, and the jurisdiction that decided it. */
 export interface LineTaxResolution {
   jurisdiction: JurisdictionType;
