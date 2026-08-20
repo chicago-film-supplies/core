@@ -477,6 +477,26 @@ Deno.test("precedence: the document's entry beats the claim beats the derivation
   assertEquals(px(derived[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
 });
 
+Deno.test("🔴 resolveLineTax: `tax` is exemption-applied, `base` is not", () => {
+  // The two fields exist because one of them will be read carelessly. `tax` is
+  // the answer a caller wants; `base` is the annotation that lets an exempt
+  // document say which tax it was exempt from.
+  const item = makeItem();
+  const taxed = resolveLineTax(item, at("Chicago"), ctx());
+  assertEquals(taxed.tax?.uid, "chi-rental-tax");
+  assertEquals(taxed.base?.uid, "chi-rental-tax");
+
+  const exempt = resolveLineTax(item, at("Chicago"), ctx({ exempt: true }));
+  assertEquals(exempt.tax, null);
+  assertEquals(exempt.base?.uid, "chi-rental-tax", "the base survives exemption");
+
+  // A non-revenue account is not taxABLE, which is a different fact: there is
+  // no tax it is exempt from, so both are null.
+  const untaxable = resolveLineTax(makeItem({ coa_revenue: 4700 }), at("Chicago"), ctx());
+  assertEquals(untaxable.tax, null);
+  assertEquals(untaxable.base, null);
+});
+
 Deno.test("resolveLineTax reports the LEVEL that answered, for the order form", () => {
   const item = makeItem({ type: "sale" });
   assertEquals(

@@ -750,12 +750,25 @@ export interface LineTaxResolution {
   /** Which rung answered — `"origin"` is the replacement rule below. */
   level: JurisdictionLevel | "origin";
   /**
-   * The tax this line's `(jurisdiction, type)` pair resolves to at
-   * `ctx.asOf`, **before exemption**. `null` means no tax covers the pair —
-   * which is how `service`, `surcharge` and an out-of-nexus destination stay
-   * untaxed without a second rule naming any of them.
+   * **The tax this line actually carries** — the jurisdiction's answer, zeroed
+   * by exemption. `null` means untaxed, which is how `service`, `surcharge`, an
+   * out-of-nexus destination and an exempt customer all stay untaxed without a
+   * rule naming any of them.
    */
   tax: Tax | null;
+  /**
+   * The same answer **before exemption** — what `price.taxes_base` records, so
+   * an exempt document still says which tax it was exempt FROM.
+   *
+   * ⚠️ Two fields rather than one, and the reason is a defect this shape
+   * caused within an hour of existing: the first cut returned only the
+   * pre-exemption tax and documented that callers must apply exemption
+   * themselves. `scripts/audit-tax-key.ts` promptly did not, and reported 79
+   * repriceable lines and $756.75 of movement that the writers would never
+   * produce. A field a caller must remember to zero is a field that will be
+   * read un-zeroed; `tax` is now the answer and `base` is the annotation.
+   */
+  base: Tax | null;
 }
 
 /**
@@ -788,10 +801,10 @@ export interface LineTaxResolution {
  *    been doing this all along: invoice 2348 (a Frankfort customer) bills its
  *    replacement at TAX001 Chicago Sales Tax.
  *
- * ⚠️ **Exemption is NOT applied here** — it belongs to
- * {@link assignLineTaxes}, which needs this answer twice: zeroed into
- * `price.taxes`, and un-zeroed into `price.taxes_base`, so an exempt document
- * still records which tax it was exempt FROM.
+ * ⚠️ **Exemption zeroes `tax` and leaves `base`.** Both are returned because
+ * {@link assignLineTaxes} needs the answer twice — zeroed into `price.taxes`,
+ * un-zeroed into `price.taxes_base` — and because a caller reading a single
+ * pre-exemption field will forget to zero it. `tax` is the answer.
  *
  * ⚠️ **`no_nexus` is a jurisdiction, not an exemption, and the difference is
  * visible exactly here.** Its lines resolve `tax: null` because no tax lists
@@ -825,11 +838,14 @@ export function resolveLineTax(
 
   const { jurisdiction, level } = jurisdictionOf();
   if (item.coa_revenue != null && !isTaxableCoa(item.coa_revenue)) {
-    return { jurisdiction, level, tax: null };
+    // A non-revenue line is not taxable, which is a different fact from being
+    // exempt: there is no tax it is exempt FROM, so `base` is null too.
+    return { jurisdiction, level, tax: null, base: null };
   }
 
   const resolved = findTaxFor(ctx.taxes, jurisdiction, key, ctx.asOf);
-  return { jurisdiction, level, tax: resolved ? atStoredVersion(resolved, ctx) : null };
+  const base = resolved ? atStoredVersion(resolved, ctx) : null;
+  return { jurisdiction, level, tax: ctx.exempt ? null : base, base };
 }
 
 /**
@@ -892,10 +908,10 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): voi
   items.forEach((item, index) => {
     if (!isPreTaxItem(item)) return;
     const subtotalDiscountedCents = item.price.subtotal_discounted_cents ?? 0;
-    const { tax } = resolveLineTax(item, destinations[index], ctx);
+    const { tax, base } = resolveLineTax(item, destinations[index], ctx);
 
-    item.price.taxes_base = tax
-      ? [{ uid: tax.uid, name: tax.name, rate: tax.rate, type: tax.type }]
+    item.price.taxes_base = base
+      ? [{ uid: base.uid, name: base.name, rate: base.rate, type: base.type }]
       : [];
 
     const explicitOnly = (item.price.taxes ?? []).filter((modifier) => {
@@ -903,6 +919,7 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): voi
       return doc !== undefined && doc.jurisdiction == null;
     }).map((modifier) => byUid.get(modifier.uid)!);
 
+    // An exempt line drops the explicit-only refs too — a tax is a tax.
     const applied = ctx.exempt ? [] : [...(tax ? [tax] : []), ...explicitOnly];
     const modifiers: PriceModifier[] = applied.map((t) => ({
       uid: t.uid,

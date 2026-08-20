@@ -23378,6 +23378,7 @@ interface LineTaxResolution {
   jurisdiction: JurisdictionType;
   level: JurisdictionLevel | "origin";
   tax: Tax | null;
+  base: Tax | null;
 }
 ```
 
@@ -23927,10 +23928,10 @@ tax          = findTaxFor(catalog, jurisdiction, key, asOf)
    been doing this all along: invoice 2348 (a Frankfort customer) bills its
    replacement at TAX001 Chicago Sales Tax.
 
-⚠️ **Exemption is NOT applied here** — it belongs to
-{@link assignLineTaxes}, which needs this answer twice: zeroed into
-`price.taxes`, and un-zeroed into `price.taxes_base`, so an exempt document
-still records which tax it was exempt FROM.
+⚠️ **Exemption zeroes `tax` and leaves `base`.** Both are returned because
+{@link assignLineTaxes} needs the answer twice — zeroed into `price.taxes`,
+un-zeroed into `price.taxes_base` — and because a caller reading a single
+pre-exemption field will forget to zero it. `tax` is the answer.
 
 ⚠️ **`no_nexus` is a jurisdiction, not an exemption, and the difference is
 visible exactly here.** Its lines resolve `tax: null` because no tax lists

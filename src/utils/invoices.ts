@@ -551,6 +551,13 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     // nested inside `price` and therefore compared — hence the two different
     // treatments of two fields added in the same pass.
     ...(item.coa_revenue !== undefined ? { coa_revenue: item.coa_revenue } : {}),
+    // The line-level tax lever mirrors onto the invoice, because the invoice is
+    // what gets billed and the rule reads `taxed_as ?? type` on whichever
+    // document it is pricing. Spread CONDITIONALLY for the `taxes_base` reason
+    // one field up: the comparator compares KEY SETS, and emitting it
+    // unconditionally would make every pre-#409 line differ from its order line
+    // on a field neither ever set.
+    ...(item.taxed_as !== undefined ? { taxed_as: item.taxed_as } : {}),
     path,
   };
 }
