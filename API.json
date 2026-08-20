@@ -3549,7 +3549,7 @@
         {
           "kind": "interface",
           "name": "TemplateVersion",
-          "declaration": "interface TemplateVersion {\n  uid: string;\n  uid_template: string;\n  status: TemplateVersionStatusType;\n  content: Record<string, string>;\n  params: TemplateParam[];\n  consumed_components: string[];\n  git_branch?: string;\n  base_sha?: string;\n  base_seq?: number;\n  display_name?: string;\n  uid_thread?: string;\n  committed_content_hash?: string;\n  sha?: string;\n  semver?: string;\n  seq?: number;\n  commit_meta?: CommitMeta;\n  blob_refs?: BlobRef[];\n  pr_number?: number | null;\n  golden_results?: GoldenDiff[];\n  reconciled?: boolean;\n  written_by: ActorRefType;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface TemplateVersion {\n  uid: string;\n  uid_template: string;\n  status: TemplateVersionStatusType;\n  content: Record<string, string>;\n  params: TemplateParam[];\n  consumed_components: string[];\n  git_branch?: string;\n  base_sha?: string;\n  base_seq?: number;\n  display_name?: string;\n  uid_thread?: string;\n  committed_content_hash?: string;\n  staging_sha?: string | null;\n  sha?: string;\n  semver?: string;\n  seq?: number;\n  commit_meta?: CommitMeta;\n  blob_refs?: BlobRef[];\n  pr_number?: number | null;\n  golden_results?: GoldenDiff[];\n  reconciled?: boolean;\n  written_by: ActorRefType;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A status-discriminated template version (draft | published | archived)."
         },
         {

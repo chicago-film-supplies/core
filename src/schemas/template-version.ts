@@ -118,7 +118,13 @@ export interface GoldenDiff {
   fixture: string;
   verdict: GoldenDiffVerdict;
   delta: number;
-  image_uuids: { candidate?: string; diff?: string };
+  /** Uploadcare UUIDs for the review images. `candidate` is the PR-head render
+   * and `diff` the pixel overlay; **`baseline` is the committed golden the
+   * candidate was compared against**, uploaded so the manager can show a
+   * before/after rather than an overlay the operator has to reverse-engineer
+   * (api-cloudrun#589). `baseline` is absent on `no-golden` (there is nothing to
+   * show) and on `diff` results predating the upload. */
+  image_uuids: { candidate?: string; diff?: string; baseline?: string };
   /** PR head sha the verdict was computed at. */
   sha: string;
   checked_at: FirestoreTimestampType;
@@ -132,6 +138,7 @@ export const GoldenDiffSchema: z.ZodType<GoldenDiff> = z.strictObject({
   image_uuids: z.strictObject({
     candidate: uploadcareRef(z.string().optional()),
     diff: uploadcareRef(z.string().optional()),
+    baseline: uploadcareRef(z.string().optional()),
   }),
   sha: z.string().min(1),
   checked_at: FirestoreTimestamp,
@@ -182,6 +189,24 @@ export interface TemplateVersion {
    * `published`/`archived`: a publish flips the doc in place and drops the
    * draft fields, and an archived draft keeps whatever it had. */
   committed_content_hash?: string;
+  /**
+   * Head commit of this draft's STAGING ref (`staging/<version-uid>`) — the git
+   * copy of every `save`, so a draft's work never exists only in Firestore
+   * (templates#79 destroyed 18 edits that did).
+   *
+   * It is the `expectedHeadOid` for the next `createCommitOnBranch`, which makes
+   * it a cached shadow of GitHub state — permitted here, unlike a cached
+   * `is_draft`, because it is **validated at the point of use**: a stale value
+   * fails the mutation's mandatory CAS and degrades to a re-read and retry, so
+   * it can never decide anything while wrong.
+   *
+   * Absent means no staging ref exists — a draft predating staging, or one whose
+   * ref `commit_draft` consumed — and the next save creates it from the draft
+   * branch head. Deliberately NOT required on `draft`: unlike
+   * `committed_content_hash` there WERE open drafts when this landed, and an
+   * absent value is recoverable rather than ambiguous.
+   */
+  staging_sha?: string | null;
 
   // ── published fields ──
   sha?: string;
@@ -220,6 +245,7 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   display_name: z.string().min(1).max(200).optional(),
   uid_thread: FirestoreId.optional(),
   committed_content_hash: z.string().min(1).optional(),
+  staging_sha: z.string().min(1).nullable().optional(),
 
   sha: z.string().min(1).optional(),
   semver: z.string().min(1).optional().meta({ column: true, label: "Version" }),

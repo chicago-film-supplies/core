@@ -86,6 +86,7 @@ const EXPECTED_REF_PATHS: Record<string, string[]> = {
   "cards": ["attachments[].uid"],
   "recurrences": ["prototype.attachments[].uid"],
   "templates-versions": [
+    "golden_results[].image_uuids.baseline",
     "golden_results[].image_uuids.candidate",
     "golden_results[].image_uuids.diff",
   ],

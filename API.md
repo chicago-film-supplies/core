@@ -7478,6 +7478,7 @@ interface TemplateVersion {
   display_name?: string;
   uid_thread?: string;
   committed_content_hash?: string;
+  staging_sha?: string | null;
   sha?: string;
   semver?: string;
   seq?: number;
