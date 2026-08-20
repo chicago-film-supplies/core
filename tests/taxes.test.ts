@@ -190,6 +190,54 @@ Deno.test("override tax_frankfort replaces item tax with 8% Frankfort + updates 
   assertEquals(px(items[0]).total_cents, 10800);
 });
 
+Deno.test("🔴 a REPLACEMENT line ignores the doc/org jurisdiction override", () => {
+  // Owner, 2026-08-20: every replacement item is a sale in which CFS is the END
+  // USER — the customer is buying it *for CFS* — so it sources to the ORIGIN, not
+  // to wherever the rental went. A Frankfort customer's replacement is a Chicago
+  // sale, which is what the live Xero ledger has always billed (invoice 2348).
+  const items = [makeItem({ type: "replacement" })];
+  const before = structuredClone(px(items[0]).taxes);
+  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(
+    px(items[0]).taxes,
+    before,
+    "the Frankfort override must not reach a replacement line",
+  );
+});
+
+Deno.test("…and the same for an ORGANIZATION-level jurisdiction claim", () => {
+  // ⚠️ `null` for the document, NOT "tax_applied". An explicit doc profile WINS
+  // over the org's, so passing one makes `getEffectiveProfileTax` return null
+  // and the whole function early-returns — the test would then pass with the
+  // replacement arm deleted, which is exactly what a planted removal showed.
+  const items = [makeItem({ type: "replacement" })];
+  const before = structuredClone(px(items[0]).taxes);
+  overrideItemTaxesForProfile(items, "tax_rantoul", null, CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes, before, "the org rung must not reach it either");
+});
+
+Deno.test("…but a NON-replacement line on the same document still takes the override", () => {
+  // The arm must be narrow: it is about the item type, not about the document.
+  const items = [makeItem({ type: "replacement" }), makeItem({ type: "rental" })];
+  // The fixture seeds both lines with the SAME tax, so "unchanged" and
+  // "overridden" are distinguishable without asserting a name the fixture
+  // happens to pick.
+  const seeded = px(items[0]).taxes[0].name;
+  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes[0].name, seeded, "the replacement keeps what it was authored with");
+  assertEquals(px(items[1]).taxes[0].name, "Frankfort Sales Tax", "the rental takes the override");
+});
+
+Deno.test("…and EXEMPTION still applies to a replacement — a different axis", () => {
+  // Exemption is a property of the CUSTOMER and zeroes tax whatever the
+  // jurisdiction. Xero agrees: every untaxed replacement line in the corpus
+  // belongs to a tax_exempt customer. Only the jurisdiction rung is skipped.
+  const items = [makeItem({ type: "replacement" })];
+  overrideItemTaxesForProfile(items, "tax_exempt", "tax_applied", CATALOG, AS_OF);
+  assertEquals(px(items[0]).taxes, []);
+  assertEquals(px(items[0]).total_cents, 10000);
+});
+
 Deno.test("override tax_exempt empties taxes and sets total to subtotal_discounted", () => {
   const items = [makeItem()];
   overrideItemTaxesForProfile(items, "tax_exempt", "tax_applied", CATALOG, AS_OF);

@@ -428,6 +428,35 @@ export function overrideItemTaxesForProfile(
       continue;
     }
 
+    // 🔴 A REPLACEMENT sources to the ORIGIN, so a document- or organization-level
+    // JURISDICTION override must not reach it (owner, 2026-08-20).
+    //
+    // Every replacement item is a sale in which **CFS is the end user** — the
+    // customer is buying the item *for CFS*, to replace gear CFS owns that was
+    // lost or damaged. The situs of that sale is CFS's own location, not wherever
+    // the rental happened to be delivered. A Frankfort customer's replacement is
+    // still a Chicago sale.
+    //
+    // `continue` rather than a rewrite, and that is the whole trick: a
+    // replacement line is AUTHORED with Chicago Sales Tax
+    // (`DEFAULT_TAX_NAME_BY_TYPE.replacement`), so leaving it alone already
+    // yields the right answer — and it preserves a LINE-level override, which
+    // stays deliberately overridable. Only the doc/org rung is skipped.
+    //
+    // Corroborated by the live Xero ledger, which has been doing this all along:
+    // invoice 2348 (Kenwood, a FRANKFORT customer) bills its
+    // `Replacement: Surveillance Kit` at TAX001 Chicago Sales Tax, and 2385
+    // carries Chicago RENTAL tax on its rental lines beside Chicago SALES tax on
+    // its replacements. Measured 2026-08-20: 234 of 248 taxed replacement lines
+    // corpus-wide were already Chicago; this arm is what stops the other 14.
+    //
+    // ⚠️ EXEMPTION deliberately still applies — the branch above runs first.
+    // Exemption is a property of the customer and zeroes tax whatever the
+    // jurisdiction, and Xero agrees: every untaxed replacement line in the corpus
+    // belongs to a `tax_exempt` customer. Only the jurisdiction rung is skipped
+    // here, not the whole profile.
+    if (item.type === "replacement") continue;
+
     const amountCents = computeItemTaxAmountCents(
       effective,
       subtotalDiscountedCents,
