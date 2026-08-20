@@ -21121,6 +21121,29 @@ Values are compared by strict equality (`===`). Both `undefined` and `null`
 participate in the match — a field that was `null` on prev and is `null`
 on the invoice will accept a new non-null order value.
 
+### `toInvoiceDestinationPair(uidOrder: string, pair: DocDestinationType): InvoiceDestinationPair`
+
+**The ONE author of an invoice destination pair.** Project an order's pair
+into the invoice's, tagged with the order it is scoped to.
+
+⚠️ **A projection enumerates what it TAKES, so every hand-written one is a
+place a new field gets dropped.** There were FIVE of them — the two below,
+`createInvoice` and the CRMS invoice webhook in api-cloudrun, and the schema
+literal itself — and adding `jurisdiction` (api-cloudrun#591) had to touch
+every one. Two were missed on the first pass: one surfaced as six failing
+tests, the other as a type error. Hence one author.
+
+**Nullish is normalized to `null`, never left `undefined`.** Firestore
+REFUSES an undefined value — the write fails, it does not drop the key — so a
+pair whose optional field is simply absent would make the invoice
+unwritable. `null` and absent mean the same thing on every field of this
+pair, and `pairsMatch` canonicalizes the two together, so this costs no
+information and no override detection.
+
+⚠️ The spread is deliberate and is what makes a NEW pair field carried by
+construction. Do not "tidy" it into an explicit field list — that is the
+defect this function exists to remove.
+
 ### `unexplainedInvoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem, differences: readonly string[], context: InvoiceSyncContext): string[]`
 
 Strip the differences that are **explained** — leaving only the ones an

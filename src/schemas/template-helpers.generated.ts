@@ -72,6 +72,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "isPreTaxItem", expr: "it.invoices.isPreTaxItem(item)", desc: "Determine whether a line item participates in subtotal/discount/tax calculations. Standalone predicate (not composed) because TS doesn't support negated predicates.", returns: "item is PreTaxLineItem" },
     { name: "isPriceableItem", expr: "it.invoices.isPriceableItem(item)", desc: "Determine whether a line item is priceable (has a price object, not a structural item).", returns: "item is PriceableLineItem" },
     { name: "isTransactionFeeItem", expr: "it.invoices.isTransactionFeeItem(item)", desc: "Determine whether a line item is a transaction fee.", returns: "item is TransactionFeeLineItem" },
+    { name: "toInvoiceDestinationPair", expr: "it.invoices.toInvoiceDestinationPair(uidOrder, pair)", desc: "**The ONE author of an invoice destination pair.** Project an order's pair into the invoice's, tagged with the order it is scoped to.", returns: "InvoiceDestinationPair" },
   ],
   "locations": [
     { name: "normalizeLocationName", expr: "it.locations.normalizeLocationName(name)", desc: "Canonical uniqueness key for a location name, scoped within its store.", returns: "string" },

@@ -29,6 +29,7 @@ import {
   removeOrderScopedItems,
   resyncInvoiceLines,
   syncOrderDestinationsSelective,
+  toInvoiceDestinationPair,
   syncOrderItems,
   syncOrderToInvoiceSelective,
   syncScalarWithOverride,
@@ -2642,6 +2643,29 @@ Deno.test("pairsMatch is insensitive to KEY ORDER", () => {
   assertEquals(result[0].delivery.instructions, "new");
 });
 
+Deno.test("toInvoiceDestinationPair carries EVERY field of the pair, by construction", () => {
+  // The ratchet the five hand-written projections could not provide: a field
+  // added to the order pair reaches the invoice pair without anyone editing a
+  // list. Compares KEY SETS, so a new field fails this the moment it exists.
+  const pair = makePair("d1", "c1", { jurisdiction: "rantoul" });
+  const projected = toInvoiceDestinationPair("o1", pair);
+  assertEquals(
+    Object.keys(projected).sort(),
+    ["uid_order", ...Object.keys(pair)].sort(),
+    "the projection must carry every key of the source pair, plus uid_order",
+  );
+  assertEquals(projected.uid_order, "o1");
+  assertEquals(projected.jurisdiction, "rantoul");
+});
+
+Deno.test("toInvoiceDestinationPair normalizes nullish to null — Firestore refuses undefined", () => {
+  const { jurisdiction: _absent, ...noJurisdiction } = makePair("d1", "c1");
+  const projected = toInvoiceDestinationPair("o1", noJurisdiction as ReturnType<typeof makePair>);
+  for (const [key, value] of Object.entries(projected)) {
+    assertEquals(value === undefined, false, `${key} is undefined — Firestore will refuse the write`);
+  }
+});
+
 Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () => {
   // 🔴 Firestore refuses `undefined` outright — the write fails, it does not
   // drop the key — so a projection that spells `jurisdiction: pair.jurisdiction`
@@ -2659,5 +2683,8 @@ Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () =>
   for (const [key, value] of Object.entries(result[0])) {
     assertEquals(value === undefined, false, `${key} is undefined — Firestore will refuse the write`);
   }
-  assertEquals(result[0].jurisdiction, null);
+  // An ABSENT key stays absent, which Firestore accepts and which the schema
+  // declares optional. The defect was only ever an explicitly-present
+  // `undefined`; minting a `null` here would write a decision nobody made.
+  assertEquals("jurisdiction" in result[0], false);
 });
