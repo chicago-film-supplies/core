@@ -19,6 +19,7 @@ import {
   type DocLineItemTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  JurisdictionEnum,
   PriceFormulaEnum,
   type PriceFormulaType,
   TaxProfileEnum,
@@ -484,6 +485,23 @@ const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
  * with a `uid_order` scope field so multi-order invoices can carry pairs
  * from several orders and have them selectively synced per source order.
  * Carries `dates` (rendered on the invoice) snapshotted from the source order.
+ *
+ * ⚠️ **A new field on this pair is FOUR edits, and the compiler catches one.**
+ * The `extends` above hands over the type; everything that enumerates the pair
+ * by hand does not:
+ *
+ * 1. `InvoiceDocDestination` below — a `z.strictObject`, so a missing key is a
+ *    write-time refusal, not a compile error.
+ * 2. `syncOrderDestinationsSelective`'s two projections
+ *    (`@cfs/core/utils/invoices`) — a **projection**, so enumerate what you
+ *    TAKE; a forgotten key drops the field, which surfaces.
+ * 3. `pairsMatch` in the same file — an **equality check**, so enumerate what
+ *    you SKIP. A forgotten key there silently answers "equal", reports an
+ *    edited pair as unedited, and **overwrites the operator's edit** on the
+ *    next sync. That is why it destructures `{ uid_order, dates, ...rest }`
+ *    and compares `rest`: every future field is included by construction.
+ * 4. api-cloudrun's `services/webhooks/invoice.ts` destination map — another
+ *    projection, from the CRMS-rebuilt order.
  */
 export interface InvoiceDocDestinationType extends DocDestinationType {
   uid_order: string;
@@ -496,6 +514,16 @@ export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z.str
   collection: DocDestinationEndpoint.meta({ label: "Collection" }),
   customer_collecting: z.boolean().default(false),
   customer_returning: z.boolean().default(false),
+  // 🔴 THIS LIST INHERITS NOTHING. `InvoiceDocDestinationType extends
+  // DocDestinationType`, so a field added to the order's pair arrives on the
+  // TYPE for free and never on this schema — a document carrying it would
+  // type-check and then be REFUSED by `validateBeforeWrite`, because a strict
+  // object rejects an unknown key. The compiler cannot see the gap; only a
+  // write can. Add every new pair field here by hand.
+  jurisdiction: JurisdictionEnum.nullable().optional().meta({
+    column: true,
+    label: "Jurisdiction",
+  }),
 });
 
 // ── Document schema ──────────────────────────────────────────────

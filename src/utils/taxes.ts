@@ -542,6 +542,10 @@ export function materializeDocumentTax(
  * because one prod order and one invoice embed the Paxton tax uid and
  * `calculateItemTax` throws `Unknown tax uid` on a missing one. Closed, not
  * erased.
+ *
+ * `no_nexus` is absent for a different reason: it is not a city CFS collects
+ * in, it is the answer when the address is in no state CFS collects in at all
+ * — case 1, decided by the region and never by this table.
  */
 const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>> = {
   CHICAGO: "chicago",
@@ -550,17 +554,26 @@ const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>
 };
 
 /**
- * **Where a delivery address sources to** — the bottom of the three-level
- * jurisdiction precedence, below a destination's explicit `jurisdiction` and
- * an organization's `default_jurisdiction`.
+ * **Where a delivery address sources to** — the bottom of the four-level
+ * jurisdiction precedence ({@link resolveJurisdiction}), below the document's
+ * own destination entry, the organization's `jurisdiction_claim` and the
+ * shared destination master.
  *
  * ## Three cases, three DIFFERENT legal reasons
  *
  * | # | address | result | why |
  * |---|---|---|---|
- * | 1 | outside Illinois | `null` | **nexus** — no obligation in another state |
+ * | 1 | outside Illinois | `"no_nexus"` | **nexus** — no obligation in another state |
  * | 2 | an Illinois city CFS collects in | that jurisdiction | **destination sourcing** |
  * | 3 | any other Illinois municipality | `origin` | **origin sourcing** — the sale is deemed to occur at our selling location |
+ *
+ * ## TOTAL — it always answers, and that is what frees `null` upstream
+ *
+ * There is no address this returns `null` for: an unresolvable region falls to
+ * case 3, and a missing city falls to case 3. Case 1 returns the `no_nexus`
+ * **value** rather than `null` because `null` means *"I assert nothing, ask the
+ * next level"* at every level of the chain, and this is the last level — it has
+ * nobody to ask. See {@link JurisdictionType} for why the two were split.
  *
  * ⚠️ **Case 3 is a RULE, not a fallback, and cases 1 and 3 are not the same
  * thing.** Merging them — "we don't collect there, so no tax" — untaxes every
@@ -589,8 +602,7 @@ const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>
  * CFS's own warehouse at 3100 W Fillmore St resolves to "Palos Township /
  * 60480", and another destination sits at "Grant Park / 60612". Which is also
  * the reason this derivation is the LOWEST precedence level: it is a
- * convenience, and an explicit `destination.jurisdiction` or an organization
- * default outranks it.
+ * convenience, and an explicit jurisdiction at any level above it outranks it.
  *
  * Pure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager
  * reaches the same answer as the API without a round trip.
@@ -605,11 +617,11 @@ const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>
 export function deriveJurisdiction(
   address: { city?: string; region?: string } | null | undefined,
   origin: JurisdictionType,
-): JurisdictionType | null {
+): JurisdictionType {
   // 1. NEXUS. Only a POSITIVELY resolved non-Illinois state exits here; an
   //    unrecognized region is unknown, not out of state.
   const code = toUsStateCode(address?.region);
-  if (code !== null && code !== "IL") return null;
+  if (code !== null && code !== "IL") return "no_nexus";
 
   // 2. DESTINATION SOURCING — an exact municipality CFS collects for.
   const city = (address?.city ?? "").trim().toUpperCase();
@@ -620,6 +632,101 @@ export function deriveJurisdiction(
   // 3. ORIGIN SOURCING — in Illinois, but not somewhere CFS collects, so the
   //    sale is deemed to occur at the selling location.
   return origin;
+}
+
+/** Which level of the precedence chain supplied a resolved jurisdiction. */
+export type JurisdictionLevel = "document" | "organization" | "destination" | "derived";
+
+/**
+ * The four levels, as named fields so no caller can get the ORDER wrong.
+ *
+ * Every level is `JurisdictionType | null | undefined`, and `null` and absent
+ * mean the same thing at all of them: *"I assert nothing, ask the next level."*
+ * The answer *"this sources somewhere CFS collects no tax"* is the `no_nexus`
+ * value — see {@link JurisdictionType}.
+ */
+export interface JurisdictionLevels {
+  /**
+   * Level 1 — `order/invoice.destinations[i].jurisdiction`, the document's own
+   * value. Seeded at create on the native path from the organization's claim
+   * when that is not the origin, and operator-editable thereafter.
+   *
+   * ⚠️ **Read the document's SNAPSHOT here, never the destination master.** It
+   * is what protects a live order from an edit to a shared address.
+   */
+  documentDestination?: JurisdictionType | null;
+  /** Level 2 — `organizations/{uid}.jurisdiction_claim`, the customer's standing claim. */
+  organization?: JurisdictionType | null;
+  /** Level 3 — `destinations/{uid}.jurisdiction`, the shared address master. */
+  destination?: JurisdictionType | null;
+  /** Level 4 input — the delivery address this destination ships to. */
+  address?: { city?: string; region?: string } | null;
+  /**
+   * Level 4 input — the selling store's own jurisdiction, resolved by the
+   * caller through `Order.uid_store` → `Store.uid_destination` →
+   * `Destination.jurisdiction`. Required, and not a constant: a second store in
+   * another jurisdiction changes every case-3 answer without touching this.
+   */
+  origin: JurisdictionType;
+}
+
+/** A resolved jurisdiction and the level of the chain that supplied it. */
+export interface ResolvedJurisdiction {
+  jurisdiction: JurisdictionType;
+  level: JurisdictionLevel;
+}
+
+/**
+ * **Resolve which jurisdiction a destination's lines are taxed in.** The one
+ * implementation of the precedence — per DESTINATION, never per document, which
+ * is what lets one order carry two jurisdictions.
+ *
+ * ```
+ * order/invoice.destinations[i].jurisdiction   the document's own value   ← WINS
+ *   ?? organizations/{uid}.jurisdiction_claim    the customer's standing claim
+ *   ?? destinations/{uid}.jurisdiction           the shared address master
+ *   ?? deriveJurisdiction(address, origin)       total — always answers
+ * ```
+ *
+ * **TOTAL: it always returns a jurisdiction**, because level 4 does. A caller
+ * never has to decide what "no answer" means, and `findTaxFor` gets a value it
+ * can look up — `no_nexus` simply matches no tax, which is the untaxed result
+ * expressed as data rather than as a missing case.
+ *
+ * ## Why the organization outranks the destination master
+ *
+ * An override a shared address can beat is not an override. Measured on prod
+ * 2026-08-19: exactly **1 of 459** destination masters carries an explicit
+ * jurisdiction — the CFS warehouse — and ranking masters above the organization
+ * made it defeat the customer's claim on **all 8** repriceable
+ * jurisdiction-bearing orders, every one a `customer_collecting` order pointed
+ * at that warehouse. A rule whose only measured effect is cancelling the
+ * mechanism above it is a defect, not a tradeoff.
+ *
+ * The master still does real work: it beats the **derivation**, which is what
+ * the geocode warning on {@link deriveJurisdiction} is about.
+ *
+ * ## Returning the level is not a convenience
+ *
+ * The order form has to show which level supplied each answer
+ * (chicago-film-supplies/manager#304), and a second implementation of the
+ * precedence to compute that is exactly the drift this function exists to
+ * prevent. One call answers both.
+ */
+export function resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdiction {
+  if (levels.documentDestination != null) {
+    return { jurisdiction: levels.documentDestination, level: "document" };
+  }
+  if (levels.organization != null) {
+    return { jurisdiction: levels.organization, level: "organization" };
+  }
+  if (levels.destination != null) {
+    return { jurisdiction: levels.destination, level: "destination" };
+  }
+  return {
+    jurisdiction: deriveJurisdiction(levels.address, levels.origin),
+    level: "derived",
+  };
 }
 
 // ── Out-of-state sourcing ────────────────────────────────────────

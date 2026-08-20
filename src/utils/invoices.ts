@@ -1628,19 +1628,63 @@ function invoicePairKey(pair: InvoiceDestinationPair): string {
   return destPairKey(pair.uid_order, pair);
 }
 
-/** Deep-equality check on a pair's endpoint payload, ignoring uid_order. */
+/**
+ * The two fields a pair comparison must NOT look at. `uid_order` is the scope
+ * key rather than payload; `dates` is snapshotted from the source order, so the
+ * invoice never owns it and a change there is not an operator edit.
+ */
+const PAIR_MATCH_EXCLUDED: ReadonlySet<string> = new Set(["uid_order", "dates"]);
+
+/**
+ * Key-sorted deep copy with `null`/`undefined`/absent collapsed to absent —
+ * so two payloads compare equal iff they say the same thing.
+ *
+ * ⚠️ **Both normalizations are load-bearing, and neither is cosmetic.**
+ * *Key order*: one side of a comparison is a stored document (Firestore returns
+ * map keys sorted) and the other may be freshly built (insertion order), so a
+ * raw `JSON.stringify` can report two identical pairs as different. *Nullish*:
+ * every field on this pair means the same thing absent as it does `null` — no
+ * destination record, no address, no instructions, no jurisdiction claim — and
+ * a corpus mid-migration holds both spellings of that. Reading one as an edit
+ * would freeze the pair as "overridden" and stop it syncing **entirely**,
+ * because the check is all-or-nothing for the whole pair.
+ */
+function canonicalizePayload(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizePayload);
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    const v = (value as Record<string, unknown>)[key];
+    if (v === null || v === undefined) continue;
+    out[key] = canonicalizePayload(v);
+  }
+  return out;
+}
+
+/**
+ * Deep-equality check on a pair's payload, ignoring {@link PAIR_MATCH_EXCLUDED}.
+ *
+ * 🔴 **An equality check enumerates what it SKIPS, never what it takes**, and
+ * the two failure modes are opposite. A forgotten key in a *projection* drops a
+ * field, which surfaces. A forgotten key here silently answers *"equal"* — so
+ * the caller concludes the invoice pair was never edited, and **overwrites the
+ * operator's edit with the order's value.** Silent data loss, not a missing
+ * field. Excluding by name makes every future field on the pair compared by
+ * construction; the sibling projections in
+ * {@link syncOrderDestinationsSelective} enumerate their takings for the same
+ * reason, in the other direction.
+ */
 function pairsMatch(a: DocDestinationType, b: DocDestinationType): boolean {
-  return JSON.stringify({
-    delivery: a.delivery,
-    collection: a.collection,
-    customer_collecting: a.customer_collecting,
-    customer_returning: a.customer_returning,
-  }) === JSON.stringify({
-    delivery: b.delivery,
-    collection: b.collection,
-    customer_collecting: b.customer_collecting,
-    customer_returning: b.customer_returning,
-  });
+  const strip = (pair: DocDestinationType): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(pair)) {
+      if (!PAIR_MATCH_EXCLUDED.has(key)) out[key] = value;
+    }
+    return out;
+  };
+  return JSON.stringify(canonicalizePayload(strip(a))) ===
+    JSON.stringify(canonicalizePayload(strip(b)));
 }
 
 /**
@@ -1705,6 +1749,7 @@ export function syncOrderDestinationsSelective(
         collection: newPair.collection,
         customer_collecting: newPair.customer_collecting,
         customer_returning: newPair.customer_returning,
+        jurisdiction: newPair.jurisdiction,
       });
     } else if (prev && pairsMatch(prev, inv)) {
       // Not overridden — replace with new order pair.
@@ -1715,6 +1760,7 @@ export function syncOrderDestinationsSelective(
         collection: newPair.collection,
         customer_collecting: newPair.customer_collecting,
         customer_returning: newPair.customer_returning,
+        jurisdiction: newPair.jurisdiction,
       });
     } else {
       // Overridden (or prev missing) — keep invoice version.

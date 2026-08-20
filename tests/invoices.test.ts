@@ -38,6 +38,7 @@ import {
 import type {
   InvoiceDocItemType,
   FirestoreTimestampType,
+  JurisdictionType,
   OrderDocDatesType,
   SettlementReasonType,
   SettlementTypeType,
@@ -1310,6 +1311,7 @@ function makePair(
     collection?: { instructions?: string | null };
     customer_collecting?: boolean;
     customer_returning?: boolean;
+    jurisdiction?: JurisdictionType | null;
   } = {},
 ) {
   return {
@@ -1318,6 +1320,7 @@ function makePair(
     collection: { uid: collectionUid, address: null, instructions: overrides.collection?.instructions ?? null, contact: null },
     customer_collecting: overrides.customer_collecting ?? false,
     customer_returning: overrides.customer_returning ?? false,
+    jurisdiction: overrides.jurisdiction ?? null,
   };
 }
 
@@ -2576,4 +2579,65 @@ Deno.test("🔴 #481 no arm may fire when the tax ROWS agree — the 171-line cr
   const verdict = explainInvoiceItemDifferences(expected, cur, invoiceItemDifferences(expected, cur), FROZEN);
   assertEquals(verdict.arms, [], "an arm fired with no tax-row difference to explain");
   assertEquals(verdict.unexplained, ["price.taxes_base"]);
+});
+
+// ── Destination pair: jurisdiction is level 1 of the tax precedence ──
+
+Deno.test("syncOrderDestinationsSelective carries jurisdiction onto a NEW invoice pair", () => {
+  // The projection enumerates what it TAKES, so a forgotten key drops the
+  // field. It surfaces immediately — which is the failure mode a projection is
+  // allowed to have, unlike the equality check below.
+  const prev: ReturnType<typeof makePair>[] = [];
+  const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
+  const result = syncOrderDestinationsSelective(prev, next, [], "o1");
+  assertEquals(result.length, 1);
+  assertEquals(result[0].jurisdiction, "frankfort");
+});
+
+Deno.test("syncOrderDestinationsSelective carries a CHANGED jurisdiction on an unedited pair", () => {
+  const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
+  const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
+  const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "chicago" }) }];
+  const result = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  assertEquals(result[0].jurisdiction, "frankfort");
+});
+
+Deno.test("pairsMatch SEES jurisdiction — an invoice-side edit is not overwritten", () => {
+  // 🔴 The silent-data-loss case, and the reason `pairsMatch` excludes by name
+  // instead of enumerating what it compares. With `jurisdiction` unlisted the
+  // pair reads as unedited, the sync takes the order's value, and the
+  // operator's override is gone — no error, no log, a wrong tax rate.
+  const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
+  const next = [makePair("d1", "c1", { jurisdiction: "chicago" })];
+  const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) }];
+  const result = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  assertEquals(result[0].jurisdiction, "rantoul");
+});
+
+Deno.test("pairsMatch: null, undefined and absent jurisdiction are ONE state", () => {
+  // All three spell "assert nothing, ask the next level", and a corpus
+  // mid-migration holds every spelling. Reading one as an edit would freeze the
+  // WHOLE pair as overridden and stop it syncing — the check is all-or-nothing.
+  const withNull = makePair("d1", "c1", { jurisdiction: null });
+  const { jurisdiction: _dropped, ...withAbsent } = makePair("d1", "c1");
+  const prev = [withNull];
+  const next = [makePair("d1", "c1", { delivery: { instructions: "new" } })];
+  const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...withAbsent } as InvoiceDestinationPair];
+  const result = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  assertEquals(result[0].delivery.instructions, "new", "absent must not read as an override of null");
+});
+
+Deno.test("pairsMatch is insensitive to KEY ORDER", () => {
+  // One side of the comparison is a stored document (Firestore returns map keys
+  // sorted) and the other may be freshly built (insertion order). A raw
+  // JSON.stringify would report two identical pairs as different, freeze the
+  // pair as overridden, and silently stop syncing it.
+  const built = makePair("d1", "c1", { jurisdiction: "chicago" });
+  const reordered = Object.fromEntries(
+    Object.keys(built).sort().map((k) => [k, (built as Record<string, unknown>)[k]]),
+  ) as ReturnType<typeof makePair>;
+  const next = [makePair("d1", "c1", { jurisdiction: "chicago", delivery: { instructions: "new" } })];
+  const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...reordered }];
+  const result = syncOrderDestinationsSelective([built], next, invoice, "o1");
+  assertEquals(result[0].delivery.instructions, "new");
 });

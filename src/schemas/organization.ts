@@ -50,19 +50,38 @@ export interface Organization {
   xero_id: string | null;
   tax_profile: TaxProfileType;
   /**
-   * This customer's standing jurisdiction — the middle of the three levels,
-   * below a destination's explicit `jurisdiction` and above
-   * `deriveJurisdiction(address)`.
+   * This customer's standing jurisdiction claim — **level 2** of the four-level
+   * precedence in `resolveJurisdiction` (`@cfs/core/utils/taxes`), below the
+   * document's own `destinations[i].jurisdiction` and above both the shared
+   * destination master and the derivation.
    *
-   * ⚠️ **A standing CLAIM, not a hint.** A Rantoul-defaulted organization
-   * taking a one-off Chicago delivery gets Rantoul unless that destination
-   * carries an explicit jurisdiction — the destination is the more specific
-   * assertion and wins, but nothing about this level is a guess. The order form
-   * must therefore show WHICH level supplied each destination's answer.
+   * ⚠️ **A standing CLAIM, not a hint, and it outranks the shared address
+   * master.** An override a shared address can beat is not an override:
+   * measured on prod, 1 of 459 masters carries a jurisdiction (the CFS
+   * warehouse) and ranking masters higher made it defeat this claim on all 8
+   * repriceable jurisdiction-bearing orders. The escape hatch is level 1 — a
+   * Rantoul-claim organization taking a one-off Chicago delivery edits **that
+   * destination's** entry on the document, so the document is never re-welded
+   * to one jurisdiction the way `tax_profile` welds it. The order form must
+   * still show WHICH level supplied each destination's answer.
+   *
+   * ⚠️ **The name is not `default_`.** "Default" reads as a fallback and this
+   * is the top of the stored chain; the rename is what stops the next reader
+   * re-deriving the precedence from the field name.
+   *
+   * `null`/absent asserts nothing and asks the next level. It does **not** mean
+   * "no jurisdiction" — that answer is the `no_nexus` value, authorable here
+   * like any other ({@link JurisdictionType}).
+   *
+   * ⚠️ **Load-bearing for the entire current corpus, not a tail case.** All 993
+   * prod orders are CRMS-originated and the CRMS path does not seed level 1, so
+   * level 1 is empty on every document that exists today and this level is what
+   * answers for Kenwood, Waterloo West and Simeon. Phase 2 cannot delete
+   * `tax_profile` before the CRMS cutover unless this stays.
    *
    * Optional through api-cloudrun#409 Phase 1.
    */
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   /**
    * Whether this customer is tax-exempt — a property of the CUSTOMER, which is
    * the half {@link TaxProfileType} welds to jurisdiction and cannot separate.
@@ -105,9 +124,9 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   // `product.ts`. TAX_PROFILES[0] is "tax_applied", so the enum's
   // type-derived seed already equals the dropped default.
   tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
-  default_jurisdiction: JurisdictionEnum.nullable().optional().meta({
+  jurisdiction_claim: JurisdictionEnum.nullable().optional().meta({
     column: true,
-    label: "Default Jurisdiction",
+    label: "Jurisdiction Claim",
   }),
   tax_exempt: z.boolean().optional().meta({ column: true, label: "Tax Exempt" }),
   description: z.string().default("").optional().meta({ column: true, label: "Description" }),
@@ -159,7 +178,7 @@ export interface CreateOrganizationInputType {
   uid: string;
   name: string;
   tax_profile: TaxProfileType;
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
   contacts?: OrganizationContactType[];
@@ -173,7 +192,7 @@ export const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType> = z
   uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
   tax_profile: TaxProfileEnum,
-  default_jurisdiction: JurisdictionEnum.nullable().optional(),
+  jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   billing_address: Address,
   contacts: z.array(OrganizationContact).optional(),
@@ -189,7 +208,7 @@ export interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
   tax_profile?: TaxProfileType;
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
   billing_address?: AddressType | null;
@@ -205,7 +224,7 @@ export const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType> = z
   uid: FirestoreId.optional(),
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }).optional(),
   tax_profile: TaxProfileEnum.optional(),
-  default_jurisdiction: JurisdictionEnum.nullable().optional(),
+  jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   description: z.string().optional(),
   billing_address: Address.optional(),

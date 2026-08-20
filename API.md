@@ -1773,7 +1773,7 @@ interface CreateOrganizationInputType {
   uid: string;
   name: string;
   tax_profile: TaxProfileType;
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
   contacts?: OrganizationContactType[];
@@ -2401,6 +2401,7 @@ interface DestinationType {
   collection: DestinationEndpointType;
   customer_collecting?: boolean;
   customer_returning?: boolean;
+  jurisdiction?: JurisdictionType | null;
 }
 ```
 
@@ -2594,6 +2595,7 @@ interface DocDestinationType {
   collection: DocDestinationEndpointType;
   customer_collecting: boolean;
   customer_returning: boolean;
+  jurisdiction?: JurisdictionType | null;
 }
 ```
 
@@ -3565,6 +3567,23 @@ Destination pair on an invoice — mirrors the order's `DocDestinationType`
 with a `uid_order` scope field so multi-order invoices can carry pairs
 from several orders and have them selectively synced per source order.
 Carries `dates` (rendered on the invoice) snapshotted from the source order.
+
+⚠️ **A new field on this pair is FOUR edits, and the compiler catches one.**
+The `extends` above hands over the type; everything that enumerates the pair
+by hand does not:
+
+1. `InvoiceDocDestination` below — a `z.strictObject`, so a missing key is a
+   write-time refusal, not a compile error.
+2. `syncOrderDestinationsSelective`'s two projections
+   (`@cfs/core/utils/invoices`) — a **projection**, so enumerate what you
+   TAKE; a forgotten key drops the field, which surfaces.
+3. `pairsMatch` in the same file — an **equality check**, so enumerate what
+   you SKIP. A forgotten key there silently answers "equal", reports an
+   edited pair as unedited, and **overwrites the operator's edit** on the
+   next sync. That is why it destructures `{ uid_order, dates, ...rest }`
+   and compares `rest`: every future field is included by construction.
+4. api-cloudrun's `services/webhooks/invoice.ts` destination map — another
+   projection, from the CRMS-rebuilt order.
 
 ```ts
 interface InvoiceDocDestinationType {
@@ -5354,7 +5373,7 @@ interface Organization {
   crms_id: number;
   xero_id: string | null;
   tax_profile: TaxProfileType;
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
   emails: string[];
@@ -8093,7 +8112,7 @@ interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
   tax_profile?: TaxProfileType;
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
   billing_address?: AddressType | null;
@@ -12100,6 +12119,23 @@ with a `uid_order` scope field so multi-order invoices can carry pairs
 from several orders and have them selectively synced per source order.
 Carries `dates` (rendered on the invoice) snapshotted from the source order.
 
+⚠️ **A new field on this pair is FOUR edits, and the compiler catches one.**
+The `extends` above hands over the type; everything that enumerates the pair
+by hand does not:
+
+1. `InvoiceDocDestination` below — a `z.strictObject`, so a missing key is a
+   write-time refusal, not a compile error.
+2. `syncOrderDestinationsSelective`'s two projections
+   (`@cfs/core/utils/invoices`) — a **projection**, so enumerate what you
+   TAKE; a forgotten key drops the field, which surfaces.
+3. `pairsMatch` in the same file — an **equality check**, so enumerate what
+   you SKIP. A forgotten key there silently answers "equal", reports an
+   edited pair as unedited, and **overwrites the operator's edit** on the
+   next sync. That is why it destructures `{ uid_order, dates, ...rest }`
+   and compares `rest`: every future field is included by construction.
+4. api-cloudrun's `services/webhooks/invoice.ts` destination map — another
+   projection, from the CRMS-rebuilt order.
+
 ```ts
 interface InvoiceDocDestinationType {
   uid_order: string;
@@ -12879,6 +12915,7 @@ interface DestinationType {
   collection: DestinationEndpointType;
   customer_collecting?: boolean;
   customer_returning?: boolean;
+  jurisdiction?: JurisdictionType | null;
 }
 ```
 
@@ -12982,6 +13019,7 @@ interface DocDestinationType {
   collection: DocDestinationEndpointType;
   customer_collecting: boolean;
   customer_returning: boolean;
+  jurisdiction?: JurisdictionType | null;
 }
 ```
 
@@ -13706,7 +13744,7 @@ interface CreateOrganizationInputType {
   uid: string;
   name: string;
   tax_profile: TaxProfileType;
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
   contacts?: OrganizationContactType[];
@@ -13747,7 +13785,7 @@ interface Organization {
   crms_id: number;
   xero_id: string | null;
   tax_profile: TaxProfileType;
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
   emails: string[];
@@ -13811,7 +13849,7 @@ interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
   tax_profile?: TaxProfileType;
-  default_jurisdiction?: JurisdictionType | null;
+  jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
   billing_address?: AddressType | null;
@@ -23241,6 +23279,44 @@ implementation.
 
 Depends one-way on `./orders.ts` (base pricing module) — no cycle.
 
+### `JurisdictionLevel`
+
+Which level of the precedence chain supplied a resolved jurisdiction.
+
+```ts
+type JurisdictionLevel = "document" | "organization" | "destination" | "derived";
+```
+
+### `JurisdictionLevels`
+
+The four levels, as named fields so no caller can get the ORDER wrong.
+
+Every level is `JurisdictionType | null | undefined`, and `null` and absent
+mean the same thing at all of them: *"I assert nothing, ask the next level."*
+The answer *"this sources somewhere CFS collects no tax"* is the `no_nexus`
+value — see {@link JurisdictionType}.
+
+```ts
+interface JurisdictionLevels {
+  documentDestination?: JurisdictionType | null;
+  organization?: JurisdictionType | null;
+  destination?: JurisdictionType | null;
+  address?: typeLiteral | null;
+  origin: JurisdictionType;
+}
+```
+
+### `ResolvedJurisdiction`
+
+A resolved jurisdiction and the level of the chain that supplied it.
+
+```ts
+interface ResolvedJurisdiction {
+  jurisdiction: JurisdictionType;
+  level: JurisdictionLevel;
+}
+```
+
 ### `TAXABLE_COA_TO_TAX_NAME`
 
 **Which tax a newly authored line carries, keyed on `coa_revenue`** — the
@@ -23433,19 +23509,28 @@ Returns `null` for "untaxed", which is a real answer rather than a miss: a
 non-taxable COA, a taxable COA with no tax in practice (4140), and the
 `service` / `surcharge` types under the fallback are all deliberately untaxed.
 
-### `deriveJurisdiction(address: typeLiteral | null | undefined, origin: JurisdictionType): JurisdictionType | null`
+### `deriveJurisdiction(address: typeLiteral | null | undefined, origin: JurisdictionType): JurisdictionType`
 
-**Where a delivery address sources to** — the bottom of the three-level
-jurisdiction precedence, below a destination's explicit `jurisdiction` and
-an organization's `default_jurisdiction`.
+**Where a delivery address sources to** — the bottom of the four-level
+jurisdiction precedence ({@link resolveJurisdiction}), below the document's
+own destination entry, the organization's `jurisdiction_claim` and the
+shared destination master.
 
 ## Three cases, three DIFFERENT legal reasons
 
 | # | address | result | why |
 |---|---|---|---|
-| 1 | outside Illinois | `null` | **nexus** — no obligation in another state |
+| 1 | outside Illinois | `"no_nexus"` | **nexus** — no obligation in another state |
 | 2 | an Illinois city CFS collects in | that jurisdiction | **destination sourcing** |
 | 3 | any other Illinois municipality | `origin` | **origin sourcing** — the sale is deemed to occur at our selling location |
+
+## TOTAL — it always answers, and that is what frees `null` upstream
+
+There is no address this returns `null` for: an unresolvable region falls to
+case 3, and a missing city falls to case 3. Case 1 returns the `no_nexus`
+**value** rather than `null` because `null` means *"I assert nothing, ask the
+next level"* at every level of the chain, and this is the last level — it has
+nobody to ask. See {@link JurisdictionType} for why the two were split.
 
 ⚠️ **Case 3 is a RULE, not a fallback, and cases 1 and 3 are not the same
 thing.** Merging them — "we don't collect there, so no tax" — untaxes every
@@ -23474,8 +23559,7 @@ city→id table to match against — and prod's geocodes are demonstrably wrong:
 CFS's own warehouse at 3100 W Fillmore St resolves to "Palos Township /
 60480", and another destination sits at "Grant Park / 60612". Which is also
 the reason this derivation is the LOWEST precedence level: it is a
-convenience, and an explicit `destination.jurisdiction` or an organization
-default outranks it.
+convenience, and an explicit jurisdiction at any level above it outranks it.
 
 Pure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager
 reaches the same answer as the API without a round trip.
@@ -23776,6 +23860,44 @@ phantom receivable when this function's taxable-COA set was a second copy
 
 So the Xero side resolves the profile through *this* and passes the single
 answer, rather than restating the precedence over an array.
+
+### `resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdiction`
+
+**Resolve which jurisdiction a destination's lines are taxed in.** The one
+implementation of the precedence — per DESTINATION, never per document, which
+is what lets one order carry two jurisdictions.
+
+```
+order/invoice.destinations[i].jurisdiction   the document's own value   ← WINS
+  ?? organizations/{uid}.jurisdiction_claim    the customer's standing claim
+  ?? destinations/{uid}.jurisdiction           the shared address master
+  ?? deriveJurisdiction(address, origin)       total — always answers
+```
+
+**TOTAL: it always returns a jurisdiction**, because level 4 does. A caller
+never has to decide what "no answer" means, and `findTaxFor` gets a value it
+can look up — `no_nexus` simply matches no tax, which is the untaxed result
+expressed as data rather than as a missing case.
+
+## Why the organization outranks the destination master
+
+An override a shared address can beat is not an override. Measured on prod
+2026-08-19: exactly **1 of 459** destination masters carries an explicit
+jurisdiction — the CFS warehouse — and ranking masters above the organization
+made it defeat the customer's claim on **all 8** repriceable
+jurisdiction-bearing orders, every one a `customer_collecting` order pointed
+at that warehouse. A rule whose only measured effect is cancelling the
+mechanism above it is a defect, not a tradeoff.
+
+The master still does real work: it beats the **derivation**, which is what
+the geocode warning on {@link deriveJurisdiction} is about.
+
+## Returning the level is not a convenience
+
+The order form has to show which level supplied each answer
+(chicago-film-supplies/manager#304), and a second implementation of the
+precedence to compute that is exactly the drift this function exists to
+prevent. One call answers both.
 
 ### `taxAppliedWindow(tax: Tax): typeLiteral`
 

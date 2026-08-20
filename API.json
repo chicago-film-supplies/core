@@ -849,7 +849,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -1119,7 +1119,7 @@
         {
           "kind": "interface",
           "name": "DestinationType",
-          "declaration": "interface DestinationType {\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n}",
+          "declaration": "interface DestinationType {\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
           "doc": "A destination pair — delivery and collection endpoints.\n\n`customer_collecting` is true when the customer picks up the items at our\nwarehouse for the delivery side of this pair. `customer_returning` is true\nwhen the customer drops the items off at our warehouse for the collection\nside. Both default to false (we deliver / we collect)."
         },
         {
@@ -1215,7 +1215,7 @@
         {
           "kind": "interface",
           "name": "DocDestinationType",
-          "declaration": "interface DocDestinationType {\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n}",
+          "declaration": "interface DocDestinationType {\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
           "doc": "Document-level destination pair. See `DestinationType` for flag semantics."
         },
         {
@@ -1684,7 +1684,7 @@
           "kind": "interface",
           "name": "InvoiceDocDestinationType",
           "declaration": "interface InvoiceDocDestinationType {\n  uid_order: string;\n}",
-          "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order."
+          "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order.\n\n⚠️ **A new field on this pair is FOUR edits, and the compiler catches one.**\nThe `extends` above hands over the type; everything that enumerates the pair\nby hand does not:\n\n1. `InvoiceDocDestination` below — a `z.strictObject`, so a missing key is a\n   write-time refusal, not a compile error.\n2. `syncOrderDestinationsSelective`'s two projections\n   (`@cfs/core/utils/invoices`) — a **projection**, so enumerate what you\n   TAKE; a forgotten key drops the field, which surfaces.\n3. `pairsMatch` in the same file — an **equality check**, so enumerate what\n   you SKIP. A forgotten key there silently answers \"equal\", reports an\n   edited pair as unedited, and **overwrites the operator's edit** on the\n   next sync. That is why it destructures `{ uid_order, dates, ...rest }`\n   and compares `rest`: every future field is included by construction.\n4. api-cloudrun's `services/webhooks/invoice.ts` destination map — another\n   projection, from the CRMS-rebuilt order."
         },
         {
           "kind": "variable",
@@ -2535,7 +2535,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -3855,7 +3855,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         },
         {
@@ -5959,7 +5959,7 @@
           "kind": "interface",
           "name": "InvoiceDocDestinationType",
           "declaration": "interface InvoiceDocDestinationType {\n  uid_order: string;\n}",
-          "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order."
+          "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order.\n\n⚠️ **A new field on this pair is FOUR edits, and the compiler catches one.**\nThe `extends` above hands over the type; everything that enumerates the pair\nby hand does not:\n\n1. `InvoiceDocDestination` below — a `z.strictObject`, so a missing key is a\n   write-time refusal, not a compile error.\n2. `syncOrderDestinationsSelective`'s two projections\n   (`@cfs/core/utils/invoices`) — a **projection**, so enumerate what you\n   TAKE; a forgotten key drops the field, which surfaces.\n3. `pairsMatch` in the same file — an **equality check**, so enumerate what\n   you SKIP. A forgotten key there silently answers \"equal\", reports an\n   edited pair as unedited, and **overwrites the operator's edit** on the\n   next sync. That is why it destructures `{ uid_order, dates, ...rest }`\n   and compares `rest`: every future field is included by construction.\n4. api-cloudrun's `services/webhooks/invoice.ts` destination map — another\n   projection, from the CRMS-rebuilt order."
         },
         {
           "kind": "variable",
@@ -6352,7 +6352,7 @@
         {
           "kind": "interface",
           "name": "DestinationType",
-          "declaration": "interface DestinationType {\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n}",
+          "declaration": "interface DestinationType {\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
           "doc": "A destination pair — delivery and collection endpoints.\n\n`customer_collecting` is true when the customer picks up the items at our\nwarehouse for the delivery side of this pair. `customer_returning` is true\nwhen the customer drops the items off at our warehouse for the collection\nside. Both default to false (we deliver / we collect)."
         },
         {
@@ -6412,7 +6412,7 @@
         {
           "kind": "interface",
           "name": "DocDestinationType",
-          "declaration": "interface DocDestinationType {\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n}",
+          "declaration": "interface DocDestinationType {\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
           "doc": "Document-level destination pair. See `DestinationType` for flag semantics."
         },
         {
@@ -6768,7 +6768,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -6786,7 +6786,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -6816,7 +6816,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  default_jurisdiction?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         }
       ]
@@ -11484,6 +11484,24 @@
       "moduleDoc": "Shared tax helpers for CFS applications — the single home for doc-level\n`tax_profile` override logic + as-of Tax-catalog resolution, so the API\n(orders + invoice webhook) and the manager (optimistic recompute) share one\nimplementation.\n\nDepends one-way on `./orders.ts` (base pricing module) — no cycle.",
       "symbols": [
         {
+          "kind": "typeAlias",
+          "name": "JurisdictionLevel",
+          "declaration": "type JurisdictionLevel = \"document\" | \"organization\" | \"destination\" | \"derived\";",
+          "doc": "Which level of the precedence chain supplied a resolved jurisdiction."
+        },
+        {
+          "kind": "interface",
+          "name": "JurisdictionLevels",
+          "declaration": "interface JurisdictionLevels {\n  documentDestination?: JurisdictionType | null;\n  organization?: JurisdictionType | null;\n  destination?: JurisdictionType | null;\n  address?: typeLiteral | null;\n  origin: JurisdictionType;\n}",
+          "doc": "The four levels, as named fields so no caller can get the ORDER wrong.\n\nEvery level is `JurisdictionType | null | undefined`, and `null` and absent\nmean the same thing at all of them: *\"I assert nothing, ask the next level.\"*\nThe answer *\"this sources somewhere CFS collects no tax\"* is the `no_nexus`\nvalue — see {@link JurisdictionType}."
+        },
+        {
+          "kind": "interface",
+          "name": "ResolvedJurisdiction",
+          "declaration": "interface ResolvedJurisdiction {\n  jurisdiction: JurisdictionType;\n  level: JurisdictionLevel;\n}",
+          "doc": "A resolved jurisdiction and the level of the chain that supplied it."
+        },
+        {
           "kind": "variable",
           "name": "TAXABLE_COA_TO_TAX_NAME",
           "declaration": "const TAXABLE_COA_TO_TAX_NAME: Readonly<Record<number, string | null>>;",
@@ -11540,8 +11558,8 @@
         {
           "kind": "function",
           "name": "deriveJurisdiction",
-          "signature": "deriveJurisdiction(address: typeLiteral | null | undefined, origin: JurisdictionType): JurisdictionType | null",
-          "doc": "**Where a delivery address sources to** — the bottom of the three-level\njurisdiction precedence, below a destination's explicit `jurisdiction` and\nan organization's `default_jurisdiction`.\n\n## Three cases, three DIFFERENT legal reasons\n\n| # | address | result | why |\n|---|---|---|---|\n| 1 | outside Illinois | `null` | **nexus** — no obligation in another state |\n| 2 | an Illinois city CFS collects in | that jurisdiction | **destination sourcing** |\n| 3 | any other Illinois municipality | `origin` | **origin sourcing** — the sale is deemed to occur at our selling location |\n\n⚠️ **Case 3 is a RULE, not a fallback, and cases 1 and 3 are not the same\nthing.** Merging them — \"we don't collect there, so no tax\" — untaxes every\nnon-Chicago Illinois delivery, which is under-collection on a real\nobligation. The asymmetry is why `origin` is a named required parameter\nrather than a default: a reader has to see that a Naperville delivery is\ntaxed, and taxed at *our store's* rate.\n\n## Conservative in the same two directions as {@link isEntirelyOutOfIllinois}\n\nAn **unresolvable** region falls to case 3, not case 1. `toUsStateCode`\nreturns `null` for *unknown*, never for *not Illinois*, and 18 of the 48\nnon-`\"IL\"` prod destinations are Illinois spelled `\"Illinois\"` — 13 of them\nin Chicago. Reading unknown as out-of-state would have stopped collecting tax\nCFS owes on all 18. Under-collecting is the expensive error.\n\n## Matching\n\n⚠️ **The city is matched EXACTLY (trimmed, case-folded), never by prefix.**\n*Chicago Heights* and *West Frankfort* are distinct Illinois municipalities\nwith their own rates; a `startsWith` would bill both at Chicago's.\n\n⚠️ **`mapbox_id` is deliberately NOT the key**, though it is present on many\naddresses. It identifies an *address*, not a municipality — there is no\ncity→id table to match against — and prod's geocodes are demonstrably wrong:\nCFS's own warehouse at 3100 W Fillmore St resolves to \"Palos Township /\n60480\", and another destination sits at \"Grant Park / 60612\". Which is also\nthe reason this derivation is the LOWEST precedence level: it is a\nconvenience, and an explicit `destination.jurisdiction` or an organization\ndefault outranks it.\n\nPure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager\nreaches the same answer as the API without a round trip.",
+          "signature": "deriveJurisdiction(address: typeLiteral | null | undefined, origin: JurisdictionType): JurisdictionType",
+          "doc": "**Where a delivery address sources to** — the bottom of the four-level\njurisdiction precedence ({@link resolveJurisdiction}), below the document's\nown destination entry, the organization's `jurisdiction_claim` and the\nshared destination master.\n\n## Three cases, three DIFFERENT legal reasons\n\n| # | address | result | why |\n|---|---|---|---|\n| 1 | outside Illinois | `\"no_nexus\"` | **nexus** — no obligation in another state |\n| 2 | an Illinois city CFS collects in | that jurisdiction | **destination sourcing** |\n| 3 | any other Illinois municipality | `origin` | **origin sourcing** — the sale is deemed to occur at our selling location |\n\n## TOTAL — it always answers, and that is what frees `null` upstream\n\nThere is no address this returns `null` for: an unresolvable region falls to\ncase 3, and a missing city falls to case 3. Case 1 returns the `no_nexus`\n**value** rather than `null` because `null` means *\"I assert nothing, ask the\nnext level\"* at every level of the chain, and this is the last level — it has\nnobody to ask. See {@link JurisdictionType} for why the two were split.\n\n⚠️ **Case 3 is a RULE, not a fallback, and cases 1 and 3 are not the same\nthing.** Merging them — \"we don't collect there, so no tax\" — untaxes every\nnon-Chicago Illinois delivery, which is under-collection on a real\nobligation. The asymmetry is why `origin` is a named required parameter\nrather than a default: a reader has to see that a Naperville delivery is\ntaxed, and taxed at *our store's* rate.\n\n## Conservative in the same two directions as {@link isEntirelyOutOfIllinois}\n\nAn **unresolvable** region falls to case 3, not case 1. `toUsStateCode`\nreturns `null` for *unknown*, never for *not Illinois*, and 18 of the 48\nnon-`\"IL\"` prod destinations are Illinois spelled `\"Illinois\"` — 13 of them\nin Chicago. Reading unknown as out-of-state would have stopped collecting tax\nCFS owes on all 18. Under-collecting is the expensive error.\n\n## Matching\n\n⚠️ **The city is matched EXACTLY (trimmed, case-folded), never by prefix.**\n*Chicago Heights* and *West Frankfort* are distinct Illinois municipalities\nwith their own rates; a `startsWith` would bill both at Chicago's.\n\n⚠️ **`mapbox_id` is deliberately NOT the key**, though it is present on many\naddresses. It identifies an *address*, not a municipality — there is no\ncity→id table to match against — and prod's geocodes are demonstrably wrong:\nCFS's own warehouse at 3100 W Fillmore St resolves to \"Palos Township /\n60480\", and another destination sits at \"Grant Park / 60612\". Which is also\nthe reason this derivation is the LOWEST precedence level: it is a\nconvenience, and an explicit jurisdiction at any level above it outranks it.\n\nPure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager\nreaches the same answer as the API without a round trip.",
           "paramTags": [
             {
               "name": "address",
@@ -11669,6 +11687,14 @@
           "name": "resolveEffectiveProfile",
           "signature": "resolveEffectiveProfile(orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null): TaxProfileType",
           "doc": "The **one precedence rule**, as a profile rather than as a resolved Tax:\nexemption from either side wins, then the document's profile, then the\norganization's.\n\nExtracted because two consumers need the same answer in different currencies\nand had grown two rules. {@link getEffectiveProfileTax} answers *\"which Tax\ndocument prices this line?\"*; `resolveXeroTaxType` (api-cloudrun\n`src/lib/xeroTax.ts`) answers *\"which Xero `TaxType` does the line carry?\"* —\nand it did so with its own `taxProfiles.includes(\"tax_frankfort\")` scan over\n`[org, doc]`. Under the `??` precedence those two disagree exactly where it\ncosts money: a document-level `\"tax_applied\"` under a Frankfort organization\nnow prices Chicago in CFS while the scan still stamps Xero `TAX007`. CFS has\npaid for that class of divergence once already — 19 invoices and $2,741.78 of\nphantom receivable when this function's taxable-COA set was a second copy\n(api-cloudrun#409).\n\nSo the Xero side resolves the profile through *this* and passes the single\nanswer, rather than restating the precedence over an array.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "resolveJurisdiction",
+          "signature": "resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdiction",
+          "doc": "**Resolve which jurisdiction a destination's lines are taxed in.** The one\nimplementation of the precedence — per DESTINATION, never per document, which\nis what lets one order carry two jurisdictions.\n\n```\norder/invoice.destinations[i].jurisdiction   the document's own value   ← WINS\n  ?? organizations/{uid}.jurisdiction_claim    the customer's standing claim\n  ?? destinations/{uid}.jurisdiction           the shared address master\n  ?? deriveJurisdiction(address, origin)       total — always answers\n```\n\n**TOTAL: it always returns a jurisdiction**, because level 4 does. A caller\nnever has to decide what \"no answer\" means, and `findTaxFor` gets a value it\ncan look up — `no_nexus` simply matches no tax, which is the untaxed result\nexpressed as data rather than as a missing case.\n\n## Why the organization outranks the destination master\n\nAn override a shared address can beat is not an override. Measured on prod\n2026-08-19: exactly **1 of 459** destination masters carries an explicit\njurisdiction — the CFS warehouse — and ranking masters above the organization\nmade it defeat the customer's claim on **all 8** repriceable\njurisdiction-bearing orders, every one a `customer_collecting` order pointed\nat that warehouse. A rule whose only measured effect is cancelling the\nmechanism above it is a defect, not a tradeoff.\n\nThe master still does real work: it beats the **derivation**, which is what\nthe geocode warning on {@link deriveJurisdiction} is about.\n\n## Returning the level is not a convenience\n\nThe order form has to show which level supplied each answer\n(chicago-film-supplies/manager#304), and a second implementation of the\nprecedence to compute that is exactly the drift this function exists to\nprevent. One call answers both.",
           "paramTags": [],
           "returnsTag": null
         },

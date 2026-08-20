@@ -21,6 +21,8 @@ import {
   type FirestoreTimestampType,
   InclusionTypeEnum,
   type InclusionTypeType,
+  JurisdictionEnum,
+  type JurisdictionType,
   type NameParts,
   NamePartsFields,
   Phone,
@@ -255,6 +257,8 @@ export interface DestinationType {
   collection: DestinationEndpointType;
   customer_collecting?: boolean;
   customer_returning?: boolean;
+  /** Level 1 of the jurisdiction precedence — see {@link DocDestinationType}. */
+  jurisdiction?: JurisdictionType | null;
 }
 
 /** Zod schema for a destination pair. */
@@ -264,6 +268,7 @@ export const Destination: z.ZodType<DestinationType> = z.object({
   collection: DestinationEndpoint,
   customer_collecting: z.boolean().optional(),
   customer_returning: z.boolean().optional(),
+  jurisdiction: JurisdictionEnum.nullable().optional(),
 });
 
 /**
@@ -275,6 +280,33 @@ export interface DocDestinationType {
   collection: DocDestinationEndpointType;
   customer_collecting: boolean;
   customer_returning: boolean;
+  /**
+   * **Level 1** of the jurisdiction precedence (`resolveJurisdiction` in
+   * `@cfs/core/utils/taxes`) — this document's OWN answer for this
+   * destination, and the one that wins.
+   *
+   * Seeded at create on the **native** path from the organization's
+   * `jurisdiction_claim` when that is not the origin, and operator-editable
+   * thereafter. Deliberately **not** seeded on the CRMS path: CRMS has no
+   * jurisdiction concept and inventing one there is guesswork.
+   *
+   * ⚠️ **Per DESTINATION, which is the whole point.** A document is never
+   * re-welded to one jurisdiction the way `tax_profile` welds it — a
+   * Rantoul-claim customer taking a one-off Chicago delivery edits that one
+   * entry, and a mixed order prices each leg correctly. A line reaches its
+   * destination through `item.path`.
+   *
+   * ⚠️ **This snapshot is what protects a live order from an edit to the
+   * SHARED destination master.** Reprice from here, never from
+   * `destinations/{uid}`.
+   *
+   * `null`/absent asserts nothing and asks the next level; the answer "sources
+   * somewhere CFS collects no tax" is the `no_nexus` value
+   * ({@link JurisdictionType}).
+   *
+   * Optional through api-cloudrun#409 Phase 1: every new tax field is additive.
+   */
+  jurisdiction?: JurisdictionType | null;
 }
 
 /** Zod schema for a document-level destination pair. */
@@ -288,6 +320,17 @@ export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
   collection: DocDestinationEndpoint.meta({ label: "Collection" }),
   customer_collecting: z.boolean().default(false),
   customer_returning: z.boolean().default(false),
+  // ⚠️ Adding a field to this pair is TWO edits, and only one of them is
+  // enforced by the compiler: `InvoiceDocDestinationType extends
+  // DocDestinationType`, so the invoice inherits the TYPE for free, while
+  // `InvoiceDocDestination` (invoice.ts) is a hand-listed `z.strictObject`
+  // that inherits nothing. A document carrying the field would type-check and
+  // then be REFUSED at write. Three more places enumerate this pair by hand —
+  // see the note on `jurisdiction` in `InvoiceDocDestination`.
+  jurisdiction: JurisdictionEnum.nullable().optional().meta({
+    column: true,
+    label: "Jurisdiction",
+  }),
 });
 
 // ── Shared modifier types ─────────────────────────────────────────

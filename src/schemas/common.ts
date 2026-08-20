@@ -436,17 +436,54 @@ export const TaxProfileEnum: z.ZodType<TaxProfileType> = z.enum(TAX_PROFILES);
  *
  * A jurisdiction is a **registration**, not a place: CFS is registered to
  * collect in exactly these, and an address outside them does not get its own
- * rate — it sources to the store (origin sourcing) or attracts nothing (no
- * nexus outside Illinois). See `deriveJurisdiction` in `@cfs/core/utils/taxes`
- * for the three cases and their distinct legal reasons.
+ * rate — it sources to the store (origin sourcing) or resolves `no_nexus`. See
+ * `deriveJurisdiction` in `@cfs/core/utils/taxes` for the three cases and their
+ * distinct legal reasons.
  *
  * ⚠️ **`paxton` stays a member although CFS no longer delivers there.** Prod
  * holds one `complete` order and one invoice under it, both embedding the
  * Paxton tax uid, and `calculateItemTax` throws `Unknown tax uid` on a missing
  * one. The member is what keeps that history re-derivable; it is removed from
  * the manager picker and from the derivation rule, not from the vocabulary.
+ *
+ * ## `no_nexus` is a sourcing ANSWER, not a place — and it is why `null` is free
+ *
+ * Every level of the precedence chain below is `JurisdictionType | null`, and
+ * **`null` means one thing at every level: "I assert nothing, ask the next
+ * level."** The answer *"this sources somewhere CFS collects no tax"* is
+ * `no_nexus`, a value like any other — so it is an override an operator can
+ * author, it stops the chain by being an answer rather than by a special rule,
+ * and a plain `??` expresses the whole precedence.
+ *
+ * ```
+ * order/invoice.destinations[i].jurisdiction   the document's own value   ← WINS
+ *   ?? organizations/{uid}.jurisdiction_claim    the customer's standing claim
+ *   ?? destinations/{uid}.jurisdiction           the shared address master
+ *   ?? deriveJurisdiction(address, origin)       total — always answers
+ * ```
+ *
+ * 🔴 **An earlier design spelled that answer `null` and it does not work.**
+ * With `null` meaning both *"no jurisdiction"* and *"no opinion"*, `a ?? b`
+ * collapses them and a stored no-jurisdiction falls through to the next level:
+ * an out-of-state delivery for a Frankfort-claim customer resolves `frankfort`,
+ * i.e. over-collection on a customer CFS has no nexus with. Splitting the two
+ * into a value and an absence is what removes the ambiguity — not a
+ * `firstAsserted` walker that policed it, which this replaced.
+ *
+ * ⚠️ **`no_nexus` is NOT "outside Illinois", and the two must not be merged.**
+ * It names the *legal reason* — CFS has no collection obligation there — which
+ * is precisely the distinction `deriveJurisdiction` case 1 (nexus) draws
+ * against case 3 (origin sourcing). A non-Chicago Illinois delivery is
+ * emphatically **not** `no_nexus`: it sources to the store and is taxed.
+ * Naming it after the reason rather than the geography is also what keeps it
+ * true if CFS ever registers in another state — that state then gets its own
+ * member, and `no_nexus` still means what it says.
+ *
+ * ⚠️ **Not offered everywhere the type is.** `taxes/{uid}.jurisdiction` records
+ * who levies a tax, and nobody levies one under `no_nexus`; the manager's tax
+ * picker excludes it exactly as it already excludes `paxton`.
  */
-const JURISDICTIONS = ["chicago", "rantoul", "frankfort", "paxton"] as const;
+const JURISDICTIONS = ["chicago", "rantoul", "frankfort", "paxton", "no_nexus"] as const;
 /** Allowed values for tax jurisdiction. */
 export type JurisdictionType = typeof JURISDICTIONS[number];
 /** Zod schema for JurisdictionType. */

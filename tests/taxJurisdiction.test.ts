@@ -6,7 +6,7 @@
  * Phase 2 deletes most of it; these assertions outlive it.
  */
 import { assertEquals, assertThrows } from "@std/assert";
-import { deriveJurisdiction, findTaxAt, findTaxFor, taxAppliedWindow } from "../src/utils/taxes.ts";
+import { deriveJurisdiction, findTaxAt, findTaxFor, resolveJurisdiction, taxAppliedWindow } from "../src/utils/taxes.ts";
 import type { Tax } from "../src/utils/orders.ts";
 
 /**
@@ -285,12 +285,25 @@ Deno.test("findTaxAt reads an UNMIGRATED catalog identically to a migrated one",
 
 const ORIGIN = "chicago" as const;
 
-Deno.test("deriveJurisdiction: out of state is NEXUS — null, no tax at all", () => {
+Deno.test("deriveJurisdiction: out of state is NEXUS — the no_nexus VALUE, not null", () => {
+  // `null` would mean "I assert nothing, ask the next level", and this is the
+  // last level — it has nobody to ask. Returning the value is what lets the
+  // whole precedence be a plain `??` and what makes the answer authorable as
+  // an override at any level above.
   assertEquals(
     deriveJurisdiction({ city: "Los Angeles", region: "CA" }, ORIGIN),
-    null,
+    "no_nexus",
   );
-  assertEquals(deriveJurisdiction({ city: "Austin", region: "Texas" }, ORIGIN), null);
+  assertEquals(deriveJurisdiction({ city: "Austin", region: "Texas" }, ORIGIN), "no_nexus");
+});
+
+Deno.test("deriveJurisdiction is TOTAL — no address resolves to null", () => {
+  // Every path returns a jurisdiction: an unresolvable region falls to case 3,
+  // and so does a missing city. A caller never has to decide what a null means.
+  assertEquals(deriveJurisdiction(null, ORIGIN), ORIGIN);
+  assertEquals(deriveJurisdiction(undefined, ORIGIN), ORIGIN);
+  assertEquals(deriveJurisdiction({}, ORIGIN), ORIGIN);
+  assertEquals(deriveJurisdiction({ city: "", region: "" }, ORIGIN), ORIGIN);
 });
 
 Deno.test("deriveJurisdiction: a collecting Illinois city is DESTINATION sourcing", () => {
@@ -349,5 +362,97 @@ Deno.test("deriveJurisdiction: origin is a PARAMETER — a second store changes 
   // ...but a collecting city still wins over the origin.
   assertEquals(deriveJurisdiction({ city: "Chicago", region: "IL" }, "frankfort"), "chicago");
   // ...and out-of-state still beats both.
-  assertEquals(deriveJurisdiction({ city: "Reno", region: "NV" }, "frankfort"), null);
+  assertEquals(deriveJurisdiction({ city: "Reno", region: "NV" }, "frankfort"), "no_nexus");
+});
+
+// ── resolveJurisdiction: the four levels ─────────────────────────
+
+const CHICAGO_ADDRESS = { city: "Chicago", region: "IL" };
+const CALIFORNIA_ADDRESS = { city: "Los Angeles", region: "CA" };
+
+Deno.test("resolveJurisdiction: the document's own entry wins over everything", () => {
+  assertEquals(
+    resolveJurisdiction({
+      documentDestination: "rantoul",
+      organization: "frankfort",
+      destination: "chicago",
+      address: CHICAGO_ADDRESS,
+      origin: "chicago",
+    }),
+    { jurisdiction: "rantoul", level: "document" },
+  );
+});
+
+Deno.test("resolveJurisdiction: the ORGANIZATION claim outranks the shared address master", () => {
+  // The reversal measured on prod: 1 of 459 masters carries a jurisdiction (the
+  // CFS warehouse) and ranking masters higher defeated the org claim on all 8
+  // repriceable jurisdiction-bearing orders. An override a shared address can
+  // beat is not an override.
+  assertEquals(
+    resolveJurisdiction({
+      organization: "frankfort",
+      destination: "chicago",
+      address: CHICAGO_ADDRESS,
+      origin: "chicago",
+    }),
+    { jurisdiction: "frankfort", level: "organization" },
+  );
+});
+
+Deno.test("resolveJurisdiction: the master still beats the DERIVATION", () => {
+  // The case the geocode warning is about — prod's own warehouse geocodes to
+  // "Palos Township / 60480".
+  assertEquals(
+    resolveJurisdiction({ destination: "rantoul", address: CHICAGO_ADDRESS, origin: "chicago" }),
+    { jurisdiction: "rantoul", level: "destination" },
+  );
+});
+
+Deno.test("resolveJurisdiction: null and absent both mean ASK THE NEXT LEVEL", () => {
+  // The whole reason `no_nexus` exists as a value: with `null` spelling both
+  // "no jurisdiction" and "no opinion", a stored no-jurisdiction fell through
+  // and an out-of-state delivery for a Frankfort-claim customer resolved
+  // `frankfort` — over-collection on a customer CFS has no nexus with.
+  const viaNull = resolveJurisdiction({
+    documentDestination: null,
+    organization: null,
+    destination: null,
+    address: CHICAGO_ADDRESS,
+    origin: "chicago",
+  });
+  const viaAbsent = resolveJurisdiction({ address: CHICAGO_ADDRESS, origin: "chicago" });
+  assertEquals(viaNull, { jurisdiction: "chicago", level: "derived" });
+  assertEquals(viaAbsent, viaNull);
+});
+
+Deno.test("resolveJurisdiction: no_nexus is an ANSWER and STOPS the chain", () => {
+  // Authored at level 1 over a Frankfort-claim customer: a genuine out-of-state
+  // one-off. Under the old `null` spelling this was inexpressible.
+  assertEquals(
+    resolveJurisdiction({
+      documentDestination: "no_nexus",
+      organization: "frankfort",
+      address: CHICAGO_ADDRESS,
+      origin: "chicago",
+    }),
+    { jurisdiction: "no_nexus", level: "document" },
+  );
+  // And derived, for an address that is plainly out of state.
+  assertEquals(
+    resolveJurisdiction({ address: CALIFORNIA_ADDRESS, origin: "chicago" }),
+    { jurisdiction: "no_nexus", level: "derived" },
+  );
+});
+
+Deno.test("resolveJurisdiction: no_nexus resolves to NO TAX, and is not an exemption", () => {
+  // The jurisdiction axis zeroes the tax by matching nothing in the catalog —
+  // exemption is the separate customer axis, and the two must stay distinct.
+  assertEquals(findTaxFor(CATALOG, "no_nexus", "rental", "2026-06-01T12:00:00.000-05:00"), null);
+  assertEquals(findTaxFor(CATALOG, "no_nexus", "sale", "2026-06-01T12:00:00.000-05:00"), null);
+});
+
+Deno.test("resolveJurisdiction is TOTAL — every input resolves to a jurisdiction", () => {
+  // Level 4 always answers, so no caller ever has to handle "no answer".
+  const resolved = resolveJurisdiction({ address: null, origin: "chicago" });
+  assertEquals(resolved, { jurisdiction: "chicago", level: "derived" });
 });
