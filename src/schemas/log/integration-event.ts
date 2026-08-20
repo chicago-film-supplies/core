@@ -140,6 +140,18 @@ export const INTEGRATION_EVENT_MSGS = [
   // report about a writer, not routine maintenance, which is why the emission
   // escalates to `warn` on any repair at all rather than reporting volume at info.
   "stock_summary_sweep",
+  // The 15-minute state record under the settlement projection
+  // (api-cloudrun#546). Emitted on EVERY run including clean ones, because the
+  // question the alert asks is "is the projection still a fold of its journal",
+  // and a rule that counted complaint-events could not tell a clean run from a
+  // run that never happened.
+  //
+  // Steady state is `drifted: 0`. Non-zero is a bug report about a WRITER — a
+  // journal row whose projection never landed — and it does not self-heal:
+  // `syncXeroSettlement` skips its projection write when no delta moved, which
+  // is exactly the case for a row already in the journal. 120 prod invoices sat
+  // that way undetected until 2026-08-20.
+  "settlement_totals_sweep",
   "sync_collection_completed",
   "sync_collection_skipped",
   "sync_started",
