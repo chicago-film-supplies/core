@@ -1,32 +1,37 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
-  deriveOrderTaxAsOf,
-  findTaxAt,
-  getEffectiveProfileTax,
-  isEntirelyOutOfIllinois,
-  materializeDocumentTax,
-  materializeOrderTax,
-  overrideItemTaxesForProfile,
-  resolveEffectiveProfile,
-  TAX_PROFILE_OVERRIDE_NAME,
   assertCoaTaxMapCoversCore,
+  assignLineTaxes,
   defaultTaxNameForLine,
+  deriveOrderTaxAsOf,
+  destinationsForItems,
+  type DocumentTaxContext,
+  findTaxAt,
+  materializeDocumentTax,
+  resolveLineTax,
+  type TaxDestination,
 } from "../src/utils/taxes.ts";
-import { TaxProfileEnum } from "../src/schemas/mod.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 const priceBase = lineItemBase.price as Record<string, unknown>;
 
-// Catalog carrying the validity window (findTaxAt needs it); other fields
-// intentionally omitted to exercise the widened optional Tax type.
+// The catalog the rule resolves against: a `(jurisdiction, item_types, window)`
+// triple per version, mirroring prod's shape. Other `Tax` fields are omitted
+// deliberately, to exercise the widened optional type.
+//
+// ⚠️ Under Rantoul and Frankfort there is NO rental/sales split — one tax
+// covers every taxed type — while Chicago splits rental from sale. That
+// asymmetry is the model, not a fixture convenience.
 const CATALOG: Tax[] = [
   {
     uid: "frankfort-tax",
     name: "Frankfort Sales Tax",
     rate: 8,
     type: "percent",
+    jurisdiction: "frankfort",
+    item_types: ["rental", "sale", "replacement"],
     valid_from: "2026-01-01T00:00:00.000-06:00",
     valid_to: null,
   },
@@ -35,19 +40,40 @@ const CATALOG: Tax[] = [
     name: "Rantoul Sales Tax",
     rate: 9,
     type: "percent",
+    jurisdiction: "rantoul",
+    item_types: ["rental", "sale", "replacement"],
     valid_from: "2026-01-01T00:00:00.000-06:00",
     valid_to: null,
   },
-  // The tax `makeItem` puts ON the line. `overrideItemTaxesForProfile` never
-  // reads it — it only ever writes `taxes` — but `materializeDocumentTax`
-  // reprices, and the reprice resolves the line's EXISTING uid through
-  // `calculateItemTax`, which throws `Unknown tax uid` on a miss. See the
-  // incomplete-catalog test at the bottom of this file.
   {
     uid: "chi-rental-tax",
     name: "Chicago Rental Tax",
     rate: 15,
     type: "percent",
+    jurisdiction: "chicago",
+    item_types: ["rental"],
+    valid_from: "2026-01-01T00:00:00.000-06:00",
+    valid_to: null,
+  },
+  {
+    uid: "chi-sales-tax",
+    name: "Chicago Sales Tax",
+    rate: 10.5,
+    type: "percent",
+    jurisdiction: "chicago",
+    item_types: ["sale", "replacement"],
+    valid_from: "2020-01-01T00:00:00.000-06:00",
+    valid_to: null,
+  },
+  // The explicit-only class: reachable by uid alone, matched by no
+  // (jurisdiction, type) pair, and $0.05 per unit rather than a percentage.
+  {
+    uid: "bottle-tax",
+    name: "Water Bottle Tax",
+    rate: 0.05,
+    type: "flat",
+    jurisdiction: null,
+    item_types: [],
     valid_from: "2026-01-01T00:00:00.000-06:00",
     valid_to: null,
   },
@@ -108,499 +134,448 @@ Deno.test("findTaxAt throws on catalog drift (two same-name docs bracket asOf)",
   assertThrows(() => findTaxAt(drifted, "Frankfort Sales Tax", AS_OF), Error, "drift");
 });
 
-// ── getEffectiveProfileTax (precedence) ──────────────────────────
-
-Deno.test("getEffectiveProfileTax: tax_exempt wins over a location profile", () => {
-  assertEquals(getEffectiveProfileTax("tax_rantoul", "tax_exempt", CATALOG, AS_OF), "exempt");
-});
-
-Deno.test("getEffectiveProfileTax: doc-level tax_frankfort resolves the Frankfort tax", () => {
-  const r = getEffectiveProfileTax("tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(typeof r === "object" && r?.uid, "frankfort-tax");
-});
-
-Deno.test("getEffectiveProfileTax: org-level tax_rantoul resolves the Rantoul tax", () => {
-  // The doc INHERITS — expressed as `null`. Passing "tax_applied" here is now a
-  // different question, answered by the test below.
-  const r = getEffectiveProfileTax("tax_rantoul", null, CATALOG, AS_OF);
-  assertEquals(typeof r === "object" && r?.uid, "rantoul-tax");
-});
-
-Deno.test("getEffectiveProfileTax: tax_applied → null (no override)", () => {
-  assertEquals(getEffectiveProfileTax("tax_applied", "tax_applied", CATALOG, AS_OF), null);
-});
-
-// ── The two questions `null` split apart (api-cloudrun#486) ──────
+// ── The pricing rule: item TYPE × JURISDICTION, per LINE ─────────
 //
-// Before, "inherit" and "plain Chicago" were the same stored value, and the
-// resolver SCANNED `[doc, org]` for the first location profile. So a doc-level
-// "tax_applied" could not mean anything — it matched no name and fell through
-// to the org's. Live in prod: invoice #2348, issued and in Xero, carries
-// `tax_profile: "tax_applied"` and is taxed Frankfort 8%.
-
-Deno.test("getEffectiveProfileTax: a doc-level tax_applied BEATS an org location profile", () => {
-  assertEquals(getEffectiveProfileTax("tax_frankfort", "tax_applied", CATALOG, AS_OF), null);
-});
-
-Deno.test("getEffectiveProfileTax: null inherits the org's location profile", () => {
-  const r = getEffectiveProfileTax("tax_frankfort", null, CATALOG, AS_OF);
-  assertEquals(typeof r === "object" && r?.uid, "frankfort-tax");
-});
-
-Deno.test("getEffectiveProfileTax: null under a plain org is no override", () => {
-  assertEquals(getEffectiveProfileTax("tax_applied", null, CATALOG, AS_OF), null);
-});
-
-Deno.test("getEffectiveProfileTax: exemption is sticky from EITHER side", () => {
-  assertEquals(getEffectiveProfileTax("tax_exempt", null, CATALOG, AS_OF), "exempt");
-  assertEquals(getEffectiveProfileTax("tax_exempt", "tax_applied", CATALOG, AS_OF), "exempt");
-  assertEquals(getEffectiveProfileTax("tax_exempt", "tax_frankfort", CATALOG, AS_OF), "exempt");
-  assertEquals(getEffectiveProfileTax("tax_applied", "tax_exempt", CATALOG, AS_OF), "exempt");
-});
-
-Deno.test("getEffectiveProfileTax: an ABSENT org profile falls back to the default", () => {
-  // The backfill window — `DocumentOrganizationSnapshot.tax_profile` is optional
-  // until both environments carry it. Absent must behave as the pre-#486 default
-  // (no override), never as exempt and never as a throw.
-  assertEquals(getEffectiveProfileTax(undefined, null, CATALOG, AS_OF), null);
-  const r = getEffectiveProfileTax(undefined, "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(typeof r === "object" && r?.uid, "frankfort-tax");
-  assertEquals(getEffectiveProfileTax(undefined, "tax_exempt", CATALOG, AS_OF), "exempt");
-});
-
-// ── overrideItemTaxesForProfile ──────────────────────────────────
+// These replace ~40 arms that tested the `tax_profile` machinery
+// (api-cloudrun#409 Phase 2). Every property those arms encoded is re-asserted
+// here against the rule that replaced them — exemption's stickiness, the
+// replacement carve-out, the COA gate, the reprice, the shape-agnostic price
+// rebuild — plus the three the profile shape could not express at all: a mixed
+// document, a line-level `taxed_as`, and a frozen rate version.
 
 // LineItem.price is a union (priceable vs transaction-fee); narrow for asserts.
 const px = (it: LineItem) =>
   it.price as {
     taxes: Array<{ uid: string; name: string; rate: number; type: string; amount_cents: number }>;
+    taxes_base?: Array<{ uid: string; name: string; rate: number; type: string }>;
     total_cents: number;
   };
 
-Deno.test("override tax_frankfort replaces item tax with 8% Frankfort + updates total", () => {
+/** Full price surface, for asserting what survived the rebuild. */
+const pxFull = (it: LineItem) => it.price as unknown as Record<string, unknown>;
+
+/** A document destination delivering to `city`, `region`. */
+const at = (
+  city: string | undefined,
+  region = "IL",
+  extra: Partial<TaxDestination> & { uid?: string } = {},
+): TaxDestination => ({
+  jurisdiction: extra.jurisdiction,
+  delivery: { uid: extra.uid ?? null, address: city === undefined ? null : { city, region } },
+});
+
+/** The context, with everything defaulted to "an ordinary Chicago document". */
+const ctx = (overrides: Partial<DocumentTaxContext> = {}): DocumentTaxContext => ({
+  destinations: [at("Chicago")],
+  origin: "chicago",
+  exempt: false,
+  taxes: CATALOG,
+  asOf: AS_OF,
+  ...overrides,
+});
+
+Deno.test("the rule: a Chicago rental resolves Chicago Rental Tax and prices it", () => {
   const items = [makeItem()];
-  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes, [{
-    uid: "frankfort-tax",
-    name: "Frankfort Sales Tax",
-    rate: 8,
-    type: "percent",
-    amount_cents: 800,
-  }]);
+  materializeDocumentTax(items, ctx());
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+  assertEquals(px(items[0]).total_cents, 11500);
+});
+
+Deno.test("the rule: a Frankfort destination taxes the SAME line at 8%", () => {
+  const items = [makeItem()];
+  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")] }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
+  assertEquals(px(items[0]).taxes[0].amount_cents, 800);
   assertEquals(px(items[0]).total_cents, 10800);
 });
 
-Deno.test("🔴 a REPLACEMENT line ignores the doc/org jurisdiction override", () => {
-  // Owner, 2026-08-20: every replacement item is a sale in which CFS is the END
-  // USER — the customer is buying it *for CFS* — so it sources to the ORIGIN, not
-  // to wherever the rental went. A Frankfort customer's replacement is a Chicago
-  // sale, which is what the live Xero ledger has always billed (invoice 2348).
-  const items = [makeItem({ type: "replacement" })];
-  const before = structuredClone(px(items[0]).taxes);
-  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(
-    px(items[0]).taxes,
-    before,
-    "the Frankfort override must not reach a replacement line",
-  );
+Deno.test("🔴 a MIXED document prices each destination's lines differently", () => {
+  // The headline defect of the shape this replaced: `tax_profile` was ONE value
+  // per document, so an order delivering to Chicago and Frankfort could only be
+  // billed at one of them. Nothing about the old shape could express this.
+  const items = [
+    { ...makeItem(), uid: "d1", type: "destination", uid_delivery: "dest-chi", path: ["d1"] },
+    { ...makeItem(), uid: "l1", path: ["d1", "l1"] },
+    { ...makeItem(), uid: "d2", type: "destination", uid_delivery: "dest-frk", path: ["d2"] },
+    { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
+  ] as LineItem[];
+
+  materializeDocumentTax(items, ctx({
+    destinations: [at("Chicago", "IL", { uid: "dest-chi" }), at("Frankfort", "IL", { uid: "dest-frk" })],
+  }));
+
+  assertEquals(px(items[1]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+  assertEquals(px(items[3]).taxes.map((t) => t.uid), ["frankfort-tax"]);
 });
 
-Deno.test("…and the same for an ORGANIZATION-level jurisdiction claim", () => {
-  // ⚠️ `null` for the document, NOT "tax_applied". An explicit doc profile WINS
-  // over the org's, so passing one makes `getEffectiveProfileTax` return null
-  // and the whole function early-returns — the test would then pass with the
-  // replacement arm deleted, which is exactly what a planted removal showed.
-  const items = [makeItem({ type: "replacement" })];
-  const before = structuredClone(px(items[0]).taxes);
-  overrideItemTaxesForProfile(items, "tax_rantoul", null, CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes, before, "the org rung must not reach it either");
+Deno.test("🔴 …and a MIXED Illinois/out-of-state document taxes only the Illinois lines", () => {
+  // Same defect, the other direction. `isEntirelyOutOfIllinois` was
+  // all-or-nothing by construction, so a mixed order taxed its California
+  // lines — under-collecting was avoided by over-collecting.
+  const items = [
+    { ...makeItem(), uid: "d1", type: "destination", uid_delivery: "dest-chi", path: ["d1"] },
+    { ...makeItem(), uid: "l1", path: ["d1", "l1"] },
+    { ...makeItem(), uid: "d2", type: "destination", uid_delivery: "dest-ca", path: ["d2"] },
+    { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
+  ] as LineItem[];
+
+  materializeDocumentTax(items, ctx({
+    destinations: [
+      at("Chicago", "IL", { uid: "dest-chi" }),
+      at("Los Angeles", "CA", { uid: "dest-ca" }),
+    ],
+  }));
+
+  assertEquals(px(items[1]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+  assertEquals(px(items[3]).taxes, []);
+  assertEquals(px(items[3]).total_cents, 10000);
 });
 
-Deno.test("…but a NON-replacement line on the same document still takes the override", () => {
-  // The arm must be narrow: it is about the item type, not about the document.
-  const items = [makeItem({ type: "replacement" }), makeItem({ type: "rental" })];
-  // The fixture seeds both lines with the SAME tax, so "unchanged" and
-  // "overridden" are distinguishable without asserting a name the fixture
-  // happens to pick.
-  const seeded = px(items[0]).taxes[0].name;
-  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes[0].name, seeded, "the replacement keeps what it was authored with");
-  assertEquals(px(items[1]).taxes[0].name, "Frankfort Sales Tax", "the rental takes the override");
+Deno.test("the rule: an entirely out-of-state document is untaxed, via no_nexus", () => {
+  const items = [makeItem()];
+  materializeDocumentTax(items, ctx({ destinations: [at("St. Louis", "MO")] }));
+  assertEquals(px(items[0]).taxes, []);
+  // …and it is a JURISDICTION, not an exemption: the line records what it
+  // would have paid nowhere, so `taxes_base` is empty too.
+  assertEquals(px(items[0]).taxes_base, []);
+});
+
+Deno.test("the rule: an unresolvable region keeps the tax (origin sourcing)", () => {
+  const items = [makeItem()];
+  materializeDocumentTax(items, ctx({ destinations: [at("Somewhere", "Freedonia")] }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+});
+
+// ── Exemption ────────────────────────────────────────────────────
+
+Deno.test("exemption empties taxes and sets total to subtotal_discounted", () => {
+  const items = [makeItem()];
+  materializeDocumentTax(items, ctx({ exempt: true }));
+  assertEquals(px(items[0]).taxes, []);
+  assertEquals(px(items[0]).total_cents, 10000);
+});
+
+Deno.test("🔴 an exempt line still records WHICH tax it was exempt from", () => {
+  // `taxes_base` keeps its name and takes the meaning it always described. A
+  // document that carries no record of the tax it did not charge cannot be
+  // audited against Xero, and #2197 is the live cost of the alternative: 25
+  // lines whose jurisdiction is now unrecoverable from the document.
+  const items = [makeItem()];
+  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")], exempt: true }));
+  assertEquals(px(items[0]).taxes, []);
+  assertEquals(px(items[0]).taxes_base?.map((t) => t.uid), ["frankfort-tax"]);
+});
+
+Deno.test("exemption beats a jurisdiction, whichever level supplied it", () => {
+  for (const destinations of [[at("Frankfort")], [at("Chicago", "IL", { jurisdiction: "rantoul" })]]) {
+    const items = [makeItem()];
+    materializeDocumentTax(items, ctx({ destinations, exempt: true }));
+    assertEquals(px(items[0]).taxes, []);
+  }
+});
+
+// ── The replacement rule ─────────────────────────────────────────
+
+Deno.test("🔴 a REPLACEMENT sources to the ORIGIN, not to its destination", () => {
+  // Every replacement is a sale in which CFS is the END USER — the customer
+  // buys the item *for CFS* — so the situs is CFS's own location. Corroborated
+  // by the live Xero ledger: invoice 2348, a Frankfort customer, bills its
+  // replacement at TAX001 Chicago Sales Tax.
+  const items = [makeItem({ type: "replacement" }, { taxes: [] })];
+  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")] }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
+});
+
+Deno.test("…and no level reaches it — not the document's own entry, not the claim", () => {
+  for (const overrides of [
+    { destinations: [at("Chicago", "IL", { jurisdiction: "rantoul" })] },
+    { organizationClaim: "rantoul" as const },
+  ]) {
+    const items = [makeItem({ type: "replacement" }, { taxes: [] })];
+    materializeDocumentTax(items, ctx(overrides));
+    assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
+  }
+});
+
+Deno.test("…but a NON-replacement line on the same document DOES take the override", () => {
+  const items = [makeItem({ type: "sale" }, { taxes: [] })];
+  materializeDocumentTax(items, ctx({ organizationClaim: "rantoul" }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
 });
 
 Deno.test("…and EXEMPTION still applies to a replacement — a different axis", () => {
   // Exemption is a property of the CUSTOMER and zeroes tax whatever the
   // jurisdiction. Xero agrees: every untaxed replacement line in the corpus
-  // belongs to a tax_exempt customer. Only the jurisdiction rung is skipped.
-  const items = [makeItem({ type: "replacement" })];
-  overrideItemTaxesForProfile(items, "tax_exempt", "tax_applied", CATALOG, AS_OF);
+  // belongs to a tax-exempt customer.
+  const items = [makeItem({ type: "replacement" }, { taxes: [] })];
+  materializeDocumentTax(items, ctx({ exempt: true }));
   assertEquals(px(items[0]).taxes, []);
-  assertEquals(px(items[0]).total_cents, 10000);
 });
 
-Deno.test("override tax_exempt empties taxes and sets total to subtotal_discounted", () => {
-  const items = [makeItem()];
-  overrideItemTaxesForProfile(items, "tax_exempt", "tax_applied", CATALOG, AS_OF);
+Deno.test("🔴 an out-of-state REPLACEMENT is taxed, where the old rule exempted it", () => {
+  // The one place the retired `isEntirelyOutOfIllinois` and this rule genuinely
+  // disagree. Measured 2026-08-20 at 8 lines corpus-wide, none repriceable,
+  // $0.00 either way — which is why it was decided here rather than deferred.
+  const items = [makeItem({ type: "replacement" }, { taxes: [] })];
+  materializeDocumentTax(items, ctx({ destinations: [at("St. Louis", "MO")] }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
+});
+
+// ── The key: `taxed_as ?? type` ──────────────────────────────────
+
+Deno.test("taxed_as overrides the line's own type for tax, and only for tax", () => {
+  const items = [makeItem({ type: "sale", taxed_as: "rental" }, { taxes: [] })];
+  materializeDocumentTax(items, ctx());
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+  assertEquals(items[0].type, "sale");
+});
+
+Deno.test('taxed_as: "none" is untaxed outright, with no branch of its own', () => {
+  // It needs none: no tax lists "none" in `item_types`, so the ordinary lookup
+  // answers null. That is the same mechanism that keeps `service` untaxed.
+  const items = [makeItem({ type: "rental", taxed_as: "none" })];
+  materializeDocumentTax(items, ctx());
   assertEquals(px(items[0]).taxes, []);
-  assertEquals(px(items[0]).total_cents, 10000);
 });
 
-Deno.test("override tax_applied leaves the item untouched (Chicago default kept)", () => {
-  const items = [makeItem()];
-  overrideItemTaxesForProfile(items, "tax_applied", "tax_applied", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes[0].uid, "chi-rental-tax");
-  assertEquals(px(items[0]).total_cents, 11500);
-});
-
-Deno.test("override skips non-priceable (group) items", () => {
-  const group = { ...lineItemBase, type: "group", name: "Section", uid: "grp-1" } as unknown as LineItem;
-  const items = [group, makeItem()];
-  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals((items[0] as LineItem).type, "group");
-  assertEquals(px(items[1]).taxes[0].uid, "frankfort-tax");
-});
-
-// ── COA gate on the profile-override path ────────────────────────
-//
-// `overrideItemTaxesForProfile` was the SECOND place the taxability rule was
-// missing. Clean A/B from prod: #1647 (`tax_applied`) held a Delivery line with
-// `taxes: []`, while #2051 (`tax_rantoul`) carried the same product at the same
-// COA with a 9% tax — so the location override re-taxed exactly the lines the
-// Xero push then stripped to `NONE`.
-
-Deno.test("override does NOT re-tax a non-revenue COA under a location profile", () => {
-  const items = [makeItem({ coa_revenue: 4100 })];
-  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes, []);
-  assertEquals(px(items[0]).total_cents, 10000, "total is the untaxed subtotal");
-});
-
-Deno.test("override still applies the location profile on a revenue COA", () => {
-  // The discriminating half: same profile, same line, only `coa_revenue` differs.
-  // Without it the test above would pass against a function that taxed nothing.
-  const items = [makeItem({ coa_revenue: 4000 })];
-  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes.length, 1);
-  assertEquals(px(items[0]).total_cents, 10800);
-});
-
-Deno.test("override leaves an absent COA taxable (order lines carry none)", () => {
-  const items = [makeItem()];
-  overrideItemTaxesForProfile(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes.length, 1);
-});
-
-// ── Every location profile must name a Tax, or it silently does nothing ──
-
-Deno.test("every tax profile except tax_applied/tax_exempt maps to a Tax name", () => {
-  // The failure mode this catches is silent: a profile added to the enum with
-  // no entry here makes `getEffectiveProfileTax` return `null`, which reads as
-  // "no override" — so the document keeps whatever tax it already had and
-  // nothing anywhere reports a problem. `tax_paxton` exists because prod #1978
-  // hit the neighbouring version of that: no Paxton profile at all, so a Paxton
-  // delivery silently kept Rantoul's 9% against Xero's 6.25%.
-  const special = new Set(["tax_applied", "tax_exempt"]);
-  // Read off the enum itself, with NO literal fallback: a hard-coded list would
-  // stop growing the day someone adds a profile, which is the exact thing being
-  // guarded against. `TaxProfileEnum` is annotated `z.ZodType<TaxProfileType>`
-  // for JSR's no-slow-types, so `.options` needs the cast to be visible — it is
-  // there at runtime, and this throws rather than degrading if it ever is not.
-  const profiles = (TaxProfileEnum as unknown as { options: string[] }).options;
-  assertEquals(Array.isArray(profiles) && profiles.length > 0, true, "enum options unreadable");
-  assertEquals(profiles.includes("tax_paxton"), true, "the enum is the source, not a copy");
-  for (const p of profiles) {
-    if (special.has(p)) {
-      assertEquals(
-        TAX_PROFILE_OVERRIDE_NAME[p as keyof typeof TAX_PROFILE_OVERRIDE_NAME],
-        undefined,
-        `${p} is handled specially and must NOT name a Tax`,
-      );
-      continue;
-    }
-    assertEquals(
-      typeof TAX_PROFILE_OVERRIDE_NAME[p as keyof typeof TAX_PROFILE_OVERRIDE_NAME],
-      "string",
-      `${p} has no Tax name — the override would silently no-op`,
-    );
+Deno.test("a type no tax lists is untaxed — service and surcharge, by the rule", () => {
+  for (const type of ["service", "surcharge"] as const) {
+    const items = [makeItem({ type }, { taxes: [] })];
+    materializeDocumentTax(items, ctx());
+    assertEquals(px(items[0]).taxes, [], type);
   }
 });
 
-Deno.test("tax_paxton resolves the Paxton tax, and loses to tax_exempt", () => {
-  const catalog: Tax[] = [
+// ── The COA gate ─────────────────────────────────────────────────
+
+Deno.test("a non-revenue COA is untaxed under every jurisdiction", () => {
+  for (const destinations of [[at("Chicago")], [at("Frankfort")], [at("Rantoul")]]) {
+    const items = [makeItem({ coa_revenue: 4700 })];
+    materializeDocumentTax(items, ctx({ destinations }));
+    assertEquals(px(items[0]).taxes, []);
+    assertEquals(px(items[0]).total_cents, 10000);
+  }
+});
+
+Deno.test("a revenue COA is taxed; an ABSENT COA is taxable too", () => {
+  // Order lines carry no `coa_revenue` at all — it lives on the product — so
+  // "unknown means taxable" here is load-bearing. Inverting it would zero the
+  // tax on every order line in the corpus.
+  const withCoa = [makeItem({ coa_revenue: 4000 })];
+  materializeDocumentTax(withCoa, ctx());
+  assertEquals(px(withCoa[0]).taxes.length, 1);
+
+  const noCoa = [makeItem()];
+  // `null` and absent are the same answer to the gate — an order line carries
+  // the field as `null` out of `getInitialValues`, an invoice line omits it.
+  assertEquals(noCoa[0].coa_revenue ?? null, null);
+  materializeDocumentTax(noCoa, ctx());
+  assertEquals(px(noCoa[0]).taxes.length, 1);
+});
+
+// ── Explicit-only refs ───────────────────────────────────────────
+
+Deno.test("🔴 an explicit-only tax ref on the line SURVIVES the rebuild", () => {
+  // `Water Bottle Tax` is the `jurisdiction: null` class — reachable by uid
+  // alone and invisible to `findTaxFor` by construction. It rides a line
+  // because the PRODUCT carries the ref, so rebuilding from the rule alone
+  // would silently drop a real charge.
+  const items = [makeItem({}, {
+    taxes: [
+      { uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 1500 },
+      { uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 5 },
+    ],
+  })];
+  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")] }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax", "bottle-tax"]);
+});
+
+Deno.test("…and an exempt document drops it too — a tax is a tax", () => {
+  const items = [makeItem({}, {
+    taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 5 }],
+  })];
+  materializeDocumentTax(items, ctx({ exempt: true }));
+  assertEquals(px(items[0]).taxes, []);
+});
+
+Deno.test("a ref naming a uid the catalog does not hold is DROPPED, not carried", () => {
+  // Unlike `resolveTaxRefsAt`, which moves a line between VERSIONS and must not
+  // decide taxability. This function IS the taxability decision, and a tax the
+  // catalog cannot answer for is not the answer.
+  const items = [makeItem({}, {
+    taxes: [{ uid: "ghost-tax", name: "Ghost", rate: 5, type: "percent", amount_cents: 500 }],
+  })];
+  materializeDocumentTax(items, ctx());
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+});
+
+// ── Reaching the destination ─────────────────────────────────────
+
+Deno.test("destinationsForItems: by uid_delivery, then by index, then the single entry", () => {
+  const items = [
+    { ...makeItem(), uid: "d1", type: "destination", uid_delivery: "dest-frk", path: ["d1"] },
+    { ...makeItem(), uid: "l1", path: ["d1", "l1"] },
+    // A divider naming NO endpoint falls back to its index among dividers.
+    { ...makeItem(), uid: "d2", type: "destination", uid_delivery: null, path: ["d2"] },
+    { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
+  ] as LineItem[];
+  const destinations = [
+    at("Frankfort", "IL", { uid: "dest-frk" }),
+    at("Rantoul", "IL", { uid: "dest-rnt" }),
+  ];
+  const resolved = destinationsForItems(items, destinations);
+  assertEquals(resolved[1], destinations[0]);
+  assertEquals(resolved[3], destinations[1]);
+});
+
+Deno.test("destinationsForItems: a divider-less items array takes the single entry", () => {
+  const items = [makeItem({ uid: "l1", path: ["l1"] })];
+  const destinations = [at("Rantoul")];
+  assertEquals(destinationsForItems(items, destinations)[0], destinations[0]);
+});
+
+Deno.test("destinationsForItems: NO destinations resolves null — and sources to the origin", () => {
+  // A defined answer, not a failure: 31 prod invoices have no destinations at
+  // all, because they have no source order.
+  const items = [makeItem({ uid: "l1", path: ["l1"] })];
+  assertEquals(destinationsForItems(items, [])[0], null);
+
+  materializeDocumentTax(items, ctx({ destinations: [] }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+});
+
+Deno.test("destinationsForItems: the walk is DEPTH-agnostic — invoices nest one level deeper", () => {
+  // An order's hierarchy is [destination, group]; an invoice's is
+  // [order, destination, group]. Anything keyed on a depth would find the
+  // destination on one document and the ORDER divider on the other.
+  const items = [
+    { ...makeItem(), uid: "o1", type: "order", path: ["o1"] },
+    { ...makeItem(), uid: "d1", type: "destination", uid_delivery: "dest-frk", path: ["o1", "d1"] },
+    { ...makeItem(), uid: "g1", type: "group", path: ["o1", "d1", "g1"] },
+    { ...makeItem(), uid: "l1", path: ["o1", "d1", "g1", "l1"] },
+  ] as LineItem[];
+  const destinations = [at("Frankfort", "IL", { uid: "dest-frk" })];
+  assertEquals(destinationsForItems(items, destinations)[3], destinations[0]);
+});
+
+// ── The three levels, through the rule ───────────────────────────
+
+Deno.test("precedence: the document's entry beats the claim beats the derivation", () => {
+  const items = [makeItem({ type: "sale" }, { taxes: [] })];
+  materializeDocumentTax(items, ctx({
+    destinations: [at("Chicago", "IL", { jurisdiction: "frankfort" })],
+    organizationClaim: "rantoul",
+  }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
+
+  const claimed = [makeItem({ type: "sale" }, { taxes: [] })];
+  materializeDocumentTax(claimed, ctx({ organizationClaim: "rantoul" }));
+  assertEquals(px(claimed[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
+
+  const derived = [makeItem({ type: "sale" }, { taxes: [] })];
+  materializeDocumentTax(derived, ctx({ destinations: [at("Rantoul")] }));
+  assertEquals(px(derived[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
+});
+
+Deno.test("resolveLineTax reports the LEVEL that answered, for the order form", () => {
+  const item = makeItem({ type: "sale" });
+  assertEquals(
+    resolveLineTax(item, at("Chicago", "IL", { jurisdiction: "frankfort" }), ctx()).level,
+    "document",
+  );
+  assertEquals(
+    resolveLineTax(item, at("Chicago"), ctx({ organizationClaim: "rantoul" })).level,
+    "organization",
+  );
+  assertEquals(resolveLineTax(item, at("Chicago"), ctx()).level, "derived");
+  assertEquals(
+    resolveLineTax(makeItem({ type: "replacement" }), at("Frankfort"), ctx()).level,
+    "origin",
+  );
+});
+
+// ── The rate VERSION is a separate question ──────────────────────
+
+Deno.test("🔴 a frozen document keeps the rate VERSION it already stores", () => {
+  // The rule picks a TAX; `frozenVersions` picks which version of it. A
+  // completed order re-priced on a later CRMS event must keep the rate it was
+  // billed at — and `applied_from` alone does not give that, because it is set
+  // to the CUTOVER, which precedes a future delivery date.
+  const versioned: Tax[] = [
     ...CATALOG,
     {
-      uid: "paxton-tax",
-      name: "Paxton Sales Tax",
-      rate: 6.25,
+      uid: "chi-rental-tax-old",
+      name: "Chicago Rental Tax",
+      rate: 11,
       type: "percent",
-      valid_from: "2020-01-01T00:00:00.000-06:00",
-      valid_to: null,
-    } as Tax,
+      jurisdiction: "chicago",
+      item_types: ["rental"],
+      valid_from: "2025-01-01T00:00:00.000-06:00",
+      valid_to: "2026-01-01T00:00:00.000-06:00",
+    },
   ];
-  const resolved = getEffectiveProfileTax("tax_applied", "tax_paxton", catalog, AS_OF);
-  assertEquals(resolved !== null && resolved !== "exempt" && resolved.uid, "paxton-tax");
-  assertEquals(getEffectiveProfileTax("tax_paxton", "tax_exempt", catalog, AS_OF), "exempt");
-});
-
-Deno.test("tax_paxton with no Paxton doc in the catalog resolves to null, not a wrong tax", () => {
-  // The guard that matters: an unseeded profile must NOT fall through to
-  // whichever location tax happens to be in the catalog.
-  assertEquals(getEffectiveProfileTax("tax_applied", "tax_paxton", CATALOG, AS_OF), null);
-});
-
-// ── materializeDocumentTax ───────────────────────────────────────
-//
-// The override PLUS the reprice — the pair the order path had as
-// `api-cloudrun`'s `repriceOrderItemsForProfile` and the native invoice path had
-// not at all. Three things are worth pinning that the bare override cannot show:
-// the org arm is a real parameter, the reprice actually happens, and the price
-// rebuild is shape-agnostic.
-
-/** Full price surface, for asserting what survived the rebuild. */
-const pxFull = (it: LineItem) =>
-  it.price as unknown as Record<string, unknown>;
-
-Deno.test("materialize: an ORG-level tax_exempt exempts a tax_applied document", () => {
-  // THE ARM THAT IS NEW. `repriceOrderItemsForProfile` passed the literal
-  // `"tax_applied"` as the org profile, so a tax-exempt customer's ORDERS were
-  // taxed while their INVOICES were not — the same customer, the same products,
-  // two answers depending on which document you looked at.
   const items = [makeItem()];
-  materializeDocumentTax(items, "tax_exempt", "tax_applied", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes, []);
-  assertEquals(px(items[0]).total_cents, 10000);
+  materializeDocumentTax(items, ctx({
+    taxes: versioned,
+    frozenVersions: new Map([["Chicago Rental Tax", "chi-rental-tax-old"]]),
+  }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax-old"]);
+  assertEquals(px(items[0]).taxes[0].rate, 11);
 });
 
-Deno.test("companion: the hardcoded org arm does NOT exempt, so the arm above bites", () => {
-  // Sweeps the pre-change behavior — `"tax_applied"` in the org position — and
-  // asserts it disagrees. Without this, the test above would keep passing
-  // against a function that had quietly gone back to ignoring `orgProfile`.
-  const items = [makeItem()];
-  materializeDocumentTax(items, "tax_applied", "tax_applied", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes.length, 1, "org arm ignored → the line stays taxed");
+Deno.test("…and a frozen NAME the document never carried resolves at asOf", () => {
+  // Freezing cannot mean "keep a version that does not exist". This is the
+  // jurisdiction-correction case: the rule moves the line to a tax the frozen
+  // map has no entry for.
+  const items = [makeItem({ type: "sale" }, { taxes: [] })];
+  materializeDocumentTax(items, ctx({
+    frozenVersions: new Map([["Chicago Rental Tax", "chi-rental-tax"]]),
+  }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
+});
+
+// ── assign vs materialize ────────────────────────────────────────
+
+Deno.test("assignLineTaxes rewrites the tax WITHOUT repricing the subtotal", () => {
+  // The half the CRMS invoice webhook needs: its subtotals are
+  // `charge_total`-authoritative, and a reprice would recompute them from
+  // `base_cents × quantity × days_factor` and under-bill by 28.6% on a real
+  // line (api-cloudrun#236).
+  const items = [makeItem({}, { subtotal_discounted_cents: 5000, subtotal_cents: 5000 })];
+  assignLineTaxes(items, ctx({ destinations: [at("Frankfort")] }));
+  assertEquals(pxFull(items[0]).subtotal_discounted_cents, 5000);
+  assertEquals(px(items[0]).taxes[0].amount_cents, 400);
+  assertEquals(px(items[0]).total_cents, 5400);
+});
+
+Deno.test("materializeDocumentTax REPRICES — the subtotal is recomputed from the line", () => {
+  const items = [makeItem({}, { subtotal_discounted_cents: 5000, subtotal_cents: 5000 })];
+  materializeDocumentTax(items, ctx());
+  assertEquals(pxFull(items[0]).subtotal_discounted_cents, 10000);
   assertEquals(px(items[0]).total_cents, 11500);
-});
-
-Deno.test("materialize: the DOC profile still beats a plain org profile", () => {
-  // Precedence is unchanged — adding the org arm must not let the org override
-  // the document. Org says Rantoul (9%), doc says Frankfort (8%): 8% wins.
-  const items = [makeItem()];
-  materializeDocumentTax(items, "tax_rantoul", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes[0].uid, "frankfort-tax");
-  assertEquals(px(items[0]).total_cents, 10800);
-});
-
-Deno.test("materialize: the org profile applies when the doc has none", () => {
-  const items = [makeItem()];
-  materializeDocumentTax(items, "tax_rantoul", null, CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes[0].uid, "rantoul-tax");
-  assertEquals(px(items[0]).total_cents, 10900);
-});
-
-Deno.test("materialize: a doc-level tax_applied keeps Chicago under a Frankfort org", () => {
-  // The Kenwood-films-in-Chicago case, and the repair #2348 needed. Under the
-  // scan this priced Frankfort 8%; the line's own Chicago Rental 15% survives.
-  const items = [makeItem()];
-  materializeDocumentTax(items, "tax_frankfort", "tax_applied", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes[0].uid, "chi-rental-tax");
-  assertEquals(px(items[0]).total_cents, 11500);
-});
-
-Deno.test("materialize: an exempt ORG zeroes the tax on a doc that says nothing", () => {
-  // api-cloudrun#486 in one line — the order path passed a hardcoded
-  // "tax_applied" in the org position, so this line stayed taxed.
-  const items = [makeItem()];
-  materializeDocumentTax(items, "tax_exempt", null, CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes, []);
-  assertEquals(px(items[0]).total_cents, 10000);
-});
-
-Deno.test("materialize: REPRICES, where the bare override only rewrites the tax", () => {
-  // The half that distinguishes the two functions. A line arriving with a stale
-  // `subtotal_cents` is corrected from `base_cents × quantity × days_factor`;
-  // `overrideItemTaxesForProfile` alone would leave the lie in place and compute
-  // the tax off it.
-  const stale = { subtotal_cents: 1, subtotal_discounted_cents: 1, total_cents: 1 };
-
-  const bare = [makeItem({}, stale)];
-  overrideItemTaxesForProfile(bare, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(pxFull(bare[0]).subtotal_cents, 1, "the bare override does not reprice");
-  assertEquals(px(bare[0]).total_cents, 1, "…so the tax is computed off the stale subtotal");
-
-  const materialized = [makeItem({}, stale)];
-  materializeDocumentTax(materialized, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  assertEquals(pxFull(materialized[0]).subtotal_cents, 10000);
-  assertEquals(pxFull(materialized[0]).subtotal_discounted_cents, 10000);
-  assertEquals(px(materialized[0]).total_cents, 10800);
 });
 
 Deno.test("materialize: preserves every price key it does not compute", () => {
-  // The reason the rebuild is a SPREAD. The order-side original listed the keys
-  // it meant to keep, so `taxes_base` was dropped until a conditional spread was
-  // added back for it specifically — and `base_percent` is still missing from
-  // that list. Here the assertion is about keys the function has never heard of,
-  // which is what makes one implementation safe for both document shapes.
-  //
-  // `legacy_unknown_key` is deliberately synthetic: since api-cloudrun#480 drop-
-  // ped `discount_percent`, `InvoiceDocItemPrice` declares no invoice-only key
-  // at all, so there is no real one to stand in for it. A key no schema declares
-  // is the stronger form anyway — it cannot quietly become a key this function
-  // learns about. Nothing parses here (`makeItem`'s overrides are
-  // `Record<string, unknown>` and `pxFull` casts), so strictness never applies.
-  const items = [makeItem({}, {
-    taxes_base: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
-    replacement_cents: 50000, // order-only key
-    legacy_unknown_key: 12, // a key NO schema declares
-  })];
-  materializeDocumentTax(items, "tax_applied", "tax_exempt", CATALOG, AS_OF);
-
-  const p = pxFull(items[0]);
-  assertEquals(
-    (p.taxes_base as Array<{ uid: string }>)[0].uid,
-    "chi-rental-tax",
-    "the intrinsic snapshot survives — it is what a profile revert reads",
-  );
-  assertEquals(p.replacement_cents, 50000, "order-only key survives");
-  assertEquals(p.legacy_unknown_key, 12, "an undeclared key survives");
-  assertEquals(p.taxes, [], "…while the override still did its job");
+  const items = [makeItem({}, { replacement_cents: 250000, base_percent: null, chargeable_days: 3 })];
+  materializeDocumentTax(items, ctx());
+  assertEquals(pxFull(items[0]).replacement_cents, 250000);
+  assertEquals(pxFull(items[0]).chargeable_days, 3);
 });
 
-Deno.test("materialize: never writes an `undefined` price key", () => {
-  // `validateBeforeWrite` rejects an explicit `undefined`, and a spread cannot
-  // introduce one — but it also cannot remove one, so this asserts the absent
-  // keys stay absent rather than materializing as undefined.
+Deno.test("materialize: never writes an `undefined` price key (Firestore rejects one)", () => {
   const items = [makeItem()];
-  materializeDocumentTax(items, "tax_applied", "tax_frankfort", CATALOG, AS_OF);
-  const undef = Object.entries(pxFull(items[0]))
-    .filter(([, v]) => v === undefined)
-    .map(([k]) => k);
-  assertEquals(undef, []);
-});
-
-Deno.test("materialize: a non-revenue COA is untaxed under every profile", () => {
-  for (const profile of ["tax_applied", "tax_frankfort", "tax_rantoul", "tax_exempt"] as const) {
-    const items = [makeItem({ coa_revenue: 4100 })];
-    materializeDocumentTax(items, "tax_applied", profile, CATALOG, AS_OF);
-    assertEquals(px(items[0]).taxes, [], `${profile} re-taxed a non-revenue COA`);
-    assertEquals(px(items[0]).total_cents, 10000, `${profile} total`);
+  materializeDocumentTax(items, ctx());
+  for (const [key, value] of Object.entries(pxFull(items[0]))) {
+    assertEquals(value === undefined, false, `price.${key} is undefined`);
   }
 });
 
 Deno.test("materialize: skips non-priceable items instead of throwing on them", () => {
-  // `calculateItemPrice` THROWS on a divider. The reprice loop has to guard, and
-  // a document always carries dividers, so this is the common case rather than
-  // an edge one.
-  const items: LineItem[] = [
-    { uid: "d1", name: "Stage", type: "destination", path: ["d1"] },
-    { uid: "g1", name: "Camera", type: "group", path: ["d1", "g1"] },
-    makeItem(),
-  ];
-  materializeDocumentTax(items, "tax_applied", "tax_exempt", CATALOG, AS_OF);
-  assertEquals(items[0].price, undefined);
-  assertEquals(px(items[2]).taxes, []);
-});
-
-Deno.test("materialize: reprices under tax_applied too — so the catalog must be COMPLETE", () => {
-  // ⚠️ The trap for every caller. There is no `tax_applied` early return: the
-  // override half returns early, the REPRICE half does not, and the reprice
-  // resolves each line's stored `taxes[].uid` against the catalog it was handed.
-  // So passing a filtered catalog — "just the profile taxes", say — throws on
-  // any line carrying a tax that filter dropped, on a document with no override
-  // at all. Callers pass the whole `taxes` collection.
-  const withoutTheLinesOwnTax = CATALOG.filter((t) => t.uid !== "chi-rental-tax");
-  assertThrows(
-    () => materializeDocumentTax([makeItem()], "tax_applied", "tax_applied", withoutTheLinesOwnTax, AS_OF),
-    Error,
-    "Unknown tax uid",
-  );
-
-  // And the same document with the complete catalog is repriced, not thrown on —
-  // otherwise the assertion above would pass against a function that always threw.
-  const items = [makeItem()];
-  materializeDocumentTax(items, "tax_applied", "tax_applied", CATALOG, AS_OF);
-  assertEquals(px(items[0]).taxes[0].uid, "chi-rental-tax");
-  assertEquals(px(items[0]).total_cents, 11500);
-});
-
-// ── resolveEffectiveProfile + the out-of-Illinois rule ───────────
-
-Deno.test("resolveEffectiveProfile agrees with getEffectiveProfileTax on every pair", () => {
-  // The point of extracting it: the Xero TaxType mapping and the pricing engine
-  // must answer the SAME question. This asserts they cannot drift — for each
-  // (org, doc) pair, resolving the profile and then its Tax gives what
-  // getEffectiveProfileTax gives directly.
-  const profiles: Array<"tax_applied" | "tax_exempt" | "tax_rantoul" | "tax_frankfort"> = [
-    "tax_applied",
-    "tax_exempt",
-    "tax_rantoul",
-    "tax_frankfort",
-  ];
-  for (const org of profiles) {
-    for (const doc of [...profiles, null]) {
-      const viaProfile = resolveEffectiveProfile(org, doc);
-      const direct = getEffectiveProfileTax(org, doc, CATALOG, AS_OF);
-      if (viaProfile === "tax_exempt") {
-        assertEquals(direct, "exempt", `${org}/${doc}`);
-      } else {
-        const name = TAX_PROFILE_OVERRIDE_NAME[viaProfile];
-        const expected = name ? findTaxAt(CATALOG, name, AS_OF) : null;
-        assertEquals(direct, expected, `${org}/${doc}`);
-      }
-    }
-  }
-});
-
-Deno.test("resolveEffectiveProfile: the SCAN it replaced disagrees where it costs money", () => {
-  // Fail-closed companion. The old rule was `[doc, org].find(names a location
-  // tax)`; the new one is `doc ?? org`. They agree everywhere except the case
-  // that matters — a doc-level "tax_applied" under a location-profile org —
-  // which is prod invoice #2348. If this ever stops disagreeing, the extraction
-  // has been undone.
-  const scan = (org: string, doc: string | null) =>
-    [doc, org].find((p) => p !== null && TAX_PROFILE_OVERRIDE_NAME[p as never]) ?? "tax_applied";
-
-  assertEquals(scan("tax_frankfort", "tax_applied"), "tax_frankfort");
-  assertEquals(resolveEffectiveProfile("tax_frankfort", "tax_applied"), "tax_applied");
-
-  // …and they still agree on inherit, which is what makes the change surgical.
-  assertEquals(scan("tax_frankfort", null), "tax_frankfort");
-  assertEquals(resolveEffectiveProfile("tax_frankfort", null), "tax_frankfort");
-});
-
-const dest = (region: string | undefined) => ({ delivery: { address: { region } } });
-
-Deno.test("isEntirelyOutOfIllinois: every destination out of state", () => {
-  assertEquals(isEntirelyOutOfIllinois([dest("MO")]), true);
-  assertEquals(isEntirelyOutOfIllinois([dest("MO"), dest("WI")]), true);
-  assertEquals(isEntirelyOutOfIllinois([dest("Missouri")]), true);
-});
-
-Deno.test("isEntirelyOutOfIllinois: a MIXED order keeps its tax", () => {
-  // `every`, not `some` — under-collecting is the expensive error.
-  assertEquals(isEntirelyOutOfIllinois([dest("MO"), dest("IL")]), false);
-  assertEquals(isEntirelyOutOfIllinois([dest("IL")]), false);
-});
-
-Deno.test("isEntirelyOutOfIllinois: 'Illinois' spelled out is NOT out of state", () => {
-  // The corpus case. 18 of the 48 non-"IL" prod destinations are this, 13 of
-  // them Chicago — a bare `region !== "IL"` would have zeroed the tax on all 18.
-  assertEquals(isEntirelyOutOfIllinois([dest("Illinois")]), false);
-  assertEquals(isEntirelyOutOfIllinois([dest("illinois")]), false);
-  assertEquals(isEntirelyOutOfIllinois([dest("Illinois"), dest("MO")]), false);
-});
-
-Deno.test("isEntirelyOutOfIllinois: an UNRESOLVABLE region keeps the tax", () => {
-  // `null` from toUsStateCode means unknown, never "not Illinois".
-  assertEquals(isEntirelyOutOfIllinois([dest("")]), false);
-  assertEquals(isEntirelyOutOfIllinois([dest(undefined)]), false);
-  assertEquals(isEntirelyOutOfIllinois([dest("Ontario")]), false);
-  assertEquals(isEntirelyOutOfIllinois([{ delivery: null }]), false);
-  assertEquals(isEntirelyOutOfIllinois([dest("MO"), dest("")]), false);
-});
-
-Deno.test("isEntirelyOutOfIllinois: no destinations is not out of state", () => {
-  assertEquals(isEntirelyOutOfIllinois([]), false);
-  assertEquals(isEntirelyOutOfIllinois(undefined), false);
+  const divider = { ...makeItem(), uid: "g1", type: "group", path: ["g1"] } as LineItem;
+  const before = JSON.stringify(divider);
+  const items = [divider, makeItem()];
+  materializeDocumentTax(items, ctx());
+  assertEquals(JSON.stringify(items[0]), before);
 });
 
 // ── The ORDER-side composition (api-cloudrun#4.10) ───────────────
@@ -674,86 +649,6 @@ Deno.test("deriveOrderTaxAsOf: falls back to the INJECTED now, never an ambient 
   assertEquals(deriveOrderTaxAsOf(undefined, NOW), NOW);
   assertEquals(deriveOrderTaxAsOf([orderDest("IL", null), null, undefined], NOW), NOW);
 });
-
-Deno.test("materializeOrderTax: an entirely out-of-state order is untaxed", () => {
-  const items = [makeItem()];
-  materializeOrderTax(items, "tax_applied", null, [orderDest("MO")], CATALOG, NOW);
-  assertEquals(px(items[0]).taxes, []);
-  // The money, not just the empty array: an untaxed line's total IS its
-  // discounted subtotal.
-  const priced = items[0].price as { subtotal_discounted_cents: number };
-  assertEquals(px(items[0]).total_cents, priced.subtotal_discounted_cents);
-});
-
-Deno.test("materializeOrderTax: out-of-state beats an org LOCATION profile", () => {
-  // The rule is applied in the DOC position, so it composes with the precedence
-  // rule instead of shadowing it — exemption is sticky from either side, which
-  // is why a Frankfort customer's Missouri delivery is still untaxed.
-  const items = [makeItem()];
-  materializeOrderTax(items, "tax_frankfort", null, [orderDest("MO")], CATALOG, NOW);
-  assertEquals(px(items[0]).taxes, []);
-});
-
-Deno.test("materializeOrderTax: ONE in-state destination is enough to tax the order", () => {
-  // The discriminating half. Without it the arms above would also pass against
-  // an implementation that exempted everything.
-  const items = [makeItem()];
-  materializeOrderTax(items, "tax_frankfort", null, [orderDest("MO"), orderDest("IL")], CATALOG, NOW);
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
-});
-
-Deno.test("materializeOrderTax: the org's profile is honored when the doc says nothing", () => {
-  // `docProfile: null` means INHERIT, and it is the safe default: an order that
-  // says nothing cannot tax an exempt customer (api-cloudrun#486).
-  const items = [makeItem()];
-  materializeOrderTax(items, "tax_exempt", null, [orderDest("IL")], CATALOG, NOW);
-  assertEquals(px(items[0]).taxes, []);
-
-  const rantoul = [makeItem()];
-  materializeOrderTax(rantoul, "tax_rantoul", null, [orderDest("IL")], CATALOG, NOW);
-  assertEquals(px(rantoul[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
-});
-
-Deno.test("materializeOrderTax: an explicit doc tax_applied BEATS an org location profile", () => {
-  // The #2348 class: the operator saying "this one is ordinary" must outrank the
-  // customer's Frankfort default rather than falling through to it.
-  const items = [makeItem()];
-  materializeOrderTax(items, "tax_frankfort", "tax_applied", [orderDest("IL")], CATALOG, NOW);
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
-});
-
-Deno.test("materializeOrderTax: the as-of instant comes from the DELIVERY date, not now", () => {
-  // The order-vs-invoice difference this whole composition exists to express: an
-  // invoice resolves at `invoice.date`, an order at its earliest delivery start.
-  // Here the Frankfort doc does not exist yet at the delivery date, so the
-  // override resolves to nothing and the line keeps its intrinsic tax — the same
-  // "no version brackets this date" case the order path handles by keeping what
-  // it had rather than silently untaxing the line.
-  const items = [makeItem()];
-  materializeOrderTax(
-    items,
-    "tax_applied",
-    "tax_frankfort",
-    [orderDest("IL", "2025-06-01T09:00:00.000-05:00")],
-    CATALOG,
-    NOW,
-  );
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
-
-  // The discriminating half: the same order delivered after Frankfort's
-  // `valid_from` DOES resolve the override.
-  const later = [makeItem()];
-  materializeOrderTax(
-    later,
-    "tax_applied",
-    "tax_frankfort",
-    [orderDest("IL", "2026-06-01T09:00:00.000-05:00")],
-    CATALOG,
-    NOW,
-  );
-  assertEquals(px(later[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
-});
-
 // ── defaultTaxNameForLine — the COA-first default rule (manager#297) ─────────
 //
 // These pin the two directions the 2026-08-16 corpus measurement found, because

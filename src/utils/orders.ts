@@ -30,6 +30,7 @@
 
 import type {
   COARevenueType,
+  TaxedAsType,
   DiscountType,
   PriceModifierType,
   OrderDocTotalsType,
@@ -157,6 +158,18 @@ export interface LineItem {
    * of `number`, so a `LineItem` still satisfies `PricingItem`.
    */
   coa_revenue?: COARevenueType | null;
+  /**
+   * **The type this line is TAXED as**, overriding {@link LineItem.type} for
+   * the tax rule alone (`taxed_as ?? type` — see `resolveLineTax`).
+   *
+   * The escape hatch for a line whose billing type and tax treatment
+   * legitimately differ, and the reason the tax key is not simply `type`: a
+   * `custom-` line has no product to inherit an account from, so its author
+   * picks the nearest billing type and the tax rule would otherwise follow that
+   * choice. `"none"` means untaxed outright — no tax lists it, so it needs no
+   * branch of its own.
+   */
+  taxed_as?: TaxedAsType | null;
 }
 
 /**

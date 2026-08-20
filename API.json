@@ -9800,7 +9800,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -10948,7 +10948,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -11489,8 +11489,14 @@
     },
     {
       "entrypoint": "@cfs/core/utils/taxes",
-      "moduleDoc": "Shared tax helpers for CFS applications — the single home for doc-level\n`tax_profile` override logic + as-of Tax-catalog resolution, so the API\n(orders + invoice webhook) and the manager (optimistic recompute) share one\nimplementation.\n\nDepends one-way on `./orders.ts` (base pricing module) — no cycle.",
+      "moduleDoc": "Shared tax rules for CFS applications — **the single home for the pricing\nrule**, so the API (order + invoice write paths, the CRMS webhooks) and the\nmanager (optimistic recompute) reach the same answer.\n\nThe rule is `(item type × jurisdiction)`, zeroed by exemption, resolved\n**per line** through the destination it is billed under:\n\n```\nkey          = item.taxed_as ?? item.type\njurisdiction = destinations[i].jurisdiction        ← WINS\n                 ?? organization.jurisdiction_claim\n                 ?? deriveJurisdiction(address, origin)   // TOTAL\ntax          = findTaxFor(catalog, jurisdiction, key, asOf)\n```\n\n⚠️ **This replaced a doc-level `tax_profile` enum** that welded exemption to\njurisdiction (api-cloudrun#409). That shape could not express a mixed\nChicago/Frankfort order at all, and made `isEntirelyOutOfIllinois` an\nall-or-nothing document exemption — so a mixed Illinois/California order\ntaxed its California lines. Both are gone: the jurisdiction is per\ndestination, and \"CFS collects nothing here\" is the `no_nexus` VALUE rather\nthan a missing case.\n\nDepends one-way on `./orders.ts` (base pricing module) — no cycle.",
       "symbols": [
+        {
+          "kind": "interface",
+          "name": "DocumentTaxContext",
+          "declaration": "interface DocumentTaxContext {\n  destinations: ReadonlyArray<TaxDestination | null | undefined>;\n  organizationClaim?: JurisdictionType | null;\n  origin: JurisdictionType;\n  exempt: boolean;\n  taxes: Tax[];\n  asOf: string;\n  frozenVersions?: ReadonlyMap<string, string>;\n}",
+          "doc": "Everything the per-line rule needs that is not the line itself.\n\nOne object rather than seven positional arguments, because every field is a\nproperty of the DOCUMENT and they are read together — and because a caller\nthat omits one gets a compile error naming it rather than a silently shifted\nargument."
+        },
         {
           "kind": "typeAlias",
           "name": "JurisdictionLevel",
@@ -11502,6 +11508,12 @@
           "name": "JurisdictionLevels",
           "declaration": "interface JurisdictionLevels {\n  documentDestination?: JurisdictionType | null;\n  organization?: JurisdictionType | null;\n  address?: typeLiteral | null;\n  origin: JurisdictionType;\n}",
           "doc": "The three levels, as named fields so no caller can get the ORDER wrong.\n\nEvery level is `JurisdictionType | null | undefined`, and `null` and absent\nmean the same thing at all of them: *\"I assert nothing, ask the next level.\"*\nThe answer *\"this sources somewhere CFS collects no tax\"* is the `no_nexus`\nvalue — see {@link JurisdictionType}."
+        },
+        {
+          "kind": "interface",
+          "name": "LineTaxResolution",
+          "declaration": "interface LineTaxResolution {\n  jurisdiction: JurisdictionType;\n  level: JurisdictionLevel | \"origin\";\n  tax: Tax | null;\n}",
+          "doc": "The tax one line resolves to, and the jurisdiction that decided it."
         },
         {
           "kind": "interface",
@@ -11522,16 +11534,16 @@
           "doc": "The revenue COAs that sales/rental tax is actually owed on — 4000 Rental\nIncome, 4140 Pass Through Income, 4200 Retail Sales Income, 4210 Replacement\nSales Income.\n\n**This is the single source of truth for line taxability**, and it has to be,\nbecause it previously existed only on the *Xero push* side and nowhere in the\nengine computing CFS's own totals. So CFS taxed lines it then told Xero were\nuntaxable (`TaxType: \"NONE\"`), inflating `total` and leaving the difference as\na phantom `amount_due`. Measured on prod 2026-07-30: **19 invoices /\n$2,741.78**, plus 9 orders / $453.50.\n\nEverything outside the set is a service or fee — Service Income, Delivery\nSurcharges, Transaction Fee, Other Income — and sales tax is not owed on it.\nXero was right and the engine was wrong, so there is no historical\nunder-collection: the customer was always billed the untaxed amount and CFS\nmerely displayed a balance that was never real.\n\n**4140 Pass Through Income was added 2026-08-02, and the direction matters.**\nEvery other member of this set was here because Xero disagreed with the engine\nand Xero was right. 4140 is the one case where the two agreed with each other\nand the constant was the outlier: prod invoice #1897 carries its SSD Card line\nat `AccountCode: 4140` in CFS *and* in Xero, taxed `TAX003` (Chicago Rental,\n11%) for $510.40 in both, paid in full. Excluding 4140 meant the next reprice\nof that invoice would have deleted tax that was charged, collected and\nremitted. Operator decision: pass-through income is taxable.\n\n`api-cloudrun/src/lib/xeroTax.ts` consumes this same constant so the push and\nthe totals cannot drift apart again."
         },
         {
-          "kind": "variable",
-          "name": "TAX_PROFILE_OVERRIDE_NAME",
-          "declaration": "const TAX_PROFILE_OVERRIDE_NAME: Partial<Record<TaxProfileType, string>>;",
-          "doc": "Doc-level location tax profiles → the Tax doc `name` they resolve to (by\n`findTaxAt`, as-of date). `tax_applied` (no override) and `tax_exempt`\n(handled separately) are absent.\n\n**A profile added here needs a `taxes/` document with that exact name, or\n`findTaxAt` returns `null` and the override silently does nothing.** That is\nthe failure mode `tax_paxton` was added to fix rather than to repeat: prod\n#1978 was delivered to Paxton, Illinois, Xero taxed it `TAX005` at the 6.25%\nIL-state rate, and CFS had no Paxton profile at all — so it fell back to\nRantoul's 9% and disagreed with Xero by $4.89 on top of the service-line tax\nit should not have charged."
-        },
-        {
           "kind": "typeAlias",
           "name": "Tax",
           "declaration": "type Tax = Pick<SchemaTax, \"uid\" | \"name\" | \"rate\" | \"type\"> & Partial<Pick<SchemaTax, \"valid_from\" | \"valid_to\" | \"applied_from\" | \"applied_to\" | \"effective_from\" | \"jurisdiction\" | \"item_types\" | \"xero_tax_type\" | \"xero_components\">>;",
           "doc": "Subset of the full Tax document needed by utility functions.\n\nOnly `uid`/`name`/`rate`/`type` are required — those are what the pricing\nhelpers read. Everything else is resolution metadata that only the as-of\nresolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and\nit stays optional so partial `Tax` literals in tests and callers keep\ntype-checking.\n\n⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on\npurpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read\n`applied_from ?? valid_from` so a deploy can precede the document migration:\ncode reading only the new name against a document holding only the old one\nsees a missing bound, treats it as OPEN, and every version then brackets\nevery instant — which throws `Tax catalog drift` on the pricing path, out of\na CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair."
+        },
+        {
+          "kind": "interface",
+          "name": "TaxDestination",
+          "declaration": "interface TaxDestination {\n  jurisdiction?: JurisdictionType | null;\n  delivery?: typeLiteral | null;\n}",
+          "doc": "One `destinations[]` entry, as the tax rule reads it.\n\nStructural rather than `DocDestinationType`, for the same reason\n{@link TaxSourcingDestination} is: the manager calls this against a\nmid-edit order whose destinations are not yet valid documents, and an order\npair and an invoice pair are two hand-listed `strictObject`s that share no\nschema."
         },
         {
           "kind": "interface",
@@ -11544,6 +11556,14 @@
           "name": "assertCoaTaxMapCoversCore",
           "signature": "assertCoaTaxMapCoversCore(): void",
           "doc": "Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.\n\nA taxable COA with no entry there would be silently left **untaxed**, which is\na money defect that looks like a clean run. Throws rather than exits so a\nscript, a test and a client can all call it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "assignLineTaxes",
+          "signature": "assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): void",
+          "doc": "**Write the rule's answer onto every priceable line** — `price.taxes`,\n`price.taxes_base` and a refreshed `price.total_cents`. Mutates in place;\ncomputes no subtotal.\n\nThis is the half a `charge_total`-authoritative caller needs on its own: the\nCRMS invoice webhook must call THIS and never\n{@link materializeDocumentTax}, because a reprice would recompute its\nsubtotals from `base_cents × quantity × days_factor` and under-bill by a\nmeasured 28.6% on a real line (api-cloudrun#236).\n\n## `taxes` and `taxes_base` have ONE author, and that is the change\n\n`taxes_base` used to be the *product's* intrinsic tax, written at line-build\ntime so that reverting a `tax_profile` override could restore it. With the\njurisdiction rule there is nothing to revert TO — the rule is total and\nre-derived on every write — so the field keeps its name and takes the\nmeaning it always described: **the tax this line would carry if the customer\nwere not exempt.** One function writes both, so they cannot drift, and an\nexempt document still records which tax it was exempt from.\n\n## An explicit-only ref on the line SURVIVES\n\n`Water Bottle Tax` and `No Tax` are the `jurisdiction: null` class:\nreachable by uid alone and invisible to {@link findTaxFor} by construction.\nThey ride a line because the PRODUCT carries the ref, so rebuilding the array\nfrom the rule alone would silently drop a real charge. Preserved deliberately\nrather than by accident — prod carries zero such lines today\n(`scripts/audit-tax-key.ts` §3), which is exactly why this would have gone\nunnoticed.\n\n⚠️ A ref naming a uid the catalog does not hold is **dropped**, unlike\n`resolveTaxRefsAt`'s deliberate passthrough. That function moves a line\nbetween versions of a tax and must not decide taxability; this one IS the\ntaxability decision, and a tax the catalog cannot answer for is not the\nanswer.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11590,6 +11610,14 @@
         },
         {
           "kind": "function",
+          "name": "destinationsForItems",
+          "signature": "destinationsForItems(items: readonly LineItem[], destinations: ReadonlyArray<TaxDestination | null | undefined>): Array<TaxDestination | null>",
+          "doc": "The `destinations[]` entry each item is billed under — **one array, parallel\nto `items`**, so the caller walks the document once rather than per line.\n\n## Reached by `path` ancestry, never by a fixed depth\n\n`item.path` is the row identity and its ancestors are addressable exactly\n(`path.slice(0, k)`), which is what makes this level-agnostic: an order's\nhierarchy is `[destination, group]` and an invoice's is\n`[order, destination, group]`, so anything keyed on a depth would find the\ndestination on one document and the ORDER divider on the other.\n\nThen the divider names its endpoint (`uid_delivery`) and the entry answers\nfor it (`delivery.uid`) — the same key the CRMS carry-forwards use, and\ndeliberately not the array index, which moves when CRMS reorders.\n\n## Three fallbacks, each measured rather than assumed\n\nMeasured over the whole prod corpus (18,958 priceable lines,\n`scripts/audit-tax-key.ts`, 2026-08-20):\n\n| rung | lines | when it fires |\n|---|---|---|\n| `uid_delivery` ↔ `delivery.uid` | 18,755 | the ordinary case |\n| divider index among dividers | 198 | a divider naming no endpoint |\n| the single entry | 5 | a divider-less items array |\n| `null` — no destinations at all | 88 | 31 CRMS invoices with no source order |\n\n`null` is a DEFINED answer, not a failure: a document with no destination\nsources entirely to the origin. Nothing in the corpus reaches a fifth case,\nwhich is why there is no guessing rung.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "findTaxAt",
           "signature": "findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null",
           "doc": "Pick the Tax whose applied window contains `asOf`, matched by exact `name`.\nReturns null when nothing matches (e.g. `asOf` before any historical doc).\nThrows on catalog drift (two same-name docs bracket the same instant).",
@@ -11623,22 +11651,6 @@
         },
         {
           "kind": "function",
-          "name": "getEffectiveProfileTax",
-          "signature": "getEffectiveProfileTax(orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, taxCatalog: Tax[], asOf: string): Tax | \"exempt\" | null",
-          "doc": "Resolve the effective doc-level override from the org + doc `tax_profile`\npair, as-of `asOf`.\n\n**Two questions, in order — not a scan.**\n\n1. Is either side `tax_exempt`? Then exempt. Exemption is sticky from either\n   direction because it is a legal fact about the customer, not a preference\n   about where the work happened; no prod order or invoice overrides *away*\n   from an exempt org.\n2. Otherwise the document's profile if it has one, else the org's — a plain\n   `??`, so a `null` doc profile means INHERIT and any non-null value means\n   the document is deliberately overriding.\n\n⚠️ **What this replaced could not express \"plain Chicago\".** It scanned\n`[docProfile, orgProfile]` and took the first that named a *location* tax, so\na doc-level `\"tax_applied\"` — the operator saying \"this one is ordinary\" —\nmatched no name, fell through, and picked up the org's location profile\nanyway. That is live: prod invoice #2348 is issued and in Xero with\n`tax_profile: \"tax_applied\"`, taxed **Frankfort 8%**, while its own\n`taxes_base` records Chicago Sales 10.25%. Making `Order.tax_profile`\nnullable is what gives \"inherit\" its own representation and frees\n`\"tax_applied\"` to mean what it says.\n\n`orgProfile` accepts `undefined` for the duration of the\n`organization.tax_profile` backfill — see `DocumentOrganizationSnapshot`.\nIt resolves to {@link DEFAULT_TAX_PROFILE}, which is the pre-#486 behaviour\nand therefore not a regression; `audit-order-tax-profile.ts` is what says\nwhen the window has closed.",
-          "paramTags": [],
-          "returnsTag": "`\"exempt\"` (→ empty taxes) | a resolved `Tax` | `null` (no override)."
-        },
-        {
-          "kind": "function",
-          "name": "isEntirelyOutOfIllinois",
-          "signature": "isEntirelyOutOfIllinois(destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined): boolean",
-          "doc": "Does **every** destination on this document deliver outside Illinois?\n\nThe one automatic exception to \"everything sources to the store address\".\nCFS is registered to collect in exactly three jurisdictions — Chicago,\nFrankfort and Rantoul — and collects no sales tax outside Illinois, so an\norder delivered entirely out of state carries none. Everything else,\nincluding the dozen Illinois suburbs a Chicago production films in on three\ndays' notice, sources to Chicago and is overridden by hand when a customer\nasks; deriving forty jurisdictions from an address is explicitly not wanted\n(api-cloudrun#237, closed won't-do).\n\n**Conservative in two directions, deliberately:**\n\n- `every`, not `some` — a mixed Illinois/out-of-state order keeps its tax\n  rather than being wholly exempted. Under-collecting is the expensive error.\n- An **unresolvable** region keeps the tax. {@link toUsStateCode} returns\n  `null` for unknown, never for \"not Illinois\", and this reads it that way.\n  That distinction is not academic: 18 of the 48 non-`\"IL\"` prod destinations\n  are Illinois spelled `\"Illinois\"`, 13 of them in Chicago, so a bare\n  `region !== \"IL\"` here would have stopped collecting tax CFS owes on all 18.\n\nA document with no destinations is not out of state.\n\nLives in core rather than in api-cloudrun because the manager's optimistic\nrecompute has to reach the same answer — a client-side reimplementation would\nput the divergence back on the client, which is the whole reason\n{@link materializeDocumentTax} lives here too.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "isTaxableCoa",
           "signature": "isTaxableCoa(coaRevenue: number | null | undefined): boolean",
           "doc": "Is a line with this revenue COA subject to tax?\n\n**`null`/`undefined` means UNKNOWN, and unknown is treated as TAXABLE** — the\nopposite of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`, and the\nasymmetry is deliberate. That call site resolves the COA from the product\nbefore asking, so absent there really does mean \"not a taxable account\". The\npricing engine has no such guarantee: **an order line item carries no\n`coa_revenue` at all** — the field is on the invoice item and the product, not\nthe order item. Folding unknown into \"untaxable\" here would silently zero the\ntax on every order line in the corpus.\n\nSo this gate only ever *removes* tax from a line it can positively identify as\nnon-revenue, and a caller that can resolve the COA must supply it (see\n{@link PricingItem.coa_revenue}).\n\n⚠️ The two sides therefore still disagree for an unknown COA, which is exactly\nthe state of a `custom-` line: it has no product, so the quote push sends\n`NONE` while the engine keeps taxing it. Closing that needs a decision about\nwhat a custom line's COA should be, not a change to this predicate.",
@@ -11648,53 +11660,8 @@
         {
           "kind": "function",
           "name": "materializeDocumentTax",
-          "signature": "materializeDocumentTax(items: LineItem[], orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, taxCatalog: Tax[], asOf: string): void",
-          "doc": "**The one tax materializer.** Apply a document's `tax_profile` as a doc-level\noverride, then reprice every priceable line from its (rewritten) tax uid.\nMutates `items` in place; callers run `calculateOrderTotals` /\n`calculateInvoiceTotals` afterwards.\n\nThis is {@link overrideItemTaxesForProfile} **plus the reprice** — the pair\nevery write path that owns its own line prices needs, and the pair only the\norder path had. `api-cloudrun`'s `repriceOrderItemsForProfile` was this\nfunction for orders only; native `POST/PUT /invoices` called neither half, so\na `tax_exempt` invoice stored the profile, sent Xero `TaxType: NONE`, and kept\nCFS items and totals fully taxed.\n\nThree consumers, one implementation: api-cloudrun's order write paths,\napi-cloudrun's `createInvoice`/`updateInvoice`, and the manager's optimistic\nrecompute. The manager consumer is the reason this lives in `core` rather than\nin `api-cloudrun/src/lib/` — a client-side reimplementation would recreate, on\nthe client, exactly the order/invoice divergence this function exists to\nclose.\n\n⚠️ **The CRMS invoice webhook must keep calling the bare\n{@link overrideItemTaxesForProfile}, not this.** Its subtotals are\n`charge_total`-authoritative (api-cloudrun#236) — a reprice would recompute\nthem from `base_cents × quantity × days_factor` and under-bill, which\n`crms.test.ts` pins at 28.6% on a real line.\n\n**`orgProfile` is a real parameter, not a constant.** The order path hardcoded\n`\"tax_applied\"` here, so an org-level `tax_exempt` was honored on that\ncustomer's invoices and silently ignored on their orders. Precedence is\n{@link getEffectiveProfileTax}'s: `tax_exempt` from either side wins, then the\ndoc's location profile, then the org's.\n\n**Pure** — `asOf` is injected rather than defaulted to now, so this stays free\nof an ambient clock (the workspace date rules ban `new Date()` for business\ndatetimes, and a defaulted `now` is how that ban gets bypassed). Callers\nderive it: the order paths from the earliest destination delivery start, the\ninvoice paths from `invoice.date`.",
-          "paramTags": [
-            {
-              "name": "items",
-              "doc": "Document items, mutated in place. Non-priceable members\n(destination/group/transaction_fee) are skipped by both halves."
-            },
-            {
-              "name": "orgProfile",
-              "doc": "The customer organization's `tax_profile`."
-            },
-            {
-              "name": "docProfile",
-              "doc": "The document's own `tax_profile`, which takes precedence."
-            },
-            {
-              "name": "taxCatalog",
-              "doc": "The `taxes` collection, for name+date resolution."
-            },
-            {
-              "name": "asOf",
-              "doc": "Instant to resolve the tax catalog at."
-            }
-          ],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "materializeOrderTax",
-          "signature": "materializeOrderTax(items: LineItem[], orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, destinations: ReadonlyArray<TaxSourcingDestination | null | undefined> | undefined, taxCatalog: Tax[], now: string): void",
-          "doc": "**The one order-side tax materializer.** Resolve an order's effective tax from\nits organization snapshot, its own `tax_profile` and its destinations, then\nreprice every billable line. Mutates `items` in place; callers run\n`calculateOrderTotals` after.\n\nThis is {@link materializeDocumentTax} plus the two things that are true of an\nORDER and not of an invoice — the as-of instant is the delivery date rather\nthan `invoice.date`, and an out-of-state delivery is exempt.\n\n⚠️ **It lives here because it is POLICY, and policy written twice drifts.**\nIt began as `api-cloudrun/src/lib/orderTaxPricing.ts`, and the manager then\nwrote a second copy in `src/utils/documentTax.ts` — carrying a comment saying\nthe two must stay byte-for-byte identical, which is a wish, not a mechanism.\nThe arithmetic was already shared; this is the ~10 lines around it.\n\nThree things it centralizes across the order write paths:\n\n1. **The organization's profile is passed for real.** Its predecessor\n   hardcoded `\"tax_applied\"` in that position because an order's snapshot had\n   no `tax_profile` to pass (api-cloudrun#486). A tax-exempt customer's\n   invoices went untaxed and their orders went taxed, and what covered the gap\n   was CRMS stamping the order's profile from the opportunity header — i.e.\n   the system being retired.\n2. **`docProfile: null` means INHERIT**, and is the safe default: an order\n   that says nothing cannot tax an exempt customer. A non-null value is a\n   deliberate override, and an explicit `\"tax_applied\"` beats an org-level\n   location profile rather than losing to it.\n3. **The out-of-state rule**, applied as an exemption in the DOC position so\n   it composes with the precedence rule instead of shadowing it — a Frankfort\n   customer's Missouri delivery is still untaxed.\n\n⚠️ Deriving that rule from the destination address does **not** generalize to\njurisdiction: CFS is registered in exactly three, a Chicago production films\nin a dozen Illinois suburbs on short notice, and picking a jurisdiction per\nsuburb is explicitly not wanted (api-cloudrun#237, won't-do). Out-of-state is\na REGISTRATION boundary, not a sourcing model.\n\n⚠️ The CRMS **invoice** webhook must keep calling the bare\n{@link overrideItemTaxesForProfile} — its subtotals are\n`charge_total`-authoritative and a reprice would under-bill\n(api-cloudrun#236). This is the order path only.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "overrideItemTaxesForProfile",
-          "signature": "overrideItemTaxesForProfile(items: LineItem[], orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null, taxCatalog: Tax[], asOf: string): void",
-          "doc": "Materialize a doc-level `tax_profile` override onto each priceable item's\n`price.taxes` (single mode — mutates in place):\n- `tax_exempt` → `taxes = []`, `total_cents = subtotal_discounted_cents`.\n- `tax_rantoul` / `tax_frankfort` → `taxes = [<resolved tax>]` with amount\n  computed from the item's **existing** `subtotal_discounted_cents` + `total_cents`\n  refreshed. (Orders re-run `calculateItemPrice` after, which recomputes both\n  from the rewritten uid; the CRMS invoice webhook keeps the amounts computed\n  here on its `charge_total`-authoritative subtotal.)\n- `tax_applied` / no active override doc → item left untouched.\n\nNon-priceable items (destination/group/transaction_fee) are skipped.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "resolveEffectiveProfile",
-          "signature": "resolveEffectiveProfile(orgProfile: TaxProfileType | undefined, docProfile: TaxProfileType | null): TaxProfileType",
-          "doc": "The **one precedence rule**, as a profile rather than as a resolved Tax:\nexemption from either side wins, then the document's profile, then the\norganization's.\n\nExtracted because two consumers need the same answer in different currencies\nand had grown two rules. {@link getEffectiveProfileTax} answers *\"which Tax\ndocument prices this line?\"*; `resolveXeroTaxType` (api-cloudrun\n`src/lib/xeroTax.ts`) answers *\"which Xero `TaxType` does the line carry?\"* —\nand it did so with its own `taxProfiles.includes(\"tax_frankfort\")` scan over\n`[org, doc]`. Under the `??` precedence those two disagree exactly where it\ncosts money: a document-level `\"tax_applied\"` under a Frankfort organization\nnow prices Chicago in CFS while the scan still stamps Xero `TAX007`. CFS has\npaid for that class of divergence once already — 19 invoices and $2,741.78 of\nphantom receivable when this function's taxable-COA set was a second copy\n(api-cloudrun#409).\n\nSo the Xero side resolves the profile through *this* and passes the single\nanswer, rather than restating the precedence over an array.",
+          "signature": "materializeDocumentTax(items: LineItem[], ctx: DocumentTaxContext): void",
+          "doc": "**The one tax materializer.** {@link assignLineTaxes} plus the reprice —\nthe pair every write path that owns its own line prices needs. Mutates\n`items` in place; callers run `calculateOrderTotals` /\n`calculateInvoiceTotals` afterwards.\n\nThree consumers, one implementation: api-cloudrun's order write paths, its\n`createInvoice`/`updateInvoice`, and the manager's optimistic recompute. The\nmanager consumer is why this lives in `core` — a client-side\nreimplementation would recreate, on the client, exactly the order/invoice\ndivergence this function exists to close.\n\n**Pure** — `asOf` is injected rather than defaulted to now, so this stays\nfree of an ambient clock (a defaulted `now` is how the workspace ban on\n`new Date()` for business datetimes gets bypassed).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11703,6 +11670,14 @@
           "name": "resolveJurisdiction",
           "signature": "resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdiction",
           "doc": "**Resolve which jurisdiction a destination's lines are taxed in.** The one\nimplementation of the precedence — per DESTINATION, never per document, which\nis what lets one order carry two jurisdictions.\n\n```\norder/invoice.destinations[i].jurisdiction   the document's own value   ← WINS\n  ?? organizations/{uid}.jurisdiction_claim    the customer's standing claim\n  ?? deriveJurisdiction(address, origin)       total — always answers\n```\n\n**TOTAL: it always returns a jurisdiction**, because level 3 does. A caller\nnever has to decide what \"no answer\" means, and `findTaxFor` gets a value it\ncan look up — `no_nexus` simply matches no tax, which is the untaxed result\nexpressed as data rather than as a missing case.\n\n## There is deliberately NO destination-master level\n\n`destinations/{uid}` carried a `jurisdiction` until api-cloudrun#591, ranked\nbetween the claim and the derivation. It is gone, and its removal is the\npoint rather than a simplification:\n\n- **It was never authored.** 1 of 459 documents carried one — the CFS\n  warehouse — and that one was really the store's ORIGIN wearing an address's\n  clothes. It now lives on `Store.jurisdiction`, where it is a property of the\n  selling business rather than of a street.\n- **Ranked above the claim it cancelled it**, on all 8 repriceable\n  jurisdiction-bearing orders (every one a `customer_collecting` order pointed\n  at that warehouse). An override a shared address can beat is not an\n  override.\n- **Ranked below the claim it did nothing**, because nothing wrote it: there\n  is no destinations write route, only `destinations.read`/`.search`.\n- **Storing a DERIVED value there would have been worse than blank.** A\n  destination is keyed by address and reused across orders and years, so a\n  stamped jurisdiction goes wrong *prospectively* the day CFS registers\n  somewhere new — every future delivery to that address sourcing at the old\n  rate. Snapshot on the DOCUMENT, which records a transaction; derive on the\n  MASTER, which is a long-lived reference.\n\n## Returning the level is not a convenience\n\nThe order form has to show which level supplied each answer\n(chicago-film-supplies/manager#304), and a second implementation of the\nprecedence to compute that is exactly the drift this function exists to\nprevent. One call answers both.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "resolveLineTax",
+          "signature": "resolveLineTax(item: LineItem, destination: TaxDestination | null, ctx: DocumentTaxContext): LineTaxResolution",
+          "doc": "**The pricing rule, for one line.** Tax liability is\n`(item type × jurisdiction)`, resolved per line through its own destination.\n\n```\nkey          = item.taxed_as ?? item.type\njurisdiction = resolveJurisdiction(document destination, org claim, address, origin)\ntax          = findTaxFor(catalog, jurisdiction, key, asOf)\n```\n\n## Two rules sit in front of the lookup, and both are ORDER-dependent\n\n1. **A non-revenue account is not taxable under any jurisdiction.** The gate\n   is {@link isTaxableCoa}, and it is kept in Phase 2 rather than deleted:\n   the argument for deleting it is that `item_types` already excludes every\n   non-revenue line TYPE, and `scripts/audit-tax-key.ts` §2 measures whether\n   that holds. On 2026-08-20 it did not — five priced\n   `sale`/`rental`/`replacement` lines sit at accounts 2210 and 4800 — so the\n   gate is still load-bearing. #409 is the measured cost of getting this\n   wrong: 19 invoices and $2,741.78 of phantom receivable when CFS taxed\n   lines it told Xero were `NONE`.\n\n2. **A `replacement` sources to the ORIGIN**, skipping levels 1 and 2\n   entirely. Every replacement is a sale in which **CFS is the end user** —\n   the customer buys the item *for CFS*, to replace gear CFS owns — so the\n   situs is CFS's own location and no document- or organization-level\n   jurisdiction reaches it (owner, 2026-08-20). The live Xero ledger has\n   been doing this all along: invoice 2348 (a Frankfort customer) bills its\n   replacement at TAX001 Chicago Sales Tax.\n\n⚠️ **Exemption is NOT applied here** — it belongs to\n{@link assignLineTaxes}, which needs this answer twice: zeroed into\n`price.taxes`, and un-zeroed into `price.taxes_base`, so an exempt document\nstill records which tax it was exempt FROM.\n\n⚠️ **`no_nexus` is a jurisdiction, not an exemption, and the difference is\nvisible exactly here.** Its lines resolve `tax: null` because no tax lists\nthat jurisdiction — but a `replacement` on an out-of-state destination still\nsources to the origin and IS taxed, which the retired\n`isEntirelyOutOfIllinois` (an all-or-nothing document-level exemption) could\nnot express. Measured at 8 lines corpus-wide, none repriceable, $0.00 either\nway — the cheapest possible moment to have made the two rules disagree.",
           "paramTags": [],
           "returnsTag": null
         },
