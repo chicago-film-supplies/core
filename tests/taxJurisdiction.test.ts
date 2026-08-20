@@ -375,7 +375,6 @@ Deno.test("resolveJurisdiction: the document's own entry wins over everything", 
     resolveJurisdiction({
       documentDestination: "rantoul",
       organization: "frankfort",
-      destination: "chicago",
       address: CHICAGO_ADDRESS,
       origin: "chicago",
     }),
@@ -383,15 +382,10 @@ Deno.test("resolveJurisdiction: the document's own entry wins over everything", 
   );
 });
 
-Deno.test("resolveJurisdiction: the ORGANIZATION claim outranks the shared address master", () => {
-  // The reversal measured on prod: 1 of 459 masters carries a jurisdiction (the
-  // CFS warehouse) and ranking masters higher defeated the org claim on all 8
-  // repriceable jurisdiction-bearing orders. An override a shared address can
-  // beat is not an override.
+Deno.test("resolveJurisdiction: the ORGANIZATION claim outranks the derivation", () => {
   assertEquals(
     resolveJurisdiction({
       organization: "frankfort",
-      destination: "chicago",
       address: CHICAGO_ADDRESS,
       origin: "chicago",
     }),
@@ -399,12 +393,25 @@ Deno.test("resolveJurisdiction: the ORGANIZATION claim outranks the shared addre
   );
 });
 
-Deno.test("resolveJurisdiction: the master still beats the DERIVATION", () => {
-  // The case the geocode warning is about — prod's own warehouse geocodes to
-  // "Palos Township / 60480".
+Deno.test("resolveJurisdiction: THREE levels — there is no destination-master rung", () => {
+  // api-cloudrun#591. `destinations/{uid}.jurisdiction` is deleted, not merely
+  // demoted: 1 of 459 documents carried one (the CFS warehouse), and that value
+  // was really the store's ORIGIN, which now lives on `Store.jurisdiction`.
+  // Ranked above the claim it cancelled it on all 8 repriceable
+  // jurisdiction-bearing orders; ranked below it did nothing, because nothing
+  // wrote it. A shared address contributes to the answer only through the
+  // derivation.
   assertEquals(
-    resolveJurisdiction({ destination: "rantoul", address: CHICAGO_ADDRESS, origin: "chicago" }),
-    { jurisdiction: "rantoul", level: "destination" },
+    Object.keys(
+      { documentDestination: null, organization: null, address: null, origin: "chicago" } satisfies
+        Parameters<typeof resolveJurisdiction>[0],
+    ).includes("destination"),
+    false,
+  );
+  assertEquals(
+    resolveJurisdiction({ organization: null, address: CHICAGO_ADDRESS, origin: "rantoul" }),
+    { jurisdiction: "chicago", level: "derived" },
+    "a collecting city still beats the origin — that is case 2, not a master",
   );
 });
 
@@ -416,7 +423,6 @@ Deno.test("resolveJurisdiction: null and absent both mean ASK THE NEXT LEVEL", (
   const viaNull = resolveJurisdiction({
     documentDestination: null,
     organization: null,
-    destination: null,
     address: CHICAGO_ADDRESS,
     origin: "chicago",
   });

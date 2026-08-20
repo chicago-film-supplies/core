@@ -296,9 +296,8 @@ export interface DocDestinationType {
    * entry, and a mixed order prices each leg correctly. A line reaches its
    * destination through `item.path`.
    *
-   * ⚠️ **This snapshot is what protects a live order from an edit to the
-   * SHARED destination master.** Reprice from here, never from
-   * `destinations/{uid}`.
+   * ⚠️ **This is a SNAPSHOT.** An order records what it was billed, so level 1
+   * must not re-resolve out from under a live document.
    *
    * `null`/absent asserts nothing and asks the next level; the answer "sources
    * somewhere CFS collects no tax" is the `no_nexus` value

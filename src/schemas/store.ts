@@ -3,7 +3,7 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
-import { type FirestoreTimestampType, TimestampFields, UidNameRef, type UidNameRefType } from "./common.ts";
+import { JurisdictionEnum, type JurisdictionType, type FirestoreTimestampType, TimestampFields, UidNameRef, type UidNameRefType } from "./common.ts";
 
 /** A store document in Firestore. */
 export interface Store {
@@ -33,6 +33,33 @@ export interface Store {
    * Optional through api-cloudrun#409 Phase 1.
    */
   uid_destination?: string | null;
+  /**
+   * **The ORIGIN** — the jurisdiction this store collects as, and the bottom of
+   * `deriveJurisdiction`'s case 3 (origin sourcing). A Naperville delivery from
+   * this store is taxed at THIS value.
+   *
+   * ⚠️ **Asserted, never derived — this is the one jurisdiction in the corpus
+   * that must not come from an address.** Every other jurisdiction is a pure
+   * function of `(address, origin)` resolved at read time, but making the ORIGIN
+   * itself derive means an edited city or a bad geocode on our own warehouse
+   * silently re-rates every non-collecting Illinois delivery. It is a property
+   * of the selling business, not of a street.
+   *
+   * ⚠️ **It lives on the STORE, not on the store's `destinations/{uid}`.** It
+   * did until api-cloudrun#591: `Destination.jurisdiction` held it, blank on 458
+   * of 459 documents, where it read as "the tax jurisdiction of this address"
+   * and was in fact "this address happens to be a selling location". A
+   * destination is a long-lived reference reused across orders and years, so a
+   * jurisdiction stamped on one goes wrong PROSPECTIVELY the day CFS registers
+   * somewhere new — while a store's own jurisdiction is exactly the thing that
+   * should be stated by hand.
+   *
+   * `null`/absent means this store has no declared origin, which is a real
+   * answer and a reportable gap: an order assigned to it sources from nowhere.
+   * Prod's `CSR` is that case. `scripts/audit-tax-axes.ts` exits 2 when the
+   * DEFAULT store cannot resolve one.
+   */
+  jurisdiction?: JurisdictionType | null;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -53,6 +80,10 @@ export const StoreSchema: z.ZodType<Store> = z.strictObject({
   // No `column: true` — `display-columns.test.ts` bans a heading ending in
   // "Uid", and there is no name to show in its place (see the docblock).
   uid_destination: FirestoreId.nullable().optional(),
+  jurisdiction: JurisdictionEnum.nullable().optional().meta({
+    column: true,
+    label: "Jurisdiction",
+  }),
   crms_store_id: z.int(),
   version: z.int().min(0).default(0),
   active: z.boolean().meta({ initial: true, column: true, label: "Active" }),

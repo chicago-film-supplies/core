@@ -458,7 +458,6 @@ export const TaxProfileEnum: z.ZodType<TaxProfileType> = z.enum(TAX_PROFILES);
  * ```
  * order/invoice.destinations[i].jurisdiction   the document's own value   ← WINS
  *   ?? organizations/{uid}.jurisdiction_claim    the customer's standing claim
- *   ?? destinations/{uid}.jurisdiction           the shared address master
  *   ?? deriveJurisdiction(address, origin)       total — always answers
  * ```
  *

@@ -2343,7 +2343,6 @@ interface DestinationDoc {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
-  jurisdiction?: JurisdictionType | null;
   organizations?: UidNameRefType[];
   query_by_organizations?: string[];
   products?: UidNameRefType[];
@@ -6821,6 +6820,7 @@ interface Store {
   default: boolean;
   default_location: UidNameRefType | null;
   uid_destination?: string | null;
+  jurisdiction?: JurisdictionType | null;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -11625,7 +11625,6 @@ interface Destination {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
-  jurisdiction?: JurisdictionType | null;
   organizations?: UidNameRefType[];
   query_by_organizations?: string[];
   products?: UidNameRefType[];
@@ -15129,6 +15128,7 @@ interface Store {
   default: boolean;
   default_location: UidNameRefType | null;
   uid_destination?: string | null;
+  jurisdiction?: JurisdictionType | null;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -23307,12 +23307,12 @@ Depends one-way on `./orders.ts` (base pricing module) — no cycle.
 Which level of the precedence chain supplied a resolved jurisdiction.
 
 ```ts
-type JurisdictionLevel = "document" | "organization" | "destination" | "derived";
+type JurisdictionLevel = "document" | "organization" | "derived";
 ```
 
 ### `JurisdictionLevels`
 
-The four levels, as named fields so no caller can get the ORDER wrong.
+The three levels, as named fields so no caller can get the ORDER wrong.
 
 Every level is `JurisdictionType | null | undefined`, and `null` and absent
 mean the same thing at all of them: *"I assert nothing, ask the next level."*
@@ -23323,7 +23323,6 @@ value — see {@link JurisdictionType}.
 interface JurisdictionLevels {
   documentDestination?: JurisdictionType | null;
   organization?: JurisdictionType | null;
-  destination?: JurisdictionType | null;
   address?: typeLiteral | null;
   origin: JurisdictionType;
 }
@@ -23534,10 +23533,9 @@ non-taxable COA, a taxable COA with no tax in practice (4140), and the
 
 ### `deriveJurisdiction(address: typeLiteral | null | undefined, origin: JurisdictionType): JurisdictionType`
 
-**Where a delivery address sources to** — the bottom of the four-level
+**Where a delivery address sources to** — the bottom of the three-level
 jurisdiction precedence ({@link resolveJurisdiction}), below the document's
-own destination entry, the organization's `jurisdiction_claim` and the
-shared destination master.
+own destination entry and the organization's `jurisdiction_claim`.
 
 ## Three cases, three DIFFERENT legal reasons
 
@@ -23893,27 +23891,36 @@ is what lets one order carry two jurisdictions.
 ```
 order/invoice.destinations[i].jurisdiction   the document's own value   ← WINS
   ?? organizations/{uid}.jurisdiction_claim    the customer's standing claim
-  ?? destinations/{uid}.jurisdiction           the shared address master
   ?? deriveJurisdiction(address, origin)       total — always answers
 ```
 
-**TOTAL: it always returns a jurisdiction**, because level 4 does. A caller
+**TOTAL: it always returns a jurisdiction**, because level 3 does. A caller
 never has to decide what "no answer" means, and `findTaxFor` gets a value it
 can look up — `no_nexus` simply matches no tax, which is the untaxed result
 expressed as data rather than as a missing case.
 
-## Why the organization outranks the destination master
+## There is deliberately NO destination-master level
 
-An override a shared address can beat is not an override. Measured on prod
-2026-08-19: exactly **1 of 459** destination masters carries an explicit
-jurisdiction — the CFS warehouse — and ranking masters above the organization
-made it defeat the customer's claim on **all 8** repriceable
-jurisdiction-bearing orders, every one a `customer_collecting` order pointed
-at that warehouse. A rule whose only measured effect is cancelling the
-mechanism above it is a defect, not a tradeoff.
+`destinations/{uid}` carried a `jurisdiction` until api-cloudrun#591, ranked
+between the claim and the derivation. It is gone, and its removal is the
+point rather than a simplification:
 
-The master still does real work: it beats the **derivation**, which is what
-the geocode warning on {@link deriveJurisdiction} is about.
+- **It was never authored.** 1 of 459 documents carried one — the CFS
+  warehouse — and that one was really the store's ORIGIN wearing an address's
+  clothes. It now lives on `Store.jurisdiction`, where it is a property of the
+  selling business rather than of a street.
+- **Ranked above the claim it cancelled it**, on all 8 repriceable
+  jurisdiction-bearing orders (every one a `customer_collecting` order pointed
+  at that warehouse). An override a shared address can beat is not an
+  override.
+- **Ranked below the claim it did nothing**, because nothing wrote it: there
+  is no destinations write route, only `destinations.read`/`.search`.
+- **Storing a DERIVED value there would have been worse than blank.** A
+  destination is keyed by address and reused across orders and years, so a
+  stamped jurisdiction goes wrong *prospectively* the day CFS registers
+  somewhere new — every future delivery to that address sourcing at the old
+  rate. Snapshot on the DOCUMENT, which records a transaction; derive on the
+  MASTER, which is a long-lived reference.
 
 ## Returning the level is not a convenience
 

@@ -50,16 +50,16 @@ export interface Organization {
   xero_id: string | null;
   tax_profile: TaxProfileType;
   /**
-   * This customer's standing jurisdiction claim — **level 2** of the four-level
-   * precedence in `resolveJurisdiction` (`@cfs/core/utils/taxes`), below the
-   * document's own `destinations[i].jurisdiction` and above both the shared
-   * destination master and the derivation.
+   * This customer's standing jurisdiction claim — **level 2** of the
+   * three-level precedence in `resolveJurisdiction` (`@cfs/core/utils/taxes`),
+   * below the document's own `destinations[i].jurisdiction` and above the
+   * derivation.
    *
-   * ⚠️ **A standing CLAIM, not a hint, and it outranks the shared address
-   * master.** An override a shared address can beat is not an override:
-   * measured on prod, 1 of 459 masters carries a jurisdiction (the CFS
-   * warehouse) and ranking masters higher made it defeat this claim on all 8
-   * repriceable jurisdiction-bearing orders. The escape hatch is level 1 — a
+   * ⚠️ **A standing CLAIM, not a hint.** There used to be a destination-master
+   * level between this and the derivation; ranked above this it cancelled it on
+   * all 8 repriceable jurisdiction-bearing orders, and ranked below it did
+   * nothing, because nothing ever wrote it. It is gone. The escape hatch is
+   * level 1 — a
    * Rantoul-claim organization taking a one-off Chicago delivery edits **that
    * destination's** entry on the document, so the document is never re-welded
    * to one jurisdiction the way `tax_profile` welds it. The order form must
