@@ -1325,8 +1325,13 @@ export interface ReplacementTotals {
 }
 
 /**
- * Calculate the total replacement cost across all pre-tax items that have
- * a replacement value on their price object.
+ * Calculate the total replacement cost across all pre-tax items that carry a
+ * NON-ZERO replacement value on their price object.
+ *
+ * **Non-zero, not "present".** `price.replacement_cents` is a field on every
+ * priced line rather than a rental-only one, so presence says nothing; see the
+ * guard below for what testing presence used to admit, and what it started to
+ * cost once a `flat` tax became reachable.
  *
  * Returns `subtotal_cents` (sum of replacement × quantity), `tax_cents` (taxes
  * applied to that subtotal), and `total_cents` (subtotal + tax).
@@ -1352,7 +1357,25 @@ export function calculateReplacementTotals(
   for (const item of items) {
     if (!isPreTaxItem(item)) continue;
 
-    if (item.price.replacement_cents == null) continue;
+    // `0` means "nothing to replace", and it is what every non-rental priced
+    // line carries — `replacement_cents` is schema-REQUIRED whenever
+    // `stock_method !== "none"` (`schemas/common.ts`), so a sale, a service and
+    // a `replacement` twin all store it, and all store it at 0. Nothing writes
+    // `null`: measured across the whole `quote` fixture set, 0 nulls against 38
+    // lines sitting at exactly 0.
+    //
+    // So the old `== null` test admitted EVERY priced line. That cost blank
+    // rows for as long as a zero row contributed zero — and stopped being free
+    // the moment a `flat` tax existed, because the flat arm of
+    // `computeItemTaxAmountCents` reads the QUANTITY and ignores the subtotal.
+    // A zero-priced component carrying a $0.05/unit levy at quantity 240 then
+    // adds $12.00 of tax to a $0.00 replacement subtotal, and the caller's
+    // "Total Replacement Cost" is inflated by a levy no replacement triggers.
+    //
+    // Truthy rather than `> 0` deliberately: a NEGATIVE replacement cost is
+    // meaningless rather than merely absent, and dropping it silently would
+    // hide the corruption instead of showing it.
+    if (!item.price.replacement_cents) continue;
 
     const quantity = item.quantity;
     // `× qty ÷ QTY_SCALE`, matching `perUnitSubtotal` — an order quantity is

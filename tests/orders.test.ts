@@ -944,6 +944,51 @@ Deno.test("calculateReplacementTotals applies flat tax per unit", () => {
   assertEquals(result.total_cents, 50050);
 });
 
+Deno.test("calculateReplacementTotals skips items whose replacement is ZERO", () => {
+  const items = [
+    makeItem({ quantity: 1 }, { replacement_cents: 50000 }),
+    makeItem({ quantity: 1 }, { replacement_cents: 0 }),
+  ];
+  const result = calculateReplacementTotals(items, TAXES);
+  assertEquals(result.subtotal_cents, 50000);
+  assertEquals(result.total_cents, 50000);
+});
+
+/**
+ * The property the `== null` guard could not hold.
+ *
+ * A zero-priced component carrying a per-unit levy — the bottled-water shape:
+ * a case of water whose `stock_method: "none"` child counts the bottles and
+ * carries `Water Bottle Tax` at $0.05 each. Its `replacement_cents` is 0
+ * because there is nothing to replace, but the FLAT arm of
+ * `computeItemTaxAmountCents` reads the QUANTITY and ignores the subtotal, so
+ * under a presence test the fold added `240 x $0.05 = $12.00` of tax to a
+ * $0.00 replacement subtotal and inflated the caller's grand total by it.
+ *
+ * Asserted as a whole-result equality rather than on `tax_cents` alone: the
+ * defect was a non-zero tax beside a zero subtotal, so a test that only
+ * checked the subtotal would have passed throughout.
+ */
+Deno.test("calculateReplacementTotals: a ZERO replacement carrying a FLAT tax contributes nothing", () => {
+  const levied = makeItem(
+    { quantity: 240 },
+    { replacement_cents: 0, base_cents: 0, formula: "fixed", taxes: [{ uid: "water-bottle-tax" }] },
+  );
+  assertEquals(calculateReplacementTotals([levied], TAXES), {
+    subtotal_cents: 0,
+    tax_cents: 0,
+    total_cents: 0,
+  });
+
+  // And it does not leak into a sibling that DOES have replacement value.
+  const parent = makeItem({ quantity: 10 }, { replacement_cents: 39000 });
+  assertEquals(calculateReplacementTotals([parent, levied], TAXES), {
+    subtotal_cents: 390000,
+    tax_cents: 0,
+    total_cents: 390000,
+  });
+});
+
 Deno.test("calculateReplacementTotals skips items with null replacement", () => {
   const items = [
     makeItem({ quantity: 1 }, { replacement_cents: 50000 }),

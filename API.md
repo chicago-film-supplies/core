@@ -22797,8 +22797,13 @@ Owns the two-pass computation: pre-tax items first, then transaction fees.
 
 ### `calculateReplacementTotals(items: LineItem[], taxes: Tax[]): ReplacementTotals`
 
-Calculate the total replacement cost across all pre-tax items that have
-a replacement value on their price object.
+Calculate the total replacement cost across all pre-tax items that carry a
+NON-ZERO replacement value on their price object.
+
+**Non-zero, not "present".** `price.replacement_cents` is a field on every
+priced line rather than a rental-only one, so presence says nothing; see the
+guard below for what testing presence used to admit, and what it started to
+cost once a `flat` tax became reachable.
 
 Returns `subtotal_cents` (sum of replacement × quantity), `tax_cents` (taxes
 applied to that subtotal), and `total_cents` (subtotal + tax).
