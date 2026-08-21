@@ -100,6 +100,19 @@ export const INTEGRATION_EVENT_MSGS = [
   // after it stops being an error. Carries `invoice_uid` and `crms_id`.
   // Retire with CRMS.
   "crms_mark_paid_noop",
+  // A component whose PRODUCT has no CRMS counterpart. A CRMS accessory row
+  // carries `related_id: <crms product id>`, so a CFS-native component has
+  // nothing for it to point at and CRMS refuses the create outright — HTTP 422
+  // `related_name can't be blank`, observed on all five bottled-water SKUs the
+  // moment `Bottled Water ( /bottle )` became their unit (api-cloudrun#596).
+  //
+  // ⚠️ **A SKIP, not a failure, and the distinction is the point.** No CRMS
+  // order can ever reference a CFS-only structural unit, so there is nothing to
+  // keep in step; attempting the create instead logged an ERROR on every write
+  // of those products, forever. DEBUG: the outcome is correct and the line
+  // exists so the condition stays countable. Carries `product_uid` and
+  // `component_uid`. Retire with CRMS.
+  "crms_accessory_skipped",
   "crms_product_not_found",
   "uploadcare_draft_cleanup_failed",
   "uploadcare_file_not_found",
