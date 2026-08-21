@@ -33,11 +33,9 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
     organization: {
       uid: ORG,
       name: "Acme Corp",
-      tax_profile: "tax_applied",
       xero_id: null,
       billing_address: null,
     },
-    tax_profile: "tax_applied",
     items: [{
       uid: "cnitem10000000000000",
       type: "sale",

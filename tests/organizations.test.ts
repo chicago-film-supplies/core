@@ -87,7 +87,7 @@ Deno.test("the shared snapshot admits both a present and an absent billing_addre
   // Order had it `.optional()`, invoice + credit note required with an explicit
   // stored `null`. Merging to either side alone makes existing documents of the
   // other unwritable, so both must parse.
-  const base = { uid: ORG_ID, name: "A", xero_id: null, tax_profile: "tax_applied" };
+  const base = { uid: ORG_ID, name: "A", xero_id: null };
   assertEquals(DocumentOrganizationSnapshot.safeParse(base).success, true);
   assertEquals(
     DocumentOrganizationSnapshot.safeParse({ ...base, billing_address: null }).success,
@@ -99,7 +99,7 @@ Deno.test("the shared snapshot still rejects an out-of-bounds name", () => {
   // Order's `[1, 100]` bounds are kept. Not a tightening in practice —
   // `Organization.name` carries the same bounds and every snapshot is copied
   // from it — but the assertion is what says the merge took the bounded side.
-  const base = { uid: ORG_ID, xero_id: null, tax_profile: "tax_applied" as const };
+  const base = { uid: ORG_ID, xero_id: null };
   assertEquals(DocumentOrganizationSnapshot.safeParse({ ...base, name: "" }).success, false);
   assertEquals(
     DocumentOrganizationSnapshot.safeParse({ ...base, name: "x".repeat(101) }).success,
@@ -107,53 +107,47 @@ Deno.test("the shared snapshot still rejects an out-of-bounds name", () => {
   );
 });
 
-Deno.test("the shared snapshot ADMITS an absent tax_profile again — api-cloudrun#596 item 3", () => {
-  // 🔴 **This assertion is #489's inverted a second time, and the symmetry is
-  // the lesson.** #489 made the field required (the contract third of
-  // expand/migrate/contract) and its predecessor asserted the opposite; the
-  // field is now LEAVING, so it goes optional for one release cycle for exactly
-  // the same reason it had to be optional to arrive. Both schema versions are
-  // `z.strictObject` and every write validates the full document, so the two
-  // accepted sets are disjoint in whichever direction the field is moving: a
-  // required field refuses documents that lack it, and a DELETED field refuses
-  // documents that still carry it.
+Deno.test("the shared snapshot now REFUSES a tax_profile — api-cloudrun#596 item 3", () => {
+  // 🔴 **This assertion has been inverted THREE times, and the sequence is the
+  // whole expand/migrate/contract argument written as tests.**
   //
-  // The order is therefore fixed and not a preference — optional here, storage
-  // emptied by `scripts/migrate-drop-tax-profile.ts`, then the key deleted.
-  // ⚠️ The middle step cannot start until PROD runs this schema: prod validates
-  // the full document on every write, so emptying storage first would refuse
-  // every order write, the CRMS opportunity webhook included, whose failures
-  // are silent drops.
-  const parsed = DocumentOrganizationSnapshot.safeParse({
+  //   before #489  — absent ADMITTED  (the field was arriving, optional)
+  //   #489         — absent REFUSED   (contract: it became required)
+  //   #596 expand  — absent ADMITTED  (it is leaving, optional again)
+  //   #596 contract— present REFUSED  (this arm)
+  //
+  // Every one of those flips is forced by the same fact: this is a
+  // `z.strictObject` and every write validates the FULL document, so two schema
+  // versions have DISJOINT accepted sets whichever direction the field moves. A
+  // required field refuses documents lacking it; a DELETED field refuses
+  // documents still carrying it.
+  //
+  // ⚠️ Which is why the middle step was gated on PROD, not on this repo:
+  // storage was emptied (2,317 documents, 2026-08-22) only once the deployed
+  // API ran the optional schema. Reaching this state before that would have
+  // refused every order write, the CRMS opportunity webhook included, whose
+  // failures are silent drops.
+  const clean = DocumentOrganizationSnapshot.safeParse({
     uid: ORG_ID,
     name: "A",
     xero_id: null,
   });
-  assertEquals(parsed.success, true);
+  assertEquals(clean.success, true, "a snapshot without the field is the only shape now");
 
-  // The discriminating half, kept from the assertion this replaces: a document
-  // that still CARRIES a profile parses too. Without it this arm would also
-  // pass against a schema that had already deleted the key — which is the one
-  // state that must not be reachable until storage is empty.
-  assertEquals(
-    DocumentOrganizationSnapshot.safeParse({
-      uid: ORG_ID,
-      name: "A",
-      xero_id: null,
-      tax_profile: "tax_exempt",
-    }).success,
-    true,
-  );
-
-  // …and the key is still TYPED while it exists — an expand that also stopped
-  // validating the member would let a writer put anything there on the way out.
-  assertEquals(
-    DocumentOrganizationSnapshot.safeParse({
-      uid: ORG_ID,
-      name: "A",
-      xero_id: null,
-      tax_profile: "tax_narnia",
-    }).success,
-    false,
-  );
+  // 🔴 The half that makes this the CONTRACT rather than a restatement: a
+  // snapshot still carrying the key is REFUSED, and refused because the key is
+  // unknown rather than because its value is wrong — so a valid old member is
+  // rejected exactly like an invalid one.
+  for (const value of ["tax_applied", "tax_frankfort", "tax_narnia"]) {
+    assertEquals(
+      DocumentOrganizationSnapshot.safeParse({
+        uid: ORG_ID,
+        name: "A",
+        xero_id: null,
+        tax_profile: value,
+      }).success,
+      false,
+      `a stored ${value} must be refused — that is what made the migration a precondition`,
+    );
+  }
 });

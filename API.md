@@ -2081,7 +2081,6 @@ interface CreditNote {
   external_notes?: string | null;
   internal_notes?: string | null;
   organization: DocumentOrganizationSnapshotType;
-  tax_profile?: TaxProfileType;
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
   remaining_credit_cents: number;
@@ -2229,31 +2228,6 @@ Allowed credit-note statuses.
 
 ```ts
 type CreditNoteStatusType = indexedAccess;
-```
-
-### `DEFAULT_TAX_PROFILE`
-
-The profile to assume when no organization profile is in hand.
-
-⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began
-as the fallback for documents predating {@link DocumentOrganizationSnapshot}'s
-`tax_profile`; that population is gone (category A = 0 in both environments)
-and every STORED snapshot now carries one. What survives is the case a schema
-cannot legislate: the pure functions here are called by the manager against
-**in-memory, mid-edit** documents, where the organization may not be attached
-yet — a fresh draft, or the moment between detaching one customer and picking
-another.
-
-So the `| undefined` on {@link resolveEffectiveProfile} and its siblings is
-deliberate and stays. #489's work list said to collapse it; collapsing it
-would push this default out to each caller, and "a document whose customer is
-unknown is taxed normally, never silently exempted" is exactly the kind of
-rule this campaign exists to keep in one place. What #489 actually bought is
-that a *stored* document can no longer be missing it — so readers of stored
-documents (the Xero push, the quote push) can and do collapse.
-
-```ts
-const DEFAULT_TAX_PROFILE: TaxProfileType;
 ```
 
 ### `DOC_LINE_ITEM_TYPES`
@@ -2717,7 +2691,6 @@ interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   xero_id: string | null;
@@ -3524,7 +3497,6 @@ interface Invoice {
   status: InvoiceStatusType;
   query_by_orders: string[];
   number_orders: number[];
-  tax_profile?: TaxProfileType;
   tax_exempt?: boolean | null;
   date: string;
   date_fs: FirestoreTimestampType;
@@ -4928,7 +4900,6 @@ interface Order {
   organization: DocumentOrganizationSnapshotType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
-  tax_profile?: TaxProfileType | null;
   tax_exempt?: boolean | null;
   uid_store?: string | null;
   totals: OrderDocTotalsType;
@@ -5376,7 +5347,6 @@ interface Organization {
   name: string;
   crms_id: number;
   xero_id: string | null;
-  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -7205,22 +7175,6 @@ interface Tax {
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
-```
-
-### `TaxProfileEnum`
-
-Zod schema for TaxProfileType.
-
-```ts
-const TaxProfileEnum: z.ZodType<TaxProfileType>;
-```
-
-### `TaxProfileType`
-
-Allowed values for organization-level tax profile.
-
-```ts
-type TaxProfileType = indexedAccess;
 ```
 
 ### `TaxRef`
@@ -9237,7 +9191,7 @@ drew exactly that distinction by hand and read as if they disagreed.
 ### `isIllinoisPostcode(postcode: string | null | undefined): boolean`
 
 Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the
-region — `audit-order-tax-profile.ts` reports a disagreement rather than
+region — `audit-order-tax-snapshot.ts` reports a disagreement rather than
 letting either field silently win, because a wrong region and a wrong
 postcode are both live in prod and neither is authoritative.
 
@@ -9824,31 +9778,6 @@ interface CoordinatesType {
 }
 ```
 
-### `DEFAULT_TAX_PROFILE`
-
-The profile to assume when no organization profile is in hand.
-
-⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began
-as the fallback for documents predating {@link DocumentOrganizationSnapshot}'s
-`tax_profile`; that population is gone (category A = 0 in both environments)
-and every STORED snapshot now carries one. What survives is the case a schema
-cannot legislate: the pure functions here are called by the manager against
-**in-memory, mid-edit** documents, where the organization may not be attached
-yet — a fresh draft, or the moment between detaching one customer and picking
-another.
-
-So the `| undefined` on {@link resolveEffectiveProfile} and its siblings is
-deliberate and stays. #489's work list said to collapse it; collapsing it
-would push this default out to each caller, and "a document whose customer is
-unknown is taxed normally, never silently exempted" is exactly the kind of
-rule this campaign exists to keep in one place. What #489 actually bought is
-that a *stored* document can no longer be missing it — so readers of stored
-documents (the Xero push, the quote push) can and do collapse.
-
-```ts
-const DEFAULT_TAX_PROFILE: TaxProfileType;
-```
-
 ### `DOC_LINE_ITEM_TYPES`
 
 Billable line item types stored in order/invoice documents (excludes destination/group dividers).
@@ -9969,7 +9898,6 @@ interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   xero_id: string | null;
@@ -10564,22 +10492,6 @@ Zod schema for StoreBreakdownLocation.
 const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;
 ```
 
-### `TaxProfileEnum`
-
-Zod schema for TaxProfileType.
-
-```ts
-const TaxProfileEnum: z.ZodType<TaxProfileType>;
-```
-
-### `TaxProfileType`
-
-Allowed values for organization-level tax profile.
-
-```ts
-type TaxProfileType = indexedAccess;
-```
-
 ### `TaxedAsEnum`
 
 Zod schema for TaxedAsType.
@@ -10761,7 +10673,7 @@ drew exactly that distinction by hand and read as if they disagreed.
 ### `isIllinoisPostcode(postcode: string | null | undefined): boolean`
 
 Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the
-region — `audit-order-tax-profile.ts` reports a disagreement rather than
+region — `audit-order-tax-snapshot.ts` reports a disagreement rather than
 letting either field silently win, because a wrong region and a wrong
 postcode are both live in prod and neither is authoritative.
 
@@ -12088,7 +12000,6 @@ interface Invoice {
   status: InvoiceStatusType;
   query_by_orders: string[];
   number_orders: number[];
-  tax_profile?: TaxProfileType;
   tax_exempt?: boolean | null;
   date: string;
   date_fs: FirestoreTimestampType;
@@ -13113,7 +13024,6 @@ interface Order {
   organization: DocumentOrganizationSnapshotType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
-  tax_profile?: TaxProfileType | null;
   tax_exempt?: boolean | null;
   uid_store?: string | null;
   totals: OrderDocTotalsType;
@@ -13795,7 +13705,6 @@ interface Organization {
   name: string;
   crms_id: number;
   xero_id: string | null;
-  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -14709,7 +14618,6 @@ interface CreditNote {
   external_notes?: string | null;
   internal_notes?: string | null;
   organization: DocumentOrganizationSnapshotType;
-  tax_profile?: TaxProfileType;
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
   remaining_credit_cents: number;

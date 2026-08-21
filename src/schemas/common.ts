@@ -410,29 +410,31 @@ export type StockMethodType = typeof STOCK_METHODS[number];
 /** Zod schema for StockMethodType. */
 export const StockMethodEnum: z.ZodType<StockMethodType> = z.enum(STOCK_METHODS);
 
-const TAX_PROFILES = [
-  "tax_applied",
-  "tax_exempt",
-  "tax_rantoul",
-  "tax_frankfort",
-  "tax_paxton",
-] as const;
-/** Allowed values for organization-level tax profile. */
-export type TaxProfileType = typeof TAX_PROFILES[number];
-/** Zod schema for TaxProfileType. */
-export const TaxProfileEnum: z.ZodType<TaxProfileType> = z.enum(TAX_PROFILES);
+// `TAX_PROFILES` / `TaxProfileType` / `TaxProfileEnum` were DELETED here
+// (api-cloudrun#596 item 3, the contract third). The enum welded a property of
+// the CUSTOMER (`tax_exempt`) to a property of WHERE THE GOODS WENT
+// (`tax_rantoul` / `tax_frankfort` / `tax_paxton`) in one slot, so a document
+// could assert only one of them — which is why a mixed Chicago/Frankfort order
+// was unpriceable and an exempt customer's jurisdiction was unrecordable.
+// {@link JurisdictionEnum} and `tax_exempt` are the two axes that replaced it.
+//
+// ⚠️ **The vocabulary survives OUTSIDE core, in api-cloudrun, and that is not
+// an oversight.** CRMS names a tax CLASS whose members are exactly these, and
+// `getOrgInvoiceTaxProfileFromCrmsId` renders one on every member webhook. That
+// is a CRMS concept with a CRMS lifetime, so it belongs at that boundary rather
+// than in the shared document vocabulary — it goes at the CRMS cutover.
 
 /**
  * **Where the goods went** — the tax jurisdiction CFS collects for.
  *
- * This is the axis {@link TAX_PROFILES} welds to exemption and cannot separate.
- * `TaxProfileType` mixes a property of the *customer* (`tax_exempt`) with a
+ * This is the axis the retired `tax_profile` enum welded to exemption and could
+ * not separate: it mixed a property of the *customer* (`tax_exempt`) with a
  * property of *where the goods went* (`tax_rantoul`, `tax_frankfort`,
- * `tax_paxton`) in one enum, so a document gets exactly one of them — which is
- * why jurisdiction is document-scoped today, why a mixed Chicago/Frankfort
- * order cannot be priced, and why an exempt customer's jurisdiction is
- * unrecordable. Splitting the two axes is what makes a per-destination answer
- * expressible at all.
+ * `tax_paxton`) in one slot, so a document got exactly one of them — which is
+ * why jurisdiction WAS document-scoped, why a mixed Chicago/Frankfort order
+ * could not be priced, and why an exempt customer's jurisdiction was
+ * unrecordable. Splitting the two axes is what made a per-destination answer
+ * expressible, and the enum was deleted at api-cloudrun#596 item 3.
  *
  * A jurisdiction is a **registration**, not a place: CFS is registered to
  * collect in exactly these, and an address outside them does not get its own
@@ -1362,7 +1364,6 @@ export interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile?: TaxProfileType;
   /**
    * Level 2 of the jurisdiction precedence — the customer's standing claim,
    * mirrored from {@link Organization.jurisdiction_claim}.
@@ -1457,19 +1458,16 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
     // whose failures are silent drops.
     //
     // Gate, re-measured immediately before this landed (2026-08-11):
-    // `audit-order-tax-profile.ts` category A = 0 in BOTH environments — prod
+    // `audit-order-tax-snapshot.ts` category A = 0 in BOTH environments — prod
     // 0 of 984, dev 0 of 984 after a re-run of the backfill, which had been
     // clobbered back to 2 by the prod→dev mirror.
-    // ⚠️ **OPTIONAL as of api-cloudrun#596 item 3 — the EXPAND third of
-    // expand/migrate/contract, and it is the mirror image of #489's contract.**
-    // #489 made this required and its comment records why that took three steps:
-    // every write path validates the FULL document and every one of these is a
-    // `z.strictObject`, so two schema versions have DISJOINT accepted sets. The
-    // same disjointness runs the other way when a field leaves — a schema that
-    // has dropped the key REJECTS every stored document still carrying it — so
-    // the field goes optional here, storage is emptied by
-    // `scripts/migrate-drop-tax-profile.ts`, and only then is the key deleted.
-    tax_profile: TaxProfileEnum.optional().meta({ column: true, label: "Tax Profile" }),
+    // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
+    // applied to prod (2,317 documents) and dev on 2026-08-22. The three steps
+    // were forced, not ceremonial: every write validates the FULL document and
+    // this is a `z.strictObject`, so a schema that has dropped the key REJECTS
+    // every stored document still carrying it. Optional → empty storage →
+    // delete. (#489 made the same field REQUIRED by the mirror-image dance, and
+    // its comment is the reason this one was safe.)
     // The pair that RETIRES `tax_profile` (api-cloudrun#596 item 1). Optional
     // through the expand step, for the disjoint-accepted-sets reason above —
     // the same three-step dance `tax_profile` itself needed, and the reason
@@ -1484,24 +1482,9 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
   })
   .meta({ label: "Organization" });
 
-/**
- * The profile to assume when no organization profile is in hand.
- *
- * ⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began
- * as the fallback for documents predating {@link DocumentOrganizationSnapshot}'s
- * `tax_profile`; that population is gone (category A = 0 in both environments)
- * and every STORED snapshot now carries one. What survives is the case a schema
- * cannot legislate: the pure functions here are called by the manager against
- * **in-memory, mid-edit** documents, where the organization may not be attached
- * yet — a fresh draft, or the moment between detaching one customer and picking
- * another.
- *
- * So the `| undefined` on {@link resolveEffectiveProfile} and its siblings is
- * deliberate and stays. #489's work list said to collapse it; collapsing it
- * would push this default out to each caller, and "a document whose customer is
- * unknown is taxed normally, never silently exempted" is exactly the kind of
- * rule this campaign exists to keep in one place. What #489 actually bought is
- * that a *stored* document can no longer be missing it — so readers of stored
- * documents (the Xero push, the quote push) can and do collapse.
- */
-export const DEFAULT_TAX_PROFILE: TaxProfileType = "tax_applied";
+// `DEFAULT_TAX_PROFILE` was DELETED here (api-cloudrun#596 item 3). It was the
+// profile to assume when no organization profile was in hand — a default that
+// existed because the enum had no way to say "this customer asserts nothing"
+// other than by naming the ordinary case. The axes say it directly: an absent
+// `jurisdiction_claim` IS "asks the next level", and an absent `tax_exempt` IS
+// "not exempt", so there is no default left to centralise.

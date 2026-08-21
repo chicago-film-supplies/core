@@ -33,12 +33,10 @@ import {
   type RateType,
   StockMethodEnum,
   type StockMethodType,
-  TaxProfileEnum,
   TaxedAsEnum,
   type TaxedAsType,
   type InvoiceStatusType,
   InvoiceStatusEnum,
-  type TaxProfileType,
   NameField,
   TimestampFields,
   ActorRef,
@@ -1075,7 +1073,6 @@ export interface Order {
    * "Is this order overridden?" is then `tax_profile !== null` — no second
    * stored fact, and no comparison against the org snapshot.
    */
-  tax_profile?: TaxProfileType | null;
   /**
    * This order's exemption, or `null` to inherit the organization's.
    *
@@ -1182,18 +1179,21 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // organization's profile", so it has to be stored rather than absent. Still
   // no `.default()`: one never materializes on a write (see the note in
   // `product.ts`), and the Typesense config declares the field required.
-  // ⚠️ **OPTIONAL as of api-cloudrun#596 item 3 — the EXPAND third of
-  // expand/migrate/contract, and it is the mirror image of #489's contract.**
-  // #489 made this required and its comment records why that took three steps:
-  // every write path validates the FULL document and every one of these is a
-  // `z.strictObject`, so two schema versions have DISJOINT accepted sets. The
-  // same disjointness runs the other way when a field leaves — a schema that
-  // has dropped the key REJECTS every stored document still carrying it — so
-  // the field goes optional here, storage is emptied by
-  // `scripts/migrate-drop-tax-profile.ts`, and only then is the key deleted.
-  tax_profile: TaxProfileEnum.nullable().optional().meta({ column: true, label: "Tax Profile" }),
-  // Nullable AND optional, unlike `tax_profile` above: `null` is the meaningful
-  // "inherit" value, and `undefined` is every order written before #409 Phase 1.
+  // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
+  // applied to prod (2,317 documents) and dev on 2026-08-22. The three steps
+  // were forced, not ceremonial: every write validates the FULL document and
+  // this is a `z.strictObject`, so a schema that has dropped the key REJECTS
+  // every stored document still carrying it. Optional → empty storage → delete.
+  // ⚠️ **Nullable AND optional, where the ORGANIZATION's twin is a plain
+  // optional boolean — and the asymmetry is deliberate.** On a document `null`
+  // is the meaningful "asserts nothing, inherit the customer's" value, and
+  // `undefined` is every order written before #409 Phase 1. A customer has no
+  // one to inherit from, so its axis needs no third state.
+  //
+  // This is why `getInitialValues` seeds `null` here and `false` there, and why
+  // the fold is `org.tax_exempt || doc.tax_exempt === true` rather than
+  // `doc ?? org`: a `false` on the document must not un-exempt an exempt
+  // customer.
   tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),
   // No `column: true` — `display-columns.test.ts` bans a heading ending in "Uid".
   uid_store: FirestoreId.nullable().optional(),

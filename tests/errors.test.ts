@@ -66,7 +66,6 @@ Deno.test("OrganizationSchema shows custom error for empty name", () => {
     name: "",
     crms_id: 1,
     xero_id: null,
-    tax_profile: "tax_applied",
     emails: [],
     phones: [],
     billing_address: null,

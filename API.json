@@ -981,7 +981,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  tax_profile?: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -1037,12 +1037,6 @@
           "name": "CreditNoteStatusType",
           "declaration": "type CreditNoteStatusType = indexedAccess;",
           "doc": "Allowed credit-note statuses."
-        },
-        {
-          "kind": "variable",
-          "name": "DEFAULT_TAX_PROFILE",
-          "declaration": "const DEFAULT_TAX_PROFILE: TaxProfileType;",
-          "doc": "The profile to assume when no organization profile is in hand.\n\n⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began\nas the fallback for documents predating {@link DocumentOrganizationSnapshot}'s\n`tax_profile`; that population is gone (category A = 0 in both environments)\nand every STORED snapshot now carries one. What survives is the case a schema\ncannot legislate: the pure functions here are called by the manager against\n**in-memory, mid-edit** documents, where the organization may not be attached\nyet — a fresh draft, or the moment between detaching one customer and picking\nanother.\n\nSo the `| undefined` on {@link resolveEffectiveProfile} and its siblings is\ndeliberate and stays. #489's work list said to collapse it; collapsing it\nwould push this default out to each caller, and \"a document whose customer is\nunknown is taxed normally, never silently exempted\" is exactly the kind of\nrule this campaign exists to keep in one place. What #489 actually bought is\nthat a *stored* document can no longer be missing it — so readers of stored\ndocuments (the Xero push, the quote push) can and do collapse."
         },
         {
           "kind": "variable",
@@ -1269,7 +1263,7 @@
         {
           "kind": "interface",
           "name": "DocumentOrganizationSnapshotType",
-          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
+          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
           "doc": "The customer-organization snapshot embedded on an order/invoice/credit note."
         },
         {
@@ -1665,7 +1659,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile?: TaxProfileType;\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -2331,7 +2325,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -2535,7 +2529,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -3383,18 +3377,6 @@
           "name": "Tax",
           "declaration": "interface Tax {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  active: boolean;\n  crms_id: number | null;\n  valid_from: string;\n  valid_from_fs: FirestoreTimestampType;\n  valid_to: string | null;\n  valid_to_fs: FirestoreTimestampType | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  applied_from?: string;\n  applied_from_fs?: FirestoreTimestampType;\n  applied_to?: string | null;\n  applied_to_fs?: FirestoreTimestampType | null;\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tax definition used for computing item-level and order-level tax amounts."
-        },
-        {
-          "kind": "variable",
-          "name": "TaxProfileEnum",
-          "declaration": "const TaxProfileEnum: z.ZodType<TaxProfileType>;",
-          "doc": "Zod schema for TaxProfileType."
-        },
-        {
-          "kind": "typeAlias",
-          "name": "TaxProfileType",
-          "declaration": "type TaxProfileType = indexedAccess;",
-          "doc": "Allowed values for organization-level tax profile."
         },
         {
           "kind": "variable",
@@ -4399,7 +4381,7 @@
           "kind": "function",
           "name": "isIllinoisPostcode",
           "signature": "isIllinoisPostcode(postcode: string | null | undefined): boolean",
-          "doc": "Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the\nregion — `audit-order-tax-profile.ts` reports a disagreement rather than\nletting either field silently win, because a wrong region and a wrong\npostcode are both live in prod and neither is authoritative.",
+          "doc": "Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the\nregion — `audit-order-tax-snapshot.ts` reports a disagreement rather than\nletting either field silently win, because a wrong region and a wrong\npostcode are both live in prod and neither is authoritative.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -4729,12 +4711,6 @@
         },
         {
           "kind": "variable",
-          "name": "DEFAULT_TAX_PROFILE",
-          "declaration": "const DEFAULT_TAX_PROFILE: TaxProfileType;",
-          "doc": "The profile to assume when no organization profile is in hand.\n\n⚠️ **Its reason changed when #489 landed, and it is NOT dead code.** It began\nas the fallback for documents predating {@link DocumentOrganizationSnapshot}'s\n`tax_profile`; that population is gone (category A = 0 in both environments)\nand every STORED snapshot now carries one. What survives is the case a schema\ncannot legislate: the pure functions here are called by the manager against\n**in-memory, mid-edit** documents, where the organization may not be attached\nyet — a fresh draft, or the moment between detaching one customer and picking\nanother.\n\nSo the `| undefined` on {@link resolveEffectiveProfile} and its siblings is\ndeliberate and stays. #489's work list said to collapse it; collapsing it\nwould push this default out to each caller, and \"a document whose customer is\nunknown is taxed normally, never silently exempted\" is exactly the kind of\nrule this campaign exists to keep in one place. What #489 actually bought is\nthat a *stored* document can no longer be missing it — so readers of stored\ndocuments (the Xero push, the quote push) can and do collapse."
-        },
-        {
-          "kind": "variable",
           "name": "DOC_LINE_ITEM_TYPES",
           "declaration": "const DOC_LINE_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\" | \"transaction_fee\"[];",
           "doc": "Billable line item types stored in order/invoice documents (excludes destination/group dividers)."
@@ -4790,7 +4766,7 @@
         {
           "kind": "interface",
           "name": "DocumentOrganizationSnapshotType",
-          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
+          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
           "doc": "The customer-organization snapshot embedded on an order/invoice/credit note."
         },
         {
@@ -5113,18 +5089,6 @@
         },
         {
           "kind": "variable",
-          "name": "TaxProfileEnum",
-          "declaration": "const TaxProfileEnum: z.ZodType<TaxProfileType>;",
-          "doc": "Zod schema for TaxProfileType."
-        },
-        {
-          "kind": "typeAlias",
-          "name": "TaxProfileType",
-          "declaration": "type TaxProfileType = indexedAccess;",
-          "doc": "Allowed values for organization-level tax profile."
-        },
-        {
-          "kind": "variable",
           "name": "TaxedAsEnum",
           "declaration": "const TaxedAsEnum: z.ZodType<TaxedAsType>;",
           "doc": "Zod schema for TaxedAsType."
@@ -5219,7 +5183,7 @@
           "kind": "function",
           "name": "isIllinoisPostcode",
           "signature": "isIllinoisPostcode(postcode: string | null | undefined): boolean",
-          "doc": "Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the\nregion — `audit-order-tax-profile.ts` reports a disagreement rather than\nletting either field silently win, because a wrong region and a wrong\npostcode are both live in prod and neither is authoritative.",
+          "doc": "Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the\nregion — `audit-order-tax-snapshot.ts` reports a disagreement rather than\nletting either field silently win, because a wrong region and a wrong\npostcode are both live in prod and neither is authoritative.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5946,7 +5910,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile?: TaxProfileType;\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -6454,7 +6418,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -6786,7 +6750,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -7166,7 +7130,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  tax_profile?: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {

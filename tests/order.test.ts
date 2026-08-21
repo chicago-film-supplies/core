@@ -120,7 +120,6 @@ Deno.test("CreateOrderInput IGNORES a legacy tax_profile — accepted, then stri
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_frankfort",
     destinations: [validDestination],
   };
   const result = CreateOrderInput.safeParse(input);
@@ -425,7 +424,6 @@ const minimalDoc = {
     // Required since api-cloudrun#489 — a stored snapshot always carries the
     // customer's profile, so a fixture without one is not a document any writer
     // can produce.
-    tax_profile: "tax_applied",
   },
   destinations: [validDocDestination],
   totals: {
@@ -445,7 +443,6 @@ Deno.test("OrderSchema validates a minimal document", () => {
 Deno.test("OrderSchema validates a complete document", () => {
   const doc = {
     ...minimalDoc,
-    tax_profile: "tax_applied",
     items: [
       {
         uid: "550e8400-e29b-41d4-a716-446655440000",

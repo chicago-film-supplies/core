@@ -67,9 +67,10 @@ Deno.test("getInitialValues — nullable fields default to null", () => {
 });
 
 Deno.test("getInitialValues — enum fields use first value", () => {
-  const result = getInitialValues(OrganizationSchema);
-  assertEquals(result.tax_profile, "tax_applied");
-
+  // ⚠️ This led with `OrganizationSchema.tax_profile === "tax_applied"` until
+  // api-cloudrun#596 item 3 deleted the field. `MovementSchema.type` carries
+  // the same property, so the arm keeps its subject rather than losing it.
+  //
   // First member of MOVEMENT_TYPES, which now leads with the custody-bearing
   // fulfillment events. Forms pick their options from
   // getDisplayTransactionTypes(), not from this synthesized default.
@@ -217,12 +218,30 @@ Deno.test("getInitialValues — fields whose dropped default equalled the type-z
   assertEquals(contact.emails, []);
   assertEquals(contact.phones, []);
 
-  // Enum: TAX_PROFILES[0] is "tax_applied", the value the dropped default held.
+  // 🔴 **The two `tax_profile` seeds this checked are gone with the field**
+  // (api-cloudrun#596 item 3) — an organization seeded `"tax_applied"` and an
+  // ORDER seeded `null`, the whole point being that a client which never
+  // touched the control could not tax an exempt customer.
+  //
+  // The successor property is stronger and is asserted here: the seeds now come
+  // from the AXES, and `getInitialValues` recursing INTO an optional is what
+  // makes an order's create payload carry an explicit `tax_exempt: false`
+  // nobody chose. That `false` is harmless ONLY because the fold in
+  // `documentTaxContext` is `org.tax_exempt || doc.tax_exempt === true`, never
+  // `doc ?? org` — so it cannot un-exempt an exempt customer.
   const org = getInitialValues(OrganizationSchema);
-  assertEquals(org.tax_profile, "tax_applied");
-  // An ORDER seeds `null`, not "tax_applied" — the field is nullable and `null`
-  // means "inherit the organization's". That is the safe seed for a new-order
-  // form: a client that never touches the control cannot tax an exempt customer.
+  assertEquals(org.jurisdiction_claim, null, "the customer asserts no jurisdiction by default");
+  assertEquals(org.tax_exempt, false, "and is not exempt by default");
+  // ⚠️ **`null`, not `false` — and the difference from the organization above
+  // is the point.** A DOCUMENT's exemption is nullable: `null` means "asserts
+  // nothing, inherit the customer's". A CUSTOMER has no one to inherit from, so
+  // its axis is a plain optional boolean and seeds `false`. Asserting the same
+  // value for both would have hidden that.
   const order = getInitialValues(OrderSchema);
-  assertEquals(order.tax_profile, null);
+  assertEquals(order.tax_exempt, null, "a new order asserts nothing — it inherits");
+  assertEquals(
+    "tax_profile" in order,
+    false,
+    "and the retired enum is not seeded — the schema has no such key",
+  );
 });

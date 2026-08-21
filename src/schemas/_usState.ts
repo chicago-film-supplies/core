@@ -127,7 +127,7 @@ export function toRegionCode(input: string): string {
 
 /**
  * Illinois ZIP prefixes are 600–629. Used only as a **cross-check** against the
- * region — `audit-order-tax-profile.ts` reports a disagreement rather than
+ * region — `audit-order-tax-snapshot.ts` reports a disagreement rather than
  * letting either field silently win, because a wrong region and a wrong
  * postcode are both live in prod and neither is authoritative.
  */
