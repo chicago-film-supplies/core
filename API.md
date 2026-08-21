@@ -23569,8 +23569,11 @@ exempt document still records which tax it was exempt from.
 
 ## An explicit-only ref on the line SURVIVES
 
-`Water Bottle Tax` and `No Tax` are the `jurisdiction: null` class:
-reachable by uid alone and invisible to {@link findTaxFor} by construction.
+`Water Bottle Tax` and `No Tax` are the `item_types: []` class: reachable by
+uid alone and invisible to {@link findTaxFor} by construction. A member may
+carry a `jurisdiction` to SCOPE itself — the bottle tax is levied per bottle
+sold in Chicago — and a ref whose scope does not match the line's resolved
+jurisdiction is dropped.
 They ride a line because the PRODUCT carries the ref, so rebuilding the array
 from the rule alone would silently drop a real charge. Preserved deliberately
 rather than by accident — prod carries zero such lines today

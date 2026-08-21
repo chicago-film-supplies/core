@@ -79,7 +79,7 @@ Deno.test("a bare YYYY-MM-DD is REFUSED on the applied window", () => {
   assertEquals(TaxSchema.safeParse(tax({ applied_from: "2026-08-18" })).success, false);
 });
 
-// ── The explicit-only biconditional ──────────────────────────────
+// ── The explicit-only class, and its SCOPE ───────────────────────
 
 Deno.test("explicit-only: jurisdiction null WITH item_types [] parses", () => {
   const r = TaxSchema.safeParse(tax({ jurisdiction: null, item_types: [] }));
@@ -92,21 +92,30 @@ Deno.test("resolvable: a jurisdiction WITH item_types parses", () => {
 });
 
 Deno.test("a null jurisdiction with NON-empty item_types is refused", () => {
-  // This is the shape that would make `findTaxFor` read a null jurisdiction as
-  // a wildcard, applying a $0.05/unit bottle tax to every line in the corpus.
+  // Types the rule could resolve, and no jurisdiction for them to resolve
+  // UNDER — so nothing can ever match them. The one direction that is still a
+  // contradiction rather than a configuration.
   const r = TaxSchema.safeParse(tax({ jurisdiction: null, item_types: ["sale"] }));
   assertEquals(r.success, false);
   assertStringIncludes(r.error?.issues[0].message ?? "", "explicit-only");
 });
 
-Deno.test("a jurisdiction with EMPTY item_types is refused", () => {
-  // The other half. A tax naming a jurisdiction but covering no type is
-  // unreachable by the rule and reachable by uid — two claims that disagree.
+Deno.test("🔴 a jurisdiction with EMPTY item_types is ALLOWED — it is a SCOPE", () => {
+  // ⚠️ This arm asserted the opposite until api-cloudrun#409, and the
+  // biconditional it enforced made a real tax unrepresentable: the Chicago
+  // Bottled Water Tax is levied per bottle SOLD IN CHICAGO, so it needs a
+  // jurisdiction to be scoped by — and it must NOT be resolvable by type,
+  // because `(chicago, sale)` is already Chicago Sales Tax's and `findTaxFor`
+  // throws on two taxes covering one pair.
+  //
+  // The two fields answer different questions: `item_types` is "can the rule
+  // find me?", `jurisdiction` is "where do I apply?". Welding them made the
+  // second unaskable.
   const r = TaxSchema.safeParse(tax({ jurisdiction: "chicago", item_types: [] }));
-  assertEquals(r.success, false);
+  assertEquals(r.success, true);
 });
 
-Deno.test("the biconditional is SKIPPED while either half is absent (Phase 1)", () => {
+Deno.test("the resolvable check is SKIPPED while either half is absent (Phase 1)", () => {
   // Every new field ships optional; the migration writes both together.
   assertEquals(TaxSchema.safeParse(tax({ jurisdiction: "chicago" })).success, true);
   assertEquals(TaxSchema.safeParse(tax({ item_types: ["sale"] })).success, true);

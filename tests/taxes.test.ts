@@ -390,6 +390,88 @@ Deno.test("🔴 an explicit-only tax ref on the line SURVIVES the rebuild", () =
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax", "bottle-tax"]);
 });
 
+Deno.test("🔴 a SCOPED explicit-only tax applies only in its own jurisdiction", () => {
+  // "5¢ per bottle SOLD IN CHICAGO" — the levy is carried by the product, not
+  // found by the rule, so the scope is the only thing that can stop it being
+  // charged on a case delivered to Frankfort.
+  const scoped: Tax[] = CATALOG.map((t) =>
+    t.uid === "bottle-tax" ? { ...t, jurisdiction: "chicago" as const } : t
+  );
+  const bottleRef = [{
+    uid: "bottle-tax",
+    name: "Water Bottle Tax",
+    rate: 0.05,
+    type: "flat" as const,
+    amount_cents: 0,
+  }];
+
+  const chicago = [makeItem({ type: "sale", quantity: 24 }, { taxes: bottleRef })];
+  materializeDocumentTax(chicago, ctx({ taxes: scoped }));
+  assertEquals(px(chicago[0]).taxes.map((t) => t.uid), ["chi-sales-tax", "bottle-tax"]);
+  // 24 units × $0.05 — a flat tax reads the QUANTITY, never the subtotal.
+  assertEquals(px(chicago[0]).taxes[1].amount_cents, 120);
+
+  const frankfort = [makeItem({ type: "sale", quantity: 24 }, { taxes: bottleRef })];
+  materializeDocumentTax(frankfort, ctx({ taxes: scoped, destinations: [at("Frankfort")] }));
+  assertEquals(
+    px(frankfort[0]).taxes.map((t) => t.uid),
+    ["frankfort-tax"],
+    "Chicago's levy must not follow the case out of Chicago",
+  );
+});
+
+Deno.test("…and an UNSCOPED explicit-only tax still applies everywhere", () => {
+  // `No Tax` and any future unscoped member: `jurisdiction: null` means "no
+  // scope", not "no jurisdiction matches".
+  const items = [makeItem({ type: "sale", quantity: 10 }, {
+    taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 0 }],
+  })];
+  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")] }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax", "bottle-tax"]);
+});
+
+Deno.test("🔴 taxes STACK on one line — a percent and a flat, priced independently", () => {
+  // The engine has always summed every ref; what changed is that the rule now
+  // AUTHORS more than one. A $100 case of water in Chicago owes 10.5% sales tax
+  // on the price AND 5¢ per bottle on the count, and the two are computed from
+  // different inputs — `subtotal_discounted_cents` vs `quantity`.
+  const scoped: Tax[] = CATALOG.map((t) =>
+    t.uid === "bottle-tax" ? { ...t, jurisdiction: "chicago" as const } : t
+  );
+  // $100/unit × 24 = $2,400 — `materializeDocumentTax` REPRICES, so the
+  // subtotal is recomputed from the line rather than taken from the fixture.
+  const items = [makeItem({ type: "sale", quantity: 24 }, {
+    taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 0 }],
+  })];
+  materializeDocumentTax(items, ctx({ taxes: scoped }));
+  assertEquals(pxFull(items[0]).subtotal_discounted_cents, 240_000);
+  const [sales, bottle] = px(items[0]).taxes;
+  assertEquals(sales.uid, "chi-sales-tax");
+  assertEquals(sales.amount_cents, 25_200, "10.5% of the $2,400 subtotal");
+  assertEquals(bottle.uid, "bottle-tax");
+  assertEquals(bottle.amount_cents, 120, "24 bottles × 5¢ — the QUANTITY, not the price");
+  assertEquals(px(items[0]).total_cents, 240_000 + 25_200 + 120);
+});
+
+Deno.test("…and a ZERO-PRICED line still owes the flat tax", () => {
+  // The shape the bottled-water restructure produces: the priced CASE line
+  // carries sales tax, its zero-priced BOTTLE child carries the levy. A flat
+  // tax reads the quantity, so a $0 line is not a $0 levy.
+  const scoped: Tax[] = CATALOG.map((t) =>
+    t.uid === "bottle-tax" ? { ...t, jurisdiction: "chicago" as const } : t
+  );
+  const items = [makeItem({ type: "sale", quantity: 24, zero_priced: true }, {
+    base_cents: 0,
+    subtotal_cents: 0,
+    subtotal_discounted_cents: 0,
+    taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 0 }],
+  })];
+  materializeDocumentTax(items, ctx({ taxes: scoped }));
+  const bottle = px(items[0]).taxes.find((t) => t.uid === "bottle-tax");
+  assertEquals(bottle?.amount_cents, 120);
+  assertEquals(px(items[0]).total_cents, 120);
+});
+
 Deno.test("…and an exempt document drops it too — a tax is a tax", () => {
   const items = [makeItem({}, {
     taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 5 }],

@@ -887,8 +887,11 @@ function atStoredVersion(tax: Tax, ctx: DocumentTaxContext): Tax {
  *
  * ## An explicit-only ref on the line SURVIVES
  *
- * `Water Bottle Tax` and `No Tax` are the `jurisdiction: null` class:
- * reachable by uid alone and invisible to {@link findTaxFor} by construction.
+ * `Water Bottle Tax` and `No Tax` are the `item_types: []` class: reachable by
+ * uid alone and invisible to {@link findTaxFor} by construction. A member may
+ * carry a `jurisdiction` to SCOPE itself — the bottle tax is levied per bottle
+ * sold in Chicago — and a ref whose scope does not match the line's resolved
+ * jurisdiction is dropped.
  * They ride a line because the PRODUCT carries the ref, so rebuilding the array
  * from the rule alone would silently drop a real charge. Preserved deliberately
  * rather than by accident — prod carries zero such lines today
@@ -908,16 +911,26 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): voi
   items.forEach((item, index) => {
     if (!isPreTaxItem(item)) return;
     const subtotalDiscountedCents = item.price.subtotal_discounted_cents ?? 0;
-    const { tax, base } = resolveLineTax(item, destinations[index], ctx);
+    const { tax, base, jurisdiction } = resolveLineTax(item, destinations[index], ctx);
 
     item.price.taxes_base = base
       ? [{ uid: base.uid, name: base.name, rate: base.rate, type: base.type }]
       : [];
 
-    const explicitOnly = (item.price.taxes ?? []).filter((modifier) => {
-      const doc = byUid.get(modifier.uid);
-      return doc !== undefined && doc.jurisdiction == null;
-    }).map((modifier) => byUid.get(modifier.uid)!);
+    // The explicit-only refs the line already carries, kept only where their
+    // SCOPE matches. `jurisdiction == null` is unscoped (applies wherever the
+    // line is); a scoped one applies only in its own jurisdiction.
+    //
+    // ⚠️ **The scope is what makes "5¢ per bottle sold in Chicago" expressible
+    // at all.** Without it a case of water delivered to Frankfort carried
+    // Chicago's levy, because an explicit-only ref was applied unconditionally
+    // — and the tax cannot instead be made resolvable, since `(chicago, sale)`
+    // is already Chicago Sales Tax's and `findTaxFor` THROWS on two taxes
+    // covering one pair.
+    const explicitOnly = (item.price.taxes ?? [])
+      .map((modifier) => byUid.get(modifier.uid))
+      .filter((doc): doc is Tax => doc !== undefined && doc.item_types?.length === 0)
+      .filter((doc) => doc.jurisdiction == null || doc.jurisdiction === jurisdiction);
 
     // An exempt line drops the explicit-only refs too — a tax is a tax.
     const applied = ctx.exempt ? [] : [...(tax ? [tax] : []), ...explicitOnly];

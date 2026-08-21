@@ -126,11 +126,25 @@ export interface Tax {
  * The two invariants that are properties of the DOCUMENT rather than of any one
  * field, so neither can be expressed at a field's own schema.
  *
- * 1. **`jurisdiction: null` ⟺ `item_types: []`** — the explicit-only class. A
- *    tax reachable by neither axis is reachable only by uid, and the two halves
- *    have to agree or `findTaxFor` gets a wildcard where it expects a refusal.
- *    ⚠️ `findTaxFor` **skips** this class; a `null` jurisdiction is never a
- *    match-anything.
+ * 1. **`item_types: []` is the EXPLICIT-ONLY class**, and `jurisdiction` SCOPES
+ *    it rather than defining it. A tax listing no item types is unreachable by
+ *    the `(jurisdiction × type)` rule and is applied only because a product
+ *    carries its ref — the Chicago Bottled Water Tax is the live case.
+ *
+ *    ⚠️ **It was `jurisdiction: null ⟺ item_types: []` until api-cloudrun#409,
+ *    and that biconditional made a real tax unrepresentable.** The bottle tax is
+ *    levied per bottle *sold in Chicago*: it needs a jurisdiction to be scoped
+ *    by, and it must NOT be resolvable by type, because `(chicago, sale)` is
+ *    already claimed by Chicago Sales Tax and `findTaxFor` THROWS on two taxes
+ *    covering one pair. So the two halves answer different questions — "can the
+ *    rule find me?" is `item_types`, "where do I apply?" is `jurisdiction` —
+ *    and welding them made the second unaskable.
+ *
+ *    ⚠️ `findTaxFor` still skips the class: it requires
+ *    `tax.jurisdiction === jurisdiction` **and** a matching `item_types` entry,
+ *    so an empty list can never match and a scoped explicit tax is no more
+ *    reachable by the rule than an unscoped one. What the scope changes is
+ *    which lines KEEP the ref — see `assignLineTaxes`.
  * 2. **`xero_components` sum to `rate`** — Xero derives `EffectiveRate` from the
  *    components, so a set that does not sum to the CFS rate pushes a tax at a
  *    different rate than CFS billed. Compared in integer basis points, not
@@ -150,20 +164,19 @@ function checkTaxAxes(
   },
   ctx: z.RefinementCtx,
 ): void {
-  if (doc.jurisdiction !== undefined && doc.item_types !== undefined) {
-    const explicitOnly = doc.jurisdiction === null;
-    if (explicitOnly !== (doc.item_types.length === 0)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["item_types"],
-        message:
-          `jurisdiction: ${JSON.stringify(doc.jurisdiction)} and item_types: ` +
-          `[${doc.item_types}] disagree — a tax is either explicit-only ` +
-          `(jurisdiction null AND item_types empty, reachable only by uid) or ` +
-          `resolvable (both set). Half of each makes findTaxFor read a null ` +
-          `jurisdiction as a wildcard.`,
-      });
-    }
+  // A RESOLVABLE tax — one the `(jurisdiction × type)` rule can find — needs
+  // both halves. The converse is deliberately NOT enforced: `item_types: []`
+  // with a jurisdiction is the scoped explicit-only class (see above).
+  if (doc.jurisdiction === null && (doc.item_types?.length ?? 0) > 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["jurisdiction"],
+      message:
+        `item_types: [${doc.item_types}] names types the rule could resolve, but ` +
+        `jurisdiction is null — so nothing can ever match them. Give the tax a ` +
+        `jurisdiction, or clear item_types to make it explicit-only (applied ` +
+        `because a product carries its ref).`,
+    });
   }
 
   const components = doc.xero_components;
