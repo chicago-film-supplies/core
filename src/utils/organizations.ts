@@ -40,11 +40,23 @@ import type {
  * each hand-rolled literal, which is the failure mode this function exists to
  * end.
  *
- * ⚠️ **Always written, never omitted**, and that is what gives the reader a
- * usable signal: from this publish on, an ABSENT key means the snapshot
- * predates the axes and `tax_profile` must be read, while `null`/`false` is a
- * real answer. Omitting on absence would collapse the two and leave
- * `documentTaxContext` unable to tell a migrated snapshot from a stale one.
+ * ⚠️ **Always written, never omitted.** That signal has now done its job and
+ * changed meaning: while `tax_profile` was still the fallback, an ABSENT axis
+ * meant *"this snapshot predates the axes, read the enum"*. The whole corpus is
+ * migrated and this builder no longer emits an enum for anything to fall back
+ * to, so an absent axis is now simply a snapshot no writer has touched since —
+ * and `null`/`false` remains the real answer. Omitting on absence would still
+ * be wrong, for the surviving half of the reason: it would leave a reader
+ * unable to distinguish it from a customer who asserts nothing.
+ *
+ * 🔴 **`tax_profile` is NOT emitted any more (api-cloudrun#596 item 3).** It is
+ * `.optional()` on the snapshot for one release cycle — the expand third — and
+ * this is the writer half of the same step: storage cannot be emptied while a
+ * shared builder keeps refilling it. ⚠️ The credit-note idempotency hash reads
+ * this block, and dropping the field from it moves NOTHING, because
+ * `creditNoteContentHash` is never persisted — api-cloudrun recomputes it from
+ * the stored document on both sides of every comparison, so both sides always
+ * agree. That refutes what api-cloudrun#596 said was the blocker here.
  *
  * ⚠️ **`?? null` / `?? false` is lossless on the measured corpus, not a
  * flattening** — prod 2026-08-21: 291 organizations, and the 11 carrying
@@ -60,7 +72,6 @@ export function buildOrganizationSnapshot(
     | "uid"
     | "name"
     | "crms_id"
-    | "tax_profile"
     | "jurisdiction_claim"
     | "tax_exempt"
     | "xero_id"
@@ -72,7 +83,6 @@ export function buildOrganizationSnapshot(
     uid: org.uid,
     name: org.name,
     crms_id: org.crms_id || null,
-    tax_profile: org.tax_profile,
     jurisdiction_claim: org.jurisdiction_claim ?? null,
     tax_exempt: org.tax_exempt ?? false,
     xero_id: org.xero_id || null,

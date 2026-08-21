@@ -11,7 +11,14 @@ const ORG = {
   uid: ORG_ID,
   name: "Kenwood TV Productions Inc",
   crms_id: 4321,
-  tax_profile: "tax_frankfort",
+  // 🔴 **The axes, not the enum — and the fixture had to move for the
+  // assertions to mean anything.** It carried `tax_profile: "tax_frankfort"`
+  // and neither axis, which was a plausible document while the enum was the
+  // source of truth and is an IMPOSSIBLE one now. api-cloudrun's `seedOrg`
+  // taught this exactly: an organization fixture that is not a plausible
+  // document leaves the arm meant to catch a defect with nothing to fire on.
+  jurisdiction_claim: "frankfort",
+  tax_exempt: false,
   xero_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   billing_address: {
     city: "Frankfort",
@@ -24,8 +31,19 @@ const ORG = {
   },
 } as unknown as Organization;
 
-Deno.test("buildOrganizationSnapshot carries tax_profile — the field #486 was missing", () => {
-  assertEquals(buildOrganizationSnapshot(ORG).tax_profile, "tax_frankfort");
+Deno.test("buildOrganizationSnapshot carries the AXES, and no longer the enum", () => {
+  // The assertion this replaces read `.tax_profile === "tax_frankfort"` — the
+  // field #486 was missing from three of four hand-rolled literals. The axes
+  // now carry that same fact and carry it BETTER: `tax_frankfort` welded a
+  // jurisdiction to an exemption slot, and these two say each separately.
+  const snapshot = buildOrganizationSnapshot(ORG);
+  assertEquals(snapshot.jurisdiction_claim, "frankfort");
+  assertEquals(snapshot.tax_exempt, false);
+  // 🔴 The half that makes this a real assertion: the key is ABSENT, not
+  // undefined-valued. Firestore stores a present-but-undefined key as null on
+  // some paths and drops it on others, and `scripts/migrate-drop-tax-profile.ts`
+  // would then be racing a writer that keeps putting it back.
+  assertEquals("tax_profile" in snapshot, false);
 });
 
 Deno.test("buildOrganizationSnapshot produces a snapshot the shared schema accepts", () => {
@@ -62,7 +80,7 @@ Deno.test("buildOrganizationSnapshot: overrides win, for the CRMS member_id case
   const snapshot = buildOrganizationSnapshot(ORG, { crms_id: 9999 });
   assertEquals(snapshot.crms_id, 9999);
   assertEquals(snapshot.name, ORG.name);
-  assertEquals(snapshot.tax_profile, "tax_frankfort");
+  assertEquals(snapshot.jurisdiction_claim, "frankfort");
 });
 
 Deno.test("the shared snapshot admits both a present and an absent billing_address", () => {
