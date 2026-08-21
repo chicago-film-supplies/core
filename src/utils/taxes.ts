@@ -80,12 +80,13 @@ export { isTaxableCoa, TAXABLE_REVENUE_COAS };
  *   **105** `sale` lines at coa 4700, all carrying no tax.
  *
  * That second direction is the larger population and the one nobody had looked
- * at. It is also the harmless one: `materializeDocumentTax` clears
- * `price.taxes` outright when `isTaxableCoa` is false, so a client that seeds a
- * tax there is corrected on save. **The first direction is NOT corrected** —
- * the gate passes and the materializer then prices whatever refs the line
- * carries, which is none. A client keyed on `type` alone therefore drops tax
- * silently on exactly the pairings this table exists to describe.
+ * at. ⚠️ **Both directions are now moot as a CLIENT hazard**, and the reason is
+ * worth keeping: `materializeDocumentTax` no longer reads a client's
+ * `price.taxes` refs at all — `assignLineTaxes` rebuilds the array from
+ * `(taxed_as ?? type, jurisdiction)`, so a client that seeds the wrong tax, or
+ * none, is corrected on save either way. This table survives as the DEFAULT a
+ * restatement tool needs when it is reconstructing what a historical line
+ * carried, not as a rule any writer consults.
  *
  * The **rate** is not here: it comes from the date-bracketed catalog via
  * {@link findTaxAt} at the document's own date.
@@ -781,25 +782,39 @@ export interface LineTaxResolution {
  * tax          = findTaxFor(catalog, jurisdiction, key, asOf)
  * ```
  *
- * ## Two rules sit in front of the lookup, and both are ORDER-dependent
+ * ## ONE rule sits in front of the lookup
  *
- * 1. **A non-revenue account is not taxable under any jurisdiction.** The gate
- *    is {@link isTaxableCoa}, and it is kept in Phase 2 rather than deleted:
- *    the argument for deleting it is that `item_types` already excludes every
- *    non-revenue line TYPE, and `scripts/audit-tax-key.ts` §2 measures whether
- *    that holds. On 2026-08-20 it did not — five priced
- *    `sale`/`rental`/`replacement` lines sit at accounts 2210 and 4800 — so the
- *    gate is still load-bearing. #409 is the measured cost of getting this
- *    wrong: 19 invoices and $2,741.78 of phantom receivable when CFS taxed
- *    lines it told Xero were `NONE`.
+ * **A `replacement` sources to the ORIGIN**, skipping levels 1 and 2 entirely.
+ * Every replacement is a sale in which **CFS is the end user** — the customer
+ * buys the item *for CFS*, to replace gear CFS owns — so the situs is CFS's own
+ * location and no document- or organization-level jurisdiction reaches it
+ * (owner, 2026-08-20). The live Xero ledger has been doing this all along:
+ * invoice 2348 (a Frankfort customer) bills its replacement at TAX001 Chicago
+ * Sales Tax.
  *
- * 2. **A `replacement` sources to the ORIGIN**, skipping levels 1 and 2
- *    entirely. Every replacement is a sale in which **CFS is the end user** —
- *    the customer buys the item *for CFS*, to replace gear CFS owns — so the
- *    situs is CFS's own location and no document- or organization-level
- *    jurisdiction reaches it (owner, 2026-08-20). The live Xero ledger has
- *    been doing this all along: invoice 2348 (a Frankfort customer) bills its
- *    replacement at TAX001 Chicago Sales Tax.
+ * ## 🔴 The revenue ACCOUNT is not one of the rules, and used to be
+ *
+ * Owner, 2026-08-20: *"an item's tax is item type × jurisdiction, it has
+ * nothing to do with coa, coa is not a determining factor for tax."* So the
+ * `isTaxableCoa` gate that stood here is **deleted**, not merely bypassed —
+ * `TAXABLE_REVENUE_COAS` is now a statement about what CFS's Xero history
+ * taxed, with no role in what a line is taxed today.
+ *
+ * ⚠️ **The gate had a twin at the Xero boundary, and the two only ever made
+ * sense together.** `resolveXeroTaxType` refused a `TaxType` for the same
+ * accounts, so removing one alone recreates api-cloudrun#409 exactly: CFS
+ * computes a tax it then tells Xero not to charge, and the difference stands as
+ * a phantom `amount_due` (19 invoices / $2,741.78 when it last happened). They
+ * were removed in one commit.
+ *
+ * ⚠️ What made this safe was a per-LINE statement replacing a per-ACCOUNT one.
+ * The class the gate was really covering was the CRMS bottled-water levy — a
+ * tax billed as a line, where `isTaxableCoa(2210) === false` was the only thing
+ * stopping sales tax being charged on a tax. That line now carries
+ * `taxed_as: "none"`, which says it on the axis this rule actually reads.
+ * Measured before the change (`scripts/audit-tax-key.ts` §2): 2 lines corpus-
+ * wide sat at a non-revenue account, both `paid` and therefore frozen, so no
+ * money moved.
  *
  * ⚠️ **Exemption zeroes `tax` and leaves `base`.** Both are returned because
  * {@link assignLineTaxes} needs the answer twice — zeroed into `price.taxes`,
@@ -821,11 +836,11 @@ export function resolveLineTax(
 ): LineTaxResolution {
   const key = item.taxed_as ?? item.type;
 
-  // 1. A non-revenue account is untaxable whatever the jurisdiction. The
-  //    resolved jurisdiction is still reported: it is what the manager renders
-  //    beside the line, and it is true of the line whether or not tax is due.
+  // The jurisdiction is resolved even when no tax comes of it: it is what the
+  // manager renders beside the line, and it is true of the line whether or not
+  // tax is due.
   const jurisdictionOf = (): { jurisdiction: JurisdictionType; level: JurisdictionLevel | "origin" } => {
-    // 2. The replacement rule — levels 1 and 2 do not apply to it.
+    // The replacement rule — levels 1 and 2 do not apply to it.
     if (key === "replacement") return { jurisdiction: ctx.origin, level: "origin" };
     if (!destination) return { jurisdiction: ctx.origin, level: "derived" };
     return resolveJurisdiction({
@@ -837,12 +852,6 @@ export function resolveLineTax(
   };
 
   const { jurisdiction, level } = jurisdictionOf();
-  if (item.coa_revenue != null && !isTaxableCoa(item.coa_revenue)) {
-    // A non-revenue line is not taxable, which is a different fact from being
-    // exempt: there is no tax it is exempt FROM, so `base` is null too.
-    return { jurisdiction, level, tax: null, base: null };
-  }
-
   const resolved = findTaxFor(ctx.taxes, jurisdiction, key, ctx.asOf);
   const base = resolved ? atStoredVersion(resolved, ctx) : null;
   return { jurisdiction, level, tax: ctx.exempt ? null : base, base };

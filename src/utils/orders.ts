@@ -141,9 +141,13 @@ export interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   /**
-   * Revenue chart-of-accounts code, deciding whether the line is taxable at all
-   * ({@link isTaxableCoa}). Stored on an invoice line; absent on an order line,
-   * where it lives on the product — see {@link PricingItem.coa_revenue}.
+   * Revenue chart-of-accounts code — **where the line's income POSTS in Xero**.
+   * Stored on an invoice line; absent on an order line, where it lives on the
+   * product — see {@link PricingItem.coa_revenue}.
+   *
+   * ⚠️ It does **not** decide taxability, and until 2026-08-20 it did. Owner:
+   * *"an item's tax is item type × jurisdiction, it has nothing to do with
+   * coa."* {@link isTaxableCoa} is the retired gate.
    *
    * `COARevenueType`, not `number` — every schema that stores this field
    * (`OrderDocLineItem`, `InvoiceDocLineItem`, and the product) types it with
@@ -244,14 +248,14 @@ export interface PricingItem {
   quantity?: number;
   price?: PricingPrice | null;
   /**
-   * Revenue chart-of-accounts code, used to decide whether the line is taxable
-   * at all ({@link isTaxableCoa}).
+   * Revenue chart-of-accounts code — where the line's income posts in Xero, and
+   * **not** an input to what it is taxed (owner ruling, 2026-08-20; see
+   * {@link isTaxableCoa}, the retired gate).
    *
    * Optional because the two item shapes differ: an **invoice** line stores it,
-   * an **order** line does not (it lives on the product). A caller that can
-   * resolve it — anything holding the product — should populate it, or the line
-   * is priced as taxable. See {@link isTaxableCoa} for why unknown means
-   * taxable rather than exempt.
+   * an **order** line does not (it lives on the product). Nothing in the
+   * pricing pipeline reads it any more, so an unresolved one no longer changes
+   * a price; the Xero push still needs it for `AccountCode`.
    */
   coa_revenue?: number | null;
 }
@@ -784,12 +788,21 @@ export function calculateItemDiscountCents(item: LineItem): number {
  * Income, 4140 Pass Through Income, 4200 Retail Sales Income, 4210 Replacement
  * Sales Income.
  *
- * **This is the single source of truth for line taxability**, and it has to be,
- * because it previously existed only on the *Xero push* side and nowhere in the
- * engine computing CFS's own totals. So CFS taxed lines it then told Xero were
- * untaxable (`TaxType: "NONE"`), inflating `total` and leaving the difference as
- * a phantom `amount_due`. Measured on prod 2026-07-30: **19 invoices /
- * $2,741.78**, plus 9 orders / $453.50.
+ * 🔴 **This is no longer a taxability rule.** It was the single source of truth
+ * for line taxability until the owner ruling of 2026-08-20 — *"an item's tax is
+ * item type × jurisdiction, it has nothing to do with coa"* — and both gates
+ * built on it (the engine's {@link isTaxableCoa} and api-cloudrun's
+ * `resolveXeroTaxType`) were removed together. What it records now is which
+ * accounts CFS's Xero history taxed, which is what {@link TAXABLE_COA_TO_TAX_NAME}
+ * and the restatement tools need.
+ *
+ * It existed because the set previously lived only on the *Xero push* side and
+ * nowhere in the engine computing CFS's own totals. So CFS taxed lines it then
+ * told Xero were untaxable (`TaxType: "NONE"`), inflating `total` and leaving
+ * the difference as a phantom `amount_due`. Measured on prod 2026-07-30:
+ * **19 invoices / $2,741.78**, plus 9 orders / $453.50. ⚠️ That failure is why
+ * the two gates had to be deleted in ONE commit rather than one at a time —
+ * removing either alone recreates it exactly.
  *
  * Everything outside the set is a service or fee — Service Income, Delivery
  * Surcharges, Transaction Fee, Other Income — and sales tax is not owed on it.
@@ -812,25 +825,33 @@ export function calculateItemDiscountCents(item: LineItem): number {
 export const TAXABLE_REVENUE_COAS: readonly number[] = [4000, 4140, 4200, 4210];
 
 /**
- * Is a line with this revenue COA subject to tax?
+ * Was a line with this revenue COA subject to tax **under the retired
+ * account-keyed gate**?
  *
- * **`null`/`undefined` means UNKNOWN, and unknown is treated as TAXABLE** — the
- * opposite of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`, and the
- * asymmetry is deliberate. That call site resolves the COA from the product
- * before asking, so absent there really does mean "not a taxable account". The
- * pricing engine has no such guarantee: **an order line item carries no
- * `coa_revenue` at all** — the field is on the invoice item and the product, not
- * the order item. Folding unknown into "untaxable" here would silently zero the
- * tax on every order line in the corpus.
+ * 🔴 **Nothing in the pricing pipeline calls this.** Owner, 2026-08-20: *"an
+ * item's tax is item type × jurisdiction, it has nothing to do with coa, coa is
+ * not a determining factor for tax."* The gate was deleted from
+ * `resolveLineTax`, from {@link calculateItemTax} and from api-cloudrun's
+ * `resolveXeroTaxType` in one commit — **one alone recreates api-cloudrun#409**,
+ * where CFS computed a tax it then told Xero not to charge and the difference
+ * stood as a phantom `amount_due` on 19 invoices / $2,741.78.
  *
- * So this gate only ever *removes* tax from a line it can positively identify as
- * non-revenue, and a caller that can resolve the COA must supply it (see
- * {@link PricingItem.coa_revenue}).
+ * What it is FOR now: explaining the corpus the gate shaped. The invoice-sync
+ * `coa_untaxes` arm (`@cfs/core/utils/invoices`) reads it to say why a frozen
+ * invoice line carries no tax while its order line does, and api-cloudrun's
+ * `repair-invoice-restate-from-xero.ts` reads it to restate historical lines the
+ * way Xero billed them. Both are statements about documents already written.
  *
- * ⚠️ The two sides therefore still disagree for an unknown COA, which is exactly
- * the state of a `custom-` line: it has no product, so the quote push sends
- * `NONE` while the engine keeps taxing it. Closing that needs a decision about
- * what a custom line's COA should be, not a change to this predicate.
+ * **`null`/`undefined` meant UNKNOWN, and unknown was TAXABLE** — the opposite
+ * of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`. That asymmetry
+ * was deliberate (an order line carries no `coa_revenue` at all, so folding
+ * unknown into "untaxable" would have zeroed the tax on every order line in the
+ * corpus) and it is preserved here, because a historical explanation has to
+ * reproduce the rule that ran — not a tidier one.
+ *
+ * ⚠️ Do not reintroduce it as a taxability test. The class it was really
+ * covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
+ * is said on the axis the rule reads now: `taxed_as: "none"`.
  */
 export function isTaxableCoa(coaRevenue: number | null | undefined): boolean {
   if (coaRevenue === null || coaRevenue === undefined) return true;
@@ -886,6 +907,13 @@ export function computeItemTaxAmountCents(
 /**
  * Calculate tax amounts for a single line item from the Tax[] parameter.
  * Returns a PriceModifier[] with computed amounts.
+ *
+ * **It prices the refs the line carries; it does not decide taxability.** That
+ * decision is `resolveLineTax` / `assignLineTaxes`, which writes `price.taxes`
+ * from `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here
+ * until the owner ruling of 2026-08-20 — *"an item's tax is item type ×
+ * jurisdiction, it has nothing to do with coa"* — and removing it is what makes
+ * the two functions answer one question instead of two.
  */
 export function calculateItemTax(
   item: PricingItem,
@@ -896,11 +924,6 @@ export function calculateItemTax(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
   }
-
-  // A non-revenue line is not taxable, and the Xero push has always known it —
-  // it sends `TaxType: "NONE"` for exactly these COAs. This gate is what stops
-  // CFS computing a tax it then tells Xero not to charge.
-  if (!isTaxableCoa(item.coa_revenue)) return [];
 
   const { subtotal_discounted_cents } = calculateItemSubtotal(item);
   const quantity = item.quantity;

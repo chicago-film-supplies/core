@@ -2983,38 +2983,38 @@ Deno.test("calculateReplacementTotals shares ONE tax formula with the order path
   assertEquals(totals.total_cents, 82_869);
 });
 
-Deno.test("calculateItemTax: a non-revenue COA yields no tax", () => {
-  const item = makeItem({ coa_revenue: 4100 }, { taxes: [{ uid: "chi-rental-tax" }] });
-  assertEquals(calculateItemTax(item, TAXES), []);
+// 🔴 The revenue ACCOUNT no longer decides taxability — owner, 2026-08-20:
+// *"an item's tax is item type × jurisdiction, it has nothing to do with coa."*
+// These three assert the DELETION rather than merely omitting the old cases: a
+// gate that has been removed is only provably removed by a test that fails if
+// it comes back.
+
+Deno.test("calculateItemTax: a non-revenue COA taxes exactly like a revenue one", () => {
+  // Same line, three accounts, one answer. The middle one is where the retired
+  // `isTaxableCoa` gate returned `[]`; the third is the `custom-`-line shape
+  // that carries no account at all.
+  for (const coa_revenue of [4000, 4100, undefined] as const) {
+    const item = makeItem({ coa_revenue }, { taxes: [{ uid: "chi-rental-tax" }] });
+    const result = calculateItemTax(item, TAXES);
+    assertEquals(result.length, 1, `coa ${coa_revenue}`);
+    assertEquals(result[0].amount_cents, 1500, `coa ${coa_revenue}`);
+  }
 });
 
-Deno.test("calculateItemTax: the SAME line taxes normally on a revenue COA", () => {
-  // Paired with the case above so the gate is shown to discriminate rather than
-  // to suppress everything — the two differ only in `coa_revenue`.
-  const item = makeItem({ coa_revenue: 4000 }, { taxes: [{ uid: "chi-rental-tax" }] });
-  const result = calculateItemTax(item, TAXES);
-  assertEquals(result.length, 1);
-  assertEquals(result[0].amount_cents, 1500);
-});
-
-Deno.test("calculateItemTax: an absent COA still taxes (order lines carry none)", () => {
-  const item = makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] });
-  assertEquals(calculateItemTax(item, TAXES).length, 1);
-});
-
-Deno.test("calculateItemPrice: a non-revenue COA drops tax out of the total", () => {
-  // The end-to-end shape of the prod defect: #1330 was a single `service` line at
-  // coa 4100 whose CFS total read 7063.20 against Xero's 6480.00 — the entire
-  // 583.20 delta being tax CFS invented.
-  const taxed = calculateItemPrice(
+Deno.test("calculateItemPrice: the account does not move the total", () => {
+  // The inverse of the prod defect this gate was built for (#1330: a `service`
+  // line at coa 4100 whose CFS total read 7063.20 against Xero's 6480.00).
+  // Removing the gate is only safe BECAUSE its twin at the Xero boundary went
+  // in the same commit — `resolveXeroTaxType` no longer refuses a `TaxType` for
+  // these accounts, so the two sides still agree. One alone recreates #409.
+  const revenue = calculateItemPrice(
     makeItem({ coa_revenue: 4000 }, { taxes: [{ uid: "chi-rental-tax" }] }),
     TAXES,
   );
-  const gated = calculateItemPrice(
+  const nonRevenue = calculateItemPrice(
     makeItem({ coa_revenue: 4100 }, { taxes: [{ uid: "chi-rental-tax" }] }),
     TAXES,
   );
-  assertEquals(taxed.total_cents, 11500);
-  assertEquals(gated.total_cents, 10000);
-  assertEquals(gated.total_cents, gated.subtotal_discounted_cents, "total is the untaxed subtotal");
+  assertEquals(revenue.total_cents, 11500);
+  assertEquals(nonRevenue.total_cents, 11500);
 });

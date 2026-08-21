@@ -207,8 +207,9 @@ const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strict
  * on is gone; store only the revenue account and the write-off is invisible.
  *
  * - **`coa_revenue`** — the revenue account of the *thing being credited*.
- *   Product-sourced, same vocabulary as the invoice line it mirrors, and the
- *   input to {@link isTaxableCoa}. Never the account the credit posts to.
+ *   Product-sourced, same vocabulary as the invoice line it mirrors. Never the
+ *   account the credit posts to, and — since the owner ruling of 2026-08-20 —
+ *   never an input to what the line is taxed either.
  * - **`coa_posting`** — where this credit lands in the ledger. Any account in
  *   the `chart-of-accounts` catalog, including the expense range, which is
  *   exactly why it cannot be `COARevenueEnum`: that enum is shared with

@@ -346,28 +346,35 @@ Deno.test("a type no tax lists is untaxed — service and surcharge, by the rule
   }
 });
 
-// ── The COA gate ─────────────────────────────────────────────────
+// ── 🔴 The revenue ACCOUNT is not a tax determinant ──────────────
+//
+// Owner, 2026-08-20: *"an item's tax is item type × jurisdiction, it has
+// nothing to do with coa, coa is not a determining factor for tax."* The gate
+// that stood here is deleted, and these assert the deletion — a removed gate is
+// only provably removed by a test that fails if it comes back.
 
-Deno.test("a non-revenue COA is untaxed under every jurisdiction", () => {
+Deno.test("🔴 the revenue COA does not change what a line is taxed", () => {
+  // 4700 Transaction Fee is the account the retired gate refused; 4000 is one it
+  // allowed; absent is the `custom-`-line shape. One answer, three accounts,
+  // under every jurisdiction.
   for (const destinations of [[at("Chicago")], [at("Frankfort")], [at("Rantoul")]]) {
-    const items = [makeItem({ coa_revenue: 4700 })];
-    materializeDocumentTax(items, ctx({ destinations }));
-    assertEquals(px(items[0]).taxes, []);
-    assertEquals(px(items[0]).total_cents, 10000);
+    const answers = ([4000, 4700, undefined] as const).map((coa_revenue) => {
+      const items = [makeItem({ coa_revenue })];
+      materializeDocumentTax(items, ctx({ destinations }));
+      return px(items[0]).taxes.map((t) => t.uid);
+    });
+    assertEquals(answers[0].length, 1);
+    assertEquals(answers[1], answers[0]);
+    assertEquals(answers[2], answers[0]);
   }
 });
 
-Deno.test("a revenue COA is taxed; an ABSENT COA is taxable too", () => {
-  // Order lines carry no `coa_revenue` at all — it lives on the product — so
-  // "unknown means taxable" here is load-bearing. Inverting it would zero the
-  // tax on every order line in the corpus.
-  const withCoa = [makeItem({ coa_revenue: 4000 })];
-  materializeDocumentTax(withCoa, ctx());
-  assertEquals(px(withCoa[0]).taxes.length, 1);
-
+Deno.test("an ABSENT coa_revenue is not a special case any more", () => {
+  // It used to be load-bearing: order lines carry no `coa_revenue` at all — it
+  // lives on the product — so "unknown means taxable" was what kept the gate
+  // from zeroing the tax on the entire order corpus. With no gate, `null` and
+  // absent are simply not consulted.
   const noCoa = [makeItem()];
-  // `null` and absent are the same answer to the gate — an order line carries
-  // the field as `null` out of `getInitialValues`, an invoice line omits it.
   assertEquals(noCoa[0].coa_revenue ?? null, null);
   materializeDocumentTax(noCoa, ctx());
   assertEquals(px(noCoa[0]).taxes.length, 1);
@@ -572,9 +579,12 @@ Deno.test("🔴 resolveLineTax: `tax` is exemption-applied, `base` is not", () =
   assertEquals(exempt.tax, null);
   assertEquals(exempt.base?.uid, "chi-rental-tax", "the base survives exemption");
 
-  // A non-revenue account is not taxABLE, which is a different fact: there is
-  // no tax it is exempt from, so both are null.
-  const untaxable = resolveLineTax(makeItem({ coa_revenue: 4700 }), at("Chicago"), ctx());
+  // ⚠️ The third case here used to be a non-revenue account — "not taxABLE,
+  // which is a different fact from exempt, so both are null". That gate is gone
+  // (see the COA block above), and the fact it expressed now travels on
+  // `taxed_as`, which IS a tax-rule axis: no tax lists the key `"none"`, so
+  // nothing is found and there is nothing to be exempt from.
+  const untaxable = resolveLineTax(makeItem({ taxed_as: "none" }), at("Chicago"), ctx());
   assertEquals(untaxable.tax, null);
   assertEquals(untaxable.base, null);
 });

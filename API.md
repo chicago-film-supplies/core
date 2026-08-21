@@ -2141,8 +2141,9 @@ revenue attribution that tracking-category rollups and the tax tables depend
 on is gone; store only the revenue account and the write-off is invisible.
 
 - **`coa_revenue`** — the revenue account of the *thing being credited*.
-  Product-sourced, same vocabulary as the invoice line it mirrors, and the
-  input to {@link isTaxableCoa}. Never the account the credit posts to.
+  Product-sourced, same vocabulary as the invoice line it mirrors. Never the
+  account the credit posts to, and — since the owner ruling of 2026-08-20 —
+  never an input to what the line is taxed either.
 - **`coa_posting`** — where this credit lands in the ledger. Any account in
   the `chart-of-accounts` catalog, including the expense range, which is
   exactly why it cannot be `COARevenueEnum`: that enum is shared with
@@ -14764,8 +14765,9 @@ revenue attribution that tracking-category rollups and the tax tables depend
 on is gone; store only the revenue account and the write-off is invisible.
 
 - **`coa_revenue`** — the revenue account of the *thing being credited*.
-  Product-sourced, same vocabulary as the invoice line it mirrors, and the
-  input to {@link isTaxableCoa}. Never the account the credit posts to.
+  Product-sourced, same vocabulary as the invoice line it mirrors. Never the
+  account the credit posts to, and — since the owner ruling of 2026-08-20 —
+  never an input to what the line is taxed either.
 - **`coa_posting`** — where this credit lands in the ledger. Any account in
   the `chart-of-accounts` catalog, including the expense range, which is
   exactly why it cannot be `COARevenueEnum`: that enum is shared with
@@ -20530,6 +20532,13 @@ applies above 5 chargeable days.
 Calculate tax amounts for a single line item from the Tax[] parameter.
 Returns a PriceModifier[] with computed amounts.
 
+**It prices the refs the line carries; it does not decide taxability.** That
+decision is `resolveLineTax` / `assignLineTaxes`, which writes `price.taxes`
+from `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here
+until the owner ruling of 2026-08-20 — *"an item's tax is item type ×
+jurisdiction, it has nothing to do with coa"* — and removing it is what makes
+the two functions answer one question instead of two.
+
 ### `calculateItemTotalCents(item: LineItem, taxes: Tax[]): number`
 
 Calculate the total (subtotal_discounted + taxes) for a single line item.
@@ -21168,7 +21177,13 @@ is blind forever, whereas an explained one goes red the moment its explanation
 stops holding:
 
 1. **`coa_untaxes`** — the invoice knows the line is non-revenue and the order
-   does not, so the taxability gate fires on one side only.
+   does not, so the retired account-keyed taxability gate fired on one side
+   only. ⚠️ **HISTORICAL, and deliberately kept.** Nothing prices this way
+   since the owner ruling of 2026-08-20 (`isTaxableCoa`), so no NEW line can
+   reach this arm — but the frozen documents the gate shaped are still
+   compared against their orders every time the badge renders, and deleting
+   the arm would turn each of them red for a rule that ran when they were
+   written.
 2. **`tax_date_version`** — the same tax NAMES at different rate versions, on a
    **frozen** order. One materializer, two as-of instants; the decision not to
    restate completed orders' quoted totals.
@@ -22622,12 +22637,21 @@ The revenue COAs that sales/rental tax is actually owed on — 4000 Rental
 Income, 4140 Pass Through Income, 4200 Retail Sales Income, 4210 Replacement
 Sales Income.
 
-**This is the single source of truth for line taxability**, and it has to be,
-because it previously existed only on the *Xero push* side and nowhere in the
-engine computing CFS's own totals. So CFS taxed lines it then told Xero were
-untaxable (`TaxType: "NONE"`), inflating `total` and leaving the difference as
-a phantom `amount_due`. Measured on prod 2026-07-30: **19 invoices /
-$2,741.78**, plus 9 orders / $453.50.
+🔴 **This is no longer a taxability rule.** It was the single source of truth
+for line taxability until the owner ruling of 2026-08-20 — *"an item's tax is
+item type × jurisdiction, it has nothing to do with coa"* — and both gates
+built on it (the engine's {@link isTaxableCoa} and api-cloudrun's
+`resolveXeroTaxType`) were removed together. What it records now is which
+accounts CFS's Xero history taxed, which is what {@link TAXABLE_COA_TO_TAX_NAME}
+and the restatement tools need.
+
+It existed because the set previously lived only on the *Xero push* side and
+nowhere in the engine computing CFS's own totals. So CFS taxed lines it then
+told Xero were untaxable (`TaxType: "NONE"`), inflating `total` and leaving
+the difference as a phantom `amount_due`. Measured on prod 2026-07-30:
+**19 invoices / $2,741.78**, plus 9 orders / $453.50. ⚠️ That failure is why
+the two gates had to be deleted in ONE commit rather than one at a time —
+removing either alone recreates it exactly.
 
 Everything outside the set is a service or fee — Service Income, Delivery
 Surcharges, Transaction Fee, Other Income — and sales tax is not owed on it.
@@ -22734,6 +22758,13 @@ applies above 5 chargeable days.
 
 Calculate tax amounts for a single line item from the Tax[] parameter.
 Returns a PriceModifier[] with computed amounts.
+
+**It prices the refs the line carries; it does not decide taxability.** That
+decision is `resolveLineTax` / `assignLineTaxes`, which writes `price.taxes`
+from `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here
+until the owner ruling of 2026-08-20 — *"an item's tax is item type ×
+jurisdiction, it has nothing to do with coa"* — and removing it is what makes
+the two functions answer one question instead of two.
 
 ### `calculateItemTotalCents(item: LineItem, taxes: Tax[]): number`
 
@@ -23047,25 +23078,33 @@ Whether a destination's collection endpoint matches its delivery endpoint
 
 ### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
 
-Is a line with this revenue COA subject to tax?
+Was a line with this revenue COA subject to tax **under the retired
+account-keyed gate**?
 
-**`null`/`undefined` means UNKNOWN, and unknown is treated as TAXABLE** — the
-opposite of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`, and the
-asymmetry is deliberate. That call site resolves the COA from the product
-before asking, so absent there really does mean "not a taxable account". The
-pricing engine has no such guarantee: **an order line item carries no
-`coa_revenue` at all** — the field is on the invoice item and the product, not
-the order item. Folding unknown into "untaxable" here would silently zero the
-tax on every order line in the corpus.
+🔴 **Nothing in the pricing pipeline calls this.** Owner, 2026-08-20: *"an
+item's tax is item type × jurisdiction, it has nothing to do with coa, coa is
+not a determining factor for tax."* The gate was deleted from
+`resolveLineTax`, from {@link calculateItemTax} and from api-cloudrun's
+`resolveXeroTaxType` in one commit — **one alone recreates api-cloudrun#409**,
+where CFS computed a tax it then told Xero not to charge and the difference
+stood as a phantom `amount_due` on 19 invoices / $2,741.78.
 
-So this gate only ever *removes* tax from a line it can positively identify as
-non-revenue, and a caller that can resolve the COA must supply it (see
-{@link PricingItem.coa_revenue}).
+What it is FOR now: explaining the corpus the gate shaped. The invoice-sync
+`coa_untaxes` arm (`@cfs/core/utils/invoices`) reads it to say why a frozen
+invoice line carries no tax while its order line does, and api-cloudrun's
+`repair-invoice-restate-from-xero.ts` reads it to restate historical lines the
+way Xero billed them. Both are statements about documents already written.
 
-⚠️ The two sides therefore still disagree for an unknown COA, which is exactly
-the state of a `custom-` line: it has no product, so the quote push sends
-`NONE` while the engine keeps taxing it. Closing that needs a decision about
-what a custom line's COA should be, not a change to this predicate.
+**`null`/`undefined` meant UNKNOWN, and unknown was TAXABLE** — the opposite
+of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`. That asymmetry
+was deliberate (an order line carries no `coa_revenue` at all, so folding
+unknown into "untaxable" would have zeroed the tax on every order line in the
+corpus) and it is preserved here, because a historical explanation has to
+reproduce the rule that ran — not a tidier one.
+
+⚠️ Do not reintroduce it as a taxability test. The class it was really
+covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
+is said on the axis the rule reads now: `taxed_as: "none"`.
 
 ### `isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem`
 
@@ -23425,12 +23464,13 @@ manager#297):
   **105** `sale` lines at coa 4700, all carrying no tax.
 
 That second direction is the larger population and the one nobody had looked
-at. It is also the harmless one: `materializeDocumentTax` clears
-`price.taxes` outright when `isTaxableCoa` is false, so a client that seeds a
-tax there is corrected on save. **The first direction is NOT corrected** —
-the gate passes and the materializer then prices whatever refs the line
-carries, which is none. A client keyed on `type` alone therefore drops tax
-silently on exactly the pairings this table exists to describe.
+at. ⚠️ **Both directions are now moot as a CLIENT hazard**, and the reason is
+worth keeping: `materializeDocumentTax` no longer reads a client's
+`price.taxes` refs at all — `assignLineTaxes` rebuilds the array from
+`(taxed_as ?? type, jurisdiction)`, so a client that seeds the wrong tax, or
+none, is corrected on save either way. This table survives as the DEFAULT a
+restatement tool needs when it is reconstructing what a historical line
+carried, not as a rule any writer consults.
 
 The **rate** is not here: it comes from the date-bracketed catalog via
 {@link findTaxAt} at the document's own date.
@@ -23458,12 +23498,21 @@ The revenue COAs that sales/rental tax is actually owed on — 4000 Rental
 Income, 4140 Pass Through Income, 4200 Retail Sales Income, 4210 Replacement
 Sales Income.
 
-**This is the single source of truth for line taxability**, and it has to be,
-because it previously existed only on the *Xero push* side and nowhere in the
-engine computing CFS's own totals. So CFS taxed lines it then told Xero were
-untaxable (`TaxType: "NONE"`), inflating `total` and leaving the difference as
-a phantom `amount_due`. Measured on prod 2026-07-30: **19 invoices /
-$2,741.78**, plus 9 orders / $453.50.
+🔴 **This is no longer a taxability rule.** It was the single source of truth
+for line taxability until the owner ruling of 2026-08-20 — *"an item's tax is
+item type × jurisdiction, it has nothing to do with coa"* — and both gates
+built on it (the engine's {@link isTaxableCoa} and api-cloudrun's
+`resolveXeroTaxType`) were removed together. What it records now is which
+accounts CFS's Xero history taxed, which is what {@link TAXABLE_COA_TO_TAX_NAME}
+and the restatement tools need.
+
+It existed because the set previously lived only on the *Xero push* side and
+nowhere in the engine computing CFS's own totals. So CFS taxed lines it then
+told Xero were untaxable (`TaxType: "NONE"`), inflating `total` and leaving
+the difference as a phantom `amount_due`. Measured on prod 2026-07-30:
+**19 invoices / $2,741.78**, plus 9 orders / $453.50. ⚠️ That failure is why
+the two gates had to be deleted in ONE commit rather than one at a time —
+removing either alone recreates it exactly.
 
 Everything outside the set is a service or fee — Service Income, Delivery
 Surcharges, Transaction Fee, Other Income — and sales tax is not owed on it.
@@ -23822,25 +23871,33 @@ untaxed without a second rule naming them.
 
 ### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
 
-Is a line with this revenue COA subject to tax?
+Was a line with this revenue COA subject to tax **under the retired
+account-keyed gate**?
 
-**`null`/`undefined` means UNKNOWN, and unknown is treated as TAXABLE** — the
-opposite of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`, and the
-asymmetry is deliberate. That call site resolves the COA from the product
-before asking, so absent there really does mean "not a taxable account". The
-pricing engine has no such guarantee: **an order line item carries no
-`coa_revenue` at all** — the field is on the invoice item and the product, not
-the order item. Folding unknown into "untaxable" here would silently zero the
-tax on every order line in the corpus.
+🔴 **Nothing in the pricing pipeline calls this.** Owner, 2026-08-20: *"an
+item's tax is item type × jurisdiction, it has nothing to do with coa, coa is
+not a determining factor for tax."* The gate was deleted from
+`resolveLineTax`, from {@link calculateItemTax} and from api-cloudrun's
+`resolveXeroTaxType` in one commit — **one alone recreates api-cloudrun#409**,
+where CFS computed a tax it then told Xero not to charge and the difference
+stood as a phantom `amount_due` on 19 invoices / $2,741.78.
 
-So this gate only ever *removes* tax from a line it can positively identify as
-non-revenue, and a caller that can resolve the COA must supply it (see
-{@link PricingItem.coa_revenue}).
+What it is FOR now: explaining the corpus the gate shaped. The invoice-sync
+`coa_untaxes` arm (`@cfs/core/utils/invoices`) reads it to say why a frozen
+invoice line carries no tax while its order line does, and api-cloudrun's
+`repair-invoice-restate-from-xero.ts` reads it to restate historical lines the
+way Xero billed them. Both are statements about documents already written.
 
-⚠️ The two sides therefore still disagree for an unknown COA, which is exactly
-the state of a `custom-` line: it has no product, so the quote push sends
-`NONE` while the engine keeps taxing it. Closing that needs a decision about
-what a custom line's COA should be, not a change to this predicate.
+**`null`/`undefined` meant UNKNOWN, and unknown was TAXABLE** — the opposite
+of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`. That asymmetry
+was deliberate (an order line carries no `coa_revenue` at all, so folding
+unknown into "untaxable" would have zeroed the tax on every order line in the
+corpus) and it is preserved here, because a historical explanation has to
+reproduce the rule that ran — not a tidier one.
+
+⚠️ Do not reintroduce it as a taxability test. The class it was really
+covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
+is said on the axis the rule reads now: `taxed_as: "none"`.
 
 ### `materializeDocumentTax(items: LineItem[], ctx: DocumentTaxContext): void`
 
@@ -23917,25 +23974,39 @@ jurisdiction = resolveJurisdiction(document destination, org claim, address, ori
 tax          = findTaxFor(catalog, jurisdiction, key, asOf)
 ```
 
-## Two rules sit in front of the lookup, and both are ORDER-dependent
+## ONE rule sits in front of the lookup
 
-1. **A non-revenue account is not taxable under any jurisdiction.** The gate
-   is {@link isTaxableCoa}, and it is kept in Phase 2 rather than deleted:
-   the argument for deleting it is that `item_types` already excludes every
-   non-revenue line TYPE, and `scripts/audit-tax-key.ts` §2 measures whether
-   that holds. On 2026-08-20 it did not — five priced
-   `sale`/`rental`/`replacement` lines sit at accounts 2210 and 4800 — so the
-   gate is still load-bearing. #409 is the measured cost of getting this
-   wrong: 19 invoices and $2,741.78 of phantom receivable when CFS taxed
-   lines it told Xero were `NONE`.
+**A `replacement` sources to the ORIGIN**, skipping levels 1 and 2 entirely.
+Every replacement is a sale in which **CFS is the end user** — the customer
+buys the item *for CFS*, to replace gear CFS owns — so the situs is CFS's own
+location and no document- or organization-level jurisdiction reaches it
+(owner, 2026-08-20). The live Xero ledger has been doing this all along:
+invoice 2348 (a Frankfort customer) bills its replacement at TAX001 Chicago
+Sales Tax.
 
-2. **A `replacement` sources to the ORIGIN**, skipping levels 1 and 2
-   entirely. Every replacement is a sale in which **CFS is the end user** —
-   the customer buys the item *for CFS*, to replace gear CFS owns — so the
-   situs is CFS's own location and no document- or organization-level
-   jurisdiction reaches it (owner, 2026-08-20). The live Xero ledger has
-   been doing this all along: invoice 2348 (a Frankfort customer) bills its
-   replacement at TAX001 Chicago Sales Tax.
+## 🔴 The revenue ACCOUNT is not one of the rules, and used to be
+
+Owner, 2026-08-20: *"an item's tax is item type × jurisdiction, it has
+nothing to do with coa, coa is not a determining factor for tax."* So the
+`isTaxableCoa` gate that stood here is **deleted**, not merely bypassed —
+`TAXABLE_REVENUE_COAS` is now a statement about what CFS's Xero history
+taxed, with no role in what a line is taxed today.
+
+⚠️ **The gate had a twin at the Xero boundary, and the two only ever made
+sense together.** `resolveXeroTaxType` refused a `TaxType` for the same
+accounts, so removing one alone recreates api-cloudrun#409 exactly: CFS
+computes a tax it then tells Xero not to charge, and the difference stands as
+a phantom `amount_due` (19 invoices / $2,741.78 when it last happened). They
+were removed in one commit.
+
+⚠️ What made this safe was a per-LINE statement replacing a per-ACCOUNT one.
+The class the gate was really covering was the CRMS bottled-water levy — a
+tax billed as a line, where `isTaxableCoa(2210) === false` was the only thing
+stopping sales tax being charged on a tax. That line now carries
+`taxed_as: "none"`, which says it on the axis this rule actually reads.
+Measured before the change (`scripts/audit-tax-key.ts` §2): 2 lines corpus-
+wide sat at a non-revenue account, both `paid` and therefore frozen, so no
+money moved.
 
 ⚠️ **Exemption zeroes `tax` and leaves `base`.** Both are returned because
 {@link assignLineTaxes} needs the answer twice — zeroed into `price.taxes`,

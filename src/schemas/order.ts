@@ -809,9 +809,12 @@ export interface OrderDocLineItemType {
   zero_priced?: boolean | null;
   crms_id?: number | null;
   /**
-   * Revenue chart-of-accounts code, denormalized from the product at write time,
-   * deciding whether the line is taxable at all (`isTaxableCoa` in
-   * `@cfs/core/utils/orders`).
+   * Revenue chart-of-accounts code, denormalized from the product at write time
+   * — **where the line's income posts in Xero**.
+   *
+   * ⚠️ It decided taxability until 2026-08-20 (`isTaxableCoa` in
+   * `@cfs/core/utils/orders`, now retired); everything below is the history of
+   * that gate, kept because it is what the field was added for.
    *
    * **Absent on every line written before `10.0.0-beta.120`** — which is
    * api-cloudrun#421 tail 3, and the reason this field exists. `isTaxableCoa`

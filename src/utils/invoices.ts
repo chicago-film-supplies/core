@@ -824,7 +824,13 @@ const TAX_EXPLAINABLE_FIELDS = new Set(["price.taxes", "price.taxes_base", "pric
  * stops holding:
  *
  * 1. **`coa_untaxes`** — the invoice knows the line is non-revenue and the order
- *    does not, so the taxability gate fires on one side only.
+ *    does not, so the retired account-keyed taxability gate fired on one side
+ *    only. ⚠️ **HISTORICAL, and deliberately kept.** Nothing prices this way
+ *    since the owner ruling of 2026-08-20 (`isTaxableCoa`), so no NEW line can
+ *    reach this arm — but the frozen documents the gate shaped are still
+ *    compared against their orders every time the badge renders, and deleting
+ *    the arm would turn each of them red for a rule that ran when they were
+ *    written.
  * 2. **`tax_date_version`** — the same tax NAMES at different rate versions, on a
  *    **frozen** order. One materializer, two as-of instants; the decision not to
  *    restate completed orders' quoted totals.
@@ -898,6 +904,8 @@ export function explainInvoiceItemDifferences(
   const expectedTax = taxAmountCents(expected);
   const currentTax = taxAmountCents(current);
 
+  // ⚠️ `isTaxableCoa` is the RETIRED gate, read here on purpose: this arm
+  // explains documents written while it ran. See its docblock.
   const coaUntaxes = !isTaxableCoa((current as { coa_revenue?: COARevenueType | null }).coa_revenue) &&
     (expected as { coa_revenue?: COARevenueType | null }).coa_revenue == null;
   const dateVersion = context.orderFrozen &&
