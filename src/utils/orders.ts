@@ -99,6 +99,8 @@ export type Tax =
       | "jurisdiction"
       | "item_types"
       | "xero_tax_type"
+      | "xero_account_code"
+      | "xero_item_code"
       | "xero_components"
     >
   >;

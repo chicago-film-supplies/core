@@ -113,6 +113,29 @@ export interface Tax {
    * $0 tax while CFS billed 10.5%, plus a hard failure on the quote push.
    */
   xero_tax_type?: string | null;
+  /**
+   * Where a **flat** tax posts in Xero, and which Xero Item its line references.
+   *
+   * ⚠️ **Xero cannot express a flat tax at all** — a `TaxType` is a percentage
+   * rate, so a per-unit levy has no rate to be. It is pushed as an ordinary
+   * LINE instead (`TaxType: "NONE"`), and these two fields are what that line
+   * needs: the account the money it collects sits in, and the catalog Item it
+   * shows as.
+   *
+   * The Chicago Bottled Water Tax is the live case: 5¢ per bottle, collected
+   * for the City, so it posts to a **liability** account (2210) rather than to
+   * revenue. Both stay `null` on a `percent` tax, which carries a
+   * {@link Tax.xero_tax_type} instead.
+   *
+   * ⚠️ On the tax DOCUMENT rather than in api-cloudrun, for the same reason
+   * `xero_tax_type` is: a hardcoded table keyed on uid falls off at the first
+   * supersede, and the levy's account is exactly the sort of fact that gets
+   * copied into a second place and drifts. #2188 booked it to 4800 while
+   * #2380/#2381/#2390 booked it to 2210 — the drift already happened once.
+   */
+  xero_account_code?: number | null;
+  /** @see {@link Tax.xero_account_code}. The Xero `ItemCode` the line carries. */
+  xero_item_code?: string | null;
   /** @see {@link XeroTaxComponentType} — must sum to {@link Tax.rate}. */
   xero_components?: XeroTaxComponentType[];
   version: number;
@@ -221,6 +244,8 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   applied_to_fs: FirestoreTimestamp.nullable().optional(),
   effective_from: chicagoStartOfDay().nullable().optional(),
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
+  xero_account_code: z.int().nullable().optional(),
+  xero_item_code: z.string().min(1).max(30).nullable().optional(),
   xero_components: z.array(XeroTaxComponent).optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
@@ -258,6 +283,8 @@ export interface CreateTaxInputType {
   item_types?: PreTaxItemType[];
   effective_from?: string | null;
   xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
   xero_components?: XeroTaxComponentType[];
 }
 
@@ -273,6 +300,8 @@ export const CreateTaxInput: z.ZodType<CreateTaxInputType> = z.object({
   item_types: z.array(PreTaxItemTypeEnum).optional(),
   effective_from: chicagoStartOfDay().nullable().optional(),
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
+  xero_account_code: z.int().nullable().optional(),
+  xero_item_code: z.string().min(1).max(30).nullable().optional(),
   xero_components: z.array(XeroTaxComponent).optional(),
 });
 
@@ -296,6 +325,8 @@ export interface UpdateTaxInputType {
   item_types?: PreTaxItemType[];
   effective_from?: string | null;
   xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
   xero_components?: XeroTaxComponentType[];
   version: number;
 }
@@ -313,6 +344,8 @@ export const UpdateTaxInput: z.ZodType<UpdateTaxInputType> = z.object({
   item_types: z.array(PreTaxItemTypeEnum).optional(),
   effective_from: chicagoStartOfDay().nullable().optional(),
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
+  xero_account_code: z.int().nullable().optional(),
+  xero_item_code: z.string().min(1).max(30).nullable().optional(),
   xero_components: z.array(XeroTaxComponent).optional(),
   version: z.int().min(0),
 });
@@ -407,6 +440,8 @@ export const SupersedeTaxInput: z.ZodType<SupersedeTaxInputType> = z.object({
   valid_to: chicagoInstant().nullable().optional(),
   effective_from: chicagoStartOfDay().nullable().optional(),
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
+  xero_account_code: z.int().nullable().optional(),
+  xero_item_code: z.string().min(1).max(30).nullable().optional(),
   xero_components: z.array(XeroTaxComponent).optional(),
   jurisdiction: JurisdictionEnum.nullable().optional(),
   item_types: z.array(PreTaxItemTypeEnum).optional(),

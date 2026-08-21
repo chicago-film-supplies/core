@@ -1972,6 +1972,8 @@ interface CreateTaxInputType {
   item_types?: PreTaxItemType[];
   effective_from?: string | null;
   xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
   xero_components?: XeroTaxComponentType[];
 }
 ```
@@ -7191,6 +7193,8 @@ interface Tax {
   applied_to_fs?: FirestoreTimestampType | null;
   effective_from?: string | null;
   xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
   xero_components?: XeroTaxComponentType[];
   version: number;
   created_by: ActorRefType;
@@ -8297,6 +8301,8 @@ interface UpdateTaxInputType {
   item_types?: PreTaxItemType[];
   effective_from?: string | null;
   xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
   xero_components?: XeroTaxComponentType[];
   version: number;
 }
@@ -20386,7 +20392,7 @@ every instant — which throws `Tax catalog drift` on the pricing path, out of
 a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_components">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
 ```
 
 ### `TransactionFeeLineItem`
@@ -22664,7 +22670,7 @@ every instant — which throws `Tax catalog drift` on the pricing path, out of
 a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_components">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
 ```
 
 ### `TransactionFeeLineItem`
@@ -23500,7 +23506,7 @@ every instant — which throws `Tax catalog drift` on the pricing path, out of
 a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_components">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
 ```
 
 ### `TaxDestination`
