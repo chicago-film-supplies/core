@@ -1220,10 +1220,17 @@ export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTota
   // future decision to TAX a fee would make this genuinely circular and needs a
   // different shape, not a bigger expression.
   //
-  // Inert on today's corpus: 0 prod invoices carry a non-empty
+  // ⚠️ **No longer inert.** This said "0 prod invoices carry a non-empty
   // `totals.transaction_fees`, because the Card Fee is still a CRMS-authored
-  // `sale` line living inside `subtotal_discounted_cents`. This lands ahead of
-  // that migration so the flip is a data change rather than a code change.
+  // `sale` line" — true when it was written, false since 2026-08-18, when
+  // api-cloudrun#401 flipped both Card Fee products to `transaction_fee`. **124
+  // prod invoices and 79 orders now carry one**, so this arm runs on the money
+  // path rather than standing ready for a migration.
+  //
+  // Worth knowing because the claim was load-bearing elsewhere: the manager's
+  // `TotalsTable` flat-rate arm had never executed for the same reason, and it
+  // shipped a 100x error ($43.60 rendering as $0.43) that only became reachable
+  // when this stopped being true.
   const transaction_fees = getTransactionFeeTotals(
     costTransactionFees(items, subtotalDiscountedCents + taxSumCents),
   );
