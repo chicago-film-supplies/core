@@ -54,12 +54,28 @@ export interface Store {
    * somewhere new — while a store's own jurisdiction is exactly the thing that
    * should be stated by hand.
    *
-   * `null`/absent means this store has no declared origin, which is a real
-   * answer and a reportable gap: an order assigned to it sources from nowhere.
-   * Prod's `CSR` is that case. `scripts/audit-tax-axes.ts` exits 2 when the
-   * DEFAULT store cannot resolve one.
+   * 🔴 **REQUIRED and non-nullable as of 2026-08-21**, and it used to say the
+   * opposite: *"`null`/absent means this store has no declared origin, which is
+   * a real answer and a reportable gap."* It is not an answer.
+   * `requireOriginJurisdiction` (api-cloudrun `lib/destinations.ts`) THROWS on a
+   * store that cannot resolve one, and that throw sits on the pricing path of
+   * every order and invoice write assigned to the store — so "no origin" is an
+   * outage for that store, not a gap someone reports. Making the field required
+   * is what turns the throw into an unrepresentable state, which that function's
+   * own docblock named as owed.
+   *
+   * **Required, not merely non-optional**: a stored `null` throws exactly like
+   * an absent field, so `.nullable()` would have kept the defect representable
+   * under a different spelling.
+   *
+   * Safe to tighten because the corpus was already clean — measured 2026-08-21,
+   * **2 stores in prod and 2 in dev, all four carrying `"chicago"`** — so no
+   * document migration was needed. ⚠️ That measurement is the precondition, not
+   * a footnote: `StoreSchema` is a `z.strictObject`, so one store missing the
+   * key would fail every parse the moment this landed (api-cloudrun#443's
+   * shape). Re-measure before tightening any other field this way.
    */
-  jurisdiction?: JurisdictionType | null;
+  jurisdiction: JurisdictionType;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -80,7 +96,7 @@ export const StoreSchema: z.ZodType<Store> = z.strictObject({
   // No `column: true` — `display-columns.test.ts` bans a heading ending in
   // "Uid", and there is no name to show in its place (see the docblock).
   uid_destination: FirestoreId.nullable().optional(),
-  jurisdiction: JurisdictionEnum.nullable().optional().meta({
+  jurisdiction: JurisdictionEnum.meta({
     column: true,
     label: "Jurisdiction",
   }),
@@ -104,6 +120,13 @@ export interface CreateStoreInputType {
   name: string;
   crms_store_id: number;
   default?: boolean;
+  /**
+   * ⚠️ **Required on the INPUT, and that is the half that makes the stored
+   * field's requirement reachable.** Tightening `Store.jurisdiction` without
+   * this leaves `createStore` unable to construct a valid document at all — the
+   * API could no longer create a store, and only a script could repair one.
+   */
+  jurisdiction: JurisdictionType;
 }
 /** Input schema for creating a store. */
 export const CreateStoreInput: z.ZodType<CreateStoreInputType> = z.object({
@@ -111,6 +134,7 @@ export const CreateStoreInput: z.ZodType<CreateStoreInputType> = z.object({
   name: z.string().min(1).max(100),
   crms_store_id: z.int(),
   default: z.boolean().optional(),
+  jurisdiction: JurisdictionEnum,
 });
 
 /** Input type for updating a store. */
@@ -120,6 +144,13 @@ export interface UpdateStoreInputType {
   crms_store_id?: number;
   default?: boolean;
   active?: boolean;
+  /**
+   * Optional here and required on create, which is the ordinary patch shape —
+   * but note it is **not nullable** on either. There is no way to un-declare a
+   * store's origin, deliberately: the only reason to clear it would be to reach
+   * the state the required field exists to forbid.
+   */
+  jurisdiction?: JurisdictionType;
   version: number;
 }
 /** Input schema for updating a store. */
@@ -129,5 +160,6 @@ export const UpdateStoreInput: z.ZodType<UpdateStoreInputType> = z.object({
   crms_store_id: z.int().optional(),
   default: z.boolean().optional(),
   active: z.boolean().optional(),
+  jurisdiction: JurisdictionEnum.optional(),
   version: z.int().min(0),
 });

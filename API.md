@@ -1889,6 +1889,7 @@ interface CreateStoreInputType {
   name: string;
   crms_store_id: number;
   default?: boolean;
+  jurisdiction: JurisdictionType;
 }
 ```
 
@@ -6823,7 +6824,7 @@ interface Store {
   default: boolean;
   default_location: UidNameRefType | null;
   uid_destination?: string | null;
-  jurisdiction?: JurisdictionType | null;
+  jurisdiction: JurisdictionType;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -8248,6 +8249,7 @@ interface UpdateStoreInputType {
   crms_store_id?: number;
   default?: boolean;
   active?: boolean;
+  jurisdiction?: JurisdictionType;
   version: number;
 }
 ```
@@ -15122,6 +15124,7 @@ interface CreateStoreInputType {
   name: string;
   crms_store_id: number;
   default?: boolean;
+  jurisdiction: JurisdictionType;
 }
 ```
 
@@ -15136,7 +15139,7 @@ interface Store {
   default: boolean;
   default_location: UidNameRefType | null;
   uid_destination?: string | null;
-  jurisdiction?: JurisdictionType | null;
+  jurisdiction: JurisdictionType;
   crms_store_id: number;
   version: number;
   active: boolean;
@@ -15172,6 +15175,7 @@ interface UpdateStoreInputType {
   crms_store_id?: number;
   default?: boolean;
   active?: boolean;
+  jurisdiction?: JurisdictionType;
   version: number;
 }
 ```

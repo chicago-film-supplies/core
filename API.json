@@ -897,7 +897,7 @@
         {
           "kind": "interface",
           "name": "CreateStoreInputType",
-          "declaration": "interface CreateStoreInputType {\n  uid: string;\n  name: string;\n  crms_store_id: number;\n  default?: boolean;\n}",
+          "declaration": "interface CreateStoreInputType {\n  uid: string;\n  name: string;\n  crms_store_id: number;\n  default?: boolean;\n  jurisdiction: JurisdictionType;\n}",
           "doc": "Input type for creating a store."
         },
         {
@@ -3225,7 +3225,7 @@
         {
           "kind": "interface",
           "name": "Store",
-          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  uid_destination?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  uid_destination?: string | null;\n  jurisdiction: JurisdictionType;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A store document in Firestore."
         },
         {
@@ -3903,7 +3903,7 @@
         {
           "kind": "interface",
           "name": "UpdateStoreInputType",
-          "declaration": "interface UpdateStoreInputType {\n  uid: string;\n  name?: string;\n  crms_store_id?: number;\n  default?: boolean;\n  active?: boolean;\n  version: number;\n}",
+          "declaration": "interface UpdateStoreInputType {\n  uid: string;\n  name?: string;\n  crms_store_id?: number;\n  default?: boolean;\n  active?: boolean;\n  jurisdiction?: JurisdictionType;\n  version: number;\n}",
           "doc": "Input type for updating a store."
         },
         {
@@ -7324,13 +7324,13 @@
         {
           "kind": "interface",
           "name": "CreateStoreInputType",
-          "declaration": "interface CreateStoreInputType {\n  uid: string;\n  name: string;\n  crms_store_id: number;\n  default?: boolean;\n}",
+          "declaration": "interface CreateStoreInputType {\n  uid: string;\n  name: string;\n  crms_store_id: number;\n  default?: boolean;\n  jurisdiction: JurisdictionType;\n}",
           "doc": "Input type for creating a store."
         },
         {
           "kind": "interface",
           "name": "Store",
-          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  uid_destination?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Store {\n  uid: string;\n  name: string;\n  default: boolean;\n  default_location: UidNameRefType | null;\n  uid_destination?: string | null;\n  jurisdiction: JurisdictionType;\n  crms_store_id: number;\n  version: number;\n  active: boolean;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A store document in Firestore."
         },
         {
@@ -7348,7 +7348,7 @@
         {
           "kind": "interface",
           "name": "UpdateStoreInputType",
-          "declaration": "interface UpdateStoreInputType {\n  uid: string;\n  name?: string;\n  crms_store_id?: number;\n  default?: boolean;\n  active?: boolean;\n  version: number;\n}",
+          "declaration": "interface UpdateStoreInputType {\n  uid: string;\n  name?: string;\n  crms_store_id?: number;\n  default?: boolean;\n  active?: boolean;\n  jurisdiction?: JurisdictionType;\n  version: number;\n}",
           "doc": "Input type for updating a store."
         }
       ]
