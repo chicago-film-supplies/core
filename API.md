@@ -1654,7 +1654,8 @@ interface CreateInvoiceInputType {
   uid: string;
   query_by_orders: string[];
   organization: typeLiteral;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
+  tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -1748,6 +1749,7 @@ interface CreateOrderInputType {
   organization: typeLiteral;
   status: OrderStatusType;
   tax_profile?: TaxProfileType | null;
+  tax_exempt?: boolean;
   destinations: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -7996,6 +7998,7 @@ Input schema for PUT /invoices/:uid — partial update.
 ```ts
 interface UpdateInvoiceInputType {
   status?: InvoiceStatusType;
+  tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -8095,6 +8098,7 @@ interface UpdateOrderInputType {
   organization?: typeLiteral;
   status?: OrderStatusType;
   tax_profile?: TaxProfileType | null;
+  tax_exempt?: boolean;
   destinations?: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -12043,7 +12047,8 @@ interface CreateInvoiceInputType {
   uid: string;
   query_by_orders: string[];
   organization: typeLiteral;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
+  tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -12483,6 +12488,7 @@ Input schema for PUT /invoices/:uid — partial update.
 ```ts
 interface UpdateInvoiceInputType {
   status?: InvoiceStatusType;
+  tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -12852,6 +12858,7 @@ interface CreateOrderInputType {
   organization: typeLiteral;
   status: OrderStatusType;
   tax_profile?: TaxProfileType | null;
+  tax_exempt?: boolean;
   destinations: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -13575,6 +13582,7 @@ interface UpdateOrderInputType {
   organization?: typeLiteral;
   status?: OrderStatusType;
   tax_profile?: TaxProfileType | null;
+  tax_exempt?: boolean;
   destinations?: DestinationType[];
   items?: OrderItemType[];
   subject?: string;

@@ -789,7 +789,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_profile?: TaxProfileType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -837,7 +837,7 @@
         {
           "kind": "interface",
           "name": "CreateOrderInputType",
-          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
+          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
           "doc": "Input schema for POST /orders — what the endpoint accepts."
         },
         {
@@ -3795,7 +3795,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -3843,7 +3843,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrderInputType",
-          "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /orders/:uid — partial update."
         },
         {
@@ -5934,7 +5934,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_profile: TaxProfileType;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_profile?: TaxProfileType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -6114,7 +6114,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -6316,7 +6316,7 @@
         {
           "kind": "interface",
           "name": "CreateOrderInputType",
-          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
+          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
           "doc": "Input schema for POST /orders — what the endpoint accepts."
         },
         {
@@ -6652,7 +6652,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrderInputType",
-          "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /orders/:uid — partial update."
         },
         {

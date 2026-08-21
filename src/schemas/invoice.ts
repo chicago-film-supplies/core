@@ -858,7 +858,25 @@ export interface CreateInvoiceInputType {
   uid: string;
   query_by_orders: string[];
   organization: { uid: string };
-  tax_profile: TaxProfileType;
+  /**
+   * ⚠️ **OPTIONAL as of the expand step, and being retired** — the server
+   * derives an invoice's tax from the organization axes and the destinations it
+   * already reads, so a client should stop sending this
+   * (api-cloudrun#596 item 2). It stays accepted until the jurisdiction
+   * migration lands, because until then a document-level LOCATION profile is
+   * the ONLY place an order's jurisdiction lives — 27 orders and 35 invoices on
+   * prod carry one — and dropping it would bill them at the origin.
+   *
+   * The precedent for the removal is #409, which stripped `coa_revenue` from
+   * the input on the same argument: the account is server-resolved from the
+   * product, and the client reads it rather than authoring it.
+   */
+  tax_profile?: TaxProfileType;
+  /**
+   * The EXEMPTION axis. Sticky with the customer's — see
+   * `CreateOrderInput.tax_exempt`.
+   */
+  tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -874,7 +892,8 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   uid: FirestoreId,
   query_by_orders: z.array(z.string()).min(1, "At least one source order is required"),
   organization: z.object({ uid: FirestoreId }),
-  tax_profile: TaxProfileEnum,
+  tax_profile: TaxProfileEnum.optional(),
+  tax_exempt: z.boolean().optional(),
   items: z.array(InvoiceItemInputSchema).optional(),
   destinations: z.array(InvoiceDocDestination).optional(),
   date: chicagoStartOfDay().optional(),
@@ -888,6 +907,15 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
 /** Input schema for PUT /invoices/:uid — partial update. */
 export interface UpdateInvoiceInputType {
   status?: InvoiceStatusType;
+  /**
+   * The EXEMPTION axis. Absent = leave unchanged; `false` = this invoice
+   * asserts none. No `null` arm, for the reason on `UpdateOrderInput`.
+   *
+   * ⚠️ There is deliberately still **no `tax_profile` here** — an invoice's
+   * profile has never been editable after create, and adding one now would be
+   * a new writer for a field being deleted.
+   */
+  tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -902,6 +930,7 @@ export interface UpdateInvoiceInputType {
 /** Input schema for updating an invoice. */
 export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   status: InvoiceStatus.optional(),
+  tax_exempt: z.boolean().optional(),
   items: z.array(InvoiceItemInputSchema).optional(),
   destinations: z.array(InvoiceDocDestination).optional(),
   date: chicagoStartOfDay().optional(),
