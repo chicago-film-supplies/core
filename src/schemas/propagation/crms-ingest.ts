@@ -133,7 +133,7 @@ const crmsInvoiceUpsertTransaction: TransactionDefinition = {
  * or by the shared thread cowrite. It is an UPSERT, so both arms are declared
  * and `rules_fired` reports per run which of them actually moved.
  *
- * ## ⚠️ `tax-profile-to-orders` is declared as of api-cloudrun#528, and the
+ * ## ⚠️ `tax-axes-to-orders` is declared as of api-cloudrun#528, and the
  *    defect it closed was TWO-SIDED
  *
  * This comment previously recorded the step as deliberately absent, because
@@ -146,14 +146,14 @@ const crmsInvoiceUpsertTransaction: TransactionDefinition = {
  * | invoice | writes **nothing**, deliberately     | wrote the snapshot |
  *
  * i.e. the two writers were exact inverses of each other, and #528 named only
- * the invoice half. Both halves are now the native path's rule: an org's
- * `tax_profile` change reprices its live **un-invoiced orders** and touches no
+ * the invoice half. Both halves are now the native path's rule: an org's tax
+ * AXES change reprices its live **un-invoiced orders** and touches no
  * invoice on either path. An invoice is a billing document whose taxes were
  * agreed at issue — several are in Xero — and `resyncInvoice` is its deliberate
  * repair path, exactly as `POST /orders/{uid}/tax-resync` is an invoiced
  * order's. `applyOrgToOrder` now delegates to the same
- * `applyOrgTaxProfileToOrder` the native path uses, so there is one
- * implementation of the reprice and the two cannot drift.
+ * `applyOrgTaxToOrder` the native path uses, so there is one implementation of
+ * the reprice and the two cannot drift.
  *
  * ⚠️ **Inert on the corpus when it landed, and that is a fact worth keeping**:
  * prod measured 0 of 987 orders and 0 of 1,010 invoices disagreeing with their
@@ -164,14 +164,14 @@ const crmsInvoiceUpsertTransaction: TransactionDefinition = {
 const crmsMemberOrganizationTransaction: TransactionDefinition = {
   id: "crms-member-organization",
   description:
-    "Creates or updates a CFS organization from a CRMS member — geocoded billing address, emails/phones, tax profile derived from the CRMS sales-tax class, and the full child-contact set with bidirectional back-references maintained in both directions. Fans the org's name and billing address out to its live orders and invoices, reprices the live un-invoiced orders when the tax profile moves, and cowrites a default thread for the organization and for every contact it mints.",
+    "Creates or updates a CFS organization from a CRMS member — geocoded billing address, emails/phones, tax axes derived from the CRMS sales-tax class, and the full child-contact set with bidirectional back-references maintained in both directions. Fans the org's name and billing address out to its live orders and invoices, reprices the live un-invoiced orders when either tax axis moves, and cowrites a default thread for the organization and for every contact it mints.",
   steps: [
     "create-org:org-to-contacts",
     "update-org:contacts-change",
     "update-org:name-to-contacts",
     "update-org:name-to-orders",
     "update-org:billing-to-orders",
-    "update-org:tax-profile-to-orders",
+    "update-org:tax-axes-to-orders",
     "update-org:name-to-invoices",
     "update-org:billing-to-invoices",
     "cowrite-thread:organizations-to-thread",

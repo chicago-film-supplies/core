@@ -198,7 +198,7 @@ export type RuleId =
   | "update-org:billing-to-orders"
   | "update-org:name-to-invoices"
   | "update-org:billing-to-invoices"
-  | "update-org:tax-profile-to-orders"
+  | "update-org:tax-axes-to-orders"
   | "update-org:contacts-change"
   // contacts.ts
   | "create-contact:contact-to-orgs"
