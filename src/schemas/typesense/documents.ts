@@ -197,7 +197,6 @@ export interface InvoiceDocument {
   crms_id?: number;
   crms_id_str?: string;
   status: string;
-  tax_profile: string;
   number_orders?: number[];
   number_orders_str?: string[];
   subject?: string;
@@ -209,7 +208,6 @@ export interface InvoiceDocument {
     name: string;
     crms_id?: number;
     crms_id_str?: string;
-    tax_profile?: string;
     xero_id?: string;
     billing_address?: TypesenseAddressFields;
   };
@@ -251,7 +249,6 @@ export interface CreditNoteDocument {
   number_str?: string;
   status: string;
   reason: string;
-  tax_profile: string;
   reference?: string;
   external_notes?: string;
   internal_notes?: string;
@@ -260,7 +257,6 @@ export interface CreditNoteDocument {
     name: string;
     crms_id?: number;
     crms_id_str?: string;
-    tax_profile?: string;
     xero_id?: string;
     billing_address?: TypesenseAddressFields;
   };
@@ -322,8 +318,6 @@ export interface OrderDocument {
   crms_id?: number;
   crms_id_str?: string;
   status: string;
-  /** Absent = inherits `organization.tax_profile`; present = a deliberate override. */
-  tax_profile?: string;
   deliveries?: boolean;
   pickups?: boolean;
   subject?: string;
@@ -339,7 +333,6 @@ export interface OrderDocument {
     name: string;
     crms_id?: number;
     crms_id_str?: string;
-    tax_profile?: string;
     xero_id?: string;
     billing_address?: TypesenseAddressFields;
   };
@@ -544,7 +537,8 @@ export interface OrganizationDocument {
   crms_id: number;
   crms_id_str?: string;
   xero_id?: string;
-  tax_profile: string;
+  jurisdiction_claim?: string;
+  tax_exempt?: boolean;
   emails?: string[];
   phones?: string[];
   billing_address: TypesenseAddressFields;

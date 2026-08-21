@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for orders. */
 export const orders: TypesenseCollectionConfig = {
   alias: "orders",
-  version: 24,
+  version: 25,
   firestoreCollection: "orders",
-  collectionName: "orders_v24",
+  collectionName: "orders_v25",
   schema: {
-    name: "orders_v24",
+    name: "orders_v25",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -17,13 +17,6 @@ export const orders: TypesenseCollectionConfig = {
       { name: "crms_id", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "crms_id_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "status", type: "string", facet: true },
-      // OPTIONAL because `Order.tax_profile` is nullable and `null` means
-      // "inherit the organization's" — the translator omits the key rather than
-      // sending a null for a `string` field. So in the index, PRESENT means the
-      // order deliberately overrides and ABSENT means it inherits; the
-      // inherited baseline is `organization.tax_profile` below. Faceting on this
-      // field therefore enumerates overrides, which is the operator's question.
-      { name: "tax_profile", type: "string", facet: true, optional: true },
       { name: "deliveries", type: "bool", facet: true, optional: true },
       { name: "pickups", type: "bool", facet: true, optional: true },
       { name: "subject", type: "string", sort: true, stem: true, optional: true },
@@ -39,7 +32,6 @@ export const orders: TypesenseCollectionConfig = {
       // carries a profile, so an absent value here would mean an indexing bug
       // rather than a document mid-backfill — and Typesense refusing the
       // document is the honest report of that.
-      { name: "organization.tax_profile", type: "string", facet: true },
       { name: "organization.xero_id", type: "string", optional: true },
       ...typesenseAddressFields("organization.billing_address"),
       { name: "dates", type: "object" },

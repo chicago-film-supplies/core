@@ -981,7 +981,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  tax_profile?: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -1269,7 +1269,7 @@
         {
           "kind": "interface",
           "name": "DocumentOrganizationSnapshotType",
-          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
+          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
           "doc": "The customer-organization snapshot embedded on an order/invoice/credit note."
         },
         {
@@ -1665,7 +1665,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile?: TaxProfileType;\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -2331,7 +2331,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType | null;\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -2535,7 +2535,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -4790,7 +4790,7 @@
         {
           "kind": "interface",
           "name": "DocumentOrganizationSnapshotType",
-          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
+          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name: string;\n  crms_id?: number | null;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
           "doc": "The customer-organization snapshot embedded on an order/invoice/credit note."
         },
         {
@@ -5946,7 +5946,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile: TaxProfileType;\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_profile?: TaxProfileType;\n  tax_exempt?: boolean | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject?: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -6454,7 +6454,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile: TaxProfileType | null;\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id?: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -6786,7 +6786,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -7166,7 +7166,7 @@
         {
           "kind": "interface",
           "name": "CreditNote",
-          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  tax_profile: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface CreditNote {\n  uid: string;\n  number: number;\n  status: CreditNoteStatusType;\n  reason: SettlementReasonType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  tax_profile?: TaxProfileType;\n  items: CreditNoteDocLineItem[];\n  totals: CreditNoteDocTotals;\n  remaining_credit_cents: number;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  xero_credit_note_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A credit note issued to an organization."
         },
         {
@@ -7768,7 +7768,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocument",
-          "declaration": "interface CreditNoteDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  reason: string;\n  tax_profile: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  remaining_credit_cents?: number;\n  remaining_credit_cents_str?: string;\n  xero_credit_note_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface CreditNoteDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  reason: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  remaining_credit_cents?: number;\n  remaining_credit_cents_str?: string;\n  xero_credit_note_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "Typesense document type for credit notes."
         },
         {
@@ -7798,7 +7798,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocument",
-          "declaration": "interface InvoiceDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  status: string;\n  tax_profile: string;\n  number_orders?: number[];\n  number_orders_str?: string[];\n  subject?: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  crms_opportunity_ids?: number[];\n  xero_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface InvoiceDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  status: string;\n  number_orders?: number[];\n  number_orders_str?: string[];\n  subject?: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  crms_opportunity_ids?: number[];\n  xero_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "Typesense document type for invoices."
         },
         {
@@ -7810,13 +7810,13 @@
         {
           "kind": "interface",
           "name": "OrderDocument",
-          "declaration": "interface OrderDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  status: string;\n  tax_profile?: string;\n  deliveries?: boolean;\n  pickups?: boolean;\n  subject?: string;\n  reference?: string;\n  crms_status?: string;\n  invoices?: Array<typeLiteral>;\n  organization: typeLiteral;\n  dates: typeLiteral;\n  destinations: Array<typeLiteral>;\n  totals: typeLiteral;\n  items?: Array<typeLiteral>;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface OrderDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  status: string;\n  deliveries?: boolean;\n  pickups?: boolean;\n  subject?: string;\n  reference?: string;\n  crms_status?: string;\n  invoices?: Array<typeLiteral>;\n  organization: typeLiteral;\n  dates: typeLiteral;\n  destinations: Array<typeLiteral>;\n  totals: typeLiteral;\n  items?: Array<typeLiteral>;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for orders."
         },
         {
           "kind": "interface",
           "name": "OrganizationDocument",
-          "declaration": "interface OrganizationDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  crms_id: number;\n  crms_id_str?: string;\n  xero_id?: string;\n  tax_profile: string;\n  emails?: string[];\n  phones?: string[];\n  billing_address: TypesenseAddressFields;\n  contacts: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  last_order?: number;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface OrganizationDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  crms_id: number;\n  crms_id_str?: string;\n  xero_id?: string;\n  jurisdiction_claim?: string;\n  tax_exempt?: boolean;\n  emails?: string[];\n  phones?: string[];\n  billing_address: TypesenseAddressFields;\n  contacts: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  last_order?: number;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for organizations."
         },
         {

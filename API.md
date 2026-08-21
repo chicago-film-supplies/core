@@ -2081,7 +2081,7 @@ interface CreditNote {
   external_notes?: string | null;
   internal_notes?: string | null;
   organization: DocumentOrganizationSnapshotType;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
   remaining_credit_cents: number;
@@ -2717,7 +2717,7 @@ interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   xero_id: string | null;
@@ -3524,7 +3524,7 @@ interface Invoice {
   status: InvoiceStatusType;
   query_by_orders: string[];
   number_orders: number[];
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   tax_exempt?: boolean | null;
   date: string;
   date_fs: FirestoreTimestampType;
@@ -4928,7 +4928,7 @@ interface Order {
   organization: DocumentOrganizationSnapshotType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
-  tax_profile: TaxProfileType | null;
+  tax_profile?: TaxProfileType | null;
   tax_exempt?: boolean | null;
   uid_store?: string | null;
   totals: OrderDocTotalsType;
@@ -5376,7 +5376,7 @@ interface Organization {
   name: string;
   crms_id: number;
   xero_id: string | null;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -9969,7 +9969,7 @@ interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   xero_id: string | null;
@@ -12088,7 +12088,7 @@ interface Invoice {
   status: InvoiceStatusType;
   query_by_orders: string[];
   number_orders: number[];
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   tax_exempt?: boolean | null;
   date: string;
   date_fs: FirestoreTimestampType;
@@ -13113,7 +13113,7 @@ interface Order {
   organization: DocumentOrganizationSnapshotType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
-  tax_profile: TaxProfileType | null;
+  tax_profile?: TaxProfileType | null;
   tax_exempt?: boolean | null;
   uid_store?: string | null;
   totals: OrderDocTotalsType;
@@ -13795,7 +13795,7 @@ interface Organization {
   name: string;
   crms_id: number;
   xero_id: string | null;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -14709,7 +14709,7 @@ interface CreditNote {
   external_notes?: string | null;
   internal_notes?: string | null;
   organization: DocumentOrganizationSnapshotType;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
   remaining_credit_cents: number;
@@ -16110,7 +16110,6 @@ interface CreditNoteDocument {
   number_str?: string;
   status: string;
   reason: string;
-  tax_profile: string;
   reference?: string;
   external_notes?: string;
   internal_notes?: string;
@@ -16217,7 +16216,6 @@ interface InvoiceDocument {
   crms_id?: number;
   crms_id_str?: string;
   status: string;
-  tax_profile: string;
   number_orders?: number[];
   number_orders_str?: string[];
   subject?: string;
@@ -16271,7 +16269,6 @@ interface OrderDocument {
   crms_id?: number;
   crms_id_str?: string;
   status: string;
-  tax_profile?: string;
   deliveries?: boolean;
   pickups?: boolean;
   subject?: string;
@@ -16301,7 +16298,8 @@ interface OrganizationDocument {
   crms_id: number;
   crms_id_str?: string;
   xero_id?: string;
-  tax_profile: string;
+  jurisdiction_claim?: string;
+  tax_exempt?: boolean;
   emails?: string[];
   phones?: string[];
   billing_address: TypesenseAddressFields;

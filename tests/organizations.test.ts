@@ -89,26 +89,34 @@ Deno.test("the shared snapshot still rejects an out-of-bounds name", () => {
   );
 });
 
-Deno.test("the shared snapshot now REFUSES an absent tax_profile — api-cloudrun#489", () => {
-  // The contract third of expand/migrate/contract, and this assertion is the
-  // inverse of the one it replaces: for one release cycle the field had to be
-  // optional, because both schema versions are `z.strictObject` and every write
-  // validates the full document, so a required field would have refused the 981
-  // prod orders that lacked it.
+Deno.test("the shared snapshot ADMITS an absent tax_profile again — api-cloudrun#596 item 3", () => {
+  // 🔴 **This assertion is #489's inverted a second time, and the symmetry is
+  // the lesson.** #489 made the field required (the contract third of
+  // expand/migrate/contract) and its predecessor asserted the opposite; the
+  // field is now LEAVING, so it goes optional for one release cycle for exactly
+  // the same reason it had to be optional to arrive. Both schema versions are
+  // `z.strictObject` and every write validates the full document, so the two
+  // accepted sets are disjoint in whichever direction the field is moving: a
+  // required field refuses documents that lack it, and a DELETED field refuses
+  // documents that still carry it.
   //
-  // Both environments now measure category A = 0 (`audit-order-tax-profile.ts`),
-  // so an absent value no longer means "mid-backfill" — it means a writer that
-  // forgot to build the snapshot through `buildOrganizationSnapshot`, and
-  // refusing it at the boundary is the point.
+  // The order is therefore fixed and not a preference — optional here, storage
+  // emptied by `scripts/migrate-drop-tax-profile.ts`, then the key deleted.
+  // ⚠️ The middle step cannot start until PROD runs this schema: prod validates
+  // the full document on every write, so emptying storage first would refuse
+  // every order write, the CRMS opportunity webhook included, whose failures
+  // are silent drops.
   const parsed = DocumentOrganizationSnapshot.safeParse({
     uid: ORG_ID,
     name: "A",
     xero_id: null,
   });
-  assertEquals(parsed.success, false);
+  assertEquals(parsed.success, true);
 
-  // The discriminating half: the SAME document with a profile parses. Without
-  // it, this arm would also pass against a schema that rejected everything.
+  // The discriminating half, kept from the assertion this replaces: a document
+  // that still CARRIES a profile parses too. Without it this arm would also
+  // pass against a schema that had already deleted the key — which is the one
+  // state that must not be reachable until storage is empty.
   assertEquals(
     DocumentOrganizationSnapshot.safeParse({
       uid: ORG_ID,
@@ -117,5 +125,17 @@ Deno.test("the shared snapshot now REFUSES an absent tax_profile — api-cloudru
       tax_profile: "tax_exempt",
     }).success,
     true,
+  );
+
+  // …and the key is still TYPED while it exists — an expand that also stopped
+  // validating the member would let a writer put anything there on the way out.
+  assertEquals(
+    DocumentOrganizationSnapshot.safeParse({
+      uid: ORG_ID,
+      name: "A",
+      xero_id: null,
+      tax_profile: "tax_narnia",
+    }).success,
+    false,
   );
 });

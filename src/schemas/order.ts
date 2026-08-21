@@ -1075,7 +1075,7 @@ export interface Order {
    * "Is this order overridden?" is then `tax_profile !== null` — no second
    * stored fact, and no comparison against the org snapshot.
    */
-  tax_profile: TaxProfileType | null;
+  tax_profile?: TaxProfileType | null;
   /**
    * This order's exemption, or `null` to inherit the organization's.
    *
@@ -1182,7 +1182,16 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // organization's profile", so it has to be stored rather than absent. Still
   // no `.default()`: one never materializes on a write (see the note in
   // `product.ts`), and the Typesense config declares the field required.
-  tax_profile: TaxProfileEnum.nullable().meta({ column: true, label: "Tax Profile" }),
+  // ⚠️ **OPTIONAL as of api-cloudrun#596 item 3 — the EXPAND third of
+  // expand/migrate/contract, and it is the mirror image of #489's contract.**
+  // #489 made this required and its comment records why that took three steps:
+  // every write path validates the FULL document and every one of these is a
+  // `z.strictObject`, so two schema versions have DISJOINT accepted sets. The
+  // same disjointness runs the other way when a field leaves — a schema that
+  // has dropped the key REJECTS every stored document still carrying it — so
+  // the field goes optional here, storage is emptied by
+  // `scripts/migrate-drop-tax-profile.ts`, and only then is the key deleted.
+  tax_profile: TaxProfileEnum.nullable().optional().meta({ column: true, label: "Tax Profile" }),
   // Nullable AND optional, unlike `tax_profile` above: `null` is the meaningful
   // "inherit" value, and `undefined` is every order written before #409 Phase 1.
   tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),

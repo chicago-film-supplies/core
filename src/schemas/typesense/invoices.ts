@@ -4,18 +4,17 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for invoices. */
 export const invoices: TypesenseCollectionConfig = {
   alias: "invoices",
-  version: 10,
+  version: 11,
   firestoreCollection: "invoices",
-  collectionName: "invoices_v10",
+  collectionName: "invoices_v11",
   schema: {
-    name: "invoices_v10",
+    name: "invoices_v11",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
       { name: "number", type: "int64", sort: true, index: true, facet: false },
       { name: "number_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "status", type: "string", facet: true },
-      { name: "tax_profile", type: "string", facet: true },
       { name: "number_orders", type: "int64[]", optional: true },
       { name: "number_orders_str", type: "string[]", index: true, sort: false, facet: false, optional: true },
       { name: "subject", type: "string", stem: true, sort: true, optional: true },
@@ -31,7 +30,6 @@ export const invoices: TypesenseCollectionConfig = {
       // stored snapshot carries a profile, so an absent value here would mean
       // an indexing bug rather than a document mid-backfill — and Typesense
       // refusing the document is the honest report of that.
-      { name: "organization.tax_profile", type: "string", facet: true },
       { name: "organization.xero_id", type: "string", optional: true },
       ...typesenseAddressFields("organization.billing_address"),
       // Per-destination dates, snapshotted from each source order onto the

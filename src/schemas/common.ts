@@ -1362,7 +1362,7 @@ export interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
   crms_id?: number | null;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   /**
    * Level 2 of the jurisdiction precedence — the customer's standing claim,
    * mirrored from {@link Organization.jurisdiction_claim}.
@@ -1460,7 +1460,16 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
     // `audit-order-tax-profile.ts` category A = 0 in BOTH environments — prod
     // 0 of 984, dev 0 of 984 after a re-run of the backfill, which had been
     // clobbered back to 2 by the prod→dev mirror.
-    tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+    // ⚠️ **OPTIONAL as of api-cloudrun#596 item 3 — the EXPAND third of
+    // expand/migrate/contract, and it is the mirror image of #489's contract.**
+    // #489 made this required and its comment records why that took three steps:
+    // every write path validates the FULL document and every one of these is a
+    // `z.strictObject`, so two schema versions have DISJOINT accepted sets. The
+    // same disjointness runs the other way when a field leaves — a schema that
+    // has dropped the key REJECTS every stored document still carrying it — so
+    // the field goes optional here, storage is emptied by
+    // `scripts/migrate-drop-tax-profile.ts`, and only then is the key deleted.
+    tax_profile: TaxProfileEnum.optional().meta({ column: true, label: "Tax Profile" }),
     // The pair that RETIRES `tax_profile` (api-cloudrun#596 item 1). Optional
     // through the expand step, for the disjoint-accepted-sets reason above —
     // the same three-step dance `tax_profile` itself needed, and the reason

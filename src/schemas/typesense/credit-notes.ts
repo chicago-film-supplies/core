@@ -15,9 +15,9 @@ import { typesenseAddressFields } from "./types.ts";
  */
 export const creditNotes: TypesenseCollectionConfig = {
   alias: "credit-notes",
-  version: 2,
+  version: 3,
   firestoreCollection: "credit-notes",
-  collectionName: "credit-notes_v2",
+  collectionName: "credit-notes_v3",
   // ENABLED 2026-08-07. This was `false` with a note saying "flip in Phase 6,
   // alongside the search UI", and it is worth recording why that instruction was
   // superseded rather than simply followed: **its stated reason had expired.**
@@ -46,7 +46,7 @@ export const creditNotes: TypesenseCollectionConfig = {
   // that did not exist when it ran.
   enabled: true,
   schema: {
-    name: "credit-notes_v2",
+    name: "credit-notes_v3",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -57,7 +57,6 @@ export const creditNotes: TypesenseCollectionConfig = {
       // "what did we credit for early returns" is one query, not a regex over
       // free text the way it is in Odoo.
       { name: "reason", type: "string", facet: true },
-      { name: "tax_profile", type: "string", facet: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "external_notes", type: "string", stem: true, optional: true },
       { name: "internal_notes", type: "string", stem: true, optional: true },
@@ -70,7 +69,6 @@ export const creditNotes: TypesenseCollectionConfig = {
       // stored snapshot carries a profile, so an absent value here would mean
       // an indexing bug rather than a document mid-backfill — and Typesense
       // refusing the document is the honest report of that.
-      { name: "organization.tax_profile", type: "string", facet: true },
       { name: "organization.xero_id", type: "string", optional: true },
       ...typesenseAddressFields("organization.billing_address"),
       { name: "items", type: "object[]", optional: true },

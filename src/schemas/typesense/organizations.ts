@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for organizations. */
 export const organizations: TypesenseCollectionConfig = {
   alias: "organizations",
-  version: 10,
+  version: 11,
   firestoreCollection: "organizations",
-  collectionName: "organizations_v10",
+  collectionName: "organizations_v11",
   schema: {
-    name: "organizations_v10",
+    name: "organizations_v11",
     enable_nested_fields: true,
     token_separators: ["(", ")", "-", "+", " "],
     fields: [
@@ -18,7 +18,20 @@ export const organizations: TypesenseCollectionConfig = {
       { name: "crms_id", type: "int64", sort: true, index: true, facet: false },
       { name: "crms_id_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "xero_id", type: "string", facet: false, optional: true },
-      { name: "tax_profile", type: "string", facet: true },
+      // 🔴 **These two replace `tax_profile`, and adding them is what makes the
+      // removal safe rather than merely tidy.** `OrderOrg.tsx` attaches a
+      // customer from SEARCH and seeds the order's organization snapshot from
+      // the Typesense document it holds — so an index that carries neither the
+      // enum nor the axes shows the order taxed at the ORIGIN for one
+      // round-trip, and translating the enum client-side is the second
+      // implementation api-cloudrun#486 exists to prevent. `OrderDetail`'s
+      // attach path holds the whole Firestore document and never needed this.
+      //
+      // `optional: true` on both because both are `.optional()` on
+      // `Organization` through the expand step — the parity test's check B is
+      // exactly that correspondence.
+      { name: "jurisdiction_claim", type: "string", facet: true, optional: true },
+      { name: "tax_exempt", type: "bool", facet: true, optional: true },
       { name: "emails", type: "string[]", stem: true, optional: true },
       { name: "phones", type: "string[]", optional: true },
       ...typesenseAddressFields("billing_address", { sortFull: true, parentOptional: false }),

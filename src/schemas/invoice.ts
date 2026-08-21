@@ -535,7 +535,7 @@ export interface Invoice {
   status: InvoiceStatusType;
   query_by_orders: string[];
   number_orders: number[];
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   /**
    * This invoice's exemption, or `null` to inherit the organization's.
    *
@@ -587,7 +587,16 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   status: InvoiceStatus.meta({ column: true, label: "Status" }),
   query_by_orders: z.array(z.string()).default([]),
   number_orders: z.array(z.int()).default([]).meta({ column: true, label: "Order #" }),
-  tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+  // ⚠️ **OPTIONAL as of api-cloudrun#596 item 3 — the EXPAND third of
+  // expand/migrate/contract, and it is the mirror image of #489's contract.**
+  // #489 made this required and its comment records why that took three steps:
+  // every write path validates the FULL document and every one of these is a
+  // `z.strictObject`, so two schema versions have DISJOINT accepted sets. The
+  // same disjointness runs the other way when a field leaves — a schema that
+  // has dropped the key REJECTS every stored document still carrying it — so
+  // the field goes optional here, storage is emptied by
+  // `scripts/migrate-drop-tax-profile.ts`, and only then is the key deleted.
+  tax_profile: TaxProfileEnum.optional().meta({ column: true, label: "Tax Profile" }),
   tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),
   // The ISO field carries the annotation; its `_fs` Timestamp mirror is the
   // same column under the other encoding — see `FS_MIRROR_SUFFIX`.

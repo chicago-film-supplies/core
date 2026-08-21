@@ -48,7 +48,7 @@ export interface Organization {
   name: string;
   crms_id: number;
   xero_id: string | null;
-  tax_profile: TaxProfileType;
+  tax_profile?: TaxProfileType;
   /**
    * This customer's standing jurisdiction claim — **level 2** of the
    * three-level precedence in `resolveJurisdiction` (`@cfs/core/utils/taxes`),
@@ -123,7 +123,16 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   // so, and a `.default()` never materializes on a write — see the note in
   // `product.ts`. TAX_PROFILES[0] is "tax_applied", so the enum's
   // type-derived seed already equals the dropped default.
-  tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+  // ⚠️ **OPTIONAL as of api-cloudrun#596 item 3 — the EXPAND third of
+  // expand/migrate/contract, and it is the mirror image of #489's contract.**
+  // #489 made this required and its comment records why that took three steps:
+  // every write path validates the FULL document and every one of these is a
+  // `z.strictObject`, so two schema versions have DISJOINT accepted sets. The
+  // same disjointness runs the other way when a field leaves — a schema that
+  // has dropped the key REJECTS every stored document still carrying it — so
+  // the field goes optional here, storage is emptied by
+  // `scripts/migrate-drop-tax-profile.ts`, and only then is the key deleted.
+  tax_profile: TaxProfileEnum.optional().meta({ column: true, label: "Tax Profile" }),
   jurisdiction_claim: JurisdictionEnum.nullable().optional().meta({
     column: true,
     label: "Jurisdiction Claim",
