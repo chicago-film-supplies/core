@@ -270,7 +270,6 @@ Deno.test("CreateInvoiceInput accepts valid input", () => {
     uid: "newinv10000000000000",
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
-    tax_profile: "tax_applied",
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, true);
 });
@@ -280,7 +279,6 @@ Deno.test("CreateInvoiceInput requires at least one order", () => {
     uid: "newinv10000000000000",
     query_by_orders: [],
     organization: { uid: "org10000000000000000" },
-    tax_profile: "tax_applied",
   };
   assertEquals(CreateInvoiceInput.safeParse(input).success, false);
 });
@@ -290,7 +288,6 @@ Deno.test("CreateInvoiceInput accepts items with path and destination fields", (
     uid: "newinv10000000000000",
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
-    tax_profile: "tax_applied",
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Venue", uid_delivery: "del10000000000000000", uid_collection: "col10000000000000000" },
       { uid: "group100000000000000", type: "group", name: "Lighting" },
@@ -416,7 +413,6 @@ Deno.test("CreateInvoiceInput accepts order divider items", () => {
     uid: "newinv10000000000000",
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
-    tax_profile: "tax_applied",
     items: [
       { uid: "orderdiv100000000000", type: "order", name: "Order #1001" },
       { uid: "dest1000000000000000", type: "destination", name: "Venue", uid_delivery: "del10000000000000000", path: ["orderdiv100000000000"] },
@@ -451,7 +447,6 @@ Deno.test("CreateInvoiceInput: an item must declare its type", () => {
     uid: "newinv10000000000000",
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
-    tax_profile: "tax_applied",
     items: [{ uid: "item1000000000000000", name: "Spot Light", quantity: 1 }],
   });
   assertEquals(bad.success, false);
@@ -463,7 +458,6 @@ Deno.test("CreateInvoiceInput: a divider cannot carry a price or a quantity", ()
     uid: "newinv10000000000000",
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
-    tax_profile: "tax_applied",
     items: [{ uid: "order100000000000000", type: "order", name: "Order #1", quantity: 2, price: { base_cents: 1000 } }],
   });
   assertEquals(bad.success, false);
@@ -512,7 +506,6 @@ Deno.test("CreateInvoiceInput: an invoice may still start with a line item", () 
       uid: "newinv10000000000000",
       query_by_orders: ["order100000000000000"],
       organization: { uid: "org10000000000000000" },
-      tax_profile: "tax_applied",
       items: [{ uid: "item1000000000000000", type: "service", name: "Delivery" }],
     }).success,
     true,

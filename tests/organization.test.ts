@@ -94,7 +94,6 @@ Deno.test("CreateOrganizationInput accepts valid input", () => {
   const input = {
     uid: "testorg1000000000000",
     name: "Acme",
-    tax_profile: "tax_applied",
     billing_address: validAddress,
   };
   assertEquals(CreateOrganizationInput.safeParse(input).success, true);

@@ -177,7 +177,15 @@ export const NewContactInput: z.ZodType<NewContactInputType> = z.object({
 export interface CreateOrganizationInputType {
   uid: string;
   name: string;
-  tax_profile: TaxProfileType;
+  /**
+   * The two tax AXES a client states — the customer's standing jurisdiction
+   * claim (level 2) and whether they are exempt.
+   *
+   * ⚠️ **`tax_profile` was REQUIRED here and is gone** (api-cloudrun#596 item
+   * 2). The document still carries one because it is deleted a step later; the
+   * server derives it from these two, which is the only way an axis-speaking
+   * client can leave a coherent value in a field it no longer knows about.
+   */
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
@@ -191,7 +199,6 @@ export interface CreateOrganizationInputType {
 export const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType> = z.object({
   uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
-  tax_profile: TaxProfileEnum,
   jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   billing_address: Address,
@@ -207,7 +214,7 @@ export const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType> = z
 export interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
-  tax_profile?: TaxProfileType;
+  /** The AXES — see {@link CreateOrganizationInputType}. */
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -223,7 +230,6 @@ export interface UpdateOrganizationInputType {
 export const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType> = z.object({
   uid: FirestoreId.optional(),
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }).optional(),
-  tax_profile: TaxProfileEnum.optional(),
   jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   description: z.string().optional(),

@@ -789,7 +789,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_profile?: TaxProfileType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -837,7 +837,7 @@
         {
           "kind": "interface",
           "name": "CreateOrderInputType",
-          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
+          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_exempt?: boolean;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
           "doc": "Input schema for POST /orders — what the endpoint accepts."
         },
         {
@@ -849,7 +849,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -3843,7 +3843,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrderInputType",
-          "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_exempt?: boolean;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /orders/:uid — partial update."
         },
         {
@@ -3855,7 +3855,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         },
         {
@@ -5934,7 +5934,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_profile?: TaxProfileType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -6316,7 +6316,7 @@
         {
           "kind": "interface",
           "name": "CreateOrderInputType",
-          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
+          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_exempt?: boolean;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
           "doc": "Input schema for POST /orders — what the endpoint accepts."
         },
         {
@@ -6652,7 +6652,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrderInputType",
-          "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_profile?: TaxProfileType | null;\n  tax_exempt?: boolean;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_exempt?: boolean;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /orders/:uid — partial update."
         },
         {
@@ -6768,7 +6768,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  tax_profile: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -6816,7 +6816,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  tax_profile?: TaxProfileType;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         }
       ]

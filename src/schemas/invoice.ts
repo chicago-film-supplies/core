@@ -859,22 +859,18 @@ export interface CreateInvoiceInputType {
   query_by_orders: string[];
   organization: { uid: string };
   /**
-   * ⚠️ **OPTIONAL as of the expand step, and being retired** — the server
-   * derives an invoice's tax from the organization axes and the destinations it
-   * already reads, so a client should stop sending this
-   * (api-cloudrun#596 item 2). It stays accepted until the jurisdiction
-   * migration lands, because until then a document-level LOCATION profile is
-   * the ONLY place an order's jurisdiction lives — 27 orders and 35 invoices on
-   * prod carry one — and dropping it would bill them at the origin.
+   * **The only tax fact a draft states.** `tax_profile` left this input at
+   * api-cloudrun#596 item 2: the server derives an invoice's tax from the
+   * organization's axes and the destinations it already projects, and the
+   * document-level LOCATION profiles that were once the only home for an
+   * order's jurisdiction now live on `destinations[i].jurisdiction` (migrated
+   * 2026-08-21, 55 documents).
    *
    * The precedent for the removal is #409, which stripped `coa_revenue` from
    * the input on the same argument: the account is server-resolved from the
    * product, and the client reads it rather than authoring it.
-   */
-  tax_profile?: TaxProfileType;
-  /**
-   * The EXEMPTION axis. Sticky with the customer's — see
-   * `CreateOrderInput.tax_exempt`.
+   *
+   * Sticky with the customer's — see `CreateOrderInput.tax_exempt`.
    */
   tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
@@ -892,7 +888,6 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   uid: FirestoreId,
   query_by_orders: z.array(z.string()).min(1, "At least one source order is required"),
   organization: z.object({ uid: FirestoreId }),
-  tax_profile: TaxProfileEnum.optional(),
   tax_exempt: z.boolean().optional(),
   items: z.array(InvoiceItemInputSchema).optional(),
   destinations: z.array(InvoiceDocDestination).optional(),
@@ -911,9 +906,10 @@ export interface UpdateInvoiceInputType {
    * The EXEMPTION axis. Absent = leave unchanged; `false` = this invoice
    * asserts none. No `null` arm, for the reason on `UpdateOrderInput`.
    *
-   * ⚠️ There is deliberately still **no `tax_profile` here** — an invoice's
-   * profile has never been editable after create, and adding one now would be
-   * a new writer for a field being deleted.
+   * ⚠️ There is deliberately no `tax_profile` here, and there is none on
+   * {@link CreateInvoiceInputType} either any more — an invoice's profile was
+   * never editable after create, and it stopped being writable at all at
+   * api-cloudrun#596 item 2.
    */
   tax_exempt?: boolean;
   items?: InvoiceItemInputType[];

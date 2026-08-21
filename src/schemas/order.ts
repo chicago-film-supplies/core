@@ -654,18 +654,19 @@ export interface CreateOrderInputType {
   uid: string;
   organization: { uid: string };
   status: OrderStatusType;
-  tax_profile?: TaxProfileType | null;
   /**
-   * The EXEMPTION axis — the half {@link TaxProfileType} welds to jurisdiction
-   * and cannot separate (api-cloudrun#596).
+   * **The document's only tax lever, and the only exemption channel there is**
+   * — `tax_profile` left this input at api-cloudrun#596 item 2, so a create
+   * says *whether this order is exempt* and nothing else.
    *
    * ⚠️ **Sticky from either side**: the rule is
    * `org.tax_exempt || doc.tax_exempt === true`, never `doc ?? org`. So `false`
    * and absent mean the same thing here — *"this document asserts no
    * exemption"* — and neither un-exempts an exempt customer.
    *
-   * Optional through the expand step; it becomes the only exemption channel
-   * when `tax_profile` goes.
+   * The JURISDICTION half is not a document-wide field at all: it lives on
+   * `destinations[i].jurisdiction`, because an order can deliver to two
+   * jurisdictions at once and one enum slot could never say so.
    */
   tax_exempt?: boolean;
   destinations: DestinationType[];
@@ -679,13 +680,6 @@ export const CreateOrderInput: z.ZodType<CreateOrderInputType> = z.object({
   uid: FirestoreId,
   organization: z.object({ uid: FirestoreId }),
   status: OrderStatus,
-  // Omitting it means INHERIT, not "tax_applied". This was a required field
-  // that `createOrder` hard-threw on, which was survivable only because the one
-  // client always sent it; the failure it invites is a client that forgets and
-  // gets a plain-Chicago order for a tax-exempt customer. `.default(null)`
-  // materializes here — unlike on a document schema — because route validation
-  // passes the PARSED input on.
-  tax_profile: TaxProfileEnum.nullable().default(null),
   tax_exempt: z.boolean().optional(),
   destinations: z.array(Destination).min(1, "At least one destination is required"),
   items: z.array(OrderItem)
@@ -705,17 +699,15 @@ export interface UpdateOrderInputType {
   uid?: string;
   organization?: { uid: string };
   status?: OrderStatusType;
-  /** Absent = leave unchanged; `null` = clear the override and inherit the org's. */
-  tax_profile?: TaxProfileType | null;
   /**
    * Absent = leave unchanged; `false` = this order asserts no exemption.
    *
-   * ⚠️ **`null` is NOT accepted, unlike `tax_profile`'s clear.** The two fields
-   * carry different numbers of states: `tax_profile` needs `null` because
-   * "inherit" and "explicitly ordinary" are different statements. Exemption has
-   * no such third state — it is sticky, so `false` and absent already mean the
-   * same thing, and admitting `null` would invite a caller to believe it un-set
-   * something.
+   * ⚠️ **`null` is deliberately NOT accepted.** Exemption is sticky, so `false`
+   * and absent already mean the same thing, and admitting `null` would invite a
+   * caller to believe it un-set something. The retired `tax_profile` did need a
+   * `null` arm, because "inherit" and "explicitly ordinary" were different
+   * statements it had to spell with the same field — which is one of the
+   * reasons it is gone.
    */
   tax_exempt?: boolean;
   destinations?: DestinationType[];
@@ -730,7 +722,6 @@ export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
   uid: FirestoreId.optional(),
   organization: z.object({ uid: FirestoreId }).optional(),
   status: OrderStatus.optional(),
-  tax_profile: TaxProfileEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   destinations: z.array(Destination).min(1, "At least one destination is required").optional(),
   items: z.array(OrderItem)

@@ -95,7 +95,6 @@ Deno.test("CreateOrderInput shows custom error for empty destinations", () => {
       charge_start: "2026-01-01",
       charge_end: "2026-01-04",
     },
-    tax_profile: "tax_applied",
     destinations: [],
   };
   const result = CreateOrderInput.safeParse(input);

@@ -1654,7 +1654,6 @@ interface CreateInvoiceInputType {
   uid: string;
   query_by_orders: string[];
   organization: typeLiteral;
-  tax_profile?: TaxProfileType;
   tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
@@ -1748,7 +1747,6 @@ interface CreateOrderInputType {
   uid: string;
   organization: typeLiteral;
   status: OrderStatusType;
-  tax_profile?: TaxProfileType | null;
   tax_exempt?: boolean;
   destinations: DestinationType[];
   items?: OrderItemType[];
@@ -1774,7 +1772,6 @@ crms_id and xero_id are obtained from external APIs — not in input.
 interface CreateOrganizationInputType {
   uid: string;
   name: string;
-  tax_profile: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
@@ -8097,7 +8094,6 @@ interface UpdateOrderInputType {
   uid?: string;
   organization?: typeLiteral;
   status?: OrderStatusType;
-  tax_profile?: TaxProfileType | null;
   tax_exempt?: boolean;
   destinations?: DestinationType[];
   items?: OrderItemType[];
@@ -8123,7 +8119,6 @@ Input schema for PUT /organizations/:uid — partial update.
 interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
-  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -12047,7 +12042,6 @@ interface CreateInvoiceInputType {
   uid: string;
   query_by_orders: string[];
   organization: typeLiteral;
-  tax_profile?: TaxProfileType;
   tax_exempt?: boolean;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
@@ -12857,7 +12851,6 @@ interface CreateOrderInputType {
   uid: string;
   organization: typeLiteral;
   status: OrderStatusType;
-  tax_profile?: TaxProfileType | null;
   tax_exempt?: boolean;
   destinations: DestinationType[];
   items?: OrderItemType[];
@@ -13581,7 +13574,6 @@ interface UpdateOrderInputType {
   uid?: string;
   organization?: typeLiteral;
   status?: OrderStatusType;
-  tax_profile?: TaxProfileType | null;
   tax_exempt?: boolean;
   destinations?: DestinationType[];
   items?: OrderItemType[];
@@ -13763,7 +13755,6 @@ crms_id and xero_id are obtained from external APIs — not in input.
 interface CreateOrganizationInputType {
   uid: string;
   name: string;
-  tax_profile: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
@@ -13868,7 +13859,6 @@ Input schema for PUT /organizations/:uid — partial update.
 interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
-  tax_profile?: TaxProfileType;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;

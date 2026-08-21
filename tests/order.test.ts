@@ -78,7 +78,6 @@ Deno.test("CreateOrderInput validates a complete input", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
@@ -94,7 +93,6 @@ Deno.test("CreateOrderInput rejects empty destinations", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, false);
@@ -105,21 +103,36 @@ Deno.test("CreateOrderInput rejects invalid status", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "invalid",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, false);
 });
 
-Deno.test("CreateOrderInput rejects invalid tax_profile", () => {
+// 🔴 This arm used to assert that a bad `tax_profile` was REJECTED. The field
+// left the input at api-cloudrun#596 item 2, and the replacement is not a
+// deletion: `CreateOrderInput` is a `z.object`, not a `z.strictObject`, so a
+// client still sending the enum is accepted and the key is STRIPPED. That is
+// what makes the removal a non-breaking one — a manager built against the old
+// schema keeps creating orders — and it is worth an arm, because the same
+// payload against a strict object would 400 every legacy client at once.
+Deno.test("CreateOrderInput IGNORES a legacy tax_profile — accepted, then stripped", () => {
   const input = {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "invalid",
+    tax_profile: "tax_frankfort",
     destinations: [validDestination],
   };
-  assertEquals(CreateOrderInput.safeParse(input).success, false);
+  const result = CreateOrderInput.safeParse(input);
+  assertEquals(result.success, true);
+  assertEquals("tax_profile" in (result.data ?? {}), false);
+
+  // Even a value the enum never held. Nothing validates it because nothing
+  // reads it — the jurisdiction lives on `destinations[i].jurisdiction`.
+  assertEquals(
+    CreateOrderInput.safeParse({ ...input, tax_profile: "invalid" }).success,
+    true,
+  );
 });
 
 Deno.test("CreateOrderInput strips extra properties on destination dates", () => {
@@ -127,7 +140,6 @@ Deno.test("CreateOrderInput strips extra properties on destination dates", () =>
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [{ ...validDestination, dates: { ...validDates, extra_field: "nope" } }],
   };
   const result = CreateOrderInput.safeParse(input);
@@ -142,7 +154,6 @@ Deno.test("CreateOrderInput strips extra properties on destination endpoint", ()
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [{
       dates: validDates,
       delivery: { uid: "testdest100000000000", bonus: true },
@@ -161,7 +172,6 @@ Deno.test("CreateOrderInput accepts destination with null contact", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [{
       dates: validDates,
       delivery: { uid: "testdest100000000000", contact: null },
@@ -176,7 +186,6 @@ Deno.test("CreateOrderInput accepts destination with complete contact", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [{
       dates: validDates,
       delivery: { uid: "testdest100000000000", contact: { uid: "testcontact100000000", first_name: "Jane", last_name: "Doe", name: "Jane Doe", phones: ["312-555-0100"] } },
@@ -191,7 +200,6 @@ Deno.test("CreateOrderInput rejects destination contact missing first_name", () 
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [{
       dates: validDates,
       delivery: { uid: "testdest100000000000", contact: { uid: "testcontact100000000" } },
@@ -206,7 +214,6 @@ Deno.test("CreateOrderInput rejects destination contact missing uid", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [{
       dates: validDates,
       delivery: { uid: "testdest100000000000", contact: { name: "Jane" } },
@@ -221,7 +228,6 @@ Deno.test("CreateOrderInput accepts per-pair customer_collecting/returning", () 
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [
       { ...validDestination, customer_collecting: true, customer_returning: false },
       { ...validDestination, customer_collecting: false, customer_returning: true },
@@ -248,7 +254,6 @@ Deno.test("CreateOrderInput rejects invalid item inclusion_type", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
@@ -263,7 +268,6 @@ Deno.test("CreateOrderInput accepts null inclusion_type", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
@@ -278,7 +282,6 @@ Deno.test("CreateOrderInput rejects invalid item price formula", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
@@ -293,7 +296,6 @@ Deno.test("CreateOrderInput rejects invalid item discount type", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
@@ -308,7 +310,6 @@ Deno.test("CreateOrderInput accepts item with discount and taxes", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
@@ -332,7 +333,6 @@ Deno.test("CreateOrderInput accepts item with null discount", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
@@ -347,7 +347,6 @@ Deno.test("CreateOrderInput rejects float quantity on items", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [
       { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
@@ -362,7 +361,6 @@ Deno.test("CreateOrderInput rejects items not starting with destination", () => 
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [{ uid: "testitem100000000000", type: "rental", path: [], name: "Camera" }],
   };
@@ -374,7 +372,6 @@ Deno.test("CreateOrderInput accepts empty items array", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [],
   };
@@ -386,7 +383,6 @@ Deno.test("CreateOrderInput rejects items without type", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [{ uid: "testitem100000000000", path: [], name: "Camera" }],
   };
@@ -398,7 +394,6 @@ Deno.test("CreateOrderInput rejects items without path", () => {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
-    tax_profile: "tax_applied",
     destinations: [validDestination],
     items: [{ uid: "dest1000000000000000", type: "destination", name: "Chicago" }],
   };
