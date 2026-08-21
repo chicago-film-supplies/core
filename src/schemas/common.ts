@@ -1363,6 +1363,45 @@ export interface DocumentOrganizationSnapshotType {
   name: string;
   crms_id?: number | null;
   tax_profile: TaxProfileType;
+  /**
+   * Level 2 of the jurisdiction precedence — the customer's standing claim,
+   * mirrored from {@link Organization.jurisdiction_claim}.
+   *
+   * ⚠️ **This is the SNAPSHOT half of the pair that replaces `tax_profile`,
+   * and it is optional for the same reason `tax_profile` was** — the expand
+   * third of expand/migrate/contract. Every snapshot is a `z.strictObject` and
+   * every write path validates the whole document, so the old and new schemas
+   * have disjoint accepted sets: a required field here rejects every stored
+   * document that predates it, and no deploy order closes that window.
+   *
+   * ⚠️ **Absent and `null` are NOT the same fact during the migration, and
+   * that is only true because the BUILDER never emits absent.**
+   * {@link buildOrganizationSnapshot} writes `?? null`, so from this publish
+   * onward absent can only mean *"this snapshot predates the axes — read
+   * `tax_profile`"*, while `null` means *"the customer asserts no
+   * jurisdiction"* and asks the next level. `documentTaxContext`
+   * (api-cloudrun) is the one place that distinguishes them, and the fallback
+   * arm is deleted when the corpus is migrated.
+   *
+   * The `?? null` is lossless rather than a flattening, and that is measured
+   * rather than assumed: on prod 2026-08-21 the 291 organizations split 277
+   * `tax_applied` / 11 `tax_exempt` / 3 location profiles, and the axes line up
+   * exactly — the same 11 carry `tax_exempt: true`, the same 3 carry a
+   * matching `jurisdiction_claim` (Kenwood frankfort, Simeon and Waterloo West
+   * rantoul), and the 277 carry NEITHER. So on the organization there is no
+   * "unknown" state for `?? null` to destroy: absent already means *asserts
+   * nothing*.
+   */
+  jurisdiction_claim?: JurisdictionType | null;
+  /**
+   * The customer's exemption, mirrored from {@link Organization.tax_exempt} —
+   * the half `tax_profile` welds to jurisdiction and cannot separate.
+   *
+   * ⚠️ **Sticky from either side**: `org.tax_exempt || doc.tax_exempt === true`,
+   * never `doc ?? org`. A `false` on the document must not un-exempt an exempt
+   * customer.
+   */
+  tax_exempt?: boolean;
   xero_id: string | null;
   billing_address?: AddressType | null;
 }
@@ -1422,6 +1461,15 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
     // 0 of 984, dev 0 of 984 after a re-run of the backfill, which had been
     // clobbered back to 2 by the prod→dev mirror.
     tax_profile: TaxProfileEnum.meta({ column: true, label: "Tax Profile" }),
+    // The pair that RETIRES `tax_profile` (api-cloudrun#596 item 1). Optional
+    // through the expand step, for the disjoint-accepted-sets reason above —
+    // the same three-step dance `tax_profile` itself needed, and the reason
+    // this schema's own history is worth keeping in view.
+    jurisdiction_claim: JurisdictionEnum.nullable().optional().meta({
+      column: true,
+      label: "Jurisdiction Claim",
+    }),
+    tax_exempt: z.boolean().optional().meta({ column: true, label: "Tax Exempt" }),
     xero_id: z.uuid().nullable(),
     billing_address: Address.optional(),
   })
