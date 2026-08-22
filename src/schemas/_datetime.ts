@@ -36,8 +36,12 @@ export function toChicagoStartOfDay(input: string): string {
 
 /**
  * Factory for "true instant" datetime fields (transaction.date,
- * tax.valid_from, order.dates.*, etc.). Input must be a valid ISO
+ * order.dates.*, booking.dates.*, etc.). Input must be a valid ISO
  * datetime string with an offset; output is Chicago offset form.
+ *
+ * ⚠️ **Not the tax window.** `tax.applied_from` / `applied_to` /
+ * `effective_from` are CALENDAR DATES and take {@link chicagoStartOfDay}: a rate
+ * boundary set at 14:30 would leave half a day pricing at the old rate.
  */
 export const chicagoInstant = (): z.ZodType<string, string> =>
   z.iso.datetime({ offset: true }).transform(toChicagoInstant);

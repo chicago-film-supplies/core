@@ -528,8 +528,8 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
       subtotal_discounted_cents: p.subtotal_discounted_cents ?? 0,
       discount: p.discount ?? null,
       taxes: p.taxes ?? [],
-      // The intrinsic-tax snapshot inherits, so an invoice's `tax_profile`
-      // revert is lossless the way an order's already is. Spread
+      // The would-be-taxed snapshot inherits, so an exempt invoice records
+      // what it was exempt FROM the way its order does. Spread
       // CONDITIONALLY, twice over: an explicit `undefined` trips
       // `validateBeforeWrite`'s no-undefined guard, and `invoicePriceDifferences`
       // compares price KEY SETS — emitting the key unconditionally would make

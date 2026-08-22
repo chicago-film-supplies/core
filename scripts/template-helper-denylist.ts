@@ -203,12 +203,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // That is why the sibling stays emitted and this does not; the line is
     // "recomputes money from base inputs", not "is a write-path helper".
     "materializeDocumentTax",
-    // A MIGRATION-WINDOW internal, not a rendering fact. It exists only so that
-    // `findTaxAt` / `findTaxFor` / api-cloudrun's window guards read
-    // `applied_from ?? valid_from` identically while api-cloudrun#409 Phase 1
-    // has both field pairs in the corpus, and it is deleted with the fallback in
-    // Phase 2. It is exported for those guards, not for templates — a template
-    // asking a tax for its own window bounds should read the fields.
+    // A RESOLVER internal, not a rendering fact. It is the one place the
+    // bracket checks read a version's bounds from, exported so `findTaxAt`,
+    // `findTaxFor` and api-cloudrun's window guards cannot each grow their own
+    // answer to "which field is the bound" — a template asking a tax for its
+    // own window should read the fields.
+    //
+    // ⚠️ This entry said it was a "MIGRATION-WINDOW internal … deleted with the
+    // fallback in Phase 2". Phase 2 landed on 2026-08-22 (core#63): the
+    // `?? valid_from` fallback and the old field pair are gone, and the
+    // function SURVIVED them — pinned by `tests/taxJurisdiction.test.ts`
+    // ("reads applied_* and nothing else"). The denylist verdict was right for
+    // a reason that has expired; the reason above is the durable one.
     //
     // It also returns an anonymous object type, which the generator can only
     // describe as `typeLiteral`. That is a symptom rather than the reason:

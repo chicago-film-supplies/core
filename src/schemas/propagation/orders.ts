@@ -135,7 +135,7 @@ const BOOKING_ALLOCATION_DIAGNOSTIC: EnforcementRef = {
 /**
  * The fulfillment view's "stripped of …" clause is a schema fact, not a
  * behaviour: `FulfillmentSchema` is a strictObject with no `totals`,
- * `invoices`, `tax_profile`, `notes`, `crms_id` or `xero_id` key, and
+ * `invoices`, `notes`, `crms_id` or `xero_id` key, and
  * `FULFILLMENT_LINE_ITEM_TYPES` omits `transaction_fee`, so a fee line fails
  * the discriminated union. A leak is a rejected write.
  */
@@ -152,7 +152,7 @@ const FULFILLMENT_STRIP_ASSERTED: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/orders/orders.test.ts::POST - creates a quoted order with a rental item and generates bookings",
   clause:
-    "the same strip, asserted positively on a real create — `totals`/`invoices`/`tax_profile`/`notes` absent from the projection and `price` absent from its line item. ⚠️ The line number this ref carried until 2026-08-18 sat in the PRECEDING step (`POST - creates a draft order with no items`), which asserts none of that.",
+    "the same strip, asserted positively on a real create — `totals`/`invoices`/`notes` absent from the projection and `price` absent from its line item. ⚠️ The line number this ref carried until 2026-08-18 sat in the PRECEDING step (`POST - creates a draft order with no items`), which asserts none of that.",
   gates: true,
 };
 

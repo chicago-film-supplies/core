@@ -757,13 +757,16 @@ export interface OrderDocItemPriceType {
   discount: DiscountType | null;
   taxes: PriceModifierType[];
   /**
-   * Intrinsic (pre-override) tax snapshot — the tax this item would carry under
-   * `tax_applied` (product default, or the tax a custom/CRMS item was created
-   * with). Set once at item-build time and never touched by the doc-level
-   * `tax_profile` override (which only rewrites `taxes`), so a `tax_profile`-only
-   * revert can restore `taxes` from it losslessly — for product AND custom
-   * items, with zero reads. Optional: absent on pre-`taxes_base` docs (the
-   * revert path falls back to a batched product read for those).
+   * **The tax this line would carry if the customer were not exempt.**
+   *
+   * ⚠️ It used to be the *product's* intrinsic tax, written once at line-build
+   * time so that reverting a `tax_profile` override could restore `taxes` from
+   * it. With the jurisdiction rule there is nothing to revert TO — the rule is
+   * total and re-derived on every write — so `assignLineTaxes` is now the ONE
+   * author of both fields and they cannot drift. What the field buys is that an
+   * exempt document still records which tax it was exempt FROM.
+   *
+   * Optional: absent on documents written before the field existed.
    */
   taxes_base?: TaxRefType[];
   total_cents: number;
@@ -1059,20 +1062,9 @@ export interface Order {
   organization: DocumentOrganizationSnapshotType;
   destinations: DocDestinationType[];
   items: OrderDocItemType[];
-  /**
-   * The order's own tax profile, or `null` to **inherit the organization's**.
-   *
-   * `null` is the safe default and is what makes both directions expressible:
-   * a client that says nothing cannot tax an exempt customer, and an explicit
-   * `"tax_applied"` now *beats* an org-level location profile instead of losing
-   * to it. That second half is a live defect on the invoice side — prod invoice
-   * #2348 is issued and in Xero carrying `tax_profile: "tax_applied"` and taxed
-   * Frankfort 8%, because `getEffectiveProfileTax` used to SCAN
-   * `[doc, org]` for the first location profile rather than pick one.
-   *
-   * "Is this order overridden?" is then `tax_profile !== null` — no second
-   * stored fact, and no comparison against the org snapshot.
-   */
+  // `tax_profile` was DELETED from this interface (#596). Its docblock
+  // outlived it here until 2026-08-22, describing a `getEffectiveProfileTax`
+  // precedence scan for a field with nothing beneath it.
   /**
    * This order's exemption, or `null` to inherit the organization's.
    *

@@ -632,8 +632,10 @@ void _itemTypeParity;
  *
  * - **no `taxable` axis.** Every line type carries taxes on some rows and not
  *   others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is
- *   taxed is the product's `tax_class` and the document's `tax_profile`, i.e.
- *   configuration, not a type invariant.
+ *   taxed is `findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)` — a
+ *   property of WHERE the goods went as much as of the line, so it is not a
+ *   type invariant. (This bullet named `tax_class` and `tax_profile` until
+ *   2026-08-22; neither is a field any more.)
  * - **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows
  *   are `fixed` while their invoice projections are `five_day_week` (617 sale,
  *   643 service, 137 surcharge). A whitelist keyed on type would reject the

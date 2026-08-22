@@ -260,7 +260,7 @@ const updateOrderInvoiceRules: CollectionRule[] = [
         source: ["organization"],
         target: ["organization"],
         transform:
-          "object co-write on (uid, name, xero_id, billing_address): overwrite only if the compared shape matches the prev order.organization snapshot; invoice.organization.tax_profile is preserved (invoice-owned)",
+          "object co-write on (uid, name, xero_id, billing_address): overwrite only if the compared shape matches the prev order.organization snapshot; the invoice's own tax axes (tax_exempt, jurisdiction_claim) are preserved (invoice-owned)",
       },
     ],
   },

@@ -123,7 +123,7 @@ const updateTaxRules: CollectionRule[] = [
 // ⚠️ **This REVERSES the conclusion `supersedeTax`'s own docblock reached**, and
 // the reversal is narrower than it looks. That docblock argued there is nothing
 // to propagate because "the order writers re-resolve by name at `asOf`, so a
-// document written after `valid_from` picks up the successor on its own". Every
+// document written after `applied_from` picks up the successor on its own". Every
 // word of that is true — *at the document's next write*. The gap is a draft that
 // nobody touches: it keeps showing the old total until someone opens it, and if
 // a customer ACCEPTS that quote, the very next write silently reprices it.

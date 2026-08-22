@@ -116,10 +116,9 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask", column: true, label: "Name", linkTo: "organizationDetail" }),
   crms_id: z.int(),
   xero_id: z.uuid().nullable(),
-  // Required (no `.default("tax_applied")`): the Typesense config declares it
-  // so, and a `.default()` never materializes on a write — see the note in
-  // `product.ts`. TAX_PROFILES[0] is "tax_applied", so the enum's
-  // type-derived seed already equals the dropped default.
+  // ⚠️ The "Required (no `.default(\"tax_applied\")`) … TAX_PROFILES[0]" note
+  // that stood here described `tax_profile` and outlived it, sitting above a
+  // field it does not describe. `TAX_PROFILES` is gone too.
   // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
   // applied to prod (2,317 documents) and dev on 2026-08-22. The three steps
   // were forced, not ceremonial: every write validates the FULL document and

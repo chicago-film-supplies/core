@@ -258,12 +258,13 @@ export interface InvoiceDocItemPrice {
    * exactly. Projected from the source order line, or set at build time on an
    * invoice-native line.
    *
-   * It is here because the doc-level `tax_profile` override rewrites `taxes` and
-   * nothing else, so **without it a profile revert on an invoice has nothing to
-   * revert to**: `materializeDocumentTax` returns early on `tax_applied`, and
-   * the item keeps whichever override was last applied. The order side has had
-   * this snapshot since 2026-07 and the invoice side never got it — divergence
-   * (6) in the convergence plan.
+   * ⚠️ **It is no longer a revert buffer.** It existed because the doc-level
+   * `tax_profile` override rewrote `taxes` and nothing else, so a revert had
+   * nothing to restore from. `tax_profile` is deleted and the jurisdiction rule
+   * is total — `assignLineTaxes` writes both fields on every document write —
+   * so the field now carries the meaning it always described: the tax this line
+   * would attract were the customer not exempt. (`materializeDocumentTax` also
+   * has no early return any more; it reprices unconditionally.)
    *
    * Optional, and it will stay optional: no invoice line written before
    * 2026-08 carries one.
