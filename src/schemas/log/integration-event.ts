@@ -165,6 +165,24 @@ export const INTEGRATION_EVENT_MSGS = [
   // is exactly the case for a row already in the journal. 120 prod invoices sat
   // that way undetected until 2026-08-20.
   "settlement_totals_sweep",
+  // The state check over Illinois' published tax rates (api-cloudrun#600).
+  // Emitted on EVERY run including clean ones, for the reason the two sweeps
+  // above are: an alert that counted complaints could not tell a matching
+  // corpus from a job that stopped running, and this one guards a rate CFS
+  // bills against.
+  //
+  // ⚠️ Its subject is an EXTERNAL publication, not CFS's own data, which makes
+  // the failure mode different from a sweep's: the source is a fixed-width file
+  // with no published byte offsets and no versioning, so a layout change looks
+  // exactly like "no rate moved". `divergent: 0` is only meaningful beside
+  // `checked: 4` — a run that parsed nothing must report `checked: 0` and be
+  // alerted on, never reported clean.
+  //
+  // Steady state is `divergent: 0, pending: 0`. Non-zero `divergent` means CFS
+  // is billing a rate Illinois does not publish; non-zero `pending` means a
+  // change is dated and not yet applied, which is the case that gives an
+  // operator lead time instead of a back-dated repair.
+  "il_tax_rate_check",
   "sync_collection_completed",
   "sync_collection_skipped",
   "sync_started",
