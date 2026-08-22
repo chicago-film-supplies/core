@@ -12,7 +12,7 @@
  *
  * Run: deno task generate-schema-template-fields
  */
-import { schemas } from "../src/schemas/mod.ts";
+import { isCollectionName, schemaFor } from "../src/schemas/mod.ts";
 import { TEMPLATE_SOURCE_COLLECTIONS, TEMPLATE_TARGET_COLLECTIONS } from "../src/schemas/template.ts";
 import { type SchemaField, walkSchema } from "./schema-walk.ts";
 
@@ -24,15 +24,21 @@ import { type SchemaField, walkSchema } from "./schema-walk.ts";
  * needed, and the generated type is `Partial` to match. Targets reuse the exact
  * same PII-omission + field-hiding walk as sources: a target's fields are an
  * output shape, but a `redact` path must never surface either way.
+ *
+ * ⚠️ **The filter is {@link isCollectionName}, so it NARROWS.** It used to be
+ * `(collection) => schemas[collection]` — the same runtime check, indexing a
+ * mapped type by a `string`, which is an implicit `any` (TS7053) and left
+ * `walkSchema` taking an unchecked argument. Same guard, now paying for itself
+ * at compile time, which is what that helper exists for.
  */
 const COLLECTIONS = [
   ...new Set<string>([...TEMPLATE_SOURCE_COLLECTIONS, ...TEMPLATE_TARGET_COLLECTIONS]),
-].filter((collection) => schemas[collection]);
+].filter(isCollectionName);
 
 const entries: string[] = [];
 
 for (const collection of COLLECTIONS) {
-  const fields: SchemaField[] = walkSchema(schemas[collection]);
+  const fields: SchemaField[] = walkSchema(schemaFor(collection));
 
   const fieldLines = fields
     .map((f) => `    { path: ${JSON.stringify(f.path)}, type: ${JSON.stringify(f.type)} },`)

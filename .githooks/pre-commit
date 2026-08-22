@@ -7,6 +7,12 @@ set -e
 echo "Running lint..."
 deno task lint
 
+# ⚠️ `deno task test` type-checks `src/` and `tests/` transitively — but nothing
+# imports `scripts/`, so the generators were unchecked and had accumulated two
+# TS7053s. First, because 1.7s of type error beats 15s of suite (core#64).
+echo "Type-checking..."
+deno task check
+
 echo "Running tests..."
 deno task test
 
