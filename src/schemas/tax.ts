@@ -54,7 +54,22 @@ export interface Tax {
   name: string;
   rate: number;
   type: RateType;
-  active: boolean;
+  /**
+   * @deprecated Being deleted. **Nothing has ever read it** — `findTaxFor` and
+   * `findTaxAt` select by `[applied_from, applied_to)` alone, so a flag
+   * disagreeing with the window changed what an operator believed and nothing
+   * about what got billed. Two prod documents sat `active: true` on a window
+   * that had already closed (api-cloudrun#613).
+   *
+   * The replacement is derived, one clause, and cannot drift from the bound
+   * that prices: `isTaxLive(tax, asOf)` in `@cfs/core/utils/taxes`.
+   *
+   * Optional here for the expand step only — documents stop carrying it before
+   * the field is removed, and `TaxSchema` is a `z.strictObject`, so the schema
+   * that admits a document without it must be DEPLOYED before any document
+   * loses it (api-cloudrun#443's lesson).
+   */
+  active?: boolean;
   crms_id: number | null;
   /**
    * Which jurisdiction this tax is collected for. `null` means **explicit-only**
@@ -230,16 +245,16 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
   type: RateTypeEnum.meta({ column: true, label: "Type" }),
-  active: z.boolean().default(true).meta({ column: true, label: "Active" }),
+  active: z.boolean().optional().meta({ column: true, label: "Active" }),
   crms_id: z.int().nullable().default(null),
   jurisdiction: JurisdictionEnum.nullable().optional().meta({
     column: true,
     label: "Jurisdiction",
   }),
   item_types: z.array(PreTaxItemTypeEnum),
-  applied_from: chicagoStartOfDay(),
+  applied_from: chicagoStartOfDay().meta({ column: true, label: "Applied From" }),
   applied_from_fs: FirestoreTimestamp,
-  applied_to: chicagoStartOfDay().nullable(),
+  applied_to: chicagoStartOfDay().nullable().meta({ column: true, label: "Applied To" }),
   applied_to_fs: FirestoreTimestamp.nullable(),
   effective_from: chicagoStartOfDay().nullable().optional(),
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
@@ -255,7 +270,10 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   title: "Tax",
   collection: "taxes",
   displayDefaults: {
-    columns: ["name", "rate", "type", "jurisdiction", "active"],
+    // The WINDOW, not the retired `active` flag: it is what prices, and a
+    // column showing a derived liveness without the bound it derives from is
+    // the drift `active` already caused (api-cloudrun#613).
+    columns: ["name", "rate", "type", "jurisdiction", "applied_from", "applied_to"],
     filters: {},
     sort: { column: "name", direction: "asc" },
   },

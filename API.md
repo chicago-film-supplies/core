@@ -7191,7 +7191,7 @@ interface Tax {
   name: string;
   rate: number;
   type: RateType;
-  active: boolean;
+  active?: boolean;
   crms_id: number | null;
   jurisdiction?: JurisdictionType | null;
   item_types: PreTaxItemType[];
@@ -17781,7 +17781,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override" | "recurrence_horizon_failed"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override" | "recurrence_horizon_failed" | "tax_expired_skipped"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -17932,7 +17932,7 @@ const EmailSentLogRecordSchema: z.ZodType<EmailSentLogRecord>;
 Msg literals this archetype absorbs.
 
 ```ts
-const INTEGRATION_EVENT_MSGS: "crms_invoice_items_uniqueness_violation" | "crms_invoice_ambiguous_line_pairing" | "crms_invoice_multiple_orders_found" | "crms_multiple_matches_found" | "crms_invoice_order_not_found" | "crms_discount_roundtrip_drift" | "crms_invoice_chargeable_days_unresolved" | "crms_invoice_reprice_frozen" | "crms_mark_paid_failed" | "crms_mark_paid_noop" | "crms_accessory_skipped" | "crms_product_not_found" | "uploadcare_draft_cleanup_failed" | "uploadcare_file_not_found" | "uploadcare_invoice_cleanup_failed" | "uploadcare_orphan_batch_failed" | "uploadcare_orphan_cleanup_failed" | "uploadcare_orphan_sweep_completed" | "uploadcare_upload_abandoned" | "dmarc_report_ingest_failed" | "dmarc_report_processor_run" | "eventarc_duplicate_event" | "eventarc_processed" | "trello_locked" | "trello_newer_update_detected" | "trello_no_new_updates" | "trello_queue_error" | "mirror_deleted" | "mirror_failed" | "mirror_set" | "mirror_set_failed_terminal" | "mirror_set_queue_failed" | "mirror_skipped_stale" | "draft_quote_skipped_deleted" | "draft_quote_skipped_invalid_order" | "draft_quote_superseded" | "dns_record_check" | "dns_record_check_resolve_failed" | "location_integrity_check" | "location_integrity_check_failed" | "stock_summary_sweep" | "settlement_totals_sweep" | "il_tax_rate_check" | "sync_collection_completed" | "sync_collection_skipped" | "sync_started" | "geocode_cache_write_failed" | "geocode_poi_fallback" | "geocoding_failed" | "member_geocode_skipped" | "user_name_cascade_batch" | "customer_linking_failed"[];
+const INTEGRATION_EVENT_MSGS: "crms_invoice_items_uniqueness_violation" | "crms_invoice_ambiguous_line_pairing" | "crms_invoice_multiple_orders_found" | "crms_multiple_matches_found" | "crms_invoice_order_not_found" | "crms_discount_roundtrip_drift" | "crms_invoice_chargeable_days_unresolved" | "crms_invoice_reprice_frozen" | "crms_mark_paid_failed" | "crms_mark_paid_noop" | "crms_accessory_skipped" | "crms_product_not_found" | "uploadcare_draft_cleanup_failed" | "uploadcare_file_not_found" | "uploadcare_invoice_cleanup_failed" | "uploadcare_orphan_batch_failed" | "uploadcare_orphan_cleanup_failed" | "uploadcare_orphan_sweep_completed" | "uploadcare_upload_abandoned" | "dmarc_report_ingest_failed" | "dmarc_report_processor_run" | "eventarc_duplicate_event" | "eventarc_processed" | "trello_locked" | "trello_newer_update_detected" | "trello_no_new_updates" | "trello_queue_error" | "mirror_deleted" | "mirror_failed" | "mirror_set" | "mirror_set_failed_terminal" | "mirror_set_queue_failed" | "mirror_skipped_stale" | "draft_quote_skipped_deleted" | "draft_quote_skipped_invalid_order" | "draft_quote_superseded" | "dns_record_check" | "dns_record_check_resolve_failed" | "location_integrity_check" | "location_integrity_check_failed" | "stock_summary_sweep" | "settlement_totals_sweep" | "il_tax_rate_check" | "tax_expiry_check" | "sync_collection_completed" | "sync_collection_skipped" | "sync_started" | "geocode_cache_write_failed" | "geocode_poi_fallback" | "geocoding_failed" | "member_geocode_skipped" | "user_name_cascade_batch" | "customer_linking_failed"[];
 ```
 
 ### `IntegrationEventLogRecord`
@@ -23444,6 +23444,8 @@ The tax one line resolves to, and the jurisdiction that decided it.
 interface LineTaxResolution {
   jurisdiction: JurisdictionType;
   level: JurisdictionLevel | "origin";
+  key: string;
+  state: TaxCellState;
   tax: Tax | null;
   base: Tax | null;
 }
@@ -23581,6 +23583,23 @@ the pair and this structural subset does not.
 type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
 ```
 
+### `TaxCellState`
+
+What the catalog has to say about one `(jurisdiction × item type)` cell at an
+instant. Three states, because two could not tell the two ways of getting
+`null` out of {@link findTaxFor} apart.
+
+- `taxed` — a version brackets `asOf`.
+- `untaxed` — **nothing has ever covered this cell**, so `null` is the rule's
+  real answer: a `service` line, a `transaction_fee`, an out-of-nexus
+  destination. `price.taxes: []` means exactly this, corpus-wide.
+- `expired` — CFS **used to** collect here and the window lapsed with nothing
+  replacing it. That is a configuration failure, not a rate of zero.
+
+```ts
+type TaxCellState = "taxed" | "untaxed" | "expired";
+```
+
 ### `TaxDestination`
 
 One `destinations[]` entry, as the tax rule reads it.
@@ -23597,6 +23616,10 @@ interface TaxDestination {
   delivery?: typeLiteral | null;
 }
 ```
+
+### `TaxExpiredError`
+
+_(class — see source)_
 
 ### `TaxSourcingDestination`
 
@@ -23663,6 +23686,8 @@ unnoticed.
 between versions of a tax and must not decide taxability; this one IS the
 taxability decision, and a tax the catalog cannot answer for is not the
 answer.
+
+## 🔴 It REFUSES an expired cell
 
 ### `computeItemTaxAmountCents(tax: Pick<Tax, "rate" | "type">, subtotalDiscountedCents: number, quantity: number): number`
 
@@ -23849,6 +23874,13 @@ contains `asOf`. `null` means *this line is untaxed*, which is a real answer
 rather than a miss — a line is untaxed **iff no tax in its jurisdiction lists
 its type**.
 
+⚠️ **`null` has a second cause, and this function cannot tell you which.** A
+cell whose window has LAPSED also returns `null` here, and that is a
+configuration failure rather than a rate of zero. {@link taxCellState}
+separates the two; this function is deliberately left as the two-valued
+lookup because its read-only consumers (`ilTaxRateCheck`, the audits) must
+not throw.
+
 One mechanism, which is the point. What this replaces was two: a
 `coa_revenue` permissive gate (`isTaxableCoa`) and a separate name-keyed
 default table, each of which could say "taxable" while the other said
@@ -23878,6 +23910,24 @@ destination → organization → {@link deriveJurisdiction} precedence.
 untaxed, which is how `service`, `surcharge` and `transaction_fee` stay
 untaxed without a second rule naming them.
 - `asOf` — Instant to resolve the catalog at.
+
+### `isTaxLive(tax: Tax, asOf: string): boolean`
+
+**The derived `active`.** Is this version the one CFS collects at `asOf`?
+
+This replaced a STORED `active` boolean, and the reason is that nothing ever
+read the stored one: `findTaxFor` and `findTaxAt` have always selected by
+window alone, so a flag disagreeing with the window changed nothing about
+what got billed and everything about what an operator believed. Two prod
+documents sat `active: true` with a window that had already closed
+(api-cloudrun#613). One clause, derived on demand, cannot drift from the
+bound that actually prices.
+
+⚠️ **"Live" is a claim about the WINDOW, not about reachability.** The
+explicit-only class (`item_types: []`) is reached by uid and is never
+window-checked by {@link assignLineTaxes}, so `isTaxLive` is not the
+question to ask of `No Tax` or `Water Bottle Tax` — their windows stay
+open-ended precisely because an expiry on them would be inert.
 
 ### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
 
@@ -24043,6 +24093,30 @@ versions of one name bracket the same instant and {@link findTaxAt} throws
 which retries forever. `TaxSchema` requires both bounds precisely so a stored
 document cannot reach that state; the `| null` here covers the partial
 literals the structural `Tax` admits.
+
+### `taxCellState(taxes: Tax[], jurisdiction: JurisdictionType | null, itemType: string, asOf: string): TaxCellState`
+
+**The third state.** Is this cell taxed, genuinely untaxed, or EXPIRED?
+
+A cell is `expired` iff no version brackets `asOf` **and** some version of
+that cell closed before it. A deliberate deregistration is expressed as a
+successor at 0% with an open window, never as a closed window with no
+successor — so "the last thing we said about this cell was a rate, and it has
+run out" is unambiguous.
+
+⚠️ **`untaxed` is the answer that must NOT widen.** A Chicago `service` line
+is `untaxed` and always has been: no tax has ever listed that type, so there
+is no lapsed version to find. If this returned `expired` for it, every
+service line in the corpus would refuse to price. That distinction is the
+entire safety property of the expiry design — see {@link TaxExpiredError}.
+
+⚠️ A `null` jurisdiction is `untaxed`, never `expired`: no-nexus means no
+catalog lookup happens at all, which is a decision rather than a lapse.
+
+**Parameters**
+
+- `taxes` — The `taxes` collection, unfiltered — historical versions are
+what make the lapse visible.
 
 ## `@cfs/core/utils/templates`
 

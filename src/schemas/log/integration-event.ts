@@ -183,6 +183,25 @@ export const INTEGRATION_EVENT_MSGS = [
   // change is dated and not yet applied, which is the case that gives an
   // operator lead time instead of a back-dated repair.
   "il_tax_rate_check",
+  // The daily state record over the tax catalog's own expiry (api-cloudrun#618).
+  // Emitted on EVERY run including clean ones, for the reason the sweeps above
+  // are: a rule counting complaints cannot tell a healthy catalog from a job
+  // that stopped running.
+  //
+  // ⚠️ **It is the COMPLEMENT of `il_tax_rate_check`, not a duplicate.** That
+  // one diffs CFS's rates against Illinois' published file and covers 29.9% of
+  // the tax CFS collects with zero human input. It cannot reach Chicago Rental
+  // Tax — 70.1% of all tax ever collected — because the 15% is the City of
+  // Chicago lease transaction tax and is published in no machine-readable form.
+  // Detection cannot reach the 70%; an expiry can, at the cost of two operator
+  // review sessions a year.
+  //
+  // Steady state is `expired: 0`. Non-zero `expired` is BOTH a money-path defect
+  // and an order-taking outage — the pricing engine refuses an expired cell
+  // rather than billing it at zero — so it alerts at critical.
+  // `expiring_soon` is the lead-time signal and alerts at warning.
+  // `{ checked, expiring_soon, expired, sample }`.
+  "tax_expiry_check",
   "sync_collection_completed",
   "sync_collection_skipped",
   "sync_started",

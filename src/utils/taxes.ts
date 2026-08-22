@@ -164,6 +164,27 @@ function windowContains(tax: Tax, t: number): boolean {
   return true;
 }
 
+/**
+ * **The derived `active`.** Is this version the one CFS collects at `asOf`?
+ *
+ * This replaced a STORED `active` boolean, and the reason is that nothing ever
+ * read the stored one: `findTaxFor` and `findTaxAt` have always selected by
+ * window alone, so a flag disagreeing with the window changed nothing about
+ * what got billed and everything about what an operator believed. Two prod
+ * documents sat `active: true` with a window that had already closed
+ * (api-cloudrun#613). One clause, derived on demand, cannot drift from the
+ * bound that actually prices.
+ *
+ * ⚠️ **"Live" is a claim about the WINDOW, not about reachability.** The
+ * explicit-only class (`item_types: []`) is reached by uid and is never
+ * window-checked by {@link assignLineTaxes}, so `isTaxLive` is not the
+ * question to ask of `No Tax` or `Water Bottle Tax` — their windows stay
+ * open-ended precisely because an expiry on them would be inert.
+ */
+export function isTaxLive(tax: Tax, asOf: string): boolean {
+  return windowContains(tax, new Date(asOf).getTime());
+}
+
 /** `uid@[from,to)` for a drift message. */
 function windowLabel(tax: Tax): string {
   const { from, to } = taxAppliedWindow(tax);
@@ -202,6 +223,13 @@ export function findTaxAt(
  * contains `asOf`. `null` means *this line is untaxed*, which is a real answer
  * rather than a miss — a line is untaxed **iff no tax in its jurisdiction lists
  * its type**.
+ *
+ * ⚠️ **`null` has a second cause, and this function cannot tell you which.** A
+ * cell whose window has LAPSED also returns `null` here, and that is a
+ * configuration failure rather than a rate of zero. {@link taxCellState}
+ * separates the two; this function is deliberately left as the two-valued
+ * lookup because its read-only consumers (`ilTaxRateCheck`, the audits) must
+ * not throw.
  *
  * One mechanism, which is the point. What this replaces was two: a
  * `coa_revenue` permissive gate (`isTaxableCoa`) and a separate name-keyed
@@ -257,6 +285,152 @@ export function findTaxFor(
     );
   }
   return matches[0];
+}
+
+/**
+ * What the catalog has to say about one `(jurisdiction × item type)` cell at an
+ * instant. Three states, because two could not tell the two ways of getting
+ * `null` out of {@link findTaxFor} apart.
+ *
+ * - `taxed` — a version brackets `asOf`.
+ * - `untaxed` — **nothing has ever covered this cell**, so `null` is the rule's
+ *   real answer: a `service` line, a `transaction_fee`, an out-of-nexus
+ *   destination. `price.taxes: []` means exactly this, corpus-wide.
+ * - `expired` — CFS **used to** collect here and the window lapsed with nothing
+ *   replacing it. That is a configuration failure, not a rate of zero.
+ */
+export type TaxCellState = "taxed" | "untaxed" | "expired";
+
+/**
+ * **The third state.** Is this cell taxed, genuinely untaxed, or EXPIRED?
+ *
+ * A cell is `expired` iff no version brackets `asOf` **and** some version of
+ * that cell closed before it. A deliberate deregistration is expressed as a
+ * successor at 0% with an open window, never as a closed window with no
+ * successor — so "the last thing we said about this cell was a rate, and it has
+ * run out" is unambiguous.
+ *
+ * ⚠️ **`untaxed` is the answer that must NOT widen.** A Chicago `service` line
+ * is `untaxed` and always has been: no tax has ever listed that type, so there
+ * is no lapsed version to find. If this returned `expired` for it, every
+ * service line in the corpus would refuse to price. That distinction is the
+ * entire safety property of the expiry design — see {@link TaxExpiredError}.
+ *
+ * ⚠️ A `null` jurisdiction is `untaxed`, never `expired`: no-nexus means no
+ * catalog lookup happens at all, which is a decision rather than a lapse.
+ *
+ * @param taxes The `taxes` collection, unfiltered — historical versions are
+ *   what make the lapse visible.
+ */
+export function taxCellState(
+  taxes: Tax[],
+  jurisdiction: JurisdictionType | null,
+  itemType: string,
+  asOf: string,
+): TaxCellState {
+  if (jurisdiction === null) return "untaxed";
+
+  const t = new Date(asOf).getTime();
+  const cell = taxes.filter((tax) =>
+    tax.jurisdiction === jurisdiction &&
+    (tax.item_types?.includes(itemType as PreTaxItemType) ?? false)
+  );
+
+  if (cell.some((tax) => windowContains(tax, t))) return "taxed";
+  return cell.some((tax) => {
+    const { to } = taxAppliedWindow(tax);
+    return to != null && new Date(to).getTime() <= t;
+  })
+    ? "expired"
+    : "untaxed";
+}
+
+/**
+ * **Thrown by the pricing path when a cell has expired.** An expired cell does
+ * not price — not at zero, not at the lapsed rate, not at all.
+ *
+ * ## Why a throw rather than a gate
+ *
+ * A closed window makes {@link findTaxFor} return `null`, and `null` already
+ * means *"this line is untaxed"*: {@link assignLineTaxes} would write
+ * `taxes: []` and `total_cents = subtotalDiscounted` with no complaint. Left
+ * alone, an expired Chicago Rental Tax silently zero-rates **70% of all tax CFS
+ * has ever collected**, and the manager's optimistic recompute shows the
+ * operator the same $0, so it looks correct.
+ *
+ * The refusal lives in the engine rather than in a gate wrapped around it
+ * because a gate would have to be **total** over every call site to be safe,
+ * while this is unrepresentable by construction — in any repo, on any path,
+ * including the manager's client-side recompute. It also keeps `taxes: []`
+ * unambiguously "untaxed" corpus-wide, so no reader anywhere needs a new
+ * discriminator.
+ *
+ * Precedent is one function up: {@link findTaxAt} throws `Tax catalog drift`
+ * rather than picking one of two overlapping versions, on exactly the reasoning
+ * that a violation must take pricing down for that cell instead of billing a
+ * number nobody chose.
+ *
+ * ⚠️ **Callers on a retrying path MUST catch this.** An uncaught throw out of a
+ * Cloud Task or a CRMS webhook handler is a 500 that redelivers forever; the
+ * failure is permanent until an operator renews the tax, so it is recorded and
+ * skipped rather than retried. api-cloudrun's `taxExpiryPolicy.ts` is the one
+ * table of what the throw becomes per path.
+ */
+export class TaxExpiredError extends Error {
+  readonly code = "tax_expired";
+  /** The jurisdiction whose cell lapsed. */
+  readonly jurisdiction: JurisdictionType;
+  /** The line key that resolved it — `item.taxed_as ?? item.type`. */
+  readonly itemType: string;
+  /** The instant the catalog was resolved at. */
+  readonly asOf: string;
+  /** The latest `applied_to` of any version of the cell — when it lapsed. */
+  readonly expiredAt: string | null;
+
+  constructor(args: {
+    jurisdiction: JurisdictionType;
+    itemType: string;
+    asOf: string;
+    expiredAt: string | null;
+    name?: string | null;
+  }) {
+    super(
+      `Tax expired: ${args.name ?? "the tax"} covering ` +
+        `(${args.jurisdiction}, ${args.itemType}) ended ` +
+        `${args.expiredAt ?? "unknown"} and nothing replaced it, so ${args.asOf} ` +
+        `resolves to no rate. Renew it with PUT /taxes/{uid} (a later ` +
+        `applied_to) — an expired tax is not a rate of zero.`,
+    );
+    this.name = "TaxExpiredError";
+    this.jurisdiction = args.jurisdiction;
+    this.itemType = args.itemType;
+    this.asOf = args.asOf;
+    this.expiredAt = args.expiredAt;
+  }
+}
+
+/**
+ * When an expired cell lapsed — the latest `applied_to` among its versions.
+ * Reported rather than derived by the caller so the message names a real bound.
+ */
+function cellExpiredAt(
+  taxes: Tax[],
+  jurisdiction: JurisdictionType,
+  itemType: string,
+): { at: string | null; name: string | null } {
+  let at: string | null = null;
+  let name: string | null = null;
+  for (const tax of taxes) {
+    if (tax.jurisdiction !== jurisdiction) continue;
+    if (!(tax.item_types?.includes(itemType as PreTaxItemType) ?? false)) continue;
+    const { to } = taxAppliedWindow(tax);
+    if (to == null) continue;
+    if (at == null || new Date(to).getTime() > new Date(at).getTime()) {
+      at = to;
+      name = tax.name;
+    }
+  }
+  return { at, name };
 }
 
 // ── Jurisdiction derivation ──────────────────────────────────────
@@ -709,6 +883,24 @@ export interface LineTaxResolution {
   /** Which rung answered — `"origin"` is the replacement rule below. */
   level: JurisdictionLevel | "origin";
   /**
+   * The axis the catalog was keyed on — `item.taxed_as ?? item.type`. Returned
+   * rather than left to the caller because a caller that re-derives it is a
+   * second copy of the rule, and the two would only ever disagree on the line
+   * an operator deliberately overrode.
+   */
+  key: string;
+  /**
+   * What the catalog had to say about `(jurisdiction × key)` at `ctx.asOf` —
+   * **after** the frozen-version fallback, so a frozen document that still
+   * holds a version of a lapsed cell reads `taxed`.
+   *
+   * ⚠️ `expired` is what {@link assignLineTaxes} refuses on. This function
+   * itself never throws: `scripts/audit-tax-key.ts` and the manager's
+   * read-only surfaces call it to REPORT the state, and a reporter that dies
+   * on the condition it reports is useless.
+   */
+  state: TaxCellState;
+  /**
    * **The tax this line actually carries** — the jurisdiction's answer, zeroed
    * by exemption. `null` means untaxed, which is how `service`, `surcharge`, an
    * out-of-nexus destination and an exempt customer all stay untaxed without a
@@ -811,8 +1003,51 @@ export function resolveLineTax(
 
   const { jurisdiction, level } = jurisdictionOf();
   const resolved = findTaxFor(ctx.taxes, jurisdiction, key, ctx.asOf);
-  const base = resolved ? atStoredVersion(resolved, ctx) : null;
-  return { jurisdiction, level, tax: ctx.exempt ? null : base, base };
+  if (resolved) {
+    const base = atStoredVersion(resolved, ctx);
+    return { jurisdiction, level, key, state: "taxed", tax: ctx.exempt ? null : base, base };
+  }
+
+  // Nothing brackets `asOf`. Which of the two `null`s is it?
+  const state = taxCellState(ctx.taxes, jurisdiction, key, ctx.asOf);
+  if (state === "expired") {
+    // A frozen document already decided this cell, and a lapse in the LIVE
+    // catalog must not retroactively detax it. Same reasoning as
+    // {@link atStoredVersion}, one rung earlier: there the stored version is
+    // picked over today's, here it is picked over nothing at all.
+    const frozen = frozenTaxForCell(ctx, jurisdiction, key);
+    if (frozen) {
+      return { jurisdiction, level, key, state: "taxed", tax: ctx.exempt ? null : frozen, base: frozen };
+    }
+  }
+  return { jurisdiction, level, key, state, tax: null, base: null };
+}
+
+/**
+ * The version of a lapsed cell a FROZEN document already carries, if exactly
+ * one of its frozen versions covers that cell.
+ *
+ * ⚠️ **More than one match keeps today's answer (`null`), rather than picking.**
+ * A document storing two taxes for one `(jurisdiction × item type)` pair is
+ * document-level drift, not catalog drift, and the frozen path is the one place
+ * that must never refuse — a completed order has to stay writable. Guessing
+ * between two stored rates would bill a number nobody chose, which is exactly
+ * what {@link findTaxFor}'s own drift throw exists to prevent.
+ */
+function frozenTaxForCell(
+  ctx: DocumentTaxContext,
+  jurisdiction: JurisdictionType,
+  itemType: string,
+): Tax | null {
+  if (!ctx.frozenVersions) return null;
+  const matches = [...ctx.frozenVersions.values()]
+    .map((uid) => ctx.taxes.find((t) => t.uid === uid))
+    .filter((t): t is Tax =>
+      t !== undefined &&
+      t.jurisdiction === jurisdiction &&
+      (t.item_types?.includes(itemType as PreTaxItemType) ?? false)
+    );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 /**
@@ -870,6 +1105,18 @@ function atStoredVersion(tax: Tax, ctx: DocumentTaxContext): Tax {
  * between versions of a tax and must not decide taxability; this one IS the
  * taxability decision, and a tax the catalog cannot answer for is not the
  * answer.
+ *
+ * ## 🔴 It REFUSES an expired cell
+ *
+ * @throws {TaxExpiredError} when a line resolves to a `(jurisdiction × item
+ * type)` cell CFS used to collect on and whose window has lapsed with no
+ * successor. An expired cell does not price at zero, at the lapsed rate, or at
+ * all — see {@link TaxExpiredError} for why the refusal lives in the engine,
+ * and {@link taxCellState} for the `untaxed` / `expired` distinction that keeps
+ * every `service` line pricing normally.
+ *
+ * A frozen document is unaffected: {@link resolveLineTax} takes the version the
+ * document already stores before the state is consulted.
  */
 export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): void {
   const byUid = new Map(ctx.taxes.map((t) => [t.uid, t]));
@@ -878,7 +1125,29 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): voi
   items.forEach((item, index) => {
     if (!isPreTaxItem(item)) return;
     const subtotalDiscountedCents = item.price.subtotal_discounted_cents ?? 0;
-    const { tax, base, jurisdiction } = resolveLineTax(item, destinations[index], ctx);
+    const { tax, base, jurisdiction, key, state } = resolveLineTax(item, destinations[index], ctx);
+
+    // 🔴 An expired cell does not price. See {@link TaxExpiredError} for why the
+    // refusal is here rather than in a gate — this function is the ONE author of
+    // `price.taxes` and `price.taxes_base`, so it is the single point at which a
+    // lapsed rate could otherwise become a number.
+    //
+    // ⚠️ **Exemption does not excuse it, and that is deliberate.** An exempt
+    // document would price at $0 either way, so nothing is mis-billed — but
+    // `taxes_base` is precisely the field whose job is to survive exemption and
+    // say WHICH tax the customer was exempt from, and an expired cell cannot
+    // answer that. Carving exemption out would also make the refusal partial,
+    // and a partial refusal is a gate wearing an engine's clothes.
+    if (state === "expired") {
+      const { at, name } = cellExpiredAt(ctx.taxes, jurisdiction, key);
+      throw new TaxExpiredError({
+        jurisdiction,
+        itemType: key,
+        asOf: ctx.asOf,
+        expiredAt: at,
+        name,
+      });
+    }
 
     item.price.taxes_base = base
       ? [{ uid: base.uid, name: base.name, rate: base.rate, type: base.type }]
@@ -932,6 +1201,10 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): voi
  * **Pure** — `asOf` is injected rather than defaulted to now, so this stays
  * free of an ambient clock (a defaulted `now` is how the workspace ban on
  * `new Date()` for business datetimes gets bypassed).
+ *
+ * @throws {TaxExpiredError} inherited from {@link assignLineTaxes}, which this
+ * calls first. Every consumer — both api-cloudrun write paths and the manager's
+ * optimistic recompute — is on the far side of that refusal.
  */
 export function materializeDocumentTax(items: LineItem[], ctx: DocumentTaxContext): void {
   assignLineTaxes(items, ctx);

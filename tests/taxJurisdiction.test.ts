@@ -3,7 +3,15 @@
  * and the `applied_*` window (api-cloudrun#409).
  */
 import { assertEquals, assertThrows } from "@std/assert";
-import { deriveJurisdiction, findTaxAt, findTaxFor, resolveJurisdiction, taxAppliedWindow } from "../src/utils/taxes.ts";
+import {
+  deriveJurisdiction,
+  findTaxAt,
+  findTaxFor,
+  isTaxLive,
+  resolveJurisdiction,
+  taxAppliedWindow,
+  taxCellState,
+} from "../src/utils/taxes.ts";
 import type { Tax } from "../src/utils/orders.ts";
 
 /**
@@ -431,4 +439,77 @@ Deno.test("resolveJurisdiction is TOTAL — every input resolves to a jurisdicti
   // Level 4 always answers, so no caller ever has to handle "no answer".
   const resolved = resolveJurisdiction({ address: null, origin: "chicago" });
   assertEquals(resolved, { jurisdiction: "chicago", level: "derived" });
+});
+
+// ── The lifecycle: isTaxLive, and the THIRD state ────────────────
+//
+// `active` was a stored boolean nothing read. These arms are what replaced it:
+// liveness is one clause over the window that actually prices, and an expired
+// cell is distinguishable from a never-taxed one — which is the entire safety
+// property of the expiry design (api-cloudrun#613/#618).
+
+Deno.test("isTaxLive: the derived `active` is exactly the applied window", () => {
+  const v3 = CATALOG.find((t) => t.uid === "chi-rental-v3")!;
+  const v2 = CATALOG.find((t) => t.uid === "chi-rental-v2")!;
+
+  assertEquals(isTaxLive(v3, NOW), true);
+  assertEquals(isTaxLive(v2, NOW), false, "superseded — its window closed");
+  // Half-open `[from, to)`: the successor owns the boundary instant, not both.
+  assertEquals(isTaxLive(v2, "2026-01-01T00:00:00.000-06:00"), false);
+  assertEquals(isTaxLive(v3, "2026-01-01T00:00:00.000-06:00"), true);
+  // And it is a claim about an INSTANT, so a past date makes the old one live.
+  assertEquals(isTaxLive(v2, "2025-06-01T12:00:00.000-05:00"), true);
+});
+
+Deno.test("🔴 taxCellState: a lapsed cell is `expired`, a never-taxed one is `untaxed`", () => {
+  // The distinction that decides whether the pricing engine refuses. Getting it
+  // wrong in either direction is fatal: `untaxed` where `expired` is true
+  // silently zero-rates 70% of the tax CFS collects; `expired` where `untaxed`
+  // is true refuses every service line in the corpus.
+  const lapsed = CATALOG.map((t) =>
+    t.uid === "chi-rental-v3"
+      ? { ...t, applied_to: "2026-08-01T00:00:00.000-05:00" }
+      : t
+  );
+
+  assertEquals(taxCellState(CATALOG, "chicago", "rental", NOW), "taxed");
+  assertEquals(taxCellState(lapsed, "chicago", "rental", NOW), "expired");
+
+  // No tax has EVER listed these types, so there is no lapsed version to find.
+  for (const type of ["service", "surcharge"]) {
+    assertEquals(taxCellState(CATALOG, "chicago", type, NOW), "untaxed", type);
+    assertEquals(taxCellState(lapsed, "chicago", type, NOW), "untaxed", type);
+  }
+});
+
+Deno.test("taxCellState: a supersede is `taxed` — the successor is what makes it so", () => {
+  // v2 closed on 2026-01-01 and v3 opened on it. The cell never lapsed, so the
+  // closed window of v2 must not read as an expiry.
+  assertEquals(taxCellState(CATALOG, "chicago", "rental", NOW), "taxed");
+  // …and at an instant inside v2's own window, v2 answers.
+  assertEquals(taxCellState(CATALOG, "chicago", "rental", "2025-06-01T12:00:00.000-05:00"), "taxed");
+});
+
+Deno.test("taxCellState: before the first version is `untaxed`, not `expired`", () => {
+  // Frankfort's earliest doc opens 2026-01-01. A 2025 order predates the
+  // registration entirely — nothing lapsed, CFS simply was not collecting yet.
+  assertEquals(taxCellState(CATALOG, "frankfort", "rental", "2025-06-01T12:00:00.000-05:00"), "untaxed");
+});
+
+Deno.test("taxCellState: no_nexus is `untaxed` — a decision, never a lapse", () => {
+  // A null jurisdiction short-circuits before the catalog is consulted, so
+  // there is no window to have closed.
+  assertEquals(taxCellState(CATALOG, null, "rental", NOW), "untaxed");
+  assertEquals(taxCellState(CATALOG, "no_nexus", "rental", NOW), "untaxed");
+});
+
+Deno.test("taxCellState: the explicit-only class is `untaxed` at every instant", () => {
+  // `Water Bottle Tax` and `No Tax` carry `jurisdiction: null` + `item_types: []`
+  // and are reached by uid alone, so a window on them is inert — which is why
+  // the migration leaves their `applied_to` open-ended.
+  const expiredBottle = CATALOG.map((t) =>
+    t.uid === "bottle" ? { ...t, applied_to: "2026-01-01T00:00:00.000-06:00" } : t
+  );
+  assertEquals(taxCellState(expiredBottle, "chicago", "rental", NOW), "taxed");
+  assertEquals(taxCellState(expiredBottle, "chicago", "sale", NOW), "taxed");
 });

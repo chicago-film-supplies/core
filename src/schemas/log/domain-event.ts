@@ -136,6 +136,27 @@ export const DOMAIN_EVENT_MSGS = [
   // `{ recurrence_uid, error_name, error_message, error_stack }`, at `error`.
   // Emitted from `src/services/recurrences.ts` in api-cloudrun.
   "recurrence_horizon_failed",
+  // A write was REFUSED because a `(jurisdiction × item type)` tax cell had
+  // expired — its applied window lapsed with no successor — and the refusing
+  // path was one that must not retry (a CRMS webhook or a `/tasks/*` recompute).
+  // See `TaxExpiredError` in `@cfs/core/utils/taxes`; api-cloudrun#618.
+  //
+  // ⚠️ **This is the ACKed half, and it exists because the alternative retries
+  // forever.** An uncaught throw out of a Cloud Task or CRMS handler is a 500
+  // and the delivery is redone until an operator renews the tax, which may be
+  // days. The failure is permanent for as long as the catalog is wrong, so it is
+  // recorded and skipped — the same shape `parseCrmsDocumentNumber`'s refusal
+  // takes (api-cloudrun#451). The OPERATOR paths do not emit this: they 400,
+  // and a 400 has someone reading it.
+  //
+  // ⚠️ It reports a REFUSAL, not the catalog's state. `tax_expiry_check`
+  // (integration archetype) is the standing-condition record and is what
+  // `TaxExpired` alerts on; this one says the expiry is actively blocking work,
+  // and names the document it blocked.
+  //
+  // `{ order_uid | invoice_uid, jurisdiction, item_type, expired_at, as_of,
+  // tax_name, operation }`, at `error`.
+  "tax_expired_skipped",
 ] as const;
 
 /** Discriminated msg union for Domain-archetype log records. */

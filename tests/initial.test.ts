@@ -83,9 +83,14 @@ Deno.test("getInitialValues — enum fields use first value", () => {
 
 Deno.test("getInitialValues — defaults are used when present", () => {
   const result = getInitialValues(TaxSchema);
-  assertEquals(result.active, true);
   assertEquals(result.crms_id, null);
   assertEquals(result.applied_from, "1970-01-01T00:00:00Z");
+  // `active` was asserted here and is not any more: it carries no default, it
+  // is being deleted, and liveness is derived from the applied window by
+  // `isTaxLive` (api-cloudrun#613/#618). Nothing reads the stored flag, so the
+  // value this helper synthesizes for it is not a fact worth pinning — the two
+  // siblings above are, because they DO have defaults, which is the property
+  // this arm is named for.
 });
 
 Deno.test("getInitialValues — custom types (FirestoreTimestamp) are omitted", () => {
