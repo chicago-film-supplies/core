@@ -11,8 +11,15 @@ const validTax = {
   name: "Chicago Rental Tax",
   rate: 15,
   type: "percent",
-  valid_from: "2026-01-01T00:00:00.000Z",
-  valid_from_fs: mockTimestamp,
+  // `item_types` names types the rule can resolve, so the doc needs a
+  // jurisdiction for them to resolve UNDER — `getInitialValues` seeds
+  // `jurisdiction: null`, which `checkTaxAxes` correctly refuses.
+  jurisdiction: "chicago",
+  item_types: ["rental"],
+  applied_from: "2026-01-01T00:00:00.000Z",
+  applied_from_fs: mockTimestamp,
+  applied_to: null,
+  applied_to_fs: null,
   created_by: { uid: "testuser100000000000", name: "Test User" },
   updated_by: { uid: "testuser100000000000", name: "Test User" },
   created_at: mockTimestamp,
@@ -48,13 +55,13 @@ Deno.test("CreateTaxInput accepts valid input", () => {
     name: "Sales Tax",
     rate: 10.25,
     type: "percent" as const,
-    valid_from: "2026-01-01T00:00:00.000Z",
+    applied_from: "2026-01-01T00:00:00.000Z",
   };
   assertEquals(CreateTaxInput.safeParse(input).success, true);
 });
 
 Deno.test("CreateTaxInput rejects missing name", () => {
-  const input = { rate: 10, type: "percent", valid_from: null };
+  const input = { rate: 10, type: "percent", applied_from: null };
   assertEquals(CreateTaxInput.safeParse(input).success, false);
 });
 

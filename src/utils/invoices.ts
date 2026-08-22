@@ -376,7 +376,7 @@ export function getXeroUnitAmountFromCents(subtotalCents: number, quantity: numb
  * ({@link pickInvoiceOnlyFields}) and the carry-forward
  * ({@link carryForwardOverrides}) are all derived from it — because four
  * hand-maintained copies of one fact is how `crms_id` came to be absent from
- * every one of them while {@link invoiceProjectionMatches} compared key sets
+ * every one of them while {@link invoiceItemsMatch} compared key sets
  * before values and reported the ENTIRE CRMS-authored corpus `out_of_sync`,
  * with nothing thrown.
  *

@@ -3,7 +3,6 @@ import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
   assertCoaTaxMapCoversCore,
   assignLineTaxes,
-  defaultTaxNameForLine,
   deriveOrderTaxAsOf,
   destinationsForItems,
   type DocumentTaxContext,
@@ -32,8 +31,8 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "frankfort",
     item_types: ["rental", "sale", "replacement"],
-    valid_from: "2026-01-01T00:00:00.000-06:00",
-    valid_to: null,
+    applied_from: "2026-01-01T00:00:00.000-06:00",
+    applied_to: null,
   },
   {
     uid: "rantoul-tax",
@@ -42,8 +41,8 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "rantoul",
     item_types: ["rental", "sale", "replacement"],
-    valid_from: "2026-01-01T00:00:00.000-06:00",
-    valid_to: null,
+    applied_from: "2026-01-01T00:00:00.000-06:00",
+    applied_to: null,
   },
   {
     uid: "chi-rental-tax",
@@ -52,8 +51,8 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "chicago",
     item_types: ["rental"],
-    valid_from: "2026-01-01T00:00:00.000-06:00",
-    valid_to: null,
+    applied_from: "2026-01-01T00:00:00.000-06:00",
+    applied_to: null,
   },
   {
     uid: "chi-sales-tax",
@@ -62,8 +61,8 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "chicago",
     item_types: ["sale", "replacement"],
-    valid_from: "2020-01-01T00:00:00.000-06:00",
-    valid_to: null,
+    applied_from: "2020-01-01T00:00:00.000-06:00",
+    applied_to: null,
   },
   // The explicit-only class: reachable by uid alone, matched by no
   // (jurisdiction, type) pair, and $0.05 per unit rather than a percentage.
@@ -74,8 +73,8 @@ const CATALOG: Tax[] = [
     type: "flat",
     jurisdiction: null,
     item_types: [],
-    valid_from: "2026-01-01T00:00:00.000-06:00",
-    valid_to: null,
+    applied_from: "2026-01-01T00:00:00.000-06:00",
+    applied_to: null,
   },
 ];
 
@@ -117,11 +116,11 @@ Deno.test("findTaxAt resolves by name within the validity window", () => {
   assertEquals(tax?.uid, "frankfort-tax");
 });
 
-Deno.test("findTaxAt returns null when asOf precedes valid_from", () => {
+Deno.test("findTaxAt returns null when asOf precedes applied_from", () => {
   assertEquals(findTaxAt(CATALOG, "Frankfort Sales Tax", "2025-06-01T00:00:00.000-05:00"), null);
 });
 
-Deno.test("findTaxAt treats null valid_to as open-ended", () => {
+Deno.test("findTaxAt treats null applied_to as open-ended", () => {
   const tax = findTaxAt(CATALOG, "Frankfort Sales Tax", "2030-01-01T00:00:00.000-06:00");
   assertEquals(tax?.uid, "frankfort-tax");
 });
@@ -129,7 +128,7 @@ Deno.test("findTaxAt treats null valid_to as open-ended", () => {
 Deno.test("findTaxAt throws on catalog drift (two same-name docs bracket asOf)", () => {
   const drifted: Tax[] = [
     ...CATALOG,
-    { uid: "frankfort-dupe", name: "Frankfort Sales Tax", rate: 8, type: "percent", valid_from: "2026-01-01T00:00:00.000-06:00", valid_to: null },
+    { uid: "frankfort-dupe", name: "Frankfort Sales Tax", rate: 8, type: "percent", applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: null },
   ];
   assertThrows(() => findTaxAt(drifted, "Frankfort Sales Tax", AS_OF), Error, "drift");
 });
@@ -622,8 +621,8 @@ Deno.test("🔴 a frozen document keeps the rate VERSION it already stores", () 
       type: "percent",
       jurisdiction: "chicago",
       item_types: ["rental"],
-      valid_from: "2025-01-01T00:00:00.000-06:00",
-      valid_to: "2026-01-01T00:00:00.000-06:00",
+      applied_from: "2025-01-01T00:00:00.000-06:00",
+      applied_to: "2026-01-01T00:00:00.000-06:00",
     },
   ];
   const items = [makeItem()];
@@ -761,52 +760,15 @@ Deno.test("deriveOrderTaxAsOf: falls back to the INJECTED now, never an ambient 
   assertEquals(deriveOrderTaxAsOf(undefined, NOW), NOW);
   assertEquals(deriveOrderTaxAsOf([orderDest("IL", null), null, undefined], NOW), NOW);
 });
-// ── defaultTaxNameForLine — the COA-first default rule (manager#297) ─────────
+
+// ── TAXABLE_COA_TO_TAX_NAME — the historical oracle ──────────────
 //
-// These pin the two directions the 2026-08-16 corpus measurement found, because
-// they behave DIFFERENTLY downstream and only one of them is self-correcting.
-
-Deno.test("defaultTaxNameForLine: coa_revenue decides, and beats the type map", () => {
-  // Direction 1 — the COA says taxed where a type-keyed map says untaxed.
-  // 36 prod `service` lines sit at coa 4000 carrying Chicago Rental Tax.
-  // ⚠️ NOT self-correcting downstream: `isTaxableCoa(4000)` passes, so
-  // `materializeDocumentTax` prices whatever refs the line carries — none — and
-  // the line is silently untaxed. This is the money half.
-  assertEquals(defaultTaxNameForLine(4000, "service"), "Chicago Rental Tax");
-  assertEquals(defaultTaxNameForLine(4200, "service"), "Chicago Sales Tax");
-  assertEquals(defaultTaxNameForLine(4210, "service"), "Chicago Sales Tax");
-  assertEquals(defaultTaxNameForLine(4200, "surcharge"), "Chicago Sales Tax");
-
-  // Direction 2 — the COA says untaxed where a type-keyed map says taxed.
-  // 105 prod `sale` lines sit at coa 4700, all carrying no tax; this is the
-  // LARGER population and the one the issue had not looked at. Harmless in
-  // practice because `materializeDocumentTax` clears `price.taxes` outright
-  // when `isTaxableCoa` is false — but a client that seeds one shows the
-  // operator a tax the save then removes.
-  assertEquals(defaultTaxNameForLine(4700, "sale"), null);
-  assertEquals(defaultTaxNameForLine(4800, "rental"), null);
-  assertEquals(defaultTaxNameForLine(2210, "sale"), null);
-
-  // Taxable in principle, no tax in practice — a real answer, not a miss.
-  assertEquals(defaultTaxNameForLine(4140, "rental"), null);
-});
-
-Deno.test("defaultTaxNameForLine: type is the fallback ONLY when there is no account", () => {
-  // A custom line carries no `coa_revenue` at all — `buildCustomOrderLine`
-  // constructs no such field — so `type` is the only key it has. 99 prod lines.
-  // This is why the type map survives rather than being deleted.
-  assertEquals(defaultTaxNameForLine(null, "rental"), "Chicago Rental Tax");
-  assertEquals(defaultTaxNameForLine(undefined, "sale"), "Chicago Sales Tax");
-  assertEquals(defaultTaxNameForLine(undefined, "replacement"), "Chicago Sales Tax");
-
-  // Untaxed by design under the fallback, not a miss.
-  assertEquals(defaultTaxNameForLine(undefined, "service"), null);
-  assertEquals(defaultTaxNameForLine(null, "surcharge"), null);
-
-  // ⚠️ The fallback must NOT fire when an account is present — that would
-  // restore the exact divergence this function replaces.
-  assertEquals(defaultTaxNameForLine(4700, "rental"), null);
-});
+// ⚠️ Not a rule any WRITER consults. The live default is
+// `findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)`; this table
+// survives for the two restatement tools that reconstruct what a historical
+// line carried, where a COA key is the correct oracle. Its type-keyed
+// companion (`defaultTaxNameForLine` / `DEFAULT_TAX_NAME_BY_TYPE`) was DELETED
+// rather than kept — a second encoding of a rule that already exists.
 
 Deno.test("assertCoaTaxMapCoversCore: the name map covers every taxable COA", () => {
   // Fails CLOSED. A taxable COA with no entry would be silently left untaxed,

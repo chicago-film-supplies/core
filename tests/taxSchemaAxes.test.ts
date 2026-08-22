@@ -20,10 +20,11 @@ function tax(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     type: "percent",
     active: true,
     crms_id: 3,
-    valid_from: "2026-01-01T00:00:00.000-06:00",
-    valid_from_fs: mockTimestamp,
-    valid_to: null,
-    valid_to_fs: null,
+    item_types: ["sale", "replacement"],
+    applied_from: "2026-01-01T00:00:00.000-06:00",
+    applied_from_fs: mockTimestamp,
+    applied_to: null,
+    applied_to_fs: null,
     version: 0,
     created_by: ACTOR,
     updated_by: ACTOR,
@@ -115,11 +116,54 @@ Deno.test("🔴 a jurisdiction with EMPTY item_types is ALLOWED — it is a SCOP
   assertEquals(r.success, true);
 });
 
-Deno.test("the resolvable check is SKIPPED while either half is absent (Phase 1)", () => {
-  // Every new field ships optional; the migration writes both together.
-  assertEquals(TaxSchema.safeParse(tax({ jurisdiction: "chicago" })).success, true);
-  assertEquals(TaxSchema.safeParse(tax({ item_types: ["sale"] })).success, true);
-  assertEquals(TaxSchema.safeParse(tax()).success, true);
+Deno.test("item_types is REQUIRED — an omitted list is not a way to say 'none'", () => {
+  // ⚠️ This arm asserted the opposite through Phase 1, when every new field
+  // shipped optional. The owner ruling that closed it: `service`, `surcharge`
+  // and `transaction_fee` are untaxed TODAY and could be taxed tomorrow, so
+  // the absence has to be a STATED fact. With the field optional, "nobody
+  // decided" and "decided: none" were the same document.
+  const { item_types: _omitted, ...withoutItemTypes } = tax();
+  assertEquals(TaxSchema.safeParse(withoutItemTypes).success, false);
+
+  // `[]` is how you say none — the explicit-only class, still admitted.
+  assertEquals(TaxSchema.safeParse(tax({ item_types: [] })).success, true);
+});
+
+// ── The applied window REPLACED valid_*, and the old pair is REFUSED ─────────
+
+Deno.test("🔴 a document still carrying valid_from is REFUSED, not ignored", () => {
+  // The discriminating half. `TaxSchema` is a `z.strictObject`, so the four
+  // `valid_*` keys are now unknown keys rather than tolerated legacy ones —
+  // which is what makes the strip migration verifiable: a document that kept
+  // the old pair cannot be written back.
+  for (const key of ["valid_from", "valid_to", "valid_from_fs", "valid_to_fs"]) {
+    assertEquals(
+      TaxSchema.safeParse(tax({ [key]: "2026-01-01T00:00:00.000-06:00" })).success,
+      false,
+      key,
+    );
+  }
+});
+
+Deno.test("applied_from and applied_to are REQUIRED — a missing bound reads as OPEN", () => {
+  // Not a tidiness rule. `taxAppliedWindow` maps an absent bound to `null` and
+  // every bracket check treats `null` as open, so an unbounded version
+  // brackets every instant, two versions of one name bracket the same instant,
+  // and `findTaxAt` throws `Tax catalog drift` — on the pricing path, out of a
+  // CRMS Cloud Task handler, which retries forever.
+  for (const key of ["applied_from", "applied_from_fs", "applied_to", "applied_to_fs"]) {
+    const doc = tax();
+    delete doc[key];
+    assertEquals(TaxSchema.safeParse(doc).success, false, key);
+  }
+  // `applied_to: null` is the OPEN-ENDED answer and stays admitted — the
+  // distinction absent-vs-null is the whole point.
+  assertEquals(TaxSchema.safeParse(tax({ applied_to: null })).success, true);
+});
+
+Deno.test("an invalid applied_from is still refused", () => {
+  assertEquals(TaxSchema.safeParse(tax({ applied_from: "not-a-date" })).success, false);
+  assertEquals(TaxSchema.safeParse(tax({ applied_from: null })).success, false);
 });
 
 Deno.test("item_types cannot name transaction_fee — it is not REPRESENTABLE", () => {

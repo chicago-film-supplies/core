@@ -93,16 +93,18 @@ export { isTaxableCoa, TAXABLE_REVENUE_COAS };
  *
  * ⚠️ **A line with NO `coa_revenue` is not covered by this table** — custom
  * lines (`buildCustomOrderLine` / `buildCustomInvoiceLine`) construct no such
- * field, so a type-keyed fallback is still required and is not a redundant
- * second encoding. Prod carries **99** such lines. That is the whole reason
- * this is a default table rather than the only key.
+ * field, and prod carries **99** of them. That gap is why this is a HISTORICAL
+ * oracle and not a rule: it can only answer for the lines that carry an
+ * account.
  *
- * ⚠️ **This lives in core because it has TWO consumers.** It was
- * `api-cloudrun/src/lib/taxByCoa.ts`, unreachable from the manager, which is
- * why the manager grew a type-keyed twin answering the same question. Moving it
- * rather than copying it is the point — an earlier revision of its docblock
- * records a *third* encoding (`chart-of-accounts.default_tax_profile`) that was
- * deleted for having one writer and zero readers.
+ * ⚠️ **Its consumers are restatement tools, not writers.** The live default is
+ * `findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)` — the same
+ * `(item type × jurisdiction)` rule everything else resolves by, which answers
+ * for a custom line too. A companion type-keyed table (`defaultTaxNameForLine`
+ * / `DEFAULT_TAX_NAME_BY_TYPE`) was DELETED rather than kept: it was a second
+ * encoding of a rule that already exists, and an earlier revision of this
+ * docblock records a *third* (`chart-of-accounts.default_tax_profile`) deleted
+ * for having one writer and zero readers.
  */
 export const TAXABLE_COA_TO_TAX_NAME: Readonly<Record<number, string | null>> = {
   4000: "Chicago Rental Tax",
@@ -131,63 +133,19 @@ export function assertCoaTaxMapCoversCore(): void {
 }
 
 /**
- * **The one default-tax rule**: the tax NAME a newly authored line should
- * carry, given its account and its type.
+ * The APPLIED window of a tax version — the one place the bracket checks below
+ * read the bounds from.
  *
- * `coa_revenue` decides wherever the line has one — that is the measured key
- * (see {@link TAXABLE_COA_TO_TAX_NAME}). `type` is the fallback for a line that
- * carries no account at all, which is every custom line.
- *
- * Returns `null` for "untaxed", which is a real answer rather than a miss: a
- * non-taxable COA, a taxable COA with no tax in practice (4140), and the
- * `service` / `surcharge` types under the fallback are all deliberately untaxed.
- */
-export function defaultTaxNameForLine(
-  coaRevenue: number | null | undefined,
-  type: string,
-): string | null {
-  if (coaRevenue != null) {
-    return Object.hasOwn(TAXABLE_COA_TO_TAX_NAME, coaRevenue)
-      ? TAXABLE_COA_TO_TAX_NAME[coaRevenue]
-      : null;
-  }
-  return DEFAULT_TAX_NAME_BY_TYPE[type] ?? null;
-}
-
-/**
- * The type-keyed fallback, for lines with no `coa_revenue`.
- *
- * ⚠️ **Not a second encoding of the table above** — it answers the case that
- * table cannot: a custom line has no account. A type absent here is untaxed by
- * design (`service`, `surcharge`), not a miss.
- */
-const DEFAULT_TAX_NAME_BY_TYPE: Readonly<Record<string, string>> = {
-  rental: "Chicago Rental Tax",
-  sale: "Chicago Sales Tax",
-  replacement: "Chicago Sales Tax",
-};
-
-/**
- * The APPLIED window of a tax version, dual-reading the old field names.
- *
- * ⚠️ **`applied_from ?? valid_from`, and the `??` is load-bearing.**
- * api-cloudrun#409 renames the pair, and deploy and document-migration cannot
- * be simultaneous. Reading only the new name against a document still holding
- * only the old one yields a MISSING bound — which every bracket check below
- * treats as OPEN, so every version brackets every instant and {@link findTaxAt}
- * throws `Tax catalog drift`. That throw is on the pricing path, and out of a
- * CRMS Cloud Task handler it retries forever. Phase 2 deletes the fallback and
- * the old fields together.
- *
- * Note the ASYMMETRY: `applied_to` is legitimately `null` (open-ended), so it
- * falls back only when *absent*, never when explicitly null. `applied_from` has
- * no meaningful null.
+ * ⚠️ **A missing bound is read as OPEN**, and that is dangerous rather than
+ * merely permissive: an unbounded version brackets every instant, so two
+ * versions of one name bracket the same instant and {@link findTaxAt} throws
+ * `Tax catalog drift` — on the pricing path, out of a CRMS Cloud Task handler,
+ * which retries forever. `TaxSchema` requires both bounds precisely so a stored
+ * document cannot reach that state; the `| null` here covers the partial
+ * literals the structural `Tax` admits.
  */
 export function taxAppliedWindow(tax: Tax): { from: string | null; to: string | null } {
-  return {
-    from: tax.applied_from ?? tax.valid_from ?? null,
-    to: tax.applied_to !== undefined ? tax.applied_to : (tax.valid_to ?? null),
-  };
+  return { from: tax.applied_from ?? null, to: tax.applied_to ?? null };
 }
 
 /**
@@ -217,8 +175,8 @@ function windowLabel(tax: Tax): string {
  * Returns null when nothing matches (e.g. `asOf` before any historical doc).
  * Throws on catalog drift (two same-name docs bracket the same instant).
  *
- * @see {@link taxAppliedWindow} for the Phase-1 dual-read and why a missing
- * bound is dangerous rather than merely permissive.
+ * @see {@link taxAppliedWindow} for why a missing bound is dangerous rather
+ * than merely permissive.
  */
 export function findTaxAt(
   taxes: Tax[],
@@ -356,7 +314,7 @@ const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>
  * rather than a default: a reader has to see that a Naperville delivery is
  * taxed, and taxed at *our store's* rate.
  *
- * ## Conservative in the same two directions as {@link isEntirelyOutOfIllinois}
+ * ## Conservative in the same two directions as `isEntirelyOutOfIllinois`
  *
  * An **unresolvable** region falls to case 3, not case 1. `toUsStateCode`
  * returns `null` for *unknown*, never for *not Illinois*, and 18 of the 48
@@ -378,7 +336,7 @@ const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>
  * the reason this derivation is the LOWEST precedence level: it is a
  * convenience, and an explicit jurisdiction at any level above it outranks it.
  *
- * Pure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager
+ * Pure and db-free, like its predecessor `isEntirelyOutOfIllinois`, so the manager
  * reaches the same answer as the API without a round trip.
  *
  * @param address The destination's delivery address.
@@ -517,7 +475,7 @@ export function resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdi
  * The one destination shape the order-side tax rules read.
  *
  * Two fields, for the two questions: `delivery.address.region` answers *"is this
- * document sourced outside Illinois?"* ({@link isEntirelyOutOfIllinois}) and
+ * document sourced outside Illinois?"* ({@link deriveJurisdiction}) and
  * `dates.delivery_start` answers *"as of when do its taxes resolve?"*
  * ({@link deriveOrderTaxAsOf}). Both optional, because a caller mid-edit may
  * have neither.

@@ -81,7 +81,7 @@ export interface Organization {
   jurisdiction_claim?: JurisdictionType | null;
   /**
    * Whether this customer is tax-exempt — a property of the CUSTOMER, which is
-   * the half {@link TaxProfileType} welds to jurisdiction and cannot separate.
+   * the half `tax_profile` welded to jurisdiction and could not separate.
    *
    * ⚠️ **Exemption is STICKY from either side**: the rule is
    * `org.tax_exempt || doc.tax_exempt === true`, never `doc ?? org`. A `false`

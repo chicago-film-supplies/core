@@ -1,18 +1,15 @@
 /**
  * The `(jurisdiction × item type)` tax rule — `findTaxFor`, `deriveJurisdiction`
- * and the Phase-1 `applied_* ?? valid_*` dual-read (api-cloudrun#409).
- *
- * Kept out of `taxes.test.ts` because that file is the *profile*-axis suite and
- * Phase 2 deletes most of it; these assertions outlive it.
+ * and the `applied_*` window (api-cloudrun#409).
  */
 import { assertEquals, assertThrows } from "@std/assert";
 import { deriveJurisdiction, findTaxAt, findTaxFor, resolveJurisdiction, taxAppliedWindow } from "../src/utils/taxes.ts";
 import type { Tax } from "../src/utils/orders.ts";
 
 /**
- * The catalog as the Phase-1′ migration leaves it: `applied_*` populated,
- * `valid_*` still present, `item_types` set from the RULE rather than from the
- * corpus (there are no taxed services, and prod's are frozen mistakes).
+ * The catalog as the contracted schema requires it: `applied_*` populated,
+ * `item_types` set from the RULE rather than from the corpus (there are no
+ * taxed services, and prod's are frozen mistakes).
  */
 const CATALOG: Tax[] = [
   {
@@ -22,8 +19,6 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "chicago",
     item_types: ["rental"],
-    valid_from: "2026-01-01T00:00:00.000-06:00",
-    valid_to: null,
     applied_from: "2026-01-01T00:00:00.000-06:00",
     applied_to: null,
   },
@@ -34,8 +29,6 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "chicago",
     item_types: ["rental"],
-    valid_from: "2025-01-01T00:00:00.000-06:00",
-    valid_to: "2026-01-01T00:00:00.000-06:00",
     applied_from: "2025-01-01T00:00:00.000-06:00",
     applied_to: "2026-01-01T00:00:00.000-06:00",
   },
@@ -46,8 +39,6 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "chicago",
     item_types: ["sale", "replacement"],
-    valid_from: "2020-01-01T00:00:00.000-06:00",
-    valid_to: null,
     applied_from: "2020-01-01T00:00:00.000-06:00",
     applied_to: null,
   },
@@ -60,8 +51,6 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "rantoul",
     item_types: ["rental", "sale", "replacement"],
-    valid_from: "2026-01-01T00:00:00.000-06:00",
-    valid_to: null,
     applied_from: "2026-01-01T00:00:00.000-06:00",
     applied_to: null,
   },
@@ -72,8 +61,6 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: "frankfort",
     item_types: ["rental", "sale", "replacement"],
-    valid_from: "2026-01-01T00:00:00.000-06:00",
-    valid_to: null,
     applied_from: "2026-01-01T00:00:00.000-06:00",
     applied_to: null,
   },
@@ -85,8 +72,6 @@ const CATALOG: Tax[] = [
     type: "flat",
     jurisdiction: null,
     item_types: [],
-    valid_from: "2026-03-27T00:00:00.000-05:00",
-    valid_to: null,
     applied_from: "2026-03-27T00:00:00.000-05:00",
     applied_to: null,
   },
@@ -97,8 +82,6 @@ const CATALOG: Tax[] = [
     type: "percent",
     jurisdiction: null,
     item_types: [],
-    valid_from: "2026-03-27T00:00:00.000-05:00",
-    valid_to: null,
     applied_from: "2026-03-27T00:00:00.000-05:00",
     applied_to: null,
   },
@@ -217,48 +200,29 @@ Deno.test("findTaxFor: a tax with NO item_types matches nothing", () => {
   assertEquals(findTaxFor(halfMigrated, "chicago", "rental", NOW), null);
 });
 
-// ── The Phase-1 dual-read ────────────────────────────────────────
+// ── The applied window ───────────────────────────────────────────
 
-Deno.test("taxAppliedWindow: prefers applied_*, falls back to valid_*", () => {
+Deno.test("taxAppliedWindow reads applied_* and nothing else", () => {
   assertEquals(
     taxAppliedWindow({
       uid: "x",
       name: "X",
       rate: 1,
       type: "percent",
-      valid_from: "2020-01-01T00:00:00.000-06:00",
-      valid_to: "2021-01-01T00:00:00.000-06:00",
       applied_from: "2025-01-01T00:00:00.000-06:00",
       applied_to: "2026-01-01T00:00:00.000-06:00",
     }),
     { from: "2025-01-01T00:00:00.000-06:00", to: "2026-01-01T00:00:00.000-06:00" },
   );
-
-  // An UNMIGRATED document — the whole reason the fallback exists.
-  assertEquals(
-    taxAppliedWindow({
-      uid: "x",
-      name: "X",
-      rate: 1,
-      type: "percent",
-      valid_from: "2020-01-01T00:00:00.000-06:00",
-      valid_to: "2021-01-01T00:00:00.000-06:00",
-    }),
-    { from: "2020-01-01T00:00:00.000-06:00", to: "2021-01-01T00:00:00.000-06:00" },
-  );
 });
 
-Deno.test("taxAppliedWindow: an EXPLICIT applied_to: null is open-ended, not a fallback", () => {
-  // The asymmetry. `null` is a real value on `applied_to` (open-ended), so it
-  // must not fall through to a stale `valid_to` and re-close a window the
-  // supersede deliberately opened.
+Deno.test("taxAppliedWindow: applied_to null is OPEN-ENDED", () => {
   assertEquals(
     taxAppliedWindow({
       uid: "x",
       name: "X",
       rate: 1,
       type: "percent",
-      valid_to: "2021-01-01T00:00:00.000-06:00",
       applied_from: "2025-01-01T00:00:00.000-06:00",
       applied_to: null,
     }).to,
@@ -266,19 +230,25 @@ Deno.test("taxAppliedWindow: an EXPLICIT applied_to: null is open-ended, not a f
   );
 });
 
-Deno.test("findTaxAt reads an UNMIGRATED catalog identically to a migrated one", () => {
-  // This is the deploy-then-migrate window in one assertion. Without the
-  // fallback the unmigrated arm has no bounds at all, so BOTH Chicago Rental
-  // versions bracket every instant and it throws `Tax catalog drift` — on the
-  // pricing path, out of a CRMS task handler, retrying forever.
-  const unmigrated: Tax[] = CATALOG.map(({ applied_from: _f, applied_to: _t, ...rest }) => rest);
-  for (const asOf of [NOW, "2025-06-01T00:00:00.000-05:00"]) {
-    assertEquals(
-      findTaxAt(unmigrated, "Chicago Rental Tax", asOf)?.uid,
-      findTaxAt(CATALOG, "Chicago Rental Tax", asOf)?.uid,
-      asOf,
-    );
-  }
+Deno.test("🔴 a MISSING bound reads as OPEN, which is why the schema requires it", () => {
+  // The property the required-ness protects, asserted directly rather than
+  // inferred from the field being required. A version with no bounds brackets
+  // every instant, so both Chicago Rental versions match one instant and
+  // `findTaxAt` throws `Tax catalog drift` — on the pricing path, out of a
+  // CRMS task handler, retrying forever.
+  //
+  // `TaxSchema` cannot produce this shape any more; the structural `Tax` in
+  // `utils/orders.ts` still can, and a caller assembling a catalog by hand is
+  // exactly who needs to know what it costs.
+  const unbounded: Tax[] = CATALOG.map(({ applied_from: _f, applied_to: _t, ...rest }) => rest);
+  assertThrows(
+    () => findTaxAt(unbounded, "Chicago Rental Tax", NOW),
+    Error,
+    "drift",
+  );
+
+  // The same catalog WITH its bounds resolves to exactly one version.
+  assertEquals(findTaxAt(CATALOG, "Chicago Rental Tax", NOW)?.uid, "chi-rental-v3");
 });
 
 // ── deriveJurisdiction: three cases, three legal reasons ─────────

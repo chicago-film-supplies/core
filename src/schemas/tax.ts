@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
-import { chicagoInstant, chicagoStartOfDay } from "./_datetime.ts";
+import { chicagoStartOfDay } from "./_datetime.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -56,10 +56,6 @@ export interface Tax {
   type: RateType;
   active: boolean;
   crms_id: number | null;
-  valid_from: string;
-  valid_from_fs: FirestoreTimestampType;
-  valid_to: string | null;
-  valid_to_fs: FirestoreTimestampType | null;
   /**
    * Which jurisdiction this tax is collected for. `null` means **explicit-only**
    * — reachable by uid, never by `findTaxFor`. Prod has exactly two:
@@ -77,20 +73,27 @@ export interface Tax {
    * ⚠️ **Set from the RULE, not from the corpus.** Prod carries taxed `service`
    * and `surcharge` lines; those are mistakes frozen as history, and encoding
    * them here would promote 11 defects into a standing rule.
+   *
+   * ⚠️ **Required, and `[]` is the way to say "no types".** The absence of a
+   * type has to be a STATED fact: `service`, `surcharge` and `transaction_fee`
+   * are untaxed today and could be taxed tomorrow, so an omitted list would
+   * make "nobody decided" and "decided: none" the same document.
+   * `audit-tax-catalog.ts` prints the full (jurisdiction × item type) matrix so
+   * adding one stays a deliberate edit.
    */
-  item_types?: PreTaxItemType[];
+  item_types: PreTaxItemType[];
   /**
    * When **CFS** starts pricing at this version — the bound `findTaxFor` and
    * `findTaxAt` bracket on, half-open `[applied_from, applied_to)`.
    *
-   * Replaces `valid_from`, which conflated this with {@link Tax.effective_from}.
+   * Replaced `valid_from`, which conflated this with {@link Tax.effective_from}.
    * They coincided on every change before 2026-08, so nothing forced them apart.
    */
-  applied_from?: string;
-  applied_from_fs?: FirestoreTimestampType;
-  /** Exclusive end of the applied window; `null`/absent = open-ended. */
-  applied_to?: string | null;
-  applied_to_fs?: FirestoreTimestampType | null;
+  applied_from: string;
+  applied_from_fs: FirestoreTimestampType;
+  /** Exclusive end of the applied window; `null` = open-ended. */
+  applied_to: string | null;
+  applied_to_fs: FirestoreTimestampType | null;
   /**
    * When the rate legally took effect. **Never prices anything** — it exists so
    * a late-discovered statutory change is a recorded fact rather than a lost
@@ -174,15 +177,15 @@ export interface Tax {
  *    floats, and only for a `percent` tax: a `flat` tax's `rate` is dollars per
  *    unit and has no components.
  *
- * Both are skipped where the field is absent — every new field is additive and
- * optional until the api-cloudrun#409 Phase 2 publish makes them required.
+ * Invariant 2 is skipped where `xero_components` is absent; invariant 1 never
+ * is, because `item_types` is required.
  */
 function checkTaxAxes(
   doc: {
     rate: number;
     type: RateType;
     jurisdiction?: JurisdictionType | null;
-    item_types?: PreTaxItemType[];
+    item_types: PreTaxItemType[];
     xero_components?: XeroTaxComponentType[];
   },
   ctx: z.RefinementCtx,
@@ -190,7 +193,7 @@ function checkTaxAxes(
   // A RESOLVABLE tax — one the `(jurisdiction × type)` rule can find — needs
   // both halves. The converse is deliberately NOT enforced: `item_types: []`
   // with a jurisdiction is the scoped explicit-only class (see above).
-  if (doc.jurisdiction === null && (doc.item_types?.length ?? 0) > 0) {
+  if (doc.jurisdiction === null && doc.item_types.length > 0) {
     ctx.addIssue({
       code: "custom",
       path: ["jurisdiction"],
@@ -229,19 +232,15 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   type: RateTypeEnum.meta({ column: true, label: "Type" }),
   active: z.boolean().default(true).meta({ column: true, label: "Active" }),
   crms_id: z.int().nullable().default(null),
-  valid_from: chicagoInstant(),
-  valid_from_fs: FirestoreTimestamp,
-  valid_to: chicagoInstant().nullable().default(null),
-  valid_to_fs: FirestoreTimestamp.nullable().default(null),
   jurisdiction: JurisdictionEnum.nullable().optional().meta({
     column: true,
     label: "Jurisdiction",
   }),
-  item_types: z.array(PreTaxItemTypeEnum).optional(),
-  applied_from: chicagoStartOfDay().optional(),
-  applied_from_fs: FirestoreTimestamp.optional(),
-  applied_to: chicagoStartOfDay().nullable().optional(),
-  applied_to_fs: FirestoreTimestamp.nullable().optional(),
+  item_types: z.array(PreTaxItemTypeEnum),
+  applied_from: chicagoStartOfDay(),
+  applied_from_fs: FirestoreTimestamp,
+  applied_to: chicagoStartOfDay().nullable(),
+  applied_to_fs: FirestoreTimestamp.nullable(),
   effective_from: chicagoStartOfDay().nullable().optional(),
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
   xero_account_code: z.int().nullable().optional(),
@@ -265,20 +264,19 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
 /**
  * Input for creating a new tax definition.
  *
- * ⚠️ **`valid_from` / `valid_to` are the Phase-1 wire names for the APPLIED
- * window** (api-cloudrun#409). The writer derives `applied_from` /`applied_to`
- * from them — snapped to Chicago midnight, because a rate boundary is a
- * calendar date — and writes both, so a reader on either name agrees. They are
- * renamed on the wire in Phase 2, once no stored document still carries the old
- * pair. Two names for one bound is a transitional cost, not a design.
+ * `applied_from` / `applied_to` are the APPLIED window — the bound
+ * {@link Tax.applied_from} documents. They take {@link chicagoStartOfDay}
+ * rather than an instant because **a rate boundary is a calendar date**: the
+ * operator authors a day, and the snap belongs in the transform rather than in
+ * each of the three writers that used to do it by hand.
  */
 export interface CreateTaxInputType {
   name: string;
   rate: number;
   type: RateType;
   active?: boolean;
-  valid_from: string;
-  valid_to?: string | null;
+  applied_from: string;
+  applied_to?: string | null;
   jurisdiction?: JurisdictionType | null;
   item_types?: PreTaxItemType[];
   effective_from?: string | null;
@@ -294,8 +292,8 @@ export const CreateTaxInput: z.ZodType<CreateTaxInputType> = z.object({
   rate: z.number(),
   type: RateTypeEnum,
   active: z.boolean().optional(),
-  valid_from: chicagoInstant(),
-  valid_to: chicagoInstant().nullable().optional(),
+  applied_from: chicagoStartOfDay(),
+  applied_to: chicagoStartOfDay().nullable().optional(),
   jurisdiction: JurisdictionEnum.nullable().optional(),
   item_types: z.array(PreTaxItemTypeEnum).optional(),
   effective_from: chicagoStartOfDay().nullable().optional(),
@@ -319,8 +317,8 @@ export interface UpdateTaxInputType {
   rate?: number;
   type?: RateType;
   active?: boolean;
-  valid_from?: string;
-  valid_to?: string | null;
+  applied_from?: string;
+  applied_to?: string | null;
   jurisdiction?: JurisdictionType | null;
   item_types?: PreTaxItemType[];
   effective_from?: string | null;
@@ -338,8 +336,8 @@ export const UpdateTaxInput: z.ZodType<UpdateTaxInputType> = z.object({
   rate: z.number().optional(),
   type: RateTypeEnum.optional(),
   active: z.boolean().optional(),
-  valid_from: chicagoInstant().optional(),
-  valid_to: chicagoInstant().nullable().optional(),
+  applied_from: chicagoStartOfDay().optional(),
+  applied_to: chicagoStartOfDay().nullable().optional(),
   jurisdiction: JurisdictionEnum.nullable().optional(),
   item_types: z.array(PreTaxItemTypeEnum).optional(),
   effective_from: chicagoStartOfDay().nullable().optional(),
@@ -383,13 +381,13 @@ export const UpdateTaxInput: z.ZodType<UpdateTaxInputType> = z.object({
  *   name at `asOf` (`resolveTaxRefsAt`); that resolution is the reason this
  *   endpoint is safe to ship before manager stops pinning uids.
  *
- * `valid_from` is one field doing two jobs — the successor's start AND the
- * incumbent's `valid_to` — because they are the same instant by definition.
+ * `applied_from` is one field doing two jobs — the successor's start AND the
+ * incumbent's `applied_to` — because they are the same instant by definition.
  * Two fields would be two chances to disagree.
  *
  * ## `effective_from` is the OTHER date, and it is not this one
  *
- * `valid_from` (→ `applied_from`) is when **CFS** starts pricing at the new
+ * `applied_from` is when **CFS** starts pricing at the new
  * rate. {@link Tax.effective_from} is when the rate **legally** took effect.
  * They coincided on every change before 2026-08 and nothing forced them apart;
  * the NITA increase arrived in a special-district bulletin CFS read weeks late,
@@ -406,13 +404,13 @@ export interface SupersedeTaxInputType {
   /** OCC on the INCUMBENT — the successor does not exist yet. */
   version: number;
   /** The successor's start, and the instant the incumbent's window closes. */
-  valid_from: string;
+  applied_from: string;
   /** The successor's rate. */
   rate: number;
   /** Defaults to the incumbent's. */
   type?: RateType;
   /** The successor's own end. Open-ended unless a third version is planned. */
-  valid_to?: string | null;
+  applied_to?: string | null;
   /** When the successor's rate legally took effect. Never prices anything. */
   effective_from?: string | null;
   /**
@@ -422,6 +420,18 @@ export interface SupersedeTaxInputType {
    * while CFS bills the new rate) and hard-fails the quote push.
    */
   xero_tax_type?: string | null;
+  /**
+   * Where a **flat** successor posts, and which Xero Item its line carries —
+   * see {@link Tax.xero_account_code}. Both default to the incumbent's.
+   *
+   * ⚠️ They were accepted by the Zod schema and absent from this interface,
+   * so `supersedeTax` could not read them and superseding the Water Bottle Tax
+   * silently dropped its liability-account binding — the exact drift
+   * {@link Tax.xero_account_code} exists to prevent.
+   */
+  xero_account_code?: number | null;
+  /** @see {@link SupersedeTaxInputType.xero_account_code}. */
+  xero_item_code?: string | null;
   /** The successor's Xero component split. Must sum to `rate`. */
   xero_components?: XeroTaxComponentType[];
   /** Defaults to the incumbent's — a supersede is the same tax, re-rated. */
@@ -434,10 +444,10 @@ export interface SupersedeTaxInputType {
 export const SupersedeTaxInput: z.ZodType<SupersedeTaxInputType> = z.object({
   uid: FirestoreId,
   version: z.int().min(0),
-  valid_from: chicagoInstant(),
+  applied_from: chicagoStartOfDay(),
   rate: z.number(),
   type: RateTypeEnum.optional(),
-  valid_to: chicagoInstant().nullable().optional(),
+  applied_to: chicagoStartOfDay().nullable().optional(),
   effective_from: chicagoStartOfDay().nullable().optional(),
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
   xero_account_code: z.int().nullable().optional(),

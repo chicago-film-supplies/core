@@ -78,21 +78,18 @@ export type PriceObject = OrderDocItemPriceType;
  * it stays optional so partial `Tax` literals in tests and callers keep
  * type-checking.
  *
- * ⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on
- * purpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read
- * `applied_from ?? valid_from` so a deploy can precede the document migration:
- * code reading only the new name against a document holding only the old one
- * sees a missing bound, treats it as OPEN, and every version then brackets
- * every instant — which throws `Tax catalog drift` on the pricing path, out of
- * a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
+ * ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
+ * the document.** That is deliberate: a missing bound reads as OPEN, so every
+ * version brackets every instant and {@link findTaxAt} throws `Tax catalog
+ * drift` on the pricing path. A partial literal in a test is allowed to be
+ * wrong that way; a stored document is not, which is why `TaxSchema` requires
+ * the pair and this structural subset does not.
  */
 export type Tax =
   & Pick<SchemaTax, "uid" | "name" | "rate" | "type">
   & Partial<
     Pick<
       SchemaTax,
-      | "valid_from"
-      | "valid_to"
       | "applied_from"
       | "applied_to"
       | "effective_from"

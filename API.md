@@ -1953,12 +1953,11 @@ const CreateTaxInput: z.ZodType<CreateTaxInputType>;
 
 Input for creating a new tax definition.
 
-⚠️ **`valid_from` / `valid_to` are the Phase-1 wire names for the APPLIED
-window** (api-cloudrun#409). The writer derives `applied_from` /`applied_to`
-from them — snapped to Chicago midnight, because a rate boundary is a
-calendar date — and writes both, so a reader on either name agrees. They are
-renamed on the wire in Phase 2, once no stored document still carries the old
-pair. Two names for one bound is a transitional cost, not a design.
+`applied_from` / `applied_to` are the APPLIED window — the bound
+{@link Tax.applied_from} documents. They take {@link chicagoStartOfDay}
+rather than an instant because **a rate boundary is a calendar date**: the
+operator authors a day, and the snap belongs in the transform rather than in
+each of the three writers that used to do it by hand.
 
 ```ts
 interface CreateTaxInputType {
@@ -1966,8 +1965,8 @@ interface CreateTaxInputType {
   rate: number;
   type: RateType;
   active?: boolean;
-  valid_from: string;
-  valid_to?: string | null;
+  applied_from: string;
+  applied_to?: string | null;
   jurisdiction?: JurisdictionType | null;
   item_types?: PreTaxItemType[];
   effective_from?: string | null;
@@ -6911,13 +6910,13 @@ that throw. One transaction makes the overlap unrepresentable instead.
   name at `asOf` (`resolveTaxRefsAt`); that resolution is the reason this
   endpoint is safe to ship before manager stops pinning uids.
 
-`valid_from` is one field doing two jobs — the successor's start AND the
-incumbent's `valid_to` — because they are the same instant by definition.
+`applied_from` is one field doing two jobs — the successor's start AND the
+incumbent's `applied_to` — because they are the same instant by definition.
 Two fields would be two chances to disagree.
 
 ## `effective_from` is the OTHER date, and it is not this one
 
-`valid_from` (→ `applied_from`) is when **CFS** starts pricing at the new
+`applied_from` is when **CFS** starts pricing at the new
 rate. {@link Tax.effective_from} is when the rate **legally** took effect.
 They coincided on every change before 2026-08 and nothing forced them apart;
 the NITA increase arrived in a special-district bulletin CFS read weeks late,
@@ -6932,12 +6931,14 @@ which is the only ordering that is incoherent rather than merely late.
 interface SupersedeTaxInputType {
   uid: string;
   version: number;
-  valid_from: string;
+  applied_from: string;
   rate: number;
   type?: RateType;
-  valid_to?: string | null;
+  applied_to?: string | null;
   effective_from?: string | null;
   xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
   xero_components?: XeroTaxComponentType[];
   jurisdiction?: JurisdictionType | null;
   item_types?: PreTaxItemType[];
@@ -7154,16 +7155,12 @@ interface Tax {
   type: RateType;
   active: boolean;
   crms_id: number | null;
-  valid_from: string;
-  valid_from_fs: FirestoreTimestampType;
-  valid_to: string | null;
-  valid_to_fs: FirestoreTimestampType | null;
   jurisdiction?: JurisdictionType | null;
-  item_types?: PreTaxItemType[];
-  applied_from?: string;
-  applied_from_fs?: FirestoreTimestampType;
-  applied_to?: string | null;
-  applied_to_fs?: FirestoreTimestampType | null;
+  item_types: PreTaxItemType[];
+  applied_from: string;
+  applied_from_fs: FirestoreTimestampType;
+  applied_to: string | null;
+  applied_to_fs: FirestoreTimestampType | null;
   effective_from?: string | null;
   xero_tax_type?: string | null;
   xero_account_code?: number | null;
@@ -8253,8 +8250,8 @@ interface UpdateTaxInputType {
   rate?: number;
   type?: RateType;
   active?: boolean;
-  valid_from?: string;
-  valid_to?: string | null;
+  applied_from?: string;
+  applied_to?: string | null;
   jurisdiction?: JurisdictionType | null;
   item_types?: PreTaxItemType[];
   effective_from?: string | null;
@@ -20297,16 +20294,15 @@ resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
 it stays optional so partial `Tax` literals in tests and callers keep
 type-checking.
 
-⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on
-purpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read
-`applied_from ?? valid_from` so a deploy can precede the document migration:
-code reading only the new name against a document holding only the old one
-sees a missing bound, treats it as OPEN, and every version then brackets
-every instant — which throws `Tax catalog drift` on the pricing path, out of
-a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
+⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
+the document.** That is deliberate: a missing bound reads as OPEN, so every
+version brackets every instant and {@link findTaxAt} throws `Tax catalog
+drift` on the pricing path. A partial literal in a test is allowed to be
+wrong that way; a stored document is not, which is why `TaxSchema` requires
+the pair and this structural subset does not.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
 ```
 
 ### `TransactionFeeLineItem`
@@ -22597,16 +22593,15 @@ resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
 it stays optional so partial `Tax` literals in tests and callers keep
 type-checking.
 
-⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on
-purpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read
-`applied_from ?? valid_from` so a deploy can precede the document migration:
-code reading only the new name against a document holding only the old one
-sees a missing bound, treats it as OPEN, and every version then brackets
-every instant — which throws `Tax catalog drift` on the pricing path, out of
-a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
+⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
+the document.** That is deliberate: a missing bound reads as OPEN, so every
+version brackets every instant and {@link findTaxAt} throws `Tax catalog
+drift` on the pricing path. A partial literal in a test is allowed to be
+wrong that way; a stored document is not, which is why `TaxSchema` requires
+the pair and this structural subset does not.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
 ```
 
 ### `TransactionFeeLineItem`
@@ -23428,16 +23423,18 @@ The **rate** is not here: it comes from the date-bracketed catalog via
 
 ⚠️ **A line with NO `coa_revenue` is not covered by this table** — custom
 lines (`buildCustomOrderLine` / `buildCustomInvoiceLine`) construct no such
-field, so a type-keyed fallback is still required and is not a redundant
-second encoding. Prod carries **99** such lines. That is the whole reason
-this is a default table rather than the only key.
+field, and prod carries **99** of them. That gap is why this is a HISTORICAL
+oracle and not a rule: it can only answer for the lines that carry an
+account.
 
-⚠️ **This lives in core because it has TWO consumers.** It was
-`api-cloudrun/src/lib/taxByCoa.ts`, unreachable from the manager, which is
-why the manager grew a type-keyed twin answering the same question. Moving it
-rather than copying it is the point — an earlier revision of its docblock
-records a *third* encoding (`chart-of-accounts.default_tax_profile`) that was
-deleted for having one writer and zero readers.
+⚠️ **Its consumers are restatement tools, not writers.** The live default is
+`findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)` — the same
+`(item type × jurisdiction)` rule everything else resolves by, which answers
+for a custom line too. A companion type-keyed table (`defaultTaxNameForLine`
+/ `DEFAULT_TAX_NAME_BY_TYPE`) was DELETED rather than kept: it was a second
+encoding of a rule that already exists, and an earlier revision of this
+docblock records a *third* (`chart-of-accounts.default_tax_profile`) deleted
+for having one writer and zero readers.
 
 ```ts
 const TAXABLE_COA_TO_TAX_NAME: Readonly<Record<number, string | null>>;
@@ -23497,16 +23494,15 @@ resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
 it stays optional so partial `Tax` literals in tests and callers keep
 type-checking.
 
-⚠️ **`applied_from`/`applied_to` sit beside `valid_from`/`valid_to` on
-purpose, and only during api-cloudrun#409 Phase 1.** The resolvers dual-read
-`applied_from ?? valid_from` so a deploy can precede the document migration:
-code reading only the new name against a document holding only the old one
-sees a missing bound, treats it as OPEN, and every version then brackets
-every instant — which throws `Tax catalog drift` on the pricing path, out of
-a CRMS Cloud Task handler, which retries forever. Phase 2 drops the old pair.
+⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
+the document.** That is deliberate: a missing bound reads as OPEN, so every
+version brackets every instant and {@link findTaxAt} throws `Tax catalog
+drift` on the pricing path. A partial literal in a test is allowed to be
+wrong that way; a stored document is not, which is why `TaxSchema` requires
+the pair and this structural subset does not.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "valid_from" | "valid_to" | "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
+type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
 ```
 
 ### `TaxDestination`
@@ -23531,7 +23527,7 @@ interface TaxDestination {
 The one destination shape the order-side tax rules read.
 
 Two fields, for the two questions: `delivery.address.region` answers *"is this
-document sourced outside Illinois?"* ({@link isEntirelyOutOfIllinois}) and
+document sourced outside Illinois?"* ({@link deriveJurisdiction}) and
 `dates.delivery_start` answers *"as of when do its taxes resolve?"*
 ({@link deriveOrderTaxAsOf}). Both optional, because a caller mid-edit may
 have neither.
@@ -23618,19 +23614,6 @@ discount exceed its line rather than clamping — so the rounding is half *away
 from zero* and the tax carries the subtotal's sign, exactly as the currency.js
 form did.
 
-### `defaultTaxNameForLine(coaRevenue: number | null | undefined, type: string): string | null`
-
-**The one default-tax rule**: the tax NAME a newly authored line should
-carry, given its account and its type.
-
-`coa_revenue` decides wherever the line has one — that is the measured key
-(see {@link TAXABLE_COA_TO_TAX_NAME}). `type` is the fallback for a line that
-carries no account at all, which is every custom line.
-
-Returns `null` for "untaxed", which is a real answer rather than a miss: a
-non-taxable COA, a taxable COA with no tax in practice (4140), and the
-`service` / `surcharge` types under the fallback are all deliberately untaxed.
-
 ### `deriveJurisdiction(address: typeLiteral | null | undefined, origin: JurisdictionType): JurisdictionType`
 
 **Where a delivery address sources to** — the bottom of the three-level
@@ -23660,7 +23643,7 @@ obligation. The asymmetry is why `origin` is a named required parameter
 rather than a default: a reader has to see that a Naperville delivery is
 taxed, and taxed at *our store's* rate.
 
-## Conservative in the same two directions as {@link isEntirelyOutOfIllinois}
+## Conservative in the same two directions as `isEntirelyOutOfIllinois`
 
 An **unresolvable** region falls to case 3, not case 1. `toUsStateCode`
 returns `null` for *unknown*, never for *not Illinois*, and 18 of the 48
@@ -23682,7 +23665,7 @@ CFS's own warehouse at 3100 W Fillmore St resolves to "Palos Township /
 the reason this derivation is the LOWEST precedence level: it is a
 convenience, and an explicit jurisdiction at any level above it outranks it.
 
-Pure and db-free, like {@link isEntirelyOutOfIllinois}, so the manager
+Pure and db-free, like its predecessor `isEntirelyOutOfIllinois`, so the manager
 reaches the same answer as the API without a round trip.
 
 **Parameters**
@@ -23974,20 +23957,16 @@ way — the cheapest possible moment to have made the two rules disagree.
 
 ### `taxAppliedWindow(tax: Tax): typeLiteral`
 
-The APPLIED window of a tax version, dual-reading the old field names.
+The APPLIED window of a tax version — the one place the bracket checks below
+read the bounds from.
 
-⚠️ **`applied_from ?? valid_from`, and the `??` is load-bearing.**
-api-cloudrun#409 renames the pair, and deploy and document-migration cannot
-be simultaneous. Reading only the new name against a document still holding
-only the old one yields a MISSING bound — which every bracket check below
-treats as OPEN, so every version brackets every instant and {@link findTaxAt}
-throws `Tax catalog drift`. That throw is on the pricing path, and out of a
-CRMS Cloud Task handler it retries forever. Phase 2 deletes the fallback and
-the old fields together.
-
-Note the ASYMMETRY: `applied_to` is legitimately `null` (open-ended), so it
-falls back only when *absent*, never when explicitly null. `applied_from` has
-no meaningful null.
+⚠️ **A missing bound is read as OPEN**, and that is dangerous rather than
+merely permissive: an unbounded version brackets every instant, so two
+versions of one name bracket the same instant and {@link findTaxAt} throws
+`Tax catalog drift` — on the pricing path, out of a CRMS Cloud Task handler,
+which retries forever. `TaxSchema` requires both bounds precisely so a stored
+document cannot reach that state; the `| null` here covers the partial
+literals the structural `Tax` admits.
 
 ## `@cfs/core/utils/templates`
 
