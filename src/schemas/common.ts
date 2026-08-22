@@ -484,7 +484,15 @@ export const StockMethodEnum: z.ZodType<StockMethodType> = z.enum(STOCK_METHODS)
  * who levies a tax, and nobody levies one under `no_nexus`; the manager's tax
  * picker excludes it exactly as it already excludes `paxton`.
  */
-const JURISDICTIONS = ["chicago", "rantoul", "frankfort", "paxton", "no_nexus"] as const;
+/**
+ * The jurisdictions CFS is REGISTERED to collect in, as a runtime list.
+ *
+ * Exported so an audit can print a TOTAL `(jurisdiction x item type)` matrix —
+ * the cells nothing covers are the point of that report, and they are only
+ * visible against the full vocabulary. A hand-copied list in the audit would be
+ * a second encoding of the registration set, free to drift from this one.
+ */
+export const JURISDICTIONS = ["chicago", "rantoul", "frankfort", "paxton", "no_nexus"] as const;
 /** Allowed values for tax jurisdiction. */
 export type JurisdictionType = typeof JURISDICTIONS[number];
 /** Zod schema for JurisdictionType. */
@@ -912,7 +920,7 @@ export type PreTaxItemType = {
  * only. `_preTaxParity` below is the mechanism that keeps the hand-written list
  * honest, checked in BOTH directions.
  */
-const PRE_TAX_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
+export const PRE_TAX_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
 /** Zod schema for PreTaxItemType. @see {@link PRE_TAX_ITEM_TYPES} */
 export const PreTaxItemTypeEnum: z.ZodType<PreTaxItemType> = z.enum(PRE_TAX_ITEM_TYPES);
 

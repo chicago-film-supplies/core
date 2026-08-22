@@ -4891,6 +4891,12 @@
         },
         {
           "kind": "variable",
+          "name": "JURISDICTIONS",
+          "declaration": "const JURISDICTIONS: \"chicago\" | \"rantoul\" | \"frankfort\" | \"paxton\" | \"no_nexus\"[];",
+          "doc": "The jurisdictions CFS is REGISTERED to collect in, as a runtime list.\n\nExported so an audit can print a TOTAL `(jurisdiction x item type)` matrix —\nthe cells nothing covers are the point of that report, and they are only\nvisible against the full vocabulary. A hand-copied list in the audit would be\na second encoding of the registration set, free to drift from this one."
+        },
+        {
+          "kind": "variable",
           "name": "JurisdictionEnum",
           "declaration": "const JurisdictionEnum: z.ZodType<JurisdictionType>;",
           "doc": "Zod schema for JurisdictionType."
@@ -4942,6 +4948,12 @@
           "name": "OOSReasonType",
           "declaration": "type OOSReasonType = indexedAccess;",
           "doc": "Allowed values for out-of-service reason."
+        },
+        {
+          "kind": "variable",
+          "name": "PRE_TAX_ITEM_TYPES",
+          "declaration": "const PRE_TAX_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\"[];",
+          "doc": "The {@link PreTaxItemType} members as a runtime enum — the vocabulary of\n`Tax.item_types`, i.e. *which line types a tax covers*.\n\n🔑 **`PreTaxItemType`, not {@link DocLineItemTypeType}, and the difference is\nthe whole point.** `transaction_fee` is `pricing: \"from_total\"`, and\n`calculateItemTax` **throws** `Item is not priceable` on it. Typing the field\nat the pre-tax subset makes *\"a tax that covers transaction fees\"*\nunrepresentable rather than merely absent from a list, and keeps\n{@link ITEM_CONTRACTS} the single author of what is priceable. The\n`destination` / `group` dividers fall out for free.\n\n⚠️ **Written out rather than derived, deliberately** — JSR's npm declaration\nemit truncates a spread inside an `as const` array (core#43), so a\n`[...X] as const` here would publish a different, wrong type to the manager\nonly. `_preTaxParity` below is the mechanism that keeps the hand-written list\nhonest, checked in BOTH directions."
         },
         {
           "kind": "interface",

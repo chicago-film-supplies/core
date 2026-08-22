@@ -10137,6 +10137,19 @@ documents: a product's Firestore id, a divider UUID, or a custom-product id.
 const ItemUid: z.ZodType<string>;
 ```
 
+### `JURISDICTIONS`
+
+The jurisdictions CFS is REGISTERED to collect in, as a runtime list.
+
+Exported so an audit can print a TOTAL `(jurisdiction x item type)` matrix —
+the cells nothing covers are the point of that report, and they are only
+visible against the full vocabulary. A hand-copied list in the audit would be
+a second encoding of the registration set, free to drift from this one.
+
+```ts
+const JURISDICTIONS: "chicago" | "rantoul" | "frankfort" | "paxton" | "no_nexus"[];
+```
+
 ### `JurisdictionEnum`
 
 Zod schema for JurisdictionType.
@@ -10229,6 +10242,29 @@ Allowed values for out-of-service reason.
 
 ```ts
 type OOSReasonType = indexedAccess;
+```
+
+### `PRE_TAX_ITEM_TYPES`
+
+The {@link PreTaxItemType} members as a runtime enum — the vocabulary of
+`Tax.item_types`, i.e. *which line types a tax covers*.
+
+🔑 **`PreTaxItemType`, not {@link DocLineItemTypeType}, and the difference is
+the whole point.** `transaction_fee` is `pricing: "from_total"`, and
+`calculateItemTax` **throws** `Item is not priceable` on it. Typing the field
+at the pre-tax subset makes *"a tax that covers transaction fees"*
+unrepresentable rather than merely absent from a list, and keeps
+{@link ITEM_CONTRACTS} the single author of what is priceable. The
+`destination` / `group` dividers fall out for free.
+
+⚠️ **Written out rather than derived, deliberately** — JSR's npm declaration
+emit truncates a spread inside an `as const` array (core#43), so a
+`[...X] as const` here would publish a different, wrong type to the manager
+only. `_preTaxParity` below is the mechanism that keeps the hand-written list
+honest, checked in BOTH directions.
+
+```ts
+const PRE_TAX_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surcharge"[];
 ```
 
 ### `PartialNameParts`
