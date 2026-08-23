@@ -4607,6 +4607,33 @@ interface MovementCustodyType {
 }
 ```
 
+### `MovementId`
+
+`transactions.uid` for a movement-journal event — the deterministic composite
+`{uid_session}|{type}|{subject}`, where the subject is a product id (ownership
+events) or a `BookingId` (custody events).
+
+**The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is
+itself `a:b:c`, so a colon-joined id would carry 2 colons for a product
+subject and 4 for a booking one — variable arity that no `split(":")` can
+disambiguate.
+
+**The `type` segment is load-bearing too:** one operator action legitimately
+produces several event types against one subject ("return 2, mark 1 damaged"
+is two picker actions on one booking), so session+subject alone would collide.
+It is matched loosely here (`[a-z][a-z_]*`) rather than against
+`MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse
+dependency would be a cycle, and the `type` **field** is the authority
+anyway. The id only has to be well-formed and stable.
+
+This is the sanctioned use of a derived id: it is what makes an append-only
+event idempotent under the manager's retry-on-409, exactly as the derived
+`bookings` id makes a booking upsert idempotent.
+
+```ts
+const MovementId: z.ZodType<string>;
+```
+
 ### `MovementLine`
 
 Zod schema for one movement line.
@@ -6444,6 +6471,35 @@ interface Role {
 }
 ```
 
+### `RoleId`
+
+A role id — which for `roles` IS the document id, and also the claim string
+written into `users.roles[]`, `invites.roles[]`, `sessions.preview_role` and
+Firebase custom claims.
+
+⚠️ **`roles.name` is a deliberate carve-out from the `uid` convention** — the
+doc id must BE the claim string because `manager/firestore.rules` can only
+`get()` by path and never query. The reasoning is in
+`core/.claude/plans/roles-campaign.md`; do not "fix" it to `uid`.
+
+⚠️ **Kept an open string, NOT a closed enum.** `POST /admin/roles` exists, so
+an operator-created role must stay representable. The six git-declared roles
+are {@link SEEDED_ROLE_NAMES}, which is the narrower literal type — use that
+where a specific role is meant, and this where any role is.
+
+The 64-char cap is a **token-size constraint, not cosmetic**: `customClaims.roles[]`
+must stay inside Firebase's 1000-byte limit.
+
+Verified against both environments before shipping (2026-08-23): 6 live roles
+in each — `admin`, `authenticated`, `customer`, `template-editor`,
+`template-maintainer`, `warehouse` — plus every `users.roles[]`,
+`invites.roles[]` and `threads.sources[]` entry with `collection: "roles"`.
+**0 would have failed the no-underscore form.**
+
+```ts
+const RoleId: z.ZodType<string>;
+```
+
 ### `RoleSchema`
 
 Zod schema for Role.
@@ -6529,6 +6585,19 @@ deliberately shorter than the transaction name (`create-org:*` under
 
 ```ts
 type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:order-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:order-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "process-order-docs:doc-to-cards" | "create-out-of-service-record:sources-to-record" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "update-org:name-to-contacts" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-crms:reap-settlements" | "void-invoice-from-crms:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-tax:to-products" | "update-tax:to-webshop-products" | "update-tax:to-orders" | "supersede-tax:recompute-live-orders" | "supersede-tax:recompute-live-invoices" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
+```
+
+### `SEEDED_ROLE_NAMES`
+
+The six roles declared in git (`api-cloudrun/scripts/rbacRoles.ts`) and seeded
+by `seed-rbac.ts`.
+
+⚠️ This is NOT the storage type — see {@link RoleId}. It exists so the role
+literals scattered through production source and fixtures become compile-
+checked rather than free strings.
+
+```ts
+const SEEDED_ROLE_NAMES: "admin" | "authenticated" | "customer" | "template-editor" | "template-maintainer" | "warehouse"[];
 ```
 
 ### `SETTLED_STATUSES`
@@ -6621,6 +6690,14 @@ interface SchemaField {
   path: string;
   type: string;
 }
+```
+
+### `SeededRoleName`
+
+One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES}
+
+```ts
+type SeededRoleName = indexedAccess;
 ```
 
 ### `Session`
@@ -10291,6 +10368,33 @@ lists) or a lowercase-kebab slug (seeded/system lists, e.g. `in-store`,
 
 ```ts
 const ListId: z.ZodType<string>;
+```
+
+### `MovementId`
+
+`transactions.uid` for a movement-journal event — the deterministic composite
+`{uid_session}|{type}|{subject}`, where the subject is a product id (ownership
+events) or a `BookingId` (custody events).
+
+**The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is
+itself `a:b:c`, so a colon-joined id would carry 2 colons for a product
+subject and 4 for a booking one — variable arity that no `split(":")` can
+disambiguate.
+
+**The `type` segment is load-bearing too:** one operator action legitimately
+produces several event types against one subject ("return 2, mark 1 damaged"
+is two picker actions on one booking), so session+subject alone would collide.
+It is matched loosely here (`[a-z][a-z_]*`) rather than against
+`MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse
+dependency would be a cycle, and the `type` **field** is the authority
+anyway. The id only has to be well-formed and stable.
+
+This is the sanctioned use of a derived id: it is what makes an append-only
+event idempotent under the manager's retry-on-409, exactly as the derived
+`bookings` id makes a booking upsert idempotent.
+
+```ts
+const MovementId: z.ZodType<string>;
 ```
 
 ### `NameField`

@@ -2162,6 +2162,12 @@
         },
         {
           "kind": "variable",
+          "name": "MovementId",
+          "declaration": "const MovementId: z.ZodType<string>;",
+          "doc": "`transactions.uid` for a movement-journal event — the deterministic composite\n`{uid_session}|{type}|{subject}`, where the subject is a product id (ownership\nevents) or a `BookingId` (custody events).\n\n**The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is\nitself `a:b:c`, so a colon-joined id would carry 2 colons for a product\nsubject and 4 for a booking one — variable arity that no `split(\":\")` can\ndisambiguate.\n\n**The `type` segment is load-bearing too:** one operator action legitimately\nproduces several event types against one subject (\"return 2, mark 1 damaged\"\nis two picker actions on one booking), so session+subject alone would collide.\nIt is matched loosely here (`[a-z][a-z_]*`) rather than against\n`MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse\ndependency would be a cycle, and the `type` **field** is the authority\nanyway. The id only has to be well-formed and stable.\n\nThis is the sanctioned use of a derived id: it is what makes an append-only\nevent idempotent under the manager's retry-on-409, exactly as the derived\n`bookings` id makes a booking upsert idempotent."
+        },
+        {
+          "kind": "variable",
           "name": "MovementLine",
           "declaration": "const MovementLine: z.ZodType<MovementLineType>;",
           "doc": "Zod schema for one movement line."
@@ -3044,6 +3050,12 @@
         },
         {
           "kind": "variable",
+          "name": "RoleId",
+          "declaration": "const RoleId: z.ZodType<string>;",
+          "doc": "A role id — which for `roles` IS the document id, and also the claim string\nwritten into `users.roles[]`, `invites.roles[]`, `sessions.preview_role` and\nFirebase custom claims.\n\n⚠️ **`roles.name` is a deliberate carve-out from the `uid` convention** — the\ndoc id must BE the claim string because `manager/firestore.rules` can only\n`get()` by path and never query. The reasoning is in\n`core/.claude/plans/roles-campaign.md`; do not \"fix\" it to `uid`.\n\n⚠️ **Kept an open string, NOT a closed enum.** `POST /admin/roles` exists, so\nan operator-created role must stay representable. The six git-declared roles\nare {@link SEEDED_ROLE_NAMES}, which is the narrower literal type — use that\nwhere a specific role is meant, and this where any role is.\n\nThe 64-char cap is a **token-size constraint, not cosmetic**: `customClaims.roles[]`\nmust stay inside Firebase's 1000-byte limit.\n\nVerified against both environments before shipping (2026-08-23): 6 live roles\nin each — `admin`, `authenticated`, `customer`, `template-editor`,\n`template-maintainer`, `warehouse` — plus every `users.roles[]`,\n`invites.roles[]` and `threads.sources[]` entry with `collection: \"roles\"`.\n**0 would have failed the no-underscore form.**"
+        },
+        {
+          "kind": "variable",
           "name": "RoleSchema",
           "declaration": "const RoleSchema: z.ZodType<Role>;",
           "doc": "Zod schema for Role."
@@ -3086,6 +3098,12 @@
         },
         {
           "kind": "variable",
+          "name": "SEEDED_ROLE_NAMES",
+          "declaration": "const SEEDED_ROLE_NAMES: \"admin\" | \"authenticated\" | \"customer\" | \"template-editor\" | \"template-maintainer\" | \"warehouse\"[];",
+          "doc": "The six roles declared in git (`api-cloudrun/scripts/rbacRoles.ts`) and seeded\nby `seed-rbac.ts`.\n\n⚠️ This is NOT the storage type — see {@link RoleId}. It exists so the role\nliterals scattered through production source and fixtures become compile-\nchecked rather than free strings."
+        },
+        {
+          "kind": "variable",
           "name": "SETTLED_STATUSES",
           "declaration": "const SETTLED_STATUSES: readonly InvoiceStatusType[];",
           "doc": "Statuses whose embedded snapshot is frozen against org-cascade rewrites."
@@ -3125,6 +3143,12 @@
           "name": "SchemaField",
           "declaration": "interface SchemaField {\n  path: string;\n  type: string;\n}",
           "doc": "A single field entry in the schema reference."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SeededRoleName",
+          "declaration": "type SeededRoleName = indexedAccess;",
+          "doc": "One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES}"
         },
         {
           "kind": "interface",
@@ -4936,6 +4960,12 @@
           "name": "ListId",
           "declaration": "const ListId: z.ZodType<string>;",
           "doc": "`lists.uid` (and `uid_list` references) — a Firestore auto-id (user-created\nlists) or a lowercase-kebab slug (seeded/system lists, e.g. `in-store`,\n`field-service`)."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementId",
+          "declaration": "const MovementId: z.ZodType<string>;",
+          "doc": "`transactions.uid` for a movement-journal event — the deterministic composite\n`{uid_session}|{type}|{subject}`, where the subject is a product id (ownership\nevents) or a `BookingId` (custody events).\n\n**The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is\nitself `a:b:c`, so a colon-joined id would carry 2 colons for a product\nsubject and 4 for a booking one — variable arity that no `split(\":\")` can\ndisambiguate.\n\n**The `type` segment is load-bearing too:** one operator action legitimately\nproduces several event types against one subject (\"return 2, mark 1 damaged\"\nis two picker actions on one booking), so session+subject alone would collide.\nIt is matched loosely here (`[a-z][a-z_]*`) rather than against\n`MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse\ndependency would be a cycle, and the `type` **field** is the authority\nanyway. The id only has to be well-formed and stable.\n\nThis is the sanctioned use of a derived id: it is what makes an append-only\nevent idempotent under the manager's retry-on-409, exactly as the derived\n`bookings` id makes a booking upsert idempotent."
         },
         {
           "kind": "variable",

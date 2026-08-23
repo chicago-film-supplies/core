@@ -309,7 +309,15 @@ export {
   CardId,
   EventCardId,
   ListId,
+  // No consumer imports this today — exported anyway so the set of identifier
+  // validators has NO exceptions, which is what lets the barrel-reachability
+  // guard in `tests/_uid.test.ts` be a plain "every one" rather than a list with
+  // an allowlist beside it. An allowlist is the thing that rots.
+  MovementId,
   QuoteId,
+  RoleId,
+  SEEDED_ROLE_NAMES,
+  type SeededRoleName,
   ThreadId,
 } from "./common.ts";
 

@@ -150,3 +150,35 @@ Deno.test("RoleId enforces the 64-char cap — a Firebase token-size constraint"
   rejects(RoleId, "a".repeat(65));
   rejects(RoleId, "");
 });
+
+// ── Barrel reachability ─────────────────────────────────────────────
+
+Deno.test("every _uid.ts value export is reachable from the @cfs/core/schemas barrel", async () => {
+  // ⚠️ **A hand-maintained re-export list, and it has already drifted once.**
+  // `_uid.ts` is internal; its validators reach consumers only because
+  // `schemas/common.ts` re-exports them AND `schemas/mod.ts` names each one
+  // again in an explicit list. Adding `RoleId` to `schemas/common.ts` was not
+  // enough — it stayed invisible to every consumer until it was written into
+  // `schemas/mod.ts` as well, and nothing in this package said so:
+  // core type-checked, the tests passed, and the failure surfaced in another
+  // repo as "has no exported member named 'RoleId'".
+  //
+  // That is precisely the class `CLAUDE.md` § Propagation records — 141
+  // hand-listed re-exports of which 60 had silently drifted out of the barrel.
+  // The fix there was to delete the thing that required a list; this list is
+  // small and deliberate, so it gets a guard instead.
+  const uid = await import("../src/schemas/_uid.ts");
+  const barrel = await import("../src/schemas/mod.ts");
+
+  const missing = Object.keys(uid)
+    .filter((k) => typeof (uid as Record<string, unknown>)[k] !== "undefined")
+    .filter((k) => !(k in barrel));
+
+  assertEquals(
+    missing,
+    [],
+    "exported from `schemas/_uid.ts` but NOT reachable from `schemas/mod.ts` — add it to the " +
+      "explicit re-export list in mod.ts (the one under `// Identifier validators`). A consumer " +
+      "importing it from `@cfs/core/schemas` gets 'has no exported member'.",
+  );
+});
