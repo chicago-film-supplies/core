@@ -3,19 +3,29 @@
 **Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 and 0.5 landed (see the status block); Wave 1 onwards not started
 **Ordering:** risk-first (owner's call), with one half-sitting prerequisite ahead of it (Wave 0 — drop it if you disagree with the reasoning there).
 
-> ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0 and 0.5 are DONE and pushed; start at Wave 1
+> ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0, 0.5 and 1 are DONE, deployed to dev; start at Wave 2
 >
 > | Wave | State |
 > |---|---|
 > | **0a** non-destructive staleness tests | ✅ core `b640b62` |
 > | **0b** declarations gate | ✅ core `80144dc` |
 > | **0c** templates pin count | ✅ core `89e8dc0`, corrected twice more — see below |
-> | **0.5** core#68 golden aggregate | ✅ core `a1cab8f` → **beta.243**; api-cloudrun `b67bb890`; manager `dd0db53`; templates PR **#121** (open, not merged) |
-> | **1 onwards** | ⏳ not started |
+> | **0.5** core#68 golden aggregate | ✅ core `a1cab8f` → **beta.243**; api-cloudrun `b67bb890`; manager `dd0db53` |
+> | **1** core#58 Phases 0 + 1 (incl. 1c) | ✅ core `a7dea49` + `a99ecce` → **beta.244**; api-cloudrun `3d16987f`; manager `99a5c5b`; templates PR **#121** (open at beta.244, not merged) |
+> | **2 onwards** | ⏳ not started |
 >
-> `@cfs/core` is at **`10.0.0-beta.243`**, and api-cloudrun + manager + the templates PR are all
-> pinned to it. api-cloudrun and manager are committed but **UNPUSHED** — pushing them deploys to
-> dev/preview, which was left as the owner's call.
+> `@cfs/core` is at **`10.0.0-beta.244`**; api-cloudrun, manager and the open templates PR are all
+> pinned to it. Everything is **pushed** — api-cloudrun's dev deploy is live
+> (`api-cloudrun-dev-01328-rt5`).
+>
+> 🔴 **Wave 1's two migrations have run in DEV ONLY. Prod is outstanding and must not be skipped.**
+> - `api-cloudrun/scripts/purge-sessions.ts` — dev: **133,911 sessions purged**. Prod: **not run.**
+>   It must run in the same deploy that ships beta.244, because `getSession` is a bare cast, so a
+>   pre-rename doc yields `session.uid === undefined` for its whole 30-day TTL and writes
+>   `session=undefined` cookies rather than failing closed. One prod user, one forced re-login.
+> - `api-cloudrun/scripts/backfill-order-document-uid.ts` — dev: **1,988 stamped**, idempotent re-run
+>   confirms 0 remaining. Prod: **not run.** Then tighten `OrderDocument.uid` to required.
+> - Prod deploy is gated behind merging the release-please PR, so both are operator steps.
 >
 > **What the plan got wrong, corrected in place below:**
 >
@@ -49,7 +59,29 @@
 >   not an invariant.
 > - **api-cloudrun#640** filed for the retired plan's P0 (an operator bless that publishes to prod).
 >
-> **Still open from Wave 0's issues:** #54 and #44 do not close until Wave 7.
+> **Wave 1 findings, all measured:**
+>
+> - **Finding 2 reproduces exactly** — 96 registry keys → 56 distinct types, **41 with `uid`, 15
+>   without**. The 40/16 figure this doc told us to re-measure does **not** reproduce.
+> - The rename produced **21 compile errors across 12 files** in api-cloudrun. That is the whole
+>   value of it: a field not named `uid` is invisible to the `uid === ref.id` drift guard.
+> - `api-cloudrun/src/services/dbRead.ts`'s `data.uid === id` comment was **already fixed** (#619)
+>   and its numbers match this measurement. `scripts/seed-rbac.ts` listed 4 roles against 6 — the
+>   list is now deleted rather than corrected, since a hand-copy beside its own source is the
+>   core#55 class.
+> - `tests/helpers/auth.ts`'s shared session id was **37** chars behind a comment claiming "38
+>   chars, fits schema's <=40 bound" — wrong about the string AND the constraint (`.length(40)` is
+>   exact). It survived only because that fixture uses a raw `ref.set()` that never parses.
+> - ⚠️ **A bug in the backfill's first draft**, caught before it ran: it also stamped `updated_at`.
+>   `OrderDocumentSchema` is a `z.strictObject` with no timestamp field, so that would have made all
+>   ~1,836 docs invalid — failing `validate-collection` and, since `validateBeforeWrite` parses the
+>   whole document, refusing every later read-modify-write.
+> - Dev shows **0** order documents whose id is neither `"quote"` nor `"packing-list"`. The legacy
+>   auto-id tail the plan warns about may be prod-only; the script keys on `ref.id` regardless and
+>   reports the count on the prod dry run.
+>
+> **Still open from Wave 0's issues:** #54 and #44 do not close until Wave 7. **#58 does not close
+> until its Phase 4** (Wave 2b).
 
 ## Context
 
@@ -711,6 +743,15 @@ collection name, so a key without a schema is a compile error. (`UNVALIDATED_COL
 The Typesense family is the **one** document family outside that guarantee, and it is outside it because
 it is derived, not because it was forgotten.
 
+⚠️ **Fold in the Typesense type-fidelity finding as a SUB-SCOPE, do not file it separately.**
+`ProductDocumentComponent.inclusion_type` is declared `?: string` in
+`src/schemas/typesense/documents.ts` where the storage leaf is an enum — a looseness nothing
+catches today, because core#57's parity arm compares field NAMES and not types, so it passes
+cleanly. It is the same root cause as everything else in 6a: the projection is declared here and
+transformed in api-cloudrun, so neither side can check the other. Filing it as its own issue would
+make this ledger −4 instead of −5 while adding no information. (Raised by the api-cloudrun#442
+planning session, verified against HEAD.)
+
 **Ledger effect: this is a 4th filed issue, so the net becomes −4.** Worth it — it is the root cause
 behind three existing issues, and scoping it may change what #60 should eventually look like.
 
@@ -719,7 +760,21 @@ behind three existing issues, and scoping it may change what #60 should eventual
 - **#56** — widen `calculateTransactionFeeAmountCents` (`src/utils/orders.ts:753`) and `isTransactionFeeItem`
   (`:558`) to `PricingItem`; add `isTransactionFeePricingItem`, mirroring the `isPreTaxItem` /
   `isPreTaxPricingItem` pair at `:569`/`:589`. Consider pulling up `isFromTotalItemType`. Then delete the
-  `uid:""`/`name:""`/`path:[]` shim (`api-cloudrun/src/lib/transactionFeeLine.ts:202-209`) and `isTransactionFeeLine` (`:90-98`).
+  `uid:""`/`name:""`/`path:[]` shim and `isTransactionFeeLine`.
+- 🔴 **The api-cloudrun half is NOT ours to do — it belongs to api-cloudrun#570's plan** (to be
+  promoted as api-cloudrun/.claude/plans/line-price-single-author.md; cited by path once it exists).
+  That plan's Step 1 **is** this wave, and its Step 3 absorbs the whole of `transactionFeeLine.ts`
+  into a new `src/lib/linePrice.ts` rather than editing it. So this wave stops at core's boundary:
+  widen the two functions, publish, bump the pins. Deleting the shim from here would put two owners
+  on one file.
+- ⚠️ **This wave and #570 have a hard ordering: #570 runs AFTER Wave 6**, because its Step 1 depends
+  on the widened `PricingItem` API this publishes.
+- ⚠️ **The citation gate makes that ordering load-bearing, in both directions.**
+  `api-cloudrun/scripts/gate.sh` runs `audit-plan-citations.ts --strict` cross-repo, and core's own
+  `deno task audit:citations --strict` does the same from `.githooks/pre-push`. Any doc citing
+  `transactionFeeLine.ts` by path — this roadmap did, and the `cfs-money` skill cites its test —
+  goes RED the moment #570 deletes it. Those edits must land in the same commit stack as the
+  deletion, which is why the paths above are named in prose rather than cited.
 ### 6c. core#60 — scoped as originally filed, and worth doing regardless of 6a
 `cards` is `enabled: true`, live with 1,097 prod docs, and **unreachable from manager's typed search
 surface** — every typed consumer is generic over `keyof TypesenseDocumentMap`. That gap is real whatever
@@ -733,7 +788,45 @@ happens to the split-brain issue, and the fix is cheap.
 - ⚠️ `CardDocument` must mirror the translation conventions: **`date_fs` (int64), not `dates.start`**;
   `address_coordinates` is a geopoint → `[lat, lng]`; `created_at`/`updated_at` are `int64`.
 
+### 6d. Derive `SchemaDocType` from the registry instead of hand-writing it
+
+Folded in from the api-cloudrun#444 planning session (work item A), and **rides Wave 6's publish —
+it does not get a beta of its own.**
+
+`SchemaDocType` (`src/schemas/mod.ts`) is a hand-written 56-member union of every document type,
+sitting a few hundred lines below `CollectionDocs`, which already knows all of them. It becomes
+`CollectionDocs[CollectionName]`.
+
+- **Measured a no-op.** The only textual difference against the hand-written union is the
+  `Destination` / `DestinationDocType` import alias. Nothing else in the expansion moves.
+- The value is that the two lists **cannot drift**: a new collection currently needs an edit in both
+  places, and only one of them fails to compile if you forget.
+- ⚠️ **Re-derive the line refs off beta.244** — that region moved this session when a stale core#44
+  claim in its docblock was corrected.
+- ⚠️ **Run `deno task check:declarations` before settling the shape.** A derived type whose
+  declaration needs inference to expand does not fail to publish — it publishes a DIFFERENT, wrong
+  type to manager only. That gate exists now precisely because this package has shipped that twice.
+
 **Closes #56, #60.**
+
+### Downstream — which wave unblocks or perturbs which api-cloudrun plan
+
+Coordination map, so neither side edits the other's file. **api-cloudrun owns everything in the
+right column**; this roadmap owns core.
+
+| This wave | Effect on an api-cloudrun plan |
+|---|---|
+| **Wave 3** (core#65, log index signatures) | **Churns** the ~60 citations api-cloudrun#442 / #444-B point at. Those two therefore run **BEFORE** Wave 3 — they need no core change, since `CollectionDocs` / `CollectionName` / `DocFor` are already in the beta.244 pin. |
+| **Wave 5** (optionality) | Same — churns api files. Same ordering. |
+| **Wave 6b** (core#56) | **Hard blocker for api-cloudrun#570 Step 1.** #570 runs after Wave 6. Its Step 3 absorbs `transactionFeeLine.ts` wholesale, so this wave must not touch it. |
+| **Wave 6a** (Typesense split-brain issue) | Carries #442's `inclusion_type` fidelity finding as a sub-scope rather than a fifth issue. |
+| **Wave 6d** | Is api-cloudrun#444 work item A, relocated here to ride Wave 6's publish. |
+| **Wave 4** (`getTestDoc`) | Shares `typeEscapeRatchet.test.ts` with #442 §E and #444-B — see the hygiene note. |
+
+⚠️ **The citation gate couples the two repos both ways.** `api-cloudrun/scripts/gate.sh` runs
+`audit-plan-citations.ts --strict` cross-repo, and core's `deno task audit:citations --strict` runs
+from `.githooks/pre-push`. So a file deleted in one repo turns a doc in the other RED. Any plan that
+deletes a cited path must land its doc edits in the same commit stack.
 
 ## Wave 7 — remainder of core#54 and core#44
 
@@ -792,8 +885,13 @@ declared-ahead-of-use keeps (5a bucket A — schema docblocks, not issues).
   `unrecognized_keys` failure `validateBeforeWrite` would refuse; three write raw and untyped, and the
   fourth is annotated `const orgDoc: Organization` **and then `as unknown as Organization` at :56**,
   which defeats the annotation entirely.
-- **Fix `api-cloudrun/tests/unit/typeEscapeRatchet.test.ts`'s regex** (also listed in Wave 4) — one character class, and it is
-  what stops the `eventCardReconcile` rewrite silently regressing.
+- **`api-cloudrun/tests/unit/typeEscapeRatchet.test.ts` has THREE claimants — coordinate, do not
+  race.** Our bullet is the regex fix (also listed in Wave 4): it requires `}` before
+  `as unknown as`, so `}) as unknown as` and `] as unknown as` escape. api-cloudrun#442's plan adds
+  an `as unknown as <document type>` arm scoped to `src/`, and api-cloudrun#444-B rewrites the very
+  cast that file allowlists. **The regex fix belongs with #442's arm**, since both edit the same
+  predicate and doing them separately means one rewrites the other. We keep only the *reason* it
+  matters here: it is what stops the `eventCardReconcile` rewrite in Wave 4 silently regressing.
 - **Delete `notes/table-cell-linkTo-migration.md`** — April 2026, tracked by no issue, and overtaken:
   `manager/src/components/TableCell.tsx:123` reads `column().meta.linkTo` and `:146` says the substring dispatch must not
   "grow back."
