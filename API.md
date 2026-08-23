@@ -23459,6 +23459,49 @@ interface ResolvedJurisdiction {
 }
 ```
 
+### `StaleTaxWarning`
+
+**One line priced on a LAPSED rate**, reported by {@link assignLineTaxes}.
+
+## Why a warning rather than a refusal
+
+An earlier revision of this module THREW here, on the reasoning that a closed
+window makes {@link findTaxFor} return `null`, `null` already means *"this
+line is untaxed"*, and an expired Chicago Rental Tax would therefore silently
+zero-rate **70% of all tax CFS has ever collected**. The zero-rating problem
+is real and this design still fixes it — by falling forward to the most
+recent version rather than to nothing.
+
+🔴 **The refusal was WRONG, and the reason is worth keeping**: a document
+resolves the catalog at its own instant, and for an ORDER that instant is the
+earliest delivery start — a date in the FUTURE
+({@link deriveOrderTaxAsOf}). So a finite `applied_to` was not a review
+deadline, it was a hard ceiling on how far ahead CFS could take a booking:
+setting one to 2026-12-01 immediately refused every order delivering after
+that date. Measured on prod 2026-08-23, 1 of 81 live orders became unwritable
+the moment the bound was set, and every new forward booking past it would
+have 400'd.
+
+So the rule is now: **price on the most recent version at or before `asOf`,
+and say so.** That is no worse than the open-ended windows it replaced — the
+same rate would have applied — and it adds a signal that never existed.
+
+⚠️ **What this gives up, stated plainly:** the line IS priced at a rate
+nobody has confirmed for that date. The protection is the warning plus the
+daily `check-tax-expiry` job, not the arithmetic.
+
+```ts
+interface StaleTaxWarning {
+  jurisdiction: JurisdictionType;
+  item_type: string;
+  tax_uid: string;
+  tax_name: string;
+  rate: number;
+  expired_at: string;
+  as_of: string;
+}
+```
+
 ### `TAXABLE_COA_TO_TAX_NAME`
 
 **Which tax a newly authored line carries, keyed on `coa_revenue`** — the
@@ -23614,10 +23657,6 @@ interface TaxDestination {
 }
 ```
 
-### `TaxExpiredError`
-
-_(class — see source)_
-
 ### `TaxSourcingDestination`
 
 The one destination shape the order-side tax rules read.
@@ -23643,7 +23682,7 @@ A taxable COA with no entry there would be silently left **untaxed**, which is
 a money defect that looks like a clean run. Throws rather than exits so a
 script, a test and a client can all call it.
 
-### `assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): void`
+### `assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): StaleTaxWarning[]`
 
 **Write the rule's answer onto every priceable line** — `price.taxes`,
 `price.taxes_base` and a refreshed `price.total_cents`. Mutates in place;
@@ -23684,7 +23723,30 @@ between versions of a tax and must not decide taxability; this one IS the
 taxability decision, and a tax the catalog cannot answer for is not the
 answer.
 
-## 🔴 It REFUSES an expired cell
+## 🔴 It REPORTS a lapsed rate — it does not refuse one
+
+**Returns** — one {@link StaleTaxWarning} per `(jurisdiction × item type)` cell
+that priced on a version whose window has run out, **deduped by cell**: a
+61-line order resolving one lapsed cell yields one warning, not 61. An empty
+array is the healthy answer.
+
+The line still prices — on the most recent version at or before `asOf`, which
+is what an open-ended window would have applied anyway. ⚠️ **An earlier
+revision THREW here and it was wrong**: an order resolves the catalog at its
+earliest DELIVERY START, so a finite `applied_to` refused every booking past
+that date rather than scheduling a review. See {@link StaleTaxWarning}.
+
+⚠️ **The return value is the whole signal — dropping it makes the lapse
+silent again.** Every caller either surfaces it (the manager, from its own
+recompute) or logs it (api-cloudrun's write paths).
+
+⚠️ **A warning is emitted even when the document is EXEMPT.** The line prices
+at $0 either way, but `taxes_base` records which tax it was exempt FROM, and
+that annotation is being taken from a rate nobody has confirmed. The
+catalogue is what is wrong, not the document.
+
+A frozen document is unaffected and produces no warning:
+{@link resolveLineTax} takes the version the document already stores first.
 
 ### `computeItemTaxAmountCents(tax: Pick<Tax, "rate" | "type">, subtotalDiscountedCents: number, quantity: number): number`
 
@@ -23956,7 +24018,7 @@ reproduce the rule that ran — not a tidier one.
 covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
 is said on the axis the rule reads now: `taxed_as: "none"`.
 
-### `materializeDocumentTax(items: LineItem[], ctx: DocumentTaxContext): void`
+### `materializeDocumentTax(items: LineItem[], ctx: DocumentTaxContext): StaleTaxWarning[]`
 
 **The one tax materializer.** {@link assignLineTaxes} plus the reprice —
 the pair every write path that owns its own line prices needs. Mutates
@@ -23972,6 +24034,12 @@ divergence this function exists to close.
 **Pure** — `asOf` is injected rather than defaulted to now, so this stays
 free of an ambient clock (a defaulted `now` is how the workspace ban on
 `new Date()` for business datetimes gets bypassed).
+
+**Returns** — 's stale-rate warnings, passed straight
+through. Every consumer — both api-cloudrun write paths and the manager's
+optimistic recompute — is responsible for surfacing or logging them; a
+dropped return value makes a lapsed rate silent, which is the condition this
+whole mechanism exists to end.
 
 ### `resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdiction`
 
@@ -24104,8 +24172,10 @@ run out" is unambiguous.
 ⚠️ **`untaxed` is the answer that must NOT widen.** A Chicago `service` line
 is `untaxed` and always has been: no tax has ever listed that type, so there
 is no lapsed version to find. If this returned `expired` for it, every
-service line in the corpus would refuse to price. That distinction is the
-entire safety property of the expiry design — see {@link TaxExpiredError}.
+service line in the corpus would be reported as pricing on a lapsed rate —
+and, worse, would fall forward onto a tax that never covered it. That
+distinction is the safety property the whole design turns on; see
+{@link StaleTaxWarning}.
 
 ⚠️ A `null` jurisdiction is `untaxed`, never `expired`: no-nexus means no
 catalog lookup happens at all, which is a decision rather than a lapse.

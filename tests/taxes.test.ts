@@ -10,7 +10,6 @@ import {
   materializeDocumentTax,
   resolveLineTax,
   type TaxDestination,
-  TaxExpiredError,
 } from "../src/utils/taxes.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
 
@@ -777,113 +776,155 @@ Deno.test("assertCoaTaxMapCoversCore: the name map covers every taxable COA", ()
   assertCoaTaxMapCoversCore();
 });
 
-// ── 🔴 An expired cell REFUSES to price ──────────────────────────
+// ── 🔴 A lapsed cell PRICES FORWARD and reports it ───────────────
 //
 // A closed window makes `findTaxFor` return null, and null already means "this
-// line is untaxed" — so left alone, an expired Chicago Rental Tax silently
-// zero-rates 70% of all tax CFS has ever collected, and the manager's
-// optimistic recompute shows the operator the same $0 so it looks correct.
-// The refusal lives in the engine rather than in a gate because a gate has to
-// be TOTAL over every call site to be safe (api-cloudrun#618).
+// line is untaxed" — so left alone, an expired Chicago Rental Tax would
+// silently zero-rate 70% of all tax CFS has ever collected.
+//
+// 🔴 An earlier revision fixed that by THROWING, and it was wrong. A document
+// resolves the catalog at its own instant, and for an ORDER that instant is the
+// earliest DELIVERY START — a date in the future. So a finite `applied_to` was
+// not a review deadline, it was a ceiling on forward booking: 1 of 81 live prod
+// orders became unwritable the moment one was set (measured 2026-08-23).
+//
+// The rule is now: price on the most recent version at or before `asOf`, and
+// SAY SO. Same money an open-ended window would have produced, plus a signal.
 
 /** `CATALOG` with Chicago Rental Tax lapsed on 2026-06-01 and no successor. */
 const LAPSED: Tax[] = CATALOG.map((t) =>
   t.uid === "chi-rental-tax" ? { ...t, applied_to: "2026-06-01T00:00:00.000-05:00" } : t
 );
 
-Deno.test("🔴 assignLineTaxes THROWS on an expired cell — it never prices at zero", () => {
+Deno.test("🔴 a lapsed cell PRICES on its most recent version — never at zero", () => {
   const items = [makeItem()];
-  const err = assertThrows(
-    () => assignLineTaxes(items, ctx({ taxes: LAPSED })),
-    TaxExpiredError,
-  );
-  // The message has to name the cell an operator must go and renew.
-  assertEquals(err.jurisdiction, "chicago");
-  assertEquals(err.itemType, "rental");
-  assertEquals(err.expiredAt, "2026-06-01T00:00:00.000-05:00");
-  assertEquals(err.code, "tax_expired");
-  assertEquals(err.message.includes("Chicago Rental Tax"), true);
+  const warnings = assignLineTaxes(items, ctx({ taxes: LAPSED }));
 
-  // …and it threw BEFORE writing anything, so no half-priced line survives.
+  // The money is what the open-ended window would have produced.
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
+  assertEquals(px(items[0]).taxes[0].rate, 15);
   assertEquals(px(items[0]).total_cents, 11500);
+
+  // …and the fact that it is a LAPSED rate travels with it.
+  assertEquals(warnings.length, 1);
+  assertEquals(warnings[0].jurisdiction, "chicago");
+  assertEquals(warnings[0].item_type, "rental");
+  assertEquals(warnings[0].tax_name, "Chicago Rental Tax");
+  assertEquals(warnings[0].rate, 15);
+  assertEquals(warnings[0].expired_at, "2026-06-01T00:00:00.000-05:00");
+  assertEquals(warnings[0].as_of, AS_OF);
 });
 
-Deno.test("🔴 materializeDocumentTax inherits the refusal", () => {
-  // The manager's optimistic recompute and both api write paths go through
-  // this, so the throw reaches every consumer without one of them opting in.
-  assertThrows(
-    () => materializeDocumentTax([makeItem()], ctx({ taxes: LAPSED })),
-    TaxExpiredError,
-  );
+Deno.test("🔴 a healthy catalog reports NOTHING — the empty array is the signal", () => {
+  // The half that makes the warning mean something: if this ever returns a
+  // warning for a live cell, every document in the corpus reads as stale and
+  // the surface stops being read.
+  assertEquals(assignLineTaxes([makeItem()], ctx()), []);
+  assertEquals(materializeDocumentTax([makeItem()], ctx()), []);
 });
 
-Deno.test("🔴 a cell nothing ever taxed still prices — `untaxed` is not `expired`", () => {
-  // The counterpart the whole design turns on. No tax lists `service`, so a
-  // service line is untaxed at every instant, expiry or not — and if this arm
-  // ever goes red, every service line in the corpus has stopped pricing.
+Deno.test("materializeDocumentTax passes the warnings straight through", () => {
+  const warnings = materializeDocumentTax([makeItem()], ctx({ taxes: LAPSED }));
+  assertEquals(warnings.length, 1);
+  assertEquals(warnings[0].tax_uid, "chi-rental-tax");
+});
+
+Deno.test("🔴 warnings are deduped by CELL, not emitted per line", () => {
+  // A 61-product order resolving one lapsed cell must produce one warning. Per
+  // line, the surface would be unreadable on exactly the documents that matter.
+  const items = [makeItem(), makeItem(), makeItem(), makeItem()];
+  assertEquals(assignLineTaxes(items, ctx({ taxes: LAPSED })).length, 1);
+  // …and every line still priced.
+  for (const item of items) assertEquals(px(item).taxes[0].rate, 15);
+});
+
+Deno.test("🔴 a cell nothing ever taxed prices at zero and warns NOT AT ALL", () => {
+  // The distinction the whole design turns on. No tax lists `service`, so there
+  // is no lapsed version to fall forward onto — `taxes: []` is the right answer
+  // and a warning here would be a false alarm on every service line in the
+  // corpus.
   const items = [makeItem({ type: "service" }, { taxes: [] })];
-  assignLineTaxes(items, ctx({ taxes: LAPSED }));
+  assertEquals(assignLineTaxes(items, ctx({ taxes: LAPSED })), []);
   assertEquals(px(items[0]).taxes, []);
   assertEquals(px(items[0]).total_cents, 10000);
 });
 
-Deno.test("🔴 a FROZEN document holding the lapsed version prices it, and does not throw", () => {
-  // A completed order re-priced on a later CRMS event must keep the rate it was
-  // billed at. The freeze already outranks "today's version"; it outranks "no
-  // version at all" for the same reason — a lapse in the LIVE catalog must not
-  // retroactively detax history, and a frozen document has to stay writable.
+Deno.test("🔴 an order delivering PAST the expiry still prices — the outage case", () => {
+  // The regression that killed the throw. `deriveOrderTaxAsOf` resolves an
+  // order at its earliest delivery start, so a 2027 booking asks the catalog
+  // about 2027; with Chicago Rental lapsed in 2026 that used to be a 400.
   const items = [makeItem()];
-  assignLineTaxes(items, ctx({
+  const warnings = assignLineTaxes(
+    items,
+    ctx({ taxes: LAPSED, asOf: "2027-03-01T09:00:00.000-06:00" }),
+  );
+  assertEquals(px(items[0]).taxes[0].rate, 15, "priced, not refused");
+  assertEquals(warnings.length, 1);
+  assertEquals(warnings[0].as_of, "2027-03-01T09:00:00.000-06:00");
+});
+
+Deno.test("🔴 an INTERIOR gap falls back to the version that ran up to it", () => {
+  // "Most recent" means most recently CLOSED, not newest document. Reaching
+  // forward across a gap would apply a rate that had not taken effect yet.
+  const gapped: Tax[] = [
+    ...CATALOG.filter((t) => t.uid !== "chi-rental-tax"),
+    { ...CATALOG.find((t) => t.uid === "chi-rental-tax")!, uid: "rental-old", rate: 11, applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: "2026-01-01T00:00:00.000-06:00" },
+    { ...CATALOG.find((t) => t.uid === "chi-rental-tax")!, uid: "rental-new", rate: 15, applied_from: "2027-01-01T00:00:00.000-06:00", applied_to: null },
+  ];
+  const items = [makeItem()];
+  const warnings = assignLineTaxes(items, ctx({ taxes: gapped }));
+  assertEquals(px(items[0]).taxes[0].uid, "rental-old", "the rate in force BEFORE the gap");
+  assertEquals(px(items[0]).taxes[0].rate, 11);
+  assertEquals(warnings[0].tax_uid, "rental-old");
+});
+
+Deno.test("a date BEFORE the first version is untaxed, not stale", () => {
+  // Nothing has closed before it, so there is nothing to fall forward from —
+  // CFS simply was not collecting yet.
+  const items = [makeItem({ type: "sale" }, { taxes: [] })];
+  const warnings = assignLineTaxes(
+    items,
+    ctx({ destinations: [at("Frankfort")], asOf: "2025-06-01T12:00:00.000-05:00" }),
+  );
+  assertEquals(px(items[0]).taxes, []);
+  assertEquals(warnings, []);
+});
+
+Deno.test("🔴 a FROZEN document keeps its stored version and warns NOT AT ALL", () => {
+  // The freeze outranks the fall-forward: what a completed order already stores
+  // beats what the catalog would infer for it, and there is nothing for an
+  // operator to act on.
+  const items = [makeItem()];
+  const warnings = assignLineTaxes(items, ctx({
     taxes: LAPSED,
     frozenVersions: new Map([["Chicago Rental Tax", "chi-rental-tax"]]),
   }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
-  assertEquals(px(items[0]).taxes[0].rate, 15);
+  assertEquals(warnings, []);
 });
 
-Deno.test("🔴 …but a frozen document acquiring a NEW expired cell still refuses", () => {
-  // `atStoredVersion`'s fall-through: freezing cannot mean "keep a version that
-  // does not exist". A frozen order whose jurisdiction is corrected onto a
-  // lapsed cell has no stored rate to keep, so the refusal is the right answer
-  // — the alternative is billing that line at zero.
+Deno.test("an EXEMPT document prices at $0 and still warns", () => {
+  // The money is right either way, but `taxes_base` records which tax the
+  // customer was exempt FROM — and that annotation is being taken from a rate
+  // nobody has confirmed. The catalogue is what is wrong, not the document.
   const items = [makeItem()];
-  assertThrows(
-    () =>
-      assignLineTaxes(items, ctx({
-        taxes: LAPSED,
-        frozenVersions: new Map([["Frankfort Sales Tax", "frankfort-tax"]]),
-      })),
-    TaxExpiredError,
-  );
+  const warnings = assignLineTaxes(items, ctx({ taxes: LAPSED, exempt: true }));
+  assertEquals(px(items[0]).taxes, []);
+  assertEquals(px(items[0]).taxes_base?.[0].uid, "chi-rental-tax");
+  assertEquals(warnings.length, 1);
 });
 
-Deno.test("🔴 exemption does NOT excuse an expired cell", () => {
-  // An exempt document prices at $0 either way, so nothing is mis-billed — but
-  // `taxes_base` is the field whose job is to survive exemption and say WHICH
-  // tax the customer was exempt from, and an expired cell cannot answer that.
-  // Carving exemption out would also make the refusal partial, which is a gate
-  // wearing an engine's clothes.
-  assertThrows(
-    () => assignLineTaxes([makeItem()], ctx({ taxes: LAPSED, exempt: true })),
-    TaxExpiredError,
-  );
-});
-
-Deno.test("resolveLineTax REPORTS the expiry rather than throwing", () => {
-  // The audits and the manager's read-only surfaces call this to say what the
-  // catalog looks like. A reporter that dies on the condition it reports is
-  // useless, so the throw is `assignLineTaxes`'s alone.
+Deno.test("resolveLineTax reports the state, and `expired` now carries a TAX", () => {
   const expired = resolveLineTax(makeItem(), at("Chicago"), ctx({ taxes: LAPSED }));
   assertEquals(expired.state, "expired");
-  assertEquals(expired.tax, null);
+  assertEquals(expired.tax?.uid, "chi-rental-tax", "expired no longer means unpriced");
   assertEquals(expired.key, "rental");
 
   const taxed = resolveLineTax(makeItem(), at("Chicago"), ctx());
   assertEquals(taxed.state, "taxed");
-  assertEquals(taxed.key, "rental");
 
   const untaxed = resolveLineTax(makeItem({ taxed_as: "none" }), at("Chicago"), ctx({ taxes: LAPSED }));
   assertEquals(untaxed.state, "untaxed");
+  assertEquals(untaxed.tax, null);
   assertEquals(untaxed.key, "none", "the key is the OVERRIDE when one is set");
 });

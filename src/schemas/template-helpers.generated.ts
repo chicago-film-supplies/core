@@ -139,7 +139,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "taxes": [
     { name: "assertCoaTaxMapCoversCore", expr: "it.taxes.assertCoaTaxMapCoversCore()", desc: "Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.", returns: "void" },
-    { name: "assignLineTaxes", expr: "it.taxes.assignLineTaxes(items, ctx)", desc: "**Write the rule's answer onto every priceable line** — `price.taxes`, `price.taxes_base` and a refreshed `price.total_cents`. Mutates in place; computes no subtotal.", returns: "void" },
+    { name: "assignLineTaxes", expr: "it.taxes.assignLineTaxes(items, ctx)", desc: "**Write the rule's answer onto every priceable line** — `price.taxes`, `price.taxes_base` and a refreshed `price.total_cents`. Mutates in place; computes no subtotal.", returns: "StaleTaxWarning[]" },
     { name: "deriveJurisdiction", expr: "it.taxes.deriveJurisdiction(address, origin)", desc: "**Where a delivery address sources to** — the bottom of the three-level jurisdiction precedence ({@link resolveJurisdiction}), below the document's own destination entry and the organization's `jurisdiction_claim`.", returns: "JurisdictionType" },
     { name: "deriveOrderTaxAsOf", expr: "it.taxes.deriveOrderTaxAsOf(destinations, now)", desc: "As-of instant for resolving an order's taxes: the earliest destination delivery start, falling back to `now`.", returns: "string" },
     { name: "destinationJurisdictions", expr: "it.taxes.destinationJurisdictions(ctx)", desc: "**The jurisdiction each of a document's destinations resolves to**, with the level that answered — one entry per `destinations[]` entry, in document order.", returns: "ResolvedJurisdiction[]" },
