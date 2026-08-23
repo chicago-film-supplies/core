@@ -1122,10 +1122,17 @@ emitter copies verbatim, so neither needs expanding.
 ⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the
 inference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus
 `keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.
-Passing that check is NOT evidence the emit is right — core#44 closed as "no
-post-publish declaration gate", so nothing here can see a wrong published
-declaration. The explicit form is chosen because it needs no expansion at all,
-which is a reasoned preference rather than a measured one.
+Passing that check is NOT evidence the emit is right. The explicit form is
+chosen because it needs no expansion at all, which is a reasoned preference
+rather than a measured one.
+
+⚠️ The line above used to add *"core#44 closed as 'no post-publish declaration
+gate', so nothing here can see a wrong published declaration."* **That is no
+longer true**: core#44 reopened on a second divergence and
+`deno task check:declarations` now runs `isolatedDeclarations` over all of
+`src/`. It is still not a check of JSR's *emitter* — it is a conservative
+over-approximation of it — so "passing does not prove the emit is right"
+survives; what does not survive is "nothing can see it".
 
 Singular and plural both appear because the registry has always carried both.
 ⚠️ The singular half may be vestigial — there are zero literal `schemas["order"]`

@@ -294,9 +294,60 @@ turned every timestamp column into a raw epoch until it was changed to read the
 `FIRESTORE_TIMESTAMP_META` marker (which survives the clone, because `.meta()`
 **merges**).
 
-### UID property naming
+### UID property naming — `uid` is a document id, `uuid` is someone else's id
 
-Any `uid` property should be named either `uid` (for the document's own user ID) or `uid_{descriptor}` (e.g., `uid_owner`, `uid_creator`) when referencing another user.
+> **`uid` / `uid_{domain}` refers to a Firestore DOCUMENT ID** — a native auto-id or a CFS
+> deterministic composite.
+> **`uuid` refers to an actual UUID from elsewhere** (Uploadcare, some line-item types).
+
+⚠️ This line previously read *"`uid` … for the document's own **user** ID"*, which is wrong in a way
+that matters: `uid` is the document's own **document** id on every collection, and only
+coincidentally a user id on `users`. `uid_{descriptor}` (`uid_owner`, `uid_creator`, `uid_thread`,
+`uid_order`) is a reference to **another document**, not specifically to a user.
+
+The rule governs **document identity and cross-document references**. Array-element ids are a
+separate, already-typed concern — `ItemUid` in `schemas/_uid.ts`, which is deliberately polymorphic.
+
+Shapes live in `src/schemas/_uid.ts` (`FirestoreId`, `BookingId`, `ItemUid`, `QuoteId`,
+`MovementId`); this section is about **naming**, that module is about **form**.
+
+**Measured 2026-08-23** against the registry: 96 `CollectionDocs` keys resolving to **56 distinct
+document types — 41 declare `uid`, 15 do not**, and the 15 are deliberate, in four classes:
+
+- **The doc id is a credential** — `sessions`, `email-verifications`, `password-resets`,
+  `mcp-oauth-codes`, `mcp-oauth-tokens`. The id is the bearer token (or `sha256(token)`), so copying
+  it into the body widens what a log or export leak reveals and buys nothing: no reader needs it.
+  ⚠️ Stated plainly, the package is **already inconsistent here** — `sessions` copies its token into
+  the body as `id`, and `template_previews.uid` is itself a bearer token. The argument is "no reader
+  needs it", not "this is a new security boundary".
+- **A natural key that is not in the body** — `counters`, `rate-limits`, `cache-geocodes`,
+  `uploadcare-sweep`. Hot-path or TTL-swept plumbing with no readers of a body id.
+  `cache-geocodes` would be worse than neutral: its id is `normalizeQuery(q)` while the body's
+  `query` is the raw string, so a `uid` would be a **third** representation of one key.
+- **A child document with no identity at all** — `orders/{uid}/documents`. This one is a **gap**, not
+  a carve-out (core#58).
+- **The id is in the body under another name.** Three of these are **sanctioned carve-outs**, each
+  for a reason that is not "we forgot":
+  - **`roles.name`** — the doc id must BE the claim string, because `manager/firestore.rules` can
+    only `get()` by path and never query. Full argument in `.claude/plans/roles-campaign.md`.
+  - **`mcp-oauth-clients.client_id`** — an OAuth 2.1 / RFC 7591 wire name, on the one surface whose
+    job is to mirror an external spec.
+  - **`uploadcare-worklist.uuid`** — already correct: it genuinely **is** an Uploadcare UUID that
+    doubles as the doc id, which is precisely what `uuid` means.
+
+  The rest of that class (`sessions.id`, `webhook-events.id`,
+  `mcp-oauth-authorize-requests.id`) are **not** carve-outs and are being renamed (core#58).
+
+Also deliberately loose, and not carve-outs from this rule so much as different questions:
+`ActorRef.uid` (free-form historical actors), and the polymorphic `DocSource.uid` / `UidNameRef.uid`.
+
+🔴 **A field named something other than `uid` is INVISIBLE to the drift guard.**
+`assertValidForWrite` / `assertValidPatch` in api-cloudrun read `doc.uid` and compare it to `ref.id`;
+a document with no `uid` passes **silently**. So the guard covers exactly "the types that happened to
+name their id field `uid`" — 41 of 56 — and nothing declares which 15 are uncovered. That is why the
+carve-outs above need `.meta({ idField })` before they are genuinely guarded rather than merely
+documented (core#58 Phase 4), and it is the reason the three renames are worth doing at all: they
+close the gap by construction.
 
 ### Dependencies
 

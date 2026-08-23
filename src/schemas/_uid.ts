@@ -21,6 +21,36 @@
  * (polymorphic), divider-item `uid` (native `z.uuid()`), and third-party
  * UUIDs (`uploadcare_uuid`, `xero_id`).
  *
+ * ## Naming: `uid` is a document id, `uuid` is someone else's id
+ *
+ * This module is about the **form** an id takes; the companion rule is about
+ * what it may be **called**, and until 2026-08-23 it was written down nowhere.
+ *
+ * > `uid` / `uid_{domain}` is a Firestore **document id** — a native auto-id or
+ * > a CFS deterministic composite.
+ * > `uuid` is an **actual UUID from elsewhere** (Uploadcare, some line-item
+ * > types) — which is why the table's last row is `uuid` and not `uid`.
+ *
+ * It governs document identity and cross-document references. Array-element ids
+ * are the separate concern `ItemUid` above already types.
+ *
+ * Measured 2026-08-23: of the registry's 56 distinct document types, **41
+ * declare `uid` and 15 do not** — a credential class (the doc id is the bearer
+ * token, so copying it into the body only widens a leak), a natural-key class
+ * (hot-path plumbing with no reader of a body id), one genuine gap
+ * (`orders/{uid}/documents`), and a class whose id sits in the body under
+ * another name. Of that last class exactly three are sanctioned:
+ * **`roles.name`** (security rules can only `get()` by path, never query),
+ * **`mcp-oauth-clients.client_id`** (an RFC 7591 wire name), and
+ * **`uploadcare-worklist.uuid`** (already correct — it IS an Uploadcare UUID).
+ * `core/CLAUDE.md` § *UID property naming* carries the full table and the
+ * reasoning.
+ *
+ * 🔴 **The naming is load-bearing, not cosmetic.** api-cloudrun's write-time
+ * drift guard reads `doc.uid` and compares it to `ref.id`; a document that
+ * names its id field anything else passes **silently**. So the guard covers
+ * exactly the 41 — and nothing declares which 15 it does not.
+ *
  * @module
  */
 
