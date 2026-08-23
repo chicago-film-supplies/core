@@ -761,10 +761,13 @@ behind three existing issues, and scoping it may change what #60 should eventual
   (`:558`) to `PricingItem`; add `isTransactionFeePricingItem`, mirroring the `isPreTaxItem` /
   `isPreTaxPricingItem` pair at `:569`/`:589`. Consider pulling up `isFromTotalItemType`. Then delete the
   `uid:""`/`name:""`/`path:[]` shim and `isTransactionFeeLine`.
-- 🔴 **The api-cloudrun half is NOT ours to do — it belongs to api-cloudrun#570's plan** (to be
-  promoted as api-cloudrun/.claude/plans/line-price-single-author.md; cited by path once it exists).
-  That plan's Step 1 **is** this wave, and its Step 3 absorbs the whole of `transactionFeeLine.ts`
-  into a new `src/lib/linePrice.ts` rather than editing it. So this wave stops at core's boundary:
+- 🔴 **The api-cloudrun half is NOT ours to do — it belongs to
+  `api-cloudrun/.claude/plans/line-price-single-author.md`** (api-cloudrun#570). That plan's Step 1
+  **is** this wave, and its Step 3 absorbs the whole of `transactionFeeLine.ts` into a new
+  `api-cloudrun/src/lib/linePrice.ts` — **not yet written**, which is why that path does not resolve
+  today — rather than editing it in place. ⚠️ Cited without a line number deliberately: a
+  `path:N` into another repo's plan resolves as long as the file is long enough, which is never what
+  the claim means — the same reason `enforced_by` bans the form. So this wave stops at core's boundary:
   widen the two functions, publish, bump the pins. Deleting the shim from here would put two owners
   on one file.
 - ⚠️ **This wave and #570 have a hard ordering: #570 runs AFTER Wave 6**, because its Step 1 depends
@@ -803,9 +806,16 @@ sitting a few hundred lines below `CollectionDocs`, which already knows all of t
   places, and only one of them fails to compile if you forget.
 - ⚠️ **Re-derive the line refs off beta.244** — that region moved this session when a stale core#44
   claim in its docblock was corrected.
-- ⚠️ **Run `deno task check:declarations` before settling the shape.** A derived type whose
-  declaration needs inference to expand does not fail to publish — it publishes a DIFFERENT, wrong
-  type to manager only. That gate exists now precisely because this package has shipped that twice.
+- ⚠️ **Run `deno task check:declarations` before settling the shape**, and **expect a no-op**:
+  `CollectionDocs[CollectionName]` is an indexed access over a written-out mapped type, so nothing
+  needs inference to expand. If it *does* fire, that is a real finding about the registry — not a
+  reason to revert to the hand-written union. The gate matters here because a derived type whose
+  declaration needs inference does not fail to publish; it publishes a DIFFERENT, wrong type to
+  manager only, which this package has shipped twice.
+- **Line refs, verified at `25b69b8`:** `SchemaDocType` is `src/schemas/mod.ts:1041` (the thing this
+  replaces) and `CollectionDocs` is `:1155`. ⚠️ Those are two different symbols and were briefly
+  conflated in cross-session coordination — `:1041` has always been `SchemaDocType`. Re-derive off
+  whatever you actually commit rather than off either number.
 
 **Closes #56, #60.**
 
@@ -816,8 +826,8 @@ right column**; this roadmap owns core.
 
 | This wave | Effect on an api-cloudrun plan |
 |---|---|
-| **Wave 3** (core#65, log index signatures) | **Churns** the ~60 citations api-cloudrun#442 / #444-B point at. Those two therefore run **BEFORE** Wave 3 — they need no core change, since `CollectionDocs` / `CollectionName` / `DocFor` are already in the beta.244 pin. |
-| **Wave 5** (optionality) | Same — churns api files. Same ordering. |
+| **Wave 3** (core#65, log index signatures) | 🔴 **api-cloudrun#442 and #444-B run BEFORE this wave, deliberately.** Wave 3 touches 367 log call sites across 104 files and would churn the api-cloudrun lines those two plans cite. They need nothing from core — `CollectionDocs` / `CollectionName` / `DocFor` are already in the beta.244 pin — so there is no reason for them to wait. |
+| **Wave 5** (optionality) | Same: its tightening churns the same api files. Same ordering — #442 / #444-B first. |
 | **Wave 6b** (core#56) | **Hard blocker for api-cloudrun#570 Step 1.** #570 runs after Wave 6. Its Step 3 absorbs `transactionFeeLine.ts` wholesale, so this wave must not touch it. |
 | **Wave 6a** (Typesense split-brain issue) | Carries #442's `inclusion_type` fidelity finding as a sub-scope rather than a fifth issue. |
 | **Wave 6d** | Is api-cloudrun#444 work item A, relocated here to ride Wave 6's publish. |

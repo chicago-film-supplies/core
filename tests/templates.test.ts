@@ -242,7 +242,7 @@ Deno.test("hashTemplateContent returns a 16-char hex digest", () => {
 // Moved here from `manager/src/components/templates/__tests__/goldenReview.test.ts` with the function
 // (core#68). Manager was the only side with coverage: api-cloudrun's
 // `aggregateVerdict` had **none**, and could not easily get any — its file
-// imports the db module, and `tests/unit/dbReachCoverage.test.ts` forbids any
+// imports the db module, and `api-cloudrun/tests/unit/dbReachCoverage.test.ts` forbids any
 // unit test from transitively reaching that. So the duplication was not merely
 // untidy, it was load-bearing for a test gap: one of the two copies was
 // structurally untestable where it lived.
