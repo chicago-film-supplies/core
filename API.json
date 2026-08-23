@@ -933,7 +933,7 @@
         {
           "kind": "interface",
           "name": "CreateTaxInputType",
-          "declaration": "interface CreateTaxInputType {\n  name: string;\n  rate: number;\n  type: RateType;\n  active?: boolean;\n  applied_from: string;\n  applied_to?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n}",
+          "declaration": "interface CreateTaxInputType {\n  name: string;\n  rate: number;\n  type: RateType;\n  applied_from: string;\n  applied_to?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n}",
           "doc": "Input for creating a new tax definition.\n\n`applied_from` / `applied_to` are the APPLIED window — the bound\n{@link Tax.applied_from} documents. They take {@link chicagoStartOfDay}\nrather than an instant because **a rate boundary is a calendar date**: the\noperator authors a day, and the snap belongs in the transform rather than in\neach of the three writers that used to do it by hand."
         },
         {
@@ -3387,7 +3387,7 @@
         {
           "kind": "interface",
           "name": "Tax",
-          "declaration": "interface Tax {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  active?: boolean;\n  crms_id: number | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types: PreTaxItemType[];\n  applied_from: string;\n  applied_from_fs: FirestoreTimestampType;\n  applied_to: string | null;\n  applied_to_fs: FirestoreTimestampType | null;\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Tax {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  crms_id: number | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types: PreTaxItemType[];\n  applied_from: string;\n  applied_from_fs: FirestoreTimestampType;\n  applied_to: string | null;\n  applied_to_fs: FirestoreTimestampType | null;\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tax definition used for computing item-level and order-level tax amounts."
         },
         {
@@ -3921,7 +3921,7 @@
         {
           "kind": "interface",
           "name": "UpdateTaxInputType",
-          "declaration": "interface UpdateTaxInputType {\n  uid: string;\n  name?: string;\n  rate?: number;\n  type?: RateType;\n  active?: boolean;\n  applied_from?: string;\n  applied_to?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  version: number;\n}",
+          "declaration": "interface UpdateTaxInputType {\n  uid: string;\n  name?: string;\n  rate?: number;\n  type?: RateType;\n  applied_from?: string;\n  applied_to?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  version: number;\n}",
           "doc": "Input for updating an existing tax definition.\n\n`rate` and `type` are accepted here and **refused by the service** — an\nin-place rate edit re-prices history, so the sanctioned move is\n{@link SupersedeTaxInput}. They stay on the input so the refusal can name what\nthe caller asked for."
         },
         {

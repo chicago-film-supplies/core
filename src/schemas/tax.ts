@@ -54,22 +54,6 @@ export interface Tax {
   name: string;
   rate: number;
   type: RateType;
-  /**
-   * @deprecated Being deleted. **Nothing has ever read it** — `findTaxFor` and
-   * `findTaxAt` select by `[applied_from, applied_to)` alone, so a flag
-   * disagreeing with the window changed what an operator believed and nothing
-   * about what got billed. Two prod documents sat `active: true` on a window
-   * that had already closed (api-cloudrun#613).
-   *
-   * The replacement is derived, one clause, and cannot drift from the bound
-   * that prices: `isTaxLive(tax, asOf)` in `@cfs/core/utils/taxes`.
-   *
-   * Optional here for the expand step only — documents stop carrying it before
-   * the field is removed, and `TaxSchema` is a `z.strictObject`, so the schema
-   * that admits a document without it must be DEPLOYED before any document
-   * loses it (api-cloudrun#443's lesson).
-   */
-  active?: boolean;
   crms_id: number | null;
   /**
    * Which jurisdiction this tax is collected for. `null` means **explicit-only**
@@ -245,7 +229,6 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
   type: RateTypeEnum.meta({ column: true, label: "Type" }),
-  active: z.boolean().optional().meta({ column: true, label: "Active" }),
   crms_id: z.int().nullable().default(null),
   jurisdiction: JurisdictionEnum.nullable().optional().meta({
     column: true,
@@ -292,7 +275,6 @@ export interface CreateTaxInputType {
   name: string;
   rate: number;
   type: RateType;
-  active?: boolean;
   applied_from: string;
   applied_to?: string | null;
   jurisdiction?: JurisdictionType | null;
@@ -309,7 +291,6 @@ export const CreateTaxInput: z.ZodType<CreateTaxInputType> = z.object({
   name: z.string().min(1).max(100),
   rate: z.number(),
   type: RateTypeEnum,
-  active: z.boolean().optional(),
   applied_from: chicagoStartOfDay(),
   applied_to: chicagoStartOfDay().nullable().optional(),
   jurisdiction: JurisdictionEnum.nullable().optional(),
@@ -334,7 +315,6 @@ export interface UpdateTaxInputType {
   name?: string;
   rate?: number;
   type?: RateType;
-  active?: boolean;
   applied_from?: string;
   applied_to?: string | null;
   jurisdiction?: JurisdictionType | null;
@@ -353,7 +333,6 @@ export const UpdateTaxInput: z.ZodType<UpdateTaxInputType> = z.object({
   name: z.string().min(1).max(100).optional(),
   rate: z.number().optional(),
   type: RateTypeEnum.optional(),
-  active: z.boolean().optional(),
   applied_from: chicagoStartOfDay().optional(),
   applied_to: chicagoStartOfDay().nullable().optional(),
   jurisdiction: JurisdictionEnum.nullable().optional(),

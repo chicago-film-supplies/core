@@ -1964,7 +1964,6 @@ interface CreateTaxInputType {
   name: string;
   rate: number;
   type: RateType;
-  active?: boolean;
   applied_from: string;
   applied_to?: string | null;
   jurisdiction?: JurisdictionType | null;
@@ -7191,7 +7190,6 @@ interface Tax {
   name: string;
   rate: number;
   type: RateType;
-  active?: boolean;
   crms_id: number | null;
   jurisdiction?: JurisdictionType | null;
   item_types: PreTaxItemType[];
@@ -8287,7 +8285,6 @@ interface UpdateTaxInputType {
   name?: string;
   rate?: number;
   type?: RateType;
-  active?: boolean;
   applied_from?: string;
   applied_to?: string | null;
   jurisdiction?: JurisdictionType | null;

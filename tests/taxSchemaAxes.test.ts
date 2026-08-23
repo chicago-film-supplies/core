@@ -18,7 +18,6 @@ function tax(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     name: "Chicago Sales Tax",
     rate: 10.5,
     type: "percent",
-    active: true,
     crms_id: 3,
     item_types: ["sale", "replacement"],
     applied_from: "2026-01-01T00:00:00.000-06:00",
@@ -257,4 +256,19 @@ Deno.test("a FLAT tax's components are not summed — its rate is dollars per un
 
 Deno.test("an empty xero_components is not a sum violation", () => {
   assertEquals(TaxSchema.safeParse(tax({ rate: 10.5, xero_components: [] })).success, true);
+});
+
+Deno.test("🔴 `active` is REFUSED — the strict schema is what makes its removal stick", () => {
+  // The field is deleted (api-cloudrun#618/#613): nothing ever read it,
+  // `findTaxFor` and `findTaxAt` select by `[applied_from, applied_to)` alone,
+  // and two prod documents sat `active: true` on a window that had already
+  // closed. Liveness is `isTaxLive(tax, asOf)`.
+  //
+  // Asserted as a REFUSAL rather than as an absence, because `z.strictObject`
+  // is the mechanism the removal rests on — and it cuts both ways: it is also
+  // why every stored document had to lose the field BEFORE this schema shipped
+  // (`scripts/migrate-tax-expiry.ts`), since one document still carrying it
+  // fails every parse from here on. #443's failure class, one collection over.
+  const result = TaxSchema.safeParse(tax({ active: true }));
+  assertEquals(result.success, false);
 });
