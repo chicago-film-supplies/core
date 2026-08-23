@@ -1,92 +1,71 @@
 # Roadmap: the 9 open `core` issues, plus the two campaigns that came out of reviewing them
 
-**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 and 0.5 landed (see the status block); Wave 1 onwards not started
+**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 landed and in prod; Wave 3 deferred; **Wave 4 is next and already gated**
 **Ordering:** risk-first (owner's call), with one half-sitting prerequisite ahead of it (Wave 0 — drop it if you disagree with the reasoning there).
 
-> ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0, 0.5 and 1 are DONE, deployed to dev; start at Wave 2
+> ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0 · 0.5 · 1 · 2 LANDED and in prod. Wave 3 deferred. Wave 4 gated and ready to build.
+>
+> *(One compacted block, not a stack — per `cfs-plan-docs`. This is the current state; earlier
+> per-wave updates are folded in.)*
 >
 > | Wave | State |
 > |---|---|
 > | **0a** non-destructive staleness tests | ✅ core `b640b62` |
 > | **0b** declarations gate | ✅ core `80144dc` |
-> | **0c** templates pin count | ✅ core `89e8dc0`, corrected twice more — see below |
-> | **0.5** core#68 golden aggregate | ✅ core `a1cab8f` → **beta.243**; api-cloudrun `b67bb890`; manager `dd0db53` |
-> | **1** core#58 Phases 0 + 1 (incl. 1c) | ✅ core `a7dea49` + `a99ecce` → **beta.244**; api-cloudrun `3d16987f`; manager `99a5c5b`; templates PR **#121** (open at beta.244, not merged) |
-> | **2 onwards** | ⏳ not started |
+> | **0c** templates pin count | ✅ `89e8dc0`, corrected twice more |
+> | **0.5** core#68 golden aggregate | ✅ **#68 CLOSED** |
+> | **1** core#58 Phases 0 + 1 (incl. 1c) | ✅ shipped **to prod**, both migrations run |
+> | **2a** core#59 `RoleId` | ✅ core `976646a` |
+> | **2b** core#58 Phase 4 (core half) | ✅ core `019e45d` |
+> | **2c** core#59 Phase 3 (API half) | ✅ api-cloudrun `5aa19607` |
+> | **3** core#65 log signatures | ⏸️ **DEFERRED** — census done, prescribed fix refuted |
+> | **4** core#53 `getTestDoc` | 🎯 **GATED, READY** — next up |
+> | **5 · 6 · 7** | ⏳ not started |
 >
-> `@cfs/core` is at **`10.0.0-beta.244`**; api-cloudrun, manager and the open templates PR are all
-> pinned to it. Everything is **pushed** — api-cloudrun's dev deploy is live
-> (`api-cloudrun-dev-01328-rt5`).
+> **`@cfs/core` is at `10.0.0-beta.248`.** api-cloudrun and manager are pinned to `beta.247`;
+> **templates PR #121 is open at beta.244 and needs rolling forward before it merges.**
+> All four repos are clean and pushed.
 >
-> ✅ **Wave 1's migrations are DONE in both environments.** release-please #638 merged →
-> api-cloudrun `v0.178.0`, prod deployed (`api-cloudrun-00287-spc`, 20:12Z, healthy).
-> - `purge-sessions.ts` — dev **133,911**, prod **882**. Both now 0.
-> - `backfill-order-document-uid.ts` — dev **1,988**, prod **1,986** (2 had already been stamped by
->   the newly deployed code regenerating an order — independent proof the write path is correct).
-> - Verified in prod: 1,988 documents parse, **0 failing the schema, 0 with `uid !== ref.id`**.
-> - ⚠️ **The "legacy auto-id tail" this plan warns about DOES NOT EXIST.**
->   `audit-order-documents-cardinality.ts` on prod reports `{"2": 994}` — every order has exactly two
->   documents, zero have more. So 0 ids were neither `quote` nor `packing-list`. The
->   `ref.id`-not-`orderDocumentId(data.name)` rule is still right (correct *by definition*), but its
->   stated justification did not fire. api-cloudrun#642 closed.
-> - **Remaining for 1d:** tighten `OrderDocument.uid` from `.optional()` to required, now that both
->   corpora are 100% stamped.
+> ### 🔴 Prod state — done, do not redo
+> Release `v0.178.0` merged, prod on `api-cloudrun-00287-spc`. **882 sessions purged; 1,986 order
+> documents stamped** (1,988 now carry `uid`, 0 failing the schema, 0 with `uid !== ref.id`).
+> `OrderDocument.uid` is now **required** — safe because both corpora are 100% stamped.
 >
-> **What the plan got wrong, corrected in place below:**
+> ### What is actually left on the two "closed" campaigns
+> - **#58** — only the CONSUMER half of Phase 4: widen `assertValidForWrite` / `assertValidPatch` in
+>   api-cloudrun to read the declared `.meta({ idField })`. Core declares it; nothing reads it yet, so
+>   the three carve-outs are *documented* but still **unguarded**.
+> - **#59** — only the manager UI, filed as **manager#321**. The API surface is complete (owner's
+>   call: API is enough for now).
 >
-> - **0b's prescribed fix for `schemas/common.ts` does not work.** Annotating `LINE_PARENTS` /
->   `DIVIDER_PARENTS` leaves all six TS9013s standing: the diagnostic is on the *use* site, because it
->   is `ITEM_CONTRACTS_INNER`'s own type that must be written down. The reference has to leave the
->   `as const` entirely, so `parentable_by` moved out to the already-annotated `ITEM_CONTRACTS`.
-> - **0a's shape had to change**, because a spawned child carries its OWN permissions — so a test
->   that spawns a generator rewrites `src/` no matter what the test process may do. `--allow-run` is
->   the load-bearing removal, not `--allow-write`. One staleness check became an in-process compare,
->   the other became `deno task check:generated`.
-> - **The declarations gate is a TASK, not a test in `jsr-emit-safety.test.ts`** — `npm:typescript`
->   reads `process.env`, and `deno task test` is now `--allow-read` only. That file is deleted, as
->   core#44 itself asked; TS9018 was confirmed to catch its construct first.
-> - 🔴 **The templates pin count is BRANCH-DEPENDENT and this doc twice stated it as a fact.**
->   `origin/main` carried **7** core pins; the unmerged `ci/citation-gate` branch carries **8** (it
->   adds `utils/citations`). A local checkout sitting on that branch also reported `beta.240` while
->   `origin/main` was already at `beta.241`, which is where this doc's "templates is one publish
->   behind" claim came from. **It was wrong.** Bump by `sed` over the version pattern and read the
->   version off `origin/main`.
-> - **Wave 0.5's sequencing blocker had already cleared.** Manager's `feat/templates-editor-lifecycle`
->   is merged; the branch and the `~/cfs-templates-editor` worktree are gone in both repos.
+> ### Corrections this campaign made to its own plan — do not re-derive
+> - **0b's prescribed fix for `schemas/common.ts` does not work.** Annotating `LINE_PARENTS` leaves
+>   all six TS9013s: the diagnostic is on the USE site, so the reference must leave the `as const`.
+> - **The declarations gate is a TASK, not a test** — `npm:typescript` reads `process.env` and
+>   `deno task test` is `--allow-read` only.
+> - **0a needed `--allow-run` removed, not `--allow-write`** — a spawned child carries its own
+>   permissions, so a test that spawns a generator rewrites `src/` regardless.
+> - 🔴 **The templates pin count is BRANCH-DEPENDENT** (`main` 7, a draft branch 8). Read the version
+>   off `origin/main`, bump by `sed` over the pattern, carry no count.
+> - **Finding 2 reproduces exactly** (41/15 pre-Wave-1); the 40/16 figure does not.
+> - **Wave 1's "legacy auto-id tail" DOES NOT EXIST** — prod is `{"2": 994}`, zero orders with >2
+>   documents. The `ref.id` rule stands on better grounds: it is the doc id *by definition*.
 >
-> **New, found while doing the work:**
+> ### Cross-repo findings worth carrying
+> - 🔴 **`cardCascade.ts` — the plan's own recommended structural template — has a read-derive-write
+>   with NO precondition**, and following it reproduced api-cloudrun#643's prod-corrupting bug inside
+>   the new role cascade. Fixed there with `lastUpdateTime`. Ranked list: **api-cloudrun#644**.
+> - ⚠️ **`set()` accepts no `Precondition`** — only `update()`/`delete()` do. "Add a precondition" is
+>   NOT a universal remedy; whole-document replace needs a transaction. Writing `set()` then
+>   `update({}, precondition)` writes first and checks after — worse than no guard.
+> - **The citation audit's two runs are not a superset of each other**: local resolves cross-repo
+>   paths (catches a wrong one); CI catches a bare basename naming an absent repo. A CI-checkout run
+>   caught a bare path that had been green locally for two commits.
 >
-> - `check:generated` caught its first defect immediately: an exported function in
->   `utils/templates.ts` ships into the template editor's helper panel, so `aggregateGoldenVerdict`
->   needed a denylist entry.
-> - The reassuring claim *"a real fixture slug can never be `_`"* is **false** —
->   `parseFixturePath` parses `fixtures/<gp>/_.json` into slug `"_"`. The sentinel is a convention,
->   not an invariant.
-> - **api-cloudrun#640** filed for the retired plan's P0 (an operator bless that publishes to prod).
->
-> **Wave 1 findings, all measured:**
->
-> - **Finding 2 reproduces exactly** — 96 registry keys → 56 distinct types, **41 with `uid`, 15
->   without**. The 40/16 figure this doc told us to re-measure does **not** reproduce.
-> - The rename produced **21 compile errors across 12 files** in api-cloudrun. That is the whole
->   value of it: a field not named `uid` is invisible to the `uid === ref.id` drift guard.
-> - `api-cloudrun/src/services/dbRead.ts`'s `data.uid === id` comment was **already fixed** (#619)
->   and its numbers match this measurement. `scripts/seed-rbac.ts` listed 4 roles against 6 — the
->   list is now deleted rather than corrected, since a hand-copy beside its own source is the
->   core#55 class.
-> - `tests/helpers/auth.ts`'s shared session id was **37** chars behind a comment claiming "38
->   chars, fits schema's <=40 bound" — wrong about the string AND the constraint (`.length(40)` is
->   exact). It survived only because that fixture uses a raw `ref.set()` that never parses.
-> - ⚠️ **A bug in the backfill's first draft**, caught before it ran: it also stamped `updated_at`.
->   `OrderDocumentSchema` is a `z.strictObject` with no timestamp field, so that would have made all
->   ~1,836 docs invalid — failing `validate-collection` and, since `validateBeforeWrite` parses the
->   whole document, refusing every later read-modify-write.
-> - Dev shows **0** order documents whose id is neither `"quote"` nor `"packing-list"`. The legacy
->   auto-id tail the plan warns about may be prod-only; the script keys on `ref.id` regardless and
->   reports the count on the prod dry run.
->
-> **Still open from Wave 0's issues:** #54 and #44 do not close until Wave 7. **#58 does not close
-> until its Phase 4** (Wave 2b).
+> ### Issues filed this session
+> api-cloudrun **#640** (operator bless, prod publish) · **#641** (test sessions are the one fixture
+> family nothing sweeps — 133,911 in dev) · **#642** (closed — prod migrations) · **#643 #644 #645**
+> (peer session) · manager **#321** (roles UI).
 
 ## Context
 
@@ -1076,6 +1055,27 @@ declared-ahead-of-use keeps (5a bucket A — schema docblocks, not issues).
 
 ## Context recommendation
 
-**CLEAR CONTEXT.** This doc plus `core/CLAUDE.md` and the two committed campaign plan docs is enough to
-execute cold, and Wave 1's session-purge sequencing wants a fresh window rather than one already spent
-verifying eight issues and running six exploration agents. Start at Wave 0 (or Wave 1 if you skip it).
+**CLEAR CONTEXT, then start at Wave 4.**
+
+Everything needed to resume cold is durable: this doc (status block first), `core/CLAUDE.md`, and the
+GitHub issues. Nothing is held only in a session.
+
+**Wave 4 is the right next unit of work and it is already de-risked** — its gate is taken (53 of 56
+schemas parse; the throw path is a 5% escape hatch), the enum-arm search that halves the override
+list is designed, and the Zod-4 introspection keys that cost the most time are written down. What
+remains is a build, not a decision.
+
+⚠️ **Three things to do FIRST, in this order, before writing `getTestDoc`:**
+
+1. **Roll templates PR #121 forward.** It is open at `beta.244`; core is at `beta.248`. Bump by `sed`
+   over the version pattern, read the current version off `origin/main`, never merge it.
+2. **Decide Wave 4's subpath name and add it to `deno.json` exports** — it is a **new** pin line in
+   `api-cloudrun/deno.json` and `templates/deno.json`, which is exactly the case a remembered count
+   gets wrong.
+3. **Re-read the Wave 4 §"GATE TAKEN" block** rather than the prose above it; the prose predates the
+   measurement in two places.
+
+**Do not start Wave 3.** Its census refuted its own prescribed fix; it needs a design decision
+(owner: predictable querying is the benefit, synonym drift is the defect), not an execution pass.
+
+**Do not assume #58 and #59 are closed.** Each has one piece left, named in the status block.
