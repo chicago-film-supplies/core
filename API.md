@@ -9764,6 +9764,162 @@ Every transaction across every module.
 const transactions: TransactionDefinition[];
 ```
 
+## `@cfs/core/schemas/testing`
+
+Schema-derived **test fixtures** — the third seeding contract, beside
+`getInitialValues` (form seed) and each consumer's own write boundary.
+
+## Why this is not `getInitialValues`
+
+`getInitialValues` answers *"what should this form show before the user
+types?"* and its return is honestly `Partial<T>`: it omits `z.custom` leaves,
+collapses a union to its first arm, and walks **into** `.optional()` to
+materialize the intermediate objects a `setStore("shipping.height", …)` call
+needs to exist before the first keystroke. Every one of those is right for a
+form and wrong for a fixture.
+
+A fixture wants the opposite: a **complete document that parses**, with
+nothing present that the schema does not require. The two questions were
+being answered by one function, so every fixture site in three repos carried
+a repair on top of it — 27 `uid_thread: testFid()` patches, a
+`delete productBase.transaction`, an empty-string filter, and ~73 casts that
+each erased the type the helper was supposed to supply. The four independent
+workarounds were all on **input** schemas, where `getInitialValues`' `""` is
+not merely incomplete but *invalid* against `.min(1)` / `z.uuid()` /
+`z.email()`.
+
+## What it guarantees
+
+1. **Complete** — the return is `z.output<S>`, not `Partial`, because the
+   result is the output of a real `parse`. No cast at the call site.
+2. **Required-only** — an `.optional()` key is **omitted, not recursed into**,
+   so `omit(doc, k)` is rejected by construction for every `k` the schema
+   genuinely requires **on input**. ⚠️ Not literally every key: a `.default(x)`
+   declaration is required in `z.output` and present in the built document,
+   and the schema still accepts a document without it — the default
+   re-materializes. Measured across the registry that is 465 of 595 top-level
+   declarations covered, the other 130 being declarations the schemas
+   themselves make droppable. {@link getFullTestDoc} is the opt-in for the
+   other behaviour.
+3. **Every leaf parses against its own leaf schema** — generate-then-verify,
+   with the leaf's own `safeParse` as the oracle (see {@link buildString}).
+4. **`z.array().min(n)` is honoured** — an array whose minimum is 1 gets one
+   built element, not `[]`.
+5. **The whole document is parsed, and a failure throws naming every path.**
+   Load-bearing, not defensive: 22 `superRefine` invariants across the
+   registry are not derivable from structure, so this is what turns
+   *"nine fixture sites found by grepping a field name"* into *"nine tests
+   fail at construction naming `jurisdiction`."*
+
+## 🔴 Timestamps are CALLER-INJECTED. This module does not fabricate them.
+
+`FirestoreTimestamp` (`schemas/common.ts`) is a `z.custom` that accepts any
+`{ seconds, nanoseconds }`, so a fabricated plain object **parses**. It is
+also, in Firestore, a **map** rather than a `Timestamp` — and api-cloudrun's
+test harness identifies its own fixtures with `c instanceof Timestamp`
+(`isEphemeralDoc`, `createdByThisRun`). A map-timestamped fixture is
+therefore invisible to the ephemeral filter *and* leaks past cleanup, which
+is the api-cloudrun#278 flake class, and any reader calling `.toMillis()`
+throws. **A value that parses and is wrong is worse than no value.**
+
+So `options.now` carries the timestamp, is **not defaulted**, and is
+**required at compile time** for any schema whose document carries
+`created_at` / `updated_at` — see {@link TestDocOptionsArg}. That is the one
+place a missing required field is a compile error rather than a runtime
+throw. Nested `*_fs` timestamp leaves are filled from the same value.
+
+⚠️ **And this module deliberately exports no `mockTimestamp` / `tsAt`
+fabricator**, though core's and manager's suites could both legitimately use
+one — neither writes to Firestore. Exporting it would put the hazard one
+import away from the one repo that must not touch it, and *not* exporting it
+is the reversible direction: api-cloudrun's write boundary can assert
+`instanceof Timestamp` first, and this module can add the fabricator
+afterwards without a breaking change. The reverse order cannot be undone.
+
+### `DeepPartial`
+
+A recursively-optional view of `T`, for overrides.
+
+Arrays are **not** made partial: overrides replace an array wholesale rather
+than merging element-wise, so a caller supplying one supplies whole elements.
+
+```ts
+type DeepPartial = conditional;
+```
+
+### `TestDocOptions`
+
+Options accepted by every entry point in this module.
+
+```ts
+interface TestDocOptions {
+  now?: FirestoreTimestampValue;
+}
+```
+
+### `TestDocOptionsArg`
+
+The trailing options argument, **required exactly when the document carries
+`created_at` / `updated_at`** and optional otherwise.
+
+This is what makes `getTestDoc(OrderSchema, {})` a compile error and
+`getTestDoc(CreateOrderInput, {})` legal: an input schema has no timestamp
+fields, so the conditional collapses to the optional arm.
+
+The `[…] extends […]` brackets are not decoration — a bare
+`Extract<…> extends never` on a naked type parameter distributes and yields
+`never` for the empty case, which is neither arm.
+
+```ts
+type TestDocOptionsArg = conditional;
+```
+
+### `TestDocOptionsWithNow`
+
+{@link TestDocOptions} with `now` promoted to required.
+
+```ts
+interface TestDocOptionsWithNow {
+  now: FirestoreTimestampValue;
+}
+```
+
+### `getFullTestDoc(schema: S, overrides?: DeepPartial<z.output<S>>, _: TestDocOptionsArg<z.output<S>>): z.output<S>`
+
+{@link getTestDoc}, but `.optional()` keys are emitted too and `.nullable()`
+fields carry a built value rather than `null`.
+
+A separate function rather than a flag on {@link getTestDoc}: the default has
+to be the one that keeps negative tests honest, and a boolean parameter at
+the call site is exactly as easy to pass as to forget.
+
+### `getTestDoc(schema: S, overrides?: DeepPartial<z.output<S>>, _: TestDocOptionsArg<z.output<S>>): z.output<S>`
+
+A minimal **complete, parsing** document for `schema`.
+
+Required keys only — an `.optional()` key is omitted rather than recursed
+into, so the result is the smallest document the schema accepts and
+`omit(result, k)` is rejected for every `k`.
+
+Overrides **deep-merge**: plain objects merge key-wise, arrays and class
+instances replace wholesale, and an explicit `undefined` deletes the key.
+
+### `getTestDocPartial(schema: S, fields: DeepPartial<z.output<S>>): Partial<z.output<S>>`
+
+A **deliberately incomplete** fixture: exactly the fields given, typed
+against `schema`, with each one validated in place.
+
+For the stand-in that is short *on purpose* — a four-field `Product` handed
+to a function that reads four fields, where a fuller fixture "would hide
+which fields actually matter". Those sites reach for `as unknown as T` today;
+this is the same fixture with the cast replaced by a checked binding, and no
+extra lines.
+
+It does **not** run the schema's own walk. A partial document cannot be
+parsed as a whole (that is what makes it partial), so what is checked is each
+supplied leaf against the schema node at its path — a misspelt key or a value
+of the wrong shape throws, a missing key does not.
+
 ## `@cfs/core/schemas/common`
 
 ### `ActorRef`

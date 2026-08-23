@@ -6,6 +6,7 @@
   "exports": {
     "./schemas": "./src/schemas/mod.ts",
     "./schemas/propagation": "./src/schemas/propagation/mod.ts",
+    "./schemas/testing": "./src/schemas/testing.ts",
     "./schemas/common": "./src/schemas/common.ts",
     "./schemas/booking": "./src/schemas/booking.ts",
     "./schemas/cache-geocodes": "./src/schemas/cache-geocodes.ts",

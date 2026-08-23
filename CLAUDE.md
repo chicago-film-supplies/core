@@ -439,6 +439,79 @@ The guards are all in `tests/typesenseFieldCoverage.test.ts`, named by the quest
 
 This applies to nested objects too — if a field inside an input schema contains an object, use `z.object()` so extra properties are silently stripped rather than rejected.
 
+### Seeding: form values vs test fixtures
+
+**Three contracts, one per role. Reach for the one that matches what you are
+building, and do not widen one to cover another** — that widening is what put a
+repair on top of the seed helper at every fixture site in three repos.
+
+| Contract | Where | Guarantee |
+|---|---|---|
+| `getInitialValues(schema)` | `@cfs/core/schemas` (`schemas/initial.ts`) | a **bindable form seed**. `Partial<T>`, materializes optional objects, and **may not parse** |
+| `getTestDoc` / `getFullTestDoc` / `getTestDocPartial` | `@cfs/core/schemas/testing` (`schemas/testing.ts`) | a **fixture**. `z.output<S>`, required keys only, **parses or throws** |
+| `seedDoc(ref, Schema, overrides)` | **api-cloudrun only** | construct → validate → track → write |
+
+🔴 **`seedDoc` must NOT move into core.** It needs `firebase-admin` and the
+test-run tracker; `src/` is platform-free by deliberate policy — manager pulls
+it into a **browser** and JSR serves it over `https:`. Core owns schema-derived
+*construction*; each repo owns its own *write boundary*.
+
+**The fault line is document-schema vs input-schema, not form vs test.** A
+doc-schema seed from `getInitialValues` is unparseable but harmless (the
+`z.custom` timestamps are simply missing). An **input**-schema seed is *actively
+invalid* — `""` against `.min(1)` / `z.uuid()` / `z.email()`, `[]` against
+`.min(1)` — and all four independent workarounds found across the repos were on
+input schemas. A form/test split alone would have fixed one of the four.
+
+🔴 **Timestamps are caller-injected. `schemas/testing.ts` does not fabricate
+one, and must not start.** `FirestoreTimestamp` is a `z.custom` that accepts any
+`{ seconds, nanoseconds }`, so a fabricated object **parses** — and stores as a
+Firestore **map**, which is invisible to api-cloudrun's `instanceof Timestamp`
+fixture filters (`isEphemeralDoc`, `createdByThisRun`) and throws on any
+`.toMillis()`. A value that parses and is wrong is worse than no value. So
+`options.now` carries it, is **not defaulted**, and is **required at compile
+time** for any schema carrying `created_at`/`updated_at`. ⚠️ The module
+deliberately exports no `mockTimestamp`/`tsAt` — those stay test-local
+(`tests/helpers/timestamp.ts`), because *not* shipping a fabricator is the
+reversible direction: api-cloudrun's write boundary can assert
+`instanceof Timestamp` first and core can add the convenience afterwards, never
+the other way round.
+
+**What the fixture contract buys, and what it does not.**
+
+- Required keys only, so **`omit(doc, k)` is rejected by construction** — but
+  only for the ~465 of 595 top-level declarations that are genuinely required
+  **on input**. ⚠️ A `.default(x)` field is required in `z.output` and present in
+  the built document, and the schema *still* accepts a document without it: the
+  default re-materializes. "Omit any key and it fails" is a claim the schemas do
+  not make, so `tests/testing.test.ts` asserts it over the required class and
+  counts both classes so neither arm can go vacuous.
+- Every leaf is **generate-then-verify** against its own `safeParse`.
+  🔴 **Sweep candidates FIRST, introspect second.** Detecting the format first
+  and falling back to the sweep silently stops reaching it for every
+  `z.email()` / `z.uuid()` / `z.iso.datetime()` leaf, and the failure is
+  invisible — introspection finding nothing looks exactly like a leaf with no
+  constraints.
+- Zod-4 introspection keys disagree and are worth not re-deriving:
+  `z.number().min(n)` → check `greater_than`, key **`value`**;
+  `z.string().length(n)` → `length_equals`, key **`length`**;
+  `z.string().min(n)` / `z.array().min(n)` → `min_length`, key **`minimum`**.
+- **A composite id is built from its own `z.templateLiteral` parts**, which is
+  the only reason `BookingId`, `MovementId`, `QuoteId` and `EventCardId` are
+  reachable at all — no fixed candidate list can spell them.
+- On a whole-document parse failure it retries **each member of each top-level
+  enum field** (one field at a time, never one the caller overrode). Still
+  purely structural, and it is what carries `product` and `templates-versions`.
+  ⚠️ **So the default product fixture is a SALE** — a `rental` obliges
+  `price.replacement_cents` through a `superRefine`. A caller wanting a rental
+  supplies the replacement price.
+- **Coverage is 55 of 56 registry schemas with no per-schema knowledge**;
+  `transactions` is the one escape hatch (every movement type demands either a
+  booking-scoped custody transition or a cost plus a line, so no single choice
+  of `type` works). That override list lives in `tests/testing.test.ts` and its
+  **length is asserted** — a second entry is the signal that the walker has
+  stopped keeping up with the schemas.
+
 ## API Reference
 
 A full OpenAPI spec for the CFS API is available at `~/cfs/api-cloudrun/openapi.json`. It is auto-generated on each commit in that repo and documents all endpoints, request/response schemas, and propagation rules.
