@@ -1,5 +1,10 @@
 /**
- * UploadcareSweepRun schema — Firestore singleton: `uploadcare-sweep/last-run`
+ * UploadcareSweepRun schema — Firestore collection: `uploadcare-sweep`
+ *
+ * ⚠️ **Not a singleton, despite what this line said until core#58.** There is one
+ * baseline doc PER PARTITION — `last-run-prod` and `last-run-dev` today, named by
+ * `lastRunDoc` on each partition in `api-cloudrun/src/services/uploadcareReferenceMap.ts`.
+ * A reader that assumed `uploadcare-sweep/last-run` would find nothing at all.
  *
  * The baseline the Uploadcare orphan sweep's **delta canary** compares against.
  *

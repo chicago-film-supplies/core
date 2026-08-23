@@ -4366,9 +4366,22 @@ const MSG_SCHEMA_REGISTRY: ReadonlyMap<string, z.ZodType>;
 
 Short-lived staging state for an in-flight authorization request.
 
+`uid` is the Firestore document id. It was called `id` until core#58; see
+`core/CLAUDE.md` § *UID property naming*.
+
+⚠️ **Note the deliberate asymmetry with `client_id` two interfaces above**,
+which does NOT get renamed. That one is an OAuth 2.1 / RFC 7591 wire name on
+the one surface whose job is to mirror an external spec, so it is a sanctioned
+carve-out. This field was only ever our own doc id under a non-conforming
+name.
+
+Cheap to rename: a 10-minute TTL, and the read PARSES, so an unmigrated
+document fails closed as a consent-page 404 rather than yielding `undefined`.
+The blast radius is any handshake in flight across the deploy.
+
 ```ts
 interface McpOAuthAuthorizeRequest {
-  id: string;
+  uid: string;
   user_uid: string;
   client_id: string;
   scope: string;
@@ -5191,6 +5204,7 @@ Metadata for a single generated order document (quote / packing list PDF).
 
 ```ts
 interface OrderDocument {
+  uid?: string;
   uuid: string;
   mime: string;
   name: string;
@@ -6586,7 +6600,7 @@ Note: expiresAt kept in camelCase for Firestore TTL policy.
 
 ```ts
 interface Session {
-  id: string;
+  uid: string;
   user_id: string;
   anonymous: boolean;
   expiresAt: FirestoreTimestampType;
@@ -8597,9 +8611,24 @@ interface ValidationIssue {
 
 An inbound webhook event stored for processing.
 
+`uid` is the Firestore document id — the provider's own event id, used as the
+doc id so a redelivery is idempotent by construction. It was called `id`
+until core#58; see `core/CLAUDE.md` § *UID property naming*.
+
+⚠️ **The rename does not buy the write-time drift guard here**, and it would
+be easy to assume it does. `api-cloudrun/src/lib/webhooks.ts` calls
+`validateBeforeWrite` directly and then does a raw `eventRef.create(doc)`, so
+`assertValidForWrite` — the thing that checks `uid === ref.id` — never runs on
+this path. This is convention alone until that write goes through the guarded
+helper.
+
+Safe to rename with no backfill and no shim: the collection has a 24 h TTL,
+there is exactly one writer, and **no reader reads the field** — every
+consumer checks `snap.exists` only.
+
 ```ts
 interface WebhookEvent {
-  id: string;
+  uid: string;
   event: string;
   received: FirestoreTimestampType;
   expiresAt: FirestoreTimestampType;
@@ -14892,7 +14921,7 @@ Note: expiresAt kept in camelCase for Firestore TTL policy.
 
 ```ts
 interface Session {
-  id: string;
+  uid: string;
   user_id: string;
   anonymous: boolean;
   expiresAt: FirestoreTimestampType;
@@ -17519,9 +17548,24 @@ invoice-shaped data themselves.
 
 An inbound webhook event stored for processing.
 
+`uid` is the Firestore document id — the provider's own event id, used as the
+doc id so a redelivery is idempotent by construction. It was called `id`
+until core#58; see `core/CLAUDE.md` § *UID property naming*.
+
+⚠️ **The rename does not buy the write-time drift guard here**, and it would
+be easy to assume it does. `api-cloudrun/src/lib/webhooks.ts` calls
+`validateBeforeWrite` directly and then does a raw `eventRef.create(doc)`, so
+`assertValidForWrite` — the thing that checks `uid === ref.id` — never runs on
+this path. This is convention alone until that write goes through the guarded
+helper.
+
+Safe to rename with no backfill and no shim: the collection has a 24 h TTL,
+there is exactly one writer, and **no reader reads the field** — every
+consumer checks `snap.exists` only.
+
 ```ts
 interface WebhookEvent {
-  id: string;
+  uid: string;
   event: string;
   received: FirestoreTimestampType;
   expiresAt: FirestoreTimestampType;

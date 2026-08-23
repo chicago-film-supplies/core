@@ -40,9 +40,25 @@ export const McpOAuthClientSchema: z.ZodType<McpOAuthClient> = z.strictObject({
   },
 });
 
-/** Short-lived staging state for an in-flight authorization request. */
+/**
+ * Short-lived staging state for an in-flight authorization request.
+ *
+ * `uid` is the Firestore document id. It was called `id` until core#58; see
+ * `core/CLAUDE.md` § *UID property naming*.
+ *
+ * ⚠️ **Note the deliberate asymmetry with `client_id` two interfaces above**,
+ * which does NOT get renamed. That one is an OAuth 2.1 / RFC 7591 wire name on
+ * the one surface whose job is to mirror an external spec, so it is a sanctioned
+ * carve-out. This field was only ever our own doc id under a non-conforming
+ * name.
+ *
+ * Cheap to rename: a 10-minute TTL, and the read PARSES, so an unmigrated
+ * document fails closed as a consent-page 404 rather than yielding `undefined`.
+ * The blast radius is any handshake in flight across the deploy.
+ */
 export interface McpOAuthAuthorizeRequest {
-  id: string;
+  /** Firestore document id. */
+  uid: string;
   user_uid: string;
   client_id: string;
   scope: string;
@@ -56,7 +72,7 @@ export interface McpOAuthAuthorizeRequest {
 
 /** Zod schema for McpOAuthAuthorizeRequest. */
 export const McpOAuthAuthorizeRequestSchema: z.ZodType<McpOAuthAuthorizeRequest> = z.strictObject({
-  id: z.string(),
+  uid: z.string(),
   user_uid: z.string().meta({ column: true, label: "User" }),
   client_id: z.string().meta({ column: true, label: "Client ID" }),
   scope: z.string(),
