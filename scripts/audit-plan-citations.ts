@@ -58,6 +58,8 @@ import {
   classifyCitation,
   describesDeletion,
   isHistoryDoc,
+  narrowingSuspects,
+  paragraphAround,
   preferOwnRepo,
   resolveSpecifier,
 } from "../src/utils/citations.ts";
@@ -226,6 +228,8 @@ async function docsToCheck(): Promise<string[]> {
 }
 
 const rel = (p: string) => p.replace(`${WORKSPACE}/`, "");
+/** True for the repo this audit is RUNNING in — it can never be "narrowed away". */
+const c0 = (r: string) => `${WORKSPACE}/${r}` === REPO;
 
 /**
  * Dead citations that are allowed to stand for a stated reason.
@@ -316,7 +320,9 @@ const counts: Record<CitationVerdict, number> = {
   "deleted-ok": 0,
 };
 let checked = 0, pathOnly = 0;
+let narrowed = 0;
 const brokenList: string[] = [];
+const narrowedList: string[] = [];
 
 for (const doc of await docsToCheck()) {
   let text: string;
@@ -364,12 +370,40 @@ for (const doc of await docsToCheck()) {
     // line-count test: once the citation is read as naming core's file,
     // checking the line number against another repo's same-named file would be
     // answering a different question.
-    const candidates = preferOwnRepo(
-      resolved.includes("/")
-        ? allPaths.filter((f) => f.endsWith(`/${resolved}`))
-        : byBasename.get(resolved) ?? [],
-      `${REPO}/`,
-    );
+    const beforeNarrowing = resolved.includes("/")
+      ? allPaths.filter((f) => f.endsWith(`/${resolved}`))
+      : byBasename.get(resolved) ?? [];
+    const candidates = preferOwnRepo(beforeNarrowing, `${REPO}/`);
+
+    // ── The narrowing report (api-cloudrun#631) ──────────────────────
+    //
+    // Narrowing to this repo does not only reduce noise, it MANUFACTURES a
+    // confident single answer — see {@link narrowingSuspects}. Where the
+    // candidate it threw away lives in a repo the surrounding paragraph
+    // explicitly names, that answer is probably wrong, and no other check can
+    // see it because the citation resolves perfectly.
+    //
+    // ⚠️ Counted and printed SEPARATELY, and never added to any failing total:
+    // it runs at roughly 3 true positives in 4, which is fine for a list a
+    // human skims and would be intolerable in a gate.
+    if (candidates.length < beforeNarrowing.length) {
+      const discardedRepos = [
+        ...new Set(
+          beforeNarrowing
+            .filter((c) => !candidates.includes(c))
+            .map((c) => rel(c).split("/")[0])
+            .filter((r) => REPOS.includes(r) && !c0(r)),
+        ),
+      ];
+      const named = narrowingSuspects(discardedRepos, paragraphAround(text, m.index));
+      if (named.length) {
+        narrowed++;
+        narrowedList.push(
+          `  ${relDoc}:${text.slice(0, m.index).split("\n").length}  \`${path}\` → ` +
+            `resolved to ${candidates.map(rel).join(", ")} · paragraph names ${named.join(", ")}`,
+        );
+      }
+    }
 
     let lineOutOfRange = false;
     let eofDetail = "";
@@ -446,11 +480,25 @@ for (const e of EXEMPT) {
   }
 }
 
+// ⚠️ Printed BEFORE the totals and never summed into them — a separate arm with
+// its own count, because it answers a different question at a different
+// confidence. See {@link narrowingSuspects}.
+if (narrowed) {
+  console.log(
+    `\nNARROWED — resolved into this repo while the paragraph names another (api-cloudrun#631).\n` +
+      `Advisory: roughly 3 in 4 are real. Repo-qualify the citation, or leave it if it is right.`,
+  );
+  for (const n of narrowedList) console.log(n);
+}
+
 console.log(
   `\n${checked} citations checked (${checked - pathOnly} line-numbered, ` +
     `${pathOnly} path-only) — ${counts.broken} broken, ${counts.ambiguous} ambiguous, ` +
     `${counts["deleted-ok"]} deleted-and-said-so, ${counts.unverifiable} unverifiable` +
     (strict ? " (--strict: ambiguous fails)" : ""),
+);
+console.log(
+  `${narrowed} narrowing suspect(s) — advisory, never gating.`,
 );
 if (absentRepos.length) {
   console.log(

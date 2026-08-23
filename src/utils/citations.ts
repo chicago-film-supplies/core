@@ -236,6 +236,91 @@ export function preferOwnRepo(candidates: readonly string[], ownRepoPrefix: stri
   return own.length ? own : [...candidates];
 }
 
+/**
+ * The PARAGRAPH containing `at` — the window {@link narrowingSuspects} reads.
+ *
+ * A line holding nothing but a comment marker (` *`, `//`, `#`) counts as blank,
+ * so a JSDoc block's bullets are separate paragraphs rather than one run.
+ *
+ * ⚠️ **The window size IS the precision, measured rather than guessed.** With
+ * {@link describesDeletion}'s ±240-character window the suspect list ran at
+ * about half true positives, because 240 characters reaches into the NEXT
+ * docstring: a citation to manager's own bookings.ts (un-backticked here, so
+ * these examples are not themselves citations) was flagged on the strength of
+ * the word "core" in an unrelated sentence below it, and a citation to
+ * api-cloudrun's own logger.ts on a manager#264 four lines above. Scoping
+ * to the paragraph removed both and kept every true positive — 3 of 4 sampled,
+ * against 2 of 4 before.
+ *
+ * The two windows are deliberately different and must stay so.
+ * `describesDeletion` is looking for a verb that may legitimately sit a couple
+ * of hard-wrapped lines away; this is looking for the SUBJECT of the sentence,
+ * which is a much tighter claim.
+ */
+export function paragraphAround(text: string, at: number): string {
+  const isBlank = (l: string) => /^\s*(?:\*|\/\/|#|\/\*\*)?\s*$/.test(l);
+  const lines = text.split("\n");
+  let idx = 0, cur = 0;
+  for (; cur < lines.length; cur++) {
+    if (idx + lines[cur].length + 1 > at) break;
+    idx += lines[cur].length + 1;
+  }
+  let a = cur, b = Math.min(cur, lines.length - 1);
+  while (a > 0 && !isBlank(lines[a - 1])) a--;
+  while (b < lines.length - 1 && !isBlank(lines[b + 1])) b++;
+  return lines.slice(a, b + 1).join("\n");
+}
+
+/**
+ * Repos that {@link preferOwnRepo} DISCARDED, which the surrounding paragraph
+ * explicitly names — the one mechanically detectable slice of semantic drift.
+ *
+ * 🔴 **`preferOwnRepo` does not only reduce noise; it MANUFACTURES a confident
+ * single answer.** When a bare basename matches files in several repos and
+ * narrowing keeps only the running repo's, the verdict is a clean `ok` — where
+ * without the narrowing it would have been `ambiguous` and a human would have
+ * read it. That is the right trade almost always (it is what makes the local run
+ * agree with CI, and it removed 49 findings in api-cloudrun alone). But where
+ * the discarded candidate sits in a repo the surrounding prose **explicitly
+ * names**, the confident answer is the wrong one, and nothing else can see it.
+ *
+ * Measured 2026-08-23 over core + api-cloudrun + manager: **25 suspects in 3,728
+ * resolved citations (0.7%)**. Confirmed real in the sample —
+ *
+ *   - core/src/schemas/propagation/out-of-service.ts cites a bare
+ *     bookings.test.ts inside an `enforced_by` clause whose sibling ref is an
+ *     api-cloudrun path, quoting a test name (*"cowrites two OOS records"*)
+ *     that exists ONLY in api-cloudrun's integration copy — 0 hits in core's
+ *     own tests/bookings.test.ts, which is where it resolved.
+ *   - a plan doc's *"templates #99 moved deno.json"*, which resolved to
+ *     api-cloudrun's.
+ *
+ *   (Every path in this paragraph is un-backticked on purpose: backticked, each
+ *   would be a live citation of exactly the ambiguous shape being described,
+ *   and this docstring would report itself.)
+ *
+ * ⚠️ **REPORT-ONLY. It must never gate, and the reason is arithmetic.** At ~3 in
+ * 4 a build gate would fail on a correct citation every fourth finding, and a
+ * false alarm on a QUALITY signal is what teaches a reader to skip the whole
+ * report — the failure the citation campaign exists to prevent. A confirmed
+ * false positive to keep in mind: `core/CLAUDE.md`'s own bullet about the
+ * ambiguity rule names api-cloudrun in a sentence ABOUT the rule, beside
+ * citations that correctly mean core's own files.
+ *
+ * The caller maps a path to its repo, because that mapping is a fact about a
+ * workspace layout rather than about citations.
+ */
+export function narrowingSuspects(discardedRepos: readonly string[], paragraph: string): string[] {
+  const named = new Set<string>();
+  for (const repo of discardedRepos) {
+    // Word-bounded: `core` must not match inside `cores` or a hyphenated name.
+    if (new RegExp(`\\b${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(paragraph)) {
+      named.add(repo);
+    }
+  }
+  return [...named];
+}
+
 /** What a citation turned out to be. See {@link classifyCitation}. */
 export type CitationVerdict =
   | "ok"

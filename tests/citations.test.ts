@@ -40,6 +40,8 @@ import {
   classifyCitation,
   describesDeletion,
   isHistoryDoc,
+  narrowingSuspects,
+  paragraphAround,
   preferOwnRepo,
   resolveSpecifier,
 } from "../src/utils/citations.ts";
@@ -426,4 +428,68 @@ Deno.test("the audit task is wired --strict, so AMBIGUOUS fails and not just BRO
       `${f} must not call scripts/audit-plan-citations.ts directly — it would bypass --strict`,
     );
   }
+});
+
+// ── narrowingSuspects: the one detectable slice of semantic drift ────
+//
+// ⚠️ Both negatives below are REAL false positives this check produced against
+// live docs on 2026-08-23, under a +/-240-character window. They are planted
+// here because the window rule is the entire precision of the arm, and nothing
+// else would notice it being widened back.
+
+Deno.test("narrowingSuspects flags a discarded repo the paragraph NAMES", () => {
+  const text = [
+    "  clause:",
+    '    "the two-source end comes from the booking path (bookings.test.ts),',
+    '     whose ref is an api-cloudrun integration test",',
+  ].join("\n");
+  const at = text.indexOf("bookings.test.ts");
+  assertEquals(
+    narrowingSuspects(["api-cloudrun"], paragraphAround(text, at)),
+    ["api-cloudrun"],
+  );
+});
+
+Deno.test("narrowingSuspects is SILENT when the repo is named in another paragraph", () => {
+  // Real: manager/src/stores/transactions.ts cites its OWN bookings.ts, and
+  // the word "core" sits in the next docstring, ~200 characters away.
+  const text = [
+    "  // is always {reference, version}. Deliberately unlike bookings.ts, whose",
+    "  // PUT appends movement events and therefore needs a session per attempt.",
+    "});",
+    "",
+    "/**",
+    " * The nine types `CreateTransactionInput` accepts.",
+    " *",
+    " * Hand-listed because core cannot enumerate them.",
+    " */",
+  ].join("\n");
+  const at = text.indexOf("bookings.ts");
+  assertEquals(narrowingSuspects(["core"], paragraphAround(text, at)), []);
+});
+
+Deno.test("narrowingSuspects is SILENT across a blank JSDoc line", () => {
+  // Real: api-cloudrun/tests/unit/typeEscapeRatchet.test.ts cites its OWN
+  // logger.ts; a manager#264 sits four lines up, past a bare ` *`.
+  const text = [
+    " *   manager#264's drain queue and is expected to shrink.",
+    " *",
+    " * `src/` carries exactly two, and both are the first class:",
+    " * db.ts stubs a WriteResult, and logger.ts rejoins a typed-log union.",
+  ].join("\n");
+  const at = text.indexOf("logger.ts");
+  assertEquals(narrowingSuspects(["manager"], paragraphAround(text, at)), []);
+});
+
+Deno.test("narrowingSuspects matches a repo name whole, never as a substring", () => {
+  const para = "the cores of the two systems disagree about a file";
+  assertEquals(narrowingSuspects(["core"], para), []);
+});
+
+Deno.test("paragraphAround stops at a blank line on BOTH sides", () => {
+  const text = "alpha\n\nbeta <x>.ts gamma\n\ndelta";
+  const got = paragraphAround(text, text.indexOf("<x>.ts"));
+  assertEquals(got, "beta <x>.ts gamma");
+  assert(!got.includes("alpha"));
+  assert(!got.includes("delta"));
 });
