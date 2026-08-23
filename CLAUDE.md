@@ -40,6 +40,12 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
   check nothing runs. A check that runs and is named nowhere is the same failure pointed the
   other way, which is why this entry exists.
 
+> The **`cfs-citations` skill** (`cfs-skills` plugin) is the authority on the citation paradigm —
+> org-shared, so it is reachable from every machine and every cloud agent, unlike this file. It holds
+> the five verdicts, why a bare basename and a bare `#N` are both unresolvable, the `::anchor` rule,
+> the narrowing report, and the semantic-drift limit no gate can see. **Cite the skill, not this
+> path.**
+
 ## Publish
 - git commit, git push to beta branch, gh action will trigger semantic release and publish
 
