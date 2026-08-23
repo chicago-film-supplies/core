@@ -136,27 +136,33 @@ export const DOMAIN_EVENT_MSGS = [
   // `{ recurrence_uid, error_name, error_message, error_stack }`, at `error`.
   // Emitted from `src/services/recurrences.ts` in api-cloudrun.
   "recurrence_horizon_failed",
-  // A write was REFUSED because a `(jurisdiction × item type)` tax cell had
-  // expired — its applied window lapsed with no successor — and the refusing
-  // path was one that must not retry (a CRMS webhook or a `/tasks/*` recompute).
-  // See `TaxExpiredError` in `@cfs/core/utils/taxes`; api-cloudrun#618.
+  // A document PRICED on a `(jurisdiction × item type)` tax cell whose REVIEW
+  // window had run out — the engine fell forward to the most recent version at
+  // or before the document's instant and said so (`UnreviewedTaxWarning` in
+  // `@cfs/core/utils/taxes`). api-cloudrun#618.
   //
-  // ⚠️ **This is the ACKed half, and it exists because the alternative retries
-  // forever.** An uncaught throw out of a Cloud Task or CRMS handler is a 500
-  // and the delivery is redone until an operator renews the tax, which may be
-  // days. The failure is permanent for as long as the catalog is wrong, so it is
-  // recorded and skipped — the same shape `parseCrmsDocumentNumber`'s refusal
-  // takes (api-cloudrun#451). The OPERATOR paths do not emit this: they 400,
-  // and a 400 has someone reading it.
+  // ⚠️ **An unreviewed rate is not a known-wrong one** (owner): what lapsed is
+  // the confirmation, not the number, and most renewals change nothing. This is
+  // a prompt to look, which is why it is a `warn` and why nothing is blocked.
   //
-  // ⚠️ It reports a REFUSAL, not the catalog's state. `tax_expiry_check`
-  // (integration archetype) is the standing-condition record and is what
-  // `TaxExpired` alerts on; this one says the expiry is actively blocking work,
-  // and names the document it blocked.
+  // ⚠️ **This replaced `tax_expired_skipped`, and the rename is the design
+  // change.** That record meant "a write was REFUSED and ACKed", because the
+  // engine used to throw. The throw was an outage: a document resolves the
+  // catalog at its own instant, and for an ORDER that instant is the earliest
+  // DELIVERY START — a future date — so a finite `applied_to` refused every
+  // booking past it rather than scheduling a review. Nothing is refused now.
   //
-  // `{ order_uid | invoice_uid, jurisdiction, item_type, expired_at, as_of,
-  // tax_name, operation }`, at `error`.
-  "tax_expired_skipped",
+  // `warn`, not `error`: the document priced, the money is what an open-ended
+  // window would have produced, and the remedy is an operator confirming a rate
+  // that is probably unchanged. `tax_expiry_check` (integration archetype) is the standing-condition
+  // record `TaxExpired` escalates on; this one names the DOCUMENT that used the
+  // stale rate, which is what makes the blast radius answerable after the fact.
+  //
+  // One record per CELL, not per line — core dedupes, because a 61-line order
+  // resolving one lapsed cell would otherwise bury the surface it is reported
+  // on. `{ order_uid | invoice_uid | product_uid | crms_id, operation,
+  // jurisdiction, item_type, tax_uid, tax_name, rate, expired_at, as_of }`.
+  "tax_priced_on_unreviewed_rate",
 ] as const;
 
 /** Discriminated msg union for Domain-archetype log records. */

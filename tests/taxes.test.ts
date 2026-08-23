@@ -776,7 +776,7 @@ Deno.test("assertCoaTaxMapCoversCore: the name map covers every taxable COA", ()
   assertCoaTaxMapCoversCore();
 });
 
-// ── 🔴 A lapsed cell PRICES FORWARD and reports it ───────────────
+// ── 🔴 An UNREVIEWED cell prices forward and reports it ──────────
 //
 // A closed window makes `findTaxFor` return null, and null already means "this
 // line is untaxed" — so left alone, an expired Chicago Rental Tax would
@@ -790,13 +790,17 @@ Deno.test("assertCoaTaxMapCoversCore: the name map covers every taxable COA", ()
 //
 // The rule is now: price on the most recent version at or before `asOf`, and
 // SAY SO. Same money an open-ended window would have produced, plus a signal.
+//
+// ⚠️ And an unreviewed rate is NOT a known-wrong one (owner): what lapsed is
+// the confirmation, not the number. Most renewals change nothing — which is
+// precisely why refusing was disproportionate.
 
-/** `CATALOG` with Chicago Rental Tax lapsed on 2026-06-01 and no successor. */
+/** `CATALOG` with Chicago Rental Tax unreviewed since 2026-06-01, no successor. */
 const LAPSED: Tax[] = CATALOG.map((t) =>
   t.uid === "chi-rental-tax" ? { ...t, applied_to: "2026-06-01T00:00:00.000-05:00" } : t
 );
 
-Deno.test("🔴 a lapsed cell PRICES on its most recent version — never at zero", () => {
+Deno.test("🔴 an unreviewed cell PRICES on its most recent version — never at zero", () => {
   const items = [makeItem()];
   const warnings = assignLineTaxes(items, ctx({ taxes: LAPSED }));
 
@@ -805,7 +809,7 @@ Deno.test("🔴 a lapsed cell PRICES on its most recent version — never at zer
   assertEquals(px(items[0]).taxes[0].rate, 15);
   assertEquals(px(items[0]).total_cents, 11500);
 
-  // …and the fact that it is a LAPSED rate travels with it.
+  // …and the fact that its review has lapsed travels with it.
   assertEquals(warnings.length, 1);
   assertEquals(warnings[0].jurisdiction, "chicago");
   assertEquals(warnings[0].item_type, "rental");
@@ -830,7 +834,7 @@ Deno.test("materializeDocumentTax passes the warnings straight through", () => {
 });
 
 Deno.test("🔴 warnings are deduped by CELL, not emitted per line", () => {
-  // A 61-product order resolving one lapsed cell must produce one warning. Per
+  // A 61-product order resolving one unreviewed cell must produce one warning. Per
   // line, the surface would be unreadable on exactly the documents that matter.
   const items = [makeItem(), makeItem(), makeItem(), makeItem()];
   assertEquals(assignLineTaxes(items, ctx({ taxes: LAPSED })).length, 1);
@@ -840,7 +844,7 @@ Deno.test("🔴 warnings are deduped by CELL, not emitted per line", () => {
 
 Deno.test("🔴 a cell nothing ever taxed prices at zero and warns NOT AT ALL", () => {
   // The distinction the whole design turns on. No tax lists `service`, so there
-  // is no lapsed version to fall forward onto — `taxes: []` is the right answer
+  // is no closed version to fall forward onto — `taxes: []` is the right answer
   // and a warning here would be a false alarm on every service line in the
   // corpus.
   const items = [makeItem({ type: "service" }, { taxes: [] })];
@@ -878,7 +882,7 @@ Deno.test("🔴 an INTERIOR gap falls back to the version that ran up to it", ()
   assertEquals(warnings[0].tax_uid, "rental-old");
 });
 
-Deno.test("a date BEFORE the first version is untaxed, not stale", () => {
+Deno.test("a date BEFORE the first version is untaxed, not unreviewed", () => {
   // Nothing has closed before it, so there is nothing to fall forward from —
   // CFS simply was not collecting yet.
   const items = [makeItem({ type: "sale" }, { taxes: [] })];
@@ -905,8 +909,8 @@ Deno.test("🔴 a FROZEN document keeps its stored version and warns NOT AT ALL"
 
 Deno.test("an EXEMPT document prices at $0 and still warns", () => {
   // The money is right either way, but `taxes_base` records which tax the
-  // customer was exempt FROM — and that annotation is being taken from a rate
-  // nobody has confirmed. The catalogue is what is wrong, not the document.
+  // customer was exempt FROM — and that annotation comes from a version nobody
+  // has re-confirmed. What needs attention is the catalogue, not the document.
   const items = [makeItem()];
   const warnings = assignLineTaxes(items, ctx({ taxes: LAPSED, exempt: true }));
   assertEquals(px(items[0]).taxes, []);

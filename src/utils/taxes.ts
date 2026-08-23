@@ -316,7 +316,7 @@ export type TaxCellState = "taxed" | "untaxed" | "expired";
  * service line in the corpus would be reported as pricing on a lapsed rate —
  * and, worse, would fall forward onto a tax that never covered it. That
  * distinction is the safety property the whole design turns on; see
- * {@link StaleTaxWarning}.
+ * {@link UnreviewedTaxWarning}.
  *
  * ⚠️ A `null` jurisdiction is `untaxed`, never `expired`: no-nexus means no
  * catalog lookup happens at all, which is a decision rather than a lapse.
@@ -348,13 +348,22 @@ export function taxCellState(
 }
 
 /**
- * **One line priced on a LAPSED rate**, reported by {@link assignLineTaxes}.
+ * **One line priced on a rate whose REVIEW has lapsed**, reported by
+ * {@link assignLineTaxes}.
+ *
+ * ⚠️ **An unreviewed rate is not a known-wrong one** (owner, 2026-08-23):
+ * *"an expired rate isn't known stale, it's unknown to be not stale — most
+ * rates will be renewed without changing."* What ran out is the CONFIRMATION,
+ * not the number. Chicago Rental Tax has been 15% since 2026-01-01 and will
+ * most likely still be 15% after a review. So this is a prompt to look, not a
+ * report of a defect, and everything downstream is levelled accordingly: a
+ * `warn`, never an `error`; a notice in the UI, never a blocked save.
  *
  * ## Why a warning rather than a refusal
  *
- * An earlier revision of this module THREW here, on the reasoning that a closed
- * window makes {@link findTaxFor} return `null`, `null` already means *"this
- * line is untaxed"*, and an expired Chicago Rental Tax would therefore silently
+ * An earlier revision THREW here, on the reasoning that a closed window makes
+ * {@link findTaxFor} return `null`, `null` already means *"this line is
+ * untaxed"*, and an unreviewed Chicago Rental Tax would therefore silently
  * zero-rate **70% of all tax CFS has ever collected**. The zero-rating problem
  * is real and this design still fixes it — by falling forward to the most
  * recent version rather than to nothing.
@@ -369,24 +378,21 @@ export function taxCellState(
  * the moment the bound was set, and every new forward booking past it would
  * have 400'd.
  *
- * So the rule is now: **price on the most recent version at or before `asOf`,
- * and say so.** That is no worse than the open-ended windows it replaced — the
- * same rate would have applied — and it adds a signal that never existed.
- *
- * ⚠️ **What this gives up, stated plainly:** the line IS priced at a rate
- * nobody has confirmed for that date. The protection is the warning plus the
- * daily `check-tax-expiry` job, not the arithmetic.
+ * So the rule is: **price on the most recent version at or before `asOf`, and
+ * say so.** That is the same money an open-ended window would have produced —
+ * which is exactly why refusing was disproportionate — plus a signal that never
+ * existed.
  */
-export interface StaleTaxWarning {
+export interface UnreviewedTaxWarning {
   /** The jurisdiction whose cell has lapsed. */
   jurisdiction: JurisdictionType;
   /** The line key that resolved it — `item.taxed_as ?? item.type`. */
   item_type: string;
-  /** The version being used, i.e. the most recent one at or before `as_of`. */
+  /** The version being used — the most recent one at or before `as_of`. */
   tax_uid: string;
   tax_name: string;
   rate: number;
-  /** When that version's window ran out. */
+  /** When that version's review window ran out. */
   expired_at: string;
   /** The instant the document resolves the catalog at. */
   as_of: string;
@@ -1017,10 +1023,11 @@ export function resolveLineTax(
       return { jurisdiction, level, key, state: "taxed", tax: ctx.exempt ? null : frozen, base: frozen };
     }
     // 🔴 **Fall forward, do not refuse.** The most recent version at or before
-    // `asOf` is the rate CFS was last charging for this cell, and it is what
-    // an open-ended window would have applied anyway. `state` stays `expired`
-    // so {@link assignLineTaxes} can report it — the line prices, and the fact
-    // that it priced on a lapsed rate travels with it.
+    // `asOf` is the rate CFS was last charging for this cell, and it is what an
+    // open-ended window would have applied anyway — an unreviewed rate is
+    // unverified, not known-wrong. `state` stays `expired` so
+    // {@link assignLineTaxes} can report it: the line prices, and the fact that
+    // its review has lapsed travels with it.
     const lapsed = mostRecentClosedTax(ctx.taxes, jurisdiction, key, ctx.asOf);
     if (lapsed) {
       const stale = atStoredVersion(lapsed, ctx);
@@ -1113,44 +1120,44 @@ function atStoredVersion(tax: Tax, ctx: DocumentTaxContext): Tax {
  * taxability decision, and a tax the catalog cannot answer for is not the
  * answer.
  *
- * ## 🔴 It REPORTS a lapsed rate — it does not refuse one
+ * ## It REPORTS an unreviewed rate — it does not refuse one
  *
- * @returns one {@link StaleTaxWarning} per `(jurisdiction × item type)` cell
- * that priced on a version whose window has run out, **deduped by cell**: a
- * 61-line order resolving one lapsed cell yields one warning, not 61. An empty
- * array is the healthy answer.
+ * @returns one {@link UnreviewedTaxWarning} per `(jurisdiction × item type)`
+ * cell that priced on a version whose review window has run out, **deduped by
+ * cell**: a 61-line order resolving one such cell yields one warning, not 61.
+ * An empty array is the healthy answer.
  *
- * The line still prices — on the most recent version at or before `asOf`, which
- * is what an open-ended window would have applied anyway. ⚠️ **An earlier
- * revision THREW here and it was wrong**: an order resolves the catalog at its
- * earliest DELIVERY START, so a finite `applied_to` refused every booking past
- * that date rather than scheduling a review. See {@link StaleTaxWarning}.
+ * The line still prices — on the most recent version at or before `asOf`, the
+ * same money an open-ended window would have produced. ⚠️ **An earlier revision
+ * THREW here and it was wrong**: an order resolves the catalog at its earliest
+ * DELIVERY START, so a finite `applied_to` refused every booking past that date
+ * rather than scheduling a review. See {@link UnreviewedTaxWarning}.
  *
  * ⚠️ **The return value is the whole signal — dropping it makes the lapse
- * silent again.** Every caller either surfaces it (the manager, from its own
+ * invisible again.** Every caller either surfaces it (the manager, from its own
  * recompute) or logs it (api-cloudrun's write paths).
  *
  * ⚠️ **A warning is emitted even when the document is EXEMPT.** The line prices
  * at $0 either way, but `taxes_base` records which tax it was exempt FROM, and
- * that annotation is being taken from a rate nobody has confirmed. The
- * catalogue is what is wrong, not the document.
+ * that annotation is being taken from a version nobody has re-confirmed. What
+ * needs attention is the catalogue, not the document.
  *
  * A frozen document is unaffected and produces no warning:
  * {@link resolveLineTax} takes the version the document already stores first.
  */
-export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): StaleTaxWarning[] {
+export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): UnreviewedTaxWarning[] {
   const byUid = new Map(ctx.taxes.map((t) => [t.uid, t]));
   const destinations = destinationsForItems(items, ctx.destinations);
-  const stale = new Map<string, StaleTaxWarning>();
+  const stale = new Map<string, UnreviewedTaxWarning>();
 
   items.forEach((item, index) => {
     if (!isPreTaxItem(item)) return;
     const subtotalDiscountedCents = item.price.subtotal_discounted_cents ?? 0;
     const { tax, base, jurisdiction, key, state } = resolveLineTax(item, destinations[index], ctx);
 
-    // Priced on a version whose window ran out. `base` is that version — the
-    // fall-forward already happened in `resolveLineTax` — so the warning names
-    // the rate actually being charged rather than re-deriving it here.
+    // Priced on a version whose REVIEW window ran out. `base` is that version —
+    // the fall-forward already happened in `resolveLineTax` — so the warning
+    // names the rate actually being charged rather than re-deriving it here.
     if (state === "expired" && base) {
       const { to } = taxAppliedWindow(base);
       if (to != null) {
@@ -1221,16 +1228,16 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): Sta
  * free of an ambient clock (a defaulted `now` is how the workspace ban on
  * `new Date()` for business datetimes gets bypassed).
  *
- * @returns {@link assignLineTaxes}'s stale-rate warnings, passed straight
+ * @returns {@link assignLineTaxes}'s unreviewed-rate warnings, passed straight
  * through. Every consumer — both api-cloudrun write paths and the manager's
  * optimistic recompute — is responsible for surfacing or logging them; a
- * dropped return value makes a lapsed rate silent, which is the condition this
+ * dropped return value makes the lapse invisible, which is the condition this
  * whole mechanism exists to end.
  */
 export function materializeDocumentTax(
   items: LineItem[],
   ctx: DocumentTaxContext,
-): StaleTaxWarning[] {
+): UnreviewedTaxWarning[] {
   const stale = assignLineTaxes(items, ctx);
 
   for (const item of items) {

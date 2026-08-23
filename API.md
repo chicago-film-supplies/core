@@ -17778,7 +17778,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override" | "recurrence_horizon_failed" | "tax_expired_skipped"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -23459,49 +23459,6 @@ interface ResolvedJurisdiction {
 }
 ```
 
-### `StaleTaxWarning`
-
-**One line priced on a LAPSED rate**, reported by {@link assignLineTaxes}.
-
-## Why a warning rather than a refusal
-
-An earlier revision of this module THREW here, on the reasoning that a closed
-window makes {@link findTaxFor} return `null`, `null` already means *"this
-line is untaxed"*, and an expired Chicago Rental Tax would therefore silently
-zero-rate **70% of all tax CFS has ever collected**. The zero-rating problem
-is real and this design still fixes it — by falling forward to the most
-recent version rather than to nothing.
-
-🔴 **The refusal was WRONG, and the reason is worth keeping**: a document
-resolves the catalog at its own instant, and for an ORDER that instant is the
-earliest delivery start — a date in the FUTURE
-({@link deriveOrderTaxAsOf}). So a finite `applied_to` was not a review
-deadline, it was a hard ceiling on how far ahead CFS could take a booking:
-setting one to 2026-12-01 immediately refused every order delivering after
-that date. Measured on prod 2026-08-23, 1 of 81 live orders became unwritable
-the moment the bound was set, and every new forward booking past it would
-have 400'd.
-
-So the rule is now: **price on the most recent version at or before `asOf`,
-and say so.** That is no worse than the open-ended windows it replaced — the
-same rate would have applied — and it adds a signal that never existed.
-
-⚠️ **What this gives up, stated plainly:** the line IS priced at a rate
-nobody has confirmed for that date. The protection is the warning plus the
-daily `check-tax-expiry` job, not the arithmetic.
-
-```ts
-interface StaleTaxWarning {
-  jurisdiction: JurisdictionType;
-  item_type: string;
-  tax_uid: string;
-  tax_name: string;
-  rate: number;
-  expired_at: string;
-  as_of: string;
-}
-```
-
 ### `TAXABLE_COA_TO_TAX_NAME`
 
 **Which tax a newly authored line carries, keyed on `coa_revenue`** — the
@@ -23674,6 +23631,55 @@ interface TaxSourcingDestination {
 }
 ```
 
+### `UnreviewedTaxWarning`
+
+**One line priced on a rate whose REVIEW has lapsed**, reported by
+{@link assignLineTaxes}.
+
+⚠️ **An unreviewed rate is not a known-wrong one** (owner, 2026-08-23):
+*"an expired rate isn't known stale, it's unknown to be not stale — most
+rates will be renewed without changing."* What ran out is the CONFIRMATION,
+not the number. Chicago Rental Tax has been 15% since 2026-01-01 and will
+most likely still be 15% after a review. So this is a prompt to look, not a
+report of a defect, and everything downstream is levelled accordingly: a
+`warn`, never an `error`; a notice in the UI, never a blocked save.
+
+## Why a warning rather than a refusal
+
+An earlier revision THREW here, on the reasoning that a closed window makes
+{@link findTaxFor} return `null`, `null` already means *"this line is
+untaxed"*, and an unreviewed Chicago Rental Tax would therefore silently
+zero-rate **70% of all tax CFS has ever collected**. The zero-rating problem
+is real and this design still fixes it — by falling forward to the most
+recent version rather than to nothing.
+
+🔴 **The refusal was WRONG, and the reason is worth keeping**: a document
+resolves the catalog at its own instant, and for an ORDER that instant is the
+earliest delivery start — a date in the FUTURE
+({@link deriveOrderTaxAsOf}). So a finite `applied_to` was not a review
+deadline, it was a hard ceiling on how far ahead CFS could take a booking:
+setting one to 2026-12-01 immediately refused every order delivering after
+that date. Measured on prod 2026-08-23, 1 of 81 live orders became unwritable
+the moment the bound was set, and every new forward booking past it would
+have 400'd.
+
+So the rule is: **price on the most recent version at or before `asOf`, and
+say so.** That is the same money an open-ended window would have produced —
+which is exactly why refusing was disproportionate — plus a signal that never
+existed.
+
+```ts
+interface UnreviewedTaxWarning {
+  jurisdiction: JurisdictionType;
+  item_type: string;
+  tax_uid: string;
+  tax_name: string;
+  rate: number;
+  expired_at: string;
+  as_of: string;
+}
+```
+
 ### `assertCoaTaxMapCoversCore(): void`
 
 Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.
@@ -23682,7 +23688,7 @@ A taxable COA with no entry there would be silently left **untaxed**, which is
 a money defect that looks like a clean run. Throws rather than exits so a
 script, a test and a client can all call it.
 
-### `assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): StaleTaxWarning[]`
+### `assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): UnreviewedTaxWarning[]`
 
 **Write the rule's answer onto every priceable line** — `price.taxes`,
 `price.taxes_base` and a refreshed `price.total_cents`. Mutates in place;
@@ -23723,27 +23729,27 @@ between versions of a tax and must not decide taxability; this one IS the
 taxability decision, and a tax the catalog cannot answer for is not the
 answer.
 
-## 🔴 It REPORTS a lapsed rate — it does not refuse one
+## It REPORTS an unreviewed rate — it does not refuse one
 
-**Returns** — one {@link StaleTaxWarning} per `(jurisdiction × item type)` cell
-that priced on a version whose window has run out, **deduped by cell**: a
-61-line order resolving one lapsed cell yields one warning, not 61. An empty
-array is the healthy answer.
+**Returns** — one {@link UnreviewedTaxWarning} per `(jurisdiction × item type)`
+cell that priced on a version whose review window has run out, **deduped by
+cell**: a 61-line order resolving one such cell yields one warning, not 61.
+An empty array is the healthy answer.
 
-The line still prices — on the most recent version at or before `asOf`, which
-is what an open-ended window would have applied anyway. ⚠️ **An earlier
-revision THREW here and it was wrong**: an order resolves the catalog at its
-earliest DELIVERY START, so a finite `applied_to` refused every booking past
-that date rather than scheduling a review. See {@link StaleTaxWarning}.
+The line still prices — on the most recent version at or before `asOf`, the
+same money an open-ended window would have produced. ⚠️ **An earlier revision
+THREW here and it was wrong**: an order resolves the catalog at its earliest
+DELIVERY START, so a finite `applied_to` refused every booking past that date
+rather than scheduling a review. See {@link UnreviewedTaxWarning}.
 
 ⚠️ **The return value is the whole signal — dropping it makes the lapse
-silent again.** Every caller either surfaces it (the manager, from its own
+invisible again.** Every caller either surfaces it (the manager, from its own
 recompute) or logs it (api-cloudrun's write paths).
 
 ⚠️ **A warning is emitted even when the document is EXEMPT.** The line prices
 at $0 either way, but `taxes_base` records which tax it was exempt FROM, and
-that annotation is being taken from a rate nobody has confirmed. The
-catalogue is what is wrong, not the document.
+that annotation is being taken from a version nobody has re-confirmed. What
+needs attention is the catalogue, not the document.
 
 A frozen document is unaffected and produces no warning:
 {@link resolveLineTax} takes the version the document already stores first.
@@ -24018,7 +24024,7 @@ reproduce the rule that ran — not a tidier one.
 covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
 is said on the axis the rule reads now: `taxed_as: "none"`.
 
-### `materializeDocumentTax(items: LineItem[], ctx: DocumentTaxContext): StaleTaxWarning[]`
+### `materializeDocumentTax(items: LineItem[], ctx: DocumentTaxContext): UnreviewedTaxWarning[]`
 
 **The one tax materializer.** {@link assignLineTaxes} plus the reprice —
 the pair every write path that owns its own line prices needs. Mutates
@@ -24035,10 +24041,10 @@ divergence this function exists to close.
 free of an ambient clock (a defaulted `now` is how the workspace ban on
 `new Date()` for business datetimes gets bypassed).
 
-**Returns** — 's stale-rate warnings, passed straight
+**Returns** — 's unreviewed-rate warnings, passed straight
 through. Every consumer — both api-cloudrun write paths and the manager's
 optimistic recompute — is responsible for surfacing or logging them; a
-dropped return value makes a lapsed rate silent, which is the condition this
+dropped return value makes the lapse invisible, which is the condition this
 whole mechanism exists to end.
 
 ### `resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdiction`
@@ -24175,7 +24181,7 @@ is no lapsed version to find. If this returned `expired` for it, every
 service line in the corpus would be reported as pricing on a lapsed rate —
 and, worse, would fall forward onto a tax that never covered it. That
 distinction is the safety property the whole design turns on; see
-{@link StaleTaxWarning}.
+{@link UnreviewedTaxWarning}.
 
 ⚠️ A `null` jurisdiction is `untaxed`, never `expired`: no-nexus means no
 catalog lookup happens at all, which is a decision rather than a lapse.
