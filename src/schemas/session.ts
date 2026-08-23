@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
+import { RoleId } from "./_uid.ts";
 
 /**
  * Full session document schema (Firestore document shape).
@@ -64,5 +65,8 @@ export const SessionSchema: z.ZodType<Session> = z.strictObject({
   expiresAt: FirestoreTimestamp,
   created_at: z.number(),
   user_agent: z.string(),
-  preview_role: z.string().regex(/^[a-z][a-z0-9_-]*$/).min(1).max(64).optional(),
+  // Same shape as `roles.name`, and it must STAY the same: this is matched
+  // against a role id to resolve preview permissions. It carried its own
+  // regex until core#59.
+  preview_role: RoleId.optional(),
 }).meta({ title: "Session", collection: "sessions" });

@@ -18,14 +18,19 @@
 > pinned to it. Everything is **pushed** — api-cloudrun's dev deploy is live
 > (`api-cloudrun-dev-01328-rt5`).
 >
-> 🔴 **Wave 1's two migrations have run in DEV ONLY. Prod is outstanding and must not be skipped.**
-> - `api-cloudrun/scripts/purge-sessions.ts` — dev: **133,911 sessions purged**. Prod: **not run.**
->   It must run in the same deploy that ships beta.244, because `getSession` is a bare cast, so a
->   pre-rename doc yields `session.uid === undefined` for its whole 30-day TTL and writes
->   `session=undefined` cookies rather than failing closed. One prod user, one forced re-login.
-> - `api-cloudrun/scripts/backfill-order-document-uid.ts` — dev: **1,988 stamped**, idempotent re-run
->   confirms 0 remaining. Prod: **not run.** Then tighten `OrderDocument.uid` to required.
-> - Prod deploy is gated behind merging the release-please PR, so both are operator steps.
+> ✅ **Wave 1's migrations are DONE in both environments.** release-please #638 merged →
+> api-cloudrun `v0.178.0`, prod deployed (`api-cloudrun-00287-spc`, 20:12Z, healthy).
+> - `purge-sessions.ts` — dev **133,911**, prod **882**. Both now 0.
+> - `backfill-order-document-uid.ts` — dev **1,988**, prod **1,986** (2 had already been stamped by
+>   the newly deployed code regenerating an order — independent proof the write path is correct).
+> - Verified in prod: 1,988 documents parse, **0 failing the schema, 0 with `uid !== ref.id`**.
+> - ⚠️ **The "legacy auto-id tail" this plan warns about DOES NOT EXIST.**
+>   `audit-order-documents-cardinality.ts` on prod reports `{"2": 994}` — every order has exactly two
+>   documents, zero have more. So 0 ids were neither `quote` nor `packing-list`. The
+>   `ref.id`-not-`orderDocumentId(data.name)` rule is still right (correct *by definition*), but its
+>   stated justification did not fire. api-cloudrun#642 closed.
+> - **Remaining for 1d:** tighten `OrderDocument.uid` from `.optional()` to required, now that both
+>   corpora are 100% stamped.
 >
 > **What the plan got wrong, corrected in place below:**
 >

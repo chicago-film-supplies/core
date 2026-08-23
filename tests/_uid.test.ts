@@ -1,5 +1,16 @@
 import { assertEquals } from "@std/assert";
-import { BookingId, EventCardId, FirestoreId, ItemUid, QuoteId, ThreadId } from "../src/schemas/_uid.ts";
+import {
+  AnyUid,
+  BookingId,
+  EventCardId,
+  FirestoreId,
+  ItemUid,
+  ListId,
+  QuoteId,
+  RoleId,
+  SEEDED_ROLE_NAMES,
+  ThreadId,
+} from "../src/schemas/_uid.ts";
 import { bookingId, fid } from "./helpers/ids.ts";
 
 const accepts = (s: { safeParse(v: unknown): { success: boolean } }, v: string) =>
@@ -93,4 +104,49 @@ Deno.test("fixture id helpers produce validator-compliant ids", () => {
   accepts(FirestoreId, prod);
   accepts(ItemUid, prod);
   accepts(BookingId, bookingId(fid("o"), fid("p"), fid("d")));
+});
+
+// ── RoleId ──────────────────────────────────────────────────────────
+
+Deno.test("RoleId accepts every live role name in both environments", () => {
+  // Measured 2026-08-23 against prod AND dev: 6 roles each, identical sets,
+  // plus every `users.roles[]` / `invites.roles[]` entry and every
+  // `threads.sources[]` entry with `collection: "roles"`. 0 would have failed.
+  // Pinned here so the corpus check does not have to be re-run to trust it.
+  for (const name of SEEDED_ROLE_NAMES) accepts(RoleId, name);
+});
+
+Deno.test("RoleId REJECTS underscores — the `on_call` defect this fixes", () => {
+  // ⚠️ The specific bug core#59 closes. `roles.name` and `sessions.preview_role`
+  // allowed `[a-z0-9_-]` while `AnyUid`'s slug arm allowed only `[a-z0-9-]`. So
+  // a role named `on_call` PASSED its own schema and then failed its own
+  // creation transaction, because the `threads.sources[]` entry minted beside it
+  // is gated on `AnyUid`. Two spellings of one shape, disagreeing.
+  rejects(RoleId, "on_call");
+  rejects(RoleId, "some_role");
+});
+
+Deno.test("RoleId and AnyUid agree on every slug — they share one fragment", () => {
+  // The property that makes the above unrepresentable rather than merely fixed:
+  // a value RoleId accepts must be one AnyUid accepts, or a role can be created
+  // that cannot be referenced. Both now derive from the same SLUG constant, so
+  // this asserts the wiring rather than re-checking a regex.
+  for (const name of [...SEEDED_ROLE_NAMES, "a", "on-call", "x9-y8"]) {
+    accepts(RoleId, name);
+    accepts(AnyUid, name);
+    accepts(ListId, name);
+  }
+  // …and a value one rejects, all reject.
+  for (const bad of ["on_call", "9lives", "-lead", "Upper"]) {
+    rejects(RoleId, bad);
+    rejects(AnyUid, bad);
+  }
+});
+
+Deno.test("RoleId enforces the 64-char cap — a Firebase token-size constraint", () => {
+  // Not cosmetic: `customClaims.roles[]` must stay inside Firebase's 1000-byte
+  // limit, so the per-role cap is what bounds the claim.
+  accepts(RoleId, "a".repeat(64));
+  rejects(RoleId, "a".repeat(65));
+  rejects(RoleId, "");
 });

@@ -7,9 +7,38 @@
  */
 import { z } from "zod";
 import { type FirestoreTimestampType, TimestampFields } from "./common.ts";
-import { ThreadId } from "./_uid.ts";
+import { RoleId, ThreadId } from "./_uid.ts";
 
 /** A role document in Firestore. */
+/**
+ * The PUBLIC projection of a {@link Role} — what `GET /admin/roles` returns and
+ * what the manager's roles table renders.
+ *
+ * ⚠️ **Deliberately its own type, not a re-export of `Role`.** It drops
+ * `uid_thread` and both timestamps, which are storage concerns no client needs;
+ * re-exporting `Role` would make widening the document a wire change.
+ *
+ * It exists because api-cloudrun's `RoleSummary` and manager's `RoleRow` were
+ * declared separately and verified field-for-field identical (core#59) — two
+ * copies of one wire contract, agreeing only by luck. `name` keeps its name:
+ * that IS the wire field, and the `roles.name`-not-`uid` carve-out is declared
+ * in `core/CLAUDE.md` § *UID property naming*.
+ */
+export interface RoleSummary {
+  name: string;
+  label: string;
+  permissions: string[];
+  description?: string;
+}
+
+/** Zod schema for {@link RoleSummary}. */
+export const RoleSummarySchema: z.ZodType<RoleSummary> = z.object({
+  name: RoleId,
+  label: z.string(),
+  permissions: z.array(z.string()),
+  description: z.string().optional(),
+});
+
 export interface Role {
   name: string;
   label: string;
@@ -62,7 +91,11 @@ export interface Role {
  */
 /** Zod schema for Role. */
 export const RoleSchema: z.ZodType<Role> = z.strictObject({
-  name: z.string().regex(/^[a-z][a-z0-9_-]*$/, "Must be lowercase alphanumerics, hyphens, or underscores").min(1).max(64).meta({ pii: "none", column: true, label: "Name" }),
+  // The doc id, deliberately named `name` rather than `uid` — a declared
+  // carve-out from the uid convention, because security rules can only `get()`
+  // by path. `RoleId` is the ONE definition of this shape (core#59); it used to
+  // be spelled here, in `session.ts`, and five more times across two repos.
+  name: RoleId.meta({ pii: "none", column: true, label: "Name" }),
   label: z.string().min(1).max(128).meta({ pii: "none", column: true, label: "Label" }),
   permissions: z.array(z.string()).default([]).meta({ column: true, label: "Permissions" }),
   description: z.string().max(500).optional().meta({ column: true, label: "Description" }),

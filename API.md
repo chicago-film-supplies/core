@@ -6432,8 +6432,6 @@ interface ReverseTransactionInputType {
 
 ### `Role`
 
-A role document in Firestore.
-
 ```ts
 interface Role {
   name: string;
@@ -6452,6 +6450,38 @@ Zod schema for Role.
 
 ```ts
 const RoleSchema: z.ZodType<Role>;
+```
+
+### `RoleSummary`
+
+The PUBLIC projection of a {@link Role} — what `GET /admin/roles` returns and
+what the manager's roles table renders.
+
+⚠️ **Deliberately its own type, not a re-export of `Role`.** It drops
+`uid_thread` and both timestamps, which are storage concerns no client needs;
+re-exporting `Role` would make widening the document a wire change.
+
+It exists because api-cloudrun's `RoleSummary` and manager's `RoleRow` were
+declared separately and verified field-for-field identical (core#59) — two
+copies of one wire contract, agreeing only by luck. `name` keeps its name:
+that IS the wire field, and the `roles.name`-not-`uid` carve-out is declared
+in `core/CLAUDE.md` § *UID property naming*.
+
+```ts
+interface RoleSummary {
+  name: string;
+  label: string;
+  permissions: string[];
+  description?: string;
+}
+```
+
+### `RoleSummarySchema`
+
+Zod schema for {@link RoleSummary}.
+
+```ts
+const RoleSummarySchema: z.ZodType<RoleSummary>;
 ```
 
 ### `RouteManifest`
@@ -10487,6 +10517,48 @@ Zod schema for RateType.
 const RateTypeEnum: z.ZodType<RateType>;
 ```
 
+### `RoleId`
+
+A role id — which for `roles` IS the document id, and also the claim string
+written into `users.roles[]`, `invites.roles[]`, `sessions.preview_role` and
+Firebase custom claims.
+
+⚠️ **`roles.name` is a deliberate carve-out from the `uid` convention** — the
+doc id must BE the claim string because `manager/firestore.rules` can only
+`get()` by path and never query. The reasoning is in
+`core/.claude/plans/roles-campaign.md`; do not "fix" it to `uid`.
+
+⚠️ **Kept an open string, NOT a closed enum.** `POST /admin/roles` exists, so
+an operator-created role must stay representable. The six git-declared roles
+are {@link SEEDED_ROLE_NAMES}, which is the narrower literal type — use that
+where a specific role is meant, and this where any role is.
+
+The 64-char cap is a **token-size constraint, not cosmetic**: `customClaims.roles[]`
+must stay inside Firebase's 1000-byte limit.
+
+Verified against both environments before shipping (2026-08-23): 6 live roles
+in each — `admin`, `authenticated`, `customer`, `template-editor`,
+`template-maintainer`, `warehouse` — plus every `users.roles[]`,
+`invites.roles[]` and `threads.sources[]` entry with `collection: "roles"`.
+**0 would have failed the no-underscore form.**
+
+```ts
+const RoleId: z.ZodType<string>;
+```
+
+### `SEEDED_ROLE_NAMES`
+
+The six roles declared in git (`api-cloudrun/scripts/rbacRoles.ts`) and seeded
+by `seed-rbac.ts`.
+
+⚠️ This is NOT the storage type — see {@link RoleId}. It exists so the role
+literals scattered through production source and fixtures become compile-
+checked rather than free strings.
+
+```ts
+const SEEDED_ROLE_NAMES: "admin" | "authenticated" | "customer" | "template-editor" | "template-maintainer" | "warehouse"[];
+```
+
 ### `SETTLEMENT_CONTRACTS`
 
 The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}
@@ -10504,6 +10576,14 @@ counterpart, and the id it retracts is still on the row `reverses` names.
 
 ```ts
 const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, SettlementContract>>;
+```
+
+### `SeededRoleName`
+
+One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES}
+
+```ts
+type SeededRoleName = indexedAccess;
 ```
 
 ### `SettlementContract`
@@ -19291,8 +19371,6 @@ const UploadcareWorkListEntrySchema: z.ZodType<UploadcareWorkListEntry>;
 
 ### `Role`
 
-A role document in Firestore.
-
 ```ts
 interface Role {
   name: string;
@@ -19311,6 +19389,38 @@ Zod schema for Role.
 
 ```ts
 const RoleSchema: z.ZodType<Role>;
+```
+
+### `RoleSummary`
+
+The PUBLIC projection of a {@link Role} — what `GET /admin/roles` returns and
+what the manager's roles table renders.
+
+⚠️ **Deliberately its own type, not a re-export of `Role`.** It drops
+`uid_thread` and both timestamps, which are storage concerns no client needs;
+re-exporting `Role` would make widening the document a wire change.
+
+It exists because api-cloudrun's `RoleSummary` and manager's `RoleRow` were
+declared separately and verified field-for-field identical (core#59) — two
+copies of one wire contract, agreeing only by luck. `name` keeps its name:
+that IS the wire field, and the `roles.name`-not-`uid` carve-out is declared
+in `core/CLAUDE.md` § *UID property naming*.
+
+```ts
+interface RoleSummary {
+  name: string;
+  label: string;
+  permissions: string[];
+  description?: string;
+}
+```
+
+### `RoleSummarySchema`
+
+Zod schema for {@link RoleSummary}.
+
+```ts
+const RoleSummarySchema: z.ZodType<RoleSummary>;
 ```
 
 ## `@cfs/core/schemas/permissions`

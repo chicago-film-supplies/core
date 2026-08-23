@@ -6,7 +6,7 @@ import { AnyUid, FirestoreId } from "./_uid.ts";
 import { usState } from "./_usState.ts";
 
 // Re-export the id validators so consumers can import them from the package root.
-export { AnyUid, BookingId, CardId, EventCardId, FirestoreId, ItemUid, ListId, QuoteId, ThreadId } from "./_uid.ts";
+export { AnyUid, BookingId, CardId, EventCardId, FirestoreId, ItemUid, ListId, QuoteId, RoleId, SEEDED_ROLE_NAMES, type SeededRoleName, ThreadId } from "./_uid.ts";
 
 // Re-export the region canonicalizer so consumers reach one implementation.
 export { isIllinoisPostcode, toRegionCode, toUsStateCode, usState } from "./_usState.ts";

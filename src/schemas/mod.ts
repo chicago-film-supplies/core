@@ -384,6 +384,8 @@ export {
 export {
   RoleSchema,
   type Role,
+  RoleSummarySchema,
+  type RoleSummary,
 } from "./role.ts";
 
 export {

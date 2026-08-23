@@ -6,6 +6,7 @@
  * user with roles taken from the invite and marks it used.
  */
 import { z } from "zod";
+import { RoleId } from "./_uid.ts";
 import {
   Email,
   FirestoreTimestamp,
@@ -39,7 +40,8 @@ export const InviteSchema: z.ZodType<Invite> = z.strictObject({
   email: Email.meta({ column: true, label: "Email" }),
   ...NamePartsFields,
   name: NameField.meta({ column: true, label: "Name" }),
-  roles: z.array(z.string()).default([]).meta({ column: true, label: "Roles" }),
+  // Role IDs — see `user.ts`. Retyped in core#59 for the same reason.
+  roles: z.array(RoleId).default([]).meta({ column: true, label: "Roles" }),
   invited_by: z.string().min(1),
   used: z.boolean().default(false).meta({ column: true, label: "Used" }),
   expires_at: FirestoreTimestamp,

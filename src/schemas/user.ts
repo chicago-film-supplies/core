@@ -2,7 +2,7 @@
  * User document schema — Firestore collection: users
  */
 import { z } from "zod";
-import { FirestoreId } from "./_uid.ts";
+import { FirestoreId, RoleId } from "./_uid.ts";
 import {
   Email,
   FirestoreTimestamp,
@@ -95,7 +95,10 @@ export const UserSchema: z.ZodType<User> = z.strictObject({
   // `.default()` never materializes on a write — see the note in `product.ts`.
   email_verified: z.boolean(),
   uid_contact: FirestoreId.nullable().optional(),
-  roles: z.array(z.string()).optional().meta({ column: true, label: "Roles" }),
+  // Role IDS, not free strings — retyped in core#59 so a schema-identity walk
+  // can find every carrier of a role name. That walk is what lets the rename
+  // cascade derive its site map instead of hand-listing queries.
+  roles: z.array(RoleId).optional().meta({ column: true, label: "Roles" }),
   token_version: z.int().min(0).optional(),
   version: z.int().min(0).default(0),
   prefs_firestore: z.record(z.string(), FirestoreDisplayPrefsSchema),

@@ -174,13 +174,75 @@ export const CardId: z.ZodType<string> = z.union([firestoreId, EventCardId]);
 export const ThreadId: z.ZodType<string> = z.union([firestoreId, EventCardId]);
 
 /**
+ * A lowercase-kebab slug: `^[a-z][a-z0-9-]*$`.
+ *
+ * ⚠️ **One fragment, because three validators used to spell it separately and
+ * one of them disagreed.** `RoleId`, `ListId` and `AnyUid`'s slug arm all mean
+ * the same shape, and `roles.name` / `sessions.preview_role` additionally
+ * allowed an underscore (`[a-z0-9_-]`) while `AnyUid` did not — so a role named
+ * `on_call` passed its own schema and then **failed its own creation
+ * transaction**, because the thread `sources[]` entry minted alongside it is
+ * gated on `AnyUid`. Underscores are gone; see {@link RoleId}.
+ */
+const SLUG = "[a-z][a-z0-9-]*";
+const slug = (message: string) => z.string().regex(new RegExp(`^${SLUG}$`), message);
+
+/**
+ * A role id — which for `roles` IS the document id, and also the claim string
+ * written into `users.roles[]`, `invites.roles[]`, `sessions.preview_role` and
+ * Firebase custom claims.
+ *
+ * ⚠️ **`roles.name` is a deliberate carve-out from the `uid` convention** — the
+ * doc id must BE the claim string because `manager/firestore.rules` can only
+ * `get()` by path and never query. The reasoning is in
+ * `core/.claude/plans/roles-campaign.md`; do not "fix" it to `uid`.
+ *
+ * ⚠️ **Kept an open string, NOT a closed enum.** `POST /admin/roles` exists, so
+ * an operator-created role must stay representable. The six git-declared roles
+ * are {@link SEEDED_ROLE_NAMES}, which is the narrower literal type — use that
+ * where a specific role is meant, and this where any role is.
+ *
+ * The 64-char cap is a **token-size constraint, not cosmetic**: `customClaims.roles[]`
+ * must stay inside Firebase's 1000-byte limit.
+ *
+ * Verified against both environments before shipping (2026-08-23): 6 live roles
+ * in each — `admin`, `authenticated`, `customer`, `template-editor`,
+ * `template-maintainer`, `warehouse` — plus every `users.roles[]`,
+ * `invites.roles[]` and `threads.sources[]` entry with `collection: "roles"`.
+ * **0 would have failed the no-underscore form.**
+ */
+export const RoleId: z.ZodType<string> = slug(
+  "Must be lowercase alphanumerics or hyphens, starting with a letter",
+).min(1).max(64);
+
+/**
+ * The six roles declared in git (`api-cloudrun/scripts/rbacRoles.ts`) and seeded
+ * by `seed-rbac.ts`.
+ *
+ * ⚠️ This is NOT the storage type — see {@link RoleId}. It exists so the role
+ * literals scattered through production source and fixtures become compile-
+ * checked rather than free strings.
+ */
+export const SEEDED_ROLE_NAMES = [
+  "admin",
+  "authenticated",
+  "customer",
+  "template-editor",
+  "template-maintainer",
+  "warehouse",
+] as const;
+
+/** One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES} */
+export type SeededRoleName = typeof SEEDED_ROLE_NAMES[number];
+
+/**
  * `lists.uid` (and `uid_list` references) — a Firestore auto-id (user-created
  * lists) or a lowercase-kebab slug (seeded/system lists, e.g. `in-store`,
  * `field-service`).
  */
 export const ListId: z.ZodType<string> = z.union([
   firestoreId,
-  z.string().regex(/^[a-z][a-z0-9-]*$/, "Must be a list slug"),
+  slug("Must be a list slug"),
 ]);
 
 /**
@@ -199,5 +261,8 @@ export const AnyUid: z.ZodType<string> = z.union([
   // reference falls through to the slug pattern and the reversal — the journal's
   // only correction path — fails validation on write.
   MovementId,
-  z.string().regex(/^[a-z][a-z0-9-]*$/, "Must be a slug"),
+  // Same fragment as `RoleId` / `ListId`. They were three separate regexes, and
+  // the role one disagreed — which is what made `on_call` fail its own creation
+  // transaction. See SLUG above.
+  slug("Must be a slug"),
 ]);
