@@ -41,8 +41,9 @@
 >   the three carve-outs are *documented* but still **unguarded**.
 > - **#59** — only the manager UI, filed as **manager#321**. The API surface is complete (owner's
 >   call: API is enough for now).
-> - **#53** — the fixture MIGRATION, not the helper: **api-cloudrun#647** (34 integration files, plus
->   the `seedDoc` write boundary and its ratchet) and **manager#322** (9 dead `initialValues`).
+> - **#53** — the fixture MIGRATION, not the helper: **api-cloudrun#647** (now **11** integration
+>   files — the order and invoice families were converted ahead of Wave 5, `968c9542` — plus the
+>   `seedDoc` write boundary and its ratchet) and **manager#322** (9 dead `initialValues`).
 >
 > ### Corrections this campaign made to its own plan — do not re-derive
 > - **0b's prescribed fix for `schemas/common.ts` does not work.** Annotating `LINE_PARENTS` leaves
@@ -76,6 +77,11 @@
 > - ⚠️ **A ratchet with a hole reports CLEAN, not smaller.** `typeEscapeRatchet`'s regex missed 20
 >   sites for as long as it existed. Same shape as the `enforced_by` line-ref finding and the
 >   fixed-point `path` guard: a guard that can only consult its own oracle is not a guard.
+> - 🔴 **A raw `ref.set()` fixture is unvalidated by construction, and a WHOLE-OBJECT override is
+>   where a required field goes to die.** Two seeders wrote an invalid order into dev for their
+>   whole lives, both under a comment claiming the opposite. Found by reconstructing the seeder's
+>   output and parsing it OFFLINE — the suite cannot see it, because the suite exercises the write
+>   and the write is what skips validation.
 >
 > ### Issues filed this session
 > api-cloudrun **#640** (operator bless, prod publish) · **#641** (test sessions are the one fixture
@@ -511,8 +517,10 @@ Each of these had been latent for the life of its fixture, and none was reachabl
 
 ### What is left, and where it lives now
 
-- **api-cloudrun#647** — 34 integration files still seed through `getInitialValues` + a cast, plus
-  the newly-visible `services/orders.ts:2221` launder. Deliberately file-at-a-time.
+- **api-cloudrun#647** — **11** integration files still seed through `getInitialValues` + a cast
+  (was 33), plus the newly-visible `services/orders.ts:2221` launder. The ORDER and INVOICE families
+  are done — see *The pre-Wave-5 conversion* below. The rest are other collections and can drain
+  whenever.
 - **api-cloudrun `seedDoc(ref, Schema, overrides)`** — construct → validate → track → write, and the
   ratchet making it the only sanctioned way to write a fixture. **Not built.** Folded into #647's
   scope; it is what makes the next required field visible, and it is worth doing before the 34-file
@@ -523,6 +531,53 @@ Each of these had been latent for the life of its fixture, and none was reachabl
 - **Manager's form-seed cleanup** stays sequenced **after Wave 5** — `buildDefaultDocDates` and the
   no-op spread in `manager/src/stores/orders.ts` can only collapse once `ProductSchema.shipping` is
   required.
+
+
+### The pre-Wave-5 conversion (done 2026-08-23) — and why it was not optional
+
+⚠️ **Wave 5's stated safety net did not yet cover the collections Wave 5 tightens.** The claim below
+— *"a minimal-valid factory is exactly the tool that keeps negative tests honest through a bulk
+tightening"* — only holds where the factory is used. On the day Wave 4 landed that was 4 api-cloudrun
+files and 6 manager files, while **13 integration files seeded orders** through
+`getInitialValues(CreateOrderInput)` and **9 seeded invoices** through `getInitialValues(InvoiceSchema)`
+— which is almost exactly the Tier-3 candidate list (`orders.crms_id`/`crms_status`/`uid_thread`/
+`xero_id`, `invoices.due_date`/`subject`/`uid_thread`).
+
+🔴 **And the old base SUPPLIED those keys, with zero values.** So a tightening would not have failed
+cleanly at construction; it would either 400 mid-suite against dev Firestore, or **pass spuriously**
+on a `""` that satisfied a presence check. That is the noisy version of the very signal 5c's
+before/after census is trying to read.
+
+**22 files converted** (api-cloudrun `968c9542`): 13 order-payload seeds, 9 order/invoice document
+seeds. Verified in two batches — 41 passed (217 steps) and 27 passed (174 steps), 0 failed.
+
+⭐ **What it found, and the reason no existing gate could have.**
+`DocumentOrganizationSnapshot.xero_id` is `z.uuid().nullable()` — required, no `.default()` — and two
+document seeders (`tests/integration/invoices/invoices.test.ts`,
+`tests/integration/creditNotes/creditNotes.test.ts`) override `organization` with a **whole-object
+literal** that omits it. A whole-object override REPLACES the base rather than merging with it, and
+these seeds write through a raw `ref.set()` that never reaches `validateBeforeWrite` — so both have
+been writing an invalid `OrderSchema` document into dev for the life of the seeder.
+
+⚠️ **Both sites carried a comment asserting the opposite.** `creditNotes`: *"this order is written
+straight to Firestore, so it must be shaped like one a writer produces."* `invoices`: *"lets
+subsequent PUT /orders flows pass `validateBeforeWrite`."* Neither was true of the document beneath
+it. Corrected in place rather than quietly fixed — **a fixture's docstring is a claim about the
+corpus, and nothing was checking it.**
+
+📝 **The method is the reusable part, and Wave 5 should use it.** The defect was found by
+reconstructing each seeder's *full output* offline and calling `safeParse` on it — a check the
+integration suite **structurally cannot make**, because the suite exercises the write and the write
+is the thing that skips validation. Two consequences for Wave 5:
+
+- Its instrument (`api-cloudrun/scripts/audit-schema-validation.ts`) reads the STORED corpus, so a
+  test seed writing invalid documents into dev pollutes the dev half of every before/after reading
+  (the api-cloudrun#637 family). Both are fixed; the other nine document-seed `organization`
+  literals were audited and already carried the field, so the class is closed rather than sampled.
+- **A whole-object override is where a required field goes to die.** Wave 5 makes fields required;
+  every such override in a fixture is a site that will silently stop matching the schema. Grep for
+  them per collection *before* tightening it, and reconstruct-and-parse rather than trusting a green
+  suite.
 
 
 ## Wave 5 — the optionality campaign (new work; only 3 api-cloudrun bugs get filed)
@@ -948,6 +1003,9 @@ the `FieldValue`-sentinel do-not-require list is written out, and the measuring 
 (`api-cloudrun/scripts/audit-schema-validation.ts`) was verified to cover every collection the wave
 touches, so it will not move mid-campaign. What remains is measurement plus one commit per tranche.
 
+✅ **The pre-Wave-5 fixture conversion is DONE** (see the section of that name) — the order and
+invoice seeds now fail loudly rather than spuriously when a field becomes required.
+
 ⚠️ **Two things to do FIRST, before the first tightening:**
 
 1. **5a's delete test is key-ABSENCE, and only `orderBy(field)` can answer it.** A `select`
@@ -956,6 +1014,10 @@ touches, so it will not move mid-campaign. What remains is measurement plus one 
 2. **Read 5b's three tiers against the corpus again, not against this doc.** Every "100% today"
    figure is a fact about data on 2026-08-23, and 5c's whole procedure is a before/after
    measurement — a stale number is the one input that makes the commit messages wrong.
+
+3. **Grep each collection's fixtures for a WHOLE-OBJECT override before tightening it**, and
+   reconstruct-and-parse rather than trusting a green suite. That is how the conversion found two
+   seeders writing invalid orders into dev; the same shape will hide the next required field.
 
 **Do not start Wave 3.** Its census refuted its own prescribed fix; it needs a design decision
 (owner: predictable querying is the benefit, synonym drift is the defect), not an execution pass.
