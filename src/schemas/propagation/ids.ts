@@ -9,7 +9,7 @@
  *
  * It cannot be derived, and that is a property of the publish boundary rather
  * than a missed trick. JSR's `no-slow-types` requires every public export to
- * carry an explicit annotation, so `mod.ts` must declare
+ * carry an explicit annotation, so `propagation/mod.ts` must declare
  * `export const rules: CollectionRule[]` — which erases every literal id at the
  * module boundary. The published declaration confirms it:
  * `_dist/src/schemas/propagation/mod.d.ts` emits exactly that line, and no
@@ -22,7 +22,7 @@
  * type, and JSR's *syntactic* declaration emitter mis-emits `as const` arrays —
  * core#43 published `declare const ITEM_TYPES: readonly ["order"]` for a
  * nine-member array, and core#44 is still open on a second live instance. See
- * `types.ts`'s `EnforcementRef` docstring for the full account. A union type is
+ * `propagation/types.ts`'s `EnforcementRef` docstring for the full account. A union type is
  * emitted verbatim and has no such failure mode.
  *
  * ## What keeps it honest
@@ -36,8 +36,9 @@
  *
  * The comment headers name the file that OWNS each id — a rule id belongs to the
  * file that declares it, and the same prefix legitimately appears under two
- * files (`update-order:*` is declared in both `orders.ts` and `invoices.ts`,
- * `cowrite-thread:*` in both `threads.ts` and `cards.ts`).
+ * files (`update-order:*` is declared in both `propagation/orders.ts` and
+ * `propagation/invoices.ts`, `cowrite-thread:*` in both
+ * `propagation/threads.ts` and `propagation/cards.ts`).
  */
 
 /**

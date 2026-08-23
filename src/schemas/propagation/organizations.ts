@@ -288,7 +288,7 @@ const updateOrganizationTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `organizations.ts` contributes to the propagation catalog. */
+/** Everything `propagation/organizations.ts` contributes to the propagation catalog. */
 export const organizations: PropagationModule = {
   rules: [
     ...createOrganizationRules,

@@ -7,7 +7,7 @@
  * (e.g. an event card's) carry multiple sources so they surface on every
  * linked doc's detail view.
  *
- * The polymorphic `{collection, uid}` source reference lives in `common.ts`
+ * The polymorphic `{collection, uid}` source reference lives in `schemas/common.ts`
  * as `DocSource` — also used by Comment and Card.
  *
  * Access is purely RBAC-driven — no per-thread ACLs. Threads are deleted

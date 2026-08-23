@@ -177,7 +177,7 @@ const deleteUserTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `users.ts` contributes to the propagation catalog. */
+/** Everything `propagation/users.ts` contributes to the propagation catalog. */
 export const users: PropagationModule = {
   rules: [
     ...createUserRules,

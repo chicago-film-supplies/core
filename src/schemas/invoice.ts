@@ -214,7 +214,7 @@ export const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[] = statusesWh
 // `ITEM_TYPES`) for exactly one purpose: typing the flat input schema's
 // `type` field. Both input unions are discriminated now, so each arm names its
 // own literal and the combined enum has no consumer left. The vocabulary itself
-// still lives in `common.ts` (`ITEM_TYPES` / `ITEM_CONTRACTS`).
+// still lives in `schemas/common.ts` (`ITEM_TYPES` / `ITEM_CONTRACTS`).
 
 // ── Payment tracking: GONE, not deprecated ──────────────────────
 //

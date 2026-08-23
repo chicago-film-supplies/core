@@ -18,7 +18,7 @@
  * ergonomics bug, not a data-loss bug.
  *
  * Leaf module by design — imports nothing but `zod`, so the document schemas can
- * import it without a cycle through the `mod.ts` barrel.
+ * import it without a cycle through the `schemas/mod.ts` barrel.
  */
 import type { z } from "zod";
 

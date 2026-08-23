@@ -28,8 +28,15 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
   ambiguous. 65 of those existed when it landed and a full-workspace run could see only 22.
   Simulate it with `cp -R core /tmp/x && cd /tmp/x/core && HOME=/tmp/nonexistent deno task
   audit:citations`. Rules in `src/utils/citations.ts`, planted both ways in
-  `tests/citations.test.ts`. It gates **broken** only; 75 ambiguous bare basenames remain
-  (core#67). ⚠️ The `lint` line above records the inverse lesson — a gate-claim naming a
+  `tests/citations.test.ts`. **The task carries `--strict`** (core#67), so AMBIGUOUS fails
+  as well as BROKEN — the flag lives in the `deno.json` task, not at the two call sites, so
+  the hook and CI cannot drift apart. ⚠️ **A bare basename is therefore no longer a legal
+  citation in this package**: write `schemas/common.ts`, `propagation/threads.ts`,
+  `utils/orders.ts`, or repo-qualify for another repo. One level of directory is enough —
+  the check is a path SUFFIX match, so core's own files resolve in a CI checkout at any
+  depth. 78 of these were cleared on 2026-08-23 (the issue said 75; three more had accrued
+  in the fortnight it sat open, which is the argument for gating rather than counting).
+  ⚠️ The `lint` line above records the inverse lesson — a gate-claim naming a
   check nothing runs. A check that runs and is named nowhere is the same failure pointed the
   other way, which is why this entry exists.
 
@@ -165,7 +172,7 @@ Each schema file exports: Zod schema object, TypeScript interface, and input sch
 
 ### Propagation — one module per file, and no hand-maintained lists
 
-**Every file in `src/schemas/propagation/` exports exactly ONE value: a `PropagationModule`** (`{ rules, transactions }`, declared in `propagation/types.ts`). `mod.ts` imports them into a `MODULES` array and derives `rules` / `transactions` with `flatMap`. **The barrel exposes three values — `rules`, `transactions`, `aggregates` — and nothing else.**
+**Every file in `src/schemas/propagation/` exports exactly ONE value: a `PropagationModule`** (`{ rules, transactions }`, declared in `propagation/types.ts`). `propagation/mod.ts` imports them into a `MODULES` array and derives `rules` / `transactions` with `flatMap`. **The barrel exposes three values — `rules`, `transactions`, `aggregates` — and nothing else.**
 
 ⚠️ **This replaced four hand-maintained copies of one list, and the drift it hid is the reason to keep it that way.** `propagation/mod.ts` re-exported **141** symbols by hand, `schemas/mod.ts` re-exported **81** of them, and `tests/propagation.test.ts` mirrored the membership twice more — so **60 exports had silently drifted out of the barrel with nothing noticing**, and two of the test's assertions were fixed-point checks that could only ever agree with the list they were derived from. The fix was to delete the thing that required a list, not to derive a better one.
 
@@ -173,8 +180,8 @@ What follows from it, and what to do when adding a rule:
 
 - **Add the rule to its file's arrays and you are done.** Nothing else needs telling.
 - **A file has ONE `rules` array, so exporting both a member array and an in-file aggregator of it is unrepresentable.** The four aggregators that used to do this (`cardRules`, `templateRules`, `recurrenceRules`, `threadCowriteRules`) are gone.
-- **The import block and `MODULES` prove each other for free** — a name in `MODULES` that is not imported is a compile error; an import missing from `MODULES` is a `deno lint` error. The only residue is a file on disk nothing imports, which `tests/propagation.test.ts` catches by comparing `mod.ts`'s source against `Deno.readDir` (filename comparison only — no dynamic import, no execution).
-- 🔴 **Never put a runtime glob (`Deno.readDir`) inside `mod.ts`.** Manager pulls this into a **browser** and JSR serves it over `https:` — neither has a directory to read or a `Deno` global. `src/` is platform-free by deliberate policy.
+- **The import block and `MODULES` prove each other for free** — a name in `MODULES` that is not imported is a compile error; an import missing from `MODULES` is a `deno lint` error. The only residue is a file on disk nothing imports, which `tests/propagation.test.ts` catches by comparing `propagation/mod.ts`'s source against `Deno.readDir` (filename comparison only — no dynamic import, no execution).
+- 🔴 **Never put a runtime glob (`Deno.readDir`) inside `propagation/mod.ts`.** Manager pulls this into a **browser** and JSR serves it over `https:` — neither has a directory to read or a `Deno` global. `src/` is platform-free by deliberate policy.
 - **A rule factory is file-local and never exported**, its instantiations are exported from that same file, and **a rule id is owned by the file that declares it.** `cowriteRulesFor` (`propagation/threads.ts`) and `ledgerRule`/`locationsRule` (`propagation/transactions.ts`) follow this; there are **no exported rule factories left**.
 - **One file may also export an `as const` step tuple — `propagation/stock.ts`'s `STOCK_STEPS` — and that is the sanctioned second export.** ⚠️ **The diagnostic that produced it is worth reusing: if a factory's hole is a TRANSACTION ID, you have one rule mis-modelled as N; if it is a COLLECTION, you have a real template.** `stockRules(transactionId, trigger)` minted **21 of the corpus's 173 rules** as seven near-identical copies — every `enforced_by` ref a shared const, `trigger` a shared const, only the id prefix and one prose fragment varying. They were three rules with eleven firing contexts, a relation `TransactionDefinition.steps[]` already modelled, so the rules are declared once and the transactions reference `STOCK_STEPS`. Corpus 173 → 155.
 - ⚠️ **A trigger is not an invariant.** *"Every booking breakdown change"* answers **when this fires**, not **what must be true**, and splicing it into an `invariant` is what made those 21 rules look distinct. Per-transaction gating prose belongs on the transaction's `description`.
@@ -187,7 +194,7 @@ What follows from it, and what to do when adding a rule:
   passing the citation audit means the file is long enough, never that the line still says
   what the clause claims — which is exactly the failure the 11-of-33 measurement above found.
   The ban stands for `enforced_by`.
-- **A rule's `source`/`target` are `PropagationEndpoint`** = `CollectionName | "*" | "orders/documents"` — keyed off this package's own collection registry, so there is no second list to drift. The `import type { CollectionName }` in `propagation/types.ts` **must stay type-only**: it is erased at emit, which is what keeps `@cfs/core/schemas/propagation` free of runtime code from `mod.ts`. A value import there would drag the whole schema barrel back in and undo the subpath's reason for
+- **A rule's `source`/`target` are `PropagationEndpoint`** = `CollectionName | "*" | "orders/documents"` — keyed off this package's own collection registry, so there is no second list to drift. The `import type { CollectionName }` in `propagation/types.ts` **must stay type-only**: it is erased at emit, which is what keeps `@cfs/core/schemas/propagation` free of runtime code from `schemas/mod.ts`. A value import there would drag the whole schema barrel back in and undo the subpath's reason for
 existing. **That subpath is `./schemas/propagation`, live as of 2026-08-18** — and the three values
 (`rules`, `transactions`, `aggregates`) are **no longer on the `./schemas` barrel at all**, so import
 them from the subpath. The propagation TYPES stay on the barrel deliberately: `export type` is erased

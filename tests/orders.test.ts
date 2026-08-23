@@ -2594,7 +2594,7 @@ Deno.test("getTransactionFeeTotals derives rate/type from the price, identity fr
 // ── ITEM_CONTRACTS ───────────────────────────────────────────────
 
 Deno.test("ITEM_CONTRACTS covers every item type, and the derived lists agree", () => {
-  // The compile-time assertions in `common.ts` already pin these; this is the
+  // The compile-time assertions in `schemas/common.ts` already pin these; this is the
   // runtime companion, so a table edit that somehow type-checks still fails.
   const contractKeys = Object.keys(ITEM_CONTRACTS).sort();
   assertEquals(contractKeys.length, 9);

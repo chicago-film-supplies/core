@@ -384,3 +384,46 @@ Deno.test("a bare basename matching several files is ambiguous — a PATH is not
     "ok",
   );
 });
+
+// ── The gate is actually armed ───────────────────────────────────────
+//
+// ⚠️ **Every arm above tests the RULES; this one tests that anything RUNS
+// them strictly.** `classifyCitation` returning "ambiguous" is worth nothing if
+// the runner is never asked to fail on it, and dropping `--strict` from the
+// task is a one-character edit that leaves all 25 rule arms green while the
+// gate quietly reverts to broken-only — with `CLAUDE.md` § Commands still
+// claiming otherwise. That is this package's own stated defect class (the
+// `lint` line there: a gate-claim naming a check nothing runs), pointed the
+// other way.
+//
+// It asserts the TASK, not the two call sites, because that is where the flag
+// lives — `.githooks/pre-push` and `.github/workflows/ci.yaml` both run
+// `deno task audit:citations` and inherit it.
+Deno.test("the audit task is wired --strict, so AMBIGUOUS fails and not just BROKEN", async () => {
+  const denoJson = JSON.parse(
+    await Deno.readTextFile(new URL("../deno.json", import.meta.url)),
+  ) as { tasks: Record<string, string> };
+  const task = denoJson.tasks["audit:citations"];
+  assert(task !== undefined, "deno.json declares no `audit:citations` task");
+  assertEquals(
+    task.includes("--strict"),
+    true,
+    `audit:citations must run --strict (core#67); got: ${task}`,
+  );
+
+  // Both gates must go through the task rather than invoking the script
+  // directly, or the flag above stops covering them.
+  for (const f of [".githooks/pre-push", ".github/workflows/ci.yaml"]) {
+    const src = await Deno.readTextFile(new URL(`../${f}`, import.meta.url));
+    assertEquals(
+      src.includes("deno task audit:citations"),
+      true,
+      `${f} must invoke the citation audit via \`deno task audit:citations\``,
+    );
+    assertEquals(
+      /audit-plan-citations\.ts/.test(src.replace(/^\s*#.*$/gm, "")),
+      false,
+      `${f} must not call scripts/audit-plan-citations.ts directly — it would bypass --strict`,
+    );
+  }
+});

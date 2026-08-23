@@ -114,7 +114,7 @@ const LEDGER_NON_NEGATIVE: EnforcementRef = {
  * ⚠️ **Enumerated, not `string`.** Both factories mint their rule id as a
  * template literal over this union, so TypeScript expands it to the four
  * concrete ids and checks each against `RuleId` — a third caller without its two
- * ids declared in `ids.ts` stops compiling. `create-store-transfer` is
+ * ids declared in `propagation/ids.ts` stops compiling. `create-store-transfer` is
  * deliberately absent: it declares its own two edges in `store-transfers.ts`,
  * because a rule id is owned by the file that declares it.
  */
@@ -277,7 +277,7 @@ const reverseTransactionTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `transactions.ts` contributes to the propagation catalog. */
+/** Everything `propagation/transactions.ts` contributes to the propagation catalog. */
 export const transactions: PropagationModule = {
   rules: [
     ...createTransactionRules,

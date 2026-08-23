@@ -33,8 +33,9 @@ export interface Location {
    * `updateLocation`'s `{...existing, ...updates}` merge, `stageLocationUpdates`
    * / `stageLocationReversal`'s `transaction.set({...existing, …})`, and
    * `resyncLocationQuantities` all re-validate the whole doc, so a *required*
-   * field would 500 on any not-yet-backfilled location. (The `locationTypes.ts`
-   * cascade writes field-by-field via `validatedPatch`, never a full-doc parse,
+   * field would 500 on any not-yet-backfilled location. (The
+   * `api-cloudrun/src/services/locationTypes.ts` cascade writes field-by-field
+   * via `validatedPatch`, never a full-doc parse,
    * so it is not the constraint — do not narrow this optional window by it.)
    */
   name_key?: string;

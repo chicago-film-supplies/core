@@ -202,12 +202,20 @@ export function describesDeletion(text: string, at: number): boolean {
  *
  * ⚠️ **A correctness fix, not just noise reduction — it makes the local run
  * agree with CI.** In CI only the running repo is indexed, so a bare
- * `logger.ts` resolves to exactly one file there and is reported clean; in a
- * full workspace the cross-repo search also finds core's and reports ambiguous.
- * Two environments, two verdicts, same citation. Under this rule CI is a
- * **no-op** — there is nothing else indexed to narrow away — and the local run
- * stops inventing a finding CI will never reproduce. Measured over
+ * `<name>.ts` resolves to exactly one file there and is reported clean; in a
+ * full workspace the cross-repo search finds the other repos' too and reports
+ * ambiguous. Two environments, two verdicts, same citation. Under this rule CI
+ * is a **no-op** — there is nothing else indexed to narrow away — and the local
+ * run stops inventing a finding CI will never reproduce. Measured over
  * api-cloudrun's 161 local findings: **49 collapse to a single candidate**.
+ *
+ * ⚠️ The live pair is `api-cloudrun/src/lib/logger.ts` and
+ * `manager/src/utils/logger.ts`. This paragraph said *core's* until 2026-08-23,
+ * and core holds no file of that name at all — a worked example naming a file
+ * that does not exist, in the docstring of the very rule that exists to
+ * disambiguate file names. It survived because the example was written as a
+ * bare basename, which is precisely the form this audit could not check until
+ * core#67.
  *
  * ⚠️ **It narrows and never empties.** When no candidate is under the running
  * repo the whole set comes back unchanged — a citation naming only another

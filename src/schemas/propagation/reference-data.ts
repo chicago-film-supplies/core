@@ -493,7 +493,7 @@ const recomputeHolidayDraftInvoiceRules: CollectionRule[] = [
 ];
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `reference-data.ts` contributes to the propagation catalog. */
+/** Everything `propagation/reference-data.ts` contributes to the propagation catalog. */
 export const referenceData: PropagationModule = {
   rules: [
     ...updateTagRules,

@@ -89,7 +89,7 @@ const updateFulfillmentItemsTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `fulfillments.ts` contributes to the propagation catalog. */
+/** Everything `propagation/fulfillments.ts` contributes to the propagation catalog. */
 export const fulfillments: PropagationModule = {
   rules: [
     ...updateFulfillmentItemsRules,

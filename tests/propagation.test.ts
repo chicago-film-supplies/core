@@ -28,10 +28,10 @@ Deno.test("every propagation source file is registered in mod.ts", async () => {
   // Not modules: the type declarations, the id unions, the aggregate literal,
   // and the barrel itself.
   //
-  // ⚠️ `stock.ts` used to be exempted here on the grounds that it "declares no
-  // rules of its own", and that stopped being true when Tier 1 item 3 collapsed
+  // ⚠️ `propagation/stock.ts` used to be exempted here on the grounds that it
+  // "declares no rules of its own", and that stopped being true when Tier 1 item 3 collapsed
   // the seven `stockRules()` copies into one module. The exemption survived the
-  // collapse and left a real hole — dropping `stock.ts` from mod.ts's imports
+  // collapse and left a real hole — dropping `propagation/stock.ts` from mod.ts's imports
   // would have gone unnoticed by the one check that exists to see exactly that.
   const NOT_MODULES = new Set(["mod.ts", "types.ts", "ids.ts", "aggregates.ts"]);
   const dir = new URL("../src/schemas/propagation/", import.meta.url);
@@ -50,7 +50,7 @@ Deno.test("every propagation source file is registered in mod.ts", async () => {
 
 // ── The id unions ────────────────────────────────────────────────
 //
-// `ids.ts` declares `RuleId` and `TransactionId` as hand-written string-literal
+// `propagation/ids.ts` declares `RuleId` and `TransactionId` as hand-written string-literal
 // unions, because JSR's `no-slow-types` forces `rules`/`transactions` to be
 // annotated `CollectionRule[]`/`TransactionDefinition[]` and that erases every
 // literal id at the publish boundary (see that file for the full account).
@@ -59,8 +59,8 @@ Deno.test("every propagation source file is registered in mod.ts", async () => {
 // covers one direction only — a rule declared under an id the union does not
 // carry is a compile error. NOTHING compile-time can see the other direction: a
 // member of the union that no rule declares. These two tests are that half, and
-// they read `ids.ts`'s own source rather than its type, because a type cannot be
-// enumerated at runtime.
+// they read `propagation/ids.ts`'s own source rather than its type, because a
+// type cannot be enumerated at runtime.
 
 /** Pull the quoted members of one `export type X = | "a" | "b";` union. */
 async function unionMembers(name: string): Promise<string[]> {
@@ -68,7 +68,7 @@ async function unionMembers(name: string): Promise<string[]> {
     new URL("../src/schemas/propagation/ids.ts", import.meta.url),
   );
   const start = src.indexOf(`export type ${name} =`);
-  assertNotEquals(start, -1, `ids.ts declares no union named ${name}`);
+  assertNotEquals(start, -1, `propagation/ids.ts declares no union named ${name}`);
   const end = src.indexOf(";", start);
   assertNotEquals(end, -1, `the ${name} union is not terminated`);
   const body = src.slice(start, end);
@@ -112,7 +112,7 @@ Deno.test("TransactionId names exactly the transactions the catalog declares", a
 });
 
 Deno.test("the rule and transaction id namespaces are disjoint", () => {
-  // `ids.ts` states this, and callers rely on it: `logPropagation` and
+  // `propagation/ids.ts` states this, and callers rely on it: `logPropagation` and
   // `logTransactionPropagation` take different id namespaces, and an id that is
   // both would resolve in either function by accident rather than by intent.
   const txIds = new Set(transactions.map((t) => t.id as string));
@@ -176,9 +176,9 @@ Deno.test("aggregate member collections exist in schemas", () => {
 // naming a field its target schema lacks would stop compiling. Three findings
 // against that:
 //
-// 1. **The type buys nothing at the publish boundary.** `mod.ts` must declare
+// 1. **The type buys nothing at the publish boundary.** `propagation/mod.ts` must declare
 //    `export const rules: CollectionRule[]` for JSR's `no-slow-types`, which
-//    erases every generic parameter — the same erasure `ids.ts` documents for
+//    erases every generic parameter — the same erasure `propagation/ids.ts` documents for
 //    rule ids. So a generic `CollectionRule<S, T>` protects only inside this
 //    package, which is exactly where this test runs. Same coverage, none of the
 //    publish-boundary risk that cost core#43 and core#44.

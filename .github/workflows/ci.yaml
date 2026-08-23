@@ -52,5 +52,10 @@ jobs:
       # citation naming an api-cloudrun file is BROKEN rather than merely
       # ambiguous. 65 of those existed when this landed; a full-workspace run
       # could see only 22 of them.
+      #
+      # ⚠️ The task carries `--strict` as of core#67, so AMBIGUOUS fails here
+      # too, not just BROKEN. The flag sits in the `deno.json` task rather than
+      # at this call site: `.githooks/pre-push` runs the same task, and two
+      # copies of one flag is how the two gates start disagreeing.
       - name: Citations
         run: deno task audit:citations

@@ -519,7 +519,7 @@ export const PriceFormulaEnum: z.ZodType<PriceFormulaType> = z.enum(PRICE_FORMUL
 
 // `ITEM_TAX_PROFILES` / `ItemTaxProfileType` / `ItemTaxProfileEnum` were removed
 // here (api-cloudrun#435). They were a THIRD tax vocabulary beside
-// `TAX_PROFILES` and the live COA→tax map, exported from `mod.ts` and used by
+// `TAX_PROFILES` and the live COA→tax map, exported from `schemas/mod.ts` and used by
 // nothing — no schema field was typed with them, and the one place their string
 // values appeared was `chart-of-accounts.default_tax_profile`, which was
 // `z.string()` and is deleted in the same change.
@@ -616,7 +616,7 @@ void _itemTypeParity;
 /**
  * The per-type rules an `items[]` entry must satisfy, one entry per
  * {@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in
- * `transaction.ts`: a table the schema reads, so a contradiction is reported by
+ * `schemas/transaction.ts`: a table the schema reads, so a contradiction is reported by
  * the schema instead of restated in every consumer.
  *
  * **The table carries only the axes that vary by TYPE.** The axes that vary by
@@ -745,7 +745,7 @@ export function checkItemPriceFormula(
  * The full per-item contract check — {@link checkItemPriceFormula} plus the
  * `replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,
  * the one item shape whose price carries a `replacement` channel. The direct
- * analogue of `checkMovementContract` in `transaction.ts`.
+ * analogue of `checkMovementContract` in `schemas/transaction.ts`.
  *
  * `required_when_stocked` treats a MISSING `stock_method` as stocked — the
  * conservative reading, and the one the hand-written refine this replaced always
@@ -1054,7 +1054,7 @@ export const OOSReasonEnum: z.ZodType<OOSReasonType> = z.enum(OOS_REASONS);
 // ── Settlements ──────────────────────────────────────────────────
 //
 // The vocabulary of the `settlements` journal — the revenue-side twin of the
-// `transactions` movement journal. It lives in `common.ts` rather than in
+// `transactions` movement journal. It lives in `schemas/common.ts` rather than in
 // `settlement.ts` because `credit-notes` shares the reason enum: one credit
 // note allocated across three invoices has ONE reason, denormalized onto each
 // settlement, and authoring it three times invites three answers.

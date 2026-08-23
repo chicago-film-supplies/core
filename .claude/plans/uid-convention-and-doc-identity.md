@@ -28,7 +28,7 @@ Read Findings 1–3 for the evidence, then Phase 0. The one thing to internalise
 
 **No action.** Two adjacent gaps surfaced, neither about `uid` — both filed as issues rather than folded in:
 
-- `TypesenseDocumentMap` (`core/src/schemas/typesense/documents.ts:878`) covers 20 of 22 aliases — `cards` and `threads` have configs but no typed search-hit shape, and no `CardDocument` / `ThreadDocument` exists at all. ⚠️ **Not latent for `cards`**: `cards.ts:26` is `enabled: true` (only `threads` and `bookings` are `enabled: false`, and `bookings` *is* in the map), so a live index is unreachable from manager's typed search surface, which is generic over `keyof TypesenseDocumentMap`.
+- `TypesenseDocumentMap` (`core/src/schemas/typesense/documents.ts:878`) covers 20 of 22 aliases — `cards` and `threads` have configs but no typed search-hit shape, and no `CardDocument` / `ThreadDocument` exists at all. ⚠️ **Not latent for `cards`**: `core/src/schemas/typesense/cards.ts:26` is `enabled: true` (only `threads` and `bookings` are `enabled: false`, and `bookings` *is* in the map), so a live index is unreachable from manager's typed search surface, which is generic over `keyof TypesenseDocumentMap`.
 - (core#60) `api-cloudrun/src/services/reindexTypesense.ts:119` builds its orphan-purge set from the **Firestore doc id** while the import keys on **`data.uid`**; they agree only because of the write guard.
 
 ---
@@ -96,7 +96,7 @@ Phase 0 is a `docs:` commit — no release.
 
 One writer (`api-cloudrun/src/lib/webhooks.ts:32-38`), **zero readers of the field** (every consumer checks `snap.exists` only), no test constructs the literal, no route or MCP surface, and a **24 h TTL** (`api-cloudrun/infra/firestore.tf:57`). Deploy and wait a day; no backfill, no shim.
 
-⚠️ The rename does **not** buy the drift guard here: `webhooks.ts:44` calls `validateBeforeWrite` directly and `:59` does a raw `eventRef.create(doc)`, so `assertValidForWrite` never runs on this path. Convention only.
+⚠️ The rename does **not** buy the drift guard here: `api-cloudrun/src/lib/webhooks.ts:44` calls `validateBeforeWrite` directly and `:59` does a raw `eventRef.create(doc)`, so `assertValidForWrite` never runs on this path. Convention only.
 
 ### 1b. `mcp-oauth-authorize-requests.id` → `uid` — near-free, but it has a public contract
 

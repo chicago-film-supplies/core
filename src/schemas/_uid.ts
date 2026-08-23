@@ -17,7 +17,7 @@
  * | *(none)*         | third-party uuid                        | `uploadcare-worklist.uuid` — an Uploadcare id, so `uuid` not `uid`; see the carve-outs below |
  *
  * Carve-outs that intentionally stay looser: `ActorRef.uid` (free-form
- * historical actors — see `common.ts`), `DocSource.uid` / `UidNameRef.uid`
+ * historical actors — see `schemas/common.ts`), `DocSource.uid` / `UidNameRef.uid`
  * (polymorphic), divider-item `uid` (native `z.uuid()`), and third-party
  * UUIDs (`uploadcare_uuid`, `xero_id`).
  *
@@ -84,7 +84,7 @@ export const BookingId: z.ZodType<string> = bookingId;
  * produces several event types against one subject ("return 2, mark 1 damaged"
  * is two picker actions on one booking), so session+subject alone would collide.
  * It is matched loosely here (`[a-z][a-z_]*`) rather than against
- * `MOVEMENT_TYPES` — `transaction.ts` imports this module, so the reverse
+ * `MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse
  * dependency would be a cycle, and the `type` **field** is the authority
  * anyway. The id only has to be well-formed and stable.
  *

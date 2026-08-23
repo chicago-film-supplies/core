@@ -95,7 +95,7 @@ on_call            Role.name regex: true   AnyUid (thread sources[].uid): false
 
 Follow the existing `PERMISSIONS` / `Permission` precedent (`core/src/schemas/permissions.ts:11,189`), which `api-cloudrun/src/routes/roleAdmin.ts:19` already imports.
 
-- **`RoleId` in `core/src/schemas/_uid.ts`** — reachable with **no new export subpath**: `_uid.ts` is internal, but its validators are already re-exported through `common.ts` into the `./schemas` barrel (`core/src/schemas/mod.ts:299`).
+- **`RoleId` in `core/src/schemas/_uid.ts`** — reachable with **no new export subpath**: `_uid.ts` is internal, but its validators are already re-exported through `core/src/schemas/common.ts` into the `./schemas` barrel (`core/src/schemas/mod.ts:299`).
   One definition of the role-name shape, replacing all **seven** enforcing copies — `role.ts:65`, `session.ts:42`, `roleAdmin.ts:41`, `:58`, **`:425` (the bare `.test()`)**, `auth.ts:169`, `RolesManager.tsx:11` — plus the prose copy at `api-cloudrun/tests/unit/permissionCache.test.ts:19`.
   **Decide the underscore question here and settle it once. Recommendation: drop underscores**, so `RoleId` and `AnyUid`'s slug arm agree — all 6 live roles comply, and it fixes the `on_call` defect. Then point `AnyUid`'s and `ListId`'s slug arms at the same fragment so they can never diverge again.
 - **`SEEDED_ROLE_NAMES` as an `as const` tuple + a `SeededRoleName` type** for the 6 git-declared roles, so the hardcoded literals become compile-checked:
@@ -201,24 +201,24 @@ Measured against prod (`cfs-3100`, 2026-08-17):
 
 A rename that rewrites `threads.sources[]` and the `comments.sources[]` denorm is a propagation and must be declared. Read `core/CLAUDE.md` § *Propagation* first — one `PropagationModule` per file, a rule id is owned by the file that declares it, factories are file-local.
 
-**`core/src/schemas/propagation/ids.ts` — hand-written unions** (and `ids.ts:1-41` explains why they cannot be derived: JSR `no-slow-types` erases the literals at the publish boundary). `tests/propagation.test.ts` asserts **set equality in both directions** against the folded catalog, so an id added in one place and not the other is red. Add:
+**`core/src/schemas/propagation/ids.ts` — hand-written unions** (and `propagation/ids.ts:1-41` explains why they cannot be derived: JSR `no-slow-types` erases the literals at the publish boundary). `tests/propagation.test.ts` asserts **set equality in both directions** against the folded catalog, so an id added in one place and not the other is red. Add:
 
 - `TransactionId`: `"rename-role"`
 - `RuleId`: `"rename-role:name-to-thread-sources"`, `"rename-role:name-to-comment-sources"`, `"rename-role:name-to-user-roles"`, `"rename-role:name-to-invite-roles"`, `"rename-role:name-to-session-preview"`
 
-**Owning file: `core/src/schemas/propagation/threads.ts`.** It already owns every `roles`-sourced rule and the roles↔threads relationship; `users.ts`'s rules are all sourced *from* `users`. Declare all five there and put them under that file's header comment in `ids.ts`. The model to copy is `createRoleTransaction` (`threads.ts:204-213`) and, for a rewrite-shaped rule, `update-user:name-to-actor-refs` (`propagation/users.ts:82`, reached from a transaction's `steps` at `:122`).
+**Owning file: `core/src/schemas/propagation/threads.ts`.** It already owns every `roles`-sourced rule and the roles↔threads relationship; `propagation/users.ts`'s rules are all sourced *from* `users`. Declare all five there and put them under that file's header comment in `propagation/ids.ts`. The model to copy is `createRoleTransaction` (`propagation/threads.ts:220`) and, for a rewrite-shaped rule, `update-user:name-to-actor-refs` (`propagation/users.ts:82`, reached from a transaction's `steps` at `:122`).
 
-⚠️ **Field paths are PATHS, not sibling lists** — the class-A defect from api-cloudrun#568, which type-checks because `FieldPath` is `string[]`. Write `{ source: ["name"], target: ["sources","uid"] }`, matching `cowriteRulesFor`'s own `{ source: [idField], target: ["sources","uid"] }` (`threads.ts:112`).
+⚠️ **Field paths are PATHS, not sibling lists** — the class-A defect from api-cloudrun#568, which type-checks because `FieldPath` is `string[]`. Write `{ source: ["name"], target: ["sources","uid"] }`, matching `cowriteRulesFor`'s own `{ source: [idField], target: ["sources","uid"] }` (`propagation/threads.ts:117`).
 
 ✅ **All four fan-out targets are legal `PropagationEndpoint`s** — verified in `CollectionDocs`: `comments:1138`, `invites:1153`, `roles:1184`, `sessions:1186`, `threads:1201`, `users:1207` (`core/src/schemas/mod.ts`).
 
-**`enforced_by` (`EnforcementRef`, `propagation/types.ts:118-137` — needs `kind`, `ref`, optional `clause`, required `gates`):**
+**`enforced_by` (`EnforcementRef`, `propagation/types.ts:120-153` — needs `kind`, `ref`, optional `clause`, required `gates`):**
 
-- ⭐ `api-cloudrun/scripts/audit-default-threads.ts` **property 3 (MIRROR)** — *"the comment's denormalized sources[] still equals its thread's"*. **This is exactly the invariant a rename breaks if it rewrites threads but not comments**, it `gates: true`, and it is already cited at `threads.ts:82-96,216-222`. Strongest available ref; also run it as the post-rename check.
+- ⭐ `api-cloudrun/scripts/audit-default-threads.ts` **property 3 (MIRROR)** — *"the comment's denormalized sources[] still equals its thread's"*. **This is exactly the invariant a rename breaks if it rewrites threads but not comments**, it `gates: true`, and it is already cited at `propagation/threads.ts:243-245`. Strongest available ref; also run it as the post-rename check.
 - `api-cloudrun/scripts/audit-env-definitions.ts` — diffs live `roles/*.permissions` against `api-cloudrun/scripts/rbacRoles.ts` per environment.
 - `api-cloudrun/scripts/audit-propagation-observed-writes.ts` — ⚠️ read its limits (`:31-50`) before citing: only 14 of 60 declared transactions ran in prod over 30 days, so a clean run proves nothing about an unexercised transaction.
-- 🔴 **Do NOT cite `audit-name-forms.ts`.** `propagation/types.ts:159-165` names it as *the* disqualifying example: it reads as though it owns the name cascades and only compares an embedded ref against its own fields, so *a rename reaching zero targets passes it.*
-- Recommended new detector, not yet written, which would earn `gates: true` if it exits non-zero (`types.ts:130-135`): `api-cloudrun/scripts/audit-role-name-integrity.ts` — no `users[].roles[]` / `invites.roles[]` / `sessions.preview_role` / `threads.sources[]` / `comments.sources[]` names a role with no doc, and every `roles/{id}.name === id`.
+- 🔴 **Do NOT cite `audit-name-forms.ts`.** `propagation/types.ts:183-188` names it as *the* disqualifying example: it reads as though it owns the name cascades and only compares an embedded ref against its own fields, so *a rename reaching zero targets passes it.*
+- Recommended new detector, not yet written, which would earn `gates: true` if it exits non-zero (`propagation/types.ts:146-152`): `api-cloudrun/scripts/audit-role-name-integrity.ts` — no `users[].roles[]` / `invites.roles[]` / `sessions.preview_role` / `threads.sources[]` / `comments.sources[]` names a role with no doc, and every `roles/{id}.name === id`.
 
 **Wiring on the api side:** route description via `getPropagationMarkdown("rename-role")` (`api-cloudrun/src/lib/propagation-docs.ts:51`, as `roleAdmin.ts:180`); fire `logTransactionPropagation("rename-role", { source_doc_id, status, duration_ms, rules_fired: [...], target_counts })` (`api-cloudrun/src/lib/logPropagation.ts:110`; `target_counts` is **required** on the closed context type at `:46-63`), modelled on `roleAdmin.ts:243-254`. ⚠️ `api-cloudrun/tests/unit/propagationCoverage.test.ts` asserts every declared step is fired **by that transaction** and **strips comment lines before matching** (`:14-33`) — a rule id that appears only in a docstring will not satisfy it.
 
@@ -234,7 +234,7 @@ A rename that rewrites `threads.sources[]` and the `comments.sources[]` denorm i
 
 | Repo | File | Change |
 |---|---|---|
-| core | `src/schemas/propagation/ids.ts` | `"rename-role"` on `TransactionId`; 5 rule ids on `RuleId`, under the `threads.ts` header |
+| core | `src/schemas/propagation/ids.ts` | `"rename-role"` on `TransactionId`; 5 rule ids on `RuleId`, under the `propagation/threads.ts` header |
 | core | `src/schemas/propagation/threads.ts` | declare the 5 rules + `renameRoleTransaction`; append to the file's single `PropagationModule` |
 | api | `api-cloudrun/src/services/roles.ts` **(not yet written)** | `renameRole()` — preflight, `runInstrumentedTransaction("rename-role")` for the role doc, batched fan-out via `flushBatchedWrites`, typed counts, `logTransactionPropagation` |
 | api | `api-cloudrun/src/routes/roleAdmin.ts` | new protected route beside delete (`:336`), `getPropagationMarkdown("rename-role")`, `invalidateRoleCache(old)` **and** `(new)` |

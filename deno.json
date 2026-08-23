@@ -78,7 +78,7 @@
   "tasks": {
     "test": "deno test --allow-read --allow-run --allow-write tests/",
     "lint": "deno lint",
-    "audit:citations": "deno run --allow-read --allow-env scripts/audit-plan-citations.ts",
+    "audit:citations": "deno run --allow-read --allow-env scripts/audit-plan-citations.ts --strict",
     "check": "deno check src/ scripts/ tests/",
     "setup": "deno install && git config core.hooksPath .githooks && deno task fetch-llms-docs",
     "fetch-llms-docs": "deno run --allow-net=zod.dev,docs.deno.com --allow-read --allow-write scripts/fetch-llms-docs.ts",

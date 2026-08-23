@@ -12,7 +12,7 @@
  * So `code` is now a plain positive integer and **membership is a lookup in this
  * collection**, refreshed by `api-cloudrun/scripts/reconcile-chart-of-accounts.ts`.
  * That kills four of the five hand-maintained copies of the account list; the
- * fifth, `COA_REVENUE_CODES` in `common.ts`, is deliberately kept because it is a
+ * fifth, `COA_REVENUE_CODES` in `schemas/common.ts`, is deliberately kept because it is a
  * *policy* subset (what a product or an invoice line may be coded to), not a
  * catalog.
  *

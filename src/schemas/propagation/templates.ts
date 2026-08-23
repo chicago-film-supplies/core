@@ -398,7 +398,7 @@ const publishTemplateTransaction: TransactionDefinition = {
   ],
 };
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `templates.ts` contributes to the propagation catalog. */
+/** Everything `propagation/templates.ts` contributes to the propagation catalog. */
 export const templates: PropagationModule = {
   rules: [
     ...createTemplateRules,

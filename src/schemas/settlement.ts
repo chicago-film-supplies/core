@@ -7,7 +7,7 @@
  * only in `type` and `reason`.
  *
  * CFS puts event journals in collections and value-detail in arrays. `items[]`
- * is detail; movements are events; a settlement is an event. `transaction.ts`
+ * is detail; movements are events; a settlement is an event. `schemas/transaction.ts`
  * draws the boundary from the other side — *"cost is cost only, never revenue —
  * customer-facing money lives in Xero"* — so the shape is the model and revenue
  * is exactly what it excludes. This is that missing half.

@@ -184,7 +184,7 @@ const deleteCardTransaction: TransactionDefinition = {
   ],
 };
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `cards.ts` contributes to the propagation catalog. */
+/** Everything `propagation/cards.ts` contributes to the propagation catalog. */
 export const cards: PropagationModule = {
   rules: [
     ...createCardRules,

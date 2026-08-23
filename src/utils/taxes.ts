@@ -49,10 +49,10 @@ import {
 // taxes ↔ orders import cycle).
 export { computeItemTaxAmountCents, type Tax };
 
-// The line-taxability rule lives in `orders.ts` for the same reason
-// `computeItemTaxAmountCents` does — `taxes.ts` depends one-way on `orders.ts`, and
-// the pricing engine there needs the gate. Re-exported so consumers can import
-// everything tax-related from `@cfs/core/utils/taxes`.
+// The line-taxability rule lives in `utils/orders.ts` for the same reason
+// `computeItemTaxAmountCents` does — `utils/taxes.ts` depends one-way on
+// `utils/orders.ts`, and the pricing engine there needs the gate. Re-exported
+// so consumers can import everything tax-related from `@cfs/core/utils/taxes`.
 export { isTaxableCoa, TAXABLE_REVENUE_COAS };
 
 /**

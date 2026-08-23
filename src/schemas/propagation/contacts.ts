@@ -259,7 +259,7 @@ const updateContactTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `contacts.ts` contributes to the propagation catalog. */
+/** Everything `propagation/contacts.ts` contributes to the propagation catalog. */
 export const contacts: PropagationModule = {
   rules: [
     ...createContactRules,

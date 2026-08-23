@@ -317,7 +317,7 @@ const voidCreditNoteTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `credit-notes.ts` contributes to the propagation catalog. */
+/** Everything `propagation/credit-notes.ts` contributes to the propagation catalog. */
 export const creditNotes: PropagationModule = {
   rules: [
     ...createCreditNoteRules,

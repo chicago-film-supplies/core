@@ -1,5 +1,5 @@
 /**
- * Structural invariant: no log record schema may reach `common.ts`.
+ * Structural invariant: no log record schema may reach `schemas/common.ts`.
  *
  * `createLoggerStrategy` descends into a `pii`-tagged container rather than
  * replacing it, so that a masked `Address` keeps its `city` / `region` /
@@ -43,7 +43,7 @@ function label(href: string): string {
  *
  * This is not hypothetical. `log/xero-event.ts:14` does
  * `import type { XeroThrottleResetsAtSource } from "../xero-budget.ts"`, and
- * `xero-budget.ts` imports `FirestoreTimestamp` from `common.ts` — so a
+ * `xero-budget.ts` imports `FirestoreTimestamp` from `schemas/common.ts` — so a
  * value-blind walk reports `log/xero-event.ts → xero-budget.ts → common.ts` and
  * fails. Its leaves are nonetheless all bare strings and numbers, because the
  * type is erased. Following value edges only reports it correctly as clean, and

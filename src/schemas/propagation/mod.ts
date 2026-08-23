@@ -18,7 +18,7 @@
  *
  * ⚠️ **A runtime glob here would be fatal, not merely inelegant** — manager
  * pulls this into a browser and JSR serves it over `https:`, and neither has a
- * directory to read or a `Deno` global. See `types.ts`'s `PropagationModule`.
+ * directory to read or a `Deno` global. See `propagation/types.ts`'s `PropagationModule`.
  */
 
 import type {
@@ -80,7 +80,7 @@ export { aggregates } from "./aggregates.ts";
 /**
  * Every propagation source file, in declaration order.
  *
- * `stock.ts` declares the four stock edges once and exports `STOCK_STEPS`, the
+ * `propagation/stock.ts` declares the four stock edges once and exports `STOCK_STEPS`, the
  * shared step tuple its seven firing transactions reference. It is the only
  * file that exports anything besides its module, and that is deliberate — see
  * its own docstring.

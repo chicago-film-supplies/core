@@ -95,7 +95,7 @@ const updateStoreRules: CollectionRule[] = [
 ];
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `stores.ts` contributes to the propagation catalog. */
+/** Everything `propagation/stores.ts` contributes to the propagation catalog. */
 export const stores: PropagationModule = {
   rules: [
     ...createStoreRules,

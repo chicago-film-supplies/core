@@ -53,7 +53,7 @@ Each of these is the row's "headline" field — clicking it opens the row's own 
 | `src/schemas/contact.ts` | `ContactSchema.first_name` / `middle_name` / `last_name` / `pronunciation` | `contactDetail` |
 | `src/schemas/organization.ts` | `OrganizationSchema.name` | `organizationDetail` |
 
-Note: the name fragments in `common.ts` (`NameFields`) are reused. If it's feasible to annotate them there and have it propagate, great — otherwise annotating per-collection is fine.
+Note: the name fragments in `src/schemas/common.ts` (`NameFields`) are reused. If it's feasible to annotate them there and have it propagate, great — otherwise annotating per-collection is fine.
 
 ### Cross-entity reference fields (nested objects that link to *another* entity)
 

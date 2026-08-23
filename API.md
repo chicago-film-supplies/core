@@ -686,7 +686,7 @@ Zod schema for CacheGeocodes.
 
 Every field here except the timestamps describes ONE customer address, so the
 whole document is PII and is tagged as such. It is the untagged twin of
-`Address` (`common.ts`) — hand-rolled from the Mapbox response rather than
+`Address` (`schemas/common.ts`) — hand-rolled from the Mapbox response rather than
 reusing the primitive — and it stayed untagged because `cache-geocodes` was
 not in `tests/pii.test.ts`'s old hand-maintained schema list.
 
@@ -1374,7 +1374,7 @@ Schema for a `component_of` back-reference. `inclusion_type` is optional here
 because the parent authors it — see {@link ProductComponent}.
 
 A catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset
-of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),
+of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `schemas/common.ts`),
 and every component that survives expansion becomes an order line of the same
 `type`. So it answers to the same contract, and the rental ⇒
 `price.replacement_cents` rule is stated once rather than a third time here.
@@ -2119,7 +2119,7 @@ A credited line.
 **`coa_revenue` is required, not optional.** A credit spanning lines with
 different revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)
 cannot be posted correctly from a document-level amount, and apportioning it
-afterwards is inferring cause from effect — the thing `transaction.ts` warns
+afterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns
 against. This is also the gap Xero *has*: its allocation view carries
 `LineItems: []`, and Odoo's users pay OCA for a module that adds line-level
 provenance.
@@ -3864,7 +3864,7 @@ type InvoiceVoided = EventEnvelope<Invoice> & typeLiteral;
 
 The per-type rules an `items[]` entry must satisfy, one entry per
 {@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in
-`transaction.ts`: a table the schema reads, so a contradiction is reported by
+`schemas/transaction.ts`: a table the schema reads, so a contradiction is reported by
 the schema instead of restated in every consumer.
 
 **The table carries only the axes that vary by TYPE.** The axes that vary by
@@ -5966,7 +5966,7 @@ Everything one propagation source file contributes to the catalog.
 
 ⚠️ **Each file in this directory exports exactly ONE of these, and nothing
 else.** That is the whole convention, and it exists to make a class of drift
-unrepresentable rather than to police it: `mod.ts` used to re-export 141
+unrepresentable rather than to police it: `propagation/mod.ts` used to re-export 141
 individual symbols by hand and `schemas/mod.ts` re-exported 81 of them, so
 **60 had silently drifted out of the barrel with nothing noticing.** A list
 that has to be maintained in four places is the defect; deriving a better
@@ -5980,12 +5980,12 @@ effects:
   used to do this (`cardRules`, `templateRules`, `recurrenceRules`,
   `threadCowriteRules`) are gone, and the "array in neither test mirror"
   category ceased to exist rather than gaining a guard.
-- `mod.ts`'s import block and its `MODULES` array check each other for free:
+- `propagation/mod.ts`'s import block and its `MODULES` array check each other for free:
   a name in `MODULES` but not imported is a compile error, and an import not
   in `MODULES` is a `deno lint` error. Only the directory listing itself
   needs a test.
 
-⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `mod.ts` to close
+⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `propagation/mod.ts` to close
 that last gap** — this module is imported by the browser via manager and
 over `https:` from JSR, where there is no directory to read and no `Deno`.
 `src/` is platform-free by deliberate policy.
@@ -8831,7 +8831,7 @@ instead of throwing on an undefined lookup.
 The full per-item contract check — {@link checkItemPriceFormula} plus the
 `replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,
 the one item shape whose price carries a `replacement` channel. The direct
-analogue of `checkMovementContract` in `transaction.ts`.
+analogue of `checkMovementContract` in `schemas/transaction.ts`.
 
 `required_when_stocked` treats a MISSING `stock_method` as stocked — the
 conservative reading, and the one the hand-written refine this replaced always
@@ -9524,7 +9524,7 @@ Everything one propagation source file contributes to the catalog.
 
 ⚠️ **Each file in this directory exports exactly ONE of these, and nothing
 else.** That is the whole convention, and it exists to make a class of drift
-unrepresentable rather than to police it: `mod.ts` used to re-export 141
+unrepresentable rather than to police it: `propagation/mod.ts` used to re-export 141
 individual symbols by hand and `schemas/mod.ts` re-exported 81 of them, so
 **60 had silently drifted out of the barrel with nothing noticing.** A list
 that has to be maintained in four places is the defect; deriving a better
@@ -9538,12 +9538,12 @@ effects:
   used to do this (`cardRules`, `templateRules`, `recurrenceRules`,
   `threadCowriteRules`) are gone, and the "array in neither test mirror"
   category ceased to exist rather than gaining a guard.
-- `mod.ts`'s import block and its `MODULES` array check each other for free:
+- `propagation/mod.ts`'s import block and its `MODULES` array check each other for free:
   a name in `MODULES` but not imported is a compile error, and an import not
   in `MODULES` is a `deno lint` error. Only the directory listing itself
   needs a test.
 
-⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `mod.ts` to close
+⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `propagation/mod.ts` to close
 that last gap** — this module is imported by the browser via manager and
 over `https:` from JSR, where there is no directory to read and no `Deno`.
 `src/` is platform-free by deliberate policy.
@@ -10113,7 +10113,7 @@ type InvoiceStatusType = indexedAccess;
 
 The per-type rules an `items[]` entry must satisfy, one entry per
 {@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in
-`transaction.ts`: a table the schema reads, so a contradiction is reported by
+`schemas/transaction.ts`: a table the schema reads, so a contradiction is reported by
 the schema instead of restated in every consumer.
 
 **The table carries only the axes that vary by TYPE.** The axes that vary by
@@ -10634,7 +10634,7 @@ interface UidNameRefType {
 The full per-item contract check — {@link checkItemPriceFormula} plus the
 `replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,
 the one item shape whose price carries a `replacement` channel. The direct
-analogue of `checkMovementContract` in `transaction.ts`.
+analogue of `checkMovementContract` in `schemas/transaction.ts`.
 
 `required_when_stocked` treats a MISSING `stock_method` as stocked — the
 conservative reading, and the one the hand-written refine this replaced always
@@ -11111,7 +11111,7 @@ Zod schema for CacheGeocodes.
 
 Every field here except the timestamps describes ONE customer address, so the
 whole document is PII and is tagged as such. It is the untagged twin of
-`Address` (`common.ts`) — hand-rolled from the Mapbox response rather than
+`Address` (`schemas/common.ts`) — hand-rolled from the Mapbox response rather than
 reusing the primitive — and it stayed untagged because `cache-geocodes` was
 not in `tests/pii.test.ts`'s old hand-maintained schema list.
 
@@ -14151,7 +14151,7 @@ Schema for a `component_of` back-reference. `inclusion_type` is optional here
 because the parent authors it — see {@link ProductComponent}.
 
 A catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset
-of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),
+of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `schemas/common.ts`),
 and every component that survives expansion becomes an order line of the same
 `type`. So it answers to the same contract, and the rental ⇒
 `price.replacement_cents` rule is stated once rather than a third time here.
@@ -14730,7 +14730,7 @@ A credited line.
 **`coa_revenue` is required, not optional.** A credit spanning lines with
 different revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)
 cannot be posted correctly from a document-level amount, and apportioning it
-afterwards is inferring cause from effect — the thing `transaction.ts` warns
+afterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns
 against. This is also the gap Xero *has*: its allocation view carries
 `LineItems: []`, and Odoo's users pay OCA for a module that adds line-level
 provenance.
@@ -14901,7 +14901,7 @@ type-blind by design — a cash payment and a credit-note allocation differ
 only in `type` and `reason`.
 
 CFS puts event journals in collections and value-detail in arrays. `items[]`
-is detail; movements are events; a settlement is an event. `transaction.ts`
+is detail; movements are events; a settlement is an event. `schemas/transaction.ts`
 draws the boundary from the other side — *"cost is cost only, never revenue —
 customer-facing money lives in Xero"* — so the shape is the model and revenue
 is exactly what it excludes. This is that missing half.
@@ -24523,12 +24523,20 @@ Narrow a citation's candidate files to the RUNNING repo's, when it has any.
 
 ⚠️ **A correctness fix, not just noise reduction — it makes the local run
 agree with CI.** In CI only the running repo is indexed, so a bare
-`logger.ts` resolves to exactly one file there and is reported clean; in a
-full workspace the cross-repo search also finds core's and reports ambiguous.
-Two environments, two verdicts, same citation. Under this rule CI is a
-**no-op** — there is nothing else indexed to narrow away — and the local run
-stops inventing a finding CI will never reproduce. Measured over
+`<name>.ts` resolves to exactly one file there and is reported clean; in a
+full workspace the cross-repo search finds the other repos' too and reports
+ambiguous. Two environments, two verdicts, same citation. Under this rule CI
+is a **no-op** — there is nothing else indexed to narrow away — and the local
+run stops inventing a finding CI will never reproduce. Measured over
 api-cloudrun's 161 local findings: **49 collapse to a single candidate**.
+
+⚠️ The live pair is `api-cloudrun/src/lib/logger.ts` and
+`manager/src/utils/logger.ts`. This paragraph said *core's* until 2026-08-23,
+and core holds no file of that name at all — a worked example naming a file
+that does not exist, in the docstring of the very rule that exists to
+disambiguate file names. It survived because the example was written as a
+bare basename, which is precisely the form this audit could not check until
+core#67.
 
 ⚠️ **It narrows and never empties.** When no candidate is under the running
 repo the whole set comes back unchanged — a citation naming only another

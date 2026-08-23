@@ -232,7 +232,7 @@ const crmsMemberContactTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `crms-ingest.ts` contributes to the propagation catalog. */
+/** Everything `propagation/crms-ingest.ts` contributes to the propagation catalog. */
 export const crmsIngest: PropagationModule = {
   rules: [],
   transactions: [

@@ -407,7 +407,7 @@ const createProductTransaction: TransactionDefinition = {
     "create-product:product-to-components",
     "create-product:product-to-ledger",
     "create-product:product-to-opening-movement",
-    // Shared step, declared in `transactions.ts`: the opening movement folds
+    // Shared step, declared in `propagation/transactions.ts`: the opening movement folds
     // onto the location documents through the same applier `create-transaction`
     // uses. Measured undeclared in prod 2026-08-17 (`locations`, 11 records).
     "create-transaction:transaction-to-locations",
@@ -767,8 +767,8 @@ const updateProductRules: CollectionRule[] = [
       // ⚠️ **No "public twin" and no `type` half — both were declared here long
       // after they stopped existing (corrected 2026-08-17, core#55).**
       // `public-stock-summaries` collapsed into `stock/{P}` and the
-      // `stock-summary-to-public` edge was deleted outright — `stock.ts` in this
-      // directory says so. And `StockSchema` is a `z.strictObject` whose header
+      // `stock-summary-to-public` edge was deleted outright — `propagation/stock.ts`
+      // says so. And `StockSchema` is a `z.strictObject` whose header
       // reads "**No `type`.**", so a projection carrying one is a
       // `validateBeforeWrite` REJECTION, not a drift: the old
       // `{ source: ["type"], target: ["type"] }` mapping declared a write the
@@ -847,7 +847,7 @@ const updateProductTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `products.ts` contributes to the propagation catalog. */
+/** Everything `propagation/products.ts` contributes to the propagation catalog. */
 export const products: PropagationModule = {
   rules: [
     ...createProductRules,

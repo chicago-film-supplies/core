@@ -872,7 +872,7 @@ const updateOrderTransaction: TransactionDefinition = {
     "update-order:ledger-to-bookings",
     ...STOCK_STEPS,
     "update-order:order-to-cards",
-    // Shared steps, declared in `cards.ts` and fired here: a minted event card
+    // Shared steps, declared in `propagation/cards.ts` and fired here: a minted event card
     // gets its thread cowritten by the same helper `create-card` uses. Measured
     // undeclared in prod 2026-08-17 (`update-order` wrote `threads`), and
     // `services/orders.ts` was already PUSHING both ids into `rules_fired`
@@ -1330,7 +1330,7 @@ const processOrderDocsTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `orders.ts` contributes to the propagation catalog. */
+/** Everything `propagation/orders.ts` contributes to the propagation catalog. */
 export const orders: PropagationModule = {
   rules: [
     ...createOrderRules,

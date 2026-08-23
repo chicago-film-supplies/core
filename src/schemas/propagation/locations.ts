@@ -126,7 +126,7 @@ const updateLocationTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `locations.ts` contributes to the propagation catalog. */
+/** Everything `propagation/locations.ts` contributes to the propagation catalog. */
 export const locations: PropagationModule = {
   rules: [
     ...createLocationRules,

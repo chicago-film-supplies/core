@@ -117,7 +117,7 @@ const STOCK_BICONDITIONAL: EnforcementRef = {
  * The three shared stock edges, in the order `assembleStockResult` performs them.
  *
  * ⚠️ **These are STEP IDS other modules reference, and that is why this file has
- * a second export.** The one-module-per-file convention (`types.ts`
+ * a second export.** The one-module-per-file convention (`propagation/types.ts`
  * `PropagationModule`) is about what a file contributes to the *catalog*; a
  * shared `as const` step tuple is the sanctioned companion, because the
  * alternative is the same three ids hand-copied into every transaction that
@@ -315,7 +315,7 @@ const rules: CollectionRule[] = [
 
 // ── Module ──────────────────────────────────────────────────────────
 
-/** Everything `stock.ts` contributes to the propagation catalog. */
+/** Everything `propagation/stock.ts` contributes to the propagation catalog. */
 export const stock: PropagationModule = {
   rules,
   transactions: [],

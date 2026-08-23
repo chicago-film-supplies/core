@@ -279,7 +279,7 @@ const ComponentObject = z.strictObject({
  * because the parent authors it — see {@link ProductComponent}.
  *
  * A catalog component is a line item in waiting: `COMPONENT_TYPES` is a subset
- * of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `common.ts`),
+ * of `DOC_LINE_ITEM_TYPES` (pinned by a compile-time assertion in `schemas/common.ts`),
  * and every component that survives expansion becomes an order line of the same
  * `type`. So it answers to the same contract, and the rental ⇒
  * `price.replacement_cents` rule is stated once rather than a third time here.

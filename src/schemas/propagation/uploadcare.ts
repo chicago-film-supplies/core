@@ -121,7 +121,7 @@ const uploadcareWorkListRules: CollectionRule[] = [
 ];
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `uploadcare.ts` contributes to the propagation catalog. */
+/** Everything `propagation/uploadcare.ts` contributes to the propagation catalog. */
 export const uploadcare: PropagationModule = {
   rules: [
     ...uploadcareWorkListRules,

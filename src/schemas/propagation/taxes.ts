@@ -191,7 +191,7 @@ const supersedeTaxDraftRecomputeRules: CollectionRule[] = [
 ];
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `taxes.ts` contributes to the propagation catalog. */
+/** Everything `propagation/taxes.ts` contributes to the propagation catalog. */
 export const taxes: PropagationModule = {
   rules: [
     ...updateTaxRules,

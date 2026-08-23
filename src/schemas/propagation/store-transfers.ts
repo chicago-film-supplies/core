@@ -153,7 +153,7 @@ const createStoreTransferTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `store-transfers.ts` contributes to the propagation catalog. */
+/** Everything `propagation/store-transfers.ts` contributes to the propagation catalog. */
 export const storeTransfers: PropagationModule = {
   rules: [
     ...createStoreTransferRules,

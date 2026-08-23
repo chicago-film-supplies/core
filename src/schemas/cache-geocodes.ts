@@ -30,7 +30,7 @@ export interface CacheGeocodes {
  *
  * Every field here except the timestamps describes ONE customer address, so the
  * whole document is PII and is tagged as such. It is the untagged twin of
- * `Address` (`common.ts`) — hand-rolled from the Mapbox response rather than
+ * `Address` (`schemas/common.ts`) — hand-rolled from the Mapbox response rather than
  * reusing the primitive — and it stayed untagged because `cache-geocodes` was
  * not in `tests/pii.test.ts`'s old hand-maintained schema list.
  *

@@ -195,7 +195,7 @@ const updateOutOfServiceTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `out-of-service.ts` contributes to the propagation catalog. */
+/** Everything `propagation/out-of-service.ts` contributes to the propagation catalog. */
 export const outOfService: PropagationModule = {
   rules: [
     ...createOutOfServiceRules,

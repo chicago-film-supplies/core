@@ -186,7 +186,7 @@ const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strict
  * **`coa_revenue` is required, not optional.** A credit spanning lines with
  * different revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)
  * cannot be posted correctly from a document-level amount, and apportioning it
- * afterwards is inferring cause from effect — the thing `transaction.ts` warns
+ * afterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns
  * against. This is also the gap Xero *has*: its allocation view carries
  * `LineItems: []`, and Odoo's users pay OCA for a module that adds line-level
  * provenance.

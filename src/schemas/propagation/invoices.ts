@@ -301,7 +301,7 @@ const updateOrderInvoiceRules: CollectionRule[] = [
 ];
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `invoices.ts` contributes to the propagation catalog. */
+/** Everything `propagation/invoices.ts` contributes to the propagation catalog. */
 export const invoices: PropagationModule = {
   rules: [
     ...createInvoiceRules,

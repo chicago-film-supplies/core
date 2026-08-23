@@ -31,11 +31,11 @@ import type { TransactionId } from "./ids.ts";
  * ⚠️ **Enumerated, not `string`, and that is what makes the factory safe.** The
  * two ids it mints are template literals over this union, so TypeScript expands
  * them to the sixteen concrete ids and checks each against `RuleId` — add a
- * ninth entity without declaring its two ids in `ids.ts` and the factory stops
+ * ninth entity without declaring its two ids in `propagation/ids.ts` and the factory stops
  * compiling. With `collection: string` the composed id widened to `string` and
  * nothing downstream could see it. `cards` is deliberately absent: its two
- * cowrite rules are declared literally in `cards.ts`, because a rule id is owned
- * by the file that declares it.
+ * cowrite rules are declared literally in `propagation/cards.ts`, because a
+ * rule id is owned by the file that declares it.
  */
 type ThreadSourceCollection =
   | "orders"
@@ -342,7 +342,7 @@ const deleteCommentTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `threads.ts` contributes to the propagation catalog. */
+/** Everything `propagation/threads.ts` contributes to the propagation catalog. */
 export const threads: PropagationModule = {
   rules: [
     ...threadOrderRules,

@@ -32,7 +32,7 @@ const FULFILLMENT_ORDER_STATUSES = [
 type FulfillmentOrderStatusType = typeof FULFILLMENT_ORDER_STATUSES[number];
 const FulfillmentOrderStatus: z.ZodType<FulfillmentOrderStatusType> = z.enum(FULFILLMENT_ORDER_STATUSES);
 
-// The list and its "why" live in `common.ts`, beside `ITEM_CONTRACTS` and the
+// The list and its "why" live in `schemas/common.ts`, beside `ITEM_CONTRACTS` and the
 // compile-time assertion tying it to `fulfillable`.
 type FulfillmentLineItemTypeType = FulfillableItemType;
 

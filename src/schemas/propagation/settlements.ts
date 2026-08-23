@@ -128,7 +128,7 @@ const createSettlementTransaction: TransactionDefinition = {
  * The reversal's credit-note leg has ONE guard, and it is a test rather than a
  * refine — deliberately.
  *
- * `CREDIT_NOTE_STATUS_REFINE` (declared in this directory's `credit-notes.ts`)
+ * `CREDIT_NOTE_STATUS_REFINE` (declared in `propagation/credit-notes.ts`)
  * only says a note is internally consistent: `applied` ⟺ zero balance, and the
  * balance never exceeds the face value. A note that never got its credit back is
  * internally consistent and completely wrong, so the refine cannot see this
@@ -517,7 +517,7 @@ const voidInvoiceFromXeroTransaction: TransactionDefinition = {
 };
 
 // ── Module ──────────────────────────────────────────────────────────
-/** Everything `settlements.ts` contributes to the propagation catalog. */
+/** Everything `propagation/settlements.ts` contributes to the propagation catalog. */
 export const settlements: PropagationModule = {
   rules: [
     ...createSettlementRules,

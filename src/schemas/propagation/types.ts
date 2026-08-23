@@ -32,12 +32,12 @@ import type { CollectionName } from "../mod.ts";
  * plural list a second time — the defect this whole campaign deletes — so
  * `tests/propagation.test.ts` asserts it instead, deriving "is a singular alias"
  * as "appending an s yields another CollectionName". Purging the singular half
- * of the registry is the real fix and is a separate breaking change; `mod.ts`
+ * of the registry is the real fix and is a separate breaking change; `schemas/mod.ts`
  * records it at {@link CollectionDocs}.
  *
  * ⚠️ **The import is `import type` and must stay that way.** It is erased at
  * emit, so `@cfs/core/schemas/propagation` pulls no runtime code out of
- * `mod.ts` — which is what makes the subpath worth having at all. **That subpath
+ * `schemas/mod.ts` — which is what makes the subpath worth having at all. **That subpath
  * now exists and the barrel no longer re-exports the three values** (Tier 1
  * item 4, landed 2026-08-18), so a value import here would drag the whole schema
  * barrel back into every consumer of the catalog and undo it.
@@ -63,7 +63,7 @@ export type PropagationEndpoint = CollectionName | "*" | "orders/documents";
  * ⚠️ **Plain `as const`, no spread — deliberately.** §5's measured guardrail is
  * that JSR's declaration emitter truncates `[...X, "y"] as const` (core#43) and
  * emits a non-spread one verbatim; `ITEM_TYPES` publishes all nine members. This
- * has no spread, and it is the same shape as `stock.ts`'s `STOCK_STEPS`, the
+ * has no spread, and it is the same shape as `propagation/stock.ts`'s `STOCK_STEPS`, the
  * already-sanctioned value export from this directory.
  */
 export const PROPAGATION_MODES = [
@@ -159,7 +159,7 @@ export interface CollectionRule {
   /**
    * Stable identifier (e.g. "create-order:org-to-order").
    *
-   * Typed, so a rule declared under an id `ids.ts` does not carry is a compile
+   * Typed, so a rule declared under an id `propagation/ids.ts` does not carry is a compile
    * error rather than something a regex over `src/` might notice. Adding a rule
    * means adding its id there too — see that file for why the union cannot be
    * derived from this array.
@@ -221,7 +221,7 @@ export interface TransactionDefinition {
  *
  * ⚠️ **Each file in this directory exports exactly ONE of these, and nothing
  * else.** That is the whole convention, and it exists to make a class of drift
- * unrepresentable rather than to police it: `mod.ts` used to re-export 141
+ * unrepresentable rather than to police it: `propagation/mod.ts` used to re-export 141
  * individual symbols by hand and `schemas/mod.ts` re-exported 81 of them, so
  * **60 had silently drifted out of the barrel with nothing noticing.** A list
  * that has to be maintained in four places is the defect; deriving a better
@@ -235,12 +235,12 @@ export interface TransactionDefinition {
  *   used to do this (`cardRules`, `templateRules`, `recurrenceRules`,
  *   `threadCowriteRules`) are gone, and the "array in neither test mirror"
  *   category ceased to exist rather than gaining a guard.
- * - `mod.ts`'s import block and its `MODULES` array check each other for free:
+ * - `propagation/mod.ts`'s import block and its `MODULES` array check each other for free:
  *   a name in `MODULES` but not imported is a compile error, and an import not
  *   in `MODULES` is a `deno lint` error. Only the directory listing itself
  *   needs a test.
  *
- * ⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `mod.ts` to close
+ * ⚠️ **Do NOT reach for a runtime glob (`Deno.readDir`) in `propagation/mod.ts` to close
  * that last gap** — this module is imported by the browser via manager and
  * over `https:` from JSR, where there is no directory to read and no `Deno`.
  * `src/` is platform-free by deliberate policy.
