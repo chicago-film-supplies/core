@@ -247,6 +247,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "preferOwnRepo",
     "resolveSpecifier",
   ],
+  // `utils/templates.ts` is mostly build/CI machinery that happens to be pure —
+  // path helpers, semver derivation, render-param validation — and only the
+  // handful a template body could plausibly call is surfaced.
+  templates: [
+    // The golden-diff CI rollup. It takes an array of visual-diff verdicts for a
+    // template family's fixtures, which is a fact about a release PR, not about
+    // the document being rendered — no render context holds one, and a template
+    // that could see its own CI status would be rendering the build rather than
+    // the order. Shared between api-cloudrun and the manager editor (core#68);
+    // neither consumer is a template.
+    "aggregateGoldenVerdict",
+  ],
   // No `it.dates.*` exports are hidden today.
   dates: [],
 };

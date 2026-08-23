@@ -11714,13 +11714,19 @@
     },
     {
       "entrypoint": "@cfs/core/utils/templates",
-      "moduleDoc": "Template helpers for the git-canonical template system — pure functions\nshared by api-cloudrun and manager.\n\n- `slugify` derives a `git_path` from a family display name (frozen at create).\n- `deriveBump` maps a conventional-commit type → semver bump level, and\n  `bumpSemver` applies that bump to the family's previous version.\n- `resolveRenderParams` validates caller-provided render params against the\n  version's declared params **strictly** — unknown params throw (the API\n  maps `RenderParamError` → HTTP 422).\n\nNo runtime dependency on `@cfs/core/schemas`: the declared-param shape is accepted\nstructurally so this module type-checks independent of the schemas publish\ncadence. `@cfs/core/schemas`' `TemplateParam` is structurally compatible.",
+      "moduleDoc": "Template helpers for the git-canonical template system — pure functions\nshared by api-cloudrun and manager.\n\n- `slugify` derives a `git_path` from a family display name (frozen at create).\n- `deriveBump` maps a conventional-commit type → semver bump level, and\n  `bumpSemver` applies that bump to the family's previous version.\n- `resolveRenderParams` validates caller-provided render params against the\n  version's declared params **strictly** — unknown params throw (the API\n  maps `RenderParamError` → HTTP 422).\n\n**No RUNTIME dependency on `@cfs/core/schemas`.** Two different techniques keep\nit that way, and which one applies depends on what is needed:\n\n- A shape a caller passes in is accepted **structurally** — `RenderParamDecl`\n  is declared here rather than imported, and `@cfs/core/schemas`'\n  `TemplateParam` is structurally compatible with it.\n- A closed union that must be named exactly is `import type`, which is erased\n  at emit and so costs a bundle nothing. `GoldenDiffVerdict` below is the one\n  such import.\n\n⚠️ **What must never appear here is a runtime VALUE import from the schemas.**\n`GOLDEN_DIFF_VERDICTS` is the tempting one — the union's own member array —\nand importing it would pull the schema barrel and all of zod into every\nconsumer that wanted a path helper. If a member list is ever needed at\nruntime, restate it locally or put the function somewhere else.",
       "symbols": [
         {
           "kind": "typeAlias",
           "name": "BumpLevel",
           "declaration": "type BumpLevel = \"major\" | \"minor\" | \"patch\";",
           "doc": "A semantic-version bump level."
+        },
+        {
+          "kind": "variable",
+          "name": "NO_FIXTURES_SENTINEL",
+          "declaration": "const NO_FIXTURES_SENTINEL: \"_\";",
+          "doc": "The `fixture` value of the family-level \"this family has no fixtures\" row.\n\n⚠️ **This is a wire contract between two repos, and it was a bare `\"_\"`\nliteral on one side of it.** When a family has zero fixtures the API\nshort-circuits before any fan-out and persists a single synthetic result\ncarrying this value, because `golden_results` cannot be empty and still say\n*why*. The manager then reads it back: its `no-fixtures` verdict arm and its\nslug map both depend on recognising it. Change it on one side only and the\nmanager renders a fixture literally named `_` and reports `match` where it\nshould report `no-fixtures` — with nothing failing on either side.\n\n⚠️ **Nothing structurally prevents a collision** — `parseFixturePath` parses\n`fixtures/<gp>/_.json` into the slug `\"_\"` quite happily, so a fixture\nliterally named `_` would be indistinguishable from the sentinel. That is a\nconvention, not an invariant, and it is a further argument for the value\nliving in exactly one place: the cheap defence is that both sides agree, and\nthe collision is only reachable by someone adding that one filename."
         },
         {
           "kind": "interface",
@@ -11733,6 +11739,14 @@
           "name": "RenderParamError",
           "declaredKind": "class",
           "doc": "Thrown when caller-provided render params fail strict validation. The API maps this to HTTP 422."
+        },
+        {
+          "kind": "function",
+          "name": "aggregateGoldenVerdict",
+          "signature": "aggregateGoldenVerdict(verdicts: readonly GoldenDiffVerdict[]): GoldenDiffVerdict | null",
+          "doc": "Roll per-fixture golden verdicts up to one family verdict.\n\nPrecedence: `renderer-unavailable` → `diff` → `no-golden` → a LONE\n`no-fixtures` → `match`. Severity order, so the family reports the worst thing\nany fixture found.\n\nReturns **`null` for an absent or empty array**, meaning *CI has not run\nagainst this branch yet* — which is a different fact from `match`, and the\ndistinction the manager's UI is built on. ⚠️ Do not let a caller collapse it\nwith `?? \"match\"`: that reports \"checked, nothing changed\" for a check that\nnever ran.\n\nThree notes on why the arms are shaped this way, each of which was implicit in\none repo and invisible in the other before this was shared:\n\n- **`renderer-unavailable` is `some`, not `every`.** One fixture failing to\n  render means the run as a whole proves nothing, so the family goes transient\n  and the caller skips persistence — a partial result must not be recorded as\n  a real verdict.\n- **`no-fixtures` is checked LAST and only when alone.** The API's own element\n  type excludes it (`GoldenDiffFixtureVerdict`), so from that side this arm is\n  unreachable; it is live for the manager, which reads persisted arrays where\n  the sentinel is the only entry. A sentinel riding alongside real results\n  deliberately falls through to `match` — real results are the better evidence.\n- **The parameter is the bare verdict union, not either repo's envelope.** The\n  API's element is a local wire shape (`GoldenDiffFixtureResult`) and the\n  manager's is core's `GoldenDiff`; taking `readonly GoldenDiffVerdict[]`\n  serves both without either having to import the other's.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",

@@ -9,12 +9,26 @@
  *   version's declared params **strictly** — unknown params throw (the API
  *   maps `RenderParamError` → HTTP 422).
  *
- * No runtime dependency on `@cfs/core/schemas`: the declared-param shape is accepted
- * structurally so this module type-checks independent of the schemas publish
- * cadence. `@cfs/core/schemas`' `TemplateParam` is structurally compatible.
+ * **No RUNTIME dependency on `@cfs/core/schemas`.** Two different techniques keep
+ * it that way, and which one applies depends on what is needed:
+ *
+ * - A shape a caller passes in is accepted **structurally** — `RenderParamDecl`
+ *   is declared here rather than imported, and `@cfs/core/schemas`'
+ *   `TemplateParam` is structurally compatible with it.
+ * - A closed union that must be named exactly is `import type`, which is erased
+ *   at emit and so costs a bundle nothing. `GoldenDiffVerdict` below is the one
+ *   such import.
+ *
+ * ⚠️ **What must never appear here is a runtime VALUE import from the schemas.**
+ * `GOLDEN_DIFF_VERDICTS` is the tempting one — the union's own member array —
+ * and importing it would pull the schema barrel and all of zod into every
+ * consumer that wanted a path helper. If a member list is ever needed at
+ * runtime, restate it locally or put the function somewhere else.
  *
  * @module
  */
+
+import type { GoldenDiffVerdict } from "../schemas/template-version.ts";
 
 // ── Git-canonical paths (fixtures + goldens) ────────────────────────
 //
@@ -304,4 +318,76 @@ export function rewriteDocFieldRefs(
     out[key] = next;
   }
   return out;
+}
+
+// ── Golden-diff aggregation ─────────────────────────────────────────
+//
+// One template family renders N fixtures, each producing its own verdict. Both
+// the API (which computes them) and the manager (which renders them) have to
+// roll those up to a single family verdict, and both used to do it with their
+// own copy of the precedence — `aggregateVerdict` in api-cloudrun and
+// `aggregateGolden` in manager. The manager's docstring asserted *"precedence
+// mirrors the API's `aggregateVerdict`"*, which is a claim about another repo
+// that nothing checked. It is one function now (core#68).
+//
+/**
+ * The `fixture` value of the family-level "this family has no fixtures" row.
+ *
+ * ⚠️ **This is a wire contract between two repos, and it was a bare `"_"`
+ * literal on one side of it.** When a family has zero fixtures the API
+ * short-circuits before any fan-out and persists a single synthetic result
+ * carrying this value, because `golden_results` cannot be empty and still say
+ * *why*. The manager then reads it back: its `no-fixtures` verdict arm and its
+ * slug map both depend on recognising it. Change it on one side only and the
+ * manager renders a fixture literally named `_` and reports `match` where it
+ * should report `no-fixtures` — with nothing failing on either side.
+ *
+ * ⚠️ **Nothing structurally prevents a collision** — `parseFixturePath` parses
+ * `fixtures/<gp>/_.json` into the slug `"_"` quite happily, so a fixture
+ * literally named `_` would be indistinguishable from the sentinel. That is a
+ * convention, not an invariant, and it is a further argument for the value
+ * living in exactly one place: the cheap defence is that both sides agree, and
+ * the collision is only reachable by someone adding that one filename.
+ */
+export const NO_FIXTURES_SENTINEL = "_";
+
+/**
+ * Roll per-fixture golden verdicts up to one family verdict.
+ *
+ * Precedence: `renderer-unavailable` → `diff` → `no-golden` → a LONE
+ * `no-fixtures` → `match`. Severity order, so the family reports the worst thing
+ * any fixture found.
+ *
+ * Returns **`null` for an absent or empty array**, meaning *CI has not run
+ * against this branch yet* — which is a different fact from `match`, and the
+ * distinction the manager's UI is built on. ⚠️ Do not let a caller collapse it
+ * with `?? "match"`: that reports "checked, nothing changed" for a check that
+ * never ran.
+ *
+ * Three notes on why the arms are shaped this way, each of which was implicit in
+ * one repo and invisible in the other before this was shared:
+ *
+ * - **`renderer-unavailable` is `some`, not `every`.** One fixture failing to
+ *   render means the run as a whole proves nothing, so the family goes transient
+ *   and the caller skips persistence — a partial result must not be recorded as
+ *   a real verdict.
+ * - **`no-fixtures` is checked LAST and only when alone.** The API's own element
+ *   type excludes it (`GoldenDiffFixtureVerdict`), so from that side this arm is
+ *   unreachable; it is live for the manager, which reads persisted arrays where
+ *   the sentinel is the only entry. A sentinel riding alongside real results
+ *   deliberately falls through to `match` — real results are the better evidence.
+ * - **The parameter is the bare verdict union, not either repo's envelope.** The
+ *   API's element is a local wire shape (`GoldenDiffFixtureResult`) and the
+ *   manager's is core's `GoldenDiff`; taking `readonly GoldenDiffVerdict[]`
+ *   serves both without either having to import the other's.
+ */
+export function aggregateGoldenVerdict(
+  verdicts: readonly GoldenDiffVerdict[],
+): GoldenDiffVerdict | null {
+  if (verdicts.length === 0) return null;
+  if (verdicts.some((v) => v === "renderer-unavailable")) return "renderer-unavailable";
+  if (verdicts.some((v) => v === "diff")) return "diff";
+  if (verdicts.some((v) => v === "no-golden")) return "no-golden";
+  if (verdicts.length === 1 && verdicts[0] === "no-fixtures") return "no-fixtures";
+  return "match";
 }

@@ -1,11 +1,13 @@
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import {
+  aggregateGoldenVerdict,
   bumpSemver,
   deriveBump,
   fixtureDir,
   fixturePath,
   goldenPath,
   hashTemplateContent,
+  NO_FIXTURES_SENTINEL,
   parseFixturePath,
   RenderParamError,
   type RenderParamDecl,
@@ -233,4 +235,80 @@ Deno.test("hashTemplateContent distinguishes add/remove of an empty file", () =>
 Deno.test("hashTemplateContent returns a 16-char hex digest", () => {
   const h = hashTemplateContent({ "a.eta": "hello" });
   assertEquals(/^[0-9a-f]{16}$/.test(h), true);
+});
+
+// ── Golden-diff aggregation ─────────────────────────────────────────
+//
+// Moved here from `manager/src/components/templates/__tests__/goldenReview.test.ts` with the function
+// (core#68). Manager was the only side with coverage: api-cloudrun's
+// `aggregateVerdict` had **none**, and could not easily get any — its file
+// imports the db module, and `tests/unit/dbReachCoverage.test.ts` forbids any
+// unit test from transitively reaching that. So the duplication was not merely
+// untidy, it was load-bearing for a test gap: one of the two copies was
+// structurally untestable where it lived.
+//
+// These cases run against the shared implementation now, so a change to the
+// precedence fails here rather than silently diverging in one repo.
+
+Deno.test("aggregateGoldenVerdict returns null when CI has not run", () => {
+  // Distinct from `match`: an empty array means "no verdict", not "clean".
+  // A caller that collapses this with `?? \"match\"` reports a check that never
+  // ran as one that ran and found nothing.
+  assertEquals(aggregateGoldenVerdict([]), null);
+});
+
+Deno.test("aggregateGoldenVerdict reports no-fixtures only for a LONE sentinel", () => {
+  assertEquals(aggregateGoldenVerdict(["no-fixtures"]), "no-fixtures");
+});
+
+Deno.test("aggregateGoldenVerdict falls through to match when no-fixtures rides alongside real results", () => {
+  // The sentinel says nothing once real fixtures were checked, so the array's
+  // meaning is carried by the other rows.
+  assertEquals(aggregateGoldenVerdict(["no-fixtures", "match"]), "match");
+});
+
+Deno.test("aggregateGoldenVerdict prefers diff over no-golden", () => {
+  assertEquals(aggregateGoldenVerdict(["no-golden", "diff", "match"]), "diff");
+});
+
+Deno.test("aggregateGoldenVerdict reports no-golden when nothing changed but a baseline is missing", () => {
+  assertEquals(aggregateGoldenVerdict(["match", "no-golden"]), "no-golden");
+});
+
+Deno.test("aggregateGoldenVerdict handles renderer-unavailable even though Firestore cannot hold it", () => {
+  // The caller skips persistence entirely on this aggregate, so it can only
+  // reach a reader via a future API change. Handled as defence; no operator copy
+  // leans on it. ⚠️ It is `some`, not `every`: one fixture failing to render
+  // means the run proves nothing, so a partial result must not be recorded.
+  assertEquals(aggregateGoldenVerdict(["diff", "renderer-unavailable"]), "renderer-unavailable");
+});
+
+Deno.test("aggregateGoldenVerdict reports match when every fixture matched", () => {
+  assertEquals(aggregateGoldenVerdict(["match", "match"]), "match");
+});
+
+Deno.test("NO_FIXTURES_SENTINEL is the value both repos agree on", () => {
+  // ⚠️ Pinned by VALUE, not merely referenced. This is a wire contract: the API
+  // writes it into `golden_results` and the manager recognises it on read, and
+  // it was a bare `"_"` literal on the API side. A test that only asserted the
+  // two sides import the same const would pass while the const changed
+  // underneath persisted documents.
+  assertEquals(NO_FIXTURES_SENTINEL, "_");
+});
+
+Deno.test("the no-fixtures sentinel is a CONVENTION, not an unrepresentable slug", () => {
+  // ⚠️ Recorded because the obvious reassuring claim — "a real slug can never
+  // be `_`" — is FALSE, and was written into this file's docstring before being
+  // checked. `parseFixturePath` parses `fixtures/<gp>/_.json` into the slug
+  // `"_"` quite happily, so a fixture with that filename is indistinguishable
+  // from the sentinel: the manager would drop it from every slug map and report
+  // the family as having no fixtures.
+  //
+  // No fixture in the templates repo is named `_` and this asserts the shape of
+  // the hazard rather than guarding it — the guard, if one is ever wanted,
+  // belongs where fixtures are created.
+  assertEquals(
+    parseFixturePath(`fixtures/quotes/${NO_FIXTURES_SENTINEL}.json`),
+    { gitPath: "quotes", slug: "_" },
+  );
 });
