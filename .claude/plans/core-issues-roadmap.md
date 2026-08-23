@@ -350,7 +350,36 @@ Execute `core/.claude/plans/roles-campaign.md` (276 lines). **`roles.name` stays
 
 **Closes #58, #59.**
 
-## Wave 3 — core#65, log index signatures (census first, then one cut)
+## Wave 3 — core#65 — ⏸️ **DEFERRED 2026-08-23. Census done; the prescribed fix is refuted.**
+
+> 🔴 **Do not execute the steps below as written.** The census (3.1) was taken and it says
+> "declare every harvested field" does not buy the benefit we want. Recorded in full on core#65.
+>
+> - **The defect targeted has not occurred** — 323 field names in use, near-miss analysis returns 5
+>   candidates, **none a misspelling** (`retry_after_ms` vs `retry_after_s` are different units).
+> - **Declaring would buy spelling only** — 87% of existing declarations are already optional; +296
+>   takes it to ~97%, an interface where any combination compiles.
+> - ⭐ **The real queryability defect is SYNONYM DRIFT, and declaring cannot fix it:**
+>   `order_uid`(30) / `order_id`(4) / `uid_order`(4) are three names for one concept across 38 sites,
+>   so a dashboard querying one silently misses 8 records. All three would be declared and all three
+>   would keep compiling. ⚠️ `order_uid` — the majority — also violates this package's own
+>   `uid_{descriptor}` convention, so the *minority* spelling is the correct one.
+> - **The grain is wrong**: `IntegrationEventLogRecord` is 42 message types flattened into one bag,
+>   discriminating by SUBSYSTEM where the fields vary by MESSAGE.
+> - **The signature is load-bearing for a real workflow**: core is a published package, so adding one
+>   log field costs edit → push → JSR → bump → install. That friction is why ~228 one-off fields ride
+>   it. Removing the valve without removing the friction relocates the pain to mid-incident.
+>
+> **Re-scoped question:** *how do we make log fields predictably queryable?* Candidates: normalise the
+> synonyms (cheap, fixes a live defect, no schema change); discriminate on `msg` rather than
+> subsystem; or split a closed envelope from an explicitly-open `context`.
+>
+> **Free regardless:** 7 of 20 arms — `client`, `dmarc`, `email`, `propagation`, `request`, `sync`,
+> `validation` — have zero undeclared fields and can lose their signature today.
+>
+> Needs a design decision, not an execution pass. The original steps are kept below for the record.
+
+### The original plan (superseded — read the census first)
 
 1. **Census.** Point api-cloudrun's `@cfs/core/schemas/log` entry at a local core checkout, delete all
    22 signatures, `deno check`. Harvest the per-arm field list the 367 call sites actually supply.
