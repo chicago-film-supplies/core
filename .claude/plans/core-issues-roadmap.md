@@ -1,7 +1,55 @@
 # Roadmap: the 9 open `core` issues, plus the two campaigns that came out of reviewing them
 
-**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** ⏳ planned, nothing implemented
+**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 and 0.5 landed (see the status block); Wave 1 onwards not started
 **Ordering:** risk-first (owner's call), with one half-sitting prerequisite ahead of it (Wave 0 — drop it if you disagree with the reasoning there).
+
+> ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0 and 0.5 are DONE and pushed; start at Wave 1
+>
+> | Wave | State |
+> |---|---|
+> | **0a** non-destructive staleness tests | ✅ core `b640b62` |
+> | **0b** declarations gate | ✅ core `80144dc` |
+> | **0c** templates pin count | ✅ core `89e8dc0`, corrected twice more — see below |
+> | **0.5** core#68 golden aggregate | ✅ core `a1cab8f` → **beta.243**; api-cloudrun `b67bb890`; manager `dd0db53`; templates PR **#121** (open, not merged) |
+> | **1 onwards** | ⏳ not started |
+>
+> `@cfs/core` is at **`10.0.0-beta.243`**, and api-cloudrun + manager + the templates PR are all
+> pinned to it. api-cloudrun and manager are committed but **UNPUSHED** — pushing them deploys to
+> dev/preview, which was left as the owner's call.
+>
+> **What the plan got wrong, corrected in place below:**
+>
+> - **0b's prescribed fix for `schemas/common.ts` does not work.** Annotating `LINE_PARENTS` /
+>   `DIVIDER_PARENTS` leaves all six TS9013s standing: the diagnostic is on the *use* site, because it
+>   is `ITEM_CONTRACTS_INNER`'s own type that must be written down. The reference has to leave the
+>   `as const` entirely, so `parentable_by` moved out to the already-annotated `ITEM_CONTRACTS`.
+> - **0a's shape had to change**, because a spawned child carries its OWN permissions — so a test
+>   that spawns a generator rewrites `src/` no matter what the test process may do. `--allow-run` is
+>   the load-bearing removal, not `--allow-write`. One staleness check became an in-process compare,
+>   the other became `deno task check:generated`.
+> - **The declarations gate is a TASK, not a test in `jsr-emit-safety.test.ts`** — `npm:typescript`
+>   reads `process.env`, and `deno task test` is now `--allow-read` only. That file is deleted, as
+>   core#44 itself asked; TS9018 was confirmed to catch its construct first.
+> - 🔴 **The templates pin count is BRANCH-DEPENDENT and this doc twice stated it as a fact.**
+>   `origin/main` carried **7** core pins; the unmerged `ci/citation-gate` branch carries **8** (it
+>   adds `utils/citations`). A local checkout sitting on that branch also reported `beta.240` while
+>   `origin/main` was already at `beta.241`, which is where this doc's "templates is one publish
+>   behind" claim came from. **It was wrong.** Bump by `sed` over the version pattern and read the
+>   version off `origin/main`.
+> - **Wave 0.5's sequencing blocker had already cleared.** Manager's `feat/templates-editor-lifecycle`
+>   is merged; the branch and the `~/cfs-templates-editor` worktree are gone in both repos.
+>
+> **New, found while doing the work:**
+>
+> - `check:generated` caught its first defect immediately: an exported function in
+>   `utils/templates.ts` ships into the template editor's helper panel, so `aggregateGoldenVerdict`
+>   needed a denylist entry.
+> - The reassuring claim *"a real fixture slug can never be `_`"* is **false** —
+>   `parseFixturePath` parses `fixtures/<gp>/_.json` into slug `"_"`. The sentinel is a convention,
+>   not an invariant.
+> - **api-cloudrun#640** filed for the retired plan's P0 (an operator bless that publishes to prod).
+>
+> **Still open from Wave 0's issues:** #54 and #44 do not close until Wave 7.
 
 ## Context
 
@@ -47,9 +95,13 @@ Referenced by number from each wave.
 
 1. Commit on `beta`, push → semantic-release publishes the next `-beta.N`.
 2. Bump `api-cloudrun/deno.json` (28 subpath lines), `manager/package.json` (1 line),
-   `templates/deno.json` (8 exact pins). `deno install` / `npm install`.
-3. ⚠️ **Bump templates by PATTERN** — `sed 's|jsr:@cfs/core@<old>/|jsr:@cfs/core@<new>/|g'`. Both plan
-   docs still say "5 utils / 6 lines / beta.196"; it is **8 lines at beta.240**. Fix both in Wave 0.
+   `templates/deno.json` (exact pins, one per subpath). `deno install` / `npm install`.
+3. ⚠️ **Bump ALL THREE by PATTERN** — `sed 's|jsr:@cfs/core@<old>/|jsr:@cfs/core@<new>/|g'` (and the
+   `npm:@jsr/cfs__core@` form for manager). **Do not carry a line count.** Measured 2026-08-23:
+   templates' count is *branch-dependent* — `origin/main` had 7 core pins, the unmerged
+   `ci/citation-gate` branch has 8 — and both campaign plan docs stated a single number as though it
+   were a property of the repo. Read the current version off `origin/main`, never off whatever draft
+   branch the templates checkout is sitting on.
 4. `templates` has branch protection — **open the PR, never merge it.**
 5. A "missing" JSR version is almost always a stale edge cache — read `~/cfs/CLAUDE.md` § 2a first.
 
@@ -180,8 +232,9 @@ The issue asserts one shared precedence. Measured 2026-08-23, there are **three 
   there is no `goldenBySlug` anywhere in api-cloudrun's `src`. It is manager-only with 3 call sites,
   and moving a single-consumer function into core adds a publish hop and de-duplicates nothing. It
   stays in manager and imports the sentinel from core.
-  `api-cloudrun/.claude/plans/templates-editor-lifecycle.md` already carries this correction inline
-  under P12; the issue text reintroduced an error that plan had fixed.
+  The api-cloudrun templates-editor-lifecycle plan carried this correction inline under P12 and the
+  issue text reintroduced an error that plan had fixed. (That plan doc is **deleted** — P12 was its
+  last code phase and this wave landed it.)
 - `verdictLabel` in `manager/src/components/templates/goldenReview.ts` is UI copy — manager-local,
   leave it.
 
@@ -205,14 +258,12 @@ lane because its file imports the db module, and `api-cloudrun/tests/unit/dbReac
 precedence to core makes it unit-testable there for the first time — the duplication was
 *load-bearing for a test gap*, not merely untidy.
 
-### 🔴 Sequencing — land or abandon manager's branch first
+### ✅ Sequencing — RESOLVED before this wave ran
 
-- `manager` has **4 unmerged commits** on `feat/templates-editor-lifecycle` and a dirty worktree at
-  `~/cfs-templates-editor/manager`. They touch `manager/src/components/templates/goldenReview.ts` (comments plus one `verdictLabel`
-  string) and shift line numbers at both call sites. Deleting `aggregateGolden` from `main`
-  underneath them is a conflict generator.
-- `api-cloudrun`'s branch of the same name is **0 commits ahead of `main`** — fully contained, safe
-  to prune along with its worktree.
+This section warned that manager had 4 unmerged commits on `feat/templates-editor-lifecycle` plus a
+dirty worktree at `~/cfs-templates-editor`, and that deleting `aggregateGolden` underneath them
+would generate conflicts. **Checked 2026-08-23: that work is merged.** The branch and the worktree
+are gone in both `manager` and `api-cloudrun`, and no conflict arose.
 
 ### Release loop — the cheapest possible rehearsal
 
@@ -754,10 +805,12 @@ declared-ahead-of-use keeps (5a bucket A — schema docblocks, not issues).
   suffixed collections (since 2026-06-30, moved into `finally` 2026-07-09), so the open question is
   *why one survived a teardown that runs*, not *add a teardown*.
   **#636** is out of scope but **sequenced** — see the Wave 5 preflight above.
-- **Branches.** `api-cloudrun`'s `feat/templates-editor-lifecycle` is 0 commits ahead of `main` —
-  fully contained; prune the branch and its worktree. `manager`'s has **4 real commits** and a dirty
-  worktree, and it **gates Wave 0.5** (they touch `manager/src/components/templates/goldenReview.ts` and both its call sites).
-- `api-cloudrun` has 1 unpushed commit on `main` (`7cb7a3ed`), unrelated.
+- **Branches — nothing outstanding.** Both `feat/templates-editor-lifecycle` branches and the
+  `~/cfs-templates-editor` worktree are gone; manager's 4 commits merged. The unrelated api-cloudrun
+  commit noted here has been pushed by another session.
+- ⚠️ `templates` is normally checked out on a user draft branch (`ci/citation-gate` today), which is
+  exempt from hygiene but **will misreport the core pin version and count** if read instead of
+  `origin/main`.
 
 ## Verification
 
