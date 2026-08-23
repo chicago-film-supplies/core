@@ -104,6 +104,15 @@ export const RoleSchema: z.ZodType<Role> = z.strictObject({
 }).meta({
   title: "Role",
   collection: "roles",
+  // 🔴 This collection's document id is `name`, NOT `uid` — a declared carve-out
+  // from the uid convention, because `manager/firestore.rules` can only `get()`
+  // by path and never query, so the doc id must BE the claim string.
+  //
+  // Declaring it here is what makes the write-time drift guard able to see this
+  // collection at all: `assertValidForWrite` compares `doc.uid` to `ref.id`, so
+  // until now a `roles` document whose `name` disagreed with its id passed
+  // SILENTLY. The rename route has to assert it by hand for exactly that reason.
+  idField: "name",
   displayDefaults: {
     columns: ["name", "label", "description", "permissions"],
     filters: {},

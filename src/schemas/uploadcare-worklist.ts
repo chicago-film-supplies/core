@@ -237,6 +237,11 @@ export const UploadcareWorkListEntrySchema: z.ZodType<UploadcareWorkListEntry> =
 }).meta({
   title: "Uploadcare Work List Entry",
   collection: "uploadcare-worklist",
+  // The doc id is `uuid`, and that is already CORRECT rather than a carve-out
+  // needing forgiveness: it genuinely is an Uploadcare UUID that doubles as the
+  // id, which is exactly what `uuid` is reserved to mean (`uid` = our document
+  // id, `uuid` = someone else's identifier).
+  idField: "uuid",
   displayDefaults: {
     columns: ["collection", "kind", "filename", "created_at"],
     filters: { kind: [] },

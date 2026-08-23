@@ -33,6 +33,10 @@ export const McpOAuthClientSchema: z.ZodType<McpOAuthClient> = z.strictObject({
 }).meta({
   title: "MCP OAuth Client",
   collection: "mcp-oauth-clients",
+  // The doc id is `client_id` — an OAuth 2.1 / RFC 7591 wire name, on the one
+  // surface whose job is to mirror an external spec. Renaming it to `uid` would
+  // make our storage disagree with the protocol it implements.
+  idField: "client_id",
   displayDefaults: {
     columns: ["client_name", "client_id"],
     filters: {},
