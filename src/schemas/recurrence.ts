@@ -33,7 +33,7 @@
  *   `POST /tasks/materialize-horizon`, which rolls the horizon forward for
  *   every `status == "active"` recurrence.
  * - `PATCH /cards/{uid}?recurrence_scope=...` dispatches to
- *   `src/services/cardsRecurrence.ts` when `card.recurrence_parent_uid`
+ *   `api-cloudrun/src/services/cardsRecurrence.ts` when `card.recurrence_parent_uid`
  *   is set.
  */
 import { z } from "zod";

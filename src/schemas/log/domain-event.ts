@@ -62,7 +62,7 @@ export const DOMAIN_EVENT_MSGS = [
   // Steady-state `backstop` volume IS the bug report — alerted on in
   // `infra/observability/vmalert/rules-vlogs.yml`. `{ order_uid, invoice_uid,
   // source, status_from, status_to, number_changed }`. Emitted from
-  // `src/lib/orderInvoiceMirror.ts`'s two callers in api-cloudrun
+  // `api-cloudrun/src/lib/orderInvoiceMirror.ts`'s two callers in api-cloudrun
   // (`services/orderInvoiceMirror.ts`, `services/invoices.ts`). api#453.
   "order_invoice_mirror_repaired",
   // A denorm cascade resolved its target ids OUTSIDE its transaction (so the
@@ -73,19 +73,19 @@ export const DOMAIN_EVENT_MSGS = [
   // and means ids kept arriving through the repair — the source is being written
   // continuously and another round would not converge either.
   // `{ tx_name, source_doc_id, repaired_counts, written_counts, still_appearing }`.
-  // Emitted from `src/lib/cascadeScan.ts` in api-cloudrun.
+  // Emitted from `api-cloudrun/src/lib/cascadeScan.ts` in api-cloudrun.
   "cascade_converged",
   "location_cascade_skip",
   // updateTransaction / updateStoreTransfer reversing the previous version out
   // of a location doc found the doc or its product row missing, or repointed a
   // uid-drifted doc. Pure drift signals the caller can't remediate — logged, not
   // thrown. `{ location_id, uid_product, reason, expected_decrement }`. Emitted
-  // from `src/lib/transactionHelpers.ts` in api-cloudrun.
+  // from `api-cloudrun/src/lib/transactionHelpers.ts` in api-cloudrun.
   "location_reversal_skip",
   // A location doc's `products[].quantity` went negative after a reversal —
   // only possible if its stored base was already drifted. Detector for the drift
   // `resyncLocationQuantities` repairs; does not throw. `{ location_id,
-  // uid_product, quantity }`. Emitted from `src/lib/transactionHelpers.ts`.
+  // uid_product, quantity }`. Emitted from `api-cloudrun/src/lib/transactionHelpers.ts`.
   "location_quantity_negative",
   "stock_recalc_item_added",
   "stock_recalc_item_modified",
@@ -111,12 +111,12 @@ export const DOMAIN_EVENT_MSGS = [
   // `{ product_uid, quantity_held, quantity_booked, quantity_out_of_service,
   // quantity_available, since, reason }`, at `warn`. `since` is the ISO instant
   // the worst point opens, or null when open-ended entries alone carry it.
-  // Emitted from `src/services/stockSummaryRebuild.ts` in api-cloudrun.
+  // Emitted from `api-cloudrun/src/services/stockSummaryRebuild.ts` in api-cloudrun.
   "stock_oversold",
   // Fulfillment picker accepted a quantity edit on a `custom-*` line
   // item. Custom uids regenerate on the next CRMS opportunity sync, so
   // the override is lossy — this is the explicit warning trail. Emitted
-  // from `src/services/fulfillmentEdits.ts` in api-cloudrun.
+  // from `api-cloudrun/src/services/fulfillmentEdits.ts` in api-cloudrun.
   "fulfillment_custom_item_qty_override",
   // One recurrence threw while the nightly sweep advanced its horizon
   // (api-cloudrun#549 D6-B). `materializeHorizonAll` absorbs the throw and
@@ -134,7 +134,7 @@ export const DOMAIN_EVENT_MSGS = [
   // count and completely different incidents.
   //
   // `{ recurrence_uid, error_name, error_message, error_stack }`, at `error`.
-  // Emitted from `src/services/recurrences.ts` in api-cloudrun.
+  // Emitted from `api-cloudrun/src/services/recurrences.ts` in api-cloudrun.
   "recurrence_horizon_failed",
   // A document PRICED on a `(jurisdiction × item type)` tax cell whose REVIEW
   // window had run out — the engine fell forward to the most recent version at

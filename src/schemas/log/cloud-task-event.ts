@@ -1,5 +1,5 @@
 /**
- * Cloud Tasks archetype — emitted by `src/lib/cloudTasks.ts` around queue
+ * Cloud Tasks archetype — emitted by `api-cloudrun/src/lib/cloudTasks.ts` around queue
  * lifecycle (create / cancel / drain / configuration).
  *
  * **PII posture**: none. Queue names, task ids, document paths are not PII.

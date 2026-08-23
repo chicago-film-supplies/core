@@ -44,3 +44,13 @@ jobs:
 
       - name: Test
         run: deno task test
+
+      # Advisory, like every step here: there is no branch protection on core
+      # `main`/`beta`, so a red run blocks nothing. It is still the only check
+      # that sees the CI-checkout class — core alone on disk, where `src/`,
+      # `scripts/` and `tests/` are CORE's top-level entries, so a bare
+      # citation naming an api-cloudrun file is BROKEN rather than merely
+      # ambiguous. 65 of those existed when this landed; a full-workspace run
+      # could see only 22 of them.
+      - name: Citations
+        run: deno task audit:citations

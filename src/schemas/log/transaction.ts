@@ -1,6 +1,6 @@
 /**
  * Firestore transaction commit log record — emitted once per
- * `db.runTransaction` invocation by `src/lib/instrumentedTransaction.ts` in
+ * `db.runTransaction` invocation by `api-cloudrun/src/lib/instrumentedTransaction.ts` in
  * api-cloudrun, capturing per-collection write counts, estimated JSON
  * bytes, and (on failure) the error.
  *

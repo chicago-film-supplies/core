@@ -1,6 +1,6 @@
 /**
  * Propagation log record — one per cascade rule execution OR per atomic
- * transaction commit (see `src/lib/logPropagation.ts` in api-cloudrun for
+ * transaction commit (see `api-cloudrun/src/lib/logPropagation.ts` in api-cloudrun for
  * the two emission paths).
  *
  * Validated at construction time in `logPropagation()` /

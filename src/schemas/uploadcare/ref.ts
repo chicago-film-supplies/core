@@ -10,7 +10,7 @@
  *
  * **This is an authoring lint, not the safety net.** The orphan sweep protects
  * files by harvesting every RFC-4122-shaped string value out of every document
- * (`api-cloudrun/src/lib/uploadcareReferenceMap.ts`), which is schema-independent
+ * (`api-cloudrun/src/services/uploadcareReferenceMap.ts`), which is schema-independent
  * and therefore cannot drift. What this annotation buys is a compile-/test-time
  * nudge — `core/tests/uploadcareRef.test.ts` fails when a field that *looks* like
  * a CDN ref isn't declared as one, and `uploadcareRefPaths()` gives the sweep's

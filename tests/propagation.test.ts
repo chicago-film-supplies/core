@@ -447,8 +447,8 @@ Deno.test("the enforced_by field is actually populated (non-vacuity)", () => {
 });
 
 Deno.test("every enforced_by ref into core/ resolves", async () => {
-  // The mirror of api-cloudrun's `enforcedByCoverage.test.ts`, and the split is
-  // forced rather than chosen: 169 of the catalog's 196 `enforced_by`
+  // The mirror of `api-cloudrun/tests/unit/enforcedByResolves.test.ts`, and the
+  // split is forced rather than chosen: 169 of the catalog's 196 `enforced_by`
   // occurrences name an `api-cloudrun/` path, which this repo's CI has no
   // checkout of and physically cannot resolve. So each repo checks the refs
   // whose target it can actually see, and neither can check the other's.

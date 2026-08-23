@@ -136,7 +136,8 @@ export function calculateInvoiceTotals(
   // `paid: 0, credited: 0, void: 0, due: total` and a caller that spreads the
   // result over stored totals ERASES the projection.
   //
-  // That is not hypothetical. `migrate-card-fee-to-transaction-fee.ts` (#401)
+  // That is not hypothetical. The one-shot `migrate-card-fee-to-transaction-fee.ts`
+  // (#401 — applied, then deleted by `847c05e4`; recover from git history)
   // called it 2-arg on 2026-08-18 and zeroed **120 prod invoices'**
   // `amount_paid_cents`, taking $123,684.19 of recorded payments off the books
   // until they were rebuilt from the journal.
@@ -812,7 +813,7 @@ const TAX_EXPLAINABLE_FIELDS = new Set(["price.taxes", "price.taxes_base", "pric
  * Strip the differences that are **explained** — leaving only the ones an
  * operator should act on (api-cloudrun#481).
  *
- * The sync badge and `scripts/audit-draft-invoice-mirror.ts` were two
+ * The sync badge and `api-cloudrun/scripts/audit-draft-invoice-mirror.ts` were two
  * comparators kept in agreement by hand, and they disagreed by construction: the
  * audit compared money and then *explained* the difference through tested arms,
  * while the badge had none and so reported every one of them. On prod that was
@@ -874,7 +875,7 @@ export interface InvoiceSyncExplanation {
  * {@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.
  *
  * The residue alone is what the badge needs; a diagnostic needs the reason, and
- * `scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning
+ * `api-cloudrun/scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning
  * the arm is what lets that audit be a pure CONSUMER of this function rather
  * than a second implementation of it — which is the defect api-cloudrun#481 is
  * named after, and it had already produced two comparators that disagreed about

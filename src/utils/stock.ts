@@ -250,10 +250,12 @@ export interface AvailabilityWindow {
  * day must produce identical numbers. Callers pass offset-carrying ISO strings; a
  * bare `YYYY-MM-DD` is rejected upstream by the schema factories.
  *
- * It lives here rather than in `utils/availability.ts` (which is where it was)
+ * It lives here rather than in the `utils/availability.ts` it started in
  * because both the summary engine and the pre-reduced fold below need it, and
- * this module is the one they can both reach: `availability.ts` already imports
- * from here, so the reverse edge would be a cycle.
+ * this module is the one they can both reach — the reverse edge would have been
+ * a cycle. ⚠️ That module no longer exists: `0205b0f` deleted the legacy pair
+ * and folded what survived into this file, so there is no availability module
+ * to look in and this is the only home for the rule.
  */
 export function windowMs(window: AvailabilityWindow): { startMs: number; endMs: number } {
   return {

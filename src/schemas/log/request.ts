@@ -1,6 +1,6 @@
 /**
  * HTTP request summary log record — one per request, emitted by
- * `src/middleware/logging.ts` in api-cloudrun after the response is sent.
+ * `api-cloudrun/src/middleware/logging.ts` in api-cloudrun after the response is sent.
  *
  * Skips `/health` to avoid load-balancer noise. Carries no PII directly;
  * the envelope's `user_id` (from session, populated via AsyncLocalStorage)

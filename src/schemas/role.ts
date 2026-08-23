@@ -28,7 +28,7 @@ export interface Role {
  * `roles/{name}` document has been migrated** (api-cloudrun#443). Read this
  * before editing anything below.
  *
- * `permissionCache` (api-cloudrun `src/lib/permissionCache.ts`) parses each role
+ * `permissionCache` (api-cloudrun `api-cloudrun/src/lib/permissionCache.ts`) parses each role
  * document on the way to resolving a session's permissions, and
  * `requirePermission` is mounted globally on the authenticated band. So a role
  * document this schema rejects resolves to **zero permissions** — for every
@@ -50,9 +50,9 @@ export interface Role {
  *    the same 403.
  *
  * **So: migrate the stored role documents FIRST, in the same sitting as the
- * deploy that changes this file.** `scripts/seed-rbac.ts` (dry-run default,
- * `--write`) is the migrator; `scripts/audit-env-definitions.ts` diffs live
- * `roles/*.permissions` against `scripts/rbacRoles.ts` per environment.
+ * deploy that changes this file.** `api-cloudrun/scripts/seed-rbac.ts` (dry-run default,
+ * `--write`) is the migrator; `api-cloudrun/scripts/audit-env-definitions.ts` diffs live
+ * `roles/*.permissions` against `api-cloudrun/scripts/rbacRoles.ts` per environment.
  *
  * The api side no longer conflates *absent* with *unreadable*: a parse failure
  * throws and surfaces as **503 `ROLE_CONFIG_UNREADABLE`**, which is still

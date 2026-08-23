@@ -802,7 +802,7 @@ export interface DocumentTaxContext {
  * ## Three fallbacks, each measured rather than assumed
  *
  * Measured over the whole prod corpus (18,958 priceable lines,
- * `scripts/audit-tax-key.ts`, 2026-08-20):
+ * `api-cloudrun/scripts/audit-tax-key.ts`, 2026-08-20):
  *
  * | rung | lines | when it fires |
  * |---|---|---|
@@ -896,7 +896,7 @@ export interface LineTaxResolution {
    * holds a version of a lapsed cell reads `taxed`.
    *
    * ⚠️ `expired` is what {@link assignLineTaxes} refuses on. This function
-   * itself never throws: `scripts/audit-tax-key.ts` and the manager's
+   * itself never throws: `api-cloudrun/scripts/audit-tax-key.ts` and the manager's
    * read-only surfaces call it to REPORT the state, and a reporter that dies
    * on the condition it reports is useless.
    */
@@ -915,7 +915,7 @@ export interface LineTaxResolution {
    * ⚠️ Two fields rather than one, and the reason is a defect this shape
    * caused within an hour of existing: the first cut returned only the
    * pre-exemption tax and documented that callers must apply exemption
-   * themselves. `scripts/audit-tax-key.ts` promptly did not, and reported 79
+   * themselves. `api-cloudrun/scripts/audit-tax-key.ts` promptly did not, and reported 79
    * repriceable lines and $756.75 of movement that the writers would never
    * produce. A field a caller must remember to zero is a field that will be
    * read un-zeroed; `tax` is now the answer and `base` is the annotation.
@@ -963,7 +963,7 @@ export interface LineTaxResolution {
  * tax billed as a line, where `isTaxableCoa(2210) === false` was the only thing
  * stopping sales tax being charged on a tax. That line now carries
  * `taxed_as: "none"`, which says it on the axis this rule actually reads.
- * Measured before the change (`scripts/audit-tax-key.ts` §2): 2 lines corpus-
+ * Measured before the change (`api-cloudrun/scripts/audit-tax-key.ts` §2): 2 lines corpus-
  * wide sat at a non-revenue account, both `paid` and therefore frozen, so no
  * money moved.
  *
@@ -1111,7 +1111,7 @@ function atStoredVersion(tax: Tax, ctx: DocumentTaxContext): Tax {
  * They ride a line because the PRODUCT carries the ref, so rebuilding the array
  * from the rule alone would silently drop a real charge. Preserved deliberately
  * rather than by accident — prod carries zero such lines today
- * (`scripts/audit-tax-key.ts` §3), which is exactly why this would have gone
+ * (`api-cloudrun/scripts/audit-tax-key.ts` §3), which is exactly why this would have gone
  * unnoticed.
  *
  * ⚠️ A ref naming a uid the catalog does not hold is **dropped**, unlike

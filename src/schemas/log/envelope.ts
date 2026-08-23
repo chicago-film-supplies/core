@@ -2,7 +2,7 @@
  * Generic log-record envelope — for OpenAPI documentation only.
  *
  * Registered as the `LogRecord` OpenAPI component
- * (`src/app.ts` in api-cloudrun) so consumers of the spec can see the
+ * (`api-cloudrun/src/app.ts` in api-cloudrun) so consumers of the spec can see the
  * baseline shape every emitted log carries. NOT used for runtime
  * validation: the structured logger does not safeParse against this — it
  * dispatches by msg literal through the typed-record registry

@@ -2657,7 +2657,8 @@ untaxed and their *orders* were taxed, and only CRMS stamping
 `order.tax_profile` from the opportunity header hid it.
 
 ⚠️ **Sharing the schema pins WHERE the snapshot is built, not WHAT it holds**
-— the Ratchet-G lesson in the workspace `CLAUDE.md`, where a single allowed
+— the Ratchet-G lesson in the workspace CLAUDE.md (untracked and
+machine-local, api-cloudrun#530), where a single allowed
 renderer of the money `_str` mirror was singular and wrong for five months.
 The value assertion that sits beside this is api-cloudrun's writer-parity
 test: one order created natively and one created through the CRMS opportunity
@@ -3663,7 +3664,7 @@ Invoice-level totals with settlement tracking.
 projection** of the `settlements` journal — produced only by
 `recomputeSettlementTotals`, written in the same transaction as the settlement
 that changed them, and rebuildable from the log by
-`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
+`api-cloudrun/scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
 to apologise for; they are the target architecture, and the same shape
 `stock/{P}` already has against the movement journal.
 
@@ -3986,7 +3987,7 @@ type JurisdictionType = indexedAccess;
 Statuses whose Xero counterpart is expected to exist and be non-VOIDED.
 
 Was three textually identical copies — `lib/xeroQuoteStatus.ts`,
-`services/invoices.ts` and `scripts/audit-xero-quotes.ts`, the last carrying
+`services/invoices.ts` and `api-cloudrun/scripts/audit-xero-quotes.ts`, the last carrying
 a "keep in lockstep" comment that nothing enforced.
 
 ```ts
@@ -6038,8 +6039,8 @@ type QuoteDeleted = EventEnvelope<Quote> & typeLiteral;
 ### `QuoteId`
 
 `quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
-`{uid_order}:draft` (the working draft). Built in api-cloudrun
-`src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+`{uid_order}:draft` (the working draft). Built in
+`api-cloudrun/src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
 
 ```ts
 const QuoteId: z.ZodType<string>;
@@ -7727,7 +7728,7 @@ type TransactionUpdated = EventEnvelope<Movement> & typeLiteral;
 
 Discriminated union of every typed log record, keyed by the `msg`
 literal. The new `logTyped<R extends TypedLogRecord>` API in
-api-cloudrun's `src/lib/logger.ts` constrains its argument to this
+`api-cloudrun/src/lib/logger.ts` constrains its argument to this
 union — TS narrows to the matching arm based on the supplied `msg`,
 giving compile-time enforcement that every field is correctly named
 and typed.
@@ -7786,7 +7787,7 @@ User display preferences for a Typesense-backed collection view.
 read by nothing. This object is **strict**, so a blob still carrying them
 fails to parse; the write path does not validate (`updateUser` merges and
 `transaction.set`s), so nothing breaks at runtime, but
-`scripts/audit-schema-validation.ts --only=users` will report it. Both
+`api-cloudrun/scripts/audit-schema-validation.ts --only=users` will report it. Both
 environments held `{}` when this landed, so there was nothing to migrate.
 
 ```ts
@@ -9898,7 +9899,8 @@ untaxed and their *orders* were taxed, and only CRMS stamping
 `order.tax_profile` from the opportunity header hid it.
 
 ⚠️ **Sharing the schema pins WHERE the snapshot is built, not WHAT it holds**
-— the Ratchet-G lesson in the workspace `CLAUDE.md`, where a single allowed
+— the Ratchet-G lesson in the workspace CLAUDE.md (untracked and
+machine-local, api-cloudrun#530), where a single allowed
 renderer of the money `_str` mirror was singular and wrong for five months.
 The value assertion that sits beside this is api-cloudrun's writer-parity
 test: one order created natively and one created through the CRMS opportunity
@@ -10390,8 +10392,8 @@ type ProductTypeType = indexedAccess;
 ### `QuoteId`
 
 `quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
-`{uid_order}:draft` (the working draft). Built in api-cloudrun
-`src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+`{uid_order}:draft` (the working draft). Built in
+`api-cloudrun/src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
 
 ```ts
 const QuoteId: z.ZodType<string>;
@@ -12232,7 +12234,7 @@ Invoice-level totals with settlement tracking.
 projection** of the `settlements` journal — produced only by
 `recomputeSettlementTotals`, written in the same transaction as the settlement
 that changed them, and rebuildable from the log by
-`scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
+`api-cloudrun/scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
 to apologise for; they are the target architecture, and the same shape
 `stock/{P}` already has against the movement journal.
 
@@ -12422,7 +12424,7 @@ type InvoiceStatusType = indexedAccess;
 Statuses whose Xero counterpart is expected to exist and be non-VOIDED.
 
 Was three textually identical copies — `lib/xeroQuoteStatus.ts`,
-`services/invoices.ts` and `scripts/audit-xero-quotes.ts`, the last carrying
+`services/invoices.ts` and `api-cloudrun/scripts/audit-xero-quotes.ts`, the last carrying
 a "keep in lockstep" comment that nothing enforced.
 
 ```ts
@@ -14908,7 +14910,7 @@ is exactly what it excludes. This is that missing half.
 carrying `reverses`. There is deliberately no `status` field, for the same
 reason `Movement` has none: a status flag *and* a reverser link is two sources
 of truth. The one permitted mutation in the whole design is
-`linkSettlementToXero` (api-cloudrun `src/lib/settlements.ts`) writing
+`linkSettlementToXero` (api-cloudrun `api-cloudrun/src/lib/settlements.ts`) writing
 `xero_payment_id` null → value once — late-binding external linkage is not
 part of the money fact.
 
@@ -15826,7 +15828,7 @@ User display preferences for a Typesense-backed collection view.
 read by nothing. This object is **strict**, so a blob still carrying them
 fails to parse; the write path does not validate (`updateUser` merges and
 `transaction.set`s), so nothing breaks at runtime, but
-`scripts/audit-schema-validation.ts --only=users` will report it. Both
+`api-cloudrun/scripts/audit-schema-validation.ts --only=users` will report it. Both
 environments held `{}` when this landed, so there was nothing to migrate.
 
 ```ts
@@ -17697,7 +17699,7 @@ const ClientLogEntrySchema: z.ZodType<ClientLogEntry>;
 
 Server-emitted log record for browser-shipped events.
 
-api-cloudrun's `src/routes/clientLogs.ts` re-emits each ingested
+`api-cloudrun/src/routes/clientLogs.ts` re-emits each ingested
 {@link ClientLogEntry} as `msg: "client_log"` with the wire entry's
 envelope rewritten into `client_*` namespaced fields (`client_msg`,
 `client_ts`, `client_level` — to avoid collision with the server
@@ -18485,7 +18487,7 @@ type TransactionStatusType = indexedAccess;
 
 Discriminated union of every typed log record, keyed by the `msg`
 literal. The new `logTyped<R extends TypedLogRecord>` API in
-api-cloudrun's `src/lib/logger.ts` constrains its argument to this
+`api-cloudrun/src/lib/logger.ts` constrains its argument to this
 union — TS narrows to the matching arm based on the supplied `msg`,
 giving compile-time enforcement that every field is correctly named
 and typed.
@@ -20675,7 +20677,7 @@ says: #1751 and #1322 are both PAID there with `AmountPaid: 0`.
 {@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.
 
 The residue alone is what the badge needs; a diagnostic needs the reason, and
-`scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning
+`api-cloudrun/scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning
 the arm is what lets that audit be a pure CONSUMER of this function rather
 than a second implementation of it — which is the defect api-cloudrun#481 is
 named after, and it had already produced two comparators that disagreed about
@@ -21146,7 +21148,7 @@ defect this function exists to remove.
 Strip the differences that are **explained** — leaving only the ones an
 operator should act on (api-cloudrun#481).
 
-The sync badge and `scripts/audit-draft-invoice-mirror.ts` were two
+The sync badge and `api-cloudrun/scripts/audit-draft-invoice-mirror.ts` were two
 comparators kept in agreement by hand, and they disagreed by construction: the
 audit compared money and then *explained* the difference through tested arms,
 while the badge had none and so reported every one of them. On prod that was
@@ -21648,10 +21650,12 @@ where the browser is — so a `-08:00`, a `Z` and a `-06:00` spelling of the sam
 day must produce identical numbers. Callers pass offset-carrying ISO strings; a
 bare `YYYY-MM-DD` is rejected upstream by the schema factories.
 
-It lives here rather than in `utils/availability.ts` (which is where it was)
+It lives here rather than in the `utils/availability.ts` it started in
 because both the summary engine and the pre-reduced fold below need it, and
-this module is the one they can both reach: `availability.ts` already imports
-from here, so the reverse edge would be a cycle.
+this module is the one they can both reach — the reverse edge would have been
+a cycle. ⚠️ That module no longer exists: `0205b0f` deleted the legacy pair
+and folded what survived into this file, so there is no availability module
+to look in and this is the only home for the rule.
 
 ## `@cfs/core/utils/money`
 
@@ -21785,8 +21789,8 @@ A Typesense `_str` mirror needs `"1234.56"`, not `"$1,234.56"`: **both `$`
 and `,` are token separators**, so the display form tokenizes as
 `1`/`234`/`56` and a plain `1234.56` query cannot match it. That is the whole
 reason a second renderer existed in `api-cloudrun/scripts/_moneySurface.ts`
-for two weeks; the options are cheaper than the copy, and this way the mirror
-and the display cannot drift on rounding.
+for two weeks before it was deleted; the options are cheaper than the copy,
+and this way the mirror and the display cannot drift on rounding.
 
 **Parameters**
 
@@ -23720,7 +23724,7 @@ jurisdiction is dropped.
 They ride a line because the PRODUCT carries the ref, so rebuilding the array
 from the rule alone would silently drop a real charge. Preserved deliberately
 rather than by accident — prod carries zero such lines today
-(`scripts/audit-tax-key.ts` §3), which is exactly why this would have gone
+(`api-cloudrun/scripts/audit-tax-key.ts` §3), which is exactly why this would have gone
 unnoticed.
 
 ⚠️ A ref naming a uid the catalog does not hold is **dropped**, unlike
@@ -23911,7 +23915,7 @@ deliberately not the array index, which moves when CRMS reorders.
 ## Three fallbacks, each measured rather than assumed
 
 Measured over the whole prod corpus (18,958 priceable lines,
-`scripts/audit-tax-key.ts`, 2026-08-20):
+`api-cloudrun/scripts/audit-tax-key.ts`, 2026-08-20):
 
 | rung | lines | when it fires |
 |---|---|---|
@@ -24135,7 +24139,7 @@ The class the gate was really covering was the CRMS bottled-water levy — a
 tax billed as a line, where `isTaxableCoa(2210) === false` was the only thing
 stopping sales tax being charged on a tax. That line now carries
 `taxed_as: "none"`, which says it on the axis this rule actually reads.
-Measured before the change (`scripts/audit-tax-key.ts` §2): 2 lines corpus-
+Measured before the change (`api-cloudrun/scripts/audit-tax-key.ts` §2): 2 lines corpus-
 wide sat at a non-revenue account, both `paid` and therefore frozen, so no
 money moved.
 
@@ -24322,3 +24326,224 @@ trailing hyphens. Two distinct display names can collapse to the same slug
 ```ts
 slugify("Packing List (v2)"); // "packing-list-v2"
 ```
+
+## `@cfs/core/utils/citations`
+
+### `CITATION`
+
+A backticked path with an optional `:N` or `:N-M` suffix.
+
+⚠️ The first character class is NARROWER than the rest on purpose. A citation
+may not START with a bare `/` or a single-letter dot segment, which is what
+separates a path from two prose forms that look like one: a URL route
+(`/openapi.json`, served by an API, not a file) and a bare extension
+(`.d.ts`, discussed as a concept). Widening the leading character to match
+the body reports both as broken — a guard that cries wolf, which is how a
+broken count stops being read.
+
+⚠️ **But requiring an ALPHANUMERIC there was too narrow, and it was a silent
+false zero for four months.** Every dot-leading directory — `.claude/**`,
+`.github/**` — failed the leading class, so no citation into any of them was
+ever matched, counted, or reported as skipped. In api-cloudrun those are the
+skills, the plans, the commands and the workflows: 100 citations, and the
+summary said nothing about them while reading as clean. Found 2026-08-23 by
+a planted case, not by review — the audit's own docstring used
+`.claude/plans/…` as its worked example of a path-only citation being
+matched, which it was not.
+
+So the leading position is an ALTERNATION, and the dot-leading branch
+requires a `/` before the extension. That is the actual discriminator: a
+dot-leading PATH has a directory in it (`.claude/skills/…`), while a
+dot-leading SUFFIX does not (`.d.ts`, and `.meta.json` — the template
+sidecar's extension, discussed as a concept). A character-count rule was
+tried first and admitted `.meta.json`.
+
+⚠️ The trailing `(?![A-Za-z0-9(.])` is load-bearing, and its absence produced
+FIVE false broken findings in instruction-grade docs (2026-08-23). Without it
+the extension group matches a PREFIX of a longer token, because the greedy
+body backtracks until some suffix happens to be a known extension:
+  `version.sha`  → reported as a citation to version.sh
+  `res.json()`   → a method call on a fetch response, read as res.json
+  `vmauth.yml.tpl`, `docker-compose.yml.tpl`, `setup.sh.tpl`
+                 → reported as the rendered VM filenames, which are of
+                   course not in the repo — so the three files the obs
+                   GitOps section is ABOUT all read as broken
+Each looks exactly like a dead file to a reader skimming the output. `(`
+separates a method call from a dotted filename; `.` stops the prefix match.
+`tpl` is in the extension list for the same reason — with it,
+`vmauth.yml.tpl` matches WHOLE and resolves, instead of being silently
+unrepresentable.
+
+⚠️ **It carries the `g` flag, so it is STATEFUL.** `RegExp.lastIndex`
+persists across calls on a shared instance. Use it with `matchAll`, which
+clones internally — never with a bare `.test()` or `.exec()` loop on this
+export.
+
+```ts
+const CITATION: RegExp;
+```
+
+### `CitationFacts`
+
+One classification request. All fields are facts the runner gathered.
+
+```ts
+interface CitationFacts {
+  readonly resolved: string;
+  readonly candidates: readonly string[];
+  readonly presentRepos: ReadonlySet<string>;
+  readonly absentRepos: readonly string[];
+  readonly knownRepos: readonly string[];
+  readonly ownTopLevel: ReadonlySet<string>;
+  readonly describesDeletion: boolean;
+  readonly lineOutOfRange?: boolean;
+}
+```
+
+### `CitationVerdict`
+
+What a citation turned out to be. See {@link classifyCitation}.
+
+```ts
+type CitationVerdict = "ok" | "broken" | "ambiguous" | "unverifiable" | "deleted-ok";
+```
+
+### `DELETION_VOCABULARY`
+
+⚠️ **`one-shot` and `git history` are in here because THE SCRIPTS CONVENTION
+defines them that way**, not as a general-English guess.
+`api-cloudrun/CLAUDE.md` § Scripts: *"**One-shot** (`migrate-*`, `backfill-*`, …) —
+applied once to prod, then **DELETE** … Archive is git: `git log
+--diff-filter=D -- scripts/`"*. So prose calling something "the one-shot
+fix-denorm-counts.ts" IS telling the reader where to look, and flagging it
+would be flagging the convention.
+
+`moved … from` and `not yet written` are the same claim pointed the other two
+ways: *"composite indexes moved there from manager/firestore.indexes.json"*
+tells the reader the old path is gone, and a plan's entry naming a script it
+WANTS written is a specification, not an assertion that the file exists.
+⚠️ The second one is only honest because deferred work also gets a GitHub
+issue — the org's deferred-work rule. Without that, "not yet written" would
+be a phrase that silences the guard forever at zero cost.
+
+⚠️ **It is NOT enough that the citation merely names a `migrate-*` file.**
+The signal has to be in the PROSE, which is what keeps this honest: three
+sampled audit scripts cited their paired migrator, two said "the one-shot" or
+"lives in git history" and were fine, and the third said *"Pair with
+backfill-xero-code.ts (the migrator) — run this after it"*, which is an
+instruction a reader cannot follow. That third one was a real finding, and
+the migrator it named had never existed at all.
+
+```ts
+const DELETION_VOCABULARY: RegExp;
+```
+
+### `JSR_PREFIXES`
+
+Rewrite a JSR module specifier to the workspace path it names.
+
+⚠️ **Without this, every `@cfs/core/...` citation reads as broken — 21 of
+them in api-cloudrun alone, all correct.** They are how the whole codebase
+refers to this package, so it is the single densest citation form in `src/`,
+and reporting the densest correct form as the top finding is precisely how a
+guard stops being read.
+
+`@cfs/core` publishes `src/` under namespaced subpaths (`@cfs/core/schemas`,
+`@cfs/core/utils/*`), so the mapping is a prefix swap. It is deliberately a
+TABLE and not a general `@scope/pkg → <pkg>/src` rule: the retired
+`@cfs/schemas` and `@cfs/utilities` packages must NOT resolve — they are
+archived on JSR with no live consumers, so prose still naming one is stale
+and should say `@cfs/core`.
+
+```ts
+const JSR_PREFIXES: ReadonlyArray<readonly [string, string]>;
+```
+
+### `classifyCitation(f: CitationFacts): CitationVerdict`
+
+The whole decision, in one place, ordered.
+
+🔴 **The ORDER is the content.** Each step below rules out one reason a
+correct citation fails to resolve, and moving any of them changes verdicts
+silently:
+
+1. A **build artifact** (`node_modules`, `_dist`) is legitimate to cite and
+   impossible to check — it is reproducible from a published version rather
+   than committed.
+2. A citation naming a **repo this machine does not have** cannot be judged.
+3. A citation leading with one of the **running repo's own** top-level
+   entries is a claim about this repo and stays checkable even so — without
+   this the CI run is nearly vacuous.
+4. Anything still unresolved in an **incomplete workspace** is unverifiable,
+   because "dead" and "lives in a repo I do not have" are indistinguishable.
+5. Only then does the **prose** get to excuse it.
+
+⚠️ **An EXEMPT/allowlist check belongs BEFORE all of this, in the runner.**
+Steps 2 and 4 are environment-dependent, so a lookup placed after them is
+reached on one machine and not another — and a both-directions discharge then
+reports *"matched NOTHING: the citation is gone"* about a citation sitting
+untouched in the file. An explicit human ruling may not be gated on which
+repos happen to be cloned.
+
+### `describesDeletion(text: string, at: number): boolean`
+
+Does the prose around this citation say the path is GONE?
+
+⚠️ **This is the one heuristic here, so it is reported as its own class
+rather than folded into "clean".** A static walker's extraction fails in BOTH
+directions — under-extraction invents findings, over-extraction falsely
+satisfies — and only planted violations distinguish them, which is why the
+test file plants one of each.
+
+The window is the surrounding ±240 characters rather than the line: these
+docs are hard-wrapped at ~80 columns, so the verb that says "deleted" is
+routinely on a different line from the path it is about.
+
+Erring towards deleted-ok is the safe direction. A missed real breakage is
+one stale citation; a false broken on a correct sentence about a deleted
+one-shot trains readers to ignore the count, and the count is the only number
+here that must stay at zero.
+
+### `isHistoryDoc(path: string): boolean`
+
+Append-only history docs, whose citations are SUPPOSED to name things that no
+longer exist.
+
+A `*-RECORD.md` is an account of a finished campaign. Measured 2026-08-23,
+api-cloudrun's `money-arithmetic-campaign-RECORD.md` alone held **32 of that
+repo's 39 broken citations**, essentially all deliberately-deleted one-shots,
+probes and ratchets. Including them would mean either rewriting true history
+or an exemption per line. Deliberately NOT generalised to all plan docs: an
+ordinary plan is refactored freely, is read as current intent, and is exactly
+where a dead citation misleads.
+
+### `preferOwnRepo(candidates: readonly string[], ownRepoPrefix: string): string[]`
+
+Narrow a citation's candidate files to the RUNNING repo's, when it has any.
+
+⚠️ **A correctness fix, not just noise reduction — it makes the local run
+agree with CI.** In CI only the running repo is indexed, so a bare
+`logger.ts` resolves to exactly one file there and is reported clean; in a
+full workspace the cross-repo search also finds core's and reports ambiguous.
+Two environments, two verdicts, same citation. Under this rule CI is a
+**no-op** — there is nothing else indexed to narrow away — and the local run
+stops inventing a finding CI will never reproduce. Measured over
+api-cloudrun's 161 local findings: **49 collapse to a single candidate**.
+
+⚠️ **It narrows and never empties.** When no candidate is under the running
+repo the whole set comes back unchanged — a citation naming only another
+repo's file is a citation to that repo, and answering "no candidates" would
+turn it into a broken finding, the opposite of what this is for.
+
+⚠️ **It is not a tie-breaker.** Two candidates *inside* the running repo
+(`src/routes/<x>.ts` and `src/services/<x>.ts`) stay ambiguous, and
+they should: that citation genuinely does not say which file it means, and
+picking one would be guessing. 107 of the 161 were that shape and were fixed
+by qualifying the prose.
+
+`ownRepoPrefix` must end in the path separator, or a sibling whose name
+merely starts with the running repo's is swept in.
+
+### `resolveSpecifier(path: string): string`
+
+Apply {@link JSR_PREFIXES}; a non-specifier path is returned untouched.

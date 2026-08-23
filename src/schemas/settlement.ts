@@ -16,7 +16,7 @@
  * carrying `reverses`. There is deliberately no `status` field, for the same
  * reason `Movement` has none: a status flag *and* a reverser link is two sources
  * of truth. The one permitted mutation in the whole design is
- * `linkSettlementToXero` (api-cloudrun `src/lib/settlements.ts`) writing
+ * `linkSettlementToXero` (api-cloudrun `api-cloudrun/src/lib/settlements.ts`) writing
  * `xero_payment_id` null → value once — late-binding external linkage is not
  * part of the money fact.
  *

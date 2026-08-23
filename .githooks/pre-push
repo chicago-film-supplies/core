@@ -4,5 +4,10 @@ set -e
 echo "pre-push: test"
 deno task test
 
+# ⚠️ pre-PUSH, not pre-commit. core#54 is removing the full suite from
+# pre-commit; a new check there would inherit the double-run it deletes.
+echo "pre-push: citations"
+deno task audit:citations
+
 echo "pre-push: publish dry-run"
 deno publish --dry-run --allow-dirty

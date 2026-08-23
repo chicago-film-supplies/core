@@ -266,7 +266,7 @@ export interface IntegrationEventLogRecord {
    * (api-cloudrun#573, closed 2026-08-22). Prod, 7 days: p50 329 ms, p95
    * 1,131 ms, p99 1,912 ms, worst 23,279 ms, and 0.41% of records over three
    * seconds. `eventarc_processed` now emits at `info` only at or above 3,000 ms
-   * (`LAG_INFO_THRESHOLD_MS`, api-cloudrun `src/routes/eventarc.ts`) and at
+   * (`LAG_INFO_THRESHOLD_MS`, api-cloudrun `api-cloudrun/src/routes/eventarc.ts`) and at
    * `debug` below it, so the field's volume no longer tracks workload — which
    * is what made keeping it cheap enough to stop arguing about.
    */

@@ -20,7 +20,7 @@ import type {
 // writer test and the corpus detector are genuinely complementary: the test
 // proves the flip happens, and the detector proves the SET property ("exactly
 // one active default, and the store points at it") that no single write can
-// establish. The detector's rules live in `src/lib/locationIntegrity.ts` and are
+// establish. The detector's rules live in `api-cloudrun/src/lib/locationIntegrity.ts` and are
 // shared verbatim with the nightly sweep, so the script and the job cannot
 // drift.
 
@@ -28,7 +28,7 @@ const LOCATION_DEFAULT_POINTER: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-location-defaults.ts",
   clause:
-    "checks 1 + 2 — exactly one ACTIVE `default: true` location per store, and `store.default_location` non-null, naming an existing location, in THIS store, flagged default, with a matching `name` denorm. Unit-tested at `tests/unit/locationIntegrity.test.ts` (dangling, cross-store, not-default and stale-name each reported separately).",
+    "checks 1 + 2 — exactly one ACTIVE `default: true` location per store, and `store.default_location` non-null, naming an existing location, in THIS store, flagged default, with a matching `name` denorm. Unit-tested at `api-cloudrun/tests/unit/locationIntegrity.test.ts` (dangling, cross-store, not-default and stale-name each reported separately).",
   gates: true,
 };
 

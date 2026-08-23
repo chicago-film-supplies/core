@@ -29,7 +29,7 @@ Read Findings 1–3 for the evidence, then Phase 0. The one thing to internalise
 **No action.** Two adjacent gaps surfaced, neither about `uid` — both filed as issues rather than folded in:
 
 - `TypesenseDocumentMap` (`core/src/schemas/typesense/documents.ts:878`) covers 20 of 22 aliases — `cards` and `threads` have configs but no typed search-hit shape, and no `CardDocument` / `ThreadDocument` exists at all. ⚠️ **Not latent for `cards`**: `cards.ts:26` is `enabled: true` (only `threads` and `bookings` are `enabled: false`, and `bookings` *is* in the map), so a live index is unreachable from manager's typed search surface, which is generic over `keyof TypesenseDocumentMap`.
-- (core#60) `api-cloudrun/scripts/reindexTypesense.ts:118` builds its orphan-purge set from the **Firestore doc id** while the import keys on **`data.uid`**; they agree only because of the write guard.
+- (core#60) `api-cloudrun/src/services/reindexTypesense.ts:119` builds its orphan-purge set from the **Firestore doc id** while the import keys on **`data.uid`**; they agree only because of the write guard.
 
 ---
 
@@ -136,7 +136,7 @@ Fixtures to flip: `core/tests/session.test.ts` (6), `api-cloudrun/tests/helpers/
 ### 1e. Prose fixes
 
 - `core/src/schemas/order-document.ts:5-9` — "auto-id" → filename-derived and deterministic.
-- `core/src/schemas/uploadcare-sweep.ts:2` — "singleton `last-run`" → per-partition (`api-cloudrun/src/lib/uploadcareReferenceMap.ts:91`).
+- `core/src/schemas/uploadcare-sweep.ts:2` — "singleton `last-run`" → per-partition (`api-cloudrun/src/services/uploadcareReferenceMap.ts:91`).
 - `api-cloudrun/src/services/dbRead.ts:48` — the `data.uid === id` invariant comment is false for 9 collections, and `roles` — which violates it — is on the readable allowlist.
 - `api-cloudrun/scripts/seed-rbac.ts:5-8` — lists 4 roles, there are 6 (the core#55 stale-count class).
 

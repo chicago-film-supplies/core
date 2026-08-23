@@ -1,6 +1,6 @@
 /**
  * Deterministic, validator-compliant id factories for fixtures.
- * Mirrors the shapes enforced by `src/_uid.ts`.
+ * Mirrors the shapes enforced by `src/schemas/_uid.ts`.
  */
 
 /** A stable 20-char `[A-Za-z0-9]` Firestore id derived from a seed label. */

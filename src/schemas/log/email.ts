@@ -1,5 +1,5 @@
 /**
- * Outbound-email log records — emitted by `src/lib/email.ts` in
+ * Outbound-email log records — emitted by `api-cloudrun/src/lib/email.ts` in
  * api-cloudrun around the Resend REST call.
  *
  * Empirically (2026-05-27 obs sweep) these `msg` values did NOT fire over

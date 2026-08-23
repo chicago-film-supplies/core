@@ -28,6 +28,7 @@ import * as organizationUtils from "../src/utils/organizations.ts";
 import * as productUtils from "../src/utils/products.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
 import * as templateUtils from "../src/utils/templates.ts";
+import * as citationUtils from "../src/utils/citations.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -65,6 +66,14 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   taxes: taxUtils,
   templates: templateUtils,
   stock: stockUtils,
+  // ⚠️ **Not injectable, and the only entry here that is not.**
+  // `utils/citations.ts` is tooling — the doc-citation audit's rules — and no
+  // template can reach it (it is in neither `TEMPLATE_COLLECTION_UTILS` nor
+  // `ALWAYS_ON_UTIL_NAMESPACES`). It is listed because this map's job is to
+  // cover every `./utils/*` entrypoint, so the drift guard sees a new export
+  // in it; without the entry, its five exports were emitted straight into the
+  // editor's helper panel with nothing objecting.
+  citations: citationUtils,
 };
 
 /**
@@ -97,6 +106,29 @@ function exprArgCount(expr: string): number {
 }
 
 // ── Lockstep with the real exports ──────────────────────────────────
+
+Deno.test("UTIL_MODULES covers every ./utils/* entrypoint in deno.json", async () => {
+  // ⚠️ **The comment on UTIL_MODULES claimed "the guard below is what enforces
+  // completeness against `deno.json`" and there was no such guard** — a
+  // gate-claim naming a check nothing runs, which is the defect class
+  // `CLAUDE.md` § Commands calls out on its own `lint` line.
+  //
+  // It cost something. `./utils/citations` was added to `deno.json` without an
+  // entry here, so the drift guard and the denylist-staleness guard both
+  // skipped the namespace entirely while the generator happily emitted its
+  // exports into the template editor's helper panel.
+  const denoJson = JSON.parse(await Deno.readTextFile(new URL("../deno.json", import.meta.url)));
+  const entrypoints = Object.keys(denoJson.exports)
+    .filter((e) => e.startsWith("./utils/"))
+    .map((e) => e.slice("./utils/".length))
+    .sort();
+  assertEquals(
+    entrypoints.filter((ns) => !(ns in UTIL_MODULES)),
+    [],
+    "a `./utils/*` entrypoint with no UTIL_MODULES entry — every guard in this " +
+      "file iterates that map, so the namespace is silently unchecked.",
+  );
+});
 
 Deno.test("every emitted helper is a real export (no stale entries)", () => {
   for (const [namespace, mod] of Object.entries(UTIL_MODULES)) {

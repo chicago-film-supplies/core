@@ -2,7 +2,7 @@
 
 ## Overview
 
-The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces with **no bare root export**: `@cfs/core/schemas[/*]` — Zod 4 schemas for Firestore + Typesense collections, programmatically enforceable propagation rules, and shared TS types (sources in `src/schemas/`); and `@cfs/core/utils/*` — pure helper functions for dates/invoices/orders/products/etc. (sources in `src/utils/`). Utils import schemas one-way via the relative `../schemas/mod.ts` barrel, so both ship in a single publish (no cross-package lockstep). Merged 2026-06 from the former `schemas-next`/`utilities-next` repos.
+The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces with **no bare root export**: `@cfs/core/schemas[/*]` — Zod 4 schemas for Firestore + Typesense collections, programmatically enforceable propagation rules, and shared TS types (sources in `src/schemas/`); and `@cfs/core/utils/*` — pure helper functions for dates/invoices/orders/products/etc. (sources in `src/utils/`). ⚠️ **That namespace now also carries one TOOLING-ONLY module — `src/utils/citations.ts`, the shared doc-citation rules — which no runtime code in any consumer imports.** It sits beside the domain helpers and is deliberately not one; namespaced subpaths mean it ships only if imported, so it costs manager's bundle nothing. Utils import schemas one-way via the relative `../schemas/mod.ts` barrel, so both ship in a single publish (no cross-package lockstep). Merged 2026-06 from the former `schemas-next`/`utilities-next` repos.
 
 ## Setup
 
@@ -18,6 +18,20 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
   `.githooks/pre-push`. A gate-claim that names a check nothing runs is the exact defect class this
   package's ratchets exist to kill, so it is stated here rather than quietly corrected.
 - `deno task test` — run tests
+- `deno task audit:citations` — check every backticked `path.ext` citation in this package's
+  prose (`CLAUDE.md`, `README.md`, `.claude/`, `notes/`, `src/`, `scripts/`, `tests/`,
+  `.github/`, `.githooks/`) still resolves. Runs in `.githooks/pre-push` and in
+  `.github/workflows/ci.yaml`, and is **advisory** — there is no branch protection on
+  `main`/`beta`, so a red run blocks nothing. ⚠️ **Its CI run is the STRONGER one**, because
+  CI checks out core alone: `src/`, `scripts/` and `tests/` are then core's OWN top-level
+  entries, so a bare citation naming an api-cloudrun file is BROKEN rather than merely
+  ambiguous. 65 of those existed when it landed and a full-workspace run could see only 22.
+  Simulate it with `cp -R core /tmp/x && cd /tmp/x/core && HOME=/tmp/nonexistent deno task
+  audit:citations`. Rules in `src/utils/citations.ts`, planted both ways in
+  `tests/citations.test.ts`. It gates **broken** only; 75 ambiguous bare basenames remain
+  (core#67). ⚠️ The `lint` line above records the inverse lesson — a gate-claim naming a
+  check nothing runs. A check that runs and is named nowhere is the same failure pointed the
+  other way, which is why this entry exists.
 
 ## Publish
 - git commit, git push to beta branch, gh action will trigger semantic release and publish
@@ -165,7 +179,14 @@ What follows from it, and what to do when adding a rule:
 - **One file may also export an `as const` step tuple — `propagation/stock.ts`'s `STOCK_STEPS` — and that is the sanctioned second export.** ⚠️ **The diagnostic that produced it is worth reusing: if a factory's hole is a TRANSACTION ID, you have one rule mis-modelled as N; if it is a COLLECTION, you have a real template.** `stockRules(transactionId, trigger)` minted **21 of the corpus's 173 rules** as seven near-identical copies — every `enforced_by` ref a shared const, `trigger` a shared const, only the id prefix and one prose fragment varying. They were three rules with eleven firing contexts, a relation `TransactionDefinition.steps[]` already modelled, so the rules are declared once and the transactions reference `STOCK_STEPS`. Corpus 173 → 155.
 - ⚠️ **A trigger is not an invariant.** *"Every booking breakdown change"* answers **when this fires**, not **what must be true**, and splicing it into an `invariant` is what made those 21 rules look distinct. Per-transaction gating prose belongs on the transaction's `description`.
 - ⚠️ **Do not write structural counts into rule prose.** Several `invariant`/`trigger` strings carry stale ones (core#55).
-- **An `enforced_by` ref is `<repo>/<path>` or `<repo>/<path>::<anchor>` — never `:<line>`.** The anchor is a literal that must OCCUR in the file: a test name, a `t.step` name, an exported symbol, a finding code. ⚠️ **The line-number form is banned rather than discouraged, and the measurement is why.** All 105 of them were converted by hand on 2026-08-18 and **11 of the first 33 read were pointing at the wrong assertion WHILE RESOLVING CLEANLY** — four clauses about contacts and invoices whose line sat one step above in the orders step, one naming `OrderItemSchema`'s docstring for a clause about `CreateOrderInput`, one naming an interface field for a clause about a `superRefine`. A scripted conversion would have cemented each of those and then gated it. `tests/propagation.test.ts` rejects the form; api-cloudrun's `tests/unit/enforcedByResolves.test.ts` resolves the anchors.
+- **An `enforced_by` ref is `<repo>/<path>` or `<repo>/<path>::<anchor>` — never `:<line>`.** The anchor is a literal that must OCCUR in the file: a test name, a `t.step` name, an exported symbol, a finding code. ⚠️ **The line-number form is banned rather than discouraged, and the measurement is why.** All 105 of them were converted by hand on 2026-08-18 and **11 of the first 33 read were pointing at the wrong assertion WHILE RESOLVING CLEANLY** — four clauses about contacts and invoices whose line sat one step above in the orders step, one naming `OrderItemSchema`'s docstring for a clause about `CreateOrderInput`, one naming an interface field for a clause about a `superRefine`. A scripted conversion would have cemented each of those and then gated it. `tests/propagation.test.ts` rejects the form; `api-cloudrun/tests/unit/enforcedByResolves.test.ts` resolves the anchors.
+  ⚠️ **`deno task audit:citations` accepts and checks `path:N`, and that does NOT bless the
+  form here.** The two scopes are different: that audit reads ordinary PROSE citations, where
+  a line number is optional and merely checked against EOF when present; `enforced_by` refs
+  are a machine-consumed catalog whose whole job is to point at one assertion. A `path:N`
+  passing the citation audit means the file is long enough, never that the line still says
+  what the clause claims — which is exactly the failure the 11-of-33 measurement above found.
+  The ban stands for `enforced_by`.
 - **A rule's `source`/`target` are `PropagationEndpoint`** = `CollectionName | "*" | "orders/documents"` — keyed off this package's own collection registry, so there is no second list to drift. The `import type { CollectionName }` in `propagation/types.ts` **must stay type-only**: it is erased at emit, which is what keeps `@cfs/core/schemas/propagation` free of runtime code from `mod.ts`. A value import there would drag the whole schema barrel back in and undo the subpath's reason for
 existing. **That subpath is `./schemas/propagation`, live as of 2026-08-18** — and the three values
 (`rules`, `transactions`, `aggregates`) are **no longer on the `./schemas` barrel at all**, so import

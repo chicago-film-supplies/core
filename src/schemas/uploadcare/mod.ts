@@ -11,7 +11,7 @@
  *   counts*. The sweep does NOT depend on this list to keep files alive: it
  *   harvests every RFC-4122-shaped string value out of every document, which is
  *   schema-independent and cannot drift. This module supplies attribution, not
- *   protection. See `api-cloudrun/src/lib/uploadcareReferenceMap.ts`.
+ *   protection. See `api-cloudrun/src/services/uploadcareReferenceMap.ts`.
  */
 import type { z } from "zod";
 import { isCollectionName, schemaFor } from "../mod.ts";

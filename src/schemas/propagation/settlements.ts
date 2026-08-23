@@ -26,7 +26,7 @@
  * 25s deadline (60–87s per contender in `firestoreWrite.ts`'s own table), and
  * the invoice is the hot document on the money path. The cost is a window in
  * which a crash leaves the order mirror stale, which is why the mirror is
- * *convergent* (`src/lib/orderInvoiceMirror.ts`) and backed by an eventarc
+ * *convergent* (`api-cloudrun/src/lib/orderInvoiceMirror.ts`) and backed by an eventarc
  * reconciler rather than merely co-written.
  *
  * The other three writers here ARE single-transaction.

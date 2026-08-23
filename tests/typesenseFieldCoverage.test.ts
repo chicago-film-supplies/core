@@ -411,7 +411,7 @@ Deno.test("typesense coverage companion: the strip rule reports a query_by_* fie
 //
 // It is deliberately a check on the DECLARATION, not on the corpus. The corpus
 // was measured separately and found clean in both environments
-// (api-cloudrun `scripts/audit-typesense-int-fields.ts`, 18k documents each);
+// (api-cloudrun `api-cloudrun/scripts/audit-typesense-int-fields.ts`, 18k documents each);
 // that proves today, this proves every future document.
 
 /** Typesense field types that promise an integer. */

@@ -7,8 +7,8 @@
  * transaction, client, dmarc, sync_error, validation_error,
  * email_send_failed / email_sent, oauth_refresh). The big-bang Phase 3
  * migration adds the remaining ~90 arms as call sites convert; the
- * coverage test in api-cloudrun (`tests/unit/logRecordCoverage.test.ts`,
- * Phase 2) enforces every emitted `msg` literal has a corresponding
+ * coverage test `api-cloudrun/tests/unit/logRecordCoverage.test.ts` (Phase 2)
+ * enforces every emitted `msg` literal has a corresponding
  * registry entry.
  *
  * Imported as `@cfs/core/schemas/log` by api-cloudrun (and re-exported from
@@ -250,7 +250,7 @@ import type { XeroEventLogRecord } from "./xero-event.ts";
 /**
  * Discriminated union of every typed log record, keyed by the `msg`
  * literal. The new `logTyped<R extends TypedLogRecord>` API in
- * api-cloudrun's `src/lib/logger.ts` constrains its argument to this
+ * `api-cloudrun/src/lib/logger.ts` constrains its argument to this
  * union — TS narrows to the matching arm based on the supplied `msg`,
  * giving compile-time enforcement that every field is correctly named
  * and typed.

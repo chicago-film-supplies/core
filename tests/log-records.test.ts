@@ -8,7 +8,7 @@
  *
  * The complementary "every emitted msg in api-cloudrun source has a
  * registry entry" check lives in api-cloudrun's
- * `tests/unit/logRecordCoverage.test.ts` (added in Phase 2).
+ * `api-cloudrun/tests/unit/logRecordCoverage.test.ts` (added in Phase 2).
  */
 
 import { assertEquals } from "@std/assert";

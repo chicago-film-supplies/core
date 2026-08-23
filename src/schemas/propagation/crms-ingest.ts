@@ -194,7 +194,7 @@ const crmsMemberOrganizationTransaction: TransactionDefinition = {
  * `name-to-user`, and this path fired **none** of them: a contact renamed
  * **through CRMS** reached neither the destination legs of its live orders nor
  * its linked user, while the same rename through `PUT /contacts/{uid}` did.
- * Both writers now go through `lib/contactCascade.ts`, so there is one
+ * Both writers now go through `api-cloudrun/src/lib/contactDenorms.ts`, so there is one
  * implementation of each denorm rather than two that can drift.
  *
  * ⚠️ **All three legs measured VACUOUS when this landed, in BOTH envs** — 0 of

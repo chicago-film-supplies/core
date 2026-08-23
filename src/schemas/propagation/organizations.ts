@@ -81,7 +81,7 @@ const ORG_TAX_AXES_TO_ORDERS: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
   clause:
-    "an org tax-AXES change (`jurisdiction_claim` / `tax_exempt`) RE-PRICING every non-terminal, un-invoiced order — not merely re-stamping the snapshot. Unlike its five siblings this cascade moves money, so the assertion is on `items[].price.taxes` and `totals`, not on a copied string. Paired with a corpus detector, which the name/billing rules do not have: `scripts/audit-order-tax-snapshot.ts` walks both directions (snapshot vs live org, and stored taxes vs recomputed).",
+    "an org tax-AXES change (`jurisdiction_claim` / `tax_exempt`) RE-PRICING every non-terminal, un-invoiced order — not merely re-stamping the snapshot. Unlike its five siblings this cascade moves money, so the assertion is on `items[].price.taxes` and `totals`, not on a copied string. Paired with a corpus detector, which the name/billing rules do not have: `api-cloudrun/scripts/audit-order-tax-snapshot.ts` walks both directions (snapshot vs live org, and stored taxes vs recomputed).",
   gates: true,
 };
 

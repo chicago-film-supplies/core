@@ -48,7 +48,7 @@ const STORE_DEFAULT_CORPUS: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-location-defaults.ts",
   clause:
-    "check 1 (`store_default_count`) — per store, exactly one ACTIVE `default: true` location, over the whole corpus. Its rules live in `src/lib/locationIntegrity.ts`, shared verbatim with the nightly `/tasks/sweep-location-integrity` job, and are unit-tested at `tests/unit/locationIntegrity.test.ts` (zero AND two defaults both reported).",
+    "check 1 (`store_default_count`) — per store, exactly one ACTIVE `default: true` location, over the whole corpus. Its rules live in `api-cloudrun/src/lib/locationIntegrity.ts`, shared verbatim with the nightly `/tasks/sweep-location-integrity` job, and are unit-tested at `api-cloudrun/tests/unit/locationIntegrity.test.ts` (zero AND two defaults both reported).",
   gates: true,
 };
 

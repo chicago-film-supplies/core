@@ -49,7 +49,7 @@ export interface TypesenseField {
    * `toCents` step. A surviving dollars-taking copy of that expression renders
    * every money mirror 100× while the index imports perfectly cleanly and
    * nothing errors — which is why the expression was hoisted into exactly one
-   * file (`src/lib/moneyMirrorString.ts` in api-cloudrun) and pinned there by
+   * file (`api-cloudrun/src/lib/moneyMirrorString.ts` in api-cloudrun) and pinned there by
    * Ratchet G before this flag's meaning changed.
    *
    * A money mirror renders at 2dp, the precision money is denominated in.

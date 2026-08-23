@@ -10,7 +10,7 @@
  *
  * **Server-emitted format (api → VictoriaLogs):**
  * - {@link ClientLogRecordSchema} — what flows through `MSG_SCHEMA_REGISTRY`
- *   and the PII walker. The api's `src/routes/clientLogs.ts` re-emits
+ *   and the PII walker. The api's `api-cloudrun/src/routes/clientLogs.ts` re-emits
  *   each entry via `logTyped({ msg: "client_log", ... })` with the
  *   `entry.data` payload spread to the top level. Common PII-shaped keys
  *   (`email`, `to`, `subject`) are declared here with `pii: "mask"` so
@@ -92,7 +92,7 @@ export const ClientLogBatchSchema: z.ZodType<ClientLogBatch> = z.object({
 /**
  * Server-emitted log record for browser-shipped events.
  *
- * api-cloudrun's `src/routes/clientLogs.ts` re-emits each ingested
+ * `api-cloudrun/src/routes/clientLogs.ts` re-emits each ingested
  * {@link ClientLogEntry} as `msg: "client_log"` with the wire entry's
  * envelope rewritten into `client_*` namespaced fields (`client_msg`,
  * `client_ts`, `client_level` — to avoid collision with the server

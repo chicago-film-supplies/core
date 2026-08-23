@@ -49,7 +49,7 @@ export const FirestoreDisplayPrefsSchema: z.ZodType<FirestoreDisplayPrefs> = z.s
  * read by nothing. This object is **strict**, so a blob still carrying them
  * fails to parse; the write path does not validate (`updateUser` merges and
  * `transaction.set`s), so nothing breaks at runtime, but
- * `scripts/audit-schema-validation.ts --only=users` will report it. Both
+ * `api-cloudrun/scripts/audit-schema-validation.ts --only=users` will report it. Both
  * environments held `{}` when this landed, so there was nothing to migrate.
  */
 export interface TypesenseDisplayPrefs {

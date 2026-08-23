@@ -1,6 +1,6 @@
 /**
  * Typesense archetype — every msg emitted from the
- * `src/services/reindexTypesense.ts` pipeline and its helpers.
+ * `api-cloudrun/src/services/reindexTypesense.ts` pipeline and its helpers.
  *
  * **PII posture**: none. Collection names, alias names, document_ids
  * (Firestore-uid-shaped opaque ids) are not PII. The `error_message`

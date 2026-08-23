@@ -1,9 +1,9 @@
 /**
  * Money-arithmetic coverage — core's arm of the cross-repo money ratchet.
  *
- * api-cloudrun (`tests/unit/moneyArithmeticCoverage.test.ts`), manager
- * (`src/utils/__tests__/moneyArithmetic.test.ts`) and templates
- * (`.github/workflows/money-lint.yml`) hold the others. This one is different
+ * `api-cloudrun/tests/unit/moneyArithmeticCoverage.test.ts`,
+ * `manager/src/utils/__tests__/moneyArithmetic.test.ts` and
+ * `templates/.github/workflows/money-lint.yml` hold the others. This one is different
  * in a way worth stating up front: **core is where the money arithmetic
  * legitimately lives.** The other arms can say "no money math here, import it
  * from core"; core cannot say that about itself.

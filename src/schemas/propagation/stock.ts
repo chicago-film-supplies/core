@@ -40,10 +40,11 @@ import type {
 // "seven transactions" until 2026-08-18 and the real figure was ELEVEN by then:
 // a count of firing contexts goes stale every time a transaction adds
 // {@link STOCK_STEPS}, which is precisely why it should not be written here.
-// `scripts/audit-propagation-corpus.ts` derives it. Each pointer below was opened and read against
-// `audit-stock.ts` as it stands, NOT translated from the `audit-stock-summaries.ts`
-// refs it replaces: that audit checked a different document with a different
-// shape, and two of its invariants have no counterpart here.
+// `api-cloudrun/scripts/audit-propagation-corpus.ts` derives it. Each pointer below was opened and read against
+// `api-cloudrun/scripts/audit-stock.ts` as it stands, NOT translated from the
+// refs of the retired `audit-stock-summaries.ts` it replaces: that audit checked
+// a different document with a different shape, and two of its invariants have no
+// counterpart here.
 
 /**
  * The corpus detector. `audit-stock.ts` reloads every ledger, booking and OOS
@@ -151,7 +152,7 @@ const REBUILD_TRIGGER =
  * The stock projection's edges — THREE rules, fired by every transaction that
  * moves stock, plus the seed. **Do not write the number of them here** (item 17):
  * it was "seven" and was eleven by 2026-08-18. Derive it with
- * `scripts/audit-propagation-corpus.ts`.
+ * `api-cloudrun/scripts/audit-propagation-corpus.ts`.
  *
  * ⚠️ **These used to be minted PER TRANSACTION, and were 21 rules of a corpus
  * that stood at 173 when the collapse landed (2026-08-17; it has moved since —
@@ -184,7 +185,7 @@ const REBUILD_TRIGGER =
  *
  * It is deferrable because the projection has **no server-side consumer that
  * needs it transactionally** — the OOS cap reads the OOS records, the allocator
- * reads the ledger, and the oversell gate (`src/lib/stockGate.ts`) reads its own
+ * reads the ledger, and the oversell gate (`api-cloudrun/src/lib/stockGate.ts`) reads its own
  * inputs under a `stock-locks/{P}` precondition rather than reading this
  * document. So the atomicity traded bought display consistency, not an invariant.
  *

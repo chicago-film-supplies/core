@@ -222,6 +222,29 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // internal.
     "taxAppliedWindow",
   ],
+  // 🔴 **Denylisted WHOLE, and for a different reason from everything else in
+  // this file.** Every other entry hides a helper that is real domain code
+  // aimed at the wrong surface. `utils/citations.ts` is not domain code at all
+  // — it is the doc-citation audit's rule set, tooling that no consumer's
+  // runtime imports, and it sits under `utils/` only because that is where the
+  // namespaced subpaths live (`CLAUDE.md` § Overview records the exception).
+  //
+  // The generator walks `./utils/*` mechanically and cannot know that, so
+  // without this entry it emits `it.citations.classifyCitation` into the
+  // template editor's helper panel — offering a document author a function
+  // whose arguments are a repo checkout's directory listing.
+  //
+  // ⚠️ **A namespace-shaped rule would be better than this list, and there
+  // isn't one.** The next tooling-only util will leak the same way; what
+  // catches it is `tests/template-helpers.test.ts` failing on an export that is
+  // neither emitted nor denylisted, which is what caught this one.
+  citations: [
+    "classifyCitation",
+    "describesDeletion",
+    "isHistoryDoc",
+    "preferOwnRepo",
+    "resolveSpecifier",
+  ],
   // No `it.dates.*` exports are hidden today.
   dates: [],
 };

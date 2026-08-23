@@ -38,6 +38,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "computeCardActionFromBookings", expr: "it.cards.computeCardActionFromBookings(side, siblings, current)", desc: "Recompute a card's denormalized **next fulfillment action** from its sibling bookings — the value the `CardTile` button shows on surfaces (Dashboard kanban, Calendar agenda) where no bookings are loaded. Pure function — no Firestore reads. Computed in lockstep with `computeCardStatusFromBookings` on every booking write.", returns: "CardAction | null" },
     { name: "computeCardStatusFromBookings", expr: "it.cards.computeCardStatusFromBookings(side, siblings, current)", desc: "Recompute an event card's `status` from its sibling bookings on the destination it belongs to. Pure function — no Firestore reads.", returns: "CardStatus" },
   ],
+  "citations": [
+
+  ],
   "contact-name": [
     { name: "deriveName", expr: "it.contact-name.deriveName(parts)", desc: "Canonical join rule for deriving a single display string from name parts. Joins `[first_name, middle_name, last_name]` with single spaces (missing parts are dropped, never produce empty padding) and appends ` (pronunciation)` when set. This is the single source of truth — every `name` field on a stored document and `ActorRef.name` is computed by passing through here.", returns: "string" },
   ],

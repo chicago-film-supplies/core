@@ -317,8 +317,8 @@ export const PAYMENT_MATCH_TOLERANCE_CENTS = 1;
  * and `,` are token separators**, so the display form tokenizes as
  * `1`/`234`/`56` and a plain `1234.56` query cannot match it. That is the whole
  * reason a second renderer existed in `api-cloudrun/scripts/_moneySurface.ts`
- * for two weeks; the options are cheaper than the copy, and this way the mirror
- * and the display cannot drift on rounding.
+ * for two weeks before it was deleted; the options are cheaper than the copy,
+ * and this way the mirror and the display cannot drift on rounding.
  *
  * @param cents - Integer minor units.
  * @param options.symbol - Currency symbol. `""` for a search mirror.

@@ -188,7 +188,7 @@ function statusesWhere(
  * Statuses whose Xero counterpart is expected to exist and be non-VOIDED.
  *
  * Was three textually identical copies — `lib/xeroQuoteStatus.ts`,
- * `services/invoices.ts` and `scripts/audit-xero-quotes.ts`, the last carrying
+ * `services/invoices.ts` and `api-cloudrun/scripts/audit-xero-quotes.ts`, the last carrying
  * a "keep in lockstep" comment that nothing enforced.
  */
 export const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[] = statusesWhere("live_in_xero");
@@ -410,7 +410,7 @@ export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocL
  * projection** of the `settlements` journal — produced only by
  * `recomputeSettlementTotals`, written in the same transaction as the settlement
  * that changed them, and rebuildable from the log by
- * `scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
+ * `api-cloudrun/scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization
  * to apologise for; they are the target architecture, and the same shape
  * `stock/{P}` already has against the movement journal.
  *

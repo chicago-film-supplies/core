@@ -5,7 +5,7 @@
 
 ## Context
 
-The manager app just unified its two cell dispatchers (`CollectionCell` for Typesense, `FirestoreCollectionCell` for Firestore) into one component at `src/components/TableCell.tsx`. The new dispatcher resolves "should this cell render as a router link?" in this order:
+The manager app just unified its two cell dispatchers (`CollectionCell` for Typesense, `FirestoreCollectionCell` for Firestore) into one component at `manager/src/components/TableCell.tsx`. The new dispatcher resolves "should this cell render as a router link?" in this order:
 
 1. **Meta-first:** `getFieldMeta(collection, columnKey).linkTo` — preferred path.
 2. **Legacy fallback:** a hard-coded allow-list (`name`, `number`, `subject`, `reference`, `organization.name`, `organizations.name`, `components.name`, `component_of.name`) + a contact-name regex (`/^contacts?\.(first_name|middle_name|last_name|pronunciation)$/`).
@@ -45,13 +45,13 @@ Each of these is the row's "headline" field — clicking it opens the row's own 
 
 | File | Field path | `linkTo` |
 |---|---|---|
-| `src/product.ts` | `ProductSchema.name` | `productDetail` |
-| `src/order.ts` | `OrderSchema.number` | `orderDetail` |
-| `src/invoice.ts` | `InvoiceSchema.number` | `invoiceDetail` |
-| `src/invoice.ts` | `InvoiceSchema.reference` | `invoiceDetail` |
-| `src/template.ts` | `TemplateSchema.subject` | `templateDetail` |
-| `src/contact.ts` | `ContactSchema.first_name` / `middle_name` / `last_name` / `pronunciation` | `contactDetail` |
-| `src/organization.ts` | `OrganizationSchema.name` | `organizationDetail` |
+| `src/schemas/product.ts` | `ProductSchema.name` | `productDetail` |
+| `src/schemas/order.ts` | `OrderSchema.number` | `orderDetail` |
+| `src/schemas/invoice.ts` | `InvoiceSchema.number` | `invoiceDetail` |
+| `src/schemas/invoice.ts` | `InvoiceSchema.reference` | `invoiceDetail` |
+| `src/schemas/template.ts` | `TemplateSchema.subject` | `templateDetail` |
+| `src/schemas/contact.ts` | `ContactSchema.first_name` / `middle_name` / `last_name` / `pronunciation` | `contactDetail` |
+| `src/schemas/organization.ts` | `OrganizationSchema.name` | `organizationDetail` |
 
 Note: the name fragments in `common.ts` (`NameFields`) are reused. If it's feasible to annotate them there and have it propagate, great — otherwise annotating per-collection is fine.
 

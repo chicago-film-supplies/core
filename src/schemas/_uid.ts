@@ -102,8 +102,8 @@ export const MovementId: z.ZodType<string> = z.templateLiteral([
 
 /**
  * `quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
- * `{uid_order}:draft` (the working draft). Built in api-cloudrun
- * `src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+ * `{uid_order}:draft` (the working draft). Built in
+ * `api-cloudrun/src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
  */
 export const QuoteId: z.ZodType<string> = z.union([
   z.templateLiteral([firestoreId, ":v", z.number()]),

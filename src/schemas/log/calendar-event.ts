@@ -1,6 +1,6 @@
 /**
- * Google Calendar sync archetype — emitted by `src/lib/calendar.ts` and
- * `src/services/calendarUpdate.ts`. Bookings flow to a shared CFS
+ * Google Calendar sync archetype — emitted by `api-cloudrun/src/lib/calendar.ts` and
+ * `api-cloudrun/src/services/calendarUpdate.ts`. Bookings flow to a shared CFS
  * calendar; these msgs cover the sync lifecycle and drift detection.
  *
  * **PII posture**: none. Calendar event ids are Google-issued opaque ids.

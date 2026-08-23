@@ -8,7 +8,7 @@
  * **Scope check before you debug a failure here.** This is developer feedback,
  * not the thing that keeps CDN files alive. The orphan sweep protects files by
  * harvesting every RFC-4122-shaped string value out of every Firestore document
- * (`api-cloudrun/src/lib/uploadcareReferenceMap.ts`) — schema-independent, so it
+ * (`api-cloudrun/src/services/uploadcareReferenceMap.ts`) — schema-independent, so it
  * cannot drift and needs no annotation. A failure here means the *lint* is out
  * of date, which is an ergonomics bug. It is not a data-loss bug.
  */

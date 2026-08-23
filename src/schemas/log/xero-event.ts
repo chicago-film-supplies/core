@@ -1,6 +1,6 @@
 /**
  * Xero integration archetype — every msg emitted by the Xero sync paths
- * (`src/lib/xero.ts`, `src/services/webhooks/xero*`, quote/invoice/payment
+ * (`api-cloudrun/src/lib/xero.ts`, `src/services/webhooks/xero*`, quote/invoice/payment
  * sync). Token-exchange msgs (`xero_token_exchange_failed`) live in
  * `./oauth-event.ts`.
  *
