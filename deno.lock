@@ -14,6 +14,7 @@
     "npm:@date-fns/tz@^1.4.1": "1.4.1",
     "npm:currency.js@^2.0.4": "2.0.4",
     "npm:date-fns@^4.1.0": "4.1.0",
+    "npm:typescript@6.0.3": "6.0.3",
     "npm:zod@*": "4.3.6",
     "npm:zod@4.3.6": "4.3.6",
     "npm:zod@^4.3.6": "4.3.6"
@@ -88,6 +89,10 @@
     "date-fns@4.1.0": {
       "integrity": "sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg=="
     },
+    "typescript@6.0.3": {
+      "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
+      "bin": true
+    },
     "unist-util-is@4.1.0": {
       "integrity": "sha512-ZOQSsnce92GrxSqlnEEseX0gi7GH9zTJZ0p9dtu87WRb/37mMPO2Ilx1s/t9vBHrFhbgweUwb+t7cIn5dxPhZg=="
     },
@@ -119,6 +124,7 @@
       "npm:@date-fns/tz@^1.4.1",
       "npm:currency.js@^2.0.4",
       "npm:date-fns@^4.1.0",
+      "npm:typescript@6.0.3",
       "npm:zod@^4.3.6"
     ]
   }

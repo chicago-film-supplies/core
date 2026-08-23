@@ -21,6 +21,12 @@ deno task check
 echo "Checking generated files..."
 deno task check:generated
 
+# JSR publishes a `.d.ts` it generates SYNTACTICALLY, so a type needing inference
+# is published wrong rather than rejected — invisible to lint, check, the suite
+# and `deno publish --dry-run`, all of which read the source. Two have shipped.
+echo "Checking declarations..."
+deno task check:declarations
+
 echo "Running tests..."
 deno task test
 

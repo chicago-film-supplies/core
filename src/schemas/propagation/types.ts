@@ -112,10 +112,12 @@ export interface FieldMapping {
  * **Never widen `ref` into a union of known script names, and never derive one
  * from an `as const` array.** JSR's syntactic declaration emitter mis-emits
  * those — core#43 published `declare const ITEM_TYPES: readonly ["order"]` for a
- * nine-member `as const`, causing 57 downstream type errors in manager, and
- * `tests/jsr-emit-safety.test.ts` bans only the *spread* form, so a non-spread
- * `as const` would pass the gate and still emit wrong (core#44). A hand-written
- * interface over plain `string` is the JSR-safe shape.
+ * nine-member `as const`, causing 57 downstream type errors in manager. The gate
+ * is now `deno task check:declarations`, which asks the general question ("can
+ * this be emitted without inference?") rather than banning one spelling; the
+ * regex test it replaced saw only the *spread* form, so the non-spread `as
+ * const` of core#44 passed it and still emitted wrong. A hand-written interface
+ * over plain `string` is the JSR-safe shape either way.
  */
 export interface EnforcementRef {
   /** How the check works. `construction` = the shape makes violation unrepresentable. */

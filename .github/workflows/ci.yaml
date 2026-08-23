@@ -51,6 +51,12 @@ jobs:
       - name: Generated files
         run: deno task check:generated
 
+      # The npm-consumer half of the package's type surface. See
+      # `scripts/check-declarations.ts` — it is self-verifying, so a green line
+      # here also means the gate proved it can still fail.
+      - name: Declarations
+        run: deno task check:declarations
+
       - name: Test
         run: deno task test
 
@@ -68,3 +74,12 @@ jobs:
       # copies of one flag is how the two gates start disagreeing.
       - name: Citations
         run: deno task audit:citations
+
+      # JSR's `no-slow-types` runs HERE and in `.githooks/pre-push` — nowhere
+      # else. It is `jsr`-tagged and off under a bare `deno lint`, and this repo
+      # declares no top-level `lint` block, so `deno task lint` does not see it.
+      # ⚠️ It covers NONE of the declaration-emit class above: it was green
+      # through all four betas of core#43 and green on core#44's `parentable_by`
+      # for the life of that defect. Two different questions, both needed.
+      - name: Publish dry-run
+        run: deno publish --dry-run

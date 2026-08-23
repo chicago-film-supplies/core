@@ -42,8 +42,19 @@ export const LogLevelEnum: z.ZodType<LogLevelType> = z.enum(LOG_LEVELS);
 /**
  * Common envelope fields shared by every typed log record arm.
  * Spread via `...baseLogFields` in each archetype schema.
+ *
+ * ⚠️ **The annotation is required, not decorative.** Without it JSR's syntactic
+ * declaration emitter has twelve Zod expressions it cannot write down — the
+ * same class that published `readonly parentable_by;` with no type at all from
+ * `schemas/common.ts` (core#44). Deriving it from {@link BaseLogFields} rather
+ * than hand-listing twelve Zod types is what stops the two drifting: `-?` makes
+ * every key REQUIRED here, so a field added to the interface and forgotten in
+ * this object is a compile error, while the indexed access keeps `| undefined`
+ * for the optional ones so `.optional()` still type-checks.
  */
-export const baseLogFields = {
+export const baseLogFields: {
+  readonly [K in keyof BaseLogFields]-?: z.ZodType<BaseLogFields[K]>;
+} = {
   level: LogLevelEnum,
   ts: z.string(),
   request_id: z.string().optional(),
@@ -62,7 +73,7 @@ export const baseLogFields = {
   span_id: z.string().optional(),
   duration_ms: z.number().optional(),
   dry_run: z.boolean().optional(),
-} as const;
+};
 
 /**
  * TypeScript shape of {@link baseLogFields} — for use in archetype

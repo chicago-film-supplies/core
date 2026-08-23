@@ -3401,6 +3401,12 @@ const INVOICE_STATUS_CONTRACTS: Readonly<Record<InvoiceStatusType, InvoiceStatus
 
 The per-type item contract table. @see {@link ItemContract}
 
+Rejoins {@link ITEM_CONTRACTS_INNER}'s literals with each type's
+`parentable_by`. Safe to hold references: this const carries an explicit
+annotation, so the emitter copies that rather than inferring anything — the
+reason the split above works at all. `Record<ItemTypeType, …>` also keeps the
+table total over `ITEM_TYPES`, so a new item type fails to compile here.
+
 ```ts
 const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;
 ```
@@ -10072,6 +10078,12 @@ type FulfillableItemType = indexedAccess;
 ### `ITEM_CONTRACTS`
 
 The per-type item contract table. @see {@link ItemContract}
+
+Rejoins {@link ITEM_CONTRACTS_INNER}'s literals with each type's
+`parentable_by`. Safe to hold references: this const carries an explicit
+annotation, so the emitter copies that rather than inferring anything — the
+reason the split above works at all. `Record<ItemTypeType, …>` also keeps the
+table total over `ITEM_TYPES`, so a new item type fails to compile here.
 
 ```ts
 const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>>;

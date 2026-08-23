@@ -582,7 +582,10 @@ export const DocLineItemTypeEnum: z.ZodType<DocLineItemTypeType> = z.enum(DOC_LI
  *
  * The derivation survives as the parity assertion below, so the two cannot
  * drift — a hand-written list without one is what core#41 is. Do not "tidy" this
- * back into a spread; `tests/jsr-emit-safety.test.ts` fails if you do.
+ * back into a spread: `deno task check:declarations` fails if you do, and it
+ * catches every position the spread can take rather than the one this used to
+ * be written in. (It replaced `jsr-emit-safety.test.ts`, whose source-text regex
+ * matched only this exact spelling — that file is deleted.)
  */
 const ITEM_TYPES = [
   "rental",
@@ -676,30 +679,74 @@ export interface ItemContract {
 // type that can be a kit parent. `transaction_fee` is excluded on both sides — a
 // fee is a document-level charge, so it neither nests under a product nor
 // carries components of its own.
-const LINE_PARENTS = [
+const LINE_PARENTS: readonly ItemTypeType[] = [
   "order", "destination", "group", "rental", "replacement", "sale", "service", "surcharge",
-] as const;
-const DIVIDER_PARENTS = ["order", "destination", "group"] as const;
+];
+const DIVIDER_PARENTS: readonly ItemTypeType[] = ["order", "destination", "group"];
 
+/**
+ * The literal half of the contract table.
+ *
+ * ⚠️ **`parentable_by` is deliberately NOT here, and the split is load-bearing
+ * for the PUBLISHED type.** It used to be, carrying `LINE_PARENTS` /
+ * `DIVIDER_PARENTS` — identifier references inside an `as const` object. JSR's
+ * declaration emitter is syntactic: it does not run inference, and given a
+ * reference it cannot write down it emitted `readonly parentable_by;` — a bare
+ * property signature with no type at all — for all six line arms of
+ * `@cfs/core@10.0.0-beta.185`, while emitting the sibling *literal* case
+ * (`parentable_by: ["order"]`) correctly two lines above. Same signature as
+ * core#43: `deno publish --dry-run` green, the registry wrong, npm consumers
+ * only, and invisible to everything in this repo that reads source.
+ *
+ * Annotating the two consts does **not** fix it — measured, not assumed. The
+ * diagnostic sits on the *use* site, because it is this object's own type that
+ * has to be written down, so the reference has to leave the `as const`
+ * altogether. Everything left here is a bare literal, which a syntactic emitter
+ * can always copy.
+ *
+ * Keep it that way: this object's literal types are load-bearing for the five
+ * mapped types below (`LINE_ITEM_TYPES`, `PRE_TAX_ITEM_TYPES`,
+ * `FROM_TOTAL_ITEM_TYPES`, `DIVIDER_ITEM_TYPES`, `FULFILLMENT_LINE_ITEM_TYPES`),
+ * which is why it cannot simply take an explicit annotation the way
+ * {@link ITEM_CONTRACTS} does. **Never put a non-literal in here.**
+ */
 const ITEM_CONTRACTS_INNER = {
   // ── dividers ──
-  order: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, parentable_by: [] },
-  destination: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, parentable_by: ["order"] },
-  group: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, parentable_by: ["destination"] },
+  order: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false },
+  destination: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false },
+  group: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false },
   // ── lines ──
-  rental: { kind: "line", pricing: "pre_tax", replacement: "required_when_stocked", fulfillable: true, parentable_by: LINE_PARENTS },
-  replacement: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, parentable_by: LINE_PARENTS },
-  sale: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, parentable_by: LINE_PARENTS },
-  service: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, parentable_by: LINE_PARENTS },
-  surcharge: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, parentable_by: LINE_PARENTS },
+  rental: { kind: "line", pricing: "pre_tax", replacement: "required_when_stocked", fulfillable: true },
+  replacement: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true },
+  sale: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true },
+  service: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true },
+  surcharge: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true },
   // A fee is priced FROM the document total, has no replacement value, and is
   // never picked off a shelf — which is why `FULFILLMENT_LINE_ITEM_TYPES`
   // excludes it rather than collapsing to `DOC_LINE_ITEM_TYPES`.
-  transaction_fee: { kind: "line", pricing: "from_total", replacement: "forbidden", fulfillable: false, parentable_by: DIVIDER_PARENTS },
+  transaction_fee: { kind: "line", pricing: "from_total", replacement: "forbidden", fulfillable: false },
 } as const;
 
-/** The per-type item contract table. @see {@link ItemContract} */
-export const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>> = ITEM_CONTRACTS_INNER;
+/**
+ * The per-type item contract table. @see {@link ItemContract}
+ *
+ * Rejoins {@link ITEM_CONTRACTS_INNER}'s literals with each type's
+ * `parentable_by`. Safe to hold references: this const carries an explicit
+ * annotation, so the emitter copies that rather than inferring anything — the
+ * reason the split above works at all. `Record<ItemTypeType, …>` also keeps the
+ * table total over `ITEM_TYPES`, so a new item type fails to compile here.
+ */
+export const ITEM_CONTRACTS: Readonly<Record<ItemTypeType, ItemContract>> = {
+  order: { ...ITEM_CONTRACTS_INNER.order, parentable_by: [] },
+  destination: { ...ITEM_CONTRACTS_INNER.destination, parentable_by: ["order"] },
+  group: { ...ITEM_CONTRACTS_INNER.group, parentable_by: ["destination"] },
+  rental: { ...ITEM_CONTRACTS_INNER.rental, parentable_by: LINE_PARENTS },
+  replacement: { ...ITEM_CONTRACTS_INNER.replacement, parentable_by: LINE_PARENTS },
+  sale: { ...ITEM_CONTRACTS_INNER.sale, parentable_by: LINE_PARENTS },
+  service: { ...ITEM_CONTRACTS_INNER.service, parentable_by: LINE_PARENTS },
+  surcharge: { ...ITEM_CONTRACTS_INNER.surcharge, parentable_by: LINE_PARENTS },
+  transaction_fee: { ...ITEM_CONTRACTS_INNER.transaction_fee, parentable_by: DIVIDER_PARENTS },
+};
 
 /**
  * The contract for an item `type`, or `undefined` for a value outside

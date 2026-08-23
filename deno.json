@@ -86,6 +86,7 @@
     "generate-template-helpers": "deno run --allow-run --allow-read --allow-write scripts/generate-template-helpers.ts",
     "docs": "deno run --allow-run --allow-read --allow-write scripts/generate-api-docs.ts",
     "docs:check": "deno task docs && git diff --exit-code -- API.md API.json",
+    "check:declarations": "deno run --allow-read --allow-env scripts/check-declarations.ts",
     "check:generated": "deno run --allow-read scripts/generate-schema-template-fields.ts --stdout | diff -u src/schemas/template-schema-fields.generated.ts - && deno run --allow-run --allow-read scripts/generate-template-helpers.ts --stdout | diff -u src/schemas/template-helpers.generated.ts -",
     "generate-lucide-icons": "deno run --allow-net=registry.npmjs.org --allow-read --allow-write scripts/generate-lucide-icons.ts"
   },
@@ -97,7 +98,8 @@
     "@std/assert": "jsr:@std/assert@^1.0.19",
     "currency.js": "npm:currency.js@^2.0.4",
     "@conventional-commits/parser": "npm:@conventional-commits/parser@^0.4.1",
-    "@std/tar": "jsr:@std/tar@^0.1.10"
+    "@std/tar": "jsr:@std/tar@^0.1.10",
+    "typescript": "npm:typescript@6.0.3"
   },
   "compilerOptions": {
     "strict": true
