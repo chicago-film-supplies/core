@@ -1,6 +1,6 @@
 # Roadmap: the 9 open `core` issues, plus the two campaigns that came out of reviewing them
 
-**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 landed and in prod; Wave 3 deferred; Wave 4 landed to dev; **Wave 5 is next**
+**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 landed and in prod; Wave 3 deferred; Wave 4 landed to dev; **Wave 5a done — its delete tranche is EMPTY; Wave 5b is next**
 **Ordering:** risk-first (owner's call), with one half-sitting prerequisite ahead of it (Wave 0 — drop it if you disagree with the reasoning there).
 
 > ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0 · 0.5 · 1 · 2 · 4 LANDED. Wave 3 deferred. Wave 5 is next.
@@ -20,7 +20,9 @@
 > | **2c** core#59 Phase 3 (API half) | ✅ api-cloudrun `5aa19607` |
 > | **3** core#65 log signatures | ⏸️ **DEFERRED** — census done, prescribed fix refuted |
 > | **4** core#53 `getTestDoc` | ✅ **#53 CLOSED** — core `3ff0298`, api `04b06c9d`, manager `56e41fd` |
-> | **5** the optionality campaign | 🎯 **NEXT** — census done, preflight verified |
+> | **5a** delete the dead fields | ✅ **DONE, and it deletes NOTHING** — all 14 candidates refuted, core `0b7e6e6` |
+> | **5b** tighten, three tiers | 🎯 **NEXT** — re-measure first; see the ⚠️ below |
+> | **5c · 5d** | ⏳ not started |
 > | **6 · 7** | ⏳ not started |
 >
 > **`@cfs/core` is at `10.0.0-beta.249`.** api-cloudrun and manager are both pinned to it and pushed;
@@ -83,11 +85,36 @@
 >   output and parsing it OFFLINE — the suite cannot see it, because the suite exercises the write
 >   and the write is what skips validation.
 >
+> ### 🔴 Wave 5a's result — READ THIS BEFORE RE-CENSUSING ANYTHING
+> **Nothing was deleted, and nothing should have been.** All 14 delete candidates failed one of
+> the two tests that decide it. 9 are key-PRESENT (so never dead); the other 5 are key-absent
+> but have a BUILT WRITER. The near-miss was `products.images`/`query_by_images` — 0 rows in 568
+> products, and a complete three-repo feature behind it (core's `deriveQueryByImages` + the mirror
+> refinement, `api-cloudrun/src/services/productImages.ts` and its three routes, manager's
+> `ProductImages.tsx`).
+>
+> ⭐ **The per-field answers now live in the schemas, not here** (core `0b7e6e6`), and the method is
+> `core/CLAUDE.md` § *"Is a field dead?"*. That is deliberate: this plan doc gets deleted when the
+> wave lands, which is exactly why the previous census re-derived "dead" from the same numbers.
+>
+> **The oracle, and its two calibrations** (both needed — it could have failed silently):
+> `orderBy(field)` is the only key-presence discriminator. ① No Firestore field override disables
+> single-field indexing (all 7 only ADD collection-group scope), so it cannot under-report.
+> ② `taxes.xero_components` returns exactly 11 = the whole taxes corpus, independently confirming
+> **empty arrays are indexed** — the one way an array field could have read as absent.
+> Cheap counts: `where(f, "==", null)` counts key-present-and-null server-side; `>= null` 500s.
+>
+> **New Tier-3 candidate found by this pass:** `taxes.xero_components` is 11/11 key-present, so
+> dropping its `.optional()` is clean. **And one removed:** `products.webshop.description` is
+> 544/568 — 24 docs lack the key, so it needs a backfill first, not a tighten.
+>
 > ### Issues filed this session
 > api-cloudrun **#640** (operator bless, prod publish) · **#641** (test sessions are the one fixture
 > family nothing sweeps — 133,911 in dev) · **#642** (closed — prod migrations) · **#643 #644 #645**
 > (peer session) · **#647** (the getTestDoc migration + `seedDoc`) · manager **#321** (roles UI) ·
-> **#322** (9 dead `initialValues`).
+> **#322** (9 dead `initialValues`) · **#649** (`organizations.last_order` never stamped) ·
+> **#650** (`destinations.query_by_organizations` — no writer AND no reader; the plan's
+> "drift + backfill" framing was wrong) · **#651** (`invoices.pdf_versions` — product question).
 
 ## Context
 
@@ -618,7 +645,22 @@ reactions (delete, 18); `recurrence_overrides`, `exception_dates`, `tags`, `quer
 **Timestamps are not at risk** — `serverTimestamp` has zero live call sites (3 mentions, all comments);
 writers stamp real `Timestamp.now()` at 155 sites.
 
-### 5a. DELETE the dead fields — split by KEY-presence first
+### 5a. DELETE the dead fields — ✅ **DONE 2026-08-23, and it deleted NOTHING**
+
+> **Result first, so nobody re-runs the census.** The key-presence pass was run over prod and
+> dev for all 14 candidates. **Not one is deletable.** The buckets below are kept as the
+> reasoning trail; the per-field verdicts are now docblocks in the schemas (core `0b7e6e6`) and
+> the method is `core/CLAUDE.md` § *"Is a field dead?"*. Three issues were filed: **#649**, **#650**,
+> **#651**.
+>
+> | verdict | fields |
+> |---|---|
+> | **key-PRESENT** (never dead) | `cards.body`/`body_text`/`recurrence_parent_uid`/`recurrence_index` (1,129/1,129) · `locations.uid_location_type` (209/209) · `transactions.reverses` (932/932) · `taxes.xero_components` (11/11) · `products.webshop.description` (544/568) · `products.images` (1/568) |
+> | **key-absent, but WRITER BUILT** | `products.query_by_images` · `contacts.uid_user` · `contacts.pronunciation` · `orders.uid_store` · `orders.created_by` |
+>
+> ⚠️ **The second row is the one the plan did not have a test for.** Key-absence was treated as
+> sufficient; it is not. A key no document carries can equally mean *the feature ships and nobody
+> has used it* — which is exactly `products.images`. **Both tests, every time.**
 
 ⭐ **The delete test is key-ABSENCE, not value-absence, and the census measured the wrong one.**
 A field no document carries **the key for** is dead. A field 876 documents carry **as `[]`** is not:
@@ -695,6 +737,34 @@ in the same release as the schema change**, named in the `BREAKING CHANGE:` foot
 this for tightening; it had no deletion arm.
 
 ### 5b. Tighten, in three tiers
+
+🔴 **Before tightening ANY collection, do these two things — in this order.** They are cheap, and
+each one has already caught a defect nothing else could see.
+
+1. **Re-measure the collection.** Every "100% today" figure below is a fact about 2026-08-23, and
+   5c's whole procedure is a before/after comparison — a stale number is the one input that makes
+   the commit message wrong. Two already moved: `taxes.xero_components` **joins** Tier 3 (11/11
+   key-present), and `products.webshop.description` **leaves** it (544/568 — 24 docs need a
+   backfill first).
+2. **Grep that collection's fixtures for a WHOLE-OBJECT override, then reconstruct-and-parse.**
+   ⭐ *A whole-object override is precisely where a newly-required field disappears without
+   anything going red.* It REPLACES the base rather than merging with it, so the field is simply
+   gone — and if the seed writes through a raw `ref.set()` it never reaches `validateBeforeWrite`
+   either. That is how two seeders wrote invalid orders into dev for their whole lives, each
+   under a comment claiming the opposite (see *The pre-Wave-5 conversion*).
+
+   Make it mechanical, not remembered — the suite **structurally cannot** catch this, because the
+   suite exercises the write and the write is the thing that skips validation:
+
+   ```sh
+   # 1. every fixture that replaces a sub-object wholesale for this collection
+   rg -n "(organization|destination|contact|price|totals):\s*\{" api-cloudrun/tests manager/src
+   # 2. every seed that bypasses the write guard entirely
+   rg -n "\.set\(" api-cloudrun/tests
+   ```
+   Then rebuild each seeder's FULL output offline and `safeParse` it against the document schema.
+   A green suite is not evidence here.
+
 - **Tier 1 — inert defaults (49 sites).** `.default(x).optional()` where the default **never
   materializes on a write** (the doctrine in `src/schemas/initial.ts` and `tests/typesense-parity.test.ts`). The source
   reads as though a value is guaranteed and it is not. Cleanup, not a data risk.
@@ -993,31 +1063,39 @@ declared-ahead-of-use keeps (5a bucket A — schema docblocks, not issues).
 
 ## Context recommendation
 
-**CLEAR CONTEXT, then start at Wave 5.**
+**CLEAR CONTEXT, then start at Wave 5b.**
 
 Everything needed to resume cold is durable: this doc (status block first), the three repos'
 `CLAUDE.md` sections written this session, and the GitHub issues. Nothing is held only in a session.
 
-**Wave 5 is the right next unit and its preflight is already done** — the 333-path census is taken,
-the `FieldValue`-sentinel do-not-require list is written out, and the measuring instrument
-(`api-cloudrun/scripts/audit-schema-validation.ts`) was verified to cover every collection the wave
-touches, so it will not move mid-campaign. What remains is measurement plus one commit per tranche.
+✅ **Wave 5a is DONE and deleted nothing** — see its section. All 14 candidates refuted, the
+verdicts are docblocks in the schemas (core `0b7e6e6`), the method is `core/CLAUDE.md` § *"Is a field
+dead?"*, and three api-cloudrun issues carry what a core schema wave must not absorb: **#649**
+(`organizations.last_order` never stamped), **#650** (`destinations.query_by_organizations` — no
+writer *and* no reader, which is not the "drift + backfill" this plan predicted), **#651**
+(`invoices.pdf_versions`, a product question).
+
+**Wave 5b is the right next unit.** The `FieldValue`-sentinel do-not-require list is written out, and
+the measuring instrument (`api-cloudrun/scripts/audit-schema-validation.ts`) was verified to cover
+every collection the wave touches, so it will not move mid-campaign.
 
 ✅ **The pre-Wave-5 fixture conversion is DONE** (see the section of that name) — the order and
 invoice seeds now fail loudly rather than spuriously when a field becomes required.
 
-⚠️ **Two things to do FIRST, before the first tightening:**
+⚠️ **Two things to do FIRST, before the first tightening — both are now written into 5b as steps:**
 
-1. **5a's delete test is key-ABSENCE, and only `orderBy(field)` can answer it.** A `select`
-   projection cannot tell absent from null, and the census reports non-null VALUES. Run the
-   key-presence pass over prod and dev before deleting anything.
-2. **Read 5b's three tiers against the corpus again, not against this doc.** Every "100% today"
+1. **Read 5b's three tiers against the corpus again, not against this doc.** Every "100% today"
    figure is a fact about data on 2026-08-23, and 5c's whole procedure is a before/after
-   measurement — a stale number is the one input that makes the commit messages wrong.
-
-3. **Grep each collection's fixtures for a WHOLE-OBJECT override before tightening it**, and
-   reconstruct-and-parse rather than trusting a green suite. That is how the conversion found two
-   seeders writing invalid orders into dev; the same shape will hide the next required field.
+   measurement — a stale number is the one input that makes the commit messages wrong. **Two have
+   already moved**: `taxes.xero_components` joins Tier 3 (11/11 key-present);
+   `products.webshop.description` leaves it (544/568, so 24 docs need a backfill first).
+2. **Grep each collection's fixtures for a WHOLE-OBJECT override before tightening it**, and
+   reconstruct-and-parse rather than trusting a green suite. A whole-object override REPLACES the
+   base rather than merging, so a newly-required field vanishes with nothing going red — and a raw
+   `ref.set()` seed never reaches `validateBeforeWrite` either. That is how two seeders wrote
+   invalid orders into dev for their whole lives, each under a comment claiming the opposite. **The
+   suite structurally cannot catch this**, because it exercises the write and the write is what
+   skips validation. 5b carries the two `rg` commands; run them, do not remember them.
 
 **Do not start Wave 3.** Its census refuted its own prescribed fix; it needs a design decision
 (owner: predictable querying is the benefit, synonym drift is the defect), not an execution pass.
