@@ -617,11 +617,49 @@ the config was **measured and rejected** (`tests/typesenseFieldCoverage.test.ts:
 `as const` on a published export, but JSR `no-slow-types` forces the `: TypesenseCollectionConfig`
 annotation, which erases every literal field name to `string`.
 
-⚠️ **Verify before committing to the contract:** nobody has empirically confirmed that a required-only,
-leaf-valid, `.min(n)`-honouring build actually parses for each of the ~40 collection schemas. The known
-static blockers are the 19 array `.min(n)` sites and 39 `.refine`/`.superRefine` sites in 11 schemas.
-**Write that script first** — it is a measurement, not a guess, and it is what decides whether the
-throw-with-issues path is a rare escape hatch or the common case.
+### ✅ GATE TAKEN 2026-08-23 — the contract is viable, and the throw path is rare
+
+A prototype walker was built and run over all **56** collection schemas. Result:
+
+| | |
+|---|---|
+| parse from a required-only, leaf-valid, `.min(n)`-honouring build | **53 of 56 (95%)** |
+| …of which needed a **re-chosen enum arm** | 2 (`product` → `type=sale`, `templates-versions` → `status=archived`) |
+| genuinely need a per-schema override | **3** — `recurrence`, `settlement`, `transaction` |
+
+**So the throw-with-issues path is a rare escape hatch (5%), not the common case.** Build it as the
+plan specifies.
+
+⭐ **A design finding the plan did not anticipate: a structural ENUM-ARM SEARCH fixes 2 of the 5
+failures.** On a whole-document parse failure, retrying each member of each top-level enum field is
+still purely structural — no per-schema knowledge — and it halves the override list. Worth building
+into `getTestDoc` before reaching for overrides.
+
+⚠️ **But it changes what the default fixture IS, and that must be documented.** `product` parses only
+as `type: "sale"`, because a `rental` obliges `price.replacement_cents` via `.superRefine`. So the
+default product fixture is a SALE, and a caller wanting a rental must supply the replacement price.
+Surprising if undocumented; fine if stated.
+
+All 3 residual failures are cross-field `.superRefine` invariants — the class no structural walk can
+solve (`"prep" must not carry a cost`; a `payment` cannot reference a credit note; `count`/`until`
+mutually exclusive). Overrides for three schemas, not a redesign.
+
+### ⚠️ Zod-4 introspection keys — hard-won, do not re-derive
+
+The walker took five wrong turns on these; they cost more time than the design did:
+
+| construct | `check` | value key |
+|---|---|---|
+| `z.number().min(n)` / `z.int().min(n)` | `greater_than` | **`value`** (+ `inclusive`) |
+| `z.string().length(n)` | `length_equals` | **`length`** |
+| `z.string().min(n)` / `z.array().min(n)` | `min_length` | **`minimum`** |
+
+🔴 **And the ordering rule that matters most: for a string leaf, SWEEP CANDIDATES FIRST and
+introspect second.** A version that detected the format first and only then fell back to the sweep
+silently stopped reaching it for every `z.email()` / `z.uuid()` / `z.iso.datetime()` leaf — the pass
+rate fell from 50 to 31 with no error, because introspection failing looks exactly like a leaf with
+no constraints. Asking the leaf's own `safeParse` what it accepts is reliable; introspection is the
+fallback, not the entry point.
 
 **Closes #53**, and closes the four invalid-`Organization`-fixture defects by construction.
 
