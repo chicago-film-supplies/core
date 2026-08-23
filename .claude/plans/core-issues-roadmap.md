@@ -1,9 +1,9 @@
 # Roadmap: the 9 open `core` issues, plus the two campaigns that came out of reviewing them
 
-**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 landed and in prod; Wave 3 deferred; **Wave 4 is next and already gated**
+**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 landed and in prod; Wave 3 deferred; Wave 4 landed to dev; **Wave 5 is next**
 **Ordering:** risk-first (owner's call), with one half-sitting prerequisite ahead of it (Wave 0 — drop it if you disagree with the reasoning there).
 
-> ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0 · 0.5 · 1 · 2 LANDED and in prod. Wave 3 deferred. Wave 4 gated and ready to build.
+> ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0 · 0.5 · 1 · 2 · 4 LANDED. Wave 3 deferred. Wave 5 is next.
 >
 > *(One compacted block, not a stack — per `cfs-plan-docs`. This is the current state; earlier
 > per-wave updates are folded in.)*
@@ -19,24 +19,30 @@
 > | **2b** core#58 Phase 4 (core half) | ✅ core `019e45d` |
 > | **2c** core#59 Phase 3 (API half) | ✅ api-cloudrun `5aa19607` |
 > | **3** core#65 log signatures | ⏸️ **DEFERRED** — census done, prescribed fix refuted |
-> | **4** core#53 `getTestDoc` | 🎯 **GATED, READY** — next up |
-> | **5 · 6 · 7** | ⏳ not started |
+> | **4** core#53 `getTestDoc` | ✅ **#53 CLOSED** — core `3ff0298`, api `04b06c9d`, manager `56e41fd` |
+> | **5** the optionality campaign | 🎯 **NEXT** — census done, preflight verified |
+> | **6 · 7** | ⏳ not started |
 >
-> **`@cfs/core` is at `10.0.0-beta.248`.** api-cloudrun and manager are pinned to `beta.247`;
-> **templates PR #121 is open at beta.244 and needs rolling forward before it merges.**
-> All four repos are clean and pushed.
+> **`@cfs/core` is at `10.0.0-beta.249`.** api-cloudrun and manager are both pinned to it and pushed;
+> **templates PR #121 is open at beta.249** (rolled forward twice this session; do not merge it —
+> agents open that PR and never merge). All four repos are clean.
 >
 > ### 🔴 Prod state — done, do not redo
 > Release `v0.178.0` merged, prod on `api-cloudrun-00287-spc`. **882 sessions purged; 1,986 order
 > documents stamped** (1,988 now carry `uid`, 0 failing the schema, 0 with `uid !== ref.id`).
 > `OrderDocument.uid` is now **required** — safe because both corpora are 100% stamped.
 >
-> ### What is actually left on the two "closed" campaigns
+> ⚠️ Wave 4 shipped only to **dev** (api-cloudrun `main` push → Cloud Build; manager → preview).
+> Nothing in it touches prod data, and prod needs the release-please PR as usual.
+>
+> ### What is actually left on the three "closed" campaigns
 > - **#58** — only the CONSUMER half of Phase 4: widen `assertValidForWrite` / `assertValidPatch` in
 >   api-cloudrun to read the declared `.meta({ idField })`. Core declares it; nothing reads it yet, so
 >   the three carve-outs are *documented* but still **unguarded**.
 > - **#59** — only the manager UI, filed as **manager#321**. The API surface is complete (owner's
 >   call: API is enough for now).
+> - **#53** — the fixture MIGRATION, not the helper: **api-cloudrun#647** (34 integration files, plus
+>   the `seedDoc` write boundary and its ratchet) and **manager#322** (9 dead `initialValues`).
 >
 > ### Corrections this campaign made to its own plan — do not re-derive
 > - **0b's prescribed fix for `schemas/common.ts` does not work.** Annotating `LINE_PARENTS` leaves
@@ -47,25 +53,35 @@
 >   permissions, so a test that spawns a generator rewrites `src/` regardless.
 > - 🔴 **The templates pin count is BRANCH-DEPENDENT** (`main` 7, a draft branch 8). Read the version
 >   off `origin/main`, bump by `sed` over the pattern, carry no count.
+> - ⚠️ **And a pinned VERSION is as perishable as a count.** This block said api-cloudrun and manager
+>   were both on `beta.247`; manager was actually on **`beta.244`**. Read the pin, never the plan.
 > - **Finding 2 reproduces exactly** (41/15 pre-Wave-1); the 40/16 figure does not.
 > - **Wave 1's "legacy auto-id tail" DOES NOT EXIST** — prod is `{"2": 994}`, zero orders with >2
 >   documents. The `ref.id` rule stands on better grounds: it is the doc id *by definition*.
+> - **Wave 4's corrections are in its own section** — 55/56 not 53/56, the `omit(doc, k)` claim
+>   narrowed to the 465 input-required declarations, one timestamp mechanism rather than two, and no
+>   fabricator export.
 >
 > ### Cross-repo findings worth carrying
 > - 🔴 **`cardCascade.ts` — the plan's own recommended structural template — has a read-derive-write
 >   with NO precondition**, and following it reproduced api-cloudrun#643's prod-corrupting bug inside
 >   the new role cascade. Fixed there with `lastUpdateTime`. Ranked list: **api-cloudrun#644**.
+>   ⭐ **A template propagates its defects along with its shape.** That outlives this roadmap.
 > - ⚠️ **`set()` accepts no `Precondition`** — only `update()`/`delete()` do. "Add a precondition" is
 >   NOT a universal remedy; whole-document replace needs a transaction. Writing `set()` then
 >   `update({}, precondition)` writes first and checks after — worse than no guard.
 > - **The citation audit's two runs are not a superset of each other**: local resolves cross-repo
 >   paths (catches a wrong one); CI catches a bare basename naming an absent repo. A CI-checkout run
 >   caught a bare path that had been green locally for two commits.
+> - ⚠️ **A ratchet with a hole reports CLEAN, not smaller.** `typeEscapeRatchet`'s regex missed 20
+>   sites for as long as it existed. Same shape as the `enforced_by` line-ref finding and the
+>   fixed-point `path` guard: a guard that can only consult its own oracle is not a guard.
 >
 > ### Issues filed this session
 > api-cloudrun **#640** (operator bless, prod publish) · **#641** (test sessions are the one fixture
 > family nothing sweeps — 133,911 in dev) · **#642** (closed — prod migrations) · **#643 #644 #645**
-> (peer session) · manager **#321** (roles UI).
+> (peer session) · **#647** (the getTestDoc migration + `seedDoc`) · manager **#321** (roles UI) ·
+> **#322** (9 dead `initialValues`).
 
 ## Context
 
@@ -426,221 +442,88 @@ it in with the 22 record arms.
 
 **Closes #65.**
 
-## Wave 4 — core#53: split the seed helper
+## Wave 4 — core#53: split the seed helper ✅ LANDED 2026-08-23
 
-**#53's own proposed fix is refuted three ways.** A blanket `case "optional" → SKIP` (a) breaks
-`tests/initial.test.ts:178` and `:216`, (b) deletes the `.nullable().optional() → null` behaviour
-`src/schemas/order.ts:1144` calls load-bearing, and (c) 🔴 **breaks manager's create-product form at the first
-keystroke** — `manager/src/components/products/DeliveryShipping.tsx` writes `setField("shipping.height", …)` unguarded, and Solid's
-`setStore` throws descending into an `undefined` intermediate. No manager test covers it.
+**Shipped as `@cfs/core/schemas/testing` in `10.0.0-beta.249`** (core `3ff0298`, api-cloudrun
+`04b06c9d`, manager `56e41fd`). `getInitialValues` is unchanged; fixtures got their own contract.
+**core#53 is CLOSED** — its own prescribed fix (`case "optional" → SKIP`) is refuted three ways, the
+decisive one being that it breaks manager's create-product form at the first keystroke.
 
-**⭐ The real fault line is document-schema vs input-schema, not form vs test.** Doc-schema seeds are
-*unparseable but harmless* (only the `z.custom` timestamps are missing). Input-schema seeds are
-*actively invalid* — `""` vs `.min(1)`/`z.uuid()`/`z.email()`, `[]` vs `.min(1)`. **Every workaround in
-both repos is on an input schema**, discovered independently four times:
-`manager/src/stores/transactions.ts:60-79` (a **production form** that abandoned the helper),
-`manager/src/primitives/__tests__/createZodValidation.test.ts:5`,
-`api-cloudrun/tests/integration/contacts/contacts.test.ts:12-16`, and
-`api-cloudrun/tests/integration/stores/stores.test.ts:16-19` + `api-cloudrun/tests/integration/tracking-categories/trackingCategories.test.ts:18-21` (both patch `uid` because `FirestoreId`
-walks to `""`). A form/test split fixes one of four.
+`getTestDoc` / `getFullTestDoc` / `getTestDocPartial`, plus `TestDocOptions`. Full reference:
+`core/CLAUDE.md` § *Seeding: form values vs test fixtures*, `api-cloudrun/CLAUDE.md` § *Testing*,
+`manager/CLAUDE.md` § *Test fixtures come from `getTestDoc`*. Implementation and its reasoning:
+`schemas/testing.ts`; 14 property arms in `tests/testing.test.ts`.
 
-### The design
+### What this wave corrected in its own plan — do not re-derive
 
-`getInitialValues` **stays exactly as it is** (form seeding; manager's 11 live drafts want today's
-output, materialized optional objects included). New subpath **`@cfs/core/schemas/testing`** — namespaced,
-so manager's bundle pays nothing, matching the `src/utils/citations.ts` precedent.
+- 🔴 **Structural coverage is 55 of 56, not the gate's 53.** Two more came free from building a
+  composite id out of its own `z.templateLiteral` parts — the only way `BookingId`, `MovementId`,
+  `QuoteId` and `EventCardId` are reachable at all. **One** override remains (`transactions`: every
+  movement type demands either a booking-scoped custody transition or a cost plus a line, so no
+  single choice of `type` works). Its list length is asserted, so a second entry is visible.
+- ⚠️ **"`omit(doc, k)` is rejected for EVERY k" is not something the schemas say.** A `.default(x)`
+  declaration is required in `z.output` and present in the built document, and the schema still
+  accepts a document without it — the default re-materializes. Measured: **465 of 595** top-level
+  declarations covered. The test asserts the property over the required class and counts BOTH
+  classes, so neither arm can pass vacuously.
+- ⚠️ **The plan's two timestamp mechanisms conflicted; one shipped.** `options.now` is the single
+  mechanism, required at compile time via a conditional rest tuple whenever the document carries
+  `created_at`/`updated_at`. It keeps the compile error, keeps `getTestDoc(CreateOrderInput, {})`
+  legal, and also reaches the nested `*_fs` leaves a top-level-key intersection cannot see.
+- ⚠️ **No `mockTimestamp` / `tsAt` export.** They already exist at `tests/helpers/timestamp.ts` and
+  stay there. NOT shipping a fabricator is the reversible direction: api-cloudrun's write boundary
+  can assert `instanceof Timestamp` first and the module can add the convenience afterwards; the
+  reverse cannot be undone. (The type already helps — `FirestoreTimestampValue` demands `toMillis` /
+  `toDate`, which a bare `{ seconds, nanoseconds }` literal does not have.)
+- **The input-schema arm needed no third entry point.** `getTestDoc` handles `Create*Input` directly:
+  the conditional options argument collapses to its optional arm for a schema with no `created_at`.
+- ⚠️ **A negative fixture puts its invalid value ON TOP of the built base**, never through the
+  helper — `getTestDoc` parses, so `getTestDoc(S, { first_name: "" })` throws rather than producing
+  the document a rejection test needs. This is the first thing anyone converting a fixture hits.
 
-```ts
-getTestDoc<S>(schema: S, overrides?: DeepPartial<z.output<S>>): z.output<S>
-getFullTestDoc<S>(schema: S, overrides?: DeepPartial<z.output<S>>): z.output<S>
-export const mockTimestamp; export function tsAt(iso): FirestoreTimestampValue;
-```
+### 🔴 The ordering rule that cost the prototype the most time
 
-Five differences from `getInitialValues`, each with a caller behind it. **Both domain briefs converged
-independently on 1, 3, 4 and 5** — that agreement is the main evidence the contract is right.
+**Sweep candidates FIRST, introspect second.** Detecting a leaf's format first and falling back to
+the sweep silently stops reaching it for every `z.email()` / `z.uuid()` / `z.iso.datetime()` leaf,
+and the failure is invisible — introspection finding nothing looks exactly like a leaf with no
+constraints. The Zod-4 value keys (`greater_than`→`value`, `length_equals`→`length`,
+`min_length`→`minimum`) are in the module docblock; they disagree, and guessing cost more than the
+design did.
 
-1. **Complete, not `Partial`** — kills ~40 downstream `as LineItem` casts in core and **33
-   `as Record<string, unknown>` casts** in api-cloudrun, each of which erases every downstream type.
-2. **Required-only; optional keys OMITTED, not recursed into.** This single change is the root fix.
-   It deletes **27 `uid_thread: testFid()` repairs**, the `delete productBase.transaction`, the contacts
-   empty-string filter, and core's 3 `uid_thread` repairs — all one cause (`src/schemas/initial.ts:34-37`).
-   It also gives `omit(doc, k)` rejection for **every** `k` *by construction* — the `8bb64f7` property,
-   and the defence **151 inline negative fixtures** currently lack.
-3. **Every leaf parses against its own leaf schema** — generate-then-verify, using the leaf's own
-   `safeParse` as oracle: try `""`, and on rejection walk a candidate list (20-char base62, uuid, `"x"`,
-   email, ISO datetime, `1`). `""` for a `FirestoreId` is a valid *form input* and an invalid *document*.
-4. **Honours `z.array(...).min(n)`** — 19 sites; `src/schemas/order.ts:1165` is the sole reason core's `minimalDoc`
-   can't be a bare seed. ⚠️ Integration rates this **medium value only**: it buys parse-validity, not
-   usefulness — a recursed `dates` block is epoch-valued and every order test overrides it anyway.
-5. **`safeParse`s its own result and throws listing every failing path.** Load-bearing, not defensive:
-   39 `.refine`/`.superRefine` sites across 11 schemas (`checkTaxAxes`, `checkItemContract`,
-   `checkPriceBaseUnit`) are not derivable from structure. This is what turns `2915c782`'s *"nine
-   fixture sites found by grepping `crms_store_id`"* into *"nine tests fail at construction naming
-   `jurisdiction`."*
+### What the parse found the moment it ran
 
-### 🔴 Timestamps are CALLER-INJECTED. Core must not fabricate them.
+Each of these had been latent for the life of its fixture, and none was reachable by grep:
 
-The two briefs **conflicted here and integration's argument wins.** Core's suite wanted the helper to
-fill `z.custom` with a plain `mockTimestamp` (deleting 92 hand-written lines). It must not, because
-**Firestore stores a plain `{seconds, nanoseconds}` as a MAP, not a Timestamp**, which silently breaks
-three things at once in api-cloudrun:
+- A Xero contact id that **Xero could not have issued** — `11111111-2222-3333-4444-555555555555`
+  against `z.uuid()`, whose variant nibble must be in `{8,9,a,b}`. In a money-wire fixture.
+- Fixture uids that were **not ids** — `"inv-golden"`, `"prod-1"`, `"custom-clean"` against
+  `FirestoreId` / `ItemUid`.
+- `eligible_delivery` / `eligible_in_store_pickup` on the shared stock fixture were **inherited, not
+  chosen** — they arrived `true` from `getInitialValues` reading `.meta({ initial })`, a FORM intent.
+  Value preserved, now stated.
+- `src/services/eventCardReconcile.ts`'s docstring **had it backwards**: it claimed a schema-seed
+  spread prevented drift, when a seed guarantees a key is PRESENT and presence is what defeats
+  `validateBeforeWrite`. Now an explicit `Card` literal.
+- `tests/unit/typeEscapeRatchet.test.ts`'s regex required `}` to be the LAST character before the
+  cast, so `}) as unknown as`, `})) as unknown as` and `] as unknown as` escaped — **20 sites did**,
+  one of them in `src/`. A ratchet with a hole that shape does not report a smaller number; it
+  reports a clean one.
 
-- `tests/helpers/cleanup.ts:100-101` — `isEphemeralDoc()` is `c instanceof Timestamp && c.toMillis() >=
-  RUN_FLOOR_MS`. A map-timestamped fixture is **invisible to the ephemeral filter**, so a parallel
-  worker selects it as "a real order" — **api-cloudrun#278 reproducing**, the exact flake class
-  `api-cloudrun/tests/helpers/fixtures.ts` exists to kill.
-- `api-cloudrun/tests/helpers/setup.ts:127-129` — `createdByThisRun()` is the same `instanceof` test, so the fixture
-  also **leaks past cleanup**.
-- Any read doing `.toMillis()` throws.
+### What is left, and where it lives now
 
-**A value that parses and is wrong is worse than no value.** So: `options.now` carries the timestamp,
-is **not defaulted**, and the universal `created_at`/`updated_at` pair is forced at compile time via
-`TestDocOverrides<T> = Partial<T> & Pick<T, Extract<keyof T, "created_at"|"updated_at">>` — which
-resolves to plain `Partial<T>` for input schemas, so `getTestDoc(CreateOrderInput, {})` still
-type-checks. That intersection is **the one place a missing required field is a compile error rather
-than a runtime throw**; `options.now` covers the remaining `*_fs` timestamp leaves. Core's own tests
-pass `{ now: mockTimestamp }` and still lose their 39 relative imports.
+- **api-cloudrun#647** — 34 integration files still seed through `getInitialValues` + a cast, plus
+  the newly-visible `services/orders.ts:2221` launder. Deliberately file-at-a-time.
+- **api-cloudrun `seedDoc(ref, Schema, overrides)`** — construct → validate → track → write, and the
+  ratchet making it the only sanctioned way to write a fixture. **Not built.** Folded into #647's
+  scope; it is what makes the next required field visible, and it is worth doing before the 34-file
+  sweep rather than after.
+- **manager#322** — 9 of 20 stores pass `initialValues` and never mint a draft. Needs
+  `EntityCacheOptions.initialValues` to become optional with a **typed** (not runtime-throw) answer
+  for `newDraft` on a seedless store.
+- **Manager's form-seed cleanup** stays sequenced **after Wave 5** — `buildDefaultDocDates` and the
+  no-op spread in `manager/src/stores/orders.ts` can only collapse once `ProductSchema.shipping` is
+  required.
 
-### Three exports, each with callers found
-
-- `getTestDoc(schema, overrides, options?)` — the above.
-- `getFullTestDoc(...)` — also emits optional/`.default()` keys, for tests that need an optional field
-  present (`product.webshop`, `order.tax_exempt`). Separate function, not a flag: the default must be
-  the one that keeps negative tests honest.
-- `getTestDocPartial(...)` — same walk, **no parse**, returns `Partial<z.output<S>>`. For the
-  *deliberately* incomplete stand-in: `api-cloudrun/tests/integration/services/xeroInvoiceBody.test.ts:32-40` builds a 4-field Product because
-  the function reads exactly four fields and says a fuller fixture "would hide which fields actually
-  matter." Exists so those stop reaching for `as unknown as T`. A −0-line, +1-honesty change.
-
-Overrides **deep-merge — objects merge key-wise, arrays replace wholesale**. Core's brief proved the
-need (`totals: { ...totalsBase, subtotal_cents: 10000 }` at `tests/invoice.test.ts:66-72`,
-`tests/order.test.ts:429-434`); with a shallow merge every such site keeps its spread and the win halves.
-
-Deliberately **not** included, each because no caller was found across 200+ files: a union-arm selector,
-an array-count parameter, a pluggable custom resolver, and any FieldValue-sentinel awareness (only 9
-`FieldValue.*` uses in integration, none in fixture construction — ship it sentinel-unaware and say so).
-
-### The aligned standard — three named contracts, one layer line
-
-Seeding is ad hoc today: **five idioms across three repos** — `getInitialValues`+cast (42 integration
-sites, 17 core sites), raw `ref.set()` (**171 blocks / 2,183 lines**, untyped and unvalidated),
-`validateBeforeWrite`+`set` (~30 sites, the `templates/` subtree — the *only* idiom that would have
-caught `2915c782`), `makeDoc` (7 sites), and hand-built full documents (31 core files, 55 per-file
-`seed*` helpers in integration). The point of this wave is to collapse that to one per role.
-
-| Contract | Exported from | Consumers |
-|---|---|---|
-| `getInitialValues` — form seed; bindable, **may not parse** | `@cfs/core/schemas` (unchanged) | manager's 11 live drafts |
-| `getTestDoc` / `getFullTestDoc` / `getTestDocPartial` — fixture; **parses or throws** | `@cfs/core/schemas/testing` | all three repos' tests |
-| `seedDoc(ref, Schema, overrides)` — construct → validate → track → write | **api-cloudrun only** | integration fixtures |
-
-🔴 **`seedDoc` must NOT go in core.** It needs `firebase-admin` and `trackDoc`; `src/` is platform-free
-by deliberate policy — manager pulls it into a **browser** and JSR serves it over `https:`. Core owns
-schema-derived *construction*; each repo owns its own *write boundary*.
-
-### Rollout
-- 🔴 **`api-cloudrun/tests/helpers/makeDoc.ts` (58 lines) is DELETED, not re-exported and not wrapped.**
-  It is already this idea with a weaker contract (`{...getInitialValues(s), ...o} as T` — no parse, no
-  optional-omission, no leaf validity), and exporting it as-is would bless that. Its 7 call sites
-  repoint to `getTestDoc`. **This is the pass/fail test on the API**: if `getTestDoc` is not a drop-in
-  superset, this domain ends up with three idioms instead of two and the wave fails on its own metric.
-- `api-cloudrun/tests/unit/` wants **nothing new** — 1 of 171 files calls the seed; point it at `getTestDoc`.
-- **Then make `seedDoc` the only sanctioned way to write a fixture in api-cloudrun**, and ratchet it.
-  That — not the line count — is what makes the next required field visible.
-- 📝 **`core/CLAUDE.md` gains a § *Seeding: form values vs test fixtures*** — the three contracts, the
-  layer line (why `seedDoc` cannot live in core), and 🔴 **why timestamps are injected rather than
-  fabricated**. The last one is the highest-value sentence in the section: the hazard is invisible
-  (a map-timestamped fixture parses fine and silently defeats both `isEphemeralDoc` and
-  `createdByThisRun`), so nothing but prose will stop the next person "helpfully" defaulting it.
-  `api-cloudrun/CLAUDE.md` and `manager/CLAUDE.md` each get a pointer, not a copy.
-- **Delete ~9 dead `getInitialValues` calls in manager** (stores that pass `initialValues` but never call
-  `newDraft`/`resetDraft`). Shrinks manager's real surface from 20 files to 11. Manager's 6 test files
-  (`stores/__tests__/*`, `manager/src/primitives/__tests__/createZodValidation.test.ts`) move to `getTestDoc`.
-- ⚠️ **Manager's form-seed cleanup is a FOLLOW-ON, sequenced after Wave 5 — not part of this wave.**
-  Its one hard dependency on optional-object expansion is `ProductSchema.shipping`, which is a Wave 5
-  make-required candidate (541 of 568 populated; 27-doc backfill). Once it is required the landmine is
-  gone, and only then can `buildDefaultDocDates` (14 hand-written lines, `manager/src/stores/orders.ts:23-67`)
-  and the no-op spread at `manager/src/stores/orders.ts:114-115` collapse. Order: **Wave 4 → Wave 5 → manager cleanup.**
-- **Rewrite `api-cloudrun/src/services/eventCardReconcile.ts:160` as an explicit object literal.** Its
-  docstring claims the seed spread prevents drift; it does the opposite — the spread guarantees a *key is
-  present*, and presence is exactly what defeats the write-time validator, so a new required field lands
-  as a fabricated zero (`""`, `0`, `[]`, or **the first enum member**) in prod with no alarm. An explicit
-  literal makes core adding a field a compile error right there. Keep
-  `api-cloudrun/tests/unit/eventCardReconcile.test.ts:119-125` pointed at the same values.
-- **Fix `api-cloudrun/tests/unit/typeEscapeRatchet.test.ts`'s regex** — it requires `}` before `as unknown as`, so
-  `}) as unknown as` and `] as unknown as` escape. ≥3 uncatalogued escapees, including
-  `api-cloudrun/src/services/eventCardReconcile.ts:160` itself; the allowlist header's "src/ carries exactly two" is false.
-- **Consider an input-schema arm.** `manager/src/stores/transactions.ts` and three test sites hit the same two bugs on
-  `Create*Input`. Decide explicitly whether `getTestDoc` handles input schemas or a third entry point does.
-
-### Estimated win — stated honestly, including where there isn't one
-
-| Tranche | Scope | Lines |
-|---|---|---|
-| Core helper alone, api-cloudrun integration | 27 `uid_thread` repairs, 6 `uid` repairs, the `delete`, the contacts filter, the core#53 comment, 33 casts | **≈ 100** |
-| Core helper alone, core's own suite | 92 timestamp lines, ~40 casts, 3 `uid_thread` repairs | **≈ 100–150** |
-| With api-cloudrun's `seedDoc` on top | ~70 of 171 raw `.set()` blocks, at 12.8 → ~6 lines | **≈ 480** |
-| Unlocked but not counted | 31 core files that hand-write full documents; 151 inline negative fixtures gaining a structural defence | 400–700 |
-
-**Where there is no win, stated plainly:** a new required field is still **not a compile error** in the
-general case — runtime-throw-at-construction is a real improvement over "grep and hope" but it is not
-what `2915c782` asked for. The 55 per-file `seed*` helpers do **not** collapse (they encode per-suite
-semantics); only their boilerplate goes. The `.min(n)` auto-fill is medium value at best. The minimal
-stand-ins get no smaller and should not. Two of core's six utils test files gain **zero** —
-`tests/order-lines.test.ts` drives `ProductDocument`, and **the entire hand-written Typesense `*Document`
-family (all 20) has no runtime Zod schema**, so no schema-walking helper can reach any of them.
-`ProductSchema` is Zod but a *different shape* (`_str` money mirrors, `_fs` epoch ints, geopoints as
-`[lat,lng]`, computed rollups with no storage counterpart), and `typesenseSchemas.products.schema` is a
-Zod-validated **config** — a field list, not a document validator. ⚠️ Deriving the document type from
-the config was **measured and rejected** (`tests/typesenseFieldCoverage.test.ts:730-736`): it needs
-`as const` on a published export, but JSR `no-slow-types` forces the `: TypesenseCollectionConfig`
-annotation, which erases every literal field name to `string`.
-
-### ✅ GATE TAKEN 2026-08-23 — the contract is viable, and the throw path is rare
-
-A prototype walker was built and run over all **56** collection schemas. Result:
-
-| | |
-|---|---|
-| parse from a required-only, leaf-valid, `.min(n)`-honouring build | **53 of 56 (95%)** |
-| …of which needed a **re-chosen enum arm** | 2 (`product` → `type=sale`, `templates-versions` → `status=archived`) |
-| genuinely need a per-schema override | **3** — `recurrence`, `settlement`, `transaction` |
-
-**So the throw-with-issues path is a rare escape hatch (5%), not the common case.** Build it as the
-plan specifies.
-
-⭐ **A design finding the plan did not anticipate: a structural ENUM-ARM SEARCH fixes 2 of the 5
-failures.** On a whole-document parse failure, retrying each member of each top-level enum field is
-still purely structural — no per-schema knowledge — and it halves the override list. Worth building
-into `getTestDoc` before reaching for overrides.
-
-⚠️ **But it changes what the default fixture IS, and that must be documented.** `product` parses only
-as `type: "sale"`, because a `rental` obliges `price.replacement_cents` via `.superRefine`. So the
-default product fixture is a SALE, and a caller wanting a rental must supply the replacement price.
-Surprising if undocumented; fine if stated.
-
-All 3 residual failures are cross-field `.superRefine` invariants — the class no structural walk can
-solve (`"prep" must not carry a cost`; a `payment` cannot reference a credit note; `count`/`until`
-mutually exclusive). Overrides for three schemas, not a redesign.
-
-### ⚠️ Zod-4 introspection keys — hard-won, do not re-derive
-
-The walker took five wrong turns on these; they cost more time than the design did:
-
-| construct | `check` | value key |
-|---|---|---|
-| `z.number().min(n)` / `z.int().min(n)` | `greater_than` | **`value`** (+ `inclusive`) |
-| `z.string().length(n)` | `length_equals` | **`length`** |
-| `z.string().min(n)` / `z.array().min(n)` | `min_length` | **`minimum`** |
-
-🔴 **And the ordering rule that matters most: for a string leaf, SWEEP CANDIDATES FIRST and
-introspect second.** A version that detected the format first and only then fell back to the sweep
-silently stopped reaching it for every `z.email()` / `z.uuid()` / `z.iso.datetime()` leaf — the pass
-rate fell from 50 to 31 with no error, because introspection failing looks exactly like a leaf with
-no constraints. Asking the leaf's own `safeParse` what it accepts is reliable; introspection is the
-fallback, not the entry point.
-
-**Closes #53**, and closes the four invalid-`Organization`-fixture defects by construction.
 
 ## Wave 5 — the optionality campaign (new work; only 3 api-cloudrun bugs get filed)
 
@@ -1055,27 +938,31 @@ declared-ahead-of-use keeps (5a bucket A — schema docblocks, not issues).
 
 ## Context recommendation
 
-**CLEAR CONTEXT, then start at Wave 4.**
+**CLEAR CONTEXT, then start at Wave 5.**
 
-Everything needed to resume cold is durable: this doc (status block first), `core/CLAUDE.md`, and the
-GitHub issues. Nothing is held only in a session.
+Everything needed to resume cold is durable: this doc (status block first), the three repos'
+`CLAUDE.md` sections written this session, and the GitHub issues. Nothing is held only in a session.
 
-**Wave 4 is the right next unit of work and it is already de-risked** — its gate is taken (53 of 56
-schemas parse; the throw path is a 5% escape hatch), the enum-arm search that halves the override
-list is designed, and the Zod-4 introspection keys that cost the most time are written down. What
-remains is a build, not a decision.
+**Wave 5 is the right next unit and its preflight is already done** — the 333-path census is taken,
+the `FieldValue`-sentinel do-not-require list is written out, and the measuring instrument
+(`api-cloudrun/scripts/audit-schema-validation.ts`) was verified to cover every collection the wave
+touches, so it will not move mid-campaign. What remains is measurement plus one commit per tranche.
 
-⚠️ **Three things to do FIRST, in this order, before writing `getTestDoc`:**
+⚠️ **Two things to do FIRST, before the first tightening:**
 
-1. **Roll templates PR #121 forward.** It is open at `beta.244`; core is at `beta.248`. Bump by `sed`
-   over the version pattern, read the current version off `origin/main`, never merge it.
-2. **Decide Wave 4's subpath name and add it to `deno.json` exports** — it is a **new** pin line in
-   `api-cloudrun/deno.json` and `templates/deno.json`, which is exactly the case a remembered count
-   gets wrong.
-3. **Re-read the Wave 4 §"GATE TAKEN" block** rather than the prose above it; the prose predates the
-   measurement in two places.
+1. **5a's delete test is key-ABSENCE, and only `orderBy(field)` can answer it.** A `select`
+   projection cannot tell absent from null, and the census reports non-null VALUES. Run the
+   key-presence pass over prod and dev before deleting anything.
+2. **Read 5b's three tiers against the corpus again, not against this doc.** Every "100% today"
+   figure is a fact about data on 2026-08-23, and 5c's whole procedure is a before/after
+   measurement — a stale number is the one input that makes the commit messages wrong.
 
 **Do not start Wave 3.** Its census refuted its own prescribed fix; it needs a design decision
 (owner: predictable querying is the benefit, synonym drift is the defect), not an execution pass.
 
-**Do not assume #58 and #59 are closed.** Each has one piece left, named in the status block.
+**Do not assume #53, #58 and #59 are closed just because the issues are.** Each has a named piece
+left, and all three are in the status block above with their issue numbers.
+
+⚠️ **templates PR #121 is open and must not be merged by an agent.** If core publishes another beta
+before it lands, roll it forward by `sed` over the `jsr:@cfs/core@<old>/` pattern — never by a
+remembered line count, and never by a version quoted from this doc.
