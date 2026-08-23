@@ -19,6 +19,9 @@ export const ACCESS_CONTROL_EVENT_MSGS = [
   "role_invalid_permission",
   "role_permission_unknown",
   "role_schema_invalid",
+  "role_deleted",
+  "role_renamed",
+  "role_rename_pointer_sweep_disagreed",
   "role_update_not_found",
   "role_updated",
   "permission_denied",
@@ -39,6 +42,10 @@ export interface AccessControlEventLogRecord {
   ts: string;
   role_name?: string;
   permission?: string;
+  /** Role rename: the name being moved away from. */
+  role_name_old?: string;
+  /** Role rename: the name being moved to. */
+  role_name_new?: string;
   request_id?: string;
   method?: string;
   path?: string;
@@ -54,5 +61,7 @@ export const AccessControlEventLogRecordSchema: z.ZodType<AccessControlEventLogR
   ...baseLogFields,
   msg: z.enum(ACCESS_CONTROL_EVENT_MSGS),
   role_name: z.string().optional(),
+  role_name_old: z.string().optional(),
+  role_name_new: z.string().optional(),
   permission: z.string().optional(),
 }).passthrough().meta({ title: "AccessControlEventLogRecord" });

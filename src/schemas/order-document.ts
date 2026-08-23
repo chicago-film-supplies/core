@@ -23,14 +23,25 @@
  * path where it previously did nothing. Setting it to the Uploadcare `uuid`
  * would fail every write.
  *
- * ⚠️ **Optional on purpose, and only for now.** `documents` has NO TTL — it is
- * absent from `local.firestore_ttls` — and `processOrderDocs` is version-keyed,
- * so a closed order is never rewritten and ~1,836 permanent documents will not
- * turn over on their own. The sequence is **optional → backfill → tighten to
- * required**; shipping it required in one shot breaks every regen immediately.
- * ⚠️ The backfill must key on **`ref.id`**, never on `orderDocumentId(data.name)`:
- * there is a tail of orders with more than two documents (legacy auto-id
- * survivors) whose ids are neither literal.
+ * **`uid` is REQUIRED**, as of the backfill completing in both environments
+ * (2026-08-23). It shipped `.optional()` first and was tightened after, rather
+ * than required in one shot, because this collection cannot age into a new
+ * shape by itself: `documents` has NO TTL — it is absent from
+ * `local.firestore_ttls` — and `processOrderDocs` is version-keyed, so a closed
+ * order is never rewritten. A required field on day one would have refused every
+ * regen against ~1,988 un-stamped documents.
+ *
+ * Backfill measured, both environments: **1,988 documents, 100% carrying `uid`,
+ * 0 with `uid !== ref.id`**, verified by parsing the whole collection group.
+ *
+ * ⚠️ **The backfill keyed on `ref.id`, never `orderDocumentId(data.name)`** — and
+ * that rule stands even though the reason usually given for it turned out to be
+ * false. The warning was a "tail of orders with more than two documents (legacy
+ * auto-id survivors) whose ids are neither literal". Measured on prod, that tail
+ * **does not exist**: `audit-order-documents-cardinality.ts` reports
+ * `{"2": 994}` — every order has exactly two documents, none has more. Key on
+ * `ref.id` regardless: it is the document id *by definition*, whereas deriving
+ * from the name is only right while a coincidence holds.
  */
 import { z } from "zod";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
@@ -40,9 +51,9 @@ import { uploadcareRef } from "./uploadcare/ref.ts";
 export interface OrderDocument {
   /**
    * Firestore document id — `"quote"` or `"packing-list"`, derived from the
-   * filename. Optional until the backfill lands; see the module doc.
+   * filename.
    */
-  uid?: string;
+  uid: string;
   uuid: string;
   mime: string;
   name: string;
@@ -52,9 +63,9 @@ export interface OrderDocument {
 /** Zod schema for OrderDocument. */
 export const OrderDocumentSchema: z.ZodType<OrderDocument> = z.strictObject({
   // The Firestore doc id, mirrored onto the body so the write-time drift guard
-  // can see it. Optional ONLY until the backfill completes — see the module doc
-  // for why this collection cannot age into the new shape by itself.
-  uid: z.string().min(1).optional(),
+  // can see it at all — a document whose id field is not called `uid` passes
+  // that guard silently.
+  uid: z.string().min(1),
   // Uploadcare CDN file id — kept a plain non-empty string (not z.uuid()) so a
   // non-UUID CDN id can never block a regen write.
   uuid: uploadcareRef(z.string().min(1)),

@@ -2445,7 +2445,7 @@
         {
           "kind": "interface",
           "name": "OrderDocument",
-          "declaration": "interface OrderDocument {\n  uid?: string;\n  uuid: string;\n  mime: string;\n  name: string;\n  orderUpdatedAt: FirestoreTimestampType;\n}",
+          "declaration": "interface OrderDocument {\n  uid: string;\n  uuid: string;\n  mime: string;\n  name: string;\n  orderUpdatedAt: FirestoreTimestampType;\n}",
           "doc": "Metadata for a single generated order document (quote / packing list PDF)."
         },
         {
@@ -8451,13 +8451,13 @@
         {
           "kind": "variable",
           "name": "ACCESS_CONTROL_EVENT_MSGS",
-          "declaration": "const ACCESS_CONTROL_EVENT_MSGS: \"rbac_registry_drift\" | \"rbac_user_missing\" | \"role_create_conflict\" | \"role_created\" | \"role_invalid_permission\" | \"role_permission_unknown\" | \"role_schema_invalid\" | \"role_update_not_found\" | \"role_updated\" | \"permission_denied\" | \"service_oidc_observed\" | \"preview_role_self_healed\" | \"preview_role_started\" | \"preview_role_stopped\" | \"preview_role_subset_violation\"[];",
+          "declaration": "const ACCESS_CONTROL_EVENT_MSGS: \"rbac_registry_drift\" | \"rbac_user_missing\" | \"role_create_conflict\" | \"role_created\" | \"role_invalid_permission\" | \"role_permission_unknown\" | \"role_schema_invalid\" | \"role_deleted\" | \"role_renamed\" | \"role_rename_pointer_sweep_disagreed\" | \"role_update_not_found\" | \"role_updated\" | \"permission_denied\" | \"service_oidc_observed\" | \"preview_role_self_healed\" | \"preview_role_started\" | \"preview_role_stopped\" | \"preview_role_subset_violation\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
           "kind": "interface",
           "name": "AccessControlEventLogRecord",
-          "declaration": "interface AccessControlEventLogRecord {\n  level: LogLevelType;\n  msg: AccessControlEventMsg;\n  ts: string;\n  role_name?: string;\n  permission?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "declaration": "interface AccessControlEventLogRecord {\n  level: LogLevelType;\n  msg: AccessControlEventMsg;\n  ts: string;\n  role_name?: string;\n  permission?: string;\n  role_name_old?: string;\n  role_name_new?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
           "doc": "Structured log entry for any RBAC / role / preview-role event."
         },
         {

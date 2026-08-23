@@ -5204,7 +5204,7 @@ Metadata for a single generated order document (quote / packing list PDF).
 
 ```ts
 interface OrderDocument {
-  uid?: string;
+  uid: string;
   uuid: string;
   mime: string;
   name: string;
@@ -17668,7 +17668,7 @@ const WebhookEventSchema: z.ZodType<WebhookEvent>;
 Msg literals this archetype absorbs.
 
 ```ts
-const ACCESS_CONTROL_EVENT_MSGS: "rbac_registry_drift" | "rbac_user_missing" | "role_create_conflict" | "role_created" | "role_invalid_permission" | "role_permission_unknown" | "role_schema_invalid" | "role_update_not_found" | "role_updated" | "permission_denied" | "service_oidc_observed" | "preview_role_self_healed" | "preview_role_started" | "preview_role_stopped" | "preview_role_subset_violation"[];
+const ACCESS_CONTROL_EVENT_MSGS: "rbac_registry_drift" | "rbac_user_missing" | "role_create_conflict" | "role_created" | "role_invalid_permission" | "role_permission_unknown" | "role_schema_invalid" | "role_deleted" | "role_renamed" | "role_rename_pointer_sweep_disagreed" | "role_update_not_found" | "role_updated" | "permission_denied" | "service_oidc_observed" | "preview_role_self_healed" | "preview_role_started" | "preview_role_stopped" | "preview_role_subset_violation"[];
 ```
 
 ### `AccessControlEventLogRecord`
@@ -17682,6 +17682,8 @@ interface AccessControlEventLogRecord {
   ts: string;
   role_name?: string;
   permission?: string;
+  role_name_old?: string;
+  role_name_new?: string;
   request_id?: string;
   method?: string;
   path?: string;
