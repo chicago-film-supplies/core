@@ -363,6 +363,59 @@ Execute `core/.claude/plans/roles-campaign.md` (276 lines). **`roles.name` stays
 
 ⚠️ **Manager and templates import no log schemas** — verified. Single consumer.
 
+### 3.1 CENSUS — done 2026-08-23. **This is the deliverable; read it before writing schema.**
+
+**Scale: ~296 distinct field names are supplied by call sites and NOT declared**, across
+364 `logTyped` object literals and 20 arms.
+
+⚠️ **The plan's stated method UNDER-REPORTS, and by a lot.** "Delete the signatures and `deno check`"
+gives **103** distinct names, not ~296 — because **TS2353 reports only the FIRST excess
+property per object literal**. One pass is not a census; it is the first layer of one. Reaching the
+real list needs either iterating check→fix→check to a fixed point, or a static parse.
+
+⚠️ **And a static parse alone is also wrong.** 8 names it misses show up only in the type-check,
+because **14 of the 364 call sites spread a value in at top level** (`...input`, `...ta`) and a
+key-based parse cannot see through them. Neither method dominates: the numbers below are the UNION.
+
+| Arm | supplied | already declared | **undeclared** |
+|---|---|---|---|
+| `integration-event` | 85 | — | **85** |
+| `domain-event` | 51 | — | **51** |
+| `template-event` | 45 | — | **45** |
+| `xero-event` | 43 | — | **43** |
+| `typesense-event` | 27 | — | **27** |
+| `system-event` | 26 | — | **26** |
+| `access-control-event` | 23 | — | **23** |
+| `oauth-event` | 21 | — | **21** |
+| `calendar-event` | 10 | — | **10** |
+| `user-session-event` | 9 | — | **9** |
+| `mcp-event` | 4 | — | **4** |
+| `cloud-task-event` | 2 | — | **2** |
+| `transaction` | 1 | — | **1** |
+
+**⭐ 7 of 20 arms have ZERO undeclared fields — their signature can be deleted for free, today:**
+`client`, `dmarc`, `email`, `propagation`, `request`, `sync`, `validation`. That is the natural first cut and it de-risks the rest.
+
+**🔴 The finding that should decide the shape of this wave: 228 of 347 undeclared field-names are
+supplied at exactly ONE call site.** Declaring ~228 single-use fields to delete 22 index signatures
+is a different trade from declaring the ~119 that recur, and the plan did not anticipate it.
+Three defensible answers, and this is an owner call:
+
+- **Declare all of them.** Faithful to the issue. Biggest schema, and ~228 declarations exist to
+  serve one call site each.
+- **Declare the recurring ones; fold the single-use ones into an existing field** (most are ad-hoc
+  debug context that belongs in a `context`/`detail` object, not on the envelope).
+- **Delete the 7 free signatures now**, declare the recurring fields, and leave the rest —
+  banking most of the value without a 300-declaration commit.
+
+⚠️ `IntegrationEventLogRecord` is the extreme: **88 fields supplied, 3 declared.** Its own docstring
+already admits `collection`/`doc_id`/`operation` ride the signature — the census confirms
+`collection` (6 sites) and `operation` (4) among many others.
+
+⚠️ **`ValidationIssue` is a 24th signature and is NOT an arm.** It is the nested Zod-issue shape, and
+its openness is arguably correct (Zod issue shapes vary by code). Decide it separately; do not sweep
+it in with the 22 record arms.
+
 **Closes #65.**
 
 ## Wave 4 — core#53: split the seed helper
