@@ -93,6 +93,20 @@
  * `vmauth.yml.tpl` matches WHOLE and resolves, instead of being silently
  * unrepresentable.
  *
+ * ⚠️ **There is no CLOSING delimiter, so this matches the first token of any
+ * code span — including a JS template literal used as an assertion message.**
+ * Reproduced 2026-08-23: a template literal opening with orders.ts and
+ * continuing "must be listed ${n} times" yields orders.ts as a citation
+ * (un-backticked here, or this docstring would demonstrate the bug ON ITSELF —
+ * which it did on the first attempt). That is deliberate rather than
+ * unnoticed, and the trade is
+ * asymmetric: requiring a closing backtick would also drop the legitimate
+ * *"path plus a parenthetical"* form that appears in real prose, and the
+ * measured cost of the current shape is zero — all four repos report 0 broken.
+ * **Any anchor-based successor has to decide this explicitly**, because it must
+ * distinguish prose from a string literal in source rather than treating both
+ * as text.
+ *
  * ⚠️ **It carries the `g` flag, so it is STATEFUL.** `RegExp.lastIndex`
  * persists across calls on a shared instance. Use it with `matchAll`, which
  * clones internally — never with a bare `.test()` or `.exec()` loop on this
