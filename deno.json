@@ -76,7 +76,7 @@
     "./utils/citations": "./src/utils/citations.ts"
   },
   "tasks": {
-    "test": "deno test --allow-read --allow-run --allow-write tests/",
+    "test": "deno test --allow-read tests/",
     "lint": "deno lint",
     "audit:citations": "deno run --allow-read --allow-env scripts/audit-plan-citations.ts --strict",
     "check": "deno check src/ scripts/ tests/",
@@ -86,6 +86,7 @@
     "generate-template-helpers": "deno run --allow-run --allow-read --allow-write scripts/generate-template-helpers.ts",
     "docs": "deno run --allow-run --allow-read --allow-write scripts/generate-api-docs.ts",
     "docs:check": "deno task docs && git diff --exit-code -- API.md API.json",
+    "check:generated": "deno run --allow-read scripts/generate-schema-template-fields.ts --stdout | diff -u src/schemas/template-schema-fields.generated.ts - && deno run --allow-run --allow-read scripts/generate-template-helpers.ts --stdout | diff -u src/schemas/template-helpers.generated.ts -",
     "generate-lucide-icons": "deno run --allow-net=registry.npmjs.org --allow-read --allow-write scripts/generate-lucide-icons.ts"
   },
   "imports": {

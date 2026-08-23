@@ -25,6 +25,17 @@
  * same `pii: "redact"` omission the schema walk uses.
  *
  * Run: deno task generate-template-helpers
+ *
+ * Pass `--stdout` to print the file instead of writing it. That mode is what
+ * `deno task check:generated` diffs against the committed copy, so the
+ * staleness gate never has to write into `src/` to prove the file is current.
+ *
+ * ⚠️ Unlike its sibling `generate-schema-template-fields.ts`, the render here
+ * cannot be a pure function: {@link runDenoDoc} spawns `deno doc`, so this
+ * generator irreducibly needs `--allow-run`. That is why its staleness check
+ * lives in `deno task check:generated` and NOT in the test suite — `deno task
+ * test` deliberately runs without `--allow-run`, and a test that spawned this
+ * would hand the child write access the test process itself does not have.
  */
 import { type Declaration, type DocSymbol, type Param, renderType, runDenoDoc } from "./deno-doc.ts";
 import { TEMPLATE_HELPER_DENYLIST } from "./template-helper-denylist.ts";
@@ -81,7 +92,13 @@ function functionDeclarations(symbol: DocSymbol): Declaration[] {
   );
 }
 
-async function main(): Promise<void> {
+/**
+ * Walk every `./utils/*` entrypoint and collect its renderable helpers.
+ *
+ * Split out from {@link renderTemplateHelpers} so the CLI can report what it
+ * found without re-deriving it from the rendered text.
+ */
+export async function buildTemplateHelperCatalogue(): Promise<Record<string, TemplateHelperEntry[]>> {
   const denoJson = JSON.parse(await Deno.readTextFile("deno.json")) as {
     exports: Record<string, string>;
   };
@@ -113,10 +130,25 @@ async function main(): Promise<void> {
       }
     }
 
-    // Sorted so the output is deterministic (the staleness test byte-compares).
+    // Sorted so the output is deterministic (the staleness gate byte-compares).
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     catalogue[namespace] = entries;
   }
+
+  return catalogue;
+}
+
+/**
+ * Render the whole generated module as a string.
+ *
+ * Exported so the write and the staleness diff share one code path. It is not
+ * pure — {@link runDenoDoc} spawns a subprocess — which is precisely the reason
+ * the staleness check is a task rather than a test; see the module doc.
+ */
+export async function renderTemplateHelpers(
+  built?: Record<string, TemplateHelperEntry[]>,
+): Promise<string> {
+  const catalogue = built ?? await buildTemplateHelperCatalogue();
 
   const namespaces = Object.keys(catalogue).sort();
   const blocks = namespaces.map((namespace) => {
@@ -157,14 +189,25 @@ ${blocks.join(",\n")},
 };
 `;
 
-  const outPath = new URL("../src/schemas/template-helpers.generated.ts", import.meta.url);
-  await Deno.writeTextFile(outPath, output);
-
-  const total = namespaces.reduce((n, ns) => n + catalogue[ns].length, 0);
-  console.log(
-    `Wrote ${outPath.pathname} — ${total} helpers across ${namespaces.length} namespaces ` +
-      `(${namespaces.map((ns) => `${ns}:${catalogue[ns].length}`).join(", ")})`,
-  );
+  return output;
 }
 
-await main();
+if (import.meta.main) {
+  const catalogue = await buildTemplateHelperCatalogue();
+  const output = await renderTemplateHelpers(catalogue);
+
+  if (Deno.args.includes("--stdout")) {
+    // Bare stdout, so the caller can pipe it straight into `diff`.
+    await Deno.stdout.write(new TextEncoder().encode(output));
+  } else {
+    const outPath = new URL("../src/schemas/template-helpers.generated.ts", import.meta.url);
+    await Deno.writeTextFile(outPath, output);
+
+    const namespaces = Object.keys(catalogue).sort();
+    const total = namespaces.reduce((n, ns) => n + catalogue[ns].length, 0);
+    console.log(
+      `Wrote ${outPath.pathname} — ${total} helpers across ${namespaces.length} namespaces ` +
+        `(${namespaces.map((ns) => `${ns}:${catalogue[ns].length}`).join(", ")})`,
+    );
+  }
+}

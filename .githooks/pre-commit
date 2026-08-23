@@ -13,6 +13,14 @@ deno task lint
 echo "Type-checking..."
 deno task check
 
+# The two `.generated.ts` files under `src/schemas/`. Their staleness check used
+# to live in the suite, where it SPAWNED each generator — and a spawned child
+# carries its own permissions, so a green `deno task test` rewrote both tracked
+# files. `deno task test` now runs read-only; this is where the byte-compare
+# went. It is a diff against generator stdout, so it never writes.
+echo "Checking generated files..."
+deno task check:generated
+
 echo "Running tests..."
 deno task test
 

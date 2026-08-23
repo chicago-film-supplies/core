@@ -42,6 +42,15 @@ jobs:
       - name: Type check
         run: deno task check
 
+      # Non-destructive: diffs each generator's `--stdout` render against the
+      # committed `src/schemas/*.generated.ts`. It lives outside `deno task
+      # test` because that task deliberately runs without `--allow-run`, and a
+      # test that spawned a generator would hand the child write access the
+      # test process itself does not have — which is how a passing suite used
+      # to rewrite two tracked files.
+      - name: Generated files
+        run: deno task check:generated
+
       - name: Test
         run: deno task test
 

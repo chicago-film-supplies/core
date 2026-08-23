@@ -8,6 +8,20 @@
  * explicitly denylisted. It previously lived in the manager (against a
  * hand-authored list); now the catalogue is generated, so the guard lives here
  * next to the generator.
+ *
+ * ⚠️ **The staleness check is NOT here — it is `deno task check:generated`.**
+ * `generate-template-helpers.ts` shells out to `deno doc`, so re-rendering it
+ * needs `--allow-run`, and `deno task test` deliberately runs without it: a
+ * spawned child carries its own permissions, so a test that spawned the
+ * generator would rewrite `src/` on every green run no matter what the test
+ * process was allowed to do.
+ *
+ * The lockstep block below still covers **membership** drift without any
+ * regeneration: an added export fails "every export is emitted or explicitly
+ * denylisted", a removed one fails "every emitted helper is a real export". So
+ * what the task alone catches is the narrower class the byte-compare sees and
+ * the name comparison cannot — a changed **signature, JSDoc summary or return
+ * type** on a helper whose name did not move.
  */
 import { assert, assertEquals, assertExists, assertGreater } from "@std/assert";
 
@@ -326,26 +340,7 @@ Deno.test("availableUtilNamespaces takes lists (forward-compatible with multi-co
 });
 
 // ── Staleness ───────────────────────────────────────────────────────
-
-Deno.test("generated file is up to date", async () => {
-  const scriptPath = new URL("../scripts/generate-template-helpers.ts", import.meta.url);
-  const generatedPath = new URL("../src/schemas/template-helpers.generated.ts", import.meta.url);
-
-  const committed = await Deno.readTextFile(generatedPath);
-
-  const command = new Deno.Command(Deno.execPath(), {
-    args: ["run", "--allow-run", "--allow-read", "--allow-write", scriptPath.pathname],
-    cwd: new URL("..", import.meta.url).pathname,
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const { code } = await command.output();
-  assertEquals(code, 0, "generator script failed");
-
-  const regenerated = await Deno.readTextFile(generatedPath);
-  assertEquals(
-    regenerated,
-    committed,
-    "template-helpers.generated.ts is stale — run: deno task generate-template-helpers",
-  );
-});
+//
+// The byte-compare against a fresh render lives in `deno task check:generated`,
+// not here — see the module doc for why it cannot run under this suite's
+// permissions. The lockstep test above is the in-suite arm.

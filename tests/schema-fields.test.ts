@@ -1,8 +1,9 @@
 /**
  * Tests for the generated template schema field metadata.
  *
- * Verifies correctness of the static output and includes a staleness
- * check that re-runs the generator and compares against the committed file.
+ * Verifies correctness of the static output and includes a staleness check that
+ * re-renders the generator's output IN PROCESS and compares it against the
+ * committed file.
  *
  * The generator derives its fields from `z.toJSONSchema()`. Two of its
  * behaviours cannot be proven by the generated output alone and are guarded by
@@ -15,6 +16,7 @@ import { isCollectionName, schemaFor } from "../src/schemas/mod.ts";
 import { templateSchemaFields } from "../src/schemas/template-schema-fields.generated.ts";
 import type { SchemaField } from "../src/schemas/template-schema-fields.generated.ts";
 import { walkSchema } from "../scripts/schema-walk.ts";
+import { renderTemplateSchemaFields } from "../scripts/generate-schema-template-fields.ts";
 
 /**
  * `templateSchemaFields` is `Partial`, so indexing it yields
@@ -247,23 +249,29 @@ Deno.test("synthetic: both union spellings are walked (anyOf AND oneOf)", () => 
 
 // ── Staleness check ─────────────────────────────────────────────────
 
+/**
+ * ⚠️ This compares against the generator's RETURN VALUE, not against the file
+ * it would have written.
+ *
+ * It used to spawn the generator as a subprocess and re-read the file. A
+ * spawned child carries its own permission set, so that test wrote into `src/`
+ * on every green run regardless of what the test process was allowed to do —
+ * i.e. a passing suite silently rewrote two tracked files, which is exactly
+ * what you do not want happening underneath a schema migration. `deno task
+ * test` now runs without `--allow-run` or `--allow-write`, and that permission
+ * removal *is* the enforcement; this shape is what lets the check survive it.
+ *
+ * Its sibling `template-helpers.generated.ts` cannot be checked this way — its
+ * generator shells out to `deno doc` — so that one is gated by
+ * `deno task check:generated` instead. See that task and this file's sibling.
+ */
 Deno.test("generated file is up to date", async () => {
-  const scriptPath = new URL("../scripts/generate-schema-template-fields.ts", import.meta.url);
   const generatedPath = new URL("../src/schemas/template-schema-fields.generated.ts", import.meta.url);
 
   const committed = await Deno.readTextFile(generatedPath);
 
-  const command = new Deno.Command(Deno.execPath(), {
-    args: ["run", "--allow-read", "--allow-write", scriptPath.pathname],
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const { code } = await command.output();
-  assertEquals(code, 0, "generator script failed");
-
-  const regenerated = await Deno.readTextFile(generatedPath);
   assertEquals(
-    regenerated,
+    renderTemplateSchemaFields(),
     committed,
     "template-schema-fields.generated.ts is stale — run: deno task generate-schema-template-fields",
   );

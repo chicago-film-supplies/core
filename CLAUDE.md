@@ -17,7 +17,36 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
   declares no top-level `lint` block to enable it — **only `deno publish` runs it**, via
   `.githooks/pre-push`. A gate-claim that names a check nothing runs is the exact defect class this
   package's ratchets exist to kill, so it is stated here rather than quietly corrected.
-- `deno task test` — run tests
+- `deno task test` — run tests. ⚠️ **Deliberately `--allow-read` only.** It carried `--allow-run`
+  and `--allow-write` for exactly 2 of its 1,667 tests — the two staleness checks on
+  `src/schemas/template-schema-fields.generated.ts` and `src/schemas/template-helpers.generated.ts` —
+  and **both used the permission to rewrite those tracked files on every green run.** They spawned
+  their generator and re-read the file, so the generator was the oracle and passing *required*
+  writing. That is a live hazard mid-migration: a schema edit plus a green test run silently commits
+  a regenerated artifact nobody reviewed.
+  **The permission removal is itself the enforcement**, and it has to be `--allow-run` and not just
+  `--allow-write`: a spawned child carries its OWN permission set, so a test with no write access can
+  still spawn `deno run --allow-write` and rewrite `src/` anyway. Dropping `--allow-write` alone
+  would have changed nothing.
+  The two checks were therefore rehomed differently, according to whether their generator needs a
+  subprocess:
+  - `template-schema-fields` is a pure Zod walk, so `tests/schema-fields.test.ts` imports
+    `renderTemplateSchemaFields()` from `scripts/generate-schema-template-fields.ts` and compares its
+    **return value** to the committed file. No subprocess, no write, and it exercises the real code
+    path rather than a copy of it.
+  - `template-helpers` shells out to `deno doc` (via `runDenoDoc` in `scripts/deno-doc.ts`), which
+    is irreducible — so its byte-compare **is not in the suite at all**. It lives in
+    `deno task check:generated` (below). `tests/template-helpers.test.ts` still catches **membership**
+    drift without regenerating (an added export fails *"every export is emitted or explicitly
+    denylisted"*, a removed one fails *"every emitted helper is a real export"*); what only the task
+    sees is a changed signature, JSDoc summary or return type on a helper whose name did not move.
+  📝 If you add a test that needs to shell out, do not re-add the flags — the failure will look like
+  an unexplained `NotCapable`. Put the check in a task instead, as `check:generated` does.
+- `deno task check:generated` — the staleness gate for the two committed `src/schemas/*.generated.ts`
+  files. **Non-destructive by construction**: each generator takes `--stdout` and the task pipes that
+  render into `diff -u` against the committed copy, so proving the file is current never writes it.
+  Runs in `.githooks/pre-commit` and `.github/workflows/ci.yaml`. Contrast `docs:check`, which is the
+  older regenerate-then-`git diff` shape and is wired into neither.
 - `deno task audit:citations` — check every backticked `path.ext` citation in this package's
   prose (`CLAUDE.md`, `README.md`, `.claude/`, `notes/`, `src/`, `scripts/`, `tests/`,
   `.github/`, `.githooks/`) still resolves. Runs in `.githooks/pre-push` and in
