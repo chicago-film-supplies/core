@@ -250,7 +250,7 @@ A rename that rewrites `threads.sources[]` and the `comments.sources[]` denorm i
 
 ## Cross-repo release order (per `~/cfs/CLAUDE.md`)
 
-Each core phase: commit on `beta` → push → JSR `-beta.N` → then bump `api-cloudrun/deno.json` (the explicit `jsr:@cfs/core@<ver>/…` subpath entries), `manager/package.json` (the single alias), and `templates/deno.json` (**exact** pins: 1 `schemas` + 5 `utils/*` — `orders`, `invoices`, `dates`, `icons`, `money`; currently `10.0.0-beta.196`). Run `deno install` / `npm install` so the lockfiles match. Templates has branch protection: **open the PR, never merge it.**
+Each core phase: commit on `beta` → push → JSR `-beta.N` → then bump `api-cloudrun/deno.json` (the explicit `jsr:@cfs/core@<ver>/…` subpath entries), `manager/package.json` (the single alias), and `templates/deno.json` (**exact** pins: 1 `schemas` + 7 `utils/*` — `citations`, `orders`, `templates`, `invoices`, `dates`, `icons`, `money`; **8 lines**, at `10.0.0-beta.240` as of 2026-08-23, i.e. **one publish behind** api-cloudrun and manager, which are both at `10.0.0-beta.241`). **Bump by PATTERN, never by the remembered count** — a `sed` over `jsr:@cfs/core@<old>/` cannot miss a line; a remembered number can, and has. The root `~/cfs/CLAUDE.md` records its own copy of this count going stale twice (missing `utils/templates`, then missing `utils/citations`, core#66); this doc was stale by both additions at once, which is how a new subpath gets stranded on the old version. Run `deno install` / `npm install` so the lockfiles match. Templates has branch protection: **open the PR, never merge it.**
 
 Templates is a pin bump and nothing else — no role type is reachable from that repo.
 

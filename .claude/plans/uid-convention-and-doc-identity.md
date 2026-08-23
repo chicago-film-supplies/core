@@ -181,7 +181,7 @@ Each core phase: commit on `beta` → push → JSR `-beta.N` → then bump
 
 - `api-cloudrun/deno.json` (the explicit `jsr:@cfs/core@<ver>/…` subpath entries; 28 `@cfs/core` lines at time of writing),
 - `manager/package.json` (the single `@cfs/core` → `npm:@jsr/cfs__core@<ver>` alias),
-- `templates/deno.json` — **exact pins, not a caret**: 1 `schemas` entry + 5 `utils/*` (`orders`, `invoices`, `dates`, `icons`, `money`), 6 lines; currently `10.0.0-beta.196`.
+- `templates/deno.json` — **exact pins, not a caret**: 1 `schemas` entry + 7 `utils/*` (`citations`, `orders`, `templates`, `invoices`, `dates`, `icons`, `money`), **8 lines**; at `10.0.0-beta.240` as of 2026-08-23. ⚠️ **`templates` is one publish BEHIND its siblings** — `api-cloudrun/deno.json` (28 subpath lines) and `manager/package.json` (1 alias) are both at `10.0.0-beta.241`. Do not assume the three move together; re-read all three before bumping. **Bump by PATTERN, never by the remembered count** — a `sed` over `jsr:@cfs/core@<old>/` cannot miss a line; a remembered number can, and has. The root `~/cfs/CLAUDE.md` records its own copy of this count going stale twice (missing `utils/templates`, then missing `utils/citations`, core#66); this doc was stale by both additions at once, which is how a new subpath gets stranded on the old version.
 
 Run `deno install` / `npm install` so the lockfiles match (Cloud Build uses `deno install --frozen`).
 
