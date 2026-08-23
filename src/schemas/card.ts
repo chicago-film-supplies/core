@@ -258,6 +258,10 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   // Required (no `.default("")`): the Typesense config declares it so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
   subject: z.string().max(200).meta({ pii: "mask", column: true, label: "Subject" }),
+  // `body`/`body_text`: required, and all 1,129 prod cards carry BOTH keys —
+  // `body: null`, `body_text: ""` (2026-08-23). The prod corpus is entirely
+  // machine-generated from orders, so the emptiness measures the hand-authored
+  // card path never having run, not a dead field. CLAUDE.md § "Is a field dead?".
   body: CommentBody.nullable(),
   body_text: z.string().max(20000).meta({ pii: "mask", column: true, label: "Body" }).default(""),
   dates: CardDates,
@@ -269,6 +273,8 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   attachments: z.array(CardAttachment).default([]).meta({ label: "Attachment" }),
   uid_assignees: z.array(FirestoreId).default([]),
   locked: z.array(CardLockKeyEnum).default([]),
+  // Both recurrence fields: key present on all 1,129 prod cards, always `null`
+  // (2026-08-23). Same reason as `body` above — no recurrence has been expanded.
   recurrence_parent_uid: FirestoreId.nullable(),
   recurrence_index: z.int().nullable(),
   recurrence_overrides: z.array(z.string()).default([]),

@@ -138,6 +138,13 @@ export const Phone: z.ZodType<string> = z
  * Stored documents also carry a denormalized `name: string` (use `NameField`
  * + `deriveName()` below). Inputs do not — clients send parts; the server
  * derives `name` at write time. See `deriveName` for the canonical join rule.
+ *
+ * ⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts
+ * carry it (2026-08-23) — and is not. It is an optional field a human types,
+ * with live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`
+ * handles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on
+ * it, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody
+ * has filled one in. See `core/CLAUDE.md` § "Is a field dead?".
  */
 export interface NameParts {
   first_name: string;

@@ -60,6 +60,10 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
   // window; no `.min(1)` because a name of pure separators normalizes to "".
   name_key: z.string().max(100).optional(),
   default: z.boolean().meta({ column: true, label: "Default" }),
+  // Required-but-nullable, and every one of the 209 prod docs carries the KEY as
+  // `null` (2026-08-23). A value census reads that as "dead"; it is not — the
+  // writer is explicit and location types are simply unassigned. CLAUDE.md
+  // § "Is a field dead?".
   uid_location_type: FirestoreId.nullable(),
   product_capacities: z.array(z.strictObject({
     uid: FirestoreId,

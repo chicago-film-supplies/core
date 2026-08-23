@@ -1188,6 +1188,9 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // customer.
   tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),
   // No `column: true` — `display-columns.test.ts` bans a heading ending in "Uid".
+  // 0 of 995 prod orders carry the KEY (2026-08-23) — expected mid-migration,
+  // not dead. `null`/absent already means the default store, and
+  // `api-cloudrun/src/lib/locationIntegrity.ts` reasons about exactly that.
   uid_store: FirestoreId.nullable().optional(),
   totals: OrderDocTotals,
   invoices: z.array(z.strictObject({
@@ -1219,6 +1222,10 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // why this is optional rather than backfilled. Adding it puts `orders` into
   // the user-rename cascade, which is safe only because api-cloudrun's
   // `ORDER_FANOUT_EXCLUDED_FIELDS` already refuses both actor names.
+  // 0 of 995 prod orders carry the KEY (2026-08-23) — declared ahead of use and
+  // already wired: `api-cloudrun/src/lib/orderFanoutGuard.ts` lists it, and
+  // `api-cloudrun/tests/unit/actorRefPaths.test.ts` asserts every order ActorRef
+  // path appears there.
   created_by: ActorRef.nullable().optional().meta({ column: true, label: "Created By" }),
   ...TimestampFields,
 }).meta({

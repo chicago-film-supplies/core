@@ -384,6 +384,9 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   uid_tracking_category: FirestoreId.nullable().optional(),
   webshop: z.strictObject({
     available: z.boolean().default(false).meta({ column: true, label: "Available" }),
+    // Key present on 544 of 568 prod products, always `null`; the other 24 lack
+    // it entirely (2026-08-23). So it is neither dead nor a clean tighten —
+    // requiring it needs a 24-doc backfill first. CLAUDE.md § "Is a field dead?".
     description: z.string().nullable().optional().meta({ column: true, label: "Description" }),
   }).meta({ label: "Webshop" }),
   // Ordered display list; `images[0]` is the primary image. Every member field
@@ -392,6 +395,13 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   // field would persist it as absent. Making them required forces the writer to
   // be explicit. The annotation wraps the `.nullable()` (invoice.ts:315's form)
   // — a tag on the outside of a `.nullable()` has silently gone unseen here.
+  // ⚠️ NOT DEAD, despite zero rows corpus-wide. 1 of 568 prod products carries
+  // the KEY (as `[]`), and the feature behind it ships end to end:
+  // `deriveQueryByImages` + the mirror refinement below, api-cloudrun's
+  // `services/productImages.ts` and its POST/PATCH/DELETE
+  // `/products/{uid}/images` routes, and manager's `ProductImages.tsx`.
+  // Nobody has uploaded a product photo yet — that is all the count means.
+  // Measured 2026-08-23; CLAUDE.md § "Is a field dead?".
   images: z.array(z.strictObject({
     uuid: uploadcareRef(z.string()),
     uuid_cutout: uploadcareRef(z.string().nullable()),
@@ -403,6 +413,8 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   // applied during parse, so it would turn "writer omitted the mirror" into
   // "writer sent an empty mirror" and the refinement below could no longer tell
   // an untouched legacy doc from a drifted write.
+  // 0 of 568 prod products carry the KEY (2026-08-23) — one step deader-looking
+  // than `images` above, and dead for the same non-reason. Read that note.
   query_by_images: z.array(uploadcareRef(z.string())).optional(),
   xero_id: z.uuid().nullable(),
   // Optional (not `.nullable()`-required) so the ~531 existing product docs

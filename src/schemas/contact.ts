@@ -66,6 +66,11 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   phones: z.array(Phone).meta({ column: true, label: "Phones" }),
   organizations: z.array(ContactOrganization).default([]).meta({ label: "Organizations" }),
   query_by_organizations: z.array(z.string()).default([]),
+  // Declared ahead of use, and NOT dead. `api-cloudrun/src/services/contacts.ts`
+  // writes it whenever a contact resolves to a user, and `src/schemas/propagation/users.ts`
+  // carries both the set and the clear — but no contact has ever been linked:
+  // 0 of 166 prod docs carry the KEY (2026-08-23). See CLAUDE.md § "Is a field
+  // dead?" — absence here is a fact about the linking flow, not this field.
   uid_user: FirestoreId.optional(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),

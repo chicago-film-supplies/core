@@ -439,6 +439,35 @@ The guards are all in `tests/typesenseFieldCoverage.test.ts`, named by the quest
 
 This applies to nested objects too — if a field inside an input schema contains an object, use `z.object()` so extra properties are silently stripped rather than rejected.
 
+### Is a field dead? — key-presence, not value-presence
+
+A field carrying no useful **value** is not evidence that it is dead, and deleting one
+on that evidence is how a built feature gets removed. Two tests, both required, before
+any `.optional()` field is deleted from a document schema:
+
+1. **Is the KEY absent?** Firestore's only discriminator is `orderBy(field)`, which
+   excludes documents missing the key while still including null-valued ones. A `select`
+   projection *cannot* tell absent from null, and neither can a value census. Two
+   corollaries: `where(field, "==", null)` counts exactly the key-present-and-null
+   documents (absent ones do not match), which is the cheap server-side count; and
+   `>= null` is not a supported filter, so paging `orderBy` is the fallback.
+   ⚠️ Confirm no Firestore field override disables single-field indexing first
+   (`api-cloudrun/infra/firestore-indexes.json`) — an exemption makes `orderBy` return
+   nothing and the oracle would report a live field as dead.
+2. **Is the WRITER built?** A key absent from every document can equally mean the
+   feature ships and nobody has used it. Grep all three repos, not just core.
+
+**Measured 2026-08-23 — all 14 candidates a value census proposed for deletion failed
+one test or the other, and none was deleted.** Nine were key-present; the other five had
+live writers. The most dangerous was `products.images`/`query_by_images`: zero rows in
+568 products, and a complete three-repo feature behind it (core's `deriveQueryByImages`
+plus the mirror refinement, `api-cloudrun/src/services/productImages.ts` with three
+routes, manager's `ProductImages.tsx`).
+
+⭐ **Record the answer in the schema, next to the field.** The reason a census re-derives
+"dead" from the same numbers every time is that the previous answer lived only in a plan
+doc, and plan docs get deleted when their wave lands.
+
 ### Seeding: form values vs test fixtures
 
 **Three contracts, one per role. Reach for the one that matches what you are

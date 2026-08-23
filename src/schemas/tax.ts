@@ -243,6 +243,10 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
   xero_account_code: z.int().nullable().optional(),
   xero_item_code: z.string().min(1).max(30).nullable().optional(),
+  // All 11 prod taxes carry the KEY, every one as `[]` (2026-08-23) — so this is
+  // key-present-but-empty, not dead, and the empty array is what invariant 2
+  // above skips on. 100% key-presence also makes it a clean candidate for
+  // dropping `.optional()`. CLAUDE.md § "Is a field dead?".
   xero_components: z.array(XeroTaxComponent).optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),

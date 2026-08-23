@@ -2206,7 +2206,7 @@
           "kind": "interface",
           "name": "NameParts",
           "declaration": "interface NameParts {\n  first_name: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
-          "doc": "Split name fields shared across Contact, User, Invite, and any schema\nembedding a contact reference. `first_name` is required; the rest are optional.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule."
+          "doc": "Split name fields shared across Contact, User, Invite, and any schema\nembedding a contact reference. `first_name` is required; the rest are optional.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule.\n\n⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts\ncarry it (2026-08-23) — and is not. It is an optional field a human types,\nwith live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`\nhandles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on\nit, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody\nhas filled one in. See `core/CLAUDE.md` § \"Is a field dead?\"."
         },
         {
           "kind": "variable",
@@ -5031,7 +5031,7 @@
           "kind": "interface",
           "name": "NameParts",
           "declaration": "interface NameParts {\n  first_name: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
-          "doc": "Split name fields shared across Contact, User, Invite, and any schema\nembedding a contact reference. `first_name` is required; the rest are optional.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule."
+          "doc": "Split name fields shared across Contact, User, Invite, and any schema\nembedding a contact reference. `first_name` is required; the rest are optional.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule.\n\n⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts\ncarry it (2026-08-23) — and is not. It is an optional field a human types,\nwith live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`\nhandles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on\nit, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody\nhas filled one in. See `core/CLAUDE.md` § \"Is a field dead?\"."
         },
         {
           "kind": "variable",

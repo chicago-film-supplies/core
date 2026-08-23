@@ -612,6 +612,11 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   // and 82 prod invoices already lack the field, so a required type licenses
   // unguarded `.map`/`.find` reads that 500 on those docs. Optional makes
   // `deno task check` fail on exactly those accesses.
+  // Declared ahead of use, and a PRODUCT question rather than a schema one:
+  // 876 of 1,019 prod invoices carry the key, every one as `[]`, and the other
+  // 143 lack it (2026-08-23). PDFs are generated — `pdf_generated_at` and
+  // `uploadcare_uuid` are set — but nothing ever appends to this journal.
+  // Whether that append path is still intended is tracked separately.
   pdf_versions: z.array(z.strictObject({
     version: z.number(),
     uploadcare_uuid: uploadcareRef(z.string()),

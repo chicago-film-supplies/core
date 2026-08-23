@@ -673,6 +673,9 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   date_fs: FirestoreTimestamp,
   reference: z.string().meta({ column: true, label: "Reference" }),
   uid_session: z.uuid(),
+  // Required-but-nullable; all 932 prod movements carry the KEY as `null`
+  // (2026-08-23) because no movement has been reversed yet. Not dead — the
+  // reversal path reads it at `:535`. CLAUDE.md § "Is a field dead?".
   reverses: MovementId.nullable(),
   sources: z.array(DocSource).default([]).meta({ label: "Source" }),
   query_by_sources: z.array(z.string()).default([]),

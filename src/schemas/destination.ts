@@ -62,6 +62,10 @@ export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   query_by_organizations: z.array(z.string()).default([]).optional(),
   products: z.array(UidNameRef).default([]).optional().meta({ label: "Products" }),
   query_by_products: z.array(z.string()).default([]).optional(),
+  // `contacts`/`query_by_contacts`: declared ahead of use. 192 of 458 prod
+  // destinations carry the key, none with an element (2026-08-23) — the feature
+  // has not shipped. Deliberately carries no issue; this line is the record.
+  // CLAUDE.md § "Is a field dead?".
   contacts: z.array(DestinationContactRef).default([]).optional(),
   query_by_contacts: z.array(z.string()).default([]).optional(),
   version: z.int().min(0).default(0),
