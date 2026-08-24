@@ -6,7 +6,7 @@ retired** (`bf72ce7`, all 9 issues closed or reissued, doc deleted), so there is
 index to hang off any more — this doc is free-standing, and **core#65 is one of only two open
 core issues** (the other is #69, Typesense projection, unrelated).
 
-> ## ⚠️ STATUS UPDATE 2026-08-24 — Phases 0 and 2 are LANDED. Three claims below are corrected.
+> ## ⚠️ STATUS UPDATE 2026-08-24 — Phases 0 and 2 are LANDED, and Phase 1's DECLARATION half with them. Four claims below are corrected.
 >
 > **Phase 2 is the headline: the alert contract now gates in `scripts/gate.sh`.** A vmalert
 > rule can no longer key on a `msg` no arm declares, or group by a field the matching arm
@@ -15,7 +15,9 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > | item | State |
 > |---|---|
 > | **Phase 2** — `api-cloudrun/tests/unit/alertRuleContract.test.ts` | ✅ landed, wired into the gate, all three arms proven to fail |
-> | **Phase 2 follow-up** — 3 of the 68 pairs were renames, not declarations | ✅ fixed; ratchet now **66** |
+> | **Phase 2 follow-up** — 3 of the 68 pairs were renames, not declarations | ✅ fixed |
+> | **Phase 1, declaration half** — 62 fields on six arms + `error_*` promoted to the envelope | ✅ landed in `core` (`187834f`). Measured against local core the ratchet is **0**. |
+> | **Phase 1, churny half** — delete the 22 index signatures, `NoExcessProperties`, arms `extends BaseLogFields` | ⏳ gated on api-cloudrun#442 / #444-B |
 > | **Phase 0** — `api-cloudrun/scripts/audit-log-corpus.ts` | ✅ written, run against prod **and** dev |
 > | Fix `typesense_collection_created` | ✅ writes `typesense_collection`; `collection` now holds the logical name |
 > | Repair the three `stats by (collection)` rules | ⛔ **no-op — the claim was wrong, see below** |
@@ -142,6 +144,25 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > campaign named — a rule referencing a field nothing supplies — caught by the reconcile
 > rather than by anyone noticing, because such a rule fails by matching nothing.
 >
+> ### 🔴 Correction 5 — `error` is a SOURCE-level synonym, not a live query defect
+>
+> ⚠️ **This corrects Correction 4 above, which was written earlier the same day.** That entry
+> called `error` a live synonym on the strength of **720 records against `error_message`'s
+> 20,326**. The record count was the wrong measurement: **717 of the 720 are `client_log`**,
+> where `error` arrives from the browser through `...entry.data` and denotes something
+> genuinely different, and 3 are `template_release_auto_merge_failed`. Every one of the four
+> alert-consumed msgs has fired **zero** times in 90 days.
+>
+> So it is five server call sites assigning `err.message` to a field named `error` while the
+> envelope and 20k records call it `error_message` — latent, and it would have become live the
+> first time any of those failure paths fired, which is exactly when nobody wants to find it.
+> Renamed; free, because no records exist under either spelling on those msgs.
+>
+> ⭐ **The lesson is defect 7's own, turned on itself: a record count is only evidence if the
+> populations are comparable.** `order_uid` vs `order_id` was one concept under two names.
+> `error` vs `error_message` is two concepts that happen to share a name — and aggregating them
+> produced a number that pointed at the right fix for the wrong reason.
+>
 > ### Bonus finding, fixed in passing
 >
 > `SCHEMA_PENDING_EMISSION` had a **stale entry** (`uploadcare_upload_abandoned`, whose emitter
@@ -156,13 +177,26 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > across 104 files) have not started, per this doc's own sequencing rule. Phase 0's remaining
 > item (the prune) is a `core` edit and batches with Phase 1.
 >
-> **Everything reachable without a `core` publish is now done.** The next step is Phase 1,
-> and it is a `core` change: declare the **62** genuinely-undeclared pairs and RENAME the
-> other four (`error` → `error_message`, via the envelope promotion this doc already
-> prescribes) — the ratchet's list is the work order and flags which is which —
-> close the envelope, name the `context` bag, type `collection`. ⭐ Phase 0 measured one
-> thing that de-risks it — the corpus carries **zero** singular collection values, so the
-> plural-only subset of `CollectionName` fits 90 days of real data, not just in principle.
+> **Phase 1's declaration half is done and the alert contract is fully discharged** — 0
+> remaining pairs measured against core's `beta`. What is left needs two things this session
+> did not do:
+>
+> 1. **A publish + three pin bumps.** Nothing downstream sees the declarations until
+>    `@cfs/core@10.0.0-beta.252` is out and `api-cloudrun`, `manager` and `templates` are
+>    bumped. At the api-cloudrun bump, `KNOWN_UNDECLARED` empties — **delete the entries arm 3
+>    goes red on; do not re-derive the list.**
+> 2. **The churny half of Phase 1, which is genuinely gated.** Deleting the 22
+>    `[key: string]: unknown` signatures and adding `NoExcessProperties` is what turns 367 call
+>    sites into compile errors — that IS the 104-file churn api-cloudrun#442 / #444-B are
+>    sequenced ahead of. Also still open: `context`'s PII exemption, arms `extends
+>    BaseLogFields`, and typing `collection`.
+>
+> ⚠️ **`collection` stayed `z.string()`, and the reason is a real constraint rather than a
+> shortcut.** Narrowing it needs a RUNTIME list for the Zod side, and `core/tests/log-imports.test.ts`
+> forbids a value import of the schema barrel from `log/` — so the choice is a second
+> hand-maintained list (the drift this campaign exists to kill) or a design decision. It is
+> stated at the field. ⭐ The corpus carries **zero** singular collection values over 90 days
+> in both envs, so the plural subset does fit the data whenever it is typed.
 
 Owning repo **`core`** (the artifact every phase converges on is core's, and three of six
 phases land there); `api-cloudrun` carries the call sites, the alert rules and the audit
