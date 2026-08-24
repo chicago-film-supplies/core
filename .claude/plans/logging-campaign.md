@@ -6,7 +6,11 @@ retired** (`bf72ce7`, all 9 issues closed or reissued, doc deleted), so there is
 index to hang off any more — this doc is free-standing, and **core#65 is one of only two open
 core issues** (the other is #69, Typesense projection, unrelated).
 
-> ## ⚠️ STATUS UPDATE 2026-08-24 — Phases 0 and 2 are LANDED, and Phase 1's DECLARATION half with them. Four claims below are corrected.
+> ## ⚠️ STATUS UPDATE 2026-08-24 — Phases 0 and 2 are DONE, Phase 1's declaration half is PUBLISHED AND PINNED, and the alert contract is at ZERO. Five claims below are corrected.
+>
+> **All four repos are level on `@cfs/core@10.0.0-beta.253`** — core `9c947bd`, api-cloudrun
+> `45e40120`, manager `58d17e3`, templates PR #123 (merged). `KNOWN_UNDECLARED` is **empty**:
+> it held 68 pairs at the start of the day.
 >
 > **Phase 2 is the headline: the alert contract now gates in `api-cloudrun/scripts/gate.sh`.** A vmalert
 > rule can no longer key on a `msg` no arm declares, or group by a field the matching arm
@@ -16,7 +20,7 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > |---|---|
 > | **Phase 2** — `api-cloudrun/tests/unit/alertRuleContract.test.ts` | ✅ landed, wired into the gate, all three arms proven to fail |
 > | **Phase 2 follow-up** — 3 of the 68 pairs were renames, not declarations | ✅ fixed |
-> | **Phase 1, declaration half** — 62 fields on six arms + `error_*` promoted to the envelope | ✅ landed in `core` (`187834f`). Measured against local core the ratchet is **0**. |
+> | **Phase 1, declaration half** — 62 fields on six arms + `error_*` promoted to the envelope | ✅ landed (`187834f`), published as `beta.253`, and pinned in all three consumers. Ratchet **0**, and the live audit's check D is **0** too. |
 > | **Phase 1, churny half** — delete the 22 index signatures, `NoExcessProperties`, arms `extends BaseLogFields` | ⏳ gated on api-cloudrun#442 / #444-B |
 > | **Phase 0** — `api-cloudrun/scripts/audit-log-corpus.ts` | ✅ written, run against prod **and** dev |
 > | Fix `typesense_collection_created` | ✅ writes `typesense_collection`; `collection` now holds the logical name |
@@ -144,6 +148,30 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > campaign named — a rule referencing a field nothing supplies — caught by the reconcile
 > rather than by anyone noticing, because such a rule fails by matching nothing.
 >
+> ### ⚠️ Correction 6 — the pre-push citation gate CANNOT catch a bare sibling-repo path
+>
+> Not a claim this doc made, but one every future promotion depends on. **Promoting a doc and
+> running `deno task gate` locally is not evidence its citations resolve in CI.** The hook runs
+> with all six repos on disk; CI checks out ONE, where `src/`, `scripts/` and `tests/` are that
+> repo's *own* top-level entries — so a bare path naming a sibling's file is BROKEN there and
+> merely resolvable here.
+>
+> It bit **twice in one day, in both directions**: this doc named
+> `api-cloudrun/scripts/gate.sh` with its repo prefix missing and failed core's CI;
+> `api-cloudrun/tests/unit/alertRuleContract.test.ts` named `core/tests/log-records.test.ts` the
+> same way and failed api-cloudrun's. ⚠️ Both paths are written in FULL here on purpose — quoting
+> the unqualified form as an example re-breaks this file, which is precisely what happened on the
+> first attempt at this paragraph.
+>
+> 🔴 **In `core` this blocks the PUBLISH, not just a check** — `publish.yaml` gates `release` on
+> `needs: ci`, so the release job is SKIPPED and no version is cut. It reads as a failed publish
+> when nothing was attempted.
+>
+> ⭐ **Simulate the lone-repo checkout before pushing prose** — seconds, and `core/CLAUDE.md`
+> prescribes it verbatim:
+> `cp -R <repo> /tmp/x && cd /tmp/x/<repo> && HOME=/tmp/nonexistent deno task audit:citations`.
+> The bogus `HOME` matters: otherwise the auto-memory notes resolve and mask the difference.
+>
 > ### 🔴 Correction 5 — `error` is a SOURCE-level synonym, not a live query defect
 >
 > ⚠️ **This corrects Correction 4 above, which was written earlier the same day.** That entry
@@ -177,19 +205,21 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > across 104 files) have not started, per this doc's own sequencing rule. Phase 0's remaining
 > item (the prune) is a `core` edit and batches with Phase 1.
 >
-> **Phase 1's declaration half is done and the alert contract is fully discharged** — 0
-> remaining pairs measured against core's `beta`. What is left needs two things this session
-> did not do:
+> **Phase 1's declaration half is done, published and pinned; the alert contract is at zero.**
+> What remains, in the order it should be picked up:
 >
-> 1. **A publish + three pin bumps.** Nothing downstream sees the declarations until
->    `@cfs/core@10.0.0-beta.252` is out and `api-cloudrun`, `manager` and `templates` are
->    bumped. At the api-cloudrun bump, `KNOWN_UNDECLARED` empties — **delete the entries arm 3
->    goes red on; do not re-derive the list.**
-> 2. **The churny half of Phase 1, which is genuinely gated.** Deleting the 22
->    `[key: string]: unknown` signatures and adding `NoExcessProperties` is what turns 367 call
->    sites into compile errors — that IS the 104-file churn api-cloudrun#442 / #444-B are
->    sequenced ahead of. Also still open: `context`'s PII exemption, arms `extends
->    BaseLogFields`, and typing `collection`.
+> 1. 🔴 **Phase 5a — the only LIVE query defect still open.** `order_uid` 12,030 / `order_id`
+>    2,869 / `uid_order` 170, re-measured exactly today: a query on the majority spelling misses
+>    **3,039 records, 20.2%**. Needs the coalescing bridge and the canary. Gated on
+>    api-cloudrun#442 / #444-B only by file churn.
+> 2. **The churny half of Phase 1**, genuinely gated: deleting the 22 `[key: string]: unknown`
+>    signatures and adding `NoExcessProperties` is what turns 367 call sites into compile
+>    errors — that IS the 104-file churn #442 / #444-B are sequenced ahead of. With it:
+>    `context`'s PII exemption, arms `extends BaseLogFields`, `service`/`document_path` onto the
+>    envelope, `ClientLogRecord.subject` → `email_subject`, and typing `collection`.
+> 3. **Phase 3** (`LOG_EVENTS`) and **Phase 4** (generated catalogue + the `cfs-logging` skill) —
+>    untouched, and both want the churny half to land first.
+> 4. **The prune** — 289 → ~183, on the emitter column and never the hit count.
 >
 > ⚠️ **`collection` stayed `z.string()`, and the reason is a real constraint rather than a
 > shortcut.** Narrowing it needs a RUNTIME list for the Zod side, and `core/tests/log-imports.test.ts`
