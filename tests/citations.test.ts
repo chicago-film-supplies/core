@@ -398,9 +398,17 @@ Deno.test("a bare basename matching several files is ambiguous — a PATH is not
 // `lint` line there: a gate-claim naming a check nothing runs), pointed the
 // other way.
 //
-// It asserts the TASK, not the two call sites, because that is where the flag
-// lives — `.githooks/pre-push` and `.github/workflows/ci.yaml` both run
-// `deno task audit:citations` and inherit it.
+// It asserts the TASK, not the call sites, because that is where the flag
+// lives — every gate runs `deno task audit:citations` and inherits it.
+//
+// ⚠️ **The call-site list is DISCOVERED, not written down.** It used to name
+// `.githooks/pre-push` and `.github/workflows/ci.yaml` literally, and core#54
+// then moved every CI step into the reusable `.github/workflows/checks.yaml` —
+// which this test caught, correctly, but only because the audit happened to
+// leave the named file. A rename in the other direction (a third call site
+// added, or the audit moved to a file the list does not name) fails OPEN: the
+// loop still passes over the files it does name while the new one bypasses
+// `--strict` unwatched. Walking the two gate directories cannot miss one.
 Deno.test("the audit task is wired --strict, so AMBIGUOUS fails and not just BROKEN", async () => {
   const denoJson = JSON.parse(
     await Deno.readTextFile(new URL("../deno.json", import.meta.url)),
@@ -413,19 +421,49 @@ Deno.test("the audit task is wired --strict, so AMBIGUOUS fails and not just BRO
     `audit:citations must run --strict (core#67); got: ${task}`,
   );
 
-  // Both gates must go through the task rather than invoking the script
-  // directly, or the flag above stops covering them.
-  for (const f of [".githooks/pre-push", ".github/workflows/ci.yaml"]) {
-    const src = await Deno.readTextFile(new URL(`../${f}`, import.meta.url));
+  // Every file under the two gate directories that mentions the audit AT ALL.
+  // Comment-stripped before matching, so the prose in this repo's heavily
+  // commented hooks and workflows neither counts as a call site nor as a
+  // direct-script violation.
+  const gateFiles: { path: string; code: string }[] = [];
+  for (const dir of [".githooks", ".github/workflows"]) {
+    for await (const entry of Deno.readDir(new URL(`../${dir}`, import.meta.url))) {
+      if (!entry.isFile) continue;
+      const path = `${dir}/${entry.name}`;
+      const code = (await Deno.readTextFile(new URL(`../${path}`, import.meta.url)))
+        .replace(/^\s*#.*$/gm, "");
+      if (/audit[:-](?:citations|plan-citations)/.test(code)) gateFiles.push({ path, code });
+    }
+  }
+
+  // Vacuity: this asks only whether the walk reached anything, and is
+  // deliberately NOT an expected count — a count is the hand-maintained list
+  // the walk exists to delete. Completeness is the per-file assertion below.
+  assert(
+    gateFiles.length > 0,
+    "no file under .githooks/ or .github/workflows/ invokes the citation audit — " +
+      "either the gate is gone, or this walk stopped reaching it",
+  );
+
+  // `.githooks/pre-push` is named because it is the gate that must exist
+  // regardless of how CI is arranged: it is the only one that runs before the
+  // commits leave this machine.
+  assertEquals(
+    gateFiles.some((f) => f.path === ".githooks/pre-push"),
+    true,
+    ".githooks/pre-push must run the citation audit",
+  );
+
+  for (const { path, code } of gateFiles) {
     assertEquals(
-      src.includes("deno task audit:citations"),
+      code.includes("deno task audit:citations"),
       true,
-      `${f} must invoke the citation audit via \`deno task audit:citations\``,
+      `${path} must invoke the citation audit via \`deno task audit:citations\``,
     );
     assertEquals(
-      /audit-plan-citations\.ts/.test(src.replace(/^\s*#.*$/gm, "")),
+      /audit-plan-citations\.ts/.test(code),
       false,
-      `${f} must not call scripts/audit-plan-citations.ts directly — it would bypass --strict`,
+      `${path} must not call scripts/audit-plan-citations.ts directly — it would bypass --strict`,
     );
   }
 });

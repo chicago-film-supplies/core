@@ -30,29 +30,12 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Every check core has, from the one place they are defined. On this workflow
+  # `release` has `needs: ci`, so nothing reaches JSR that has not passed all of
+  # them — including the four (Generated files, Declarations, Citations,
+  # Publish dry-run) this job did NOT have while it held its own copy.
   ci:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Install dependencies
-        run: deno install
-
-      - name: Lint
-        run: deno task lint
-
-      - name: Type check
-        run: deno task check
-
-      - name: Test
-        run: deno task test
+    uses: ./.github/workflows/checks.yaml
 
   release:
     needs: ci

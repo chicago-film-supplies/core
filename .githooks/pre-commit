@@ -27,8 +27,19 @@ deno task check:generated
 echo "Checking declarations..."
 deno task check:declarations
 
-echo "Running tests..."
-deno task test
+# ⚠️ The full suite is NOT here — core#54 item 5. It ran in this hook AND in
+# `.githooks/pre-push` AND twice in CI, so a 5-commit-1-push session executed
+# the identical hermetic suite 8 times; it is 2 now. `api-cloudrun` already made
+# this trade the same way (`api-cloudrun/.claude/skills/cfs-testing/SKILL.md`: "stack your
+# commits and push once, letting the hook be the single full run"), and the
+# `--no-verify` path is covered because `.github/workflows/publish.yaml` fires
+# on every push to `main`/`beta` and gates `release` on the checks.
+#
+# What stays here is the set that is cheap and answers a question the suite
+# cannot: measured 2026-08-24 on a warm cache, lint 0.2s + check 0.1s +
+# check:generated 1.0s + check:declarations 2.3s + docs 5.4s, against 12.3s for
+# the suite alone. Run `deno task test` yourself while iterating; pre-push runs
+# it for real.
 
 echo "Regenerating API docs..."
 deno task docs

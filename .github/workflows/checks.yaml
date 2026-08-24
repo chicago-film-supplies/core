@@ -1,0 +1,89 @@
+name: Checks
+
+# The single definition of "core's checks". Both workflows that need them call
+# this one; neither holds a copy.
+#
+# It exists because the two copies had DRIFTED, and the drift was invisible.
+# `ci.yaml` and `publish.yaml`'s `ci` job started as verbatim duplicates, and
+# core#54 item 4 proposed dropping the `push` trigger from `ci.yaml` on exactly
+# that premise — "zero risk, its job is a verbatim copy". By the time that item
+# came up for execution `ci.yaml` had gained four steps `publish.yaml` never
+# got: Generated files, Declarations, Citations and Publish dry-run. Executing
+# the item as written would have REMOVED four gates from the only trigger that
+# fires on this repo's actual workflow (commit on `beta`, push, semantic-release
+# publishes the next `-beta.N` to JSR, consumers pin it minutes later).
+#
+# ⭐ The generalisable part: a plan item whose safety argument is "these two are
+# identical" decays the moment either one is edited, and nothing reports the
+# decay. Deleting the second copy is what makes the argument true by
+# construction rather than true as of the day it was written.
+on:
+  workflow_call:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        run: deno install
+
+      - name: Lint
+        run: deno task lint
+
+      - name: Type check
+        run: deno task check
+
+      # Non-destructive: diffs each generator's `--stdout` render against the
+      # committed `src/schemas/*.generated.ts`. It lives outside `deno task
+      # test` because that task deliberately runs without `--allow-run`, and a
+      # test that spawned a generator would hand the child write access the
+      # test process itself does not have — which is how a passing suite used
+      # to rewrite two tracked files.
+      - name: Generated files
+        run: deno task check:generated
+
+      # The npm-consumer half of the package's type surface. See
+      # `scripts/check-declarations.ts` — it is self-verifying, so a green line
+      # here also means the gate proved it can still fail.
+      - name: Declarations
+        run: deno task check:declarations
+
+      - name: Test
+        run: deno task test
+
+      # ⚠️ Reachable from `publish.yaml` as of core#54, where `release` has
+      # `needs: ci` — so on a push to `main`/`beta` a broken citation now stops
+      # the JSR publish rather than merely printing red. That is not a new
+      # constraint in practice: `.githooks/pre-push` runs the same task under
+      # `set -e`, so no push means no publish already. What changed is that the
+      # `--no-verify` path is covered too.
+      #
+      # It is still the only check that sees the CI-checkout class — core alone
+      # on disk, where `src/`, `scripts/` and `tests/` are CORE's top-level
+      # entries, so a bare citation naming an api-cloudrun file is BROKEN rather
+      # than merely ambiguous. 65 of those existed when it landed; a
+      # full-workspace run could see only 22 of them.
+      #
+      # ⚠️ The task carries `--strict` as of core#67, so AMBIGUOUS fails here
+      # too, not just BROKEN. The flag sits in the `deno.json` task rather than
+      # at this call site: `.githooks/pre-push` runs the same task, and two
+      # copies of one flag is how the two gates start disagreeing.
+      - name: Citations
+        run: deno task audit:citations
+
+      # JSR's `no-slow-types` runs HERE and in `.githooks/pre-push` — nowhere
+      # else. It is `jsr`-tagged and off under a bare `deno lint`, and this repo
+      # declares no top-level `lint` block, so `deno task lint` does not see it.
+      # ⚠️ It covers NONE of the declaration-emit class above: it was green
+      # through all four betas of core#43 and green on core#44's `parentable_by`
+      # for the life of that defect. Two different questions, both needed.
+      - name: Publish dry-run
+        run: deno publish --dry-run

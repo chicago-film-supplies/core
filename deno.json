@@ -77,7 +77,7 @@
     "./utils/citations": "./src/utils/citations.ts"
   },
   "tasks": {
-    "test": "deno test --allow-read tests/",
+    "test": "deno test --allow-read --parallel tests/",
     "lint": "deno lint",
     "audit:citations": "deno run --allow-read --allow-env scripts/audit-plan-citations.ts --strict",
     "check": "deno check src/ scripts/ tests/",

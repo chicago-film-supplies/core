@@ -1,21 +1,20 @@
 name: CI
 
-# `push` is not redundant with `pull_request` here — it is the only trigger that
-# fires on this repo's ACTUAL workflow.
+# PRs and manual runs only. `push` lives in `.github/workflows/publish.yaml`,
+# whose `ci` job calls the same reusable `.github/workflows/checks.yaml` and
+# then gates `release` on it — so a push to `main`/`beta` still runs every check
+# here, exactly once, before anything reaches JSR.
 #
-# Per the workspace CLAUDE.md, core is committed to directly on `beta`; a PR is
-# the exception, not the rule. So with a PR-only trigger, the normal path —
-# commit on beta, push, semantic-release publishes the next `-beta.N` to JSR —
-# ran no CI at all. The `.githooks/pre-commit` and `pre-push` hooks both run the
-# full suite, which is why this was never felt, but a `--no-verify` or a clone
-# that never ran `deno task setup` publishes a package to JSR with nothing
-# having checked it. Consumers pin that version minutes later.
+# ⚠️ This is core#54 item 4, and the item as written was WRONG when it came up.
+# It argued dropping `push` was zero-risk because `publish.yaml`'s `ci` job was
+# a verbatim copy of this file's. It had stopped being one: this file had gained
+# Generated files, Declarations, Citations and Publish dry-run, and `push` is
+# the only trigger that fires on this repo's actual workflow — core is committed
+# to directly on `beta`, so a PR is the exception, not the rule. Dropping the
+# trigger first would have silently taken four gates off the publish path.
+# Extracting the shared job is what made the item's own premise true.
 on:
   pull_request:
-    branches:
-      - main
-      - beta
-  push:
     branches:
       - main
       - beta
@@ -23,63 +22,4 @@ on:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Install dependencies
-        run: deno install
-
-      - name: Lint
-        run: deno task lint
-
-      - name: Type check
-        run: deno task check
-
-      # Non-destructive: diffs each generator's `--stdout` render against the
-      # committed `src/schemas/*.generated.ts`. It lives outside `deno task
-      # test` because that task deliberately runs without `--allow-run`, and a
-      # test that spawned a generator would hand the child write access the
-      # test process itself does not have — which is how a passing suite used
-      # to rewrite two tracked files.
-      - name: Generated files
-        run: deno task check:generated
-
-      # The npm-consumer half of the package's type surface. See
-      # `scripts/check-declarations.ts` — it is self-verifying, so a green line
-      # here also means the gate proved it can still fail.
-      - name: Declarations
-        run: deno task check:declarations
-
-      - name: Test
-        run: deno task test
-
-      # Advisory, like every step here: there is no branch protection on core
-      # `main`/`beta`, so a red run blocks nothing. It is still the only check
-      # that sees the CI-checkout class — core alone on disk, where `src/`,
-      # `scripts/` and `tests/` are CORE's top-level entries, so a bare
-      # citation naming an api-cloudrun file is BROKEN rather than merely
-      # ambiguous. 65 of those existed when this landed; a full-workspace run
-      # could see only 22 of them.
-      #
-      # ⚠️ The task carries `--strict` as of core#67, so AMBIGUOUS fails here
-      # too, not just BROKEN. The flag sits in the `deno.json` task rather than
-      # at this call site: `.githooks/pre-push` runs the same task, and two
-      # copies of one flag is how the two gates start disagreeing.
-      - name: Citations
-        run: deno task audit:citations
-
-      # JSR's `no-slow-types` runs HERE and in `.githooks/pre-push` — nowhere
-      # else. It is `jsr`-tagged and off under a bare `deno lint`, and this repo
-      # declares no top-level `lint` block, so `deno task lint` does not see it.
-      # ⚠️ It covers NONE of the declaration-emit class above: it was green
-      # through all four betas of core#43 and green on core#44's `parentable_by`
-      # for the life of that defect. Two different questions, both needed.
-      - name: Publish dry-run
-        run: deno publish --dry-run
+    uses: ./.github/workflows/checks.yaml

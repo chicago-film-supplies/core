@@ -15,8 +15,8 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
 - `deno task lint` — lint. ⚠️ **This does NOT include JSR `no-slow-types`**, despite what this line
   claimed until 2026-08-18. That rule is `jsr`-tagged and off under a bare `deno lint`, and this repo
   declares no top-level `lint` block to enable it — **only `deno publish` runs it**, from
-  `.githooks/pre-push` and the *Publish dry-run* step in `.github/workflows/ci.yaml` (added with the
-  declaration gate below; before that the hook was its only home, one `--no-verify` from off). A
+  `.githooks/pre-push` and the *Publish dry-run* step in `.github/workflows/checks.yaml` (added with
+  the declaration gate below; before that the hook was its only home, one `--no-verify` from off). A
   gate-claim that names a check nothing runs is the exact defect class this package's ratchets exist
   to kill, so it is stated here rather than quietly corrected.
   ⚠️ **And `no-slow-types` is not the declaration gate.** It asks whether a type can be derived
@@ -46,12 +46,20 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
   - **Exemptions are predicates, never line numbers.** Both write-ups of core#44 cited lines and both
     had rotted before anyone acted on them. There are two, and an exemption that stops matching is
     itself a failure — the dead-denylist lesson from `tests/template-helpers.test.ts`.
-  Runs in `.githooks/pre-commit` and `.github/workflows/ci.yaml`. ~2.5 s. It is a task rather than a
+  Runs in `.githooks/pre-commit` and `.github/workflows/checks.yaml`. ~2.5 s. It is a task rather than a
   test because `npm:typescript` reads `process.env` at load and `deno task test` is `--allow-read`
   only. It replaced the now-deleted `jsr-emit-safety.test.ts`, whose single source-text regex caught
   the core#43 construct but missed four other spellings of it and all three other diagnostic codes;
   `TS9018` was confirmed to catch that construct before that file was removed.
-- `deno task test` — run tests. ⚠️ **Deliberately `--allow-read` only.** It carried `--allow-run`
+- `deno task test` — run tests. **`--parallel`, and NOT in `.githooks/pre-commit`** — both core#54,
+  2026-08-24. The suite is hermetic (no `Deno.env` mutation anywhere in `tests/`, no network, no
+  clock, no fixed ports, no `Deno.chdir`), which is what makes `--parallel` safe; the last thing that
+  was not hermetic about it was the two generators that wrote into `src/`, and core#54 fix 1
+  moved those out. Measured on 8 cores: 11.6–12.5 s → 4.7–5.0 s. CI is 2 vCPU, so expect ~2× there, not ~2.5×.
+  It runs in `.githooks/pre-push` and in `.github/workflows/checks.yaml` — **twice per push, down
+  from eight times per 5-commit session.** ⚠️ It is *your* job while iterating: nothing runs the
+  suite at commit time any more, so a red suite is now discovered at push rather than at commit.
+  ⚠️ **Deliberately `--allow-read` only.** It carried `--allow-run`
   and `--allow-write` for exactly 2 of its 1,667 tests — the two staleness checks on
   `src/schemas/template-schema-fields.generated.ts` and `src/schemas/template-helpers.generated.ts` —
   and **both used the permission to rewrite those tracked files on every green run.** They spawned
@@ -79,21 +87,28 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
 - `deno task check:generated` — the staleness gate for the two committed `src/schemas/*.generated.ts`
   files. **Non-destructive by construction**: each generator takes `--stdout` and the task pipes that
   render into `diff -u` against the committed copy, so proving the file is current never writes it.
-  Runs in `.githooks/pre-commit` and `.github/workflows/ci.yaml`. Contrast `docs:check`, which is the
-  older regenerate-then-`git diff` shape and is wired into neither.
+  Runs in `.githooks/pre-commit` and `.github/workflows/checks.yaml`. Contrast `docs:check`, which is
+  the older regenerate-then-`git diff` shape and is wired into neither.
 - `deno task audit:citations` — check every backticked `path.ext` citation in this package's
   prose (`CLAUDE.md`, `README.md`, `.claude/`, `notes/`, `src/`, `scripts/`, `tests/`,
   `.github/`, `.githooks/`) still resolves. Runs in `.githooks/pre-push` and in
-  `.github/workflows/ci.yaml`, and is **advisory** — there is no branch protection on
-  `main`/`beta`, so a red run blocks nothing. ⚠️ **Its CI run is the STRONGER one**, because
+  `.github/workflows/checks.yaml`, the reusable job both workflows call. ⚠️ **It stopped being
+  advisory on 2026-08-24 (core#54).** There is still no branch protection on `main`/`beta`,
+  so it blocks no merge — but `.github/workflows/publish.yaml` gates `release` on `needs: ci`,
+  and `ci` is now that shared job, so **a broken citation on a push to `main`/`beta` stops the
+  JSR publish.** That is not a new constraint in practice (`.githooks/pre-push` runs the same
+  task under `set -e`, so no push meant no publish already); what changed is that the
+  `--no-verify` path is covered too. ⚠️ **Its CI run is the STRONGER one**, because
   CI checks out core alone: `src/`, `scripts/` and `tests/` are then core's OWN top-level
   entries, so a bare citation naming an api-cloudrun file is BROKEN rather than merely
   ambiguous. 65 of those existed when it landed and a full-workspace run could see only 22.
   Simulate it with `cp -R core /tmp/x && cd /tmp/x/core && HOME=/tmp/nonexistent deno task
   audit:citations`. Rules in `src/utils/citations.ts`, planted both ways in
   `tests/citations.test.ts`. **The task carries `--strict`** (core#67), so AMBIGUOUS fails
-  as well as BROKEN — the flag lives in the `deno.json` task, not at the two call sites, so
-  the hook and CI cannot drift apart. ⚠️ **A bare basename is therefore no longer a legal
+  as well as BROKEN — the flag lives in the `deno.json` task, not at the call sites, so the
+  hook and CI cannot drift apart. `tests/citations.test.ts` asserts that by WALKING
+  `.githooks/` and `.github/workflows/` rather than naming files: the literal two-file list it
+  used to carry would have failed open the moment a third call site appeared. ⚠️ **A bare basename is therefore no longer a legal
   citation in this package**: write `schemas/common.ts`, `propagation/threads.ts`,
   `utils/orders.ts`, or repo-qualify for another repo. One level of directory is enough —
   the check is a path SUFFIX match, so core's own files resolve in a CI checkout at any
