@@ -1,9 +1,9 @@
 # Roadmap: the 9 open `core` issues, plus the two campaigns that came out of reviewing them
 
-**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 · 4 landed; Wave 3 deferred; **Wave 5 is COMPLETE (5a · 5b · 5c · 5d)**; Wave 6 is next
+**Date:** 2026-08-24 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 · 4 landed; Wave 3 deferred; **Wave 5 is COMPLETE and SHIPPED to all three consumers**; Wave 6 is next
 **Ordering:** risk-first (owner's call), with one half-sitting prerequisite ahead of it (Wave 0 — drop it if you disagree with the reasoning there).
 
-> ## ⚠️ STATUS UPDATE 2026-08-23 — Wave 5 is DONE. Wave 6 is next.
+> ## ⚠️ STATUS UPDATE 2026-08-24 — Wave 5 is DONE **and shipped downstream**. Wave 6 is next.
 >
 > *(One compacted block, not a stack — per `cfs-plan-docs`. This is the current state; earlier
 > per-wave updates are folded in.)*
@@ -105,12 +105,46 @@
 >   guard: a guard that can only consult its own oracle is not a guard.
 > - 🔴 **A raw `ref.set()` fixture is unvalidated by construction, and a WHOLE-OBJECT override is
 >   where a required field goes to die.** Found by reconstructing the seeder's output and parsing it
->   OFFLINE — the suite cannot see it, because the suite exercises the write and the write is what
->   skips validation.
+>   OFFLINE.
+> - ⚠️ **CORRECTED 2026-08-24 — "the suite cannot see it" is only half true, and the other half is
+>   how Wave 5 actually broke.** The seeding write skips validation, so the suite is blind *there*.
+>   But the moment the code under test **RE-WRITES** that document through `validateBeforeWrite`, it
+>   is a loud `ValidationError` from inside a transaction — a 500 out of a webhook, pointing at
+>   production code that is correct. Wave 5's pin bump fixed the four writers and left the fixtures:
+>   **7 red files / 20 failed steps blocked the api-cloudrun push** (repaired, api-cloudrun
+>   `3bfcf157`, 29 seeds across 18 files). So the failure is not silent — it is loud, late, and in
+>   the wrong place, which is *worse* than a fixture that throws at construction. That is the
+>   argument FOR api-cloudrun#647, and it is now on the issue.
+> - 🔴 **#647's census under-covers: 9 of those 18 files contain no `getInitialValues` at all.** The
+>   population is *"files that write a document Firestore never validates"*, not *"files that call
+>   `getInitialValues`"* — and a hand-spelled literal is the more dangerous half, having never gone
+>   near a schema. ⭐ **Two census techniques failed and are recorded on the issue**: proximity to
+>   `trackDoc("<coll>")` misses helper-based seeders (`seedInvoice()`, `orderDoc()`), and
+>   spread-based seeds (`{...realDoc}`) are false positives. A census by DOCUMENT SHAPE found the
+>   stragglers and reported zero remaining.
+>
+> ### Wave 5 downstream — DONE 2026-08-24
+> | Consumer | State |
+> |---|---|
+> | `core` | `dbe3d15` on `beta`; **`@cfs/core@10.0.0-beta.250`** live on JSR, CI + Release green |
+> | `api-cloudrun` | pin + four writer fixes (`cc627b9f`), org seeders (`bbb791af`), **29 fixtures (`3bfcf157`)** |
+> | `manager` | pin already on `main`; `706a815` pushed |
+> | `templates` | **PR #121 merged** — `beta.241` → `beta.250`, `main` now on 250 |
+>
+> ⚠️ **The templates pin was TEN betas behind and its PR body was stale** (it described
+> `beta.241 → beta.243` and core#68, written before the branch was re-pointed). Body corrected before
+> merge. ⭐ **A pinned VERSION is as perishable as a pin COUNT** — the local checkout sat on
+> `ci/citation-gate` reporting `beta.240`/8 pins while `origin/main` was `beta.241`/7. Read both off
+> `origin/main`, always.
+>
+> **Folded in en route:** manager#320 — the four money/quantity property sweeps ran 3.9–6.5 s against
+> vitest's 5 s default and blocked the manager push. Fixed with per-test timeouts (`706a815`),
+> **#320 CLOSED**. ⚠️ Four sweeps, not the three the issue names — the fail-closed float-form
+> companion runs the same 354k loop and passed only by luck.
 >
 > ### Issues filed across this campaign
 > api-cloudrun **#640 #641 #643 #644 #645 #647 #649 #650 #651**, and **#652** (tracking-category
-> service groups, filed by Wave 5b) · manager **#321 #322**.
+> service groups, filed by Wave 5b) · manager **#321 #322**. **Closed:** manager **#320**.
 
 
 ## Context

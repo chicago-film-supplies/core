@@ -501,6 +501,51 @@ not a checklist: each step has caught something the others could not.
    `ref.set()` seed never reaches `validateBeforeWrite`, and a **whole-object
    override REPLACES rather than merges**, so a newly-required field vanishes
    from it with nothing going red.
+   🔴 **"Nothing goes red" is only true until the document is RE-WRITTEN, and
+   that is how Wave 5 actually broke.** The seeding write is unvalidated, so the
+   suite is blind there — but the moment the code under test writes that
+   document back through `validateBeforeWrite`, it is a loud `ValidationError`
+   from inside a transaction: a 500 out of a webhook, pointing at production code
+   that is correct. Wave 5b fixed the four writers, left the fixtures, and the
+   api-cloudrun pre-push suite came back **7 red files / 20 failed steps**
+   (repaired: 29 seeds across 18 files). So the cost of skipping this step is not
+   a silent gap — it is a blocked push and an hour spent reading innocent
+   handlers. ⭐ **Only a seed whose document is re-written fails at all**; the
+   rest stay latent until an unrelated session adds a read-derive-write, which is
+   why the sweep must cover every seed and not just the red ones.
+   ⚠️ **Two ways of finding them that DO NOT work**, both measured:
+   **(a) proximity to the collection handle.** Keying the census on
+   `trackDoc("<coll>")` and scanning forward misses every helper-based seeder —
+   a `seedInvoice()` whose `.set()` lives in a function, or a plain `orderDoc()`
+   literal with no handle at all. Both were missed and both were caught by the
+   suite.
+   **(b) the presence of `getInitialValues`.** api-cloudrun#647's census is
+   `grep -rln "getInitialValues" tests/`, and **9 of the 18 files needing repair
+   contain none** — they are hand-spelled literals that never went near a schema,
+   which is the *more* dangerous half.
+   ⭐ **Census by DOCUMENT SHAPE**: match a signature of fields that identifies
+   the collection, then check the required ones, and **skip any body containing
+   `...`** — a spread inherits from a real document and is a false positive (all
+   7 raw `products` seeds spread a live dev doc and none failed). That pass found
+   the stragglers and then reported zero remaining.
+   🔴 **For the REPAIR, proximity is not merely weak — it corrupts.** A bad
+   *find* is a miss; a bad *write* puts the wrong field in the wrong document.
+   Scanning forward from `trackDoc("invoices")` to the next `.set({` attributed
+   an ORDER's seed to `invoices` — because `orderRef` and `invoiceRef` are
+   declared on adjacent lines and used far below — and wrote `subject: null` onto
+   an `Order`. **`Invoice.subject` is nullable and `Order.subject` is not**, so
+   the seed was accepted and the next `PUT /orders/{uid}` 400'd, on a test whose
+   retry log already blamed it for flaking. A `products` seeder took the same
+   stray key.
+   ⭐ **Classify a seed by its RECEIVER, bound to its declaration** —
+   `<recv>.set({…})` where `const <recv> = trackDoc("<coll>")` in the same file,
+   skipping any name bound more than once (`ref` is reused everywhere). That is
+   exact rather than positional. Shape signatures are for FINDING gaps and are
+   too weak to repair with: invoices carry `destinations` and `totals` too, so a
+   shape vote calls them orders.
+   **The durable fix is `getTestDoc`, which PARSES what it builds** — see
+   *Seeding: form values vs test fixtures* below — so the class is closed rather
+   than swept again next campaign.
 6. **Re-parse both live corpora** against the tightened schema before committing.
 
 ⚠️ **Requiring a field rewrites every negative test that spelled its fields
