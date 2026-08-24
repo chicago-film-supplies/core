@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { AuthoredComponentSchema, ComponentSchema, CreateProductInput, deriveProductImageUuids, ProductSchema } from "../src/schemas/product.ts";
+import { AuthoredComponentSchema, ComponentSchema, CreateProductInput, deriveProductImageUuids, ProductSchema, UpdateProductInput } from "../src/schemas/product.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -214,6 +214,10 @@ const validCreateInput = {
   price: {
     base_cents: 50000,
     replacement_cents: 500000,
+    // Required on the create input as of Wave 5b — `4000` is what rentals
+    // actually carry in prod. Stated in the shared fixture so the negative
+    // cases below still fail for the reason each one names.
+    coa_revenue: 4000 as const,
     taxes: [],
     formula: "five_day_week" as const,
     discountable: true,
@@ -404,6 +408,44 @@ Deno.test("deriveProductImageUuids: follows images order, cutout beside its orig
     deriveProductImageUuids([imageRow(IMG_A, IMG_A_CUT), imageRow(IMG_B)]),
     [IMG_A, IMG_A_CUT, IMG_B],
   );
+});
+
+Deno.test("price.coa_revenue is REQUIRED on the document and on BOTH inputs", () => {
+  // 568/568 in prod and dev carry the key (2026-08-23, `orderBy`
+  // key-presence). Each arm drops exactly one field from an otherwise valid
+  // value, so this asserts `coa_revenue` rather than "something is missing".
+  const { coa_revenue: _a, ...priceWithoutCoa } = validProduct.price;
+  assertEquals(ProductSchema.safeParse({ ...validProduct, price: priceWithoutCoa }).success, false);
+  assertEquals(ProductSchema.safeParse(validProduct).success, true);
+
+  const { coa_revenue: _b, ...createPriceWithoutCoa } = validCreateInput.price;
+  assertEquals(CreateProductInput.safeParse({ ...validCreateInput, price: createPriceWithoutCoa }).success, false);
+  assertEquals(CreateProductInput.safeParse(validCreateInput).success, true);
+
+  // The UPDATE input is the one that mattered: `price` there is a WHOLE-OBJECT
+  // replacement, so an update omitting `coa_revenue` used to erase the stored
+  // account rather than leave it alone.
+  const update = { uid: validProduct.uid, version: 0, price: validCreateInput.price };
+  assertEquals(UpdateProductInput.safeParse(update).success, true);
+  assertEquals(
+    UpdateProductInput.safeParse({ ...update, price: createPriceWithoutCoa }).success,
+    false,
+  );
+
+  // ⚠️ And it stays OPTIONAL on a component — `updateProduct` deletes it from
+  // every webshop component copy, because the public catalogue carries no
+  // ledger account.
+  const component = {
+    uid: "testcomp100000000000",
+    path: ["testproduct100000000"],
+    name: "Battery",
+    type: "rental",
+    stock_method: "bulk",
+    crms_id: 200,
+    quantity: 2,
+    price: { base_cents: 0, replacement_cents: 10000, taxes: [], formula: "fixed", discountable: false },
+  };
+  assertEquals(ComponentSchema.safeParse(component).success, true);
 });
 
 Deno.test("components require inclusion_type; component_of does not", () => {

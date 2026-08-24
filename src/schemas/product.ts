@@ -100,7 +100,29 @@ export interface AuthoredProductComponent extends ProductComponent {
 export interface ProductPrice {
   base_cents: number;
   replacement_cents?: number | null;
-  coa_revenue?: COARevenueType;
+  /**
+   * Where this product's revenue posts in Xero. **Required as of Wave 5b.**
+   *
+   * **568 of 568 products in prod and dev carry the key** (measured 2026-08-23,
+   * `orderBy` key-presence), and both writers supply it unconditionally:
+   * `createProduct` passes the input through, and
+   * `api-cloudrun/scripts/reconcile-crms-product-catalog.ts` derives one via
+   * `getCoaRevenueFromCrmsId`, whose return type is non-nullable.
+   *
+   * 🔴 **The optionality was an erasure path, not just a loose type.**
+   * `UpdateProductInput.price` is a WHOLE-OBJECT replacement — `updateProduct`
+   * substitutes the price wholesale rather than merging — so an update that
+   * omitted `coa_revenue` silently dropped the stored value. Both inputs
+   * require it as of this commit, which is what makes the document requirement
+   * reachable rather than merely stated: tightening the document alone would
+   * have turned that erasure into a 400 on a call that used to succeed.
+   *
+   * ⚠️ This is the TOP-LEVEL product price only. `ProductComponent.price` and
+   * the two `WebshopProduct` mirrors keep `coa_revenue` optional deliberately —
+   * `updateProduct` explicitly `delete`s it from every webshop component copy,
+   * because the public catalogue has no business carrying a ledger account.
+   */
+  coa_revenue: COARevenueType;
   taxes: TaxRefType[];
   formula: PriceFormulaType;
   discountable: boolean;
@@ -353,7 +375,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   price: z.strictObject({
     base_cents: z.int().meta({ column: true, label: "Price" }),
     replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement Price" }),
-    coa_revenue: COARevenueEnum.optional(),
+    coa_revenue: COARevenueEnum,
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum.meta({ column: true, label: "Price Formula" }),
     discountable: z.boolean().default(true).meta({ column: true, label: "Discountable" }),
@@ -502,7 +524,8 @@ export interface CreateProductInputType {
   price: {
     base_cents: number;
     replacement_cents?: number | null;
-    coa_revenue?: COARevenueType;
+    /** Required — see {@link ProductPrice.coa_revenue}. */
+    coa_revenue: COARevenueType;
     taxes: TaxRefType[];
     formula: PriceFormulaType;
     discountable: boolean;
@@ -560,7 +583,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   price: z.object({
     base_cents: z.int(),
     replacement_cents: z.int().nullable().optional(),
-    coa_revenue: COARevenueEnum.optional(),
+    coa_revenue: COARevenueEnum,
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
@@ -636,7 +659,12 @@ export interface UpdateProductInputType {
   price?: {
     base_cents: number;
     replacement_cents?: number | null;
-    coa_revenue?: COARevenueType;
+    /**
+     * Required — `price` here is a WHOLE-OBJECT replacement, so an update
+     * that omitted this erased the stored account. See
+     * {@link ProductPrice.coa_revenue}.
+     */
+    coa_revenue: COARevenueType;
     taxes: TaxRefType[];
     formula: PriceFormulaType;
     discountable: boolean;
@@ -686,7 +714,7 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
   price: z.object({
     base_cents: z.int(),
     replacement_cents: z.int().nullable().optional(),
-    coa_revenue: COARevenueEnum.optional(),
+    coa_revenue: COARevenueEnum,
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),

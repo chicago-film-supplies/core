@@ -2739,7 +2739,7 @@
         {
           "kind": "interface",
           "name": "ProductPrice",
-          "declaration": "interface ProductPrice {\n  base_cents: number;\n  replacement_cents?: number | null;\n  coa_revenue?: COARevenueType;\n  taxes: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
+          "declaration": "interface ProductPrice {\n  base_cents: number;\n  replacement_cents?: number | null;\n  coa_revenue: COARevenueType;\n  taxes: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
           "doc": "Pricing details for a product."
         },
         {
@@ -7104,7 +7104,7 @@
         {
           "kind": "interface",
           "name": "ProductPrice",
-          "declaration": "interface ProductPrice {\n  base_cents: number;\n  replacement_cents?: number | null;\n  coa_revenue?: COARevenueType;\n  taxes: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
+          "declaration": "interface ProductPrice {\n  base_cents: number;\n  replacement_cents?: number | null;\n  coa_revenue: COARevenueType;\n  taxes: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
           "doc": "Pricing details for a product."
         },
         {

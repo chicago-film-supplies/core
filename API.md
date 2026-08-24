@@ -5878,7 +5878,7 @@ Pricing details for a product.
 interface ProductPrice {
   base_cents: number;
   replacement_cents?: number | null;
-  coa_revenue?: COARevenueType;
+  coa_revenue: COARevenueType;
   taxes: TaxRefType[];
   formula: PriceFormulaType;
   discountable: boolean;
@@ -14726,7 +14726,7 @@ Pricing details for a product.
 interface ProductPrice {
   base_cents: number;
   replacement_cents?: number | null;
-  coa_revenue?: COARevenueType;
+  coa_revenue: COARevenueType;
   taxes: TaxRefType[];
   formula: PriceFormulaType;
   discountable: boolean;
