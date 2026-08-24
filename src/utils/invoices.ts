@@ -1509,9 +1509,10 @@ export function syncOrderItems(
  * that was overridden on the invoice and should now track the order again.
  *
  * Pure: returns a fresh items array; the input is not mutated. Scoped to one
- * **order divider** — a multi-order invoice loops its linked orders. Invoice-only
- * override fields (`coa_revenue`, `tracking_category`, `xero_id`,
- * `xero_tracking_option_id`) are always carried forward.
+ * **order divider** — a multi-order invoice loops its linked orders. The
+ * {@link INVOICE_ONLY_ITEM_FIELDS} are always carried forward — named by the
+ * list rather than re-spelled, because the copy that stood here listed four of
+ * them and the list has six.
  *
  * - `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from
  *   the order — a hard snap-to-order, so price overrides are discarded and lines
@@ -1697,8 +1698,97 @@ export function toInvoiceDestinationPair(
  * The two fields a pair comparison must NOT look at. `uid_order` is the scope
  * key rather than payload; `dates` is snapshotted from the source order, so the
  * invoice never owns it and a change there is not an operator edit.
+ *
+ * ⚠️ **This set and {@link INVOICE_OVERRIDABLE_PAIR_FIELDS} are both skipped by
+ * {@link pairsMatch} and they skip for OPPOSITE reasons. Do not merge them.**
+ * The members here are *not payload* — there is no statement in them that an
+ * operator could have made, so a difference can never be an edit. The members
+ * there *are* payload, and are skipped precisely because they may be an edit:
+ * they are **reconciled** field-by-field instead of compared. Conflating the two
+ * puts the next field in the wrong one, and the two wrong answers differ — a
+ * payload field in here is never carried at all, while a non-payload field over
+ * there would be carried forward forever from a value nobody chose.
  */
 const PAIR_MATCH_EXCLUDED: ReadonlySet<string> = new Set(["uid_order", "dates"]);
+
+/**
+ * The destination-pair fields an invoice OWNS — compared by nothing and
+ * **reconciled** per field by {@link carryOverridablePairFields}.
+ *
+ * ONE list, with its membership set and the carry derived from it, for the
+ * reason {@link INVOICE_ONLY_ITEM_FIELDS} states: four hand-maintained copies of
+ * one fact is how `crms_id` came to be absent from every one of them.
+ *
+ * ⚠️ **Named *overridable*, not *only*.** The item-side list names fields the
+ * ORDER does not carry at all, which is what makes *"present on the invoice
+ * wins"* safe there. `jurisdiction` is carried by **both** documents, with the
+ * order's as the default — so the carry here is an override *detection*
+ * ({@link syncScalarWithOverride}), never a presence test. See
+ * {@link carryOverridablePairFields} for why the distinction is load-bearing.
+ *
+ * ⚠️ One literal, no spread — core#43 is the standing case where JSR's npm
+ * `.d.ts` emit TRUNCATED a spread inside an `as const`.
+ */
+const INVOICE_OVERRIDABLE_PAIR_FIELDS = ["jurisdiction"] as const;
+
+/** Membership form of {@link INVOICE_OVERRIDABLE_PAIR_FIELDS}, for key filtering. */
+const INVOICE_OVERRIDABLE_PAIR_FIELD_SET: ReadonlySet<string> = new Set(
+  INVOICE_OVERRIDABLE_PAIR_FIELDS,
+);
+
+/**
+ * Reconcile the invoice-owned fields of one pair, on the SYNCED arm of
+ * {@link syncOrderDestinationsSelective}.
+ *
+ * This is the half of the items mechanism that destinations never got. On items,
+ * editing an invoice-owned field is invisible to the comparator, so the row
+ * stays "synced", keeps tracking the order, and carries the override forward —
+ * an owned edit costs nothing. Before this, editing a pair's `jurisdiction` was
+ * a *difference*, so the pair flipped to "overridden" and froze address,
+ * contact, instructions, `customer_collecting`/`returning` and dates along with
+ * it, on every later order edit.
+ *
+ * 🔴 **It uses {@link syncScalarWithOverride}, NOT a {@link pickInvoiceOnlyFields}
+ * -shaped spread, and copying the items form here would ship a silent defect.**
+ * That picker is *"present on the invoice wins"* (`if (source[key] !== undefined)`),
+ * which is safe only because the order projection has nothing at those keys.
+ * {@link toInvoiceDestinationPair} normalizes every present key's nullish to
+ * `null`, so an inherited-and-unedited invoice pair carries `jurisdiction: null`
+ * — which is `!== undefined`. A "present wins" carry would take that `null` over
+ * the order's real value and **pin every synced invoice to null forever**.
+ *
+ * ⚠️ **The `?? null` on all three arms is load-bearing.**
+ * `syncScalarWithOverride` compares by `===`, and the two documents spell
+ * "asserts nothing" differently: the order side deletes the key
+ * (`buildDestinationPair`, `api-cloudrun/src/services/orders.ts`) while the
+ * invoice side stores `null`. Un-normalized, `undefined === null` is false,
+ * every inherited pair reads as an override, and the pair pins at `null` — the
+ * exact failure {@link canonicalizePayload} already prevents *inside*
+ * {@link pairsMatch}, reappearing one layer out.
+ *
+ * @param prev - The pair as the order last had it (order-side spelling)
+ * @param next - The new order pair, already projected to invoice shape
+ * @param inv - The stored invoice pair
+ * @returns `next` with each owned field resolved to the order's new value or the
+ *   invoice's override
+ */
+function carryOverridablePairFields(
+  prev: DocDestinationType,
+  next: InvoiceDestinationPair,
+  inv: InvoiceDestinationPair,
+): InvoiceDestinationPair {
+  const prevRec = prev as unknown as Record<string, unknown>;
+  const invRec = inv as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...(next as unknown as Record<string, unknown>) };
+  for (const key of INVOICE_OVERRIDABLE_PAIR_FIELDS) {
+    out[key] = syncScalarWithOverride(
+      prevRec[key] ?? null,
+      out[key] ?? null,
+      invRec[key] ?? null,
+    );
+  }
+  return out as unknown as InvoiceDestinationPair;
+}
 
 /**
  * Key-sorted deep copy with `null`/`undefined`/absent collapsed to absent —
@@ -1739,12 +1829,19 @@ function canonicalizePayload(value: unknown): unknown {
  * construction; the sibling projections in
  * {@link syncOrderDestinationsSelective} enumerate their takings for the same
  * reason, in the other direction.
+ *
+ * Two skip sets, for opposite reasons — {@link PAIR_MATCH_EXCLUDED} is *not
+ * payload*, {@link INVOICE_OVERRIDABLE_PAIR_FIELDS} is payload the invoice owns
+ * and {@link carryOverridablePairFields} reconciles. Read both docblocks before
+ * adding a name to either.
  */
 function pairsMatch(a: DocDestinationType, b: DocDestinationType): boolean {
   const strip = (pair: DocDestinationType): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(pair)) {
-      if (!PAIR_MATCH_EXCLUDED.has(key)) out[key] = value;
+      if (PAIR_MATCH_EXCLUDED.has(key)) continue;
+      if (INVOICE_OVERRIDABLE_PAIR_FIELD_SET.has(key)) continue;
+      out[key] = value;
     }
     return out;
   };
@@ -1760,11 +1857,22 @@ function pairsMatch(a: DocDestinationType, b: DocDestinationType): boolean {
  *
  * Policy per pair:
  * - Not in invoice (new in order) → add, tagged with `uid_order`.
- * - In invoice AND prev order matches current invoice → replace with new order pair.
+ * - In invoice AND prev order matches current invoice → replace with new order
+ *   pair, **carrying the invoice-owned fields forward**
+ *   ({@link carryOverridablePairFields}).
  * - In invoice BUT prev order ≠ invoice → overridden, keep invoice version.
  * - In invoice but not in new order:
  *   - prev matches invoice → deleted from order, drop.
  *   - prev ≠ invoice → overridden, keep.
+ *
+ * ⚠️ **"Matches" here is {@link pairsMatch}, which no longer sees the
+ * {@link INVOICE_OVERRIDABLE_PAIR_FIELDS}.** So an override on one of those is
+ * no longer a whole-pair freeze: the pair keeps syncing everything else and the
+ * owned field is carried. Two consequences worth stating, because they are the
+ * behaviour change: the rest of the pair (address, contact, instructions,
+ * `customer_collecting`/`returning`) now tracks the order again, and a pair the
+ * ORDER has deleted is dropped even when the invoice set a jurisdiction on it —
+ * an owned-field edit is not a claim that the destination still exists.
  *
  * @param prevOrderDests - Pairs from the previous version of the order
  * @param newOrderDests - Pairs from the new version of the order
@@ -1809,8 +1917,11 @@ export function syncOrderDestinationsSelective(
       // New pair — add tagged with uid_order.
       synced.push(toInvoiceDestinationPair(uidOrder, newPair));
     } else if (prev && pairsMatch(prev, inv)) {
-      // Not overridden — replace with new order pair.
-      synced.push(toInvoiceDestinationPair(uidOrder, newPair));
+      // Not overridden on any COMPARED field — replace with the new order pair,
+      // then reconcile the fields the invoice owns.
+      synced.push(
+        carryOverridablePairFields(prev, toInvoiceDestinationPair(uidOrder, newPair), inv),
+      );
     } else {
       // Overridden (or prev missing) — keep invoice version.
       synced.push(inv);

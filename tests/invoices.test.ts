@@ -2603,16 +2603,73 @@ Deno.test("syncOrderDestinationsSelective carries a CHANGED jurisdiction on an u
   assertEquals(result[0].jurisdiction, "frankfort");
 });
 
-Deno.test("pairsMatch SEES jurisdiction — an invoice-side edit is not overwritten", () => {
-  // 🔴 The silent-data-loss case, and the reason `pairsMatch` excludes by name
-  // instead of enumerating what it compares. With `jurisdiction` unlisted the
-  // pair reads as unedited, the sync takes the order's value, and the
+Deno.test("syncOrderDestinationsSelective PRESERVES an invoice-side jurisdiction edit", () => {
+  // 🔴 The silent-data-loss case. If the sync takes the order's value here, the
   // operator's override is gone — no error, no log, a wrong tax rate.
+  //
+  // ⚠️ This used to be phrased as *"pairsMatch SEES jurisdiction"*, and the
+  // MECHANISM changed while the property did not (api-cloudrun#630 step A2/A3):
+  // `pairsMatch` now skips `INVOICE_OVERRIDABLE_PAIR_FIELDS`, and
+  // `carryOverridablePairFields` reconciles them with `syncScalarWithOverride`.
+  // The test is stated against the exported function rather than the private
+  // comparator so it survives that swap — which is the whole reason it was
+  // rewritten instead of deleted.
   const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const next = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) }];
   const result = syncOrderDestinationsSelective(prev, next, invoice, "o1");
   assertEquals(result[0].jurisdiction, "rantoul");
+});
+
+Deno.test("a jurisdiction override does NOT freeze the rest of the pair", () => {
+  // ⭐ The behaviour api-cloudrun#630 step A2 adds, and nothing pinned it before.
+  // Under the old whole-pair `pairsMatch`, setting a jurisdiction made the pair
+  // "overridden" and froze address, contact, instructions,
+  // customer_collecting/returning and dates on every later order edit — so the
+  // manager's read-only "charge window from order #NNNN" went silently stale.
+  //
+  // This is the items mechanism applied to pairs: an owned edit is invisible to
+  // the comparator, so the row keeps tracking its source.
+  const prev = [makePair("d1", "c1", { jurisdiction: "chicago", delivery: { instructions: "old" } })];
+  const next = [makePair("d1", "c1", { jurisdiction: "chicago", delivery: { instructions: "new" }, customer_collecting: true })];
+  const invoice: InvoiceDestinationPair[] = [{
+    uid_order: "o1",
+    ...makePair("d1", "c1", { jurisdiction: "rantoul", delivery: { instructions: "old" } }),
+  }];
+  const result = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  assertEquals(result[0].jurisdiction, "rantoul", "the owned field is still the override");
+  assertEquals(result[0].delivery.instructions, "new", "…and everything else resumed syncing");
+  assertEquals(result[0].customer_collecting, true);
+});
+
+Deno.test("an INHERITED pair still accepts the order's changed jurisdiction — the nullish trap", () => {
+  // 🔴 The A3 defect a `pickInvoiceOnlyFields`-shaped "present on the invoice
+  // wins" carry would ship. The two documents spell "asserts nothing"
+  // differently: `buildDestinationPair` DELETES the key on the order side, while
+  // `toInvoiceDestinationPair` normalizes it to `null` on the invoice side. So
+  // an inherited-and-unedited invoice pair carries `jurisdiction: null`, which
+  // is `!== undefined` — a presence test would take that null over the order's
+  // real value and pin every synced invoice to null forever.
+  //
+  // `syncScalarWithOverride` with `?? null` on all three arms is what makes the
+  // two spellings ONE state.
+  const { jurisdiction: _absentOnOrder, ...prevNoKey } = makePair("d1", "c1");
+  const prev = [prevNoKey as ReturnType<typeof makePair>];
+  const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
+  const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: null }) }];
+  const result = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  assertEquals(result[0].jurisdiction, "frankfort");
+});
+
+Deno.test("an owned-field edit does not keep a pair the ORDER deleted", () => {
+  // The other side of the same change, stated so it is a decision rather than a
+  // side effect: an override on an invoice-owned field is a statement about the
+  // field, not a claim that the destination still exists. Under the old
+  // whole-pair freeze this pair survived its own deletion.
+  const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
+  const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) }];
+  const result = syncOrderDestinationsSelective(prev, [], invoice, "o1");
+  assertEquals(result.length, 0);
 });
 
 Deno.test("pairsMatch: null, undefined and absent jurisdiction are ONE state", () => {

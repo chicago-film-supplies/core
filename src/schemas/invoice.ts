@@ -544,6 +544,21 @@ export interface Invoice {
    * Optional through api-cloudrun#409 Phase 1.
    */
   tax_exempt?: boolean | null;
+  /**
+   * Which store this invoice sells FROM — the ORIGIN for Illinois origin
+   * sourcing, and the invoice-side twin of {@link Order.uid_store}.
+   * `null`/absent means the `default: true` store, so the 1,019 existing
+   * invoices need no migration.
+   *
+   * ⚠️ **Not `booking.uid_store`**, which is per-line and records which store's
+   * stock filled that line. Origin sourcing is a property of the DOCUMENT.
+   *
+   * ⚠️ An invoice's origin is its OWN, not its source order's. It is projected
+   * from the order at create and then editable, exactly as
+   * `destinations[i].jurisdiction` is — because a correction arrives on the
+   * invoice (api-cloudrun#630).
+   */
+  uid_store?: string | null;
   date: string;
   date_fs: FirestoreTimestampType;
   due_date?: string;
@@ -613,6 +628,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   // this is a `z.strictObject`, so a schema that has dropped the key REJECTS
   // every stored document still carrying it. Optional → empty storage → delete.
   tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),
+  uid_store: FirestoreId.nullable().optional(),
   // The ISO field carries the annotation; its `_fs` Timestamp mirror is the
   // same column under the other encoding — see `FS_MIRROR_SUFFIX`.
   date: chicagoStartOfDay().meta({ column: true, label: "Date", serverSortVia: "date_fs" }),
@@ -904,6 +920,11 @@ export interface CreateInvoiceInputType {
    * Sticky with the customer's — see `CreateOrderInput.tax_exempt`.
    */
   tax_exempt?: boolean;
+  /**
+   * The ORIGIN axis. `null`/absent means the `default: true` store — so this is
+   * additive for every existing caller. See {@link Invoice.uid_store}.
+   */
+  uid_store?: string | null;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -920,6 +941,7 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   query_by_orders: z.array(z.string()).min(1, "At least one source order is required"),
   organization: z.object({ uid: FirestoreId }),
   tax_exempt: z.boolean().optional(),
+  uid_store: FirestoreId.nullable().optional(),
   items: z.array(InvoiceItemInputSchema).optional(),
   destinations: z.array(InvoiceDocDestination).optional(),
   date: chicagoStartOfDay().optional(),
@@ -943,7 +965,28 @@ export interface UpdateInvoiceInputType {
    * api-cloudrun#596 item 2.
    */
   tax_exempt?: boolean;
+  /**
+   * The ORIGIN axis. Absent = leave unchanged; `null` = fall back to the
+   * `default: true` store. See {@link Invoice.uid_store}.
+   */
+  uid_store?: string | null;
   items?: InvoiceItemInputType[];
+  /**
+   * The JURISDICTION axis, per destination pair — **and only that.** The
+   * consumer reads `destinations[i].jurisdiction` off each pair, matched by
+   * `(uid_order, delivery.uid, collection.uid)`, and ignores every other field:
+   * the rest of a pair is projected from its source order and is not the
+   * invoice's to state.
+   *
+   * ⚠️ **Present-vs-absent and `null` are different verbs.** An absent
+   * `jurisdiction` key preserves the stored one; an explicit `null` CLEARS the
+   * override so the pair falls back to the customer's claim and then the
+   * derivation. Same shape as `due_date` below, for the same reason.
+   *
+   * ⚠️ This field was declared and **silently discarded** by
+   * `api-cloudrun/src/services/invoices.ts` until api-cloudrun#630 — a wrong
+   * jurisdiction on an invoice could not be corrected by any call.
+   */
   destinations?: InvoiceDocDestinationType[];
   date?: string;
   /**
@@ -979,6 +1022,7 @@ export interface UpdateInvoiceInputType {
 export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   status: InvoiceStatus.optional(),
   tax_exempt: z.boolean().optional(),
+  uid_store: FirestoreId.nullable().optional(),
   items: z.array(InvoiceItemInputSchema).optional(),
   destinations: z.array(InvoiceDocDestination).optional(),
   date: chicagoStartOfDay().optional(),

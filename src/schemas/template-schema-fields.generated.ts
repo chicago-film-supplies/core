@@ -201,6 +201,7 @@ export const templateSchemaFields: Partial<
     { path: "status", type: "draft | issued | part_paid | paid | void" },
     { path: "number_orders", type: "number[]" },
     { path: "tax_exempt", type: "boolean? | null" },
+    { path: "uid_store", type: "string? | null" },
     { path: "date", type: "string" },
     { path: "due_date", type: "string?" },
     { path: "subject", type: "string | null" },

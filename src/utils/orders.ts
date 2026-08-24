@@ -1739,7 +1739,8 @@ function collectUniquenessIssues<T extends LineItem>(
  *
  * This is the uniqueness invariant orders/invoices rely on so that path-based
  * line identity is unambiguous. Violations indicate a duplicate that should
- * be merged — `mergeStagedIntoOrder` and the migration script consolidate.
+ * be merged — manager's `mergeStagedIntoOrder` (`manager/src/stores/orders.ts`)
+ * and the migration script consolidate.
  *
  * Returns `[]` when uniqueness holds.
  *

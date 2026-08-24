@@ -1665,6 +1665,7 @@ interface CreateInvoiceInputType {
   query_by_orders: string[];
   organization: typeLiteral;
   tax_exempt?: boolean;
+  uid_store?: string | null;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -1758,6 +1759,7 @@ interface CreateOrderInputType {
   organization: typeLiteral;
   status: OrderStatusType;
   tax_exempt?: boolean;
+  uid_store?: string | null;
   destinations: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -3513,6 +3515,7 @@ interface Invoice {
   query_by_orders: string[];
   number_orders: number[];
   tax_exempt?: boolean | null;
+  uid_store?: string | null;
   date: string;
   date_fs: FirestoreTimestampType;
   due_date?: string;
@@ -8141,6 +8144,7 @@ Input schema for PUT /invoices/:uid — partial update.
 interface UpdateInvoiceInputType {
   status?: InvoiceStatusType;
   tax_exempt?: boolean;
+  uid_store?: string | null;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -8240,6 +8244,7 @@ interface UpdateOrderInputType {
   organization?: typeLiteral;
   status?: OrderStatusType;
   tax_exempt?: boolean;
+  uid_store?: string | null;
   destinations?: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -12445,6 +12450,7 @@ interface CreateInvoiceInputType {
   query_by_orders: string[];
   organization: typeLiteral;
   tax_exempt?: boolean;
+  uid_store?: string | null;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -12491,6 +12497,7 @@ interface Invoice {
   query_by_orders: string[];
   number_orders: number[];
   tax_exempt?: boolean | null;
+  uid_store?: string | null;
   date: string;
   date_fs: FirestoreTimestampType;
   due_date?: string;
@@ -12884,6 +12891,7 @@ Input schema for PUT /invoices/:uid — partial update.
 interface UpdateInvoiceInputType {
   status?: InvoiceStatusType;
   tax_exempt?: boolean;
+  uid_store?: string | null;
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
@@ -13253,6 +13261,7 @@ interface CreateOrderInputType {
   organization: typeLiteral;
   status: OrderStatusType;
   tax_exempt?: boolean;
+  uid_store?: string | null;
   destinations: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -13975,6 +13984,7 @@ interface UpdateOrderInputType {
   organization?: typeLiteral;
   status?: OrderStatusType;
   tax_exempt?: boolean;
+  uid_store?: string | null;
   destinations?: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -21543,9 +21553,10 @@ edits, or re-pull individual lines by `path` — the escape hatch for a line
 that was overridden on the invoice and should now track the order again.
 
 Pure: returns a fresh items array; the input is not mutated. Scoped to one
-**order divider** — a multi-order invoice loops its linked orders. Invoice-only
-override fields (`coa_revenue`, `tracking_category`, `xero_id`,
-`xero_tracking_option_id`) are always carried forward.
+**order divider** — a multi-order invoice loops its linked orders. The
+{@link INVOICE_ONLY_ITEM_FIELDS} are always carried forward — named by the
+list rather than re-spelled, because the copy that stood here listed four of
+them and the list has six.
 
 - `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from
   the order — a hard snap-to-order, so price overrides are discarded and lines
@@ -21568,11 +21579,22 @@ are touched — pairs from other orders pass through unchanged.
 
 Policy per pair:
 - Not in invoice (new in order) → add, tagged with `uid_order`.
-- In invoice AND prev order matches current invoice → replace with new order pair.
+- In invoice AND prev order matches current invoice → replace with new order
+  pair, **carrying the invoice-owned fields forward**
+  ({@link carryOverridablePairFields}).
 - In invoice BUT prev order ≠ invoice → overridden, keep invoice version.
 - In invoice but not in new order:
   - prev matches invoice → deleted from order, drop.
   - prev ≠ invoice → overridden, keep.
+
+⚠️ **"Matches" here is {@link pairsMatch}, which no longer sees the
+{@link INVOICE_OVERRIDABLE_PAIR_FIELDS}.** So an override on one of those is
+no longer a whole-pair freeze: the pair keeps syncing everything else and the
+owned field is carried. Two consequences worth stating, because they are the
+behaviour change: the rest of the pair (address, contact, instructions,
+`customer_collecting`/`returning`) now tracks the order again, and a pair the
+ORDER has deleted is dropped even when the invoice set a jurisdiction on it —
+an owned-field edit is not a claim that the destination still exists.
 
 **Parameters**
 
@@ -21755,7 +21777,8 @@ just `[self.uid]`).
 
 This is the uniqueness invariant orders/invoices rely on so that path-based
 line identity is unambiguous. Violations indicate a duplicate that should
-be merged — `mergeStagedIntoOrder` and the migration script consolidate.
+be merged — manager's `mergeStagedIntoOrder` (`manager/src/stores/orders.ts`)
+and the migration script consolidate.
 
 Returns `[]` when uniqueness holds.
 
@@ -23750,7 +23773,8 @@ just `[self.uid]`).
 
 This is the uniqueness invariant orders/invoices rely on so that path-based
 line identity is unambiguous. Violations indicate a duplicate that should
-be merged — `mergeStagedIntoOrder` and the migration script consolidate.
+be merged — manager's `mergeStagedIntoOrder` (`manager/src/stores/orders.ts`)
+and the migration script consolidate.
 
 Returns `[]` when uniqueness holds.
 

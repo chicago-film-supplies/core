@@ -667,6 +667,18 @@ export interface CreateOrderInputType {
    * jurisdictions at once and one enum slot could never say so.
    */
   tax_exempt?: boolean;
+  /**
+   * Which store this order sells FROM — the ORIGIN half of the tax rule, and
+   * the other axis this input states. `null`/absent means the `default: true`
+   * store, so no existing caller changes meaning.
+   *
+   * ⚠️ Present on the UPDATE input too, deliberately. Create-only would make
+   * the value unchangeable after the first write — the same half-built override
+   * api-cloudrun#630 is about.
+   *
+   * ⚠️ **Not `booking.uid_store`** — see {@link Order.uid_store}.
+   */
+  uid_store?: string | null;
   destinations: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -679,6 +691,7 @@ export const CreateOrderInput: z.ZodType<CreateOrderInputType> = z.object({
   organization: z.object({ uid: FirestoreId }),
   status: OrderStatus,
   tax_exempt: z.boolean().optional(),
+  uid_store: FirestoreId.nullable().optional(),
   destinations: z.array(Destination).min(1, "At least one destination is required"),
   items: z.array(OrderItem)
     .refine(
@@ -708,6 +721,15 @@ export interface UpdateOrderInputType {
    * reasons it is gone.
    */
   tax_exempt?: boolean;
+  /**
+   * The ORIGIN axis. Absent = leave unchanged; `null` = fall back to the
+   * `default: true` store. See {@link CreateOrderInputType.uid_store}.
+   *
+   * ⚠️ Unlike `tax_exempt` beside it, `null` IS accepted and IS distinct from
+   * absent — origin is not sticky, so "use the default store" is a real answer
+   * an operator can set back.
+   */
+  uid_store?: string | null;
   destinations?: DestinationType[];
   items?: OrderItemType[];
   subject?: string;
@@ -721,6 +743,7 @@ export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
   organization: z.object({ uid: FirestoreId }).optional(),
   status: OrderStatus.optional(),
   tax_exempt: z.boolean().optional(),
+  uid_store: FirestoreId.nullable().optional(),
   destinations: z.array(Destination).min(1, "At least one destination is required").optional(),
   items: z.array(OrderItem)
     .refine(
