@@ -1,9 +1,9 @@
 # Roadmap: the 9 open `core` issues, plus the two campaigns that came out of reviewing them
 
-**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 landed and in prod; Wave 3 deferred; Wave 4 landed to dev; **Wave 5a done — its delete tranche is EMPTY; Wave 5b is next**
+**Date:** 2026-08-23 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 · 4 landed; Wave 3 deferred; **Wave 5 is COMPLETE (5a · 5b · 5c · 5d)**; Wave 6 is next
 **Ordering:** risk-first (owner's call), with one half-sitting prerequisite ahead of it (Wave 0 — drop it if you disagree with the reasoning there).
 
-> ## ⚠️ STATUS UPDATE 2026-08-23 — Waves 0 · 0.5 · 1 · 2 · 4 LANDED. Wave 3 deferred. Wave 5 is next.
+> ## ⚠️ STATUS UPDATE 2026-08-23 — Wave 5 is DONE. Wave 6 is next.
 >
 > *(One compacted block, not a stack — per `cfs-plan-docs`. This is the current state; earlier
 > per-wave updates are folded in.)*
@@ -21,100 +21,97 @@
 > | **3** core#65 log signatures | ⏸️ **DEFERRED** — census done, prescribed fix refuted |
 > | **4** core#53 `getTestDoc` | ✅ **#53 CLOSED** — core `3ff0298`, api `04b06c9d`, manager `56e41fd` |
 > | **5a** delete the dead fields | ✅ **DONE, and it deletes NOTHING** — all 14 candidates refuted, core `0b7e6e6` |
-> | **5b** tighten, three tiers | 🎯 **NEXT** — re-measure first; see the ⚠️ below |
-> | **5c · 5d** | ⏳ not started |
-> | **6 · 7** | ⏳ not started |
+> | **5b** tighten, three tiers | ✅ **DONE** — core `86df446` `59fcf7b` `9704dee` `eada285` |
+> | **5c** the procedure | ✅ applied per tier; **5d** ✅ written into `core/CLAUDE.md` |
+> | **6 · 7** | ⏳ **NEXT** |
 >
-> **`@cfs/core` is at `10.0.0-beta.249`.** api-cloudrun and manager are both pinned to it and pushed;
-> **templates PR #121 is open at beta.249** (rolled forward twice this session; do not merge it —
-> agents open that PR and never merge). All four repos are clean.
+> ### 🎯 Wave 5b's result — read this before re-proposing anything
 >
-> ### 🔴 Prod state — done, do not redo
-> Release `v0.178.0` merged, prod on `api-cloudrun-00287-spc`. **882 sessions purged; 1,986 order
-> documents stamped** (1,988 now carry `uid`, 0 failing the schema, 0 with `uid !== ref.id`).
-> `OrderDocument.uid` is now **required** — safe because both corpora are 100% stamped.
+> **Tier 1 (49 paths / 21 declarations + 2 input): all deleted.** `.default(x).optional()` is
+> `Optional(Default(x))` — the outer node short-circuits, so the default fires **nowhere**, not even
+> on a parse. Every one named the value its own leaf type already derives, so `getInitialValues` was
+> proved byte-identical across all 252 exported schemas. `tests/inert-defaults.test.ts` is the
+> ratchet, with the construct planted in eight container shapes.
 >
-> ⚠️ Wave 4 shipped only to **dev** (api-cloudrun `main` push → Cloud Build; manager → preview).
-> Nothing in it touches prod data, and prod needs the release-please PR as usual.
+> **Tier 2: one of two.** `products.description` required (568/568 both envs).
+> `tracking-categories.crms_product_group_id` **refuted** — 18/20, and the two holdouts are SERVICE
+> groups that `crmsProduct.ts` reads. The defect is on the input; filed as **api-cloudrun#652**.
 >
-> ### What is actually left on the three "closed" campaigns
-> - **#58** — only the CONSUMER half of Phase 4: widen `assertValidForWrite` / `assertValidPatch` in
->   api-cloudrun to read the declared `.meta({ idField })`. Core declares it; nothing reads it yet, so
->   the three carve-outs are *documented* but still **unguarded**.
-> - **#59** — only the manager UI, filed as **manager#321**. The API surface is complete (owner's
->   call: API is enough for now).
-> - **#53** — the fixture MIGRATION, not the helper: **api-cloudrun#647** (now **11** integration
->   files — the order and invoice families were converted ahead of Wave 5, `968c9542` — plus the
->   `seedDoc` write boundary and its ratchet) and **manager#322** (9 dead `initialValues`).
+> **Tier 3: nine of eighteen.** Required now: `orders.crms_id` (nullable) · `orders.uid_thread` ·
+> `invoices.subject` (nullable) · `invoices.uid_thread` · `contacts.uid_thread` ·
+> `organizations.uid_thread` · `taxes.effective_from` (nullable) · `taxes.xero_components` ·
+> `products.price.coa_revenue` (+ **both** product inputs — it was an erasure path, since
+> `UpdateProductInput.price` is a whole-object replacement).
+>
+> 🔴 **The nine refusals are the more valuable half, and each is now a docblock beside its field.**
+> - `orders.crms_status` (995/995) and `invoices.crms_id` (1,019/1,019) are facts about the CRMS
+>   INGEST. `createOrder` stamps no `crms_status`; `createInvoice` stamps no top-level `crms_id`.
+>   Requiring either 400s the native create path. ⚠️ `orders.crms_id` reads **identically** and IS
+>   required, because `createOrder` writes an explicit `null` — same census, opposite verdicts, and
+>   only the writer separates them.
+> - `orders.xero_id` and `orders.organization.xero_id` were **already non-optional** — stale entries.
+> - `invoices.due_date`/`due_date_fs` — removed by the manager#326 decision (below) and independently
+>   by `createInvoice`, which writes neither key when no due date is supplied.
+> - `contacts.crms_id` 166/166 prod but **166 of 178 dev**; `locations.name_key` 209/209 vs **209/210**.
+>   Prod-only measurement would have shipped both.
+> - `products.xero_code` (567/568) · `uid_thread` (558/568) · `shipping` (541/568) — backfill first.
+>
+> **Verification actually run**: every document in prod AND dev re-parsed against the tightened
+> schemas offline — 995 orders, 1,019 invoices, 166/178 contacts, 291/313 organizations, 11 taxes,
+> 568 products — zero failures either side. Tool: `api-cloudrun/scripts/audit-field-presence.ts`
+> (key-presence) plus an offline parse pass.
+>
+> ⚠️ **Two test files were found already passing for the WRONG reason** — `contact.test.ts`'s four
+> rejection cases and `organization.test.ts`'s "rejects additional properties" each omitted fields
+> that were required long before this wave, so each asserted "rejects SOMETHING". Both now build from
+> a minimal-valid factory. **The change that would have hidden this permanently is the change that
+> surfaced it.**
+>
+> ### Folded in from outside the roadmap
+> **manager#326 — `UpdateInvoiceInput.due_date` takes `null` as a CLEAR VERB** (core `157dd10`).
+> Wire-level only: `Invoice` and `CreateInvoiceInput` are deliberately NOT widened, so a cleared
+> invoice loses both keys rather than storing null. Storing null would put an explicit null on an
+> `int64` Typesense field, a path **nothing in either corpus has ever exercised**.
+> 🔴 **Carried obligation, ships with the pin bump:** `updateInvoice`'s
+> `if (input.due_date !== undefined)` arm stamps `due_date_fs = 1970-01-01` on a null, into the field
+> `serverSortVia` sorts on. Do not ship the pin without the guard.
+>
+> ### What is still left on the three "closed" campaigns
+> - **#58** — the CONSUMER half of Phase 4: widen `assertValidForWrite` / `assertValidPatch` in
+>   api-cloudrun to read the declared `.meta({ idField })`. Core declares it; nothing reads it yet.
+> - **#59** — the manager UI, filed as **manager#321**. The API surface is complete.
+> - **#53** — the fixture MIGRATION: **api-cloudrun#647** and **manager#322**.
 >
 > ### Corrections this campaign made to its own plan — do not re-derive
-> - **0b's prescribed fix for `schemas/common.ts` does not work.** Annotating `LINE_PARENTS` leaves
->   all six TS9013s: the diagnostic is on the USE site, so the reference must leave the `as const`.
-> - **The declarations gate is a TASK, not a test** — `npm:typescript` reads `process.env` and
->   `deno task test` is `--allow-read` only.
-> - **0a needed `--allow-run` removed, not `--allow-write`** — a spawned child carries its own
->   permissions, so a test that spawns a generator rewrites `src/` regardless.
-> - 🔴 **The templates pin count is BRANCH-DEPENDENT** (`main` 7, a draft branch 8). Read the version
->   off `origin/main`, bump by `sed` over the pattern, carry no count.
-> - ⚠️ **And a pinned VERSION is as perishable as a count.** This block said api-cloudrun and manager
->   were both on `beta.247`; manager was actually on **`beta.244`**. Read the pin, never the plan.
-> - **Finding 2 reproduces exactly** (41/15 pre-Wave-1); the 40/16 figure does not.
-> - **Wave 1's "legacy auto-id tail" DOES NOT EXIST** — prod is `{"2": 994}`, zero orders with >2
->   documents. The `ref.id` rule stands on better grounds: it is the doc id *by definition*.
-> - **Wave 4's corrections are in its own section** — 55/56 not 53/56, the `omit(doc, k)` claim
->   narrowed to the 465 input-required declarations, one timestamp mechanism rather than two, and no
->   fabricator export.
+> - **0b's prescribed fix for `schemas/common.ts` does not work.** The diagnostic is on the USE site,
+>   so the reference must leave the `as const`.
+> - **The declarations gate is a TASK, not a test** — `npm:typescript` reads `process.env`.
+> - **0a needed `--allow-run` removed, not `--allow-write`** — a spawned child carries its own perms.
+> - 🔴 **The templates pin count is BRANCH-DEPENDENT.** Read the version off `origin/main`, bump by
+>   `sed` over the pattern, carry no count. ⚠️ **And a pinned VERSION is as perishable as a count** —
+>   read the pin, never the plan.
+> - **Wave 1's "legacy auto-id tail" DOES NOT EXIST** — prod is `{"2": 994}`.
+> - 🔴 **Wave 5a deleted NOTHING and that was correct** — all 14 candidates refuted, 9 key-present and
+>   5 with live writers. Per-field verdicts are docblocks (core `0b7e6e6`); method is
+>   `core/CLAUDE.md` § *"Is a field dead?"*.
 >
 > ### Cross-repo findings worth carrying
 > - 🔴 **`cardCascade.ts` — the plan's own recommended structural template — has a read-derive-write
->   with NO precondition**, and following it reproduced api-cloudrun#643's prod-corrupting bug inside
->   the new role cascade. Fixed there with `lastUpdateTime`. Ranked list: **api-cloudrun#644**.
->   ⭐ **A template propagates its defects along with its shape.** That outlives this roadmap.
-> - ⚠️ **`set()` accepts no `Precondition`** — only `update()`/`delete()` do. "Add a precondition" is
->   NOT a universal remedy; whole-document replace needs a transaction. Writing `set()` then
->   `update({}, precondition)` writes first and checks after — worse than no guard.
-> - **The citation audit's two runs are not a superset of each other**: local resolves cross-repo
->   paths (catches a wrong one); CI catches a bare basename naming an absent repo. A CI-checkout run
->   caught a bare path that had been green locally for two commits.
-> - ⚠️ **A ratchet with a hole reports CLEAN, not smaller.** `typeEscapeRatchet`'s regex missed 20
->   sites for as long as it existed. Same shape as the `enforced_by` line-ref finding and the
->   fixed-point `path` guard: a guard that can only consult its own oracle is not a guard.
+>   with NO precondition**, and following it reproduced api-cloudrun#643's prod-corrupting bug.
+>   Ranked list: **api-cloudrun#644**. ⭐ **A template propagates its defects along with its shape.**
+> - ⚠️ **`set()` accepts no `Precondition`** — only `update()`/`delete()` do. Whole-document replace
+>   needs a transaction.
+> - ⚠️ **A ratchet with a hole reports CLEAN, not smaller.** Same shape as the fixed-point `path`
+>   guard: a guard that can only consult its own oracle is not a guard.
 > - 🔴 **A raw `ref.set()` fixture is unvalidated by construction, and a WHOLE-OBJECT override is
->   where a required field goes to die.** Two seeders wrote an invalid order into dev for their
->   whole lives, both under a comment claiming the opposite. Found by reconstructing the seeder's
->   output and parsing it OFFLINE — the suite cannot see it, because the suite exercises the write
->   and the write is what skips validation.
+>   where a required field goes to die.** Found by reconstructing the seeder's output and parsing it
+>   OFFLINE — the suite cannot see it, because the suite exercises the write and the write is what
+>   skips validation.
 >
-> ### 🔴 Wave 5a's result — READ THIS BEFORE RE-CENSUSING ANYTHING
-> **Nothing was deleted, and nothing should have been.** All 14 delete candidates failed one of
-> the two tests that decide it. 9 are key-PRESENT (so never dead); the other 5 are key-absent
-> but have a BUILT WRITER. The near-miss was `products.images`/`query_by_images` — 0 rows in 568
-> products, and a complete three-repo feature behind it (core's `deriveQueryByImages` + the mirror
-> refinement, `api-cloudrun/src/services/productImages.ts` and its three routes, manager's
-> `ProductImages.tsx`).
->
-> ⭐ **The per-field answers now live in the schemas, not here** (core `0b7e6e6`), and the method is
-> `core/CLAUDE.md` § *"Is a field dead?"*. That is deliberate: this plan doc gets deleted when the
-> wave lands, which is exactly why the previous census re-derived "dead" from the same numbers.
->
-> **The oracle, and its two calibrations** (both needed — it could have failed silently):
-> `orderBy(field)` is the only key-presence discriminator. ① No Firestore field override disables
-> single-field indexing (all 7 only ADD collection-group scope), so it cannot under-report.
-> ② `taxes.xero_components` returns exactly 11 = the whole taxes corpus, independently confirming
-> **empty arrays are indexed** — the one way an array field could have read as absent.
-> Cheap counts: `where(f, "==", null)` counts key-present-and-null server-side; `>= null` 500s.
->
-> **New Tier-3 candidate found by this pass:** `taxes.xero_components` is 11/11 key-present, so
-> dropping its `.optional()` is clean. **And one removed:** `products.webshop.description` is
-> 544/568 — 24 docs lack the key, so it needs a backfill first, not a tighten.
->
-> ### Issues filed this session
-> api-cloudrun **#640** (operator bless, prod publish) · **#641** (test sessions are the one fixture
-> family nothing sweeps — 133,911 in dev) · **#642** (closed — prod migrations) · **#643 #644 #645**
-> (peer session) · **#647** (the getTestDoc migration + `seedDoc`) · manager **#321** (roles UI) ·
-> **#322** (9 dead `initialValues`) · **#649** (`organizations.last_order` never stamped) ·
-> **#650** (`destinations.query_by_organizations` — no writer AND no reader; the plan's
-> "drift + backfill" framing was wrong) · **#651** (`invoices.pdf_versions` — product question).
+> ### Issues filed across this campaign
+> api-cloudrun **#640 #641 #643 #644 #645 #647 #649 #650 #651**, and **#652** (tracking-category
+> service groups, filed by Wave 5b) · manager **#321 #322**.
+
 
 ## Context
 
@@ -736,7 +733,14 @@ The repair is 5c's shape applied to a deletion: **purge the key with `FieldValue
 in the same release as the schema change**, named in the `BREAKING CHANGE:` footer. 5c establishes
 this for tightening; it had no deletion arm.
 
-### 5b. Tighten, in three tiers
+### 5b. Tighten, in three tiers — ✅ **DONE 2026-08-23. Nine of eighteen tightened.**
+
+> **Result first.** Tier 1 deleted all 21+2 inert defaults; Tier 2 tightened one of two;
+> Tier 3 tightened nine and refused nine. The per-field verdicts — including every refusal — are
+> now **docblocks beside the fields**, and the method is `core/CLAUDE.md` § *"Making a field
+> REQUIRED"*. The status block at the top of this doc carries the summary. What follows is the
+> reasoning trail that produced it; the two preflight steps below were both run and both bit.
+
 
 🔴 **Before tightening ANY collection, do these two things — in this order.** They are cheap, and
 each one has already caught a defect nothing else could see.
@@ -782,7 +786,7 @@ each one has already caught a defect nothing else could see.
 - **Untestable by filter:** anything inside an array of maps (`orders.items[].*`, `invoices.items[].*`,
   `products.components[].*`). Needs a paged projection.
 
-### 5c. The procedure (already established — 5 prior commits, don't reinvent)
+### 5c. The procedure — ✅ applied per tier; now `core/CLAUDE.md` § *"Making a field REQUIRED"*
 **Measure the corpus, prod and dev, and put the numbers and date in the commit message** — that is the
 branch point. Clean → tighten in one commit (`8bb64f7`). Dirty → **expand → backfill → tighten**, naming
 the backfill in the `BREAKING CHANGE:` footer (`affb480`). **Required, never `.nullable()`**. **Never
@@ -790,7 +794,7 @@ the backfill in the `BREAKING CHANGE:` footer (`affb480`). **Required, never `.n
 interface. ⚠️ **Expect fixtures the compiler cannot see** — `2915c782` found **nine** raw `ref.set({…})`
 sites needing a new required field, and *none* was a compile error; they were found by grep.
 
-### 5d. Write down the conventions the corpus already follows
+### 5d. Write down the conventions — ✅ **DONE**, core `CLAUDE.md` (two new sections)
 166 of 211 declarations carry **no stated reason** for their optionality. The 45 that do are uniformly
 excellent — each cites a corpus count and names its expand/migrate/contract step. Promote that to a rule
 in `core/CLAUDE.md`, along with nullable-inside-optional and "null when absence would be a lie".
