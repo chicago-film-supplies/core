@@ -6,6 +6,82 @@ retired** (`bf72ce7`, all 9 issues closed or reissued, doc deleted), so there is
 index to hang off any more — this doc is free-standing, and **core#65 is one of only two open
 core issues** (the other is #69, Typesense projection, unrelated).
 
+> ## ⚠️ STATUS UPDATE 2026-08-24 — Phase 0's audit script is LANDED and has been run against both envs. Three claims below are corrected.
+>
+> | Phase 0 item | State |
+> |---|---|
+> | `api-cloudrun/scripts/audit-log-corpus.ts` | ✅ written, run against prod **and** dev |
+> | Fix `typesense_collection_created` | ✅ writes `typesense_collection`; `collection` now holds the logical name |
+> | Repair the three `stats by (collection)` rules | ⛔ **no-op — the claim was wrong, see below** |
+> | Prune dead msg literals | ⏳ **not started** — and it is a `core` edit, so it belongs to Phase 1's publish, not here |
+> | Re-census | ✅ numbers below supersede *What is true today* |
+>
+> ### 🔴 Correction 1 — "three alert rules mix them" is FALSE
+>
+> Defect 11's first half is confirmed and measured: `collection` really did carry 20 logical
+> names **and** 28 Typesense physical index names, all from `typesense_collection_created`.
+> Its second half is not. **No vmalert rule references `typesense_collection_created` — zero
+> occurrences across all three rule files.** Every rule that does `stats by (collection)`
+> (9 clauses, 7 alerts) is `msg:`-scoped to a *different* message, so none of them could ever
+> see a polluted value. The blast radius was ad-hoc queries and the future typing of
+> `collection`, never live alerting. The emitter fix still lands — it is the precondition for
+> typing `collection` — but it repairs no rule, and nothing needed editing in the YAML.
+>
+> ### 🔴 Correction 2 — Phase 0's credential instruction would not work
+>
+> This doc said the script queries `$DEV_OBS`/`$PROD_OBS` with **`$OBS_ADMIN` from `.envrc`**.
+> `api-cloudrun/scripts/_obsCredential.ts` exists precisely to stop that: there is
+> deliberately **no generic `OBS_ADMIN`**, because `.envrc` carries the *dev* password under
+> that name, so pointing it at prod sends the wrong credential and 401s with a message that
+> reads like an UNSET variable rather than a wrong one. The script uses `resolveObsTarget(env)`
+> (per-env, from Secret Manager). The endpoint is also `/logs/select/logsql/…`, not
+> `/select/logsql/…`.
+>
+> ### 🔴 Correction 3 — the undeclared-alert-field count is 46, not 37
+>
+> Defect 8 predicted the census was a floor. It was. Measured 2026-08-24 by the script:
+> **46 distinct fields across 68 rule×field pairs**, against 77 fields and 51 msgs the rules
+> reference. `unknown_permission` is in the list, exactly as defect 8 said it would be.
+>
+> ### Re-census — supersedes *What is true today*
+>
+> | | doc (08-23) | measured 08-24 |
+> |---|---:|---:|
+> | Registered `msg` literals | 289 | **289** ✅ |
+> | vmalert rules | 70 | **70** ✅ |
+> | Emitted, not registered | 1 (`xero_quote_transition_rejected`, 28) | **1, 28** ✅ |
+> | Distinct `msg` emitted, prod ∪ dev | 149 | **148** |
+> | Registered, never emitted | 141 | **142** (only **6** with no emitter in `src/`) |
+> | Distinct `msg` referenced by rules | 46 | **51** |
+> | Distinct fields referenced by rules | 73 | **77** |
+> | Undeclared alert fields | 37 | **46** |
+> | Typesense index names in `collection` | 29 | **28** prod / **30** dev |
+>
+> The `order_*` drift (defect 7) re-measured **exactly**: 12,030 / 2,869 / 170, so a query on
+> `order_uid` still misses 3,039 of 15,069 — 20.2%. Defects 10 and 11 re-confirmed unchanged.
+> The one Typesense name the doc cited by example (`templates_v2_fdcacf9e`) has aged out of the
+> 90-day window — that is the corpus moving, which is what the doc says these numbers are for.
+>
+> ⭐ **Expect 289 → ~183, not → 180 or → 149.** 182 registered msgs emitted nothing in 90 days,
+> but only **6** have no emitter in `src/`, and all six are already in the reviewed
+> `SCHEMA_PENDING_EMISSION` allowlist. The prune is far smaller than this doc estimated,
+> and the emitter column is why.
+>
+> ### Bonus finding, fixed in passing
+>
+> `SCHEMA_PENDING_EMISSION` had a **stale entry** (`uploadcare_upload_abandoned`, whose emitter
+> landed at `api-cloudrun/src/services/processOrderDocs.ts`) and — unlike its sibling
+> `MIGRATION_DEBT` — **no reverse guard**, so a revived entry could sit there suppressing
+> nothing forever. Entry removed, reverse guard added beside the existing one, and verified to
+> fail on a re-planted entry. Same lesson as defect 10, one directory over.
+>
+> ### Still gated
+>
+> **api-cloudrun#442 and #444-B remain OPEN**, so the churny phases (1, 3, 5 — 367 call sites
+> across 104 files) have not started, per this doc's own sequencing rule. Phase 0's remaining
+> item (the prune) is a `core` edit and batches with Phase 1. **Phase 2, the alert contract
+> test, needs nothing from either and is the next thing to do.**
+
 Owning repo **`core`** (the artifact every phase converges on is core's, and three of six
 phases land there); `api-cloudrun` carries the call sites, the alert rules and the audit
 scripts; `claude-plugins` carries the skill. Lives beside the surviving
