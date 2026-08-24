@@ -19,6 +19,23 @@
  *
  * If compliance posture changes, retag here once and every arm inherits.
  *
+ * `error_name` / `error_message` / `error_stack` are LOGGER-SUPPLIED, not
+ * caller-supplied: `logError(msg, err, fields)` decomposes the Error itself, so
+ * any arm reachable through that shim carries them whether or not it declares
+ * them. They live here for that reason — the same one `subject` gives.
+ *
+ * ⚠️ **Their absence from the envelope was minting synonyms.** Only `sync` and
+ * `transaction` declared them, so five other msgs settled on a *different* name
+ * for the same value: measured against prod over 90 days, `error` 720 records
+ * against `error_message`'s 20,326, with every one of the five assigning
+ * `err.message` to it. Declaring `error` on those arms would have blessed the
+ * drift in the schema; promoting the real name here is what makes the rename
+ * available to them instead.
+ *
+ * The caps are the empirical ones both prior declarations already used (200 /
+ * 500 / 2048) — `error_stack` rides 50–82% of production records, so this is a
+ * cost bound, not a validation nicety.
+ *
  * `subject` is the namespaced id of the *thing a request is about* — the
  * external or domain identifier that no read/write trail can ever carry because
  * it is not a Firestore document (`crms_opportunity:1234`, `xero_invoice:…`).
@@ -73,6 +90,9 @@ export const baseLogFields: {
   span_id: z.string().optional(),
   duration_ms: z.number().optional(),
   dry_run: z.boolean().optional(),
+  error_name: z.string().max(200).optional(),
+  error_message: z.string().max(500).optional(),
+  error_stack: z.string().max(2048).optional(),
 };
 
 /**
@@ -92,4 +112,7 @@ export interface BaseLogFields {
   span_id?: string;
   duration_ms?: number;
   dry_run?: boolean;
+  error_name?: string;
+  error_message?: string;
+  error_stack?: string;
 }

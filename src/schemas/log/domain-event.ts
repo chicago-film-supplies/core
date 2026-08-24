@@ -195,6 +195,23 @@ export interface DomainEventLogRecord {
   user_id?: string;
   trace_id?: string;
   span_id?: string;
+  /**
+   * `order_invoice_mirror_repaired` — the `order.invoices[]` status the mirror
+   * converged FROM and TO. ⚠️ **Nullable, not merely optional**: the emitter
+   * writes `converged.status_changed?.from ?? null`, so a repair that changed
+   * the number but not the status carries an explicit `null` rather than an
+   * absent key.
+   */
+  status_from?: string | null;
+  status_to?: string | null;
+  /**
+   * `stock_oversold` — the PEAK-instant figures, not a window's. A negative
+   * `quantity_available` here is a physical impossibility (more units out at one
+   * instant than exist), which is why the alert is keyed on it and not on the
+   * far larger set a window-based comparison would flag.
+   */
+  quantity_held?: number;
+  quantity_available?: number;
   [key: string]: unknown;
 }
 
@@ -209,4 +226,8 @@ export const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord> = z.obj
   store_uid: z.string().optional(),
   recurrence_uid: z.string().optional(),
   document_path: z.string().optional(),
+  status_from: z.string().nullable().optional(),
+  status_to: z.string().nullable().optional(),
+  quantity_held: z.int().optional(),
+  quantity_available: z.int().optional(),
 }).passthrough().meta({ title: "DomainEventLogRecord" });

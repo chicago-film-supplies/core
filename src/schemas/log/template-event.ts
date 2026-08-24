@@ -80,6 +80,11 @@ export interface TemplateEventLogRecord {
   user_id?: string;
   trace_id?: string;
   span_id?: string;
+  /**
+   * `template_abandon_close_pr_failed` — which cleanup step failed
+   * (`delete_branch`, …). The `TemplateAbandonCleanupFailed` alert groups by it.
+   */
+  op?: string;
   [key: string]: unknown;
 }
 
@@ -92,4 +97,5 @@ export const TemplateEventLogRecordSchema: z.ZodType<TemplateEventLogRecord> = z
   branch: z.string().optional(),
   pr_number: z.number().optional(),
   commit_sha: z.string().optional(),
+  op: z.string().optional(),
 }).passthrough().meta({ title: "TemplateEventLogRecord" });

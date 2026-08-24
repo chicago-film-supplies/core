@@ -271,6 +271,88 @@ export interface IntegrationEventLogRecord {
    * is what made keeping it cheap enough to stop arguing about.
    */
   lag_ms?: number;
+  // ── Scheduled-watch counters ─────────────────────────────────────
+  // `il_tax_rate_check`, `tax_expiry_check`, `settlement_totals_sweep`,
+  // `stock_summary_sweep`. Each emits on EVERY run including clean ones, so
+  // these are the state an alert reads — not an event count.
+  /** Cells / rows / ledgers examined this run. A `checked: 0` run is a finding. */
+  checked?: number;
+  /** `il_tax_rate_check` — cells whose published rate disagrees with the catalog. */
+  divergent?: number;
+  /** `il_tax_rate_check` — cells whose change has not taken effect yet. */
+  pending?: number;
+  /** `tax_expiry_check` — cells past their review window / approaching it. */
+  expired?: number;
+  expiring_soon?: number;
+  /** `settlement_totals_sweep` — invoices whose stored projection disagrees. */
+  drifted?: number;
+  /** `settlement_totals_sweep` — invoices the fold could not reproduce. */
+  unreproduced?: number;
+  /** `settlement_totals_sweep` — carried #575 pins that no longer reproduce. */
+  pins_stale?: number;
+  /** `stock_summary_sweep` — projections repaired / that failed to repair. */
+  repaired?: number;
+  failed?: number;
+
+  // ── DNS drift watch (`dns_record_check{,_resolve_failed}`) ────────
+  /** The watched record's key, name and RR type. */
+  record?: string;
+  name?: string;
+  kind?: string;
+  /** Hash of what resolved, and of what was expected. */
+  hash?: string;
+  expected_hash?: string;
+  /**
+   * ⚠️ **The STRING `"true"` / `"false"`, not a boolean, and deliberately so.**
+   * VictoriaLogs has no first-class boolean for log fields, so the
+   * `DnsRecordDrift` rule's `filter drift:"true"` needs unambiguous semantics.
+   * Typing this `boolean` would be the obvious-looking change that silently
+   * empties that alert.
+   */
+  drift?: "true" | "false";
+
+  // ── Location integrity watch (`location_integrity_check`) ─────────
+  /** Which invariant the scan violated, on which document, and how. */
+  invariant?: string;
+  doc_id?: string;
+  detail?: string;
+
+  // ── Uploadcare orphan sweep (`uploadcare_orphan_sweep_completed`) ─
+  /** Which corpus partition the run scanned (`prod`, `dev`, …). */
+  partition?: string;
+  files_scanned?: number;
+  orphans_found?: number;
+  deleted?: number;
+  /** Orphans excluding the CI golden set — what the spike alert keys on. */
+  orphans_excluding_golden?: number;
+  /** Set when the anomaly breaker downgraded the run to report-only. */
+  abort_reason?: string;
+  /** Duplicate-filename displacement within the document-PDF set. */
+  displacement_files?: number;
+  displacement_groups?: number;
+  displacement_group_names?: string[];
+
+  // ── Shared across several integration msgs ────────────────────────
+  /**
+   * The LOGICAL Firestore collection. ⚠️ Not a Typesense physical index name —
+   * that is `typesense_collection` on the typesense arm, and conflating the two
+   * put 28 build names like `orders_v24_2ed14c9e` into this field until
+   * 2026-08-24.
+   *
+   * ⚠️ **Still `string` rather than the plural-only subset of `CollectionName`,
+   * which is what the campaign wants.** The narrowing needs a RUNTIME list for
+   * the Zod side, and `core/tests/log-imports.test.ts` forbids a value import of
+   * the schema barrel from `log/` — so the choice is a second hand-maintained
+   * list (the drift this campaign exists to kill) or a design decision that
+   * belongs with the rest of Phase 1. Measured helper: the corpus carries ZERO
+   * singular collection values over 90 days in both envs, so the plural subset
+   * does fit the data.
+   */
+  collection?: string;
+  /** Why a best-effort step gave up — a short enum-ish token, not a message. */
+  reason?: string;
+  /** `dmarc_report_ingest_failed` — the Gmail message the report arrived on. */
+  message_id?: string;
   [key: string]: unknown;
 }
 
@@ -283,4 +365,35 @@ export const IntegrationEventLogRecordSchema: z.ZodType<IntegrationEventLogRecor
   // See the field's docstring on the interface: declared rather than passed
   // through, so a misspelling fails instead of silently collecting nothing.
   lag_ms: z.number().nonnegative().optional(),
+  checked: z.int().optional(),
+  divergent: z.int().optional(),
+  pending: z.int().optional(),
+  expired: z.int().optional(),
+  expiring_soon: z.int().optional(),
+  drifted: z.int().optional(),
+  unreproduced: z.int().optional(),
+  pins_stale: z.int().optional(),
+  repaired: z.int().optional(),
+  failed: z.int().optional(),
+  record: z.string().optional(),
+  name: z.string().optional(),
+  kind: z.string().optional(),
+  hash: z.string().optional(),
+  expected_hash: z.string().optional(),
+  drift: z.enum(["true", "false"]).optional(),
+  invariant: z.string().optional(),
+  doc_id: z.string().optional(),
+  detail: z.string().optional(),
+  partition: z.string().optional(),
+  files_scanned: z.int().optional(),
+  orphans_found: z.int().optional(),
+  deleted: z.int().optional(),
+  orphans_excluding_golden: z.int().optional(),
+  abort_reason: z.string().optional(),
+  displacement_files: z.int().optional(),
+  displacement_groups: z.int().optional(),
+  displacement_group_names: z.array(z.string()).optional(),
+  collection: z.string().optional(),
+  reason: z.string().optional(),
+  message_id: z.string().optional(),
 }).passthrough().meta({ title: "IntegrationEventLogRecord" });

@@ -99,6 +99,16 @@ export interface TypesenseEventLogRecord {
   reindex_attempts?: number;
   /** `typesense_sync_state` — documents written since the last reindex. */
   updates?: number;
+  /** `typesense_scoped_key_parent_missing` — the alias with no parent key. */
+  alias?: string;
+  /** `typesense_scoped_key_parent_missing` — the `.search` permission held. */
+  permission?: string;
+  /** `typesense_alias_mismatch` — where the alias actually points. */
+  alias_target?: string;
+  /** `typesense_alias_mismatch` — where it was expected to point. */
+  expected?: string;
+  /** `typesense_import_failed` — documents Typesense rejected by line. */
+  rejected_count?: number;
   [key: string]: unknown;
 }
 
@@ -123,4 +133,9 @@ export const TypesenseEventLogRecordSchema: z.ZodType<TypesenseEventLogRecord> =
   alias_current: z.boolean().optional(),
   reindex_attempts: z.int().min(0).optional(),
   updates: z.int().min(0).optional(),
+  alias: z.string().optional(),
+  permission: z.string().optional(),
+  alias_target: z.string().optional(),
+  expected: z.string().optional(),
+  rejected_count: z.int().min(0).optional(),
 }).passthrough().meta({ title: "TypesenseEventLogRecord" });

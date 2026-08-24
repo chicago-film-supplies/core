@@ -245,6 +245,9 @@ interface BaseLogFields {
   span_id?: string;
   duration_ms?: number;
   dry_run?: boolean;
+  error_name?: string;
+  error_message?: string;
+  error_stack?: string;
 }
 ```
 
@@ -17971,6 +17974,7 @@ interface AccessControlEventLogRecord {
   permission?: string;
   role_name_old?: string;
   role_name_new?: string;
+  unknown_permission?: string;
   request_id?: string;
   method?: string;
   path?: string;
@@ -18016,6 +18020,9 @@ interface BaseLogFields {
   span_id?: string;
   duration_ms?: number;
   dry_run?: boolean;
+  error_name?: string;
+  error_message?: string;
+  error_stack?: string;
 }
 ```
 
@@ -18278,6 +18285,10 @@ interface DomainEventLogRecord {
   user_id?: string;
   trace_id?: string;
   span_id?: string;
+  status_from?: string | null;
+  status_to?: string | null;
+  quantity_held?: number;
+  quantity_available?: number;
 }
 ```
 
@@ -18385,6 +18396,37 @@ interface IntegrationEventLogRecord {
   trace_id?: string;
   span_id?: string;
   lag_ms?: number;
+  checked?: number;
+  divergent?: number;
+  pending?: number;
+  expired?: number;
+  expiring_soon?: number;
+  drifted?: number;
+  unreproduced?: number;
+  pins_stale?: number;
+  repaired?: number;
+  failed?: number;
+  record?: string;
+  name?: string;
+  kind?: string;
+  hash?: string;
+  expected_hash?: string;
+  drift?: "true" | "false";
+  invariant?: string;
+  doc_id?: string;
+  detail?: string;
+  partition?: string;
+  files_scanned?: number;
+  orphans_found?: number;
+  deleted?: number;
+  orphans_excluding_golden?: number;
+  abort_reason?: string;
+  displacement_files?: number;
+  displacement_groups?: number;
+  displacement_group_names?: string[];
+  collection?: string;
+  reason?: string;
+  message_id?: string;
 }
 ```
 
@@ -18844,6 +18886,7 @@ interface TemplateEventLogRecord {
   user_id?: string;
   trace_id?: string;
   span_id?: string;
+  op?: string;
 }
 ```
 
@@ -18960,6 +19003,11 @@ interface TypesenseEventLogRecord {
   alias_current?: boolean;
   reindex_attempts?: number;
   updates?: number;
+  alias?: string;
+  permission?: string;
+  alias_target?: string;
+  expected?: string;
+  rejected_count?: number;
 }
 ```
 

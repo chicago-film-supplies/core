@@ -44,7 +44,4 @@ export const SyncErrorLogRecordSchema: z.ZodType<SyncErrorLogRecord> = z.object(
   sync_service: z.string(),
   document_path: z.string().optional(),
   operation: z.string().optional(),
-  error_name: z.string().max(200).optional(),
-  error_message: z.string().max(500).optional(),
-  error_stack: z.string().max(2048).optional(),
 }).passthrough().meta({ title: "SyncErrorLogRecord" });

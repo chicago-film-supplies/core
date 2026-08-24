@@ -139,8 +139,5 @@ export const TransactionLogRecordSchema: z.ZodType<TransactionLogRecord> = z.obj
   read_counts: z.record(z.string(), z.number()).optional(),
   range_reads: z.record(z.string(), z.number()).optional(),
   contended_ranges: z.array(z.string()).max(20).optional(),
-  error_name: z.string().max(200).optional(),
-  error_message: z.string().max(500).optional(),
-  error_stack: z.string().max(2048).optional(),
   aborted: z.boolean().optional(),
 }).passthrough().meta({ title: "TransactionLogRecord" });

@@ -99,7 +99,7 @@
         {
           "kind": "interface",
           "name": "BaseLogFields",
-          "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  subject?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n}",
+          "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  subject?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n  error_name?: string;\n  error_message?: string;\n  error_stack?: string;\n}",
           "doc": "TypeScript shape of {@link baseLogFields} — for use in archetype\ninterfaces that want to declare the envelope explicitly."
         },
         {
@@ -8541,7 +8541,7 @@
         {
           "kind": "interface",
           "name": "AccessControlEventLogRecord",
-          "declaration": "interface AccessControlEventLogRecord {\n  level: LogLevelType;\n  msg: AccessControlEventMsg;\n  ts: string;\n  role_name?: string;\n  permission?: string;\n  role_name_old?: string;\n  role_name_new?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "declaration": "interface AccessControlEventLogRecord {\n  level: LogLevelType;\n  msg: AccessControlEventMsg;\n  ts: string;\n  role_name?: string;\n  permission?: string;\n  role_name_old?: string;\n  role_name_new?: string;\n  unknown_permission?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
           "doc": "Structured log entry for any RBAC / role / preview-role event."
         },
         {
@@ -8559,7 +8559,7 @@
         {
           "kind": "interface",
           "name": "BaseLogFields",
-          "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  subject?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n}",
+          "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  subject?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n  error_name?: string;\n  error_message?: string;\n  error_stack?: string;\n}",
           "doc": "TypeScript shape of {@link baseLogFields} — for use in archetype\ninterfaces that want to declare the envelope explicitly."
         },
         {
@@ -8673,7 +8673,7 @@
         {
           "kind": "interface",
           "name": "DomainEventLogRecord",
-          "declaration": "interface DomainEventLogRecord {\n  level: LogLevelType;\n  msg: DomainEventMsg;\n  ts: string;\n  order_uid?: string;\n  invoice_uid?: string;\n  product_uid?: string;\n  organization_uid?: string;\n  recurrence_uid?: string;\n  document_path?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "declaration": "interface DomainEventLogRecord {\n  level: LogLevelType;\n  msg: DomainEventMsg;\n  ts: string;\n  order_uid?: string;\n  invoice_uid?: string;\n  product_uid?: string;\n  organization_uid?: string;\n  recurrence_uid?: string;\n  document_path?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  status_from?: string | null;\n  status_to?: string | null;\n  quantity_held?: number;\n  quantity_available?: number;\n}",
           "doc": "Structured log entry for any domain-aggregate lifecycle event."
         },
         {
@@ -8721,7 +8721,7 @@
         {
           "kind": "interface",
           "name": "IntegrationEventLogRecord",
-          "declaration": "interface IntegrationEventLogRecord {\n  level: LogLevelType;\n  msg: IntegrationEventMsg;\n  ts: string;\n  service?: string;\n  document_path?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  lag_ms?: number;\n}",
+          "declaration": "interface IntegrationEventLogRecord {\n  level: LogLevelType;\n  msg: IntegrationEventMsg;\n  ts: string;\n  service?: string;\n  document_path?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  lag_ms?: number;\n  checked?: number;\n  divergent?: number;\n  pending?: number;\n  expired?: number;\n  expiring_soon?: number;\n  drifted?: number;\n  unreproduced?: number;\n  pins_stale?: number;\n  repaired?: number;\n  failed?: number;\n  record?: string;\n  name?: string;\n  kind?: string;\n  hash?: string;\n  expected_hash?: string;\n  drift?: \"true\" | \"false\";\n  invariant?: string;\n  doc_id?: string;\n  detail?: string;\n  partition?: string;\n  files_scanned?: number;\n  orphans_found?: number;\n  deleted?: number;\n  orphans_excluding_golden?: number;\n  abort_reason?: string;\n  displacement_files?: number;\n  displacement_groups?: number;\n  displacement_group_names?: string[];\n  collection?: string;\n  reason?: string;\n  message_id?: string;\n}",
           "doc": "Structured log entry for any external-integration event."
         },
         {
@@ -8925,7 +8925,7 @@
         {
           "kind": "interface",
           "name": "TemplateEventLogRecord",
-          "declaration": "interface TemplateEventLogRecord {\n  level: LogLevelType;\n  msg: TemplateEventMsg;\n  ts: string;\n  template_uid?: string;\n  template_version_uid?: string;\n  branch?: string;\n  pr_number?: number;\n  commit_sha?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "declaration": "interface TemplateEventLogRecord {\n  level: LogLevelType;\n  msg: TemplateEventMsg;\n  ts: string;\n  template_uid?: string;\n  template_version_uid?: string;\n  branch?: string;\n  pr_number?: number;\n  commit_sha?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  op?: string;\n}",
           "doc": "Structured log entry for any template / golden-diff event."
         },
         {
@@ -8967,7 +8967,7 @@
         {
           "kind": "interface",
           "name": "TypesenseEventLogRecord",
-          "declaration": "interface TypesenseEventLogRecord {\n  level: LogLevelType;\n  msg: TypesenseEventMsg;\n  ts: string;\n  collection?: string;\n  typesense_collection?: string;\n  document_id?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  outcome?: TypesenseSyncOutcome;\n  alias_current?: boolean;\n  reindex_attempts?: number;\n  updates?: number;\n}",
+          "declaration": "interface TypesenseEventLogRecord {\n  level: LogLevelType;\n  msg: TypesenseEventMsg;\n  ts: string;\n  collection?: string;\n  typesense_collection?: string;\n  document_id?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  outcome?: TypesenseSyncOutcome;\n  alias_current?: boolean;\n  reindex_attempts?: number;\n  updates?: number;\n  alias?: string;\n  permission?: string;\n  alias_target?: string;\n  expected?: string;\n  rejected_count?: number;\n}",
           "doc": "Structured log entry for any Typesense pipeline event."
         },
         {

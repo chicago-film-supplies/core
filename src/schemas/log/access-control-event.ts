@@ -46,6 +46,13 @@ export interface AccessControlEventLogRecord {
   role_name_old?: string;
   /** Role rename: the name being moved to. */
   role_name_new?: string;
+  /**
+   * `role_permission_unknown` — the permission string a stored role names that
+   * the catalog does not. ⚠️ Distinct from `permission` above, which is the
+   * permission a request was CHECKED against; these are different facts and the
+   * `RbacRolePermissionUnknown` alert groups by this one.
+   */
+  unknown_permission?: string;
   request_id?: string;
   method?: string;
   path?: string;
@@ -61,6 +68,7 @@ export const AccessControlEventLogRecordSchema: z.ZodType<AccessControlEventLogR
   ...baseLogFields,
   msg: z.enum(ACCESS_CONTROL_EVENT_MSGS),
   role_name: z.string().optional(),
+  unknown_permission: z.string().optional(),
   role_name_old: z.string().optional(),
   role_name_new: z.string().optional(),
   permission: z.string().optional(),
