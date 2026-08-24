@@ -674,7 +674,7 @@ is the thing that skips validation. Two consequences for Wave 5:
   suite.
 
 
-## Wave 5 — the optionality campaign (new work; only 3 api-cloudrun bugs get filed)
+## Wave 5 — the optionality campaign ✅ LANDED 2026-08-23, shipped to all consumers 2026-08-24
 
 `getTestDoc` lands **before** this deliberately: a minimal-valid factory is exactly the tool that keeps
 negative tests honest through a bulk tightening. That is the `tests/store.test.ts:8-17` lesson.
@@ -869,9 +869,9 @@ sites needing a new required field, and *none* was a compile error; they were fo
 excellent — each cites a corpus count and names its expand/migrate/contract step. Promote that to a rule
 in `core/CLAUDE.md`, along with nullable-inside-optional and "null when absence would be a lie".
 
-## Wave 6 — core#56 + core#60 (one publish), and file the split-brain issue behind them
+## Wave 6 — core#56 + core#60 ✅ LANDED IN CORE 2026-08-24 (one publish; **pin bumps still pending**)
 
-### 6a. File the split-brain issue — do NOT hand-write 22 Zod schemas
+### 6a. File the split-brain issue ✅ **FILED as core#69** — do NOT hand-write 22 Zod schemas
 
 ⚠️ **An earlier draft of this wave proposed hand-writing `z.ZodType<XDocument>` for all 22. That is the
 wrong shape and is dropped.** Typesense is a *derived* artifact, so a hand-maintained Zod copy entrenches
@@ -941,7 +941,7 @@ planning session, verified against HEAD.)
 **Ledger effect: this is a 4th filed issue, so the net becomes −4.** Worth it — it is the root cause
 behind three existing issues, and scoping it may change what #60 should eventually look like.
 
-### 6b. core#56 — the fee pricing level mismatch
+### 6b. core#56 — the fee pricing level mismatch ✅ core `f10aceb`
 
 - **#56** — widen `calculateTransactionFeeAmountCents` (`src/utils/orders.ts:753`) and `isTransactionFeeItem`
   (`:558`) to `PricingItem`; add `isTransactionFeePricingItem`, mirroring the `isPreTaxItem` /
@@ -964,7 +964,7 @@ behind three existing issues, and scoping it may change what #60 should eventual
   `transactionFeeLine.ts` by path — this roadmap did, and the `cfs-money` skill cites its test —
   goes RED the moment #570 deletes it. Those edits must land in the same commit stack as the
   deletion, which is why the paths above are named in prose rather than cited.
-### 6c. core#60 — scoped as originally filed, and worth doing regardless of 6a
+### 6c. core#60 ✅ **CLOSED**, core `157d516` — scoped as originally filed, and worth doing regardless of 6a
 `cards` is `enabled: true`, live with 1,097 prod docs, and **unreachable from manager's typed search
 surface** — every typed consumer is generic over `keyof TypesenseDocumentMap`. That gap is real whatever
 happens to the split-brain issue, and the fix is cheap.
@@ -977,7 +977,7 @@ happens to the split-brain issue, and the fix is cheap.
 - ⚠️ `CardDocument` must mirror the translation conventions: **`date_fs` (int64), not `dates.start`**;
   `address_coordinates` is a geopoint → `[lat, lng]`; `created_at`/`updated_at` are `int64`.
 
-### 6d. Derive `SchemaDocType` from the registry instead of hand-writing it
+### 6d. Derive `SchemaDocType` from the registry ✅ core `2d0c237`
 
 Folded in from the api-cloudrun#444 planning session (work item A), and **rides Wave 6's publish —
 it does not get a beta of its own.**
