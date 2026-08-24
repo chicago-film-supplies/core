@@ -167,12 +167,21 @@ try {
  *
  * A configured root that does not exist FAILS rather than being skipped: a root
  * silently dropping out reads as a clean result rather than as an unscanned one.
+ *
+ * 🔴 **And the converse now fails too — see {@link assertEveryTopLevelIsAccountedFor}.**
+ * `notes/` was a scan root until 2026-08-24, when its last file was deleted and
+ * the audit went red on the missing root. Dropping the entry was the right fix
+ * for *that* file, but on its own it leaves a hole pointed the other way: a
+ * `notes/` recreated later — or any new top-level directory of prose — would
+ * simply never be scanned, and the run would say **clean** rather than
+ * **partial**. This list is hand-maintained by necessity (each root carries its
+ * own extension set), so the guard that makes it safe is the completeness check
+ * beside it, not care.
  */
 const SCAN_ROOTS: Array<{ path: string; exts: string[]; extensionless?: boolean }> = [
   { path: "CLAUDE.md", exts: [".md"] },
   { path: "README.md", exts: [".md"] },
   { path: ".claude", exts: [".md"] },
-  { path: "notes", exts: [".md"] },
   // The densest and most authoritative half: source docstrings. This package is
   // mostly prose about invariants, and it cites its consumers by path.
   { path: "src", exts: [".ts"] },
@@ -311,6 +320,45 @@ function isRuntimeArtifact(path: string): boolean {
  */
 const OWN_TOP_LEVEL = new Set<string>();
 for await (const e of Deno.readDir(REPO)) OWN_TOP_LEVEL.add(e.name);
+
+/**
+ * Every top-level entry is either SCANNED or explicitly NOT PROSE.
+ *
+ * ⚠️ **This is the half {@link SCAN_ROOTS}'s own fail-closed check cannot do.**
+ * That one asks "is every configured root present?" — it catches a root that
+ * was deleted. This asks "is every present entry configured?" — it catches a
+ * root that was never added, which is the failure that reports **clean**.
+ *
+ * The exclusion list carries a reason per entry rather than a bare name,
+ * because an unexplained exclusion is indistinguishable from an oversight the
+ * next time someone reads it.
+ */
+const NOT_PROSE: Record<string, string> = {
+  ".git": "git internals",
+  ".gitignore": "not prose",
+  ".releaserc.json": "semantic-release config; no citations",
+  "deno.json": "task + import config; cited BY docs, cites none itself",
+  "deno.lock": "generated",
+  "LICENSE": "verbatim licence text",
+  "API.json": "generated deno-doc output — a projection of the `src` docstrings already scanned",
+  "API.md": "generated deno-doc output — a projection of the `src` docstrings already scanned",
+  "node_modules": "not tracked",
+};
+
+function assertEveryTopLevelIsAccountedFor(): void {
+  const scanned = new Set(SCAN_ROOTS.map((r) => r.path));
+  const unaccounted = [...OWN_TOP_LEVEL]
+    .filter((n) => !scanned.has(n) && !(n in NOT_PROSE))
+    .sort();
+  if (unaccounted.length === 0) return;
+  console.error(
+    `error: top-level ${unaccounted.map((n) => `\`${n}\``).join(", ")} ` +
+      `is neither a scan root nor listed in NOT_PROSE — add it to SCAN_ROOTS ` +
+      `(with its extension set) or to NOT_PROSE (with a reason).`,
+  );
+  Deno.exit(1);
+}
+assertEveryTopLevelIsAccountedFor();
 
 const counts: Record<CitationVerdict, number> = {
   "ok": 0,

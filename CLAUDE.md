@@ -90,8 +90,13 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
   Runs in `.githooks/pre-commit` and `.github/workflows/checks.yaml`. Contrast `docs:check`, which is
   the older regenerate-then-`git diff` shape and is wired into neither.
 - `deno task audit:citations` — check every backticked `path.ext` citation in this package's
-  prose (`CLAUDE.md`, `README.md`, `.claude/`, `notes/`, `src/`, `scripts/`, `tests/`,
-  `.github/`, `.githooks/`) still resolves. Runs in `.githooks/pre-push` and in
+  prose (`CLAUDE.md`, `README.md`, `.claude/`, `src/`, `scripts/`, `tests/`, `.github/`,
+  `.githooks/`) still resolves. ⚠️ **Do not read that list as the definition** — the
+  script's `SCAN_ROOTS` is, and it is checked BOTH ways: a configured root that has
+  vanished fails, and a top-level entry that is neither a scan root nor an explicitly
+  reasoned `NOT_PROSE` exclusion fails too. The second half was added when `notes/` was
+  deleted on 2026-08-24: dropping the dead root was correct, but a `notes/` recreated
+  later would have gone unscanned while the run still said *clean*. Runs in `.githooks/pre-push` and in
   `.github/workflows/checks.yaml`, the reusable job both workflows call. ⚠️ **It stopped being
   advisory on 2026-08-24 (core#54).** There is still no branch protection on `main`/`beta`,
   so it blocks no merge — but `.github/workflows/publish.yaml` gates `release` on `needs: ci`,

@@ -1,15 +1,35 @@
 # Roles: centralize the type in core, and add the missing lifecycle operations
 
-**Date:** 2026-08-17 • **Repo:** core (+ api-cloudrun, manager) • **Status:** ⏳ planned, nothing implemented
+**Date:** 2026-08-17 • **Repo:** core (+ api-cloudrun, manager) • **Status:** 🚧 Phase 2 landed; Phase 3's API half landed; **the manager UI is all that remains** (manager#321)
 **Origin:** the question "is keying `roles` by `name` a mistake — what does renaming cost, should it move to a generated auto-id?" The answer is **no**, and the evidence is recorded below so no future session re-litigates it. What the audit *did* find is that the role surface is missing operations and that a role's id shape is defined nine times across three repos, two of which disagree.
 **Tracking issue:** core#59
-**Related:** `.claude/plans/uid-convention-and-doc-identity.md` + core#58 (declares `roles.name` as a carve-out and points here for the reason; its Phase 4 is what finally *guards* that carve-out) • api-cloudrun#574 (`POST /users` writes roles unchecked, and the absent-role skip has no log or metric — the same silent de-privileging this campaign's rename must avoid) • api-cloudrun#548 (`cleanup-orphan-threads` can delete a thread that still has comments — blocks one option in Phase 3a)
+**Related:** core#58 (**closed** — it declared `roles.name` as a carve-out and pointed here for the reason; its plan doc has been retired) · api-cloudrun#655 (the consumer half of #58's Phase 4 — the write-time drift guard still reads a hardcoded `uid` and so does **not** yet guard this carve-out, despite `roles` now declaring `idField: "name"`) • api-cloudrun#574 (`POST /users` writes roles unchecked, and the absent-role skip has no log or metric — the same silent de-privileging this campaign's rename must avoid) • api-cloudrun#548 (`cleanup-orphan-threads` can delete a thread that still has comments — blocks one option in Phase 3a)
+
+> ## ⚠️ STATUS UPDATE 2026-08-24 — Phase 2 and Phase 3's API half are DONE. Only the manager UI is left.
+>
+> | Phase | State |
+> |---|---|
+> | **2** — `RoleId` centralized in core | ✅ core `976646a`, published and pinned everywhere (currently `@cfs/core@10.0.0-beta.251`) |
+> | **3, API half** — delete + rename/replace routes | ✅ api-cloudrun `5aa19607` |
+> | **3, UI half** — wire both into `RolesManager` | ⏳ **the only thing left**, tracked as **manager#321** |
+>
+> ⚠️ **The rename route exists and has no caller.** That is the current state, and it is the one
+> worth knowing before touching this: the dangerous fan-out — seven Firestore write targets across
+> six collections, failure mode silent de-privileging — is *written and deployed*, and the manager
+> UI is what will first exercise it against real data. Phase 3's dev rehearsal below has not been
+> superseded by the route landing; run it before the UI ships, not after.
+>
+> 🔴 **`roles.name` is declared as a carve-out but still not guarded.** core#58 Phase 4 landed the
+> declaration — `roles` carries `.meta({ idField: "name" })` — but api-cloudrun's
+> `assertValidForWrite` / `assertValidPatch` still read a hardcoded `uid` field, so a `roles`
+> document whose `name` disagrees with its id passes **silently**, exactly as before. The rename
+> route has to assert it by hand for that reason. Filed as **api-cloudrun#655**.
 
 ## START HERE
 
-Nothing has been built. **`roles.name` stays** — decided, with the evidence in the next section; do not reopen it. Two phases remain, and **Phase 2 must land before Phase 3** for a reason stated at the top of Phase 3.
+**`roles.name` stays** — decided, with the evidence in the next section; do not reopen it. Phase 2 is done and Phase 3's routes are deployed; what is left is the manager UI (manager#321), and the dev rehearsal that must precede it.
 
-Phase 2 makes the role-name shape one exported schema in core and retypes its carriers. Phase 3 adds the two operations the surface is missing — wiring the **already-existing** delete endpoint into the manager UI, and adding a **rename/replace** route that does not exist at all. The rename touches seven Firestore write targets across six collections and its failure mode is **silent de-privileging**, which is why it is last and why it is rehearsed in dev.
+Phase 2 made the role-name shape one exported schema in core and retyped its carriers. Phase 3 adds the two operations the surface was missing — wiring the **already-existing** delete endpoint into the manager UI, and a **rename/replace** route that did not exist at all. The rename touches seven Firestore write targets across six collections and its failure mode is **silent de-privileging**, which is why it is last and why it is rehearsed in dev.
 
 ---
 
