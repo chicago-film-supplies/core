@@ -129,7 +129,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
     label: "Jurisdiction Claim",
   }),
   tax_exempt: z.boolean().optional().meta({ column: true, label: "Tax Exempt" }),
-  description: z.string().default("").optional().meta({ column: true, label: "Description" }),
+  description: z.string().optional().meta({ column: true, label: "Description" }),
   emails: z.array(Email).default([]).meta({ column: true, label: "Emails" }),
   phones: z.array(Phone).default([]).meta({ column: true, label: "Phones" }),
   billing_address: Address.meta({ label: "Billing" }),

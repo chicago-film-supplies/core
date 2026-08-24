@@ -1413,8 +1413,8 @@ export const Address: z.ZodType<AddressType | null> = z.strictObject({
   // stores.
   region: usState().default("").meta({ pii: "none", column: true, label: "State" }),
   street: z.string().default(""),
-  street2: z.string().default("").optional(),
-  mapbox_id: z.string().default("").optional(),
+  street2: z.string().optional(),
+  mapbox_id: z.string().optional(),
   address_coordinates: Coordinates.optional(),
   user_coordinates: Coordinates.optional(),
 }).nullable().meta({

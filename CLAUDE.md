@@ -439,6 +439,33 @@ The guards are all in `tests/typesenseFieldCoverage.test.ts`, named by the quest
 
 This applies to nested objects too — if a field inside an input schema contains an object, use `z.object()` so extra properties are silently stripped rather than rejected.
 
+### `.default()` and `.optional()` — the wrapper order decides whether either fires
+
+Three spellings, three different claims. Pick the one that is true; do not stack them.
+
+| Spelling | What a parse does | Say this when |
+|---|---|---|
+| `.optional()` | `undefined` passes through | the field may genuinely be absent |
+| `.default(x)` | `undefined` becomes `x` | every document carries it — **measure the corpus first** |
+| `.meta({ initial: x })` | nothing | only the *form* needs a seed (`schemas/initial.ts`) |
+
+🔴 **`.default(x).optional()` is `Optional(Default(x))` and the default is DEAD.** The outer
+`.optional()` short-circuits on `undefined`, so the inner node is never consulted and `x` cannot be
+produced by any parse. 21 document declarations and 2 input ones carried it (49 resolved paths —
+`Address` is shared) and every one named the value its own leaf type already derives, so removing
+them left `getInitialValues` byte-identical across all 252 exported schemas. `tests/inert-defaults.test.ts`
+is the ratchet, with planted constructs in eight container shapes so a walk that stops reaching one
+fails rather than reporting clean.
+
+⚠️ **This is the sharper edge of a defect `schemas/initial.ts` already records**: a `.default()`
+never materializes on a *write* either, because `validateBeforeWrite` discards `result.data` and the
+caller writes the raw document. So `.default(x)` alone still leaves the stored key absent — it makes
+the parse pass, not the document complete. That is why "every document carries it" has to be
+**measured**, and why the form seed moved to `.meta({ initial })` rather than staying a default.
+
+⭐ **The order that DOES work is `.optional().default(x)`** — default outermost, so `undefined`
+reaches it. Reach for it only when a parse genuinely should substitute a value.
+
 ### Is a field dead? — key-presence, not value-presence
 
 A field carrying no useful **value** is not evidence that it is dead, and deleting one

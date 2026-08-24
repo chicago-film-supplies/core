@@ -263,8 +263,8 @@ export const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType> = z
     start: chicagoInstant().nullable().optional(),
     end: chicagoInstant().nullable().optional(),
   }),
-  sources: z.array(DocSource).default([]).optional(),
-  stores: z.array(OOSStoreSchema).default([]).optional(),
+  sources: z.array(DocSource).optional(),
+  stores: z.array(OOSStoreSchema).optional(),
   crms_id: z.int().nullable().optional(),
   crms_stock_level_id: z.int().nullable().optional(),
 });
