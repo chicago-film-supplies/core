@@ -8,7 +8,7 @@ core issues** (the other is #69, Typesense projection, unrelated).
 
 > ## ⚠️ STATUS UPDATE 2026-08-24 — Phases 0 and 2 are LANDED, and Phase 1's DECLARATION half with them. Four claims below are corrected.
 >
-> **Phase 2 is the headline: the alert contract now gates in `scripts/gate.sh`.** A vmalert
+> **Phase 2 is the headline: the alert contract now gates in `api-cloudrun/scripts/gate.sh`.** A vmalert
 > rule can no longer key on a `msg` no arm declares, or group by a field the matching arm
 > does not carry, without turning the build red.
 >
@@ -80,7 +80,7 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > This doc says the test should "land red on the 37 → declare them → green", never by
 > allowlist. The declarations land in **`core`** — a JSR publish plus three pin bumps — and
 > the churny phases are gated on #442/#444-B. A test that stays red until an unrelated gate
-> opens cannot be wired into `scripts/gate.sh` at all, and an unwired ratchet is one
+> opens cannot be wired into `api-cloudrun/scripts/gate.sh` at all, and an unwired ratchet is one
 > `--no-verify` from nothing (that file documents 21 that were).
 >
 > So it gates **today** against anything new, with the current **68 pairs** itemized, dated,
