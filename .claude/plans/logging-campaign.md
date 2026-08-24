@@ -15,6 +15,7 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > | item | State |
 > |---|---|
 > | **Phase 2** — `api-cloudrun/tests/unit/alertRuleContract.test.ts` | ✅ landed, wired into the gate, all three arms proven to fail |
+> | **Phase 2 follow-up** — 3 of the 68 pairs were renames, not declarations | ✅ fixed; ratchet now **66** |
 > | **Phase 0** — `api-cloudrun/scripts/audit-log-corpus.ts` | ✅ written, run against prod **and** dev |
 > | Fix `typesense_collection_created` | ✅ writes `typesense_collection`; `collection` now holds the logical name |
 > | Repair the three `stats by (collection)` rules | ⛔ **no-op — the claim was wrong, see below** |
@@ -103,6 +104,44 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > in the test — it stays in the script. That is not a compromise; it is the reason the two
 > halves are two artifacts.
 >
+> ### 🔴 Correction 4 — the rename table is INCOMPLETE. Three more synonym families, measured.
+>
+> Defect 7 concluded *"the drift is confined to the order concept"*. It is not. Working the
+> Phase 2 ratchet's list surfaced three more live pairs, none of them in the rename table:
+>
+> | minority spelling | records | established name | records | status |
+> |---|---:|---|---:|---|
+> | `error` | 720 | `error_message` | 20,326 | 🔴 **open** — needs Phase 1 |
+> | `version_uid` | 3 | `template_version_uid` | 24 | ✅ fixed |
+> | `git_branch` | 0 | `branch` | 695 | ✅ fixed |
+>
+> ⚠️ **This changes what Phase 1 must do with the ratchet's list.** Four of its entries are
+> the `error` pair, and **declaring `error` would make the gate green by minting the very
+> drift this campaign exists to kill** — a schema-blessed synonym, which is strictly worse
+> than an undeclared field. The fix is the rename, and it needs `core` because the arms that
+> emit `error` do not declare `error_message` either. **Phase 1's own prescription settles all
+> four at once**: promote `error_name` / `error_message` / `error_stack` to the envelope.
+>
+> ⭐ **The measurement method is defect 7's, and it is the reusable part.** Both template
+> pairs looked like declaration work and were renames; a query on the declared name was
+> missing the records entirely. **Before declaring any field to satisfy the ratchet, count it
+> against its established sibling.** `template_release_auto_merge_failed` carries the same
+> `version_uid` drift (3 records), is not alert-consumed so the ratchet cannot see it, and
+> belongs in Phase 5b.
+>
+> ⭐ A rename is only free if the corpus says so, and that is checkable rather than assumable:
+> `template_abandon_close_pr_failed` has **zero** records over 90 days, so no bridge and no
+> canary were warranted. The plan's "single-spelling ⇒ no ceremony" rule generalises to
+> "no records ⇒ no ceremony".
+>
+> ### One alert named a field that has never existed
+>
+> `DmarcReportIngestFailed` unpacked `filename`; `api-cloudrun/src/services/dmarcReports.ts`
+> writes `message_id`. The file *has* a `filename` concept for the Gmail attachment, which is
+> presumably where it came from, but it never reaches the record. This is the class the
+> campaign named — a rule referencing a field nothing supplies — caught by the reconcile
+> rather than by anyone noticing, because such a rule fails by matching nothing.
+>
 > ### Bonus finding, fixed in passing
 >
 > `SCHEMA_PENDING_EMISSION` had a **stale entry** (`uploadcare_upload_abandoned`, whose emitter
@@ -118,7 +157,9 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > item (the prune) is a `core` edit and batches with Phase 1.
 >
 > **Everything reachable without a `core` publish is now done.** The next step is Phase 1,
-> and it is a `core` change: declare the 68 pairs (the ratchet's list is the work order),
+> and it is a `core` change: declare the **62** genuinely-undeclared pairs and RENAME the
+> other four (`error` → `error_message`, via the envelope promotion this doc already
+> prescribes) — the ratchet's list is the work order and flags which is which —
 > close the envelope, name the `context` bag, type `collection`. ⭐ Phase 0 measured one
 > thing that de-risks it — the corpus carries **zero** singular collection values, so the
 > plural-only subset of `CollectionName` fits 90 days of real data, not just in principle.
