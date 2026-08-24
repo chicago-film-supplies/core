@@ -466,6 +466,67 @@ the parse pass, not the document complete. That is why "every document carries i
 ⭐ **The order that DOES work is `.optional().default(x)`** — default outermost, so `undefined`
 reaches it. Reach for it only when a parse genuinely should substitute a value.
 
+### Making a field REQUIRED — the procedure, and what the corpus can and cannot say
+
+**Measure the corpus in BOTH environments, put the numbers and the date in the
+commit message, and read the WRITER before either.** That order is the procedure,
+not a checklist: each step has caught something the others could not.
+
+1. **Key-presence, both environments.** `orderBy(field).count()` per env (see
+   *Is a field dead?* above for why `select` cannot answer this). ⚠️ **Prod-only
+   is how a tightening ships broken** — `contacts.crms_id` is 166/166 in prod
+   and **166 of 178 in dev**, because dev's native contacts have no CRMS id;
+   `locations.name_key` is 209/209 and 209/210 the same way. Dev's extra
+   documents are the ones NOT written by the legacy ingest, which makes them the
+   most informative rows in either corpus.
+2. **Read every writer.** 🔴 **100% key-presence over a machine-generated corpus
+   is evidence about the GENERATOR, never about the document.**
+   `orders.crms_status` is 995/995 and its only writer in the whole repo is the
+   CRMS opportunity webhook — `createOrder` stamps nothing, so requiring it would
+   400 the native create path the first time it ran. `invoices.crms_id` is
+   1,019/1,019 for exactly the same reason. Meanwhile `orders.crms_id` reads
+   identically **and is required**, because `createOrder` writes an explicit
+   `null`. Same census, opposite verdicts, and only the writer distinguishes
+   them. `cards.destination`/`organization` are the canonical case.
+3. **Tighten the INPUT schemas in the same commit where the writer cannot supply
+   the value itself.** Otherwise the document requirement is unreachable: the
+   create path can no longer construct a valid document and only a script can
+   repair one (`8bb64f7`). Where the writer *does* supply it —
+   `input.subject ?? null`, `input.xero_components ?? []` — the input correctly
+   stays optional, and that split is the design rather than an inconsistency.
+4. **Drop the `?` on the interface too.** `z.ZodType<T>` is checked in one
+   direction only, so a required schema member under an optional interface member
+   compiles silently; `tests/interface-optionality.test.ts` is what catches it.
+5. **Sweep the fixtures, and expect ones the compiler cannot see.** A raw
+   `ref.set()` seed never reaches `validateBeforeWrite`, and a **whole-object
+   override REPLACES rather than merges**, so a newly-required field vanishes
+   from it with nothing going red.
+6. **Re-parse both live corpora** against the tightened schema before committing.
+
+⚠️ **Requiring a field rewrites every negative test that spelled its fields
+inline** — each silently becomes *"fails for SOME reason"*, and the constraint it
+names could then be deleted with the test still green. Build from a
+minimal-valid factory and have each negative case mutate or drop exactly ONE
+field (`tests/store.test.ts`, `tests/contact.test.ts`,
+`tests/organization.test.ts`). Two of those files were found already passing for
+the wrong reason, before the change that would have hidden it.
+
+**Required, not merely non-optional** — where a stored `null` fails exactly like
+an absent key, `.nullable()` keeps the defect representable under a different
+spelling (`8bb64f7`). **Keep `.nullable()` only where `null` is a real answer**
+that a writer actually produces: `orders.crms_id` is null for a CFS-native order,
+`taxes.effective_from` is null for "no statutory date recorded". Never reach for
+`.nullable()` or `.default()` as a cushion to make a tightening land.
+
+**A declaration's optionality should carry its reason.** 166 of 211 optional
+declarations state none; the 45 that do each cite a corpus count and name their
+expand/migrate/contract step, and those are the ones a later census does not have
+to re-derive. ⭐ **Record a REFUSAL the same way** — the reason
+`tracking-categories.crms_product_group_id` and `orders.crms_status` stay
+optional is now a docblock beside each, because a plan doc is deleted when its
+wave lands and the next census would otherwise re-propose them from the same
+numbers.
+
 ### Is a field dead? — key-presence, not value-presence
 
 A field carrying no useful **value** is not evidence that it is dead, and deleting one
