@@ -761,7 +761,7 @@ Deno.test("typesense document parity: every hand-written document field is a dec
   // matching, every assertion below passes over an empty set and this arm reads
   // green while checking nothing — which is the exact defect it exists to catch.
   assertEquals(
-    blocks.length >= 18,
+    blocks.length >= 22,
     true,
     `only ${blocks.length} document interfaces matched — the block regex stopped reaching them`,
   );
@@ -820,4 +820,72 @@ Deno.test("typesense document parity companion: the arm reports a field the conf
     false,
     "orders must NOT declare a bare `amount` — if it does, core#57's drift is undetectable",
   );
+});
+
+/**
+ * Read `TypesenseDocumentMap`'s keys out of the source. The interface is a TYPE
+ * and is erased at runtime, so there is nothing to enumerate at import time —
+ * the same reason the parity arm above reads source text.
+ */
+function documentMapKeys(source: string): string[] {
+  const block = source.match(/export interface TypesenseDocumentMap \{([\s\S]*?)\n\}/);
+  if (!block) return [];
+  return [...block[1].matchAll(/^\s*"?([a-z][\w-]*)"?:/gm)].map((m) => m[1]);
+}
+
+/**
+ * core#60 — `TypesenseDocumentMap` covered 20 of the 22 declared aliases, and
+ * the two missing ones were `cards` and `threads`.
+ *
+ * `cards` is the one that cost something: `enabled: true`, live, 1,097 prod
+ * documents, and **unreachable from manager's typed search surface**, because
+ * every typed consumer there is generic over `keyof TypesenseDocumentMap`.
+ *
+ * ⚠️ **Assert ALL 22, not the live ones.** `enabled` defaults to on and
+ * `bookings` is disabled *and* mapped, so this map is about TYPE REACHABILITY,
+ * not liveness. Keying it on `enabled` would drop a type the moment someone
+ * toggled a flag, which is a config change silently becoming a type change.
+ */
+Deno.test("every declared Typesense alias is reachable from TypesenseDocumentMap", async () => {
+  const source = await Deno.readTextFile(
+    new URL("../src/schemas/typesense/documents.ts", import.meta.url),
+  );
+  const mapped = documentMapKeys(source);
+
+  // Vacuity guard first — an empty parse would make the comparison below pass
+  // against an empty set. ⚠️ It deliberately asks only whether the parser
+  // REACHED the block, not whether the map is complete: a count-based guard set
+  // to the current size overlaps the equality assertion, and then a genuinely
+  // missing alias trips the vacuity message ("the regex stopped reaching them")
+  // instead of the one that names it. Measured — removing `cards` reported 21
+  // keys and blamed the regex. Completeness is the next assertion's job, and it
+  // prints the diff.
+  assertEquals(
+    mapped.length > 0,
+    true,
+    "no TypesenseDocumentMap keys parsed at all — the regex stopped reaching the block",
+  );
+
+  const declared = Object.keys(typesenseSchemas).sort();
+  assertEquals(
+    [...mapped].sort(),
+    declared,
+    "TypesenseDocumentMap must name exactly the declared alias set — " +
+      "a config with no map entry is invisible to every typed search consumer",
+  );
+});
+
+Deno.test("document-map companion: the parser finds real keys, and reports a missing one", () => {
+  // Fail-closed. The arm above can only bite if `documentMapKeys` actually
+  // parses — and a parser that silently returns [] is indistinguishable from a
+  // map that happens to be complete.
+  const complete = `export interface TypesenseDocumentMap {\n  bookings: BookingDocument;\n  "chart-of-accounts": ChartOfAccountsDocument;\n  cards: CardDocument;\n}`;
+  assertEquals(documentMapKeys(complete), ["bookings", "chart-of-accounts", "cards"]);
+
+  // The core#60 shape itself: a declared alias with no map entry.
+  const missingCards = `export interface TypesenseDocumentMap {\n  bookings: BookingDocument;\n}`;
+  assertEquals(documentMapKeys(missingCards).includes("cards"), false);
+
+  // And a parse that stops reaching the block returns empty rather than lying.
+  assertEquals(documentMapKeys("export interface SomethingElse {\n  a: B;\n}"), []);
 });

@@ -17038,11 +17038,10 @@ type TypesenseDocument = BookingDocument | ChartOfAccountsDocument | CommentDocu
 
 ### `TypesenseDocumentMap`
 
-Map from collection alias to its document type.
-
 ```ts
 interface TypesenseDocumentMap {
   bookings: BookingDocument;
+  cards: CardDocument;
   chart-of-accounts: ChartOfAccountsDocument;
   comments: CommentDocument;
   contacts: ContactDocument;
@@ -17059,6 +17058,7 @@ interface TypesenseDocumentMap {
   tags: TagDocument;
   templates: TemplateDocument;
   template-components: TemplateComponentDocument;
+  threads: ThreadDocument;
   tracking-categories: TrackingCategoryDocument;
   users: UserDocument;
   webshop-products: WebshopProductDocument;

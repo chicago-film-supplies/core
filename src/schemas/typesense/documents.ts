@@ -869,8 +869,85 @@ export type TypesenseDocument =
   | WebshopProductDocument;
 
 /** Map from collection alias to its document type. */
+// ── Cards ───────────────────────────────────────────────────────────
+
+/**
+ * Typesense document type for cards (core#60).
+ *
+ * ⚠️ **Mirrors the TRANSLATION, not the storage schema.** Three conventions the
+ * `cards` config depends on and that a `Card`-shaped copy would get wrong:
+ *
+ * - **`date_fs` is an `int64`, and `dates.start` is not declared at all.**
+ *   `translateObject` turns the stored Firestore Timestamp into epoch ms. The
+ *   ISO string beside it is a Chicago-offset string, and range-filtering that is
+ *   the lexicographic-date trap `date_fs` exists to avoid.
+ * - **`address_coordinates` is a `[lat, lng]` tuple**, rewritten from Firestore's
+ *   `{latitude, longitude}` by `GEOPOINT_KEYS` — hence {@link TypesenseAddressFields}
+ *   rather than a hand-spelled pair.
+ * - **`created_at` / `updated_at` are `int64`**, not the stored Timestamps.
+ *
+ * `sources` is required-but-possibly-empty while its nested members are optional:
+ * Typesense cannot flatten nested facets out of an empty array, so a source-less
+ * manual card would 400 on upsert if `sources.uid` were required. The interface
+ * states that asymmetry rather than smoothing it.
+ */
+export interface CardDocument {
+  id: string;
+  uid: string;
+  uid_list: string;
+  status: string;
+  position: number;
+  subject: string;
+  body_text?: string;
+  date_fs?: number;
+  destination?: {
+    address?: Pick<TypesenseAddressFields, "city" | "region" | "address_coordinates">;
+  };
+  sources: Array<{
+    collection?: string;
+    uid?: string;
+  }>;
+  uid_thread: string;
+  uid_assignees?: string[];
+  recurrence_parent_uid?: string;
+  created_by: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  created_at: number;
+  updated_at?: number;
+}
+
+// ── Threads ─────────────────────────────────────────────────────────
+
+/**
+ * Typesense document type for threads (core#60).
+ *
+ * ⚠️ **The `threads` config is `enabled: false`** — a reserved slot, since
+ * thread-level search can pivot off comment hits. It is declared here anyway
+ * because {@link TypesenseDocumentMap} is about **type reachability from
+ * manager's typed search surface**, not about liveness: `enabled` defaults to on
+ * and `bookings` is disabled *and* mapped. A map keyed on liveness would drop a
+ * type the moment someone toggled a flag.
+ */
+export interface ThreadDocument {
+  id: string;
+  uid: string;
+  sources: Array<{
+    collection?: string;
+    uid?: string;
+  }>;
+  title?: string;
+  last_message_preview?: string;
+  last_message_at?: number;
+  comment_count: number;
+  created_by: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  created_at: number;
+  updated_at?: number;
+}
+
 export interface TypesenseDocumentMap {
   bookings: BookingDocument;
+  cards: CardDocument;
   "chart-of-accounts": ChartOfAccountsDocument;
   comments: CommentDocument;
   contacts: ContactDocument;
@@ -887,6 +964,7 @@ export interface TypesenseDocumentMap {
   tags: TagDocument;
   templates: TemplateDocument;
   "template-components": TemplateComponentDocument;
+  threads: ThreadDocument;
   "tracking-categories": TrackingCategoryDocument;
   users: UserDocument;
   "webshop-products": WebshopProductDocument;

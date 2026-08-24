@@ -8026,8 +8026,8 @@
         {
           "kind": "interface",
           "name": "TypesenseDocumentMap",
-          "declaration": "interface TypesenseDocumentMap {\n  bookings: BookingDocument;\n  chart-of-accounts: ChartOfAccountsDocument;\n  comments: CommentDocument;\n  contacts: ContactDocument;\n  destinations: DestinationDocument;\n  invoices: InvoiceDocument;\n  credit-notes: CreditNoteDocument;\n  locations: LocationDocument;\n  orders: OrderDocument;\n  fulfillments: FulfillmentDocument;\n  organizations: OrganizationDocument;\n  out-of-service: OutOfServiceDocument;\n  products: ProductDocument;\n  stores: StoreDocument;\n  tags: TagDocument;\n  templates: TemplateDocument;\n  template-components: TemplateComponentDocument;\n  tracking-categories: TrackingCategoryDocument;\n  users: UserDocument;\n  webshop-products: WebshopProductDocument;\n}",
-          "doc": "Map from collection alias to its document type."
+          "declaration": "interface TypesenseDocumentMap {\n  bookings: BookingDocument;\n  cards: CardDocument;\n  chart-of-accounts: ChartOfAccountsDocument;\n  comments: CommentDocument;\n  contacts: ContactDocument;\n  destinations: DestinationDocument;\n  invoices: InvoiceDocument;\n  credit-notes: CreditNoteDocument;\n  locations: LocationDocument;\n  orders: OrderDocument;\n  fulfillments: FulfillmentDocument;\n  organizations: OrganizationDocument;\n  out-of-service: OutOfServiceDocument;\n  products: ProductDocument;\n  stores: StoreDocument;\n  tags: TagDocument;\n  templates: TemplateDocument;\n  template-components: TemplateComponentDocument;\n  threads: ThreadDocument;\n  tracking-categories: TrackingCategoryDocument;\n  users: UserDocument;\n  webshop-products: WebshopProductDocument;\n}",
+          "doc": ""
         },
         {
           "kind": "interface",
