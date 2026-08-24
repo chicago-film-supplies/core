@@ -1137,46 +1137,49 @@ declared-ahead-of-use keeps (5a bucket A — schema docblocks, not issues).
 
 ## Context recommendation
 
-**CLEAR CONTEXT, then start at Wave 5b.**
+**CLEAR CONTEXT, then start at the Wave 6 PIN BUMP.**
 
-Everything needed to resume cold is durable: this doc (status block first), the three repos'
-`CLAUDE.md` sections written this session, and the GitHub issues. Nothing is held only in a session.
+Everything needed to resume cold is durable: this doc (status block first), the `CLAUDE.md` sections
+written across this campaign, and the GitHub issues. Nothing is held only in a session.
 
-✅ **Wave 5a is DONE and deleted nothing** — see its section. All 14 candidates refuted, the
-verdicts are docblocks in the schemas (core `0b7e6e6`), the method is `core/CLAUDE.md` § *"Is a field
-dead?"*, and three api-cloudrun issues carry what a core schema wave must not absorb: **#649**
-(`organizations.last_order` never stamped), **#650** (`destinations.query_by_organizations` — no
-writer *and* no reader, which is not the "drift + backfill" this plan predicted), **#651**
-(`invoices.pdf_versions`, a product question).
+### The next unit is the pin bump, not Wave 7
 
-**Wave 5b is the right next unit.** The `FieldValue`-sentinel do-not-require list is written out, and
-the measuring instrument (`api-cloudrun/scripts/audit-schema-validation.ts`) was verified to cover
-every collection the wave touches, so it will not move mid-campaign.
+`@cfs/core` published a new beta on Wave 6's push. **api-cloudrun, manager and templates are all
+still on `10.0.0-beta.250`.** Follow *The shared release loop* above:
 
-✅ **The pre-Wave-5 fixture conversion is DONE** (see the section of that name) — the order and
-invoice seeds now fail loudly rather than spuriously when a field becomes required.
+1. Read the CURRENT pin off each repo — never off this doc. ⚠️ **A pinned version is as perishable
+   as a pin count**, and `templates`' must be read off `origin/main`, not off whatever draft branch
+   the checkout is sitting on (it was on `ci/citation-gate` reporting `beta.240` while `main` was
+   `beta.241`).
+2. `sed 's|jsr:@cfs/core@<old>/|jsr:@cfs/core@<new>/|g'` over all three, plus the
+   `npm:@jsr/cfs__core@` form for manager. **Bump by PATTERN, never by a remembered line count.**
+3. `templates` goes via PR. A pin-only diff (`deno.json` + `deno.lock`) is auto-merged; anything else
+   in the PR takes it out of that row.
 
-⚠️ **Two things to do FIRST, before the first tightening — both are now written into 5b as steps:**
+**What the bump unblocks, and the reason 6b exists: `api-cloudrun#570` Step 1** — delete the
+`uid:""` / `name:""` / `path:[]` shim and `isTransactionFeeLine` from
+`api-cloudrun/src/lib/transactionFeeLine.ts`, now that `calculateTransactionFeeAmountCents` and
+`isTransactionFeePricingItem` accept a `PricingItem`.
 
-1. **Read 5b's three tiers against the corpus again, not against this doc.** Every "100% today"
-   figure is a fact about data on 2026-08-23, and 5c's whole procedure is a before/after
-   measurement — a stale number is the one input that makes the commit messages wrong. **Two have
-   already moved**: `taxes.xero_components` joins Tier 3 (11/11 key-present);
-   `products.webshop.description` leaves it (544/568, so 24 docs need a backfill first).
-2. **Grep each collection's fixtures for a WHOLE-OBJECT override before tightening it**, and
-   reconstruct-and-parse rather than trusting a green suite. A whole-object override REPLACES the
-   base rather than merging, so a newly-required field vanishes with nothing going red — and a raw
-   `ref.set()` seed never reaches `validateBeforeWrite` either. That is how two seeders wrote
-   invalid orders into dev for their whole lives, each under a comment claiming the opposite. **The
-   suite structurally cannot catch this**, because it exercises the write and the write is what
-   skips validation. 5b carries the two `rg` commands; run them, do not remember them.
+⚠️ **6b tightened a predicate, so expect the bump to surface callers, not just types.**
+`isTransactionFeeItem` now rejects a fee line with no numeric `quantity`. The corpus has none (205
+lines each side, 0 offenders), but a TEST fixture may — and Wave 5 has already shown that a raw
+`ref.set()` fixture is invisible until something re-writes the document through
+`validateBeforeWrite`. Read `core/CLAUDE.md` § *Making a field REQUIRED*, step 5, before sweeping.
 
-**Do not start Wave 3.** Its census refuted its own prescribed fix; it needs a design decision
-(owner: predictable querying is the benefit, synonym drift is the defect), not an execution pass.
+### Then Wave 7
 
-**Do not assume #53, #58 and #59 are closed just because the issues are.** Each has a named piece
-left, and all three are in the status block above with their issue numbers.
+`core#54` item 5 (drop the full suite from `.githooks/pre-commit` — the suite is 15.5 s and a
+5-commit session runs it 8 times) and `core#44`. Both are described in the Wave 7 section below.
 
-⚠️ **templates PR #121 is open and must not be merged by an agent.** If core publishes another beta
-before it lands, roll it forward by `sed` over the `jsr:@cfs/core@<old>/` pattern — never by a
-remembered line count, and never by a version quoted from this doc.
+### Still open, and deliberately not in a wave
+
+- **core#65** (Wave 3) — ⏸️ deferred, census done, prescribed fix refuted. Read the census before
+  re-proposing anything.
+- **core#69** — the Typesense split-brain issue filed by Wave 6a. Its own sitting; it may change what
+  a successor to #60 looks like.
+- **core#58 / core#59 / core#53 leftovers** — the consumer half of #58 Phase 4 (api-cloudrun reading
+  the declared `.meta({ idField })`), manager#321, and the fixture migration
+  (api-cloudrun#647 + manager#322). ⚠️ **#647's census under-covers by half** — 9 of the 18 files
+  that needed repair contain no `getInitialValues` at all; the corrected population definition is on
+  the issue.
