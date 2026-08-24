@@ -1,9 +1,9 @@
 # Roadmap: the 9 open `core` issues, plus the two campaigns that came out of reviewing them
 
-**Date:** 2026-08-24 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 · 4 landed; Wave 3 deferred; **Wave 5 is COMPLETE and SHIPPED to all three consumers**; Wave 6 is next
+**Date:** 2026-08-24 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** 🚧 Waves 0 · 0.5 · 1 · 2 · 4 landed; Wave 3 deferred; **Wave 5 COMPLETE and shipped to all three consumers**; **Wave 6 COMPLETE in core (6a · 6b · 6c · 6d)**, pin bumps pending; Wave 7 is next
 **Ordering:** risk-first (owner's call), with one half-sitting prerequisite ahead of it (Wave 0 — drop it if you disagree with the reasoning there).
 
-> ## ⚠️ STATUS UPDATE 2026-08-24 — Wave 5 is DONE **and shipped downstream**. Wave 6 is next.
+> ## ⚠️ STATUS UPDATE 2026-08-24 — Wave 5 shipped downstream; **Wave 6 is DONE in core**. Wave 7 is next.
 >
 > *(One compacted block, not a stack — per `cfs-plan-docs`. This is the current state; earlier
 > per-wave updates are folded in.)*
@@ -23,7 +23,11 @@
 > | **5a** delete the dead fields | ✅ **DONE, and it deletes NOTHING** — all 14 candidates refuted, core `0b7e6e6` |
 > | **5b** tighten, three tiers | ✅ **DONE** — core `86df446` `59fcf7b` `9704dee` `eada285` |
 > | **5c** the procedure | ✅ applied per tier; **5d** ✅ written into `core/CLAUDE.md` |
-> | **6 · 7** | ⏳ **NEXT** |
+> | **6a** Typesense split-brain issue | ✅ **FILED — core#69** |
+> | **6b** core#56 fee pricing at `PricingItem` | ✅ core `f10aceb` — and closed core#49's last arm |
+> | **6c** core#60 `CardDocument` + `ThreadDocument` | ✅ **#60 CLOSED** — core `157d516` |
+> | **6d** derive `SchemaDocType` | ✅ core `2d0c237` |
+> | **7** | ⏳ **NEXT** — core#54 item 5, core#44 |
 >
 > ### 🎯 Wave 5b's result — read this before re-proposing anything
 >
@@ -142,9 +146,41 @@
 > **#320 CLOSED**. ⚠️ Four sweeps, not the three the issue names — the fail-closed float-form
 > companion runs the same 354k loop and passed only by luck.
 >
+> ### 🎯 Wave 6's result — three corrections to its own plan
+>
+> **6b is NOT the pure widening core#56 describes.** `isTransactionFeeItem` narrowed to a type
+> DECLARING `quantity: number` and never checked it — **core#49's remaining arm, still open in the
+> fee path.** Measured: a quantity-less fee line passed the predicate and the pricer then threw
+> `The number NaN cannot be converted to a BigInt`. ⚠️ **The `percent_of_total` branch never reads
+> `quantity`, so such a line PRICED CORRECTLY before the check and now throws** — a real behaviour
+> change, so it was measured first: **205 `transaction_fee` lines in prod, 205 in dev, 0 without a
+> numeric quantity** (3,008 / 3,029 docs across orders + invoices + quotes). Corpus contains none.
+>
+> 🔴 **6d's obvious equivalence check cannot fail.** `A extends B ? true : never` DISTRIBUTES over a
+> union, so the result is `true | never` and `true` stays assignable however many members are
+> missing. The first draft passed for that reason, not because the types agreed. `[A] extends [B]`
+> (tuple-wrapped, non-distributive) plus planted negatives is the sound form. ⭐ Same shape as every
+> other fixed-point guard this campaign has found.
+>
+> 🔴 **6c's vacuity guard overlapped its own assertion.** Writing it as `mapped.length >= 22` — the
+> current size — meant a genuinely missing alias tripped the VACUITY message (*"the regex stopped
+> reaching them"*), blaming the parser for a real defect. Measured by deleting `cards`. A vacuity
+> guard asks only whether the parser reached the block; completeness is the equality assertion's job.
+>
+> ⚠️ **6d's dead copy was nearly kept.** The first draft parked the old 56-member union beside the
+> derived alias as a `@deprecated` record — which reintroduces exactly what the change removes, a
+> second list that can drift, merely unused. Deleted; git history is the record. `deno lint`'s
+> `no-unused-vars` then named the orphaned `DestinationDocType` import, which review had missed.
+>
+> ### 🔴 Wave 6's pin bump is NOT done — it is the next session's first task
+> `@cfs/core` beta publishes on push. **api-cloudrun, manager and templates are still on beta.250.**
+> The bump unblocks **api-cloudrun#570 Step 1** (delete the `uid:""`/`name:""`/`path:[]` shim and
+> `isTransactionFeeLine` from `src/lib/transactionFeeLine.ts`), which is the whole point of 6b.
+>
 > ### Issues filed across this campaign
 > api-cloudrun **#640 #641 #643 #644 #645 #647 #649 #650 #651**, and **#652** (tracking-category
-> service groups, filed by Wave 5b) · manager **#321 #322**. **Closed:** manager **#320**.
+> service groups, filed by Wave 5b) · manager **#321 #322** · core **#69** (Typesense split-brain,
+> filed by Wave 6a). **Closed:** manager **#320**, core **#60**.
 
 
 ## Context
