@@ -6,11 +6,16 @@ retired** (`bf72ce7`, all 9 issues closed or reissued, doc deleted), so there is
 index to hang off any more — this doc is free-standing, and **core#65 is one of only two open
 core issues** (the other is #69, Typesense projection, unrelated).
 
-> ## ⚠️ STATUS UPDATE 2026-08-24 — Phase 0's audit script is LANDED and has been run against both envs. Three claims below are corrected.
+> ## ⚠️ STATUS UPDATE 2026-08-24 — Phases 0 and 2 are LANDED. Three claims below are corrected.
 >
-> | Phase 0 item | State |
+> **Phase 2 is the headline: the alert contract now gates in `scripts/gate.sh`.** A vmalert
+> rule can no longer key on a `msg` no arm declares, or group by a field the matching arm
+> does not carry, without turning the build red.
+>
+> | item | State |
 > |---|---|
-> | `api-cloudrun/scripts/audit-log-corpus.ts` | ✅ written, run against prod **and** dev |
+> | **Phase 2** — `api-cloudrun/tests/unit/alertRuleContract.test.ts` | ✅ landed, wired into the gate, all three arms proven to fail |
+> | **Phase 0** — `api-cloudrun/scripts/audit-log-corpus.ts` | ✅ written, run against prod **and** dev |
 > | Fix `typesense_collection_created` | ✅ writes `typesense_collection`; `collection` now holds the logical name |
 > | Repair the three `stats by (collection)` rules | ⛔ **no-op — the claim was wrong, see below** |
 > | Prune dead msg literals | ⏳ **not started** — and it is a `core` edit, so it belongs to Phase 1's publish, not here |
@@ -67,6 +72,37 @@ core issues** (the other is #69, Typesense projection, unrelated).
 > `SCHEMA_PENDING_EMISSION` allowlist. The prune is far smaller than this doc estimated,
 > and the emitter column is why.
 >
+> ### Phase 2 landed as a shrinking ratchet — a deliberate deviation
+>
+> This doc says the test should "land red on the 37 → declare them → green", never by
+> allowlist. The declarations land in **`core`** — a JSR publish plus three pin bumps — and
+> the churny phases are gated on #442/#444-B. A test that stays red until an unrelated gate
+> opens cannot be wired into `scripts/gate.sh` at all, and an unwired ratchet is one
+> `--no-verify` from nothing (that file documents 21 that were).
+>
+> So it gates **today** against anything new, with the current **68 pairs** itemized, dated,
+> and grouped by the msg whose arm needs each field — **that grouping is Phase 1's work
+> list**, already written out. A third arm fails when an entry stops being a violation, so
+> the list cannot rot into a permanent exemption. Emptying it is what "green only by
+> declaration" means here, and Phase 1 is what empties it.
+>
+> Two structural notes worth keeping:
+>
+> - **Arm 1 (every explicit `msg:` is registered) is strict, has no allowlist, and is green
+>   today.** It uses an explicit-`msg:`-only extractor, because the general one resolves
+>   *bare* tokens by intersecting against a vocabulary — so a misspelt bare token belongs to
+>   no vocabulary and vanishes rather than being reported. Bare misspellings stay the
+>   corpus's job (the script's check F).
+> - **The parse has ONE owner**, `api-cloudrun/scripts/_alertRules.ts`, shared by the script
+>   and the test. This campaign exists because "what fields does this message carry" has six
+>   owners that disagree; a script and a test parsing the same YAML differently would be that
+>   defect committed by the guard against it.
+>
+> ⭐ **The hermetic boundary is where the plan's "pair it with an independent property"
+> actually lands.** `gate.sh` is hermetic by construction, so the corpus half *cannot* live
+> in the test — it stays in the script. That is not a compromise; it is the reason the two
+> halves are two artifacts.
+>
 > ### Bonus finding, fixed in passing
 >
 > `SCHEMA_PENDING_EMISSION` had a **stale entry** (`uploadcare_upload_abandoned`, whose emitter
@@ -79,8 +115,13 @@ core issues** (the other is #69, Typesense projection, unrelated).
 >
 > **api-cloudrun#442 and #444-B remain OPEN**, so the churny phases (1, 3, 5 — 367 call sites
 > across 104 files) have not started, per this doc's own sequencing rule. Phase 0's remaining
-> item (the prune) is a `core` edit and batches with Phase 1. **Phase 2, the alert contract
-> test, needs nothing from either and is the next thing to do.**
+> item (the prune) is a `core` edit and batches with Phase 1.
+>
+> **Everything reachable without a `core` publish is now done.** The next step is Phase 1,
+> and it is a `core` change: declare the 68 pairs (the ratchet's list is the work order),
+> close the envelope, name the `context` bag, type `collection`. ⭐ Phase 0 measured one
+> thing that de-risks it — the corpus carries **zero** singular collection values, so the
+> plural-only subset of `CollectionName` fits 90 days of real data, not just in principle.
 
 Owning repo **`core`** (the artifact every phase converges on is core's, and three of six
 phases land there); `api-cloudrun` carries the call sites, the alert rules and the audit
