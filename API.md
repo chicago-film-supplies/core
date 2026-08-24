@@ -23148,6 +23148,14 @@ interface TransactionFeeLineItem {
 }
 ```
 
+### `TransactionFeePricingItem`
+
+A {@link PricingItem} that has passed {@link isTransactionFeePricingItem}.
+
+```ts
+type TransactionFeePricingItem = PricingItem & typeLiteral;
+```
+
 ### `buildPackingList(items: LineItem[], consolidated?: boolean, destinationUid?: string): PackingListItem[] | ConsolidatedItem[]`
 
 Build a packing list from order line items.
@@ -23232,7 +23240,7 @@ rounding a per-unit figure first and multiplying it. `quote.eta` in the
 two diverge systematically rather than coincidentally; that divergence is
 tracked as Phase C3 work, and this function is the side that is right.
 
-### `calculateTransactionFeeAmountCents(item: LineItem, basisCents: number): number`
+### `calculateTransactionFeeAmountCents(item: PricingItem, basisCents: number): number`
 
 The dollar amount a `transaction_fee` line contributes to a document.
 
@@ -23547,6 +23555,23 @@ is said on the axis the rule reads now: `taxed_as: "none"`.
 ### `isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem`
 
 Determine whether a line item is a transaction fee.
+
+### `isTransactionFeePricingItem(item: PricingItem): item is TransactionFeePricingItem`
+
+{@link isTransactionFeeItem} at the {@link PricingItem} surface — the same
+checks, narrowing to a shape the pricing pipeline can read rather than to a
+stored line item.
+
+The exact {@link isPreTaxItem} / {@link isPreTaxPricingItem} pairing, applied
+to the fee family (core#56). It exists so a writer holding an item it has not
+built yet can reach the fee pricer without inventing `uid`, `name` and `path`
+— which is what `api-cloudrun/src/lib/transactionFeeLine.ts` was doing.
+
+⚠️ The `quantity` check is load-bearing HERE in a way it is not at the
+`LineItem` surface: `PricingItem.quantity` is `?: number` by design, because
+the whole point of the shape is to describe an item mid-construction. A
+caller reaching this predicate with the quantity not yet resolved is the
+expected case, not a malformed document.
 
 ### `orderHasDiscount(items: LineItem[]): boolean`
 

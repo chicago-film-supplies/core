@@ -132,6 +132,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // renders stored items and has `isPreTaxItem` for them; this one exists for
     // the write path and would only invite a template to narrow the wrong shape.
     "isPreTaxPricingItem",
+    // Same reason, same pairing, for the fee family (core#56). `isTransactionFeeItem`
+    // is the one a template wants; this is its PricingItem twin, added so
+    // `calculateTransactionFeeAmountCents` can accept an item a writer has not
+    // built yet.
+    "isTransactionFeePricingItem",
   ],
   invoices: [
     // ── Xero integration ──

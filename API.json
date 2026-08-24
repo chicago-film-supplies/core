@@ -11162,6 +11162,12 @@
           "doc": "A transaction fee line item.\n\nCarries the same `PriceObject` every other line carries — a fee is an\nordinary line whose `price.formula` is `percent_of_total`, not a second price\nshape. It differs from a `PreTaxLineItem` only in that it is priced FROM the\ndocument total rather than into it, which is why it has its own predicate and\nits own pass in `calculateOrderTotals`."
         },
         {
+          "kind": "typeAlias",
+          "name": "TransactionFeePricingItem",
+          "declaration": "type TransactionFeePricingItem = PricingItem & typeLiteral;",
+          "doc": "A {@link PricingItem} that has passed {@link isTransactionFeePricingItem}."
+        },
+        {
           "kind": "function",
           "name": "buildPackingList",
           "signature": "buildPackingList(items: LineItem[], consolidated?: boolean, destinationUid?: string): PackingListItem[] | ConsolidatedItem[]",
@@ -11236,7 +11242,7 @@
         {
           "kind": "function",
           "name": "calculateTransactionFeeAmountCents",
-          "signature": "calculateTransactionFeeAmountCents(item: LineItem, basisCents: number): number",
+          "signature": "calculateTransactionFeeAmountCents(item: PricingItem, basisCents: number): number",
           "doc": "The dollar amount a `transaction_fee` line contributes to a document.\n\nA fee is priced from the document, not from itself, so it needs the one input\n`calculateItemSubtotal` cannot see: `basis`, the document's\n`subtotal_discounted` (pre-tax, post-discount — the same base the fee has\nalways been computed against).\n\n- `percent_of_total` → `basisCents × base_percent / 100`.\n- anything else → the ordinary per-unit subtotal, `base_cents × quantity`, so\n  a flat processing charge stays expressible without a second formula.\n\nExact: the percentage is applied as `× rate ÷ 100` over integer cents rather\nthan as a pre-divided float factor, and rounds half-up exactly once.\n\nThe form this replaced was `currency(basis).multiply(rate / 100)`. That is the\n*benign* float form, and an earlier version of this docstring was wrong about\nwhy — `multiply` takes a plain JS number and never wraps it, so nothing\nquantizes the ratio; it carries only the ~1e-18 representation error in\n`rate / 100`, which flips a tie so rarely that it mis-costs **0** of the fee\nsweep's pairs. The form that genuinely loses money is **divide-first**,\n`currency(rate).divide(100)`, which does re-enter the constructor and\nquantizes: `currency(12.345).divide(100) === 0.12`. Both are measured on every\nrun by the fail-closed companion in `tests/orders.test.ts` — the assertion\npins divide-first, the benign form is reported.",
           "paramTags": [],
           "returnsTag": null
@@ -11446,6 +11452,14 @@
           "name": "isTransactionFeeItem",
           "signature": "isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem",
           "doc": "Determine whether a line item is a transaction fee.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isTransactionFeePricingItem",
+          "signature": "isTransactionFeePricingItem(item: PricingItem): item is TransactionFeePricingItem",
+          "doc": "{@link isTransactionFeeItem} at the {@link PricingItem} surface — the same\nchecks, narrowing to a shape the pricing pipeline can read rather than to a\nstored line item.\n\nThe exact {@link isPreTaxItem} / {@link isPreTaxPricingItem} pairing, applied\nto the fee family (core#56). It exists so a writer holding an item it has not\nbuilt yet can reach the fee pricer without inventing `uid`, `name` and `path`\n— which is what `api-cloudrun/src/lib/transactionFeeLine.ts` was doing.\n\n⚠️ The `quantity` check is load-bearing HERE in a way it is not at the\n`LineItem` surface: `PricingItem.quantity` is `?: number` by design, because\nthe whole point of the shape is to describe an item mid-construction. A\ncaller reaching this predicate with the quantity not yet resolved is the\nexpected case, not a malformed document.",
           "paramTags": [],
           "returnsTag": null
         },

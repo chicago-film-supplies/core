@@ -54,6 +54,7 @@ import {
   isPreTaxItem,
   isPreTaxPricingItem,
   isTransactionFeeItem,
+  isTransactionFeePricingItem,
   isSameAsDeliveryDates,
   isSameAsDeliveryDestination,
   getDestinationPairItemName,
@@ -151,6 +152,90 @@ Deno.test("isTransactionFeeItem returns true for fee item", () => {
 
 Deno.test("isTransactionFeeItem returns false for rental", () => {
   assertEquals(isTransactionFeeItem(makeItem()), false);
+});
+
+/**
+ * core#49's REMAINING arm, closed by core#56.
+ *
+ * `TransactionFeeLineItem` declares `quantity: number` while `LineItem` has it
+ * optional, so the predicate returned `true` for a value it had just declared
+ * well-typed. Measured before the fix: `calculateTransactionFeeAmountCents` then
+ * threw `The number NaN cannot be converted to a BigInt` out of `perUnitSubtotal`
+ * on the non-`percent_of_total` branch — loud rather than silent, unlike
+ * core#49's `currency(NaN).value === null`, but an opaque BigInt error in place
+ * of this function's own message.
+ *
+ * ⚠️ **The `percent_of_total` branch never reads `quantity`, so a fee line
+ * without one PRICED CORRECTLY before this check and now throws.** That makes
+ * the tightening a behaviour change, not the pure widening core#56 describes, so
+ * it was measured first: **205 `transaction_fee` lines in prod and 205 in dev,
+ * 0 without a numeric quantity** (3,008 / 3,029 documents across orders,
+ * invoices and quotes, 2026-08-24). The corpus contains none, in either
+ * environment.
+ */
+Deno.test("isTransactionFeeItem returns false when quantity is absent — the type asserts it", () => {
+  const noQty = { ...makeFeeItem() } as Record<string, unknown>;
+  delete noQty.quantity;
+  assertEquals(isTransactionFeeItem(noQty as unknown as LineItem), false);
+});
+
+Deno.test("isTransactionFeeItem returns false when quantity is not a number", () => {
+  assertEquals(isTransactionFeeItem({ ...makeFeeItem(), quantity: "1" } as unknown as LineItem), false);
+  // `null` is what a STRUCTURAL line stores for quantity, and `typeof null` is
+  // "object" — so this arm is the one the corpus actually exercises.
+  assertEquals(isTransactionFeeItem({ ...makeFeeItem(), quantity: null } as unknown as LineItem), false);
+});
+
+// ── isTransactionFeePricingItem (core#56) ────────────────────────
+
+Deno.test("isTransactionFeePricingItem accepts an item with no uid, name or path", () => {
+  // The whole point of the widening: a writer holding an item it has not built
+  // yet reaches the fee pricer without inventing identity fields. This is the
+  // shape `api-cloudrun/src/lib/transactionFeeLine.ts` was shimming.
+  const midConstruction = {
+    type: "transaction_fee",
+    quantity: 1,
+    price: { base_percent: 3, formula: "percent_of_total" },
+  };
+  assertEquals(isTransactionFeePricingItem(midConstruction as unknown as PricingItem), true);
+});
+
+Deno.test("isTransactionFeePricingItem returns false for a pre-tax item", () => {
+  assertEquals(isTransactionFeePricingItem(makeItem() as PricingItem), false);
+});
+
+/**
+ * The quantity check is load-bearing HERE in a way it is not at the `LineItem`
+ * surface: `PricingItem.quantity` is `?: number` by design, so a caller arriving
+ * with it unresolved is the expected case rather than a malformed document.
+ */
+Deno.test("isTransactionFeePricingItem returns false when quantity is absent", () => {
+  const noQty = { ...makeFeeItem() } as Record<string, unknown>;
+  delete noQty.quantity;
+  assertEquals(isTransactionFeePricingItem(noQty as unknown as PricingItem), false);
+});
+
+Deno.test("calculateTransactionFeeAmountCents refuses a quantity-less line with its own message", () => {
+  const noQty = { ...makeFeeItem({}, { formula: "fixed" }) } as Record<string, unknown>;
+  delete noQty.quantity;
+  assertThrows(
+    () => calculateTransactionFeeAmountCents(noQty as unknown as PricingItem, 100_000),
+    Error,
+    "not a transaction fee",
+  );
+});
+
+Deno.test("calculateTransactionFeeAmountCents prices a PricingItem — no uid, name or path", () => {
+  const midConstruction = {
+    type: "transaction_fee",
+    quantity: 1,
+    price: { base_percent: 3, formula: "percent_of_total" },
+  };
+  // 3% of $1,000.00 = $30.00.
+  assertEquals(
+    calculateTransactionFeeAmountCents(midConstruction as unknown as PricingItem, 100_000),
+    3_000,
+  );
 });
 
 // ── isPreTaxItem ─────────────────────────────────────────────────

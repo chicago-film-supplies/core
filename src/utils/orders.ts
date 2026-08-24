@@ -260,6 +260,9 @@ export interface PricingItem {
 /** A {@link PricingItem} that has passed {@link isPreTaxPricingItem}. */
 export type PreTaxPricingItem = PricingItem & { quantity: number; price: PricingPrice };
 
+/** A {@link PricingItem} that has passed {@link isTransactionFeePricingItem}. */
+export type TransactionFeePricingItem = PricingItem & { quantity: number; price: PricingPrice };
+
 /** @see {@link OrderDocTotalsType} from `@cfs/core/schemas` */
 export type OrderTotals = OrderDocTotalsType;
 
@@ -559,6 +562,18 @@ export function isTransactionFeeItem(item: LineItem): item is TransactionFeeLine
   if (!item || typeof item !== "object") return false;
   if (itemContract(item.type)?.pricing !== "from_total") return false;
   if (!item.price || typeof item.price !== "object") return false;
+  // core#49's remaining arm. `TransactionFeeLineItem` DECLARES `quantity: number`
+  // while `LineItem` has it optional, so omitting this check made the predicate
+  // lie — and the lie reached the money. Measured before the fix: a `from_total`
+  // line with no quantity passed this predicate, and
+  // `calculateTransactionFeeAmountCents` then threw
+  // `The number NaN cannot be converted to a BigInt` out of `perUnitSubtotal` on
+  // the non-`percent_of_total` branch. Loud rather than silent — unlike core#49's
+  // `currency(NaN).value === null` — but an opaque BigInt error in place of this
+  // function's own message, and a predicate that returns `true` for a value it
+  // has just declared well-typed. The `percent_of_total` branch never reads
+  // `quantity` and was never affected.
+  if (typeof item.quantity !== "number") return false;
   return true;
 }
 
@@ -597,6 +612,30 @@ export function isPreTaxPricingItem(item: PricingItem): item is PreTaxPricingIte
   // the cast was unchecked in exactly the place it matters most. core#49 named
   // only `isPreTaxItem`; fixing one and not the other would have left the
   // subtotal path lying while making the replacement path honest.
+  if (typeof item.quantity !== "number") return false;
+  return true;
+}
+
+/**
+ * {@link isTransactionFeeItem} at the {@link PricingItem} surface — the same
+ * checks, narrowing to a shape the pricing pipeline can read rather than to a
+ * stored line item.
+ *
+ * The exact {@link isPreTaxItem} / {@link isPreTaxPricingItem} pairing, applied
+ * to the fee family (core#56). It exists so a writer holding an item it has not
+ * built yet can reach the fee pricer without inventing `uid`, `name` and `path`
+ * — which is what `api-cloudrun/src/lib/transactionFeeLine.ts` was doing.
+ *
+ * ⚠️ The `quantity` check is load-bearing HERE in a way it is not at the
+ * `LineItem` surface: `PricingItem.quantity` is `?: number` by design, because
+ * the whole point of the shape is to describe an item mid-construction. A
+ * caller reaching this predicate with the quantity not yet resolved is the
+ * expected case, not a malformed document.
+ */
+export function isTransactionFeePricingItem(item: PricingItem): item is TransactionFeePricingItem {
+  if (!item || typeof item !== "object") return false;
+  if (itemContract(item.type)?.pricing !== "from_total") return false;
+  if (!item.price || typeof item.price !== "object") return false;
   if (typeof item.quantity !== "number") return false;
   return true;
 }
@@ -750,8 +789,8 @@ function perUnitSubtotal(
  * run by the fail-closed companion in `tests/orders.test.ts` — the assertion
  * pins divide-first, the benign form is reported.
  */
-export function calculateTransactionFeeAmountCents(item: LineItem, basisCents: number): number {
-  if (!isTransactionFeeItem(item)) {
+export function calculateTransactionFeeAmountCents(item: PricingItem, basisCents: number): number {
+  if (!isTransactionFeePricingItem(item)) {
     throw new Error("Item is not a transaction fee: missing price object or wrong type");
   }
   if (item.price.formula !== "percent_of_total") {
