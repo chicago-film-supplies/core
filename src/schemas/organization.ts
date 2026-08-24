@@ -102,7 +102,14 @@ export interface Organization {
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
   last_order?: FirestoreTimestampType | null;
-  uid_thread?: string;
+  /**
+   * Required. `createOrganization` stamps `threadDoc.uid` in the same
+   * transaction that writes the organization. **291 of 291 prod and 313 of 313
+   * dev organizations carry the key** (2026-08-23, `orderBy` key-presence) —
+   * and dev's 22 native extras carrying it is what makes this a fact about the
+   * writer rather than about the CRMS ingest.
+   */
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -138,7 +145,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   contacts: z.array(OrganizationContact).meta({ column: true, label: "Contacts" }),
   query_by_contacts: z.array(z.string()).default([]),
   last_order: FirestoreTimestamp.nullable().optional().meta({ column: true, label: "Last Order" }),
-  uid_thread: ThreadId.optional(),
+  uid_thread: ThreadId,
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),

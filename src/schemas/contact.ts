@@ -43,7 +43,19 @@ export interface Contact extends NameParts {
   organizations: ContactOrganizationType[];
   query_by_organizations: string[];
   uid_user?: string;
-  uid_thread?: string;
+  /**
+   * Required. `createContact` (`api-cloudrun/src/services/contacts.ts`) stamps
+   * `threadDoc.uid` in the same transaction that writes the contact.
+   * **166 of 166 prod and 178 of 178 dev contacts carry the key** (measured
+   * 2026-08-23 by `orderBy` key-presence; the dev figure is the load-bearing
+   * one — its 12 dev-native contacts all carry it, so this is not an artefact
+   * of the CRMS ingest).
+   *
+   * ⚠️ Contrast `crms_id` on this same document, which is 166/166 in prod and
+   * **166 of 178 in dev** — those 12 dev-native contacts are exactly what keeps
+   * that field optional.
+   */
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -72,7 +84,7 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   // 0 of 166 prod docs carry the KEY (2026-08-23). See CLAUDE.md § "Is a field
   // dead?" — absence here is a fact about the linking flow, not this field.
   uid_user: FirestoreId.optional(),
-  uid_thread: ThreadId.optional(),
+  uid_thread: ThreadId,
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),

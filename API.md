@@ -1437,7 +1437,7 @@ interface Contact {
   organizations: ContactOrganizationType[];
   query_by_organizations: string[];
   uid_user?: string;
-  uid_thread?: string;
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -3514,7 +3514,7 @@ interface Invoice {
   date_fs: FirestoreTimestampType;
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
-  subject?: string | null;
+  subject: string | null;
   reference?: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
@@ -3528,7 +3528,7 @@ interface Invoice {
   pdf_versions?: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
-  uid_thread?: string;
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -4983,12 +4983,12 @@ interface Order {
   query_by_contacts: string[];
   query_by_dates: string[];
   bookings_breakdown: typeLiteral;
-  crms_id?: number | null;
+  crms_id: number | null;
   crms_status?: string;
   subject?: string;
   reference?: string | null;
   xero_id?: string | null;
-  uid_thread?: string;
+  uid_thread: string;
   version: number;
   created_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
@@ -5431,7 +5431,7 @@ interface Organization {
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
   last_order?: FirestoreTimestampType | null;
-  uid_thread?: string;
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -7339,11 +7339,11 @@ interface Tax {
   applied_from_fs: FirestoreTimestampType;
   applied_to: string | null;
   applied_to_fs: FirestoreTimestampType | null;
-  effective_from?: string | null;
+  effective_from: string | null;
   xero_tax_type?: string | null;
   xero_account_code?: number | null;
   xero_item_code?: string | null;
-  xero_components?: XeroTaxComponentType[];
+  xero_components: XeroTaxComponentType[];
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -11933,7 +11933,7 @@ interface Contact {
   organizations: ContactOrganizationType[];
   query_by_organizations: string[];
   uid_user?: string;
-  uid_thread?: string;
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -12479,7 +12479,7 @@ interface Invoice {
   date_fs: FirestoreTimestampType;
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
-  subject?: string | null;
+  subject: string | null;
   reference?: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
@@ -12493,7 +12493,7 @@ interface Invoice {
   pdf_versions?: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
-  uid_thread?: string;
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -13507,12 +13507,12 @@ interface Order {
   query_by_contacts: string[];
   query_by_dates: string[];
   bookings_breakdown: typeLiteral;
-  crms_id?: number | null;
+  crms_id: number | null;
   crms_status?: string;
   subject?: string;
   reference?: string | null;
   xero_id?: string | null;
-  uid_thread?: string;
+  uid_thread: string;
   version: number;
   created_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
@@ -14188,7 +14188,7 @@ interface Organization {
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
   last_order?: FirestoreTimestampType | null;
-  uid_thread?: string;
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;

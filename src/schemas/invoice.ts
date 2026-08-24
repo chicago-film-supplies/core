@@ -548,7 +548,13 @@ export interface Invoice {
   date_fs: FirestoreTimestampType;
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
-  subject?: string | null;
+  /**
+    * Required and nullable — `null` is "no subject", and that is what
+    * `createInvoice` writes (`input.subject ?? null`, mirroring `reference`
+    * beside it). **1,019 of 1,019 in prod and dev carry the key**, 0 null
+    * (measured 2026-08-23, `orderBy` key-presence).
+    */
+  subject: string | null;
   reference?: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
@@ -567,10 +573,26 @@ export interface Invoice {
     deleted_at: FirestoreTimestampType | null;
   }>;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
+  /**
+   * ⚠️ **1,019 of 1,019 in both environments, and it stays optional.** The
+   * number describes the INGEST, not the document: `createInvoice`
+   * (`api-cloudrun/src/services/invoices.ts`) writes no top-level `crms_id` at
+   * all, so a natively created invoice has no key. Every stored invoice carries
+   * one because every stored invoice came from CRMS.
+   *
+   * ⚠️ Note the asymmetry with `Order.crms_id`, which IS required-and-nullable:
+   * `createOrder` stamps an explicit `null` and this writer does not. The two
+   * corpora read identically and the schemas correctly differ.
+   */
   crms_id?: number | null;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   crms_opportunity_ids?: number[];
-  uid_thread?: string;
+  /**
+   * Required. `createInvoice` stamps `invoiceThreadDoc.uid` in the same
+   * transaction that writes the invoice, and **1,019 of 1,019 in prod and dev
+   * carry the key** (2026-08-23, `orderBy` key-presence).
+   */
+  uid_thread: string;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -597,7 +619,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   date_fs: FirestoreTimestamp,
   due_date: chicagoStartOfDay().optional().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs" }),
   due_date_fs: FirestoreTimestamp.optional(),
-  subject: z.string().nullable().optional().meta({ column: true, label: "Subject", linkTo: "invoiceDetail" }),
+  subject: z.string().nullable().meta({ column: true, label: "Subject", linkTo: "invoiceDetail" }),
   reference: z.string().nullable().optional().meta({ column: true, label: "Reference", linkTo: "invoiceDetail" }),
   external_notes: z.string().meta({ pii: "mask", column: true, label: "External Notes" }).nullable().optional(),
   internal_notes: z.string().meta({ pii: "mask", column: true, label: "Internal Notes" }).nullable().optional(),
@@ -626,9 +648,11 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     created_by: ActorRef,
     deleted_at: FirestoreTimestamp.nullable(),
   })).optional(),
+  // NOT tightened — see the interface. `createInvoice` writes no top-level
+  // `crms_id`; the 1,019/1,019 reading is about the CRMS ingest.
   crms_id: z.int().nullable().optional(),
   crms_opportunity_ids: z.array(z.int()).optional(),
-  uid_thread: ThreadId.optional(),
+  uid_thread: ThreadId,
   /** Optimistic-concurrency if-match token — bumped on every whole-doc write, not a revision pointer (mirrors orders/orgs/contacts). */
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),

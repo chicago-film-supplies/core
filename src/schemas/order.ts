@@ -1119,12 +1119,44 @@ export interface Order {
     lost: number;
     damaged: number;
   };
-  crms_id?: number | null;
+  /**
+    * The CRMS opportunity id, or `null` for an order CFS created itself.
+    *
+    * Required and NULLABLE, which is the whole distinction: `null` is a real
+    * answer ("no CRMS twin") and absence was not. `createOrder`
+    * (`api-cloudrun/src/services/orders.ts`) writes an explicit `null`, and
+    * every one of **995 prod and 995 dev orders carries the key** (measured
+    * 2026-08-23 by `orderBy(field)` key-presence — see CLAUDE.md § "Is a field
+    * dead?" — with 0 nulls, because the whole live corpus is CRMS-authored).
+    *
+    * ⚠️ Contrast {@link crms_status} directly below, which is 995/995 for the
+    * same reason and is NOT required, because the reason differs.
+    */
+  crms_id: number | null;
+  /**
+   * ⚠️ **995 of 995 in both environments, and it must stay optional.** That
+   * number is a fact about the GENERATOR, not about the document: the only
+   * writer in the repo is the CRMS opportunity webhook
+   * (`api-cloudrun/src/services/webhooks/opportunity.ts`), and `createOrder`
+   * sets it nowhere. Every stored order carries it because every stored order
+   * came from CRMS — a natively created one has no key at all, so requiring it
+   * would 400 the native create path the first time it ran.
+   *
+   * Same shape as `cards.destination`/`organization`: a machine-generated
+   * corpus proves what the generator does, never what the document permits.
+   * And CRMS is being retired, so the native path is the future one.
+   */
   crms_status?: string;
   subject?: string;
   reference?: string | null;
   xero_id?: string | null;
-  uid_thread?: string;
+  /**
+   * Required. Every order is born with a default thread — `createOrder` stamps
+   * `orderThreadDoc.uid` in the same transaction that writes the order — and
+   * **995 of 995 in prod and dev carry the key** (2026-08-23, `orderBy`
+   * key-presence). The `?` described a document no writer can produce.
+   */
+  uid_thread: string;
   version: number;
   /**
    * Who created this order — **optional, and there is no `updated_by` twin**
@@ -1211,12 +1243,14 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
     lost: z.number().default(0),
     damaged: z.number().default(0),
   }).default({ quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0 }),
-  crms_id: z.int().nullable().optional(),
+  crms_id: z.int().nullable(),
+  // NOT tightened — see the interface. 995/995 is a fact about the CRMS
+  // webhook, the only writer; `createOrder` stamps no `crms_status` at all.
   crms_status: z.string().optional(),
   subject: z.string().default("").meta({ column: true, label: "Subject", linkTo: "orderDetail" }),
   reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference", linkTo: "orderDetail" }),
   xero_id: z.uuid().nullable().default(null),
-  uid_thread: ThreadId.optional(),
+  uid_thread: ThreadId,
   version: z.int().min(0).default(0),
   // `created_by` only — see the interface for why there is no `updated_by`, and
   // why this is optional rather than backfilled. Adding it puts `orders` into

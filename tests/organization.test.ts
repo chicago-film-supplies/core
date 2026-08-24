@@ -20,9 +20,36 @@ const validAddress = {
 
 const actor = { uid: "testuser100000000000", name: "Test User" };
 
+/**
+ * A MINIMAL VALID organization document, so every negative case below fails for
+ * exactly the reason it names.
+ *
+ * ⚠️ Introduced when `uid_thread` became required (2026-08-23). The
+ * "rejects additional properties" case below is the one that shows why: it
+ * already omitted `emails`, `phones`, `contacts`, `query_by_contacts` and both
+ * timestamps, so it rejected whether or not the extra key was there — the same
+ * defect this file's `tax_profile` test had already been corrected for, still
+ * live one test lower down.
+ */
+const validOrganization = (overrides: Record<string, unknown> = {}) => ({
+  uid: "testorg1000000000000",
+  name: "Acme",
+  crms_id: 1,
+  xero_id: null as string | null,
+  emails: [] as string[],
+  phones: [] as string[],
+  billing_address: null as Record<string, unknown> | null,
+  contacts: [] as Array<Record<string, unknown>>,
+  query_by_contacts: [] as string[],
+  uid_thread: "testthread0000000000",
+  created_by: actor,
+  updated_by: actor,
+  ...ts,
+  ...overrides,
+});
+
 Deno.test("OrganizationSchema validates a complete document", () => {
-  const doc = {
-    uid: "testorg1000000000000",
+  const doc = validOrganization({
     name: "Acme Corp",
     crms_id: 100,
     xero_id: "00000000-0000-4000-8000-000000000001",
@@ -31,10 +58,7 @@ Deno.test("OrganizationSchema validates a complete document", () => {
     billing_address: validAddress,
     contacts: [{ uid: "testc100000000000000", first_name: "John", name: "John", roles: ["admin"] }],
     query_by_contacts: ["testc100000000000000"],
-    created_by: actor,
-    updated_by: actor,
-    ...ts,
-  };
+  });
   assertEquals(OrganizationSchema.safeParse(doc).success, true);
 });
 
@@ -42,22 +66,19 @@ Deno.test("OrganizationSchema rejects missing required fields", () => {
   assertEquals(OrganizationSchema.safeParse({ uid: "testorg1000000000000" }).success, false);
 });
 
+Deno.test("OrganizationSchema requires uid_thread — every organization is born with a thread", () => {
+  // 291/291 prod and 313/313 dev carry the key (2026-08-23, `orderBy`
+  // key-presence), and dev's 22 native extras carrying it is what makes this a
+  // fact about `createOrganization` rather than about the CRMS ingest.
+  const { uid_thread: _omitted, ...withoutThread } = validOrganization();
+  assertEquals(OrganizationSchema.safeParse(withoutThread).success, false);
+});
+
 Deno.test("OrganizationSchema accepts null billing_address", () => {
-  const doc = {
-    uid: "testorg1000000000000",
-    name: "Acme",
-    crms_id: 1,
-    xero_id: null,
-    // `tax_profile` and `contacts` lost their `.default()` — the Typesense
-    // config declares both required and a default never reaches the stored
-    // doc. See `tests/typesense-parity.test.ts`.
-    contacts: [],
-    billing_address: null,
-    created_by: actor,
-    updated_by: actor,
-    ...ts,
-  };
-  assertEquals(OrganizationSchema.safeParse(doc).success, true);
+  // `contacts` lost its `.default()` — the Typesense config declares it
+  // required and a default never reaches the stored doc. See
+  // `tests/typesense-parity.test.ts`.
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ billing_address: null })).success, true);
 });
 
 Deno.test("OrganizationSchema rejects ANY tax_profile — the field is gone (#596 item 3)", () => {
@@ -71,24 +92,10 @@ Deno.test("OrganizationSchema rejects ANY tax_profile — the field is gone (#59
   // it rejected whether or not `tax_profile` was there, and would have passed
   // against a schema that never validated the field at all. A one-sided
   // rejection assertion needs its positive half or it proves nothing.
-  const base = {
-    uid: "testorg1000000000000",
-    name: "Acme",
-    crms_id: 1,
-    xero_id: null,
-    emails: [],
-    phones: [],
-    billing_address: null,
-    contacts: [],
-    query_by_contacts: [],
-    created_by: actor,
-    updated_by: actor,
-    ...ts,
-  };
-  assertEquals(OrganizationSchema.safeParse(base).success, true, "…without it, this parses");
+  assertEquals(OrganizationSchema.safeParse(validOrganization()).success, true, "…without it, this parses");
   for (const value of ["tax_applied", "invalid"]) {
     assertEquals(
-      OrganizationSchema.safeParse({ ...base, tax_profile: value }).success,
+      OrganizationSchema.safeParse(validOrganization({ tax_profile: value })).success,
       false,
       `a stored ${value} is refused as an unknown key`,
     );
@@ -96,17 +103,7 @@ Deno.test("OrganizationSchema rejects ANY tax_profile — the field is gone (#59
 });
 
 Deno.test("OrganizationSchema rejects additional properties", () => {
-  const doc = {
-    uid: "testorg1000000000000",
-    name: "Acme",
-    crms_id: 1,
-    xero_id: null,
-    billing_address: null,
-    created_by: actor,
-    updated_by: actor,
-    bogus: true,
-  };
-  assertEquals(OrganizationSchema.safeParse(doc).success, false);
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ bogus: true })).success, false);
 });
 
 Deno.test("CreateOrganizationInput accepts valid input", () => {

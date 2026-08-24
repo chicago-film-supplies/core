@@ -104,8 +104,16 @@ export interface Tax {
    *
    * There is deliberately no `effective_to` — a version's statutory window ends
    * at its successor's `effective_from`.
+   *
+   * Required and NULLABLE as of Wave 5b: `null` is the real answer ("no
+   * statutory date recorded"), and it is what `createTax` and `supersedeTax`
+   * (`api-cloudrun/src/services/taxes.ts`) write when the caller omits one
+   * (`input.effective_from ?? null`). **11 of 11 taxes in prod and dev carry
+   * the key** (measured 2026-08-23, `orderBy` key-presence). The three input
+   * schemas keep their `?` — the writer is what supplies the value, and that
+   * split is the point.
    */
-  effective_from?: string | null;
+  effective_from: string | null;
   /**
    * The Xero `TaxType` code this version pushes as, e.g. `"TAX002"`.
    *
@@ -138,8 +146,22 @@ export interface Tax {
   xero_account_code?: number | null;
   /** @see {@link Tax.xero_account_code}. The Xero `ItemCode` the line carries. */
   xero_item_code?: string | null;
-  /** @see {@link XeroTaxComponentType} — must sum to {@link Tax.rate}. */
-  xero_components?: XeroTaxComponentType[];
+  /**
+   * @see {@link XeroTaxComponentType} — must sum to {@link Tax.rate}.
+   *
+   * Required as of Wave 5b. `createTax` and `supersedeTax`
+   * (`api-cloudrun/src/services/taxes.ts`) both write `input.xero_components ??
+   * []`, so the key is stamped on every write whether or not the caller sends
+   * one, and **all 11 taxes in prod and dev carry it** (measured 2026-08-23 by
+   * `orderBy` key-presence — every one as `[]`, which is what confirmed empty
+   * arrays ARE indexed and made this oracle trustworthy in the first place).
+   *
+   * ⚠️ Empty stays legal and stays meaningful: invariant 2 above (components
+   * sum to `rate`) is skipped on an empty list. Requiring the field says the
+   * key is always present, not that a decomposition always exists. The three
+   * input schemas keep their `?` — the writer is what supplies the value.
+   */
+  xero_components: XeroTaxComponentType[];
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -239,15 +261,15 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   applied_from_fs: FirestoreTimestamp,
   applied_to: chicagoStartOfDay().nullable().meta({ column: true, label: "Applied To" }),
   applied_to_fs: FirestoreTimestamp.nullable(),
-  effective_from: chicagoStartOfDay().nullable().optional(),
+  effective_from: chicagoStartOfDay().nullable(),
   xero_tax_type: z.string().min(1).max(20).nullable().optional(),
   xero_account_code: z.int().nullable().optional(),
   xero_item_code: z.string().min(1).max(30).nullable().optional(),
-  // All 11 prod taxes carry the KEY, every one as `[]` (2026-08-23) — so this is
-  // key-present-but-empty, not dead, and the empty array is what invariant 2
-  // above skips on. 100% key-presence also makes it a clean candidate for
-  // dropping `.optional()`. CLAUDE.md § "Is a field dead?".
-  xero_components: z.array(XeroTaxComponent).optional(),
+  // Required as of Wave 5b — 11/11 in prod and dev, every one as `[]`, and both
+  // writers stamp `?? []`. That census is what confirmed empty arrays ARE
+  // indexed by `orderBy`, which is the one way an array field could have read as
+  // absent when it was not. CLAUDE.md § "Is a field dead?".
+  xero_components: z.array(XeroTaxComponent),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
