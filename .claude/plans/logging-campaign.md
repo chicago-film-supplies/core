@@ -617,9 +617,15 @@ and deleted, Waves 4–7 landed, all four pins converged on `beta.251`, and api-
 filed. Every state claim here was re-verified on 2026-08-24 — but **re-verify again before
 acting**, and treat this paragraph as the reason to, not as an excuse to skip it.
 
-File one issue per phase in the repo it lands in, each linking the promoted doc. **Re-scope
-core#65** to Phase 1 + Phase 3 and point its body at the doc — do not close it; its evidence
-and the census comment are the campaign's origin. Cross-reference `api-cloudrun#645` from
+**Filed 2026-08-24 — two issues, not six.** Per the deferred-work rule (*cross-repo work gets
+one issue in the primary repo, with the others named in the body*), the phases are grouped by
+repo rather than one issue each:
+
+- **core#65**, re-scoped and retitled — the core half (Phases 1, 3, 4). Not closed: its census
+  comment is the campaign's origin.
+- **api-cloudrun#656** — the api-cloudrun half (Phases 0, 2, 5).
+
+Both link this doc; each carries the constraints that bite in its own repo. Cross-reference `api-cloudrun#645` from
 Phase 0 (its NUL bytes make every grep-based census in that repo incomplete, and both files
 are still `data` to `file(1)` today).
 
