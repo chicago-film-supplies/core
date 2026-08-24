@@ -922,7 +922,28 @@ export interface UpdateInvoiceInputType {
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
-  due_date?: string;
+  /**
+   * Explicit `null` **clears** the due date; an absent key preserves it.
+   *
+   * The null arm exists on the UPDATE input only, and that asymmetry is the
+   * point: it is a wire-level clear VERB, not a storable value. {@link Invoice}
+   * keeps `due_date` plainly `.optional()` and a cleared invoice simply loses
+   * both `due_date` and `due_date_fs` — which is already a reachable document
+   * shape, because `createInvoice` writes neither key when no due date is
+   * supplied. {@link CreateInvoiceInputType} takes no null for the same reason:
+   * omitting the field is how you create an invoice without a due date.
+   *
+   * ⚠️ **Whoever consumes this must clear the `_fs` MIRROR too.** `null !==
+   * undefined`, `new Date(null)` is the epoch, and `Timestamp.fromDate` accepts
+   * it — so a naive `if (input.due_date !== undefined)` arm stamps
+   * `due_date_fs = 1970-01-01` into the field `serverSortVia` sorts on, with no
+   * error anywhere. Guarded in `api-cloudrun/src/services/invoices.ts`.
+   *
+   * Origin: chicago-film-supplies/manager#326 — clearing the control wrote `""`,
+   * which fails `chicagoStartOfDay()`, so the store aborted before any request
+   * and the field showed an error indicator with no message.
+   */
+  due_date?: string | null;
   subject?: string;
   reference?: string | null;
   external_notes?: string;
@@ -937,7 +958,10 @@ export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   items: z.array(InvoiceItemInputSchema).optional(),
   destinations: z.array(InvoiceDocDestination).optional(),
   date: chicagoStartOfDay().optional(),
-  due_date: chicagoStartOfDay().optional(),
+  // `.nullish()`, not `.optional()` — null is the clear verb. See the interface.
+  // `""` stays rejected, which is what manager#326 needs: an empty control must
+  // send null, not an empty string.
+  due_date: chicagoStartOfDay().nullish(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
   external_notes: z.string().meta({ pii: "mask" }).optional(),

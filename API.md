@@ -8128,7 +8128,7 @@ interface UpdateInvoiceInputType {
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
-  due_date?: string;
+  due_date?: string | null;
   subject?: string;
   reference?: string | null;
   external_notes?: string;
@@ -12871,7 +12871,7 @@ interface UpdateInvoiceInputType {
   items?: InvoiceItemInputType[];
   destinations?: InvoiceDocDestinationType[];
   date?: string;
-  due_date?: string;
+  due_date?: string | null;
   subject?: string;
   reference?: string | null;
   external_notes?: string;

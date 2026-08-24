@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
 import { derivePaymentStatus } from "../src/utils/invoices.ts";
@@ -812,4 +812,57 @@ Deno.test("derivePaymentStatus never leaves a terminal status, and never invents
   // `operator_moves.issued`, and both are correct here.
   assertEquals(INVOICE_STATUS_CONTRACTS.issued.operator_moves.includes("part_paid"), false);
   assertEquals(INVOICE_STATUS_CONTRACTS.issued.operator_moves.includes("paid"), false);
+});
+
+Deno.test("UpdateInvoiceInput.due_date: null is the clear verb, \"\" is still not", async (t) => {
+  // manager#326 — the control cleared to `""`, which fails `chicagoStartOfDay()`,
+  // so the store aborted before any request and the field showed an error
+  // indicator with no message. The repair is a null arm, NOT a looser string:
+  // `""` has to stay rejected or the same silent-abort path reopens for an
+  // operator who types and deletes a character.
+  const base = { version: 1 };
+  const cases: Array<[string, unknown, boolean]> = [
+    ["null clears", null, true],
+    ["absent preserves", undefined, true],
+    ["a Chicago start-of-day is accepted", "2026-08-23T00:00:00.000-05:00", true],
+    ["empty string is rejected", "", false],
+    ["a bare calendar date is rejected", "2026-08-23", false],
+  ];
+  for (const [label, value, expected] of cases) {
+    await t.step(label, () => {
+      const input = value === undefined ? base : { ...base, due_date: value };
+      assertEquals(UpdateInvoiceInput.safeParse(input).success, expected);
+    });
+  }
+
+  // The clear arm has to survive to the consumer as a distinguishable value —
+  // `null` and "absent" mean different things on this input and a parse that
+  // collapsed one into the other would make the verb unreadable.
+  const cleared = UpdateInvoiceInput.safeParse({ ...base, due_date: null });
+  assert(cleared.success);
+  assertEquals(cleared.data.due_date, null);
+  assertEquals("due_date" in cleared.data, true);
+  const untouched = UpdateInvoiceInput.safeParse(base);
+  assert(untouched.success);
+  assertEquals(untouched.data.due_date, undefined);
+});
+
+Deno.test("Invoice.due_date is NOT nullable — the clear verb is wire-only", () => {
+  // The asymmetry is deliberate and load-bearing. A cleared invoice loses both
+  // `due_date` and `due_date_fs` rather than storing null, which is already a
+  // reachable shape: `createInvoice` (`api-cloudrun/src/services/invoices.ts`)
+  // writes neither key when no due date is supplied. Storing null instead would
+  // put an explicit null on an `int64` Typesense field
+  // (`schemas/typesense/invoices.ts` declares `due_date_fs` optional), which
+  // nothing in either corpus has ever exercised — `translateObject` passes null
+  // through verbatim and only geopoints are special-cased.
+  //
+  // If that decision is ever revisited, this test is the thing that has to
+  // change first, and the Typesense question is what it has to answer.
+  const shape = (InvoiceSchema as unknown as { _zod: { def: { shape: Record<string, { safeParse(v: unknown): { success: boolean } }> } } })
+    ._zod.def.shape;
+  assertEquals(shape.due_date.safeParse(null).success, false);
+  assertEquals(shape.due_date.safeParse(undefined).success, true);
+  assertEquals(shape.due_date_fs.safeParse(null).success, false);
+  assertEquals(shape.due_date_fs.safeParse(undefined).success, true);
 });

@@ -3825,7 +3825,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -6216,7 +6216,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  external_notes?: string;\n  internal_notes?: string;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
