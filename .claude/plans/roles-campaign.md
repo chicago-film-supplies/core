@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17 • **Repo:** core (+ api-cloudrun, manager) • **Status:** 🚧 Phase 2 landed; Phase 3's API half landed; **the manager UI is all that remains** (manager#321)
 **Origin:** the question "is keying `roles` by `name` a mistake — what does renaming cost, should it move to a generated auto-id?" The answer is **no**, and the evidence is recorded below so no future session re-litigates it. What the audit *did* find is that the role surface is missing operations and that a role's id shape is defined nine times across three repos, two of which disagree.
-**Tracking issue:** core#59
+**Tracking issue:** **manager#321** — the UI half, which is all that remains. core#59 is **closed** (its core and API halves landed); this doc is kept for the `roles.name` decision below, which `CLAUDE.md` and `src/schemas/_uid.ts` both cite as the standing authority.
 **Related:** core#58 (**closed** — it declared `roles.name` as a carve-out and pointed here for the reason; its plan doc has been retired) · api-cloudrun#655 (the consumer half of #58's Phase 4 — the write-time drift guard still reads a hardcoded `uid` and so does **not** yet guard this carve-out, despite `roles` now declaring `idField: "name"`) • api-cloudrun#574 (`POST /users` writes roles unchecked, and the absent-role skip has no log or metric — the same silent de-privileging this campaign's rename must avoid) • api-cloudrun#548 (`cleanup-orphan-threads` can delete a thread that still has comments — blocks one option in Phase 3a)
 
 > ## ⚠️ STATUS UPDATE 2026-08-24 — Phase 2 and Phase 3's API half are DONE. Only the manager UI is left.
