@@ -197,7 +197,19 @@ export interface Product {
   crms_linked_rental_id?: number | null;
   crms_linked_replacement_id?: number | null;
   crms_linked_replacement_rate_id?: number | null;
-  description?: string;
+  /**
+   * Required, and it was only ever optional by accident.
+   *
+   * `CreateProductInput.description` is `z.string()` — REQUIRED — so no product
+   * has ever been creatable without one, and the corpus agrees: **568 of 568
+   * carry the key in prod and dev (measured 2026-08-23, key-presence via
+   * `orderBy`, not a value census — an empty string is a legitimate value here
+   * and a null is not).** The `?` said a reader must branch on absence for a
+   * case no writer can produce.
+   *
+   * Empty is meaningful and stays legal: there is no `.min(1)`.
+   */
+  description: string;
   eligible_delivery: boolean;
   eligible_in_store_pickup: boolean;
   eligible_shipping_ground: boolean;
@@ -333,7 +345,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   crms_linked_rental_id: z.int().nullable().optional(),
   crms_linked_replacement_id: z.int().nullable().optional(),
   crms_linked_replacement_rate_id: z.int().nullable().optional(),
-  description: z.string().optional().meta({ column: true, label: "Description" }),
+  description: z.string().meta({ column: true, label: "Description" }),
   eligible_delivery: z.boolean().meta({ initial: true, column: true, label: "Delivery Eligible" }),
   eligible_in_store_pickup: z.boolean().meta({ initial: true, column: true, label: "Pickup Eligible" }),
   eligible_shipping_ground: z.boolean().meta({ column: true, label: "Ground Eligible" }),

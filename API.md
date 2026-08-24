@@ -5765,7 +5765,7 @@ interface Product {
   crms_linked_rental_id?: number | null;
   crms_linked_replacement_id?: number | null;
   crms_linked_replacement_rate_id?: number | null;
-  description?: string;
+  description: string;
   eligible_delivery: boolean;
   eligible_in_store_pickup: boolean;
   eligible_shipping_ground: boolean;
@@ -14619,7 +14619,7 @@ interface Product {
   crms_linked_rental_id?: number | null;
   crms_linked_replacement_id?: number | null;
   crms_linked_replacement_rate_id?: number | null;
-  description?: string;
+  description: string;
   eligible_delivery: boolean;
   eligible_in_store_pickup: boolean;
   eligible_shipping_ground: boolean;

@@ -23,6 +23,35 @@ export interface TrackingCategory {
    * operand), so this is forward tolerance, not a live case.
    */
   count?: number;
+  /**
+   * ⚠️ **Both `crms_*_group_id` fields are optional and BOTH must stay that
+   * way.** CRMS has two group kinds and a category maps to one, the other, or
+   * occasionally both — measured 2026-08-23, identical in prod and dev:
+   * **20 categories, 18 with a product group, 4 with a service group, 2 with
+   * both, 0 with neither.**
+   *
+   * This field was a Wave 5b "accidental optionality" candidate on the grounds
+   * that {@link CreateTrackingCategoryInputType} requires it. The corpus refutes
+   * that reading: `Transport` and `Trash & Cleanup` are **service** groups, and
+   * `getCrmsProductGroupId` (`api-cloudrun/src/lib/crmsProduct.ts`) reads
+   * `crms_service_group_id` for every `type === "service"` product it syncs. A
+   * required `crms_product_group_id` would make both of those documents
+   * unparseable and break that path.
+   *
+   * 🔴 **The real defect is on the INPUT, not here** — `createTrackingCategory`
+   * accepts no `crms_service_group_id` and writes none, so a service-group
+   * category cannot be created through the API at all. Both live ones predate
+   * the route (created 2025-11-29). Tracked as
+   * chicago-film-supplies/api-cloudrun#652.
+   *
+   * The invariant the pair really carries is *at least one of the two*, which
+   * would be a `superRefine` rather than a required field. It is deliberately
+   * NOT added here: `getTestDoc` builds required keys only, so a document-level
+   * refinement over two optional fields makes this schema unbuildable and forces
+   * a second entry onto the per-schema override list in `tests/testing.test.ts`
+   * — whose LENGTH that file asserts, precisely because a growing list means the
+   * walker has stopped keeping up with the schemas.
+   */
   crms_product_group_id?: number;
   crms_service_group_id?: number;
   crms_product_group_name: string;
