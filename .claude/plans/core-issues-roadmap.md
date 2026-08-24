@@ -531,10 +531,10 @@ Each of these had been latent for the life of its fixture, and none was reachabl
 - `eligible_delivery` / `eligible_in_store_pickup` on the shared stock fixture were **inherited, not
   chosen** — they arrived `true` from `getInitialValues` reading `.meta({ initial })`, a FORM intent.
   Value preserved, now stated.
-- `src/services/eventCardReconcile.ts`'s docstring **had it backwards**: it claimed a schema-seed
+- `api-cloudrun/src/services/eventCardReconcile.ts`'s docstring **had it backwards**: it claimed a schema-seed
   spread prevented drift, when a seed guarantees a key is PRESENT and presence is what defeats
   `validateBeforeWrite`. Now an explicit `Card` literal.
-- `tests/unit/typeEscapeRatchet.test.ts`'s regex required `}` to be the LAST character before the
+- `api-cloudrun/tests/unit/typeEscapeRatchet.test.ts`'s regex required `}` to be the LAST character before the
   cast, so `}) as unknown as`, `})) as unknown as` and `] as unknown as` escaped — **20 sites did**,
   one of them in `src/`. A ratchet with a hole that shape does not report a smaller number; it
   reports a clean one.
@@ -577,8 +577,8 @@ seeds. Verified in two batches — 41 passed (217 steps) and 27 passed (174 step
 
 ⭐ **What it found, and the reason no existing gate could have.**
 `DocumentOrganizationSnapshot.xero_id` is `z.uuid().nullable()` — required, no `.default()` — and two
-document seeders (`tests/integration/invoices/invoices.test.ts`,
-`tests/integration/creditNotes/creditNotes.test.ts`) override `organization` with a **whole-object
+document seeders (`api-cloudrun/tests/integration/invoices/invoices.test.ts`,
+`api-cloudrun/tests/integration/creditNotes/creditNotes.test.ts`) override `organization` with a **whole-object
 literal** that omits it. A whole-object override REPLACES the base rather than merging with it, and
 these seeds write through a raw `ref.set()` that never reaches `validateBeforeWrite` — so both have
 been writing an invalid `OrderSchema` document into dev for the life of the seeder.
