@@ -975,7 +975,6 @@ import type { Recurrence } from "./recurrence.ts";
 import type { CacheGeocodes } from "./cache-geocodes.ts";
 import type { ChartOfAccounts } from "./chart-of-accounts.ts";
 import type { Contact } from "./contact.ts";
-import type { Destination as DestinationDocType } from "./destination.ts";
 import type { EmailVerification } from "./email-verification.ts";
 import type { Fulfillment } from "./fulfillment.ts";
 import type { HolidayDates } from "./holiday-dates.ts";
@@ -1047,17 +1046,21 @@ import type {
  * nothing 51 of 53 doc types were not already free to do, and the runtime guard
  * in `validateBeforeWrite` still rejects every doc/collection mismatch with a
  * `collection/id` label.
+ *
+ * ⭐ **DERIVED from {@link CollectionDocs}, not written out** (core#44 work item
+ * A, landed with Wave 6). It was a hand-maintained 56-member union sitting a few
+ * hundred lines above the registry that already knew all of them, so a new
+ * collection needed an edit in two places and only ONE of them failed to compile
+ * if you forgot.
+ *
+ * **Measured a no-op before the swap**, non-distributively — `[A] extends [B]`
+ * in both directions, with planted negatives to prove the check could still
+ * return false. ⚠️ The naive `A extends B ? true : never` does NOT work here: it
+ * distributes over the union, so the result is `true | never` and `true` stays
+ * assignable to it whatever the members are. That check cannot fail, which is
+ * the same shape as the fixed-point guards this package keeps finding.
  */
-export type SchemaDocType =
-  | Booking | CacheGeocodes | Card | ChartOfAccounts | Comment | Contact | Counter | DestinationDocType
-  | EmailVerification | HolidayDates | HolidayDefinition | HolidaySnapshot | InventoryLedger | Invite | Invoice | List | Location
-  | LocationType | Order | OrderDocument | Organization | OutOfService | PasswordReset
-  | Fulfillment | Product | PreviewRecord | Quote | RateLimit | Recurrence | Role | Session
-  | Stock | StockLock | Tax | Template
-  | TemplateComponent | TemplateVersion
-  | CreditNote | Settlement | Store | Tag | Thread | TrackingCategory | Movement | TypesenseConfig | UploadcareSweepRun | UploadcareWorkListEntry | User
-  | WebhookEvent | WebshopProduct | XeroBudget | XeroSyncState
-  | McpOAuthClient | McpOAuthAuthorizeRequest | McpOAuthCode | McpOAuthToken;
+export type SchemaDocType = CollectionDocs[CollectionName];
 
 // ── Schema record keyed by collection name ─────────────────────────
 
