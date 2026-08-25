@@ -932,8 +932,8 @@ export interface CreateInvoiceInputType {
   due_date?: string;
   subject?: string;
   reference?: string | null;
-  external_notes?: string;
-  internal_notes?: string;
+  external_notes?: string | null;
+  internal_notes?: string | null;
 }
 
 /** Input schema for creating an invoice. */
@@ -949,8 +949,19 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   due_date: chicagoStartOfDay().optional(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
-  external_notes: z.string().meta({ pii: "mask" }).optional(),
-  internal_notes: z.string().meta({ pii: "mask" }).optional(),
+  // ⚠️ `.nullable()`, not merely `.optional()` — api-cloudrun#492's shape, one
+  // schema over. The STORED arm is `.nullable().optional()`, so
+  // `getInitialValues(InvoiceSchema)` seeds both as `null`, and the manager
+  // drafts an invoice by projecting that seed straight back through this input.
+  // Accepting only `undefined` therefore 400s on a payload the system itself
+  // produced — `expected string, received null` — making invoice drafting
+  // unreachable from the manager's own flow.
+  //
+  // Widening what the BOUNDARY accepts and nothing downstream: every reader
+  // already treats `null` and absent identically, and a widening cannot break an
+  // older client because it never rejects what was previously valid.
+  external_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
+  internal_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
 });
 
 /** Input schema for PUT /invoices/:uid — partial update. */
@@ -1020,8 +1031,8 @@ export interface UpdateInvoiceInputType {
   due_date?: string | null;
   subject?: string;
   reference?: string | null;
-  external_notes?: string;
-  internal_notes?: string;
+  external_notes?: string | null;
+  internal_notes?: string | null;
   version: number;
 }
 
@@ -1039,8 +1050,19 @@ export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   due_date: chicagoStartOfDay().nullish(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
-  external_notes: z.string().meta({ pii: "mask" }).optional(),
-  internal_notes: z.string().meta({ pii: "mask" }).optional(),
+  // ⚠️ `.nullable()`, not merely `.optional()` — api-cloudrun#492's shape, one
+  // schema over. The STORED arm is `.nullable().optional()`, so
+  // `getInitialValues(InvoiceSchema)` seeds both as `null`, and the manager
+  // drafts an invoice by projecting that seed straight back through this input.
+  // Accepting only `undefined` therefore 400s on a payload the system itself
+  // produced — `expected string, received null` — making invoice drafting
+  // unreachable from the manager's own flow.
+  //
+  // Widening what the BOUNDARY accepts and nothing downstream: every reader
+  // already treats `null` and absent identically, and a widening cannot break an
+  // older client because it never rejects what was previously valid.
+  external_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
+  internal_notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   version: z.int().min(0),
 });
 

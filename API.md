@@ -1672,8 +1672,8 @@ interface CreateInvoiceInputType {
   due_date?: string;
   subject?: string;
   reference?: string | null;
-  external_notes?: string;
-  internal_notes?: string;
+  external_notes?: string | null;
+  internal_notes?: string | null;
 }
 ```
 
@@ -8143,8 +8143,8 @@ interface UpdateInvoiceInputType {
   due_date?: string | null;
   subject?: string;
   reference?: string | null;
-  external_notes?: string;
-  internal_notes?: string;
+  external_notes?: string | null;
+  internal_notes?: string | null;
   version: number;
 }
 ```
@@ -12449,8 +12449,8 @@ interface CreateInvoiceInputType {
   due_date?: string;
   subject?: string;
   reference?: string | null;
-  external_notes?: string;
-  internal_notes?: string;
+  external_notes?: string | null;
+  internal_notes?: string | null;
 }
 ```
 
@@ -12888,8 +12888,8 @@ interface UpdateInvoiceInputType {
   due_date?: string | null;
   subject?: string;
   reference?: string | null;
-  external_notes?: string;
-  internal_notes?: string;
+  external_notes?: string | null;
+  internal_notes?: string | null;
   version: number;
 }
 ```

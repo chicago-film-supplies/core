@@ -262,6 +262,51 @@ Deno.test("InvoiceSchema accepts transaction_fees in totals", () => {
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
 });
 
+Deno.test("BOTH invoice input arms accept the notes as `null` — the seed's own shape", () => {
+  // 🔴 The round-trip, not a hand-built payload: `getInitialValues` reads the
+  // STORED schema, where both fields are `.nullable().optional()`, so it seeds
+  // them as `null`. The manager drafts an invoice by projecting that seed
+  // straight through these input arms. While they were `.optional()` alone, the
+  // system refused a payload it had produced itself — `expected string, received
+  // null` — and invoice drafting was unreachable from the manager's own flow.
+  //
+  // ⚠️ Asserting on the SEED is what makes this test honest. Writing
+  // `{ external_notes: null }` by hand would pass the moment someone re-tightened
+  // the arm and changed the seed to match, which is the fixed-point trap: a check
+  // that can only ever agree with the thing it is checking.
+  const seed = getInitialValues(InvoiceSchema) as Record<string, unknown>;
+  assertEquals(seed.external_notes, null, "the stored seed really is null");
+  assertEquals(seed.internal_notes, null, "the stored seed really is null");
+
+  const base = {
+    uid: "testinvoice000000001",
+    organization: { uid: "testorg1000000000000" },
+    status: "draft",
+    query_by_orders: ["testorder10000000001"],
+    external_notes: seed.external_notes,
+    internal_notes: seed.internal_notes,
+  };
+  const created = CreateInvoiceInput.safeParse(base);
+  assertEquals(
+    created.success,
+    true,
+    created.success ? "" : JSON.stringify(created.error.issues),
+  );
+
+  // ⚠️ The UPDATE arm had the identical gap and is easy to fix only on the
+  // create side — an operator clearing a note sends `null` here.
+  const updated = UpdateInvoiceInput.safeParse({
+    version: 0,
+    external_notes: null,
+    internal_notes: null,
+  });
+  assertEquals(
+    updated.success,
+    true,
+    updated.success ? "" : JSON.stringify(updated.error.issues),
+  );
+});
+
 Deno.test("CreateInvoiceInput accepts valid input", () => {
   const input = {
     uid: "newinv10000000000000",
