@@ -95,6 +95,7 @@ export type TransactionId =
   | "void-credit-note"
   // fulfillments.ts
   | "update-fulfillment-items"
+  | "reset-fulfillment"
   // reference-data.ts
   | "create-holiday-definition"
   | "update-holiday-definition"
@@ -240,6 +241,7 @@ export type RuleId =
   | "void-credit-note:status"
   // fulfillments.ts
   | "update-fulfillment-items:items-self"
+  | "reset-fulfillment:rebuild-from-order"
   // taxes.ts
   | "update-tax:to-products"
   | "update-tax:to-webshop-products"

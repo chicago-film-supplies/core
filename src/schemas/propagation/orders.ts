@@ -581,7 +581,10 @@ const createOrderRules: CollectionRule[] = [
     target: "fulfillments",
     mode: "co-write",
     invariant:
-      "Fulfillment clients see a sanitized order view — pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items are stripped",
+      // ⚠️ Not "tax profile" — that field was deleted in #596. Its successor,
+      // `destinations[i].jurisdiction`, is CARRIED, because `destinations` is
+      // copied whole (api-cloudrun#674).
+      "Fulfillment clients see a sanitized order view — pricing, totals, invoices, CRM/Xero ids, the order's version, notes, and transaction_fee items are stripped; the destination `jurisdiction` is carried",
     enforced_by: [FULFILLMENT_SHAPE_STRIPS, FULFILLMENT_STRIP_ASSERTED],
     transaction: "create-order",
     fields: [
@@ -831,7 +834,9 @@ const updateOrderRules: CollectionRule[] = [
     target: "fulfillments",
     mode: "co-write",
     invariant:
-      "Fulfillment view mirrors the order on every update — stripped of pricing, totals, invoices, tax profile, CRM/Xero ids, version, notes, and transaction_fee items",
+      // ⚠️ See the `create-order` twin above — `tax_profile` is gone (#596) and
+      // its successor is carried rather than stripped.
+      "Fulfillment view mirrors the order on every update — stripped of pricing, totals, invoices, CRM/Xero ids, the order's version, notes, and transaction_fee items; the destination `jurisdiction` is carried",
     enforced_by: [FULFILLMENT_SHAPE_STRIPS, FULFILLMENT_STRIP_ASSERTED],
     transaction: "update-order",
     fields: [

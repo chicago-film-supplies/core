@@ -2,9 +2,18 @@
  * Fulfillment schemas — Firestore collection: fulfillments
  *
  * Sanitized projection of an Order for the fulfillment client view.
- * Strips pricing, financial totals, invoice refs, tax profile, CRM/Xero
- * ids, notes, and transaction_fee line items. Keeps destination contacts,
- * dates, quantities, and item structure.
+ * Strips pricing, financial totals, invoice refs, CRM/Xero ids, notes, and
+ * transaction_fee line items. Keeps destination contacts, dates, quantities,
+ * and item structure.
+ *
+ * ⚠️ **It does NOT strip the tax axis, and this line said "tax profile" until
+ * api-cloudrun#674.** `tax_profile` was deleted outright in
+ * `@cfs/core@10.0.0-beta.230` (#596); what replaced it —
+ * `destinations[i].jurisdiction` — is carried through verbatim, because
+ * `destinations` is copied whole. So the sentence named a field that no longer
+ * exists AND implied a strip that does not happen. If the jurisdiction ever
+ * needs to be withheld from picker clients, that is a decision to take here,
+ * not a property to assume from this header.
  *
  * Picker-editable: line items may carry `quantity_order` (server-set when
  * picker quantity diverges from order quantity) and `path_substituted_for`
@@ -24,13 +33,37 @@ import {
 import {
   DocDestination,
   type DocDestinationType,
+  ORDER_STATUSES,
+  type OrderStatusType,
 } from "./order.ts";
+// 🔴 The SAME two divider arms the order and invoice unions are built from —
+// imported, not restated. Two hand-written twins stood here and were
+// byte-equivalent to these (api-cloudrun#674). A copy of a divider arm is
+// exactly the shape this repo has already paid for: the `uid_delivery` /
+// `uid_collection` removal had to be applied to FOUR arms rather than two
+// because of them, and the measured PII rationale on
+// `DestinationDividerArm.name` was stranded on the definition fulfillments did
+// not use.
+//
+// ⚠️ These are the un-annotated consts, and they have to be: a
+// `z.discriminatedUnion` arm must expose `_zod.propValues` at the type level,
+// which a `z.ZodType<T>` annotation erases. That is why `_dividers.ts` exists
+// and is not an entrypoint — see its module header.
+import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 
-const FULFILLMENT_ORDER_STATUSES = [
-  "draft", "quoted", "reserved", "active", "complete", "canceled",
-] as const;
-type FulfillmentOrderStatusType = typeof FULFILLMENT_ORDER_STATUSES[number];
-const FulfillmentOrderStatus: z.ZodType<FulfillmentOrderStatusType> = z.enum(FULFILLMENT_ORDER_STATUSES);
+/**
+ * 🔴 **A fulfillment's status IS the order's status, so this reuses
+ * `ORDER_STATUSES` rather than restating it.** `buildFulfillment` passes
+ * `orderNew.status` straight through, so the copy that stood here was the
+ * riskiest of the three in this module: adding a member to `ORDER_STATUSES`
+ * alone would make **every** fulfillment projection write fail at runtime —
+ * the order accepts the new status, the projection copies it, and this enum
+ * refuses it. The two lists were byte-identical when they were merged
+ * (api-cloudrun#674), which is exactly the state in which a copy looks
+ * harmless.
+ */
+type FulfillmentOrderStatusType = OrderStatusType;
+const FulfillmentOrderStatus: z.ZodType<FulfillmentOrderStatusType> = z.enum(ORDER_STATUSES);
 
 // The list and its "why" live in `schemas/common.ts`, beside `ITEM_CONTRACTS` and the
 // compile-time assertion tying it to `fulfillable`.
@@ -95,15 +128,7 @@ export interface FulfillmentDestinationItemType {
   description: string;
 }
 
-const FulfillmentDestinationItemInner = z.strictObject({
-  uid: z.uuid(),
-  type: z.literal("destination"),
-  // Venue label, projected from `OrderDocDestinationItem.name` — same string,
-  // same classification. See `OrderDocLineItem.name`.
-  name: z.string().max(200).meta({ pii: "none" }).default(""),
-  path: z.array(ItemUid).default([]),
-  description: z.string().meta({ pii: "none" }).default(""),
-});
+const FulfillmentDestinationItemInner = DestinationDividerArm;
 
 export const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemType> = FulfillmentDestinationItemInner;
 
@@ -116,15 +141,7 @@ export interface FulfillmentGroupItemType {
   description: string;
 }
 
-const FulfillmentGroupItemInner = z.strictObject({
-  uid: z.uuid(),
-  type: z.literal("group"),
-  // Section header, projected from `OrderDocGroupItem.name` — same string, same
-  // classification. See `OrderDocLineItem.name`.
-  name: z.string().min(1).max(100).meta({ pii: "none" }),
-  path: z.array(ItemUid).default([]),
-  description: z.string().meta({ pii: "none" }).default(""),
-});
+const FulfillmentGroupItemInner = GroupDividerArm;
 
 export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> = FulfillmentGroupItemInner;
 
