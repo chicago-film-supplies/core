@@ -555,8 +555,10 @@ export type JurisdictionLevel = "document" | "organization" | "derived";
 export interface JurisdictionLevels {
   /**
    * Level 1 — `order/invoice.destinations[i].jurisdiction`, the document's own
-   * value. Seeded at create on the native path from the organization's claim
-   * when that is not the origin, and operator-editable thereafter.
+   * value. **Nothing seeds it** — a create stores exactly what its payload
+   * states per destination — so absent/`null` is the ordinary case and asks
+   * level 2 rather than asserting anything. See
+   * {@link DocDestinationType.jurisdiction} for why the seed was deleted.
    *
    * ⚠️ **Read the document's own stored value here.** It is a snapshot: an
    * order records what it was billed, so it must not re-resolve out from under

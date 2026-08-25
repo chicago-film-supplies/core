@@ -353,10 +353,17 @@ export interface DocDestinationType {
    * `@cfs/core/utils/taxes`) — this document's OWN answer for this
    * destination, and the one that wins.
    *
-   * Seeded at create on the **native** path from the organization's
-   * `jurisdiction_claim` when that is not the origin, and operator-editable
-   * thereafter. Deliberately **not** seeded on the CRMS path: CRMS has no
-   * jurisdiction concept and inventing one there is guesswork.
+   * 🔴 **Nothing seeds it.** A create stores exactly what the payload states
+   * per destination, on the native path and the CRMS path alike — so `null` is
+   * the ordinary case and it means *inherit*, not *no jurisdiction*. The seed
+   * that used to write `organization.jurisdiction_claim` down onto every
+   * destination was deleted because a stored copy is not a convenience but an
+   * OVERRIDE that outranks the thing it copied: level 2 already answers on its
+   * own rung, and the copy made `update-org:tax-axes-to-orders` relabel the
+   * snapshot while repricing nothing. The reasoning lives at the deletion,
+   * `api-cloudrun/src/services/orders.ts`. Which rung answered is visible
+   * through `destinationJurisdictions` (manager#304), never by reading a
+   * stored value here.
    *
    * ⚠️ **Per DESTINATION, which is the whole point.** A document is never
    * re-welded to one jurisdiction the way `tax_profile` welds it — a
