@@ -183,11 +183,17 @@ export const DOMAIN_EVENT_MSGS = [
   // ⚠️ **The reason this exists at all is that the loss was previously TOTALLY
   // silent** — no error, no log, a changed tax rate on an issued invoice. The
   // fix for the drop itself is the pair re-key (the divider's uid becomes the
-  // join key, so an address change stops moving the key); this record is what
-  // makes the interim measurable and what will show the population going to
-  // zero when that lands.
+  // join key, so an address change stops moving the key). That landed in
+  // `@cfs/core@10.0.0-beta.261`, and measured across all 988 prod invoice
+  // pairs — dev identical — every one of them joins on the new key against 750
+  // on the old, so this record's population is expected to be **zero** from
+  // that release on. A non-zero count now means a genuinely unjoinable
+  // document, which is a different and worse fact than the drift it was
+  // written to measure.
   //
-  // `{ invoice_uid, order_uid, jurisdiction, delivery_uid, collection_uid }`.
+  // `{ invoice_uid, order_uid, jurisdiction, pair_uid, delivery_uid,
+  // collection_uid }` — `pair_uid` is what FINDS the row, the endpoints are
+  // what tell a human where it was going.
   "invoice_destination_override_dropped",
 
   // A document was written whose destination DIVIDERS and destination PAIRS

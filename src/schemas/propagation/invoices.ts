@@ -243,7 +243,7 @@ const updateOrderInvoiceRules: CollectionRule[] = [
         source: ["destinations"],
         target: ["destinations"],
         transform:
-          "selective sync within uid_order scope: match pairs by (delivery.uid, collection.uid) — update only non-overridden pairs, add new pairs (tagged with uid_order), remove deleted non-overridden pairs. Leaves pairs from other orders untouched.",
+          "selective sync within uid_order scope: match pairs by pair.uid (the destination divider's uid — NOT the endpoint uids, which move when an address is corrected: api-cloudrun#663) — update only non-overridden pairs, add new pairs (tagged with uid_order), remove deleted non-overridden pairs. Leaves pairs from other orders untouched.",
       },
       {
         source: ["subject"],

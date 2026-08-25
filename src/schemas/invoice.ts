@@ -979,9 +979,15 @@ export interface UpdateInvoiceInputType {
   /**
    * The JURISDICTION axis, per destination pair — **and only that.** The
    * consumer reads `destinations[i].jurisdiction` off each pair, matched by
-   * `(uid_order, delivery.uid, collection.uid)`, and ignores every other field:
-   * the rest of a pair is projected from its source order and is not the
-   * invoice's to state.
+   * `(uid_order, uid)`, and ignores every other field: the rest of a pair is
+   * projected from its source order and is not the invoice's to state.
+   *
+   * ⚠️ **`uid` is therefore REQUIRED on every pair a caller sends, and it is the
+   * pair's own identity — its destination divider's uid, not `delivery.uid`.**
+   * The match was on the two ENDPOINT uids until api-cloudrun#663, which made
+   * this arm unusable for its main purpose: correcting a pair's address changed
+   * the very key the correction was addressed by, so the edit landed on nothing.
+   * A caller echoing the stored pair back gets this right for free.
    *
    * ⚠️ **Present-vs-absent and `null` are different verbs.** An absent
    * `jurisdiction` key preserves the stored one; an explicit `null` CLEARS the
