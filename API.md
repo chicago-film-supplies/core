@@ -3084,8 +3084,8 @@ interface FulfillmentDestinationItemType {
   type: "destination";
   name: string;
   path: string[];
-  uid_delivery: string | null;
-  uid_collection: string | null;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
   description: string;
 }
 ```
@@ -5097,8 +5097,8 @@ interface OrderDocDestinationItemType {
   type: "destination";
   name: string;
   path: string[];
-  uid_delivery: string | null;
-  uid_collection: string | null;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
   description: string;
 }
 ```
@@ -13630,8 +13630,8 @@ interface OrderDocDestinationItemType {
   type: "destination";
   name: string;
   path: string[];
-  uid_delivery: string | null;
-  uid_collection: string | null;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
   description: string;
 }
 ```
@@ -14076,8 +14076,8 @@ interface FulfillmentDestinationItemType {
   type: "destination";
   name: string;
   path: string[];
-  uid_delivery: string | null;
-  uid_collection: string | null;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
   description: string;
 }
 ```
@@ -21070,6 +21070,13 @@ webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.
 afterward (the webhook + backfill) get positional path assignment; the
 order-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.
 
+⚠️ **It no longer copies `uid_delivery`/`uid_collection`, and `source` no
+longer accepts them.** They were the divider's second copy of the pair's
+endpoints, and copying them here across two documents is the mechanism
+api-cloudrun#664 describes: the pairs come from `order.destinations` and the
+dividers from `order.items`, ~100 lines apart, with nothing cross-checking
+them. The section's endpoint is now read from the pair its `uid` names.
+
 ### `buildOrderScopedItems(orderItems: LineItem[], orderDividerUid: string): InvoiceDocItemType[]`
 
 Build invoice items from an order's items, scoped under an order divider.
@@ -23475,10 +23482,17 @@ and this returns both halves so all three hold **by construction** rather than
 by two call sites remembering to agree:
 
 ```
-pair.uid              === divider.uid              // the row identity
-pair.delivery.uid     === divider.uid_delivery     // the endpoint documents
-pair.collection.uid   === divider.uid_collection
+pair.uid === divider.uid     // the row identity, and now the ONLY coupling
 ```
+
+⚠️ **There used to be THREE couplings and there is now one.** The divider also
+carried `uid_delivery`/`uid_collection`, copies of the pair's own
+`delivery.uid`/`collection.uid`, and this function emitted them from the
+pair's endpoints so they could not disagree. Step 11 of
+`api-cloudrun/.claude/plans/destination-pair-identity.md` stops emitting them
+here — the first of the three steps that removes them, before the corpus purge
+and before the schema drops the field. **Nothing is lost:** a reader wanting
+this section's endpoint asks the pair the uid names, which is the only copy.
 
 🔴 **Every one of api-cloudrun#662, #663 and #664 is one of those three
 equalities broken by a writer that authored only one side.** #662 moved the
@@ -23494,13 +23508,6 @@ destination — you know its identity because you are creating it. Use that one
 where two arrays arrive from a client and you have to work out which pair
 belongs to which divider, which is a different question with a different
 failure mode (it can be undecidable, and reports rather than guesses).
-
-⚠️ **The divider's `uid_delivery`/`uid_collection` are taken from the
-endpoints, never passed separately.** That is what makes the second and third
-equalities unrepresentable rather than checked, and it is why the parameter
-list has no place to disagree. When those two fields are removed from the
-divider arm at the contract step, this function is the single place that
-stops emitting them.
 
 `path` comes back `[]` — the caller places the divider in its array and runs
 {@link computeItemPaths}, which is the one author of a path.

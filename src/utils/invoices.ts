@@ -439,9 +439,16 @@ function stripOrderPrefix(path: string[], orderDividerUid: string): string[] {
  * `path` defaults to `[]` so callers that run `computeInvoiceItemPaths`
  * afterward (the webhook + backfill) get positional path assignment; the
  * order-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.
+ *
+ * ⚠️ **It no longer copies `uid_delivery`/`uid_collection`, and `source` no
+ * longer accepts them.** They were the divider's second copy of the pair's
+ * endpoints, and copying them here across two documents is the mechanism
+ * api-cloudrun#664 describes: the pairs come from `order.destinations` and the
+ * dividers from `order.items`, ~100 lines apart, with nothing cross-checking
+ * them. The section's endpoint is now read from the pair its `uid` names.
  */
 export function buildInvoiceDestinationDivider(
-  source: { uid: string; name: string; description?: string | null; uid_delivery?: string | null; uid_collection?: string | null },
+  source: { uid: string; name: string; description?: string | null },
   path: string[] = [],
 ): OrderDocDestinationItemType {
   return {
@@ -449,8 +456,6 @@ export function buildInvoiceDestinationDivider(
     type: "destination",
     name: source.name,
     description: source.description ?? "",
-    uid_delivery: source.uid_delivery ?? null,
-    uid_collection: source.uid_collection ?? null,
     path,
   };
 }

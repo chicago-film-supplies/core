@@ -3414,20 +3414,36 @@ Deno.test("assignDestinationPairUids ignores non-destination items", () => {
 const ENDPOINT_A = { uid: "destAAAAAAAAAAAAAAAA", address: null, instructions: null, contact: null };
 const ENDPOINT_B = { uid: "destBBBBBBBBBBBBBBBB", address: null, instructions: null, contact: null };
 
-Deno.test("buildDestinationPairWithDivider: all three couplings hold by construction", () => {
+Deno.test("buildDestinationPairWithDivider: the ONE coupling holds by construction", () => {
   const { pair, divider } = buildDestinationPairWithDivider({
     name: "Fillmore",
     dates: docDates(),
     delivery: ENDPOINT_A,
     collection: ENDPOINT_B,
   });
-  // The row identity, and the two endpoint references. These are the three
-  // equalities #662, #664 and #663 each broke.
+  // ⚠️ There used to be THREE equalities here — the row identity plus the two
+  // endpoint references #662/#663/#664 each broke — and there is now one. The
+  // endpoints are no longer copied onto the divider at all, so the other two
+  // are not maintained; they are UNREPRESENTABLE, which is the whole point of
+  // the contract step.
   assertEquals(pair.uid, divider.uid);
-  assertEquals(divider.uid_delivery, pair.delivery.uid);
-  assertEquals(divider.uid_collection, pair.collection.uid);
   assertEquals(divider.type, "destination");
   assertEquals(divider.path, []);
+});
+
+Deno.test("buildDestinationPairWithDivider: the divider carries NO endpoint keys", () => {
+  // 🔴 Absent, not `null`. Step 11a stops every writer emitting them so the
+  // corpus purge has something stable to purge to; the contract publish then
+  // deletes the keys from a `z.strictObject`, which refuses a present-but-null
+  // key exactly as firmly as a populated one.
+  const { divider } = buildDestinationPairWithDivider({
+    name: "Fillmore",
+    dates: docDates(),
+    delivery: ENDPOINT_A,
+    collection: ENDPOINT_B,
+  });
+  assertEquals("uid_delivery" in divider, false);
+  assertEquals("uid_collection" in divider, false);
 });
 
 Deno.test("buildDestinationPairWithDivider: the result JOINS under the derive side", () => {
@@ -3463,19 +3479,20 @@ Deno.test("buildDestinationPairWithDivider: a passed uid is REUSED, not re-minte
   assertEquals(divider.uid, stored);
 });
 
-Deno.test("buildDestinationPairWithDivider: a null endpoint uid reaches the divider as null", () => {
-  // A genuinely destinationless order. `uid_delivery` is `FirestoreId.nullable()`
+Deno.test("buildDestinationPairWithDivider: a destinationless order keeps its null on the PAIR", () => {
+  // A genuinely destinationless order. `delivery.uid` is `FirestoreId.nullable()`
   // at the doc level, so `null` is the representable answer — the old "unknown"
-  // sentinel failed the id pattern (api-cloudrun#303).
+  // sentinel failed the id pattern (api-cloudrun#303). It survives on the pair,
+  // which is now the only place it lives; the divider mirrors nothing.
   const { pair, divider } = buildDestinationPairWithDivider({
     name: "",
     dates: docDates(),
     delivery: { uid: null, address: null, instructions: null, contact: null },
     collection: { uid: null, address: null, instructions: null, contact: null },
   });
-  assertEquals(divider.uid_delivery, null);
-  assertEquals(divider.uid_collection, null);
   assertEquals(pair.delivery.uid, null);
+  assertEquals(pair.collection.uid, null);
+  assertEquals("uid_delivery" in divider, false);
 });
 
 Deno.test("buildDestinationPairWithDivider: an unstated jurisdiction is ABSENT, not null", () => {

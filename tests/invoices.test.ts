@@ -129,10 +129,7 @@ const ORDER_ID_1 = "Order000000000000001";
 const ORDER_ID_2 = "Order000000000000002";
 const DEL_1 = "Delivery000000000001";
 const DEL_2 = "Delivery000000000002";
-const DEL_9 = "Delivery000000000009";
-const DEL_10 = "Delivery000000000010";
 const COL_1 = "Collection0000000001";
-const COL_9 = "Collection0000000009";
 // Line-item uids (ItemUid — FirestoreId form).
 const ITEM_1 = "Item0000000000000001";
 const ITEM_2 = "Item0000000000000002";
@@ -1608,26 +1605,32 @@ Deno.test("buildInvoiceDestinationDivider maps fields and defaults path to []", 
   const divider = buildInvoiceDestinationDivider({
     uid: DEST_9,
     name: "Warehouse",
-    uid_delivery: DEL_9,
-    uid_collection: COL_9,
   });
   assertEquals(divider.type, "destination");
   assertEquals(divider.uid, DEST_9);
   assertEquals(divider.name, "Warehouse");
   assertEquals(divider.description, "");
-  assertEquals((divider as { uid_delivery?: string | null }).uid_delivery, DEL_9);
-  assertEquals((divider as { uid_collection?: string | null }).uid_collection, COL_9);
   assertEquals(divider.path, []);
 });
 
-Deno.test("buildInvoiceDestinationDivider nulls missing collection, accepts explicit path, matches schema", () => {
+Deno.test("buildInvoiceDestinationDivider emits NO endpoint keys — not even null", () => {
+  // 🔴 Absent, not `null`. The divider's `uid_delivery`/`uid_collection` were a
+  // second copy of the pair's own endpoints, joined by value across two arrays
+  // (api-cloudrun#664). Step 11a stops every writer emitting them; the corpus
+  // purge then empties what is stored; only then does the schema drop the keys.
+  // Writing an explicit `null` here would leave a PRESENT key, which the
+  // contract's `z.strictObject` refuses just as firmly as a populated one.
+  const divider = buildInvoiceDestinationDivider({ uid: DEST_9, name: "Warehouse" });
+  assertEquals("uid_delivery" in divider, false);
+  assertEquals("uid_collection" in divider, false);
+});
+
+Deno.test("buildInvoiceDestinationDivider accepts an explicit path and matches the schema", () => {
   // The webhook leaves path [] and lets computeInvoiceItemPaths assign it; the
   // order-projection caller passes the scoped path directly — both must validate.
-  // A real order destination always carries a delivery uid; uid_collection may be null.
   // OrderDocDestinationItem validates `uid` as a UUID, so use a real one.
   const destUid = crypto.randomUUID();
-  const divider = buildInvoiceDestinationDivider({ uid: destUid, name: "Venue", uid_delivery: DEL_10 }, [ORDER_DIV_1, destUid]);
-  assertEquals((divider as { uid_collection?: string | null }).uid_collection, null); // omitted → defaulted to null
+  const divider = buildInvoiceDestinationDivider({ uid: destUid, name: "Venue" }, [ORDER_DIV_1, destUid]);
   assertEquals(divider.path, [ORDER_DIV_1, destUid]);
   const parsed = OrderDocDestinationItem.safeParse(divider);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
@@ -2417,18 +2420,23 @@ Deno.test("invoiceScopeDividersMatch: a missing group, and a divider at the wron
 });
 
 Deno.test("adoptOrderDividerStructure: an existing divider row keeps its own fields", () => {
-  // 112 prod invoices hold a destination divider whose uid_delivery points at a
-  // different `destinations` doc than the order's. That is benign staleness the
-  // badge should keep showing — a STRUCTURAL repair must not quietly overwrite
-  // it, so an existing row is re-pathed and never re-cloned.
+  // An invoice may legitimately state something its source order does not — a
+  // STRUCTURAL repair must not quietly overwrite it, so an existing row is
+  // re-pathed and never re-cloned.
+  //
+  // ⚠️ The witness is `description`, an ordinary payload field. It used to be
+  // `uid_delivery`, which the destination campaign's contract step deletes —
+  // and which was the wrong witness anyway, because the whole reason a divider
+  // carried its own endpoint copy is the class api-cloudrun#664 describes.
   const order = groupedOrderItems();
   const staleDest = {
-    uid: DEST_1, type: "destination", name: "Main Venue", description: "",
-    uid_delivery: DEL_9, uid_collection: COL_9, path: [ORDER_DIV_1, DEST_1],
+    uid: DEST_1, type: "destination", name: "Main Venue",
+    description: "invoice-authored note",
+    path: [ORDER_DIV_1, DEST_1],
   } as unknown as InvoiceDocItemType;
   const { items } = adoptOrderDividerStructure([...flatInvoiceScope(), staleDest], order, ORDER_DIV_1);
   const dest = items.find((it) => it.uid === DEST_1) as unknown as Record<string, unknown>;
-  assertEquals(dest.uid_delivery, DEL_9, "the invoice's own (stale) ref was overwritten");
+  assertEquals(dest.description, "invoice-authored note", "the invoice's own field was overwritten");
   assertEquals(dest.path, [ORDER_DIV_1, DEST_1]);
 });
 

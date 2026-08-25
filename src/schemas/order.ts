@@ -1046,8 +1046,9 @@ export interface OrderDocDestinationItemType {
   type: "destination";
   name: string;
   path: string[];
-  uid_delivery: string | null;
-  uid_collection: string | null;
+  /** @see `DestinationDividerArm` — optional through the step-11 window, deleted at the contract. */
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
   description: string;
 }
 

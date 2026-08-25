@@ -2140,10 +2140,17 @@ export interface DestinationPairWithDivider {
  * by two call sites remembering to agree:
  *
  * ```
- * pair.uid              === divider.uid              // the row identity
- * pair.delivery.uid     === divider.uid_delivery     // the endpoint documents
- * pair.collection.uid   === divider.uid_collection
+ * pair.uid === divider.uid     // the row identity, and now the ONLY coupling
  * ```
+ *
+ * ⚠️ **There used to be THREE couplings and there is now one.** The divider also
+ * carried `uid_delivery`/`uid_collection`, copies of the pair's own
+ * `delivery.uid`/`collection.uid`, and this function emitted them from the
+ * pair's endpoints so they could not disagree. Step 11 of
+ * `api-cloudrun/.claude/plans/destination-pair-identity.md` stops emitting them
+ * here — the first of the three steps that removes them, before the corpus purge
+ * and before the schema drops the field. **Nothing is lost:** a reader wanting
+ * this section's endpoint asks the pair the uid names, which is the only copy.
  *
  * 🔴 **Every one of api-cloudrun#662, #663 and #664 is one of those three
  * equalities broken by a writer that authored only one side.** #662 moved the
@@ -2160,13 +2167,7 @@ export interface DestinationPairWithDivider {
  * belongs to which divider, which is a different question with a different
  * failure mode (it can be undecidable, and reports rather than guesses).
  *
- * ⚠️ **The divider's `uid_delivery`/`uid_collection` are taken from the
- * endpoints, never passed separately.** That is what makes the second and third
- * equalities unrepresentable rather than checked, and it is why the parameter
- * list has no place to disagree. When those two fields are removed from the
- * divider arm at the contract step, this function is the single place that
- * stops emitting them.
- *
+
  * `path` comes back `[]` — the caller places the divider in its array and runs
  * {@link computeItemPaths}, which is the one author of a path.
  */
@@ -2193,10 +2194,6 @@ export function buildDestinationPairWithDivider(
     type: "destination",
     name: input.name,
     description: input.description ?? "",
-    // Taken from the pair's own endpoints — see the docblock. There is
-    // deliberately no parameter for these.
-    uid_delivery: input.delivery.uid ?? null,
-    uid_collection: input.collection.uid ?? null,
     path: [],
   };
   return { pair, divider };

@@ -96,8 +96,9 @@ export interface FulfillmentDestinationItemType {
   type: "destination";
   name: string;
   path: string[];
-  uid_delivery: string | null;
-  uid_collection: string | null;
+  /** @see `DestinationDividerArm` — optional through the step-11 window, deleted at the contract. */
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
   description: string;
 }
 
@@ -108,8 +109,21 @@ const FulfillmentDestinationItemInner = z.strictObject({
   // same classification. See `OrderDocLineItem.name`.
   name: z.string().max(200).meta({ pii: "none" }).default(""),
   path: z.array(ItemUid).default([]),
-  uid_delivery: FirestoreId.nullable().default(null),
-  uid_collection: FirestoreId.nullable().default(null),
+  // ⚠️ **Tolerant window — step 11a of the destination campaign.** Was
+  // `.nullable().default(null)`, i.e. required in the parsed output. The
+  // divider's endpoints are a SECOND copy of the pair's own
+  // `delivery.uid`/`collection.uid`, joined by value; every writer has stopped
+  // emitting them, and the contract publish deletes both keys once the corpora
+  // are purged. `.optional()` is what makes all three states parse in the
+  // meantime — carried, explicitly null, and absent — so a purged document and
+  // an un-purged one are both writable while the purge runs.
+  //
+  // 🔴 **Do NOT re-add `.default(null)`.** `validateBeforeWrite` writes the RAW
+  // document, so a default never materializes anyway; what it does do is make
+  // the parsed OUTPUT type require the key, which is what stopped the builders
+  // from being able to omit it.
+  uid_delivery: FirestoreId.nullable().optional(),
+  uid_collection: FirestoreId.nullable().optional(),
   description: z.string().meta({ pii: "none" }).default(""),
 });
 
