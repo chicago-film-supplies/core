@@ -22947,6 +22947,25 @@ interface DestinationPairLike {
 }
 ```
 
+### `DestinationPairMintInput`
+
+What {@link buildDestinationPairWithDivider} takes.
+
+```ts
+interface DestinationPairMintInput {
+  uid?: string;
+  name: string;
+  description?: string;
+  dates: OrderDocDatesType;
+  delivery: DocDestinationEndpointType;
+  collection: DocDestinationEndpointType;
+  customer_collecting?: boolean;
+  customer_returning?: boolean;
+  jurisdiction?: JurisdictionType | null;
+  mintUid?: fnOrConstructor;
+}
+```
+
 ### `DestinationPairUidResult`
 
 What {@link assignDestinationPairUids} returns.
@@ -22956,6 +22975,17 @@ interface DestinationPairUidResult {
   destinations: parenthesized[];
   orphanPairs: number[];
   orphanDividers: string[];
+}
+```
+
+### `DestinationPairWithDivider`
+
+What {@link buildDestinationPairWithDivider} returns.
+
+```ts
+interface DestinationPairWithDivider {
+  pair: DocDestinationType;
+  divider: OrderDocDestinationItemType;
 }
 ```
 
@@ -23427,6 +23457,47 @@ exception is invoice #2241 (1 divider, 2 pairs), which reaches
 - `fallbackUid` — Mints a uid for a pair that states none and matches no
 divider. Defaults to `crypto.randomUUID`; injectable so a migration can be
 deterministic.
+
+### `buildDestinationPairWithDivider(input: DestinationPairMintInput): DestinationPairWithDivider`
+
+**The ONE author of a destination pair AND its divider** — build them
+together, from one identity, so they cannot be built inconsistently.
+
+A destination is stored as two rows that have to agree: a `type:"destination"`
+divider in `items[]`, and a pair in `destinations[]`. Three facts couple them,
+and this returns both halves so all three hold **by construction** rather than
+by two call sites remembering to agree:
+
+```
+pair.uid              === divider.uid              // the row identity
+pair.delivery.uid     === divider.uid_delivery     // the endpoint documents
+pair.collection.uid   === divider.uid_collection
+```
+
+🔴 **Every one of api-cloudrun#662, #663 and #664 is one of those three
+equalities broken by a writer that authored only one side.** #662 moved the
+pair and left the divider; #664 re-minted the divider and left the pair;
+#663 lost an override because the *identity* it was keyed on moved. Before
+this, each writer spelled the coupling itself — the manager minted a uuid
+inline for the divider and built the pair beside it, and the CRMS webhook did
+the same 120 lines apart.
+
+⚠️ **This is the MINT side. {@link assignDestinationPairUids} is the DERIVE
+side, and they are not interchangeable.** Use this where you are authoring a
+destination — you know its identity because you are creating it. Use that one
+where two arrays arrive from a client and you have to work out which pair
+belongs to which divider, which is a different question with a different
+failure mode (it can be undecidable, and reports rather than guesses).
+
+⚠️ **The divider's `uid_delivery`/`uid_collection` are taken from the
+endpoints, never passed separately.** That is what makes the second and third
+equalities unrepresentable rather than checked, and it is why the parameter
+list has no place to disagree. When those two fields are removed from the
+divider arm at the contract step, this function is the single place that
+stops emitting them.
+
+`path` comes back `[]` — the caller places the divider in its array and runs
+{@link computeItemPaths}, which is the one author of a path.
 
 ### `buildPackingList(items: LineItem[], consolidated?: boolean, destinationUid?: string): PackingListItem[] | ConsolidatedItem[]`
 

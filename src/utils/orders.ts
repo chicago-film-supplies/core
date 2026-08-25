@@ -39,6 +39,9 @@ import type {
   OrderDocDatesType,
   DestinationType,
   DocDestinationType,
+  DocDestinationEndpointType,
+  JurisdictionType,
+  OrderDocDestinationItemType,
   FirestoreTimestampType,
   ConsolidatedItemType,
   GroupPathType,
@@ -2087,6 +2090,109 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
       : 0,
     stock_method: entry.stock_method,
   }));
+}
+
+// ── Minting a destination pair and its divider ──────────────────
+
+/** What {@link buildDestinationPairWithDivider} takes. */
+export interface DestinationPairMintInput {
+  /**
+   * Reuse an existing divider's uid instead of minting one. Pass the STORED
+   * divider's uid on a rebuild — a CRMS webhook re-derives its items array on
+   * every event, and letting the uid churn un-keys every pair, every path and
+   * every invoice-side override that points at it.
+   */
+  uid?: string;
+  /** The operator-typed divider label — a VENUE, not a person. */
+  name: string;
+  description?: string;
+  dates: OrderDocDatesType;
+  delivery: DocDestinationEndpointType;
+  collection: DocDestinationEndpointType;
+  customer_collecting?: boolean;
+  customer_returning?: boolean;
+  jurisdiction?: JurisdictionType | null;
+  /** Injectable so a test or a migration can be deterministic. */
+  mintUid?: () => string;
+}
+
+/** What {@link buildDestinationPairWithDivider} returns. */
+export interface DestinationPairWithDivider {
+  pair: DocDestinationType;
+  /** `path` is `[]`; run `computeItemPaths` after placing it in the array. */
+  divider: OrderDocDestinationItemType;
+}
+
+/**
+ * **The ONE author of a destination pair AND its divider** — build them
+ * together, from one identity, so they cannot be built inconsistently.
+ *
+ * A destination is stored as two rows that have to agree: a `type:"destination"`
+ * divider in `items[]`, and a pair in `destinations[]`. Three facts couple them,
+ * and this returns both halves so all three hold **by construction** rather than
+ * by two call sites remembering to agree:
+ *
+ * ```
+ * pair.uid              === divider.uid              // the row identity
+ * pair.delivery.uid     === divider.uid_delivery     // the endpoint documents
+ * pair.collection.uid   === divider.uid_collection
+ * ```
+ *
+ * 🔴 **Every one of api-cloudrun#662, #663 and #664 is one of those three
+ * equalities broken by a writer that authored only one side.** #662 moved the
+ * pair and left the divider; #664 re-minted the divider and left the pair;
+ * #663 lost an override because the *identity* it was keyed on moved. Before
+ * this, each writer spelled the coupling itself — the manager minted a uuid
+ * inline for the divider and built the pair beside it, and the CRMS webhook did
+ * the same 120 lines apart.
+ *
+ * ⚠️ **This is the MINT side. {@link assignDestinationPairUids} is the DERIVE
+ * side, and they are not interchangeable.** Use this where you are authoring a
+ * destination — you know its identity because you are creating it. Use that one
+ * where two arrays arrive from a client and you have to work out which pair
+ * belongs to which divider, which is a different question with a different
+ * failure mode (it can be undecidable, and reports rather than guesses).
+ *
+ * ⚠️ **The divider's `uid_delivery`/`uid_collection` are taken from the
+ * endpoints, never passed separately.** That is what makes the second and third
+ * equalities unrepresentable rather than checked, and it is why the parameter
+ * list has no place to disagree. When those two fields are removed from the
+ * divider arm at the contract step, this function is the single place that
+ * stops emitting them.
+ *
+ * `path` comes back `[]` — the caller places the divider in its array and runs
+ * {@link computeItemPaths}, which is the one author of a path.
+ */
+export function buildDestinationPairWithDivider(
+  input: DestinationPairMintInput,
+): DestinationPairWithDivider {
+  const uid = input.uid ?? (input.mintUid ?? (() => crypto.randomUUID()))();
+  const pair: DocDestinationType = {
+    uid,
+    dates: input.dates,
+    delivery: input.delivery,
+    collection: input.collection,
+    customer_collecting: input.customer_collecting ?? false,
+    customer_returning: input.customer_returning ?? false,
+  };
+  // ⚠️ ONE representation for "asserts nothing", and it is an ABSENT key —
+  // `buildDestinationPair` (api-cloudrun) and `resolveJurisdiction` both read
+  // presence, so writing an explicit `null` here would make a cleared claim and
+  // an unstated one two states that compare unequal.
+  if (input.jurisdiction != null) pair.jurisdiction = input.jurisdiction;
+
+  const divider: OrderDocDestinationItemType = {
+    uid,
+    type: "destination",
+    name: input.name,
+    description: input.description ?? "",
+    // Taken from the pair's own endpoints — see the docblock. There is
+    // deliberately no parameter for these.
+    uid_delivery: input.delivery.uid ?? null,
+    uid_collection: input.collection.uid ?? null,
+    path: [],
+  };
+  return { pair, divider };
 }
 
 // ── The divider ↔ pair join ─────────────────────────────────────

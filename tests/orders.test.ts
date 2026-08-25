@@ -51,6 +51,7 @@ import {
   getTotalDiscountCents,
   groupByDestination,
   assignDestinationPairUids,
+  buildDestinationPairWithDivider,
   isPriceableItem,
   isPreTaxItem,
   isPreTaxPricingItem,
@@ -3283,4 +3284,95 @@ Deno.test("assignDestinationPairUids ignores non-destination items", () => {
     [pair("destA", "destB")],
   );
   assertEquals(destinations[0].uid, D1);
+});
+
+// ── buildDestinationPairWithDivider — the mint side ─────────────
+
+const ENDPOINT_A = { uid: "destAAAAAAAAAAAAAAAA", address: null, instructions: null, contact: null };
+const ENDPOINT_B = { uid: "destBBBBBBBBBBBBBBBB", address: null, instructions: null, contact: null };
+
+Deno.test("buildDestinationPairWithDivider: all three couplings hold by construction", () => {
+  const { pair, divider } = buildDestinationPairWithDivider({
+    name: "Fillmore",
+    dates: docDates(),
+    delivery: ENDPOINT_A,
+    collection: ENDPOINT_B,
+  });
+  // The row identity, and the two endpoint references. These are the three
+  // equalities #662, #664 and #663 each broke.
+  assertEquals(pair.uid, divider.uid);
+  assertEquals(divider.uid_delivery, pair.delivery.uid);
+  assertEquals(divider.uid_collection, pair.collection.uid);
+  assertEquals(divider.type, "destination");
+  assertEquals(divider.path, []);
+});
+
+Deno.test("buildDestinationPairWithDivider: the result JOINS under the derive side", () => {
+  // The mint and the derive must agree, or a document one built is a document
+  // the other reports as unjoined. This is the property that keeps the two
+  // functions two views of one rule rather than two rules.
+  const { pair, divider } = buildDestinationPairWithDivider({
+    name: "Fillmore",
+    dates: docDates(),
+    delivery: ENDPOINT_A,
+    collection: ENDPOINT_B,
+    mintUid: () => "cccccccc-3333-4333-8333-333333333333",
+  });
+  const joined = assignDestinationPairUids([divider], [pair]);
+  assertEquals(joined.destinations[0].uid, divider.uid);
+  assertEquals(joined.orphanPairs, []);
+  assertEquals(joined.orphanDividers, []);
+});
+
+Deno.test("buildDestinationPairWithDivider: a passed uid is REUSED, not re-minted", () => {
+  // The CRMS rebuild case. A churned divider uid un-keys every path and every
+  // invoice-side override pointing at the pair (api-cloudrun#480, #663).
+  const stored = "dddddddd-4444-4444-8444-444444444444";
+  const { pair, divider } = buildDestinationPairWithDivider({
+    uid: stored,
+    name: "Fillmore",
+    dates: docDates(),
+    delivery: ENDPOINT_A,
+    collection: ENDPOINT_B,
+    mintUid: () => "NEVER-USED",
+  });
+  assertEquals(pair.uid, stored);
+  assertEquals(divider.uid, stored);
+});
+
+Deno.test("buildDestinationPairWithDivider: a null endpoint uid reaches the divider as null", () => {
+  // A genuinely destinationless order. `uid_delivery` is `FirestoreId.nullable()`
+  // at the doc level, so `null` is the representable answer — the old "unknown"
+  // sentinel failed the id pattern (api-cloudrun#303).
+  const { pair, divider } = buildDestinationPairWithDivider({
+    name: "",
+    dates: docDates(),
+    delivery: { uid: null, address: null, instructions: null, contact: null },
+    collection: { uid: null, address: null, instructions: null, contact: null },
+  });
+  assertEquals(divider.uid_delivery, null);
+  assertEquals(divider.uid_collection, null);
+  assertEquals(pair.delivery.uid, null);
+});
+
+Deno.test("buildDestinationPairWithDivider: an unstated jurisdiction is ABSENT, not null", () => {
+  // One representation for "asserts nothing". `resolveJurisdiction` reads
+  // presence, so an explicit null would make a cleared claim and an unstated
+  // one two states that compare unequal.
+  const { pair } = buildDestinationPairWithDivider({
+    name: "Fillmore",
+    dates: docDates(),
+    delivery: ENDPOINT_A,
+    collection: ENDPOINT_B,
+  });
+  assertEquals("jurisdiction" in pair, false);
+
+  const stated = buildDestinationPairWithDivider({
+    name: "Fillmore",
+    dates: docDates(),
+    delivery: ENDPOINT_A,
+    collection: ENDPOINT_B,
+    jurisdiction: "rantoul",
+  }).pair;
+  assertEquals(stated.jurisdiction, "rantoul");
 });

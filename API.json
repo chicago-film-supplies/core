@@ -11049,9 +11049,21 @@
         },
         {
           "kind": "interface",
+          "name": "DestinationPairMintInput",
+          "declaration": "interface DestinationPairMintInput {\n  uid?: string;\n  name: string;\n  description?: string;\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n  mintUid?: fnOrConstructor;\n}",
+          "doc": "What {@link buildDestinationPairWithDivider} takes."
+        },
+        {
+          "kind": "interface",
           "name": "DestinationPairUidResult",
           "declaration": "interface DestinationPairUidResult {\n  destinations: parenthesized[];\n  orphanPairs: number[];\n  orphanDividers: string[];\n}",
           "doc": "What {@link assignDestinationPairUids} returns."
+        },
+        {
+          "kind": "interface",
+          "name": "DestinationPairWithDivider",
+          "declaration": "interface DestinationPairWithDivider {\n  pair: DocDestinationType;\n  divider: OrderDocDestinationItemType;\n}",
+          "doc": "What {@link buildDestinationPairWithDivider} returns."
         },
         {
           "kind": "typeAlias",
@@ -11222,6 +11234,14 @@
               "doc": "Mints a uid for a pair that states none and matches no\ndivider. Defaults to `crypto.randomUUID`; injectable so a migration can be\ndeterministic."
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "buildDestinationPairWithDivider",
+          "signature": "buildDestinationPairWithDivider(input: DestinationPairMintInput): DestinationPairWithDivider",
+          "doc": "**The ONE author of a destination pair AND its divider** — build them\ntogether, from one identity, so they cannot be built inconsistently.\n\nA destination is stored as two rows that have to agree: a `type:\"destination\"`\ndivider in `items[]`, and a pair in `destinations[]`. Three facts couple them,\nand this returns both halves so all three hold **by construction** rather than\nby two call sites remembering to agree:\n\n```\npair.uid              === divider.uid              // the row identity\npair.delivery.uid     === divider.uid_delivery     // the endpoint documents\npair.collection.uid   === divider.uid_collection\n```\n\n🔴 **Every one of api-cloudrun#662, #663 and #664 is one of those three\nequalities broken by a writer that authored only one side.** #662 moved the\npair and left the divider; #664 re-minted the divider and left the pair;\n#663 lost an override because the *identity* it was keyed on moved. Before\nthis, each writer spelled the coupling itself — the manager minted a uuid\ninline for the divider and built the pair beside it, and the CRMS webhook did\nthe same 120 lines apart.\n\n⚠️ **This is the MINT side. {@link assignDestinationPairUids} is the DERIVE\nside, and they are not interchangeable.** Use this where you are authoring a\ndestination — you know its identity because you are creating it. Use that one\nwhere two arrays arrive from a client and you have to work out which pair\nbelongs to which divider, which is a different question with a different\nfailure mode (it can be undecidable, and reports rather than guesses).\n\n⚠️ **The divider's `uid_delivery`/`uid_collection` are taken from the\nendpoints, never passed separately.** That is what makes the second and third\nequalities unrepresentable rather than checked, and it is why the parameter\nlist has no place to disagree. When those two fields are removed from the\ndivider arm at the contract step, this function is the single place that\nstops emitting them.\n\n`path` comes back `[]` — the caller places the divider in its array and runs\n{@link computeItemPaths}, which is the one author of a path.",
+          "paramTags": [],
           "returnsTag": null
         },
         {

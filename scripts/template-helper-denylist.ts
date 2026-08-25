@@ -103,6 +103,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // already carries — the same trap as `sumDocumentTotals` below, on the
     // structural axis rather than the money one.
     "assignDestinationPairUids",
+    // The mint side of the same join — a WRITER builds a destination pair and
+    // its divider together; a template renders the pair the document already
+    // carries.
+    "buildDestinationPairWithDivider",
     "computeItemPaths", // canonical path computation — write-path only
     "validateItemPaths", // invariant assertion — write-path only
     "validateItemUniqueness", // invariant assertion — write-path only
