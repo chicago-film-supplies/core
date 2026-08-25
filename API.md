@@ -18229,7 +18229,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_org_bootstrapped_from_crms" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "payment_added" | "payment_updated" | "organization_check_failed" | "organization_no_crms_id" | "organization_no_xero_id" | "receive_invoice_hook_failed" | "receive_member_update_failed" | "receive_opportunity_hook_failed" | "receive_quarantine_hook_failed" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_destination_override_dropped"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -20613,6 +20613,38 @@ type ConsolidatedItem = ConsolidatedItemType;
 type Discount = DiscountType;
 ```
 
+### `DroppedInvoiceDestination`
+
+One invoice destination pair that {@link syncOrderDestinationsSelective}
+removed, and WHY.
+
+🔴 **The two reasons are not degrees of the same thing, and the difference is
+api-cloudrun#663.**
+
+- `removed_from_order` — the order genuinely deleted this pair, the invoice
+  had not edited it, so dropping it is the intended behaviour. Reported for
+  completeness, not because anything is wrong.
+- `key_names_no_order_pair` — the order carries no pair at this key AT ALL,
+  so `prev` is `undefined` and **the override check never ran**. The pair is
+  dropped without its payload ever being compared to anything. Measured on
+  prod 2026-08-24: 239 of 989 invoice pairs are in this state, 14 of them
+  carrying a `jurisdiction` that prices their lines.
+
+⚠️ **The same condition means the OPPOSITE thing in the two loops.** In the
+first loop `prev === undefined` falls to *"Overridden (or prev missing) —
+keep invoice version"*; in the second it falls through to the drop. That
+asymmetry is the defect, and it is why this type exists rather than a boolean.
+
+```ts
+interface DroppedInvoiceDestination {
+  uid_order: string;
+  delivery_uid: string | null;
+  collection_uid: string | null;
+  jurisdiction: JurisdictionType | null;
+  reason: "removed_from_order" | "key_names_no_order_pair";
+}
+```
+
 ### `GroupPath`
 
 ```ts
@@ -20771,6 +20803,27 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+}
+```
+
+### `OrderDestinationSyncResult`
+
+What {@link syncOrderDestinationsSelective} returns.
+
+🔴 **`dropped` is a REPORT, and an ignored return is the failure mode.** It
+carries no policy: the drop already happened, and nothing here decides
+differently. It exists so a caller can say out loud that an invoice-side
+jurisdiction was discarded — which until now happened with no error, no log
+and a changed tax rate on an issued invoice.
+
+Same shape and the same hazard as `UnreviewedTaxWarning[]`: dropping the
+value compiles, reads fine, and puts the loss back to being invisible. It is
+pinned on the api-cloudrun side for exactly that reason.
+
+```ts
+interface OrderDestinationSyncResult {
+  destinations: InvoiceDestinationPair[];
+  dropped: DroppedInvoiceDestination[];
 }
 ```
 
@@ -21570,7 +21623,7 @@ them and the list has six.
 The caller re-linearizes paths via {@link computeInvoiceItemPaths} and
 recomputes `totals` via {@link calculateInvoiceTotals} before writing.
 
-### `syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string): InvoiceDestinationPair[]`
+### `syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string): OrderDestinationSyncResult`
 
 Selectively sync one order's destination pairs into an invoice's destinations,
 respecting invoice-side overrides. Per-pair matching is by
@@ -21603,7 +21656,9 @@ an owned-field edit is not a claim that the destination still exists.
 - `currentInvoiceDests` — Current full invoice destinations array (all orders)
 - `uidOrder` — The order uid this sync is scoped to
 
-**Returns** — Updated full invoice destinations array
+**Returns** — `{ destinations, dropped }` — the updated full invoice destinations
+array, and every pair this call removed, each with the reason it went. See
+{@link OrderDestinationSyncResult}; **do not discard `dropped`.**
 
 ### `syncOrderItems(invoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string): InvoiceDocItemType[]`
 

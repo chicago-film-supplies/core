@@ -45,7 +45,7 @@ export {
   validateItemUniqueness,
 } from "./orders.ts";
 
-import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, InvoiceStatusType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   isDividerItemType,
@@ -1850,6 +1850,54 @@ function pairsMatch(a: DocDestinationType, b: DocDestinationType): boolean {
 }
 
 /**
+ * One invoice destination pair that {@link syncOrderDestinationsSelective}
+ * removed, and WHY.
+ *
+ * 🔴 **The two reasons are not degrees of the same thing, and the difference is
+ * api-cloudrun#663.**
+ *
+ * - `removed_from_order` — the order genuinely deleted this pair, the invoice
+ *   had not edited it, so dropping it is the intended behaviour. Reported for
+ *   completeness, not because anything is wrong.
+ * - `key_names_no_order_pair` — the order carries no pair at this key AT ALL,
+ *   so `prev` is `undefined` and **the override check never ran**. The pair is
+ *   dropped without its payload ever being compared to anything. Measured on
+ *   prod 2026-08-24: 239 of 989 invoice pairs are in this state, 14 of them
+ *   carrying a `jurisdiction` that prices their lines.
+ *
+ * ⚠️ **The same condition means the OPPOSITE thing in the two loops.** In the
+ * first loop `prev === undefined` falls to *"Overridden (or prev missing) —
+ * keep invoice version"*; in the second it falls through to the drop. That
+ * asymmetry is the defect, and it is why this type exists rather than a boolean.
+ */
+export interface DroppedInvoiceDestination {
+  uid_order: string;
+  delivery_uid: string | null;
+  collection_uid: string | null;
+  /** The field that prices the pair's lines — the reason a silent drop matters. */
+  jurisdiction: JurisdictionType | null;
+  reason: "removed_from_order" | "key_names_no_order_pair";
+}
+
+/**
+ * What {@link syncOrderDestinationsSelective} returns.
+ *
+ * 🔴 **`dropped` is a REPORT, and an ignored return is the failure mode.** It
+ * carries no policy: the drop already happened, and nothing here decides
+ * differently. It exists so a caller can say out loud that an invoice-side
+ * jurisdiction was discarded — which until now happened with no error, no log
+ * and a changed tax rate on an issued invoice.
+ *
+ * Same shape and the same hazard as `UnreviewedTaxWarning[]`: dropping the
+ * value compiles, reads fine, and puts the loss back to being invisible. It is
+ * pinned on the api-cloudrun side for exactly that reason.
+ */
+export interface OrderDestinationSyncResult {
+  destinations: InvoiceDestinationPair[];
+  dropped: DroppedInvoiceDestination[];
+}
+
+/**
  * Selectively sync one order's destination pairs into an invoice's destinations,
  * respecting invoice-side overrides. Per-pair matching is by
  * `(uid_order, delivery.uid, collection.uid)`; only pairs scoped to `uidOrder`
@@ -1878,14 +1926,16 @@ function pairsMatch(a: DocDestinationType, b: DocDestinationType): boolean {
  * @param newOrderDests - Pairs from the new version of the order
  * @param currentInvoiceDests - Current full invoice destinations array (all orders)
  * @param uidOrder - The order uid this sync is scoped to
- * @returns Updated full invoice destinations array
+ * @returns `{ destinations, dropped }` — the updated full invoice destinations
+ *   array, and every pair this call removed, each with the reason it went. See
+ *   {@link OrderDestinationSyncResult}; **do not discard `dropped`.**
  */
 export function syncOrderDestinationsSelective(
   prevOrderDests: DocDestinationType[],
   newOrderDests: DocDestinationType[],
   currentInvoiceDests: InvoiceDestinationPair[],
   uidOrder: string,
-): InvoiceDestinationPair[] {
+): OrderDestinationSyncResult {
   // Index prev order pairs by key (scoped to uidOrder).
   const prevByKey = new Map<string, DocDestinationType>();
   for (const pair of prevOrderDests) {
@@ -1904,6 +1954,7 @@ export function syncOrderDestinationsSelective(
   }
 
   const synced: InvoiceDestinationPair[] = [];
+  const dropped: DroppedInvoiceDestination[] = [];
   const processedKeys = new Set<string>();
 
   // Walk new order pairs in order.
@@ -1935,11 +1986,23 @@ export function syncOrderDestinationsSelective(
     if (prev && !pairsMatch(prev, inv)) {
       // Overridden — keep even though removed from order.
       synced.push(inv);
+      continue;
     }
-    // Else: synced and removed → drop.
+    // Dropped. ⚠️ Two ways to reach this line and they are NOT the same event:
+    // with a `prev` the order deleted a pair the invoice had not edited, which
+    // is intended; without one the key names no order pair, so `pairsMatch`
+    // never ran and the invoice's payload was never consulted. The second is
+    // api-cloudrun#663, and it is the reason this reports rather than counts.
+    dropped.push({
+      uid_order: uidOrder,
+      delivery_uid: inv.delivery?.uid ?? null,
+      collection_uid: inv.collection?.uid ?? null,
+      jurisdiction: inv.jurisdiction ?? null,
+      reason: prev ? "removed_from_order" : "key_names_no_order_pair",
+    });
   }
 
-  return [...outOfScope, ...synced];
+  return { destinations: [...outOfScope, ...synced], dropped };
 }
 
 /**

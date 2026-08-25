@@ -8655,7 +8655,7 @@
         {
           "kind": "variable",
           "name": "DOMAIN_EVENT_MSGS",
-          "declaration": "const DOMAIN_EVENT_MSGS: \"afterOrderWrite_order_not_found\" | \"store_destination_no_default\" | \"after_order_write_no_changes\" | \"after_product_write_no_changes\" | \"after_product_write_not_found\" | \"after_product_write_skip_create\" | \"update_order_no_changes\" | \"order_docs_skipped\" | \"order_invoice_count_high\" | \"invoice_created\" | \"invoice_org_bootstrapped_from_crms\" | \"invoice_pdf_not_found\" | \"invoice_pdf_skip\" | \"invoice_updated\" | \"payment_added\" | \"payment_updated\" | \"organization_check_failed\" | \"organization_no_crms_id\" | \"organization_no_xero_id\" | \"receive_invoice_hook_failed\" | \"receive_member_update_failed\" | \"receive_opportunity_hook_failed\" | \"receive_quarantine_hook_failed\" | \"item_path_invariant_failed\" | \"order_invoice_mirror_repaired\" | \"cascade_converged\" | \"location_cascade_skip\" | \"location_reversal_skip\" | \"location_quantity_negative\" | \"stock_recalc_item_added\" | \"stock_recalc_item_modified\" | \"stock_recalc_item_removed\" | \"stock_recalc_items\" | \"stock_recalc_status_changed\" | \"stock_oversold\" | \"fulfillment_custom_item_qty_override\" | \"recurrence_horizon_failed\" | \"tax_priced_on_unreviewed_rate\"[];",
+          "declaration": "const DOMAIN_EVENT_MSGS: \"afterOrderWrite_order_not_found\" | \"store_destination_no_default\" | \"after_order_write_no_changes\" | \"after_product_write_no_changes\" | \"after_product_write_not_found\" | \"after_product_write_skip_create\" | \"update_order_no_changes\" | \"order_docs_skipped\" | \"order_invoice_count_high\" | \"invoice_created\" | \"invoice_org_bootstrapped_from_crms\" | \"invoice_pdf_not_found\" | \"invoice_pdf_skip\" | \"invoice_updated\" | \"payment_added\" | \"payment_updated\" | \"organization_check_failed\" | \"organization_no_crms_id\" | \"organization_no_xero_id\" | \"receive_invoice_hook_failed\" | \"receive_member_update_failed\" | \"receive_opportunity_hook_failed\" | \"receive_quarantine_hook_failed\" | \"item_path_invariant_failed\" | \"order_invoice_mirror_repaired\" | \"cascade_converged\" | \"location_cascade_skip\" | \"location_reversal_skip\" | \"location_quantity_negative\" | \"stock_recalc_item_added\" | \"stock_recalc_item_modified\" | \"stock_recalc_item_removed\" | \"stock_recalc_items\" | \"stock_recalc_status_changed\" | \"stock_oversold\" | \"fulfillment_custom_item_qty_override\" | \"recurrence_horizon_failed\" | \"tax_priced_on_unreviewed_rate\" | \"invoice_destination_override_dropped\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
@@ -9852,6 +9852,12 @@
           "doc": ""
         },
         {
+          "kind": "interface",
+          "name": "DroppedInvoiceDestination",
+          "declaration": "interface DroppedInvoiceDestination {\n  uid_order: string;\n  delivery_uid: string | null;\n  collection_uid: string | null;\n  jurisdiction: JurisdictionType | null;\n  reason: \"removed_from_order\" | \"key_names_no_order_pair\";\n}",
+          "doc": "One invoice destination pair that {@link syncOrderDestinationsSelective}\nremoved, and WHY.\n\n🔴 **The two reasons are not degrees of the same thing, and the difference is\napi-cloudrun#663.**\n\n- `removed_from_order` — the order genuinely deleted this pair, the invoice\n  had not edited it, so dropping it is the intended behaviour. Reported for\n  completeness, not because anything is wrong.\n- `key_names_no_order_pair` — the order carries no pair at this key AT ALL,\n  so `prev` is `undefined` and **the override check never ran**. The pair is\n  dropped without its payload ever being compared to anything. Measured on\n  prod 2026-08-24: 239 of 989 invoice pairs are in this state, 14 of them\n  carrying a `jurisdiction` that prices their lines.\n\n⚠️ **The same condition means the OPPOSITE thing in the two loops.** In the\nfirst loop `prev === undefined` falls to *\"Overridden (or prev missing) —\nkeep invoice version\"*; in the second it falls through to the drop. That\nasymmetry is the defect, and it is why this type exists rather than a boolean."
+        },
+        {
           "kind": "typeAlias",
           "name": "GroupPath",
           "declaration": "type GroupPath = GroupPathType;",
@@ -9916,6 +9922,12 @@
           "name": "LineItem",
           "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
+        },
+        {
+          "kind": "interface",
+          "name": "OrderDestinationSyncResult",
+          "declaration": "interface OrderDestinationSyncResult {\n  destinations: InvoiceDestinationPair[];\n  dropped: DroppedInvoiceDestination[];\n}",
+          "doc": "What {@link syncOrderDestinationsSelective} returns.\n\n🔴 **`dropped` is a REPORT, and an ignored return is the failure mode.** It\ncarries no policy: the drop already happened, and nothing here decides\ndifferently. It exists so a caller can say out loud that an invoice-side\njurisdiction was discarded — which until now happened with no error, no log\nand a changed tax rate on an issued invoice.\n\nSame shape and the same hazard as `UnreviewedTaxWarning[]`: dropping the\nvalue compiles, reads fine, and puts the loss back to being invisible. It is\npinned on the api-cloudrun side for exactly that reason."
         },
         {
           "kind": "interface",
@@ -10383,7 +10395,7 @@
         {
           "kind": "function",
           "name": "syncOrderDestinationsSelective",
-          "signature": "syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string): InvoiceDestinationPair[]",
+          "signature": "syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string): OrderDestinationSyncResult",
           "doc": "Selectively sync one order's destination pairs into an invoice's destinations,\nrespecting invoice-side overrides. Per-pair matching is by\n`(uid_order, delivery.uid, collection.uid)`; only pairs scoped to `uidOrder`\nare touched — pairs from other orders pass through unchanged.\n\nPolicy per pair:\n- Not in invoice (new in order) → add, tagged with `uid_order`.\n- In invoice AND prev order matches current invoice → replace with new order\n  pair, **carrying the invoice-owned fields forward**\n  ({@link carryOverridablePairFields}).\n- In invoice BUT prev order ≠ invoice → overridden, keep invoice version.\n- In invoice but not in new order:\n  - prev matches invoice → deleted from order, drop.\n  - prev ≠ invoice → overridden, keep.\n\n⚠️ **\"Matches\" here is {@link pairsMatch}, which no longer sees the\n{@link INVOICE_OVERRIDABLE_PAIR_FIELDS}.** So an override on one of those is\nno longer a whole-pair freeze: the pair keeps syncing everything else and the\nowned field is carried. Two consequences worth stating, because they are the\nbehaviour change: the rest of the pair (address, contact, instructions,\n`customer_collecting`/`returning`) now tracks the order again, and a pair the\nORDER has deleted is dropped even when the invoice set a jurisdiction on it —\nan owned-field edit is not a claim that the destination still exists.",
           "paramTags": [
             {
@@ -10403,7 +10415,7 @@
               "doc": "The order uid this sync is scoped to"
             }
           ],
-          "returnsTag": "Updated full invoice destinations array"
+          "returnsTag": "`{ destinations, dropped }` — the updated full invoice destinations\narray, and every pair this call removed, each with the reason it went. See\n{@link OrderDestinationSyncResult}; **do not discard `dropped`.**"
         },
         {
           "kind": "function",
