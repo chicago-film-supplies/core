@@ -1209,7 +1209,7 @@
         {
           "kind": "interface",
           "name": "DocDestinationType",
-          "declaration": "interface DocDestinationType {\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
+          "declaration": "interface DocDestinationType {\n  uid: string;\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
           "doc": "Document-level destination pair. See `DestinationType` for flag semantics."
         },
         {
@@ -6514,7 +6514,7 @@
         {
           "kind": "interface",
           "name": "DocDestinationType",
-          "declaration": "interface DocDestinationType {\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
+          "declaration": "interface DocDestinationType {\n  uid: string;\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
           "doc": "Document-level destination pair. See `DestinationType` for flag semantics."
         },
         {
@@ -11031,9 +11031,27 @@
         },
         {
           "kind": "interface",
+          "name": "DestinationDividerLike",
+          "declaration": "interface DestinationDividerLike {\n  uid: string;\n  type: string;\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
+          "doc": "The shape {@link assignDestinationPairUids} needs from an items array."
+        },
+        {
+          "kind": "interface",
           "name": "DestinationGroup",
           "declaration": "interface DestinationGroup {\n  uid_delivery: string;\n  uid_collection: string;\n  items: LineItem[];\n  packing_list_delivery: LineItem[];\n  packing_list_collection: LineItem[];\n}",
           "doc": "A destination section with its delivery/collection UIDs and child items."
+        },
+        {
+          "kind": "interface",
+          "name": "DestinationPairLike",
+          "declaration": "interface DestinationPairLike {\n  delivery?: typeLiteral | null;\n  collection?: typeLiteral | null;\n  uid?: string;\n}",
+          "doc": "The shape {@link assignDestinationPairUids} needs from a destinations array."
+        },
+        {
+          "kind": "interface",
+          "name": "DestinationPairUidResult",
+          "declaration": "interface DestinationPairUidResult {\n  destinations: parenthesized[];\n  orphanPairs: number[];\n  orphanDividers: string[];\n}",
+          "doc": "What {@link assignDestinationPairUids} returns."
         },
         {
           "kind": "typeAlias",
@@ -11184,6 +11202,27 @@
           "name": "TransactionFeePricingItem",
           "declaration": "type TransactionFeePricingItem = PricingItem & typeLiteral;",
           "doc": "A {@link PricingItem} that has passed {@link isTransactionFeePricingItem}."
+        },
+        {
+          "kind": "function",
+          "name": "assignDestinationPairUids",
+          "signature": "assignDestinationPairUids(items: readonly DestinationDividerLike[], destinations: readonly P[], _: unknown): DestinationPairUidResult<P>",
+          "doc": "**The ONE author of `destinations[i].uid`** — the join between a document's\ndestination DIVIDERS (`items[]`) and its destination PAIRS\n(`destinations[]`).\n\nUnder the pair-uid model a pair's identity IS its divider's uid\n({@link DocDestinationType.uid}). This function derives that from the join\nthe corpus already carries — `divider.uid_delivery`/`uid_collection` against\n`pair.delivery.uid`/`collection.uid` — so the same rule serves the migration\nand every writer during the expand window, rather than one rule per caller.\n\n⚠️ **This exists because the OLD join is the only evidence available today.**\nOnce an input carries `pair.uid` outright, a writer should take it and call\nthis only as the fallback for a caller that does not yet state one. Deriving\nfrom endpoints forever would keep alive the very coupling the model removes.\n\n## The two rungs, and why there is no third\n\n1. **Endpoint match** — a divider claims the first unclaimed pair whose\n   `(delivery.uid, collection.uid)` equals its own `(uid_delivery,\n   uid_collection)`. Walked in document order, so repeated endpoints pair\n   k-th with k-th.\n2. **The FORCED leftover** — if exactly one divider and exactly one pair are\n   left unclaimed, they are each other's only possible partner, so pairing\n   them is a deduction rather than a guess.\n\n🔴 **There is deliberately no ordinal rung beyond that.** Two-or-more\nleftovers on both sides is precisely the state a drifted multi-destination\ndocument is in, and pairing those by position is what\n`destinationsForItems`'s own comment calls *\"the tempting fix… silently\nwrong the first time a multi-destination document drifted.\"* Those are\nreported through `orphanPairs`/`orphanDividers` for the caller to refuse or\nescalate.\n\nMeasured 2026-08-25, prod and dev identically: **996 of 996 orders, 987 of\n988 divider-bearing invoices and 996 of 996 fulfillments carry exactly one\ndivider and one pair, and every one of them joins on rung 1.** The single\nexception is invoice #2241 (1 divider, 2 pairs), which reaches\n`orphanPairs` and needs a human.",
+          "paramTags": [
+            {
+              "name": "items",
+              "doc": "The document's items array. Non-destination rows are ignored."
+            },
+            {
+              "name": "destinations",
+              "doc": "The document's destination pairs, in stored order."
+            },
+            {
+              "name": "fallbackUid",
+              "doc": "Mints a uid for an orphan pair. Defaults to\n`crypto.randomUUID`; injectable so a migration can be deterministic."
+            }
+          ],
+          "returnsTag": null
         },
         {
           "kind": "function",

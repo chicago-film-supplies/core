@@ -508,6 +508,11 @@ export interface InvoiceDocDestinationType extends DocDestinationType {
 
 export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z.strictObject({
   uid_order: FirestoreId,
+  // The invoice's destination-divider uid — see {@link DocDestinationType.uid}.
+  // The invoice's divider REUSES the order's (`adoptOrderDividerStructure`
+  // keeps a divider the invoice already carries under the same uid), so a pair
+  // projected by `toInvoiceDestinationPair` arrives already keyed correctly.
+  uid: z.uuid(),
   dates: OrderDocDates,
   delivery: DocDestinationEndpoint.meta({ label: "Delivery" }),
   collection: DocDestinationEndpoint.meta({ label: "Collection" }),

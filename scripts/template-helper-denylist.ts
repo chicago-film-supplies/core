@@ -97,6 +97,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "addAllocationToReserved", // netting building block
   ],
   orders: [
+    // The divider ↔ pair join, derived at WRITE time and then stored as
+    // `destinations[i].uid`. A render context reads that field directly; a
+    // template re-deriving it would be recomputing an identity the document
+    // already carries — the same trap as `sumDocumentTotals` below, on the
+    // structural axis rather than the money one.
+    "assignDestinationPairUids",
     "computeItemPaths", // canonical path computation — write-path only
     "validateItemPaths", // invariant assertion — write-path only
     "validateItemUniqueness", // invariant assertion — write-path only

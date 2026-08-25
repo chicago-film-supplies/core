@@ -68,6 +68,11 @@ const validDestination = {
 
 const validDocDestination = {
   ...destBase,
+  // The pair's identity IS its destination divider's uid, and `getInitialValues`
+  // seeds a FORM field rather than a valid one — so a required `z.uuid()` has to
+  // be stated here or every case below fails on the fixture instead of on the
+  // thing it is about.
+  uid: "11111111-1111-4111-8111-111111111111",
   dates: validDocDates,
 };
 
@@ -237,6 +242,7 @@ Deno.test("CreateOrderInput accepts per-pair customer_collecting/returning", () 
 
 Deno.test("DocDestination defaults customer_collecting/returning to false", () => {
   const result = DocDestination.safeParse({
+    uid: "11111111-1111-4111-8111-111111111111",
     dates: validDocDates,
     delivery: { uid: null, address: null, instructions: null, contact: null },
     collection: { uid: null, address: null, instructions: null, contact: null },
@@ -705,6 +711,7 @@ Deno.test("OrderSchema validates destination with contact", () => {
   const doc = {
     ...minimalDoc,
     destinations: [{
+      uid: "11111111-1111-4111-8111-111111111111",
       dates: validDocDates,
       delivery: {
         uid: "testdest100000000000",

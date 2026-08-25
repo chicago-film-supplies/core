@@ -30,6 +30,9 @@ const validDocDates = {
 
 const validDestination = {
   uid_order: "testorder10000000000",
+  // The pair's identity — its destination divider's uid. See the twin in
+  // `tests/order.test.ts`.
+  uid: "11111111-1111-4111-8111-111111111111",
   dates: validDocDates,
   delivery: { uid: null, address: null, instructions: null, contact: null },
   collection: { uid: null, address: null, instructions: null, contact: null },

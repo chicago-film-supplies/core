@@ -2576,6 +2576,7 @@ Document-level destination pair. See `DestinationType` for flag semantics.
 
 ```ts
 interface DocDestinationType {
+  uid: string;
   dates: OrderDocDatesType;
   delivery: DocDestinationEndpointType;
   collection: DocDestinationEndpointType;
@@ -13436,6 +13437,7 @@ Document-level destination pair. See `DestinationType` for flag semantics.
 
 ```ts
 interface DocDestinationType {
+  uid: string;
   dates: OrderDocDatesType;
   delivery: DocDestinationEndpointType;
   collection: DocDestinationEndpointType;
@@ -22906,6 +22908,19 @@ console.log(totals.total); // 100
 type ConsolidatedItem = ConsolidatedItemType;
 ```
 
+### `DestinationDividerLike`
+
+The shape {@link assignDestinationPairUids} needs from an items array.
+
+```ts
+interface DestinationDividerLike {
+  uid: string;
+  type: string;
+  uid_delivery?: string | null;
+  uid_collection?: string | null;
+}
+```
+
 ### `DestinationGroup`
 
 A destination section with its delivery/collection UIDs and child items.
@@ -22917,6 +22932,30 @@ interface DestinationGroup {
   items: LineItem[];
   packing_list_delivery: LineItem[];
   packing_list_collection: LineItem[];
+}
+```
+
+### `DestinationPairLike`
+
+The shape {@link assignDestinationPairUids} needs from a destinations array.
+
+```ts
+interface DestinationPairLike {
+  delivery?: typeLiteral | null;
+  collection?: typeLiteral | null;
+  uid?: string;
+}
+```
+
+### `DestinationPairUidResult`
+
+What {@link assignDestinationPairUids} returns.
+
+```ts
+interface DestinationPairUidResult {
+  destinations: parenthesized[];
+  orphanPairs: number[];
+  orphanDividers: string[];
 }
 ```
 
@@ -23327,6 +23366,54 @@ A {@link PricingItem} that has passed {@link isTransactionFeePricingItem}.
 ```ts
 type TransactionFeePricingItem = PricingItem & typeLiteral;
 ```
+
+### `assignDestinationPairUids(items: readonly DestinationDividerLike[], destinations: readonly P[], _: unknown): DestinationPairUidResult<P>`
+
+**The ONE author of `destinations[i].uid`** — the join between a document's
+destination DIVIDERS (`items[]`) and its destination PAIRS
+(`destinations[]`).
+
+Under the pair-uid model a pair's identity IS its divider's uid
+({@link DocDestinationType.uid}). This function derives that from the join
+the corpus already carries — `divider.uid_delivery`/`uid_collection` against
+`pair.delivery.uid`/`collection.uid` — so the same rule serves the migration
+and every writer during the expand window, rather than one rule per caller.
+
+⚠️ **This exists because the OLD join is the only evidence available today.**
+Once an input carries `pair.uid` outright, a writer should take it and call
+this only as the fallback for a caller that does not yet state one. Deriving
+from endpoints forever would keep alive the very coupling the model removes.
+
+## The two rungs, and why there is no third
+
+1. **Endpoint match** — a divider claims the first unclaimed pair whose
+   `(delivery.uid, collection.uid)` equals its own `(uid_delivery,
+   uid_collection)`. Walked in document order, so repeated endpoints pair
+   k-th with k-th.
+2. **The FORCED leftover** — if exactly one divider and exactly one pair are
+   left unclaimed, they are each other's only possible partner, so pairing
+   them is a deduction rather than a guess.
+
+🔴 **There is deliberately no ordinal rung beyond that.** Two-or-more
+leftovers on both sides is precisely the state a drifted multi-destination
+document is in, and pairing those by position is what
+`destinationsForItems`'s own comment calls *"the tempting fix… silently
+wrong the first time a multi-destination document drifted."* Those are
+reported through `orphanPairs`/`orphanDividers` for the caller to refuse or
+escalate.
+
+Measured 2026-08-25, prod and dev identically: **996 of 996 orders, 987 of
+988 divider-bearing invoices and 996 of 996 fulfillments carry exactly one
+divider and one pair, and every one of them joins on rung 1.** The single
+exception is invoice #2241 (1 divider, 2 pairs), which reaches
+`orphanPairs` and needs a human.
+
+**Parameters**
+
+- `items` — The document's items array. Non-destination rows are ignored.
+- `destinations` — The document's destination pairs, in stored order.
+- `fallbackUid` — Mints a uid for an orphan pair. Defaults to
+`crypto.randomUUID`; injectable so a migration can be deterministic.
 
 ### `buildPackingList(items: LineItem[], consolidated?: boolean, destinationUid?: string): PackingListItem[] | ConsolidatedItem[]`
 

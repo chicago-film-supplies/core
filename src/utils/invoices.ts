@@ -1695,9 +1695,11 @@ export function toInvoiceDestinationPair(
 }
 
 /**
- * The two fields a pair comparison must NOT look at. `uid_order` is the scope
- * key rather than payload; `dates` is snapshotted from the source order, so the
- * invoice never owns it and a change there is not an operator edit.
+ * The three fields a pair comparison must NOT look at. `uid` is the pair's
+ * IDENTITY (its destination divider's uid) and `uid_order` its scope — a key is
+ * what a comparison is addressed BY, never part of what it compares. `dates` is
+ * snapshotted from the source order, so the invoice never owns it and a change
+ * there is not an operator edit.
  *
  * ⚠️ **This set and {@link INVOICE_OVERRIDABLE_PAIR_FIELDS} are both skipped by
  * {@link pairsMatch} and they skip for OPPOSITE reasons. Do not merge them.**
@@ -1709,7 +1711,7 @@ export function toInvoiceDestinationPair(
  * payload field in here is never carried at all, while a non-payload field over
  * there would be carried forward forever from a value nobody chose.
  */
-const PAIR_MATCH_EXCLUDED: ReadonlySet<string> = new Set(["uid_order", "dates"]);
+const PAIR_MATCH_EXCLUDED: ReadonlySet<string> = new Set(["uid", "uid_order", "dates"]);
 
 /**
  * The destination-pair fields an invoice OWNS — compared by nothing and

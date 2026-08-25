@@ -50,6 +50,7 @@ import {
   getTaxTotals,
   getTotalDiscountCents,
   groupByDestination,
+  assignDestinationPairUids,
   isPriceableItem,
   isPreTaxItem,
   isPreTaxPricingItem,
@@ -3147,4 +3148,105 @@ Deno.test("calculateItemPrice: the account does not move the total", () => {
   );
   assertEquals(revenue.total_cents, 11500);
   assertEquals(nonRevenue.total_cents, 11500);
+});
+
+// ── assignDestinationPairUids — the divider ↔ pair join ─────────
+
+const D1 = "aaaaaaaa-1111-4111-8111-111111111111";
+const D2 = "bbbbbbbb-2222-4222-8222-222222222222";
+
+/** A destination divider naming its two endpoint documents. */
+const divider = (uid: string, delivery: string | null, collection: string | null) => ({
+  uid,
+  type: "destination",
+  uid_delivery: delivery,
+  uid_collection: collection,
+});
+
+/** A stored pair naming its two endpoint documents. */
+const pair = (delivery: string | null, collection: string | null) => ({
+  delivery: { uid: delivery },
+  collection: { uid: collection },
+});
+
+Deno.test("assignDestinationPairUids joins on the endpoint uids — the whole live corpus", () => {
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [divider(D1, "destA", "destB")],
+    [pair("destA", "destB")],
+  );
+  assertEquals(destinations[0].uid, D1);
+  assertEquals(orphanPairs, []);
+  assertEquals(orphanDividers, []);
+});
+
+Deno.test("assignDestinationPairUids pairs repeated endpoints k-th with k-th", () => {
+  // Two sections delivering to ONE address — the case that makes `delivery.uid`
+  // unusable as an identity, and the reason this field exists.
+  const { destinations, orphanPairs } = assignDestinationPairUids(
+    [divider(D1, "destA", "destA"), divider(D2, "destA", "destA")],
+    [pair("destA", "destA"), pair("destA", "destA")],
+  );
+  assertEquals(destinations.map((d) => d.uid), [D1, D2]);
+  assertEquals(orphanPairs, []);
+});
+
+Deno.test("assignDestinationPairUids takes the FORCED leftover when a divider was repointed", () => {
+  // The #662 shape: the pair moved and the divider did not (or vice versa). One
+  // divider and one pair are left over, so they are each other's only possible
+  // partner — a deduction, not a guess.
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [divider(D1, "destA", "destA"), divider(D2, "STALE", "STALE")],
+    [pair("destA", "destA"), pair("destB", "destB")],
+  );
+  assertEquals(destinations.map((d) => d.uid), [D1, D2]);
+  assertEquals(orphanPairs, []);
+  assertEquals(orphanDividers, []);
+});
+
+Deno.test("assignDestinationPairUids REFUSES to guess beyond the forced leftover", () => {
+  // Two unmatched on each side. Pairing these by position is exactly the
+  // ordinal rung `destinationsForItems` calls "silently wrong the first time a
+  // multi-destination document drifted", so both sides are reported instead.
+  const { orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [divider(D1, "STALE1", "STALE1"), divider(D2, "STALE2", "STALE2")],
+    [pair("destA", "destA"), pair("destB", "destB")],
+  );
+  assertEquals(orphanPairs, [0, 1]);
+  assertEquals(orphanDividers, [D1, D2]);
+});
+
+Deno.test("assignDestinationPairUids reports a pair no divider names — invoice #2241", () => {
+  // One divider, two pairs: the single prod document that is not mechanical.
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [divider(D1, "destA", "destA")],
+    [pair("destA", "destA"), pair("destB", "destB")],
+  );
+  assertEquals(destinations[0].uid, D1);
+  assertEquals(orphanPairs, [1]);
+  assertEquals(orphanDividers, []);
+  // The orphan still carries a well-formed uid, so the array is writable by a
+  // caller that has decided to proceed. Presence is not a claim of joinedness.
+  assertEquals(typeof destinations[1].uid, "string");
+});
+
+Deno.test("assignDestinationPairUids keeps an already-stated uid on an orphan pair", () => {
+  // Idempotence: re-running the derivation over a document that has already
+  // been backfilled must not churn an orphan's identity to a fresh uuid.
+  const { destinations } = assignDestinationPairUids(
+    [],
+    [{ ...pair("destA", "destA"), uid: D2 }],
+  );
+  assertEquals(destinations[0].uid, D2);
+});
+
+Deno.test("assignDestinationPairUids ignores non-destination items", () => {
+  const { destinations } = assignDestinationPairUids(
+    [
+      { uid: "od-1", type: "order" },
+      divider(D1, "destA", "destB"),
+      { uid: "grp-1", type: "group" },
+    ],
+    [pair("destA", "destB")],
+  );
+  assertEquals(destinations[0].uid, D1);
 });

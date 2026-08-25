@@ -1304,10 +1304,23 @@ Deno.test("component ancestry nests under the full invoice divider prefix", () =
 
 // ── Top-level field sync helpers ────────────────────────────────
 
+/**
+ * A stable, UUID-shaped pair uid derived from the endpoints, so a pair standing
+ * for the same row across `prev`, `next` and the invoice carries one identity —
+ * which is what the stored corpus does (the invoice's destination divider
+ * reuses the order's uid). The VALUE is arbitrary; the stability is the point.
+ */
+function pairUid(deliveryUid: string, collectionUid: string): string {
+  const seed = `${deliveryUid}|${collectionUid}`.padEnd(12, "0").slice(0, 12);
+  const hex = [...seed].map((c) => (c.charCodeAt(0) % 16).toString(16)).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4000-8000-${hex}`;
+}
+
 function makePair(
   deliveryUid: string,
   collectionUid: string,
   overrides: {
+    uid?: string;
     delivery?: { instructions?: string | null };
     collection?: { instructions?: string | null };
     customer_collecting?: boolean;
@@ -1316,6 +1329,7 @@ function makePair(
   } = {},
 ) {
   return {
+    uid: overrides.uid ?? pairUid(deliveryUid, collectionUid),
     dates: NO_DOC_DATES,
     delivery: { uid: deliveryUid, address: null, instructions: overrides.delivery?.instructions ?? null, contact: null },
     collection: { uid: collectionUid, address: null, instructions: overrides.collection?.instructions ?? null, contact: null },

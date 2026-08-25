@@ -273,6 +273,39 @@ export const Destination: z.ZodType<DestinationType> = z.object({
  * Document-level destination pair. See `DestinationType` for flag semantics.
  */
 export interface DocDestinationType {
+  /**
+   * **The pair's identity, and it is the DESTINATION DIVIDER's uid** — the
+   * `items[]` row (`type: "destination"`) whose section delivers here.
+   *
+   * 🔴 **This is the join, and it is the only one.** *"Which destination does
+   * this section of the document deliver to"* used to be stored twice — on the
+   * divider as `uid_delivery`/`uid_collection`, and on this pair as
+   * `delivery.uid`/`collection.uid` — joined by a **value** (a
+   * `destinations/{uid}` document id) rather than by identity. Every one of
+   * api-cloudrun#662 / #663 / #664 is one copy moving without the other.
+   *
+   * ⚠️ **`delivery.uid` cannot be this identity, by construction.**
+   * `findOrCreateDestination` is a **global address-book dedupe** — matched on
+   * `mapbox_ids` → coordinates → exact `address.full`, scoped to neither the
+   * organization nor the document — so two pairs on one document delivering to
+   * one address legitimately SHARE a `delivery.uid`.
+   * `findDuplicateDestinations` (api-cloudrun `lib/firestoreWrite.ts`) has said
+   * so in its own words for as long as it has existed: *"a destination has no
+   * stable single-field identity."*
+   *
+   * ⚠️ **An address correction is now ordinary payload.** Repointing
+   * `delivery.uid` moves the ENDPOINT, not the row — which is what lets
+   * `pairsMatch` see the difference and `carryOverridablePairFields` run on the
+   * population it was written for (api-cloudrun#663: 239 of 989 prod invoice
+   * pairs named no order pair at all, 14 carrying a `jurisdiction` that prices
+   * their lines).
+   *
+   * ⚠️ **NOT a `destinations/{uid}` document id.** It is an `items[].uid` — a
+   * UUID, and the same value `path[k]` already carries for that divider. All
+   * 2,980 prod destination dividers are UUID-shaped (measured 2026-08-25,
+   * orders + invoices + fulfillments, dev identical).
+   */
+  uid: string;
   dates: OrderDocDatesType;
   delivery: DocDestinationEndpointType;
   collection: DocDestinationEndpointType;
@@ -308,6 +341,10 @@ export interface DocDestinationType {
 
 /** Zod schema for a document-level destination pair. */
 export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
+  // The destination divider's uid — see {@link DocDestinationType.uid}. Typed
+  // `z.uuid()` to match `DestinationDividerArm.uid` exactly, because it IS that
+  // value; a looser type here would admit a pair no divider can name.
+  uid: z.uuid(),
   dates: OrderDocDates,
   // Two keys, ONE schema instance — and two headings, because `.meta()` clones.
   // `DocDestinationEndpoint.meta({ label: "Delivery" }) !== DocDestinationEndpoint`,
