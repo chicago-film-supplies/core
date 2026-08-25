@@ -20640,6 +20640,7 @@ asymmetry is the defect, and it is why this type exists rather than a boolean.
 ```ts
 interface DroppedInvoiceDestination {
   uid_order: string;
+  uid: string | null;
   delivery_uid: string | null;
   collection_uid: string | null;
   jurisdiction: JurisdictionType | null;
@@ -21662,8 +21663,10 @@ recomputes `totals` via {@link calculateInvoiceTotals} before writing.
 
 Selectively sync one order's destination pairs into an invoice's destinations,
 respecting invoice-side overrides. Per-pair matching is by
-`(uid_order, delivery.uid, collection.uid)`; only pairs scoped to `uidOrder`
-are touched — pairs from other orders pass through unchanged.
+`(uid_order, pair.uid)` — see {@link destPairKey}, and note that it was the
+ENDPOINT uids until api-cloudrun#663, where the key itself moved whenever an
+address was corrected. Only pairs scoped to `uidOrder` are touched — pairs
+from other orders pass through unchanged.
 
 Policy per pair:
 - Not in invoice (new in order) → add, tagged with `uid_order`.
@@ -22927,6 +22930,7 @@ A destination section with its delivery/collection UIDs and child items.
 
 ```ts
 interface DestinationGroup {
+  uid: string | null;
   uid_delivery: string;
   uid_collection: string;
   items: LineItem[];
@@ -23499,7 +23503,7 @@ stops emitting them.
 `path` comes back `[]` — the caller places the divider in its array and runs
 {@link computeItemPaths}, which is the one author of a path.
 
-### `buildPackingList(items: LineItem[], consolidated?: boolean, destinationUid?: string): PackingListItem[] | ConsolidatedItem[]`
+### `buildPackingList(items: LineItem[], consolidated?: boolean, destinationDividerUid?: string): PackingListItem[] | ConsolidatedItem[]`
 
 Build a packing list from order line items.
 
@@ -23507,7 +23511,18 @@ When `consolidated` is true, deduplicates by product UID and sums quantities
 (delegates to {@link consolidateItems}). When false (default), returns
 expanded entries with `group_name` preserved.
 
-Pass `destinationUid` to scope to a single destination; omit for the full order.
+Pass `destinationDividerUid` to scope to a single destination section; omit
+for the full order.
+
+⚠️ **That parameter is the DIVIDER's uid, and it used to be a
+`destinations/{uid}` endpoint id** — matched against the divider's
+`uid_delivery` *or* its `uid_collection`, so a document whose delivery and
+collection legs differ was reachable under two different values and two
+sections delivering to one address were **both** returned as one list. The
+divider's uid is the section's identity and matches exactly one section.
+(No caller passed the old argument: the parameter is reached only through the
+`it.orders.buildPackingList` template helper, and no template calls it —
+measured across the `templates` repo, 2026-08-25.)
 
 Excludes structural rows, surcharges, transaction fees, and services.
 
@@ -23770,10 +23785,17 @@ slips through.
 ### `getGroupPath(items: LineItem[], index: number): GroupPath`
 
 Walk backwards from `index` to determine which destination and group
-an item belongs to. `destination` is the destination's `uid_delivery`;
-`group` is the group item's `uid` (not its display name) — keying on
-uid lets group display names be edited without losing collapse state
-or risking collisions between two groups that happen to share a name.
+an item belongs to. Both are the DIVIDER's own `uid` (not its display name,
+and not the endpoint it ships to) — keying on uid lets display names be
+edited without losing collapse state, and stops two sections that happen to
+deliver to one address from sharing a collapse key.
+
+⚠️ **`destination` was the divider's `uid_delivery` until the pair re-key**
+(api-cloudrun#662/#663/#664). Two dividers legitimately share one
+`destinations/{uid}`, so that key collapsed both sections together; and the
+field itself is deleted from the divider at the end of that campaign. This
+value is only ever a UI collapse key, so nothing durable was keyed on the
+old spelling.
 
 ### `getGroupTotals(items: LineItem[], index: number, taxes: Tax[]): GroupTotalsResult`
 
@@ -23835,9 +23857,37 @@ itself now that the price no longer carries a nested `{uid, name}`: a line
 item's `uid` IS its product uid, which is exactly what the old
 `price.uid` held.
 
-### `groupByDestination(items: LineItem[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]`
+### `groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]`
 
-Slice the flat items array into destination sections.
+Slice the flat items array into destination sections, each carrying the
+endpoints its PAIR names.
+
+⚠️ **`destinations` is a required parameter and used to be absent, because
+the endpoints used to be read off the divider itself** — the second copy that
+api-cloudrun#662/#663/#664 are all instances of. The divider now carries only
+its `uid`; the endpoints live on the pair that uid addresses, and step 11 of
+`api-cloudrun/.claude/plans/destination-pair-identity.md` deletes
+`uid_delivery`/`uid_collection` from the divider outright. Reading them here
+again would re-open the class.
+
+✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is
+a `destinations/{uid}` document id and it is the third segment of every
+booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
+moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
+the same string. There is no `bookings` migration in this change, and there
+must not be: `webhooks/opportunity.ts` records 552 duplicate prod bookings
+from a destination uid moving under that id.
+
+The fallbacks answer for a section whose pair is missing or names no
+endpoint — a divider-less items array, and a genuinely destinationless CRMS
+order (where the caller passes `""` and skips the group downstream).
+
+**Parameters**
+
+- `items` — The document's flat items array
+- `destinations` — The document's destination pairs, joined by `uid`
+- `fallbackDeliveryUid` — Endpoint for a section whose pair supplies none
+- `fallbackCollectionUid` — Defaults to `fallbackDeliveryUid`
 
 ### `isPreTaxItem(item: LineItem): item is PreTaxLineItem`
 
@@ -24431,6 +24481,7 @@ schema.
 
 ```ts
 interface TaxDestination {
+  uid?: string | null;
   jurisdiction?: JurisdictionType | null;
   delivery?: typeLiteral | null;
 }
@@ -24726,25 +24777,41 @@ hierarchy is `[destination, group]` and an invoice's is
 `[order, destination, group]`, so anything keyed on a depth would find the
 destination on one document and the ORDER divider on the other.
 
-Then the divider names its endpoint (`uid_delivery`) and the entry answers
-for it (`delivery.uid`) — the same key the CRMS carry-forwards use, and
-deliberately not the array index, which moves when CRMS reorders.
+Then the divider IS the pair's identity: `pair.uid === divider.uid`, one
+lookup, no second copy to disagree with. Deliberately not the array index,
+which moves when CRMS reorders, and no longer the endpoint uid, which is a
+`destinations/{uid}` document id and therefore *shared* by two pairs
+delivering to one address (api-cloudrun#662/#663/#664).
 
-## Three fallbacks, each measured rather than assumed
+## One join and one deduction — measured, not assumed
 
-Measured over the whole prod corpus (18,958 priceable lines,
-`api-cloudrun/scripts/audit-tax-key.ts`, 2026-08-20):
+Measured over the whole prod corpus (19,098 priceable lines,
+`api-cloudrun/scripts/audit-tax-key.ts`, 2026-08-25; dev identical):
 
 | rung | lines | when it fires |
 |---|---|---|
-| `uid_delivery` ↔ `delivery.uid` | 18,755 | the ordinary case |
-| divider index among dividers | 198 | a divider naming no endpoint |
-| the single entry | 5 | a divider-less items array |
+| `divider.uid` ↔ `pair.uid` | 19,008 | the ordinary case, and now the only join |
+| the single entry | 2 | a divider-less items array |
 | `null` — no destinations at all | 88 | 31 CRMS invoices with no source order |
+| UNREACHABLE | 0 | — |
 
 `null` is a DEFINED answer, not a failure: a document with no destination
-sources entirely to the origin. Nothing in the corpus reaches a fifth case,
-which is why there is no guessing rung.
+sources entirely to the origin.
+
+🔴 **The divider-INDEX rung is deleted, and it must not come back.** It fired
+on 198 lines when this table was first written and on **0** once the #662
+repair landed, so it now costs nothing and only ever bought a guess: it is
+the rung this function's own earlier comment called *"the tempting fix…
+silently wrong the first time a multi-destination document drifted."* Under
+the uid join a divider that names no pair is a **defect to report**, not a
+position to guess from — Phase 4 of
+`api-cloudrun/.claude/plans/destination-pair-identity.md` refuses it at
+write.
+
+⚠️ **The single-entry rung is KEPT, and it is a deduction rather than a
+guess** — the same distinction `assignDestinationPairUids`' rung 2 draws.
+With exactly one destination on the document there is no other answer to
+pick, so nothing is being inferred from position.
 
 ### `findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null`
 

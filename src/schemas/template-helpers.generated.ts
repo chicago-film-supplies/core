@@ -101,7 +101,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
 
   ],
   "orders": [
-    { name: "buildPackingList", expr: "it.orders.buildPackingList(items, consolidated, destinationUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
+    { name: "buildPackingList", expr: "it.orders.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
     { name: "calculateItemDiscountCents", expr: "it.orders.calculateItemDiscountCents(item)", desc: "Calculate the discount amount, in cents, for a single line item.", returns: "number" },
     { name: "calculateItemPrice", expr: "it.orders.calculateItemPrice(item, taxes)", desc: "Calculate the complete price for a single line item. Runs the full pipeline: subtotal → discount → taxes → total.", returns: "typeLiteral" },
     { name: "calculateItemSubtotal", expr: "it.orders.calculateItemSubtotal(item)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },
@@ -114,12 +114,12 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "getDestinationPairItemName", expr: "it.orders.getDestinationPairItemName(destination, index)", desc: "Build a display name for a destination pair from its delivery/collection addresses. Falls back to \"Destination N\" when no addresses are present.", returns: "string" },
     { name: "getDestinationsLegend", expr: "it.orders.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "getGroupItems", expr: "it.orders.getGroupItems(items, index)", desc: "Collect the child product items belonging to a collapsible section.", returns: "LineItem[]" },
-    { name: "getGroupPath", expr: "it.orders.getGroupPath(items, index)", desc: "Walk backwards from `index` to determine which destination and group an item belongs to. `destination` is the destination's `uid_delivery`; `group` is the group item's `uid` (not its display name) — keying on uid lets group display names be edited without losing collapse state or risking collisions between two groups that happen to share a name.", returns: "GroupPath" },
+    { name: "getGroupPath", expr: "it.orders.getGroupPath(items, index)", desc: "Walk backwards from `index` to determine which destination and group an item belongs to. Both are the DIVIDER's own `uid` (not its display name, and not the endpoint it ships to) — keying on uid lets display names be edited without losing collapse state, and stops two sections that happen to deliver to one address from sharing a collapse key.", returns: "GroupPath" },
     { name: "getGroupTotals", expr: "it.orders.getGroupTotals(items, index, taxes)", desc: "Get count and pricing totals for a collapsed section.", returns: "GroupTotalsResult" },
     { name: "getTaxTotals", expr: "it.orders.getTaxTotals(items, taxes)", desc: "Aggregate tax PriceModifiers by name across all pre-tax items.", returns: "PriceModifier[]" },
     { name: "getTotalDiscountCents", expr: "it.orders.getTotalDiscountCents(items)", desc: "Calculate the total discount amount, in cents, across all pre-tax items.", returns: "number" },
     { name: "getTransactionFeeTotals", expr: "it.orders.getTransactionFeeTotals(items)", desc: "Aggregate priced fee lines into the document-level `transaction_fees` rollup.", returns: "PriceModifier[]" },
-    { name: "groupByDestination", expr: "it.orders.groupByDestination(items, fallbackDeliveryUid, fallbackCollectionUid)", desc: "Slice the flat items array into destination sections.", returns: "DestinationGroup[]" },
+    { name: "groupByDestination", expr: "it.orders.groupByDestination(items, destinations, fallbackDeliveryUid, fallbackCollectionUid)", desc: "Slice the flat items array into destination sections, each carrying the endpoints its PAIR names.", returns: "DestinationGroup[]" },
     { name: "isPreTaxItem", expr: "it.orders.isPreTaxItem(item)", desc: "Determine whether a line item participates in subtotal/discount/tax calculations. Standalone predicate (not composed) because TS doesn't support negated predicates.", returns: "item is PreTaxLineItem" },
     { name: "isPriceableItem", expr: "it.orders.isPriceableItem(item)", desc: "Determine whether a line item is priceable (has a price object, not a structural item).", returns: "item is PriceableLineItem" },
     { name: "isSameAsDeliveryDates", expr: "it.orders.isSameAsDeliveryDates(dates)", desc: "Whether charge dates match the delivery/collection dates (i.e. no custom charge period has been set).", returns: "boolean" },

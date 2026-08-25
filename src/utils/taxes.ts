@@ -721,10 +721,29 @@ export function deriveOrderTaxAsOf(
  * schema.
  */
 export interface TaxDestination {
+  /**
+   * **The pair's identity: its destination DIVIDER's uid**, and the only key
+   * {@link destinationsForItems} joins on.
+   *
+   * ⚠️ Not a `destinations/{uid}` document id — that is `delivery.uid` below,
+   * and the two answer different questions. This one says *which row of this
+   * document*; that one says *which address in the shared address book*. They
+   * were one field until api-cloudrun#662/#663/#664, and every one of those
+   * incidents is the second job leaking into the first.
+   *
+   * Optional here and required on the stored schemas (`DocDestinationType`,
+   * `InvoiceDocDestinationType`) for the reason the interface's own docblock
+   * gives: the manager calls this against a mid-edit order whose destinations
+   * are not yet valid documents.
+   */
+  uid?: string | null;
   /** Level 1 — the document's own answer for this destination. */
   jurisdiction?: JurisdictionType | null;
   delivery?: {
-    /** The `destinations/{uid}` this entry ships to — the key a divider names. */
+    /**
+     * The `destinations/{uid}` this entry ships to — the shared address book
+     * row. **Payload, not identity**; see {@link TaxDestination.uid}.
+     */
     uid?: string | null;
     address?: { city?: string; region?: string } | null;
   } | null;
@@ -795,25 +814,41 @@ export interface DocumentTaxContext {
  * `[order, destination, group]`, so anything keyed on a depth would find the
  * destination on one document and the ORDER divider on the other.
  *
- * Then the divider names its endpoint (`uid_delivery`) and the entry answers
- * for it (`delivery.uid`) — the same key the CRMS carry-forwards use, and
- * deliberately not the array index, which moves when CRMS reorders.
+ * Then the divider IS the pair's identity: `pair.uid === divider.uid`, one
+ * lookup, no second copy to disagree with. Deliberately not the array index,
+ * which moves when CRMS reorders, and no longer the endpoint uid, which is a
+ * `destinations/{uid}` document id and therefore *shared* by two pairs
+ * delivering to one address (api-cloudrun#662/#663/#664).
  *
- * ## Three fallbacks, each measured rather than assumed
+ * ## One join and one deduction — measured, not assumed
  *
- * Measured over the whole prod corpus (18,958 priceable lines,
- * `api-cloudrun/scripts/audit-tax-key.ts`, 2026-08-20):
+ * Measured over the whole prod corpus (19,098 priceable lines,
+ * `api-cloudrun/scripts/audit-tax-key.ts`, 2026-08-25; dev identical):
  *
  * | rung | lines | when it fires |
  * |---|---|---|
- * | `uid_delivery` ↔ `delivery.uid` | 18,755 | the ordinary case |
- * | divider index among dividers | 198 | a divider naming no endpoint |
- * | the single entry | 5 | a divider-less items array |
+ * | `divider.uid` ↔ `pair.uid` | 19,008 | the ordinary case, and now the only join |
+ * | the single entry | 2 | a divider-less items array |
  * | `null` — no destinations at all | 88 | 31 CRMS invoices with no source order |
+ * | UNREACHABLE | 0 | — |
  *
  * `null` is a DEFINED answer, not a failure: a document with no destination
- * sources entirely to the origin. Nothing in the corpus reaches a fifth case,
- * which is why there is no guessing rung.
+ * sources entirely to the origin.
+ *
+ * 🔴 **The divider-INDEX rung is deleted, and it must not come back.** It fired
+ * on 198 lines when this table was first written and on **0** once the #662
+ * repair landed, so it now costs nothing and only ever bought a guess: it is
+ * the rung this function's own earlier comment called *"the tempting fix…
+ * silently wrong the first time a multi-destination document drifted."* Under
+ * the uid join a divider that names no pair is a **defect to report**, not a
+ * position to guess from — Phase 4 of
+ * `api-cloudrun/.claude/plans/destination-pair-identity.md` refuses it at
+ * write.
+ *
+ * ⚠️ **The single-entry rung is KEPT, and it is a deduction rather than a
+ * guess** — the same distinction `assignDestinationPairUids`' rung 2 draws.
+ * With exactly one destination on the document there is no other answer to
+ * pick, so nothing is being inferred from position.
  */
 export function destinationsForItems(
   items: readonly LineItem[],
@@ -823,7 +858,6 @@ export function destinationsForItems(
   for (const item of items) {
     if (item.path?.length) byPath.set(item.path.join("/"), item);
   }
-  const dividers = items.filter((i) => i.type === "destination");
 
   return items.map((item) => {
     if (destinations.length === 0) return null;
@@ -838,13 +872,9 @@ export function destinationsForItems(
       }
     }
 
-    if (divider) {
-      if (divider.uid_delivery) {
-        const byUid = destinations.find((d) => d?.delivery?.uid === divider.uid_delivery);
-        if (byUid) return byUid;
-      }
-      const index = dividers.indexOf(divider);
-      if (index >= 0 && index < destinations.length) return destinations[index] ?? null;
+    if (divider?.uid) {
+      const byUid = destinations.find((d) => d?.uid === divider.uid);
+      if (byUid) return byUid;
     }
 
     return destinations.length === 1 ? destinations[0] ?? null : null;

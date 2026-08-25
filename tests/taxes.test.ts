@@ -154,13 +154,25 @@ const px = (it: LineItem) =>
 const pxFull = (it: LineItem) => it.price as unknown as Record<string, unknown>;
 
 /** A document destination delivering to `city`, `region`. */
+/**
+ * ⚠ `uid` is the PAIR's identity — its destination divider's uid, and the only
+ * key `destinationsForItems` joins on. `delivery_uid` is the separate
+ * `destinations/{uid}` address-book row. Every fixture below keeps the two
+ * spelled differently ("d1" vs "dest-chi") on purpose: they were one value
+ * until api-cloudrun#663, so a fixture that reuses one for both passes under
+ * either join and cannot see the re-key at all.
+ */
 const at = (
   city: string | undefined,
   region = "IL",
-  extra: Partial<TaxDestination> & { uid?: string } = {},
+  extra: Partial<TaxDestination> & { uid?: string; delivery_uid?: string } = {},
 ): TaxDestination => ({
+  uid: extra.uid ?? null,
   jurisdiction: extra.jurisdiction,
-  delivery: { uid: extra.uid ?? null, address: city === undefined ? null : { city, region } },
+  delivery: {
+    uid: extra.delivery_uid ?? null,
+    address: city === undefined ? null : { city, region },
+  },
 });
 
 /** The context, with everything defaulted to "an ordinary Chicago document". */
@@ -193,14 +205,17 @@ Deno.test("🔴 a MIXED document prices each destination's lines differently", (
   // per document, so an order delivering to Chicago and Frankfort could only be
   // billed at one of them. Nothing about the old shape could express this.
   const items = [
-    { ...makeItem(), uid: "d1", type: "destination", uid_delivery: "dest-chi", path: ["d1"] },
+    { ...makeItem(), uid: "d1", type: "destination", path: ["d1"] },
     { ...makeItem(), uid: "l1", path: ["d1", "l1"] },
-    { ...makeItem(), uid: "d2", type: "destination", uid_delivery: "dest-frk", path: ["d2"] },
+    { ...makeItem(), uid: "d2", type: "destination", path: ["d2"] },
     { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
   ] as LineItem[];
 
   materializeDocumentTax(items, ctx({
-    destinations: [at("Chicago", "IL", { uid: "dest-chi" }), at("Frankfort", "IL", { uid: "dest-frk" })],
+    destinations: [
+      at("Chicago", "IL", { uid: "d1", delivery_uid: "dest-chi" }),
+      at("Frankfort", "IL", { uid: "d2", delivery_uid: "dest-frk" }),
+    ],
   }));
 
   assertEquals(px(items[1]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
@@ -212,16 +227,16 @@ Deno.test("🔴 …and a MIXED Illinois/out-of-state document taxes only the Ill
   // all-or-nothing by construction, so a mixed order taxed its California
   // lines — under-collecting was avoided by over-collecting.
   const items = [
-    { ...makeItem(), uid: "d1", type: "destination", uid_delivery: "dest-chi", path: ["d1"] },
+    { ...makeItem(), uid: "d1", type: "destination", path: ["d1"] },
     { ...makeItem(), uid: "l1", path: ["d1", "l1"] },
-    { ...makeItem(), uid: "d2", type: "destination", uid_delivery: "dest-ca", path: ["d2"] },
+    { ...makeItem(), uid: "d2", type: "destination", path: ["d2"] },
     { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
   ] as LineItem[];
 
   materializeDocumentTax(items, ctx({
     destinations: [
-      at("Chicago", "IL", { uid: "dest-chi" }),
-      at("Los Angeles", "CA", { uid: "dest-ca" }),
+      at("Chicago", "IL", { uid: "d1", delivery_uid: "dest-chi" }),
+      at("Los Angeles", "CA", { uid: "d2", delivery_uid: "dest-ca" }),
     ],
   }));
 
@@ -499,21 +514,59 @@ Deno.test("a ref naming a uid the catalog does not hold is DROPPED, not carried"
 
 // ── Reaching the destination ─────────────────────────────────────
 
-Deno.test("destinationsForItems: by uid_delivery, then by index, then the single entry", () => {
+Deno.test("destinationsForItems: the join is the divider uid, and pair ORDER is irrelevant", () => {
   const items = [
-    { ...makeItem(), uid: "d1", type: "destination", uid_delivery: "dest-frk", path: ["d1"] },
+    { ...makeItem(), uid: "d1", type: "destination", path: ["d1"] },
     { ...makeItem(), uid: "l1", path: ["d1", "l1"] },
-    // A divider naming NO endpoint falls back to its index among dividers.
-    { ...makeItem(), uid: "d2", type: "destination", uid_delivery: null, path: ["d2"] },
+    { ...makeItem(), uid: "d2", type: "destination", path: ["d2"] },
+    { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
+  ] as LineItem[];
+  // Stored in the OPPOSITE order to the dividers — the state the deleted
+  // divider-index rung got silently wrong.
+  const destinations = [
+    at("Rantoul", "IL", { uid: "d2", delivery_uid: "dest-rnt" }),
+    at("Frankfort", "IL", { uid: "d1", delivery_uid: "dest-frk" }),
+  ];
+  const resolved = destinationsForItems(items, destinations);
+  assertEquals(resolved[1], destinations[1]);
+  assertEquals(resolved[3], destinations[0]);
+});
+
+Deno.test("destinationsForItems: two sections sharing ONE address stay distinct", () => {
+  // `findOrCreateDestination` is a global address-book dedupe, so a
+  // repeat-location order legitimately gives two pairs one `delivery.uid`.
+  // Under the endpoint join both lines resolved to whichever pair came first,
+  // and a per-destination jurisdiction on the second was unreachable.
+  const items = [
+    { ...makeItem(), uid: "d1", type: "destination", path: ["d1"] },
+    { ...makeItem(), uid: "l1", path: ["d1", "l1"] },
+    { ...makeItem(), uid: "d2", type: "destination", path: ["d2"] },
     { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
   ] as LineItem[];
   const destinations = [
-    at("Frankfort", "IL", { uid: "dest-frk" }),
-    at("Rantoul", "IL", { uid: "dest-rnt" }),
+    at("Chicago", "IL", { uid: "d1", delivery_uid: "shared" }),
+    at("Chicago", "IL", { uid: "d2", delivery_uid: "shared", jurisdiction: "frankfort" }),
   ];
   const resolved = destinationsForItems(items, destinations);
   assertEquals(resolved[1], destinations[0]);
   assertEquals(resolved[3], destinations[1]);
+  assertEquals(resolved[3]?.jurisdiction, "frankfort");
+});
+
+Deno.test("destinationsForItems: a divider naming NO pair does NOT fall back to its index", () => {
+  // 🔴 The deleted rung. Two pairs, one divider that matches neither: the
+  // ordinal answer would be `destinations[0]` — a real jurisdiction, silently
+  // attached to lines nothing says belong to it. `null` (source to the origin)
+  // is the honest answer, and Phase 4 refuses the document at write.
+  const items = [
+    { ...makeItem(), uid: "orphan", type: "destination", path: ["orphan"] },
+    { ...makeItem(), uid: "l1", path: ["orphan", "l1"] },
+  ] as LineItem[];
+  const destinations = [
+    at("Frankfort", "IL", { uid: "d1", delivery_uid: "dest-frk" }),
+    at("Rantoul", "IL", { uid: "d2", delivery_uid: "dest-rnt" }),
+  ];
+  assertEquals(destinationsForItems(items, destinations)[1], null);
 });
 
 Deno.test("destinationsForItems: a divider-less items array takes the single entry", () => {
@@ -538,11 +591,11 @@ Deno.test("destinationsForItems: the walk is DEPTH-agnostic — invoices nest on
   // destination on one document and the ORDER divider on the other.
   const items = [
     { ...makeItem(), uid: "o1", type: "order", path: ["o1"] },
-    { ...makeItem(), uid: "d1", type: "destination", uid_delivery: "dest-frk", path: ["o1", "d1"] },
+    { ...makeItem(), uid: "d1", type: "destination", path: ["o1", "d1"] },
     { ...makeItem(), uid: "g1", type: "group", path: ["o1", "d1", "g1"] },
     { ...makeItem(), uid: "l1", path: ["o1", "d1", "g1", "l1"] },
   ] as LineItem[];
-  const destinations = [at("Frankfort", "IL", { uid: "dest-frk" })];
+  const destinations = [at("Frankfort", "IL", { uid: "d1", delivery_uid: "dest-frk" })];
   assertEquals(destinationsForItems(items, destinations)[3], destinations[0]);
 });
 

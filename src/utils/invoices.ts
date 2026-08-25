@@ -1649,13 +1649,31 @@ export function computeInvoiceSyncStatus(
 export type InvoiceDestinationPair = InvoiceDocDestinationType;
 
 /**
- * Stable key for matching a destination pair by its endpoint uids.
- * Each endpoint's `uid` references a record in the destinations collection;
- * the (delivery.uid, collection.uid) tuple uniquely identifies a pair
- * within a single order.
+ * Stable key for matching a destination pair: **the order it is scoped to, and
+ * the pair's own identity** — its destination divider's uid.
+ *
+ * `uid_order` is still part of it because an invoice can bill several orders
+ * and each brings its own dividers; the pair uid alone is unique only within
+ * one order's scope.
+ *
+ * 🔴 **It was `(uid_order, delivery.uid, collection.uid)` and that key MOVED —
+ * which is the whole of api-cloudrun#663.** Those are `destinations/{uid}`
+ * document ids, so correcting an address on one side re-pointed them, the key
+ * stopped naming the same row, and `pairsMatch` never ran: the invoice's
+ * payload was never consulted, and an operator's jurisdiction override was
+ * dropped with no error and a changed tax rate on an issued invoice.
+ *
+ * Measured 2026-08-25 across all 988 prod invoice pairs (dev identical): all
+ * **988 join on this key, 750 on the old one, and 0 join on the old key
+ * alone** — so the re-key reaches 238 pairs the endpoint key could not, and
+ * regresses none.
+ *
+ * ⚠️ The invoice's divider REUSES the order's ({@link adoptOrderDividerStructure}
+ * keeps a divider the invoice already carries under the same uid), which is what
+ * makes one key address both documents' idea of the same row.
  */
 function destPairKey(uidOrder: string, pair: DocDestinationType): string {
-  return [uidOrder, pair.delivery?.uid ?? "", pair.collection?.uid ?? ""].join("/");
+  return [uidOrder, pair.uid ?? ""].join("/");
 }
 
 /** Stable key for an invoice-side pair (uses its own uid_order). */
@@ -1884,6 +1902,13 @@ function pairsMatch(a: DocDestinationType, b: DocDestinationType): boolean {
  */
 export interface DroppedInvoiceDestination {
   uid_order: string;
+  /**
+   * The pair's identity — its destination divider's uid, and the key the sync
+   * addressed it by. Reported alongside the endpoints rather than instead of
+   * them: the uid is what an operator (or a repair) uses to FIND the row, the
+   * endpoints are what tells a human WHERE it was going.
+   */
+  uid: string | null;
   delivery_uid: string | null;
   collection_uid: string | null;
   /** The field that prices the pair's lines — the reason a silent drop matters. */
@@ -1912,8 +1937,10 @@ export interface OrderDestinationSyncResult {
 /**
  * Selectively sync one order's destination pairs into an invoice's destinations,
  * respecting invoice-side overrides. Per-pair matching is by
- * `(uid_order, delivery.uid, collection.uid)`; only pairs scoped to `uidOrder`
- * are touched — pairs from other orders pass through unchanged.
+ * `(uid_order, pair.uid)` — see {@link destPairKey}, and note that it was the
+ * ENDPOINT uids until api-cloudrun#663, where the key itself moved whenever an
+ * address was corrected. Only pairs scoped to `uidOrder` are touched — pairs
+ * from other orders pass through unchanged.
  *
  * Policy per pair:
  * - Not in invoice (new in order) → add, tagged with `uid_order`.
@@ -2007,6 +2034,7 @@ export function syncOrderDestinationsSelective(
     // api-cloudrun#663, and it is the reason this reports rather than counts.
     dropped.push({
       uid_order: uidOrder,
+      uid: inv.uid ?? null,
       delivery_uid: inv.delivery?.uid ?? null,
       collection_uid: inv.collection?.uid ?? null,
       jurisdiction: inv.jurisdiction ?? null,

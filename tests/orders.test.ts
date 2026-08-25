@@ -1129,7 +1129,9 @@ Deno.test("getGroupPath finds destination and group", () => {
     makeItem({ uid: "item-1", path: ["d1", "g1", "item-1"] }),
   ];
   const result = getGroupPath(items, 2);
-  assertEquals(result.destination, "dest-1");
+  // The DIVIDER's uid, not its `uid_delivery` — see the docblock. The fixture
+  // deliberately keeps the two distinct so this assertion can tell them apart.
+  assertEquals(result.destination, "d1");
   assertEquals(result.group, "g1");
   assertEquals(result.product, null); // parent is group (structural), not a product
 });
@@ -1141,7 +1143,7 @@ Deno.test("getGroupPath returns product parent for component", () => {
     makeItem({ uid: "child-1", path: ["d1", "parent-1", "child-1"] }),
   ];
   const result = getGroupPath(items, 2);
-  assertEquals(result.destination, "dest-1");
+  assertEquals(result.destination, "d1");
   assertEquals(result.product, "parent-1");
 });
 
@@ -1273,35 +1275,103 @@ Deno.test("consolidateItems unit_price matches exact rational arithmetic over 20
 
 // ── groupByDestination ───────────────────────────────────────────
 
-Deno.test("groupByDestination splits by destination dividers", () => {
+// ⚠ Every fixture below keeps the DIVIDER uid and the ENDPOINT uid distinct
+// ("d1" vs "dest-A"). The pre-#663 fixtures used one value for both, so they
+// passed under the endpoint join and the uid join alike and could not have
+// caught the re-key going the wrong way. A fixture that cannot fail is not a
+// test of the thing that changed.
+
+Deno.test("groupByDestination splits by destination dividers, taking endpoints from the PAIR", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "d1", uid_collection: "d1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     makeItem({ uid: "p1", type: "rental", path: ["d1", "p1"] }),
     makeItem({ uid: "p2", type: "sale", path: ["d1", "p2"] }),
-    { type: "destination", uid: "d2", name: "", path: ["d2"], uid_delivery: "d2", uid_collection: "d2" },
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
     makeItem({ uid: "p3", type: "rental", path: ["d2", "p3"] }),
   ];
-  const result = groupByDestination(items, "fallback");
+  const destinations = [
+    { uid: "d1", delivery: { uid: "dest-A" }, collection: { uid: "dest-A-back" } },
+    { uid: "d2", delivery: { uid: "dest-B" }, collection: { uid: "dest-B-back" } },
+  ];
+  const result = groupByDestination(items, destinations, "fallback");
   assertEquals(result.length, 2);
-  assertEquals(result[0].uid_delivery, "d1");
+  assertEquals(result[0].uid, "d1");
+  assertEquals(result[0].uid_delivery, "dest-A");
+  assertEquals(result[0].uid_collection, "dest-A-back");
   assertEquals(result[0].items.length, 2);
   assertEquals(result[0].packing_list_delivery.length, 2);
   assertEquals(result[0].packing_list_collection.length, 1);
-  assertEquals(result[1].uid_delivery, "d2");
+  assertEquals(result[1].uid, "d2");
+  assertEquals(result[1].uid_delivery, "dest-B");
   assertEquals(result[1].items.length, 1);
+});
+
+Deno.test("groupByDestination pairs by uid, not by position", () => {
+  // The pairs arrive in the OPPOSITE order to their dividers — the state a
+  // positional join gets silently wrong, and the reason `destinations` is
+  // indexed by uid here rather than walked alongside `items`.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    makeItem({ uid: "p1", type: "rental", path: ["d1", "p1"] }),
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
+    makeItem({ uid: "p2", type: "rental", path: ["d2", "p2"] }),
+  ];
+  const destinations = [
+    { uid: "d2", delivery: { uid: "dest-B" }, collection: { uid: "dest-B" } },
+    { uid: "d1", delivery: { uid: "dest-A" }, collection: { uid: "dest-A" } },
+  ];
+  const result = groupByDestination(items, destinations, "fallback");
+  assertEquals(result[0].uid_delivery, "dest-A");
+  assertEquals(result[1].uid_delivery, "dest-B");
+});
+
+Deno.test("groupByDestination keeps two sections apart when they share ONE address", () => {
+  // Two dividers, one `destinations/{uid}`. This is the shape the endpoint key
+  // could not express — `findOrCreateDestination` is a global address-book
+  // dedupe, so a repeat-location order legitimately produces it.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    makeItem({ uid: "p1", type: "rental", path: ["d1", "p1"] }),
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
+    makeItem({ uid: "p2", type: "rental", path: ["d2", "p2"] }),
+  ];
+  const destinations = [
+    { uid: "d1", delivery: { uid: "shared" }, collection: { uid: "shared" } },
+    { uid: "d2", delivery: { uid: "shared" }, collection: { uid: "shared" } },
+  ];
+  const result = groupByDestination(items, destinations, "fallback");
+  assertEquals(result.length, 2);
+  assertEquals(result[0].uid, "d1");
+  assertEquals(result[1].uid, "d2");
+  assertEquals(result[0].items.length, 1);
+  assertEquals(result[1].items.length, 1);
+});
+
+Deno.test("groupByDestination falls back when a divider names no pair", () => {
+  const items: LineItem[] = [
+    { type: "destination", uid: "orphan", name: "", path: ["orphan"] },
+    makeItem({ uid: "p1", type: "rental", path: ["orphan", "p1"] }),
+  ];
+  const result = groupByDestination(items, [], "fb-delivery", "fb-collection");
+  assertEquals(result.length, 1);
+  assertEquals(result[0].uid, "orphan");
+  assertEquals(result[0].uid_delivery, "fb-delivery");
+  assertEquals(result[0].uid_collection, "fb-collection");
 });
 
 Deno.test("groupByDestination uses fallback when no dividers", () => {
   const items = [makeItem({ uid: "p1", type: "rental" })];
-  const result = groupByDestination(items, "fb-delivery", "fb-collection");
+  const result = groupByDestination(items, [], "fb-delivery", "fb-collection");
   assertEquals(result.length, 1);
+  assertEquals(result[0].uid, null);
   assertEquals(result[0].uid_delivery, "fb-delivery");
   assertEquals(result[0].uid_collection, "fb-collection");
 });
 
 Deno.test("groupByDestination returns empty section for empty items", () => {
-  const result = groupByDestination([], "fb");
+  const result = groupByDestination([], [], "fb");
   assertEquals(result.length, 1);
+  assertEquals(result[0].uid, null);
   assertEquals(result[0].items.length, 0);
 });
 

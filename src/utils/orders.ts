@@ -1970,10 +1970,17 @@ const COLLECTION_TYPES = new Set(["rental"]);
 
 /**
  * Walk backwards from `index` to determine which destination and group
- * an item belongs to. `destination` is the destination's `uid_delivery`;
- * `group` is the group item's `uid` (not its display name) — keying on
- * uid lets group display names be edited without losing collapse state
- * or risking collisions between two groups that happen to share a name.
+ * an item belongs to. Both are the DIVIDER's own `uid` (not its display name,
+ * and not the endpoint it ships to) — keying on uid lets display names be
+ * edited without losing collapse state, and stops two sections that happen to
+ * deliver to one address from sharing a collapse key.
+ *
+ * ⚠️ **`destination` was the divider's `uid_delivery` until the pair re-key**
+ * (api-cloudrun#662/#663/#664). Two dividers legitimately share one
+ * `destinations/{uid}`, so that key collapsed both sections together; and the
+ * field itself is deleted from the divider at the end of that campaign. This
+ * value is only ever a UI collapse key, so nothing durable was keyed on the
+ * old spelling.
  */
 export function getGroupPath(items: LineItem[], index: number): GroupPath {
   const item = items[index];
@@ -1990,7 +1997,7 @@ export function getGroupPath(items: LineItem[], index: number): GroupPath {
       result.group = entry.uid ?? null;
     }
     if (entry.type === "destination") {
-      result.destination = entry.uid_delivery ?? null;
+      result.destination = entry.uid ?? null;
       break;
     }
   }
@@ -2349,6 +2356,12 @@ export function assignDestinationPairUids<P extends DestinationPairLike>(
 
 /** A destination section with its delivery/collection UIDs and child items. */
 export interface DestinationGroup {
+  /**
+   * The destination DIVIDER's uid — this section's identity, and the key its
+   * pair is addressed by. `null` on the synthetic leading group a divider-less
+   * items array produces, which answers for no pair.
+   */
+  uid: string | null;
   uid_delivery: string;
   uid_collection: string;
   items: LineItem[];
@@ -2357,10 +2370,37 @@ export interface DestinationGroup {
 }
 
 /**
- * Slice the flat items array into destination sections.
+ * Slice the flat items array into destination sections, each carrying the
+ * endpoints its PAIR names.
+ *
+ * ⚠️ **`destinations` is a required parameter and used to be absent, because
+ * the endpoints used to be read off the divider itself** — the second copy that
+ * api-cloudrun#662/#663/#664 are all instances of. The divider now carries only
+ * its `uid`; the endpoints live on the pair that uid addresses, and step 11 of
+ * `api-cloudrun/.claude/plans/destination-pair-identity.md` deletes
+ * `uid_delivery`/`uid_collection` from the divider outright. Reading them here
+ * again would re-open the class.
+ *
+ * ✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is
+ * a `destinations/{uid}` document id and it is the third segment of every
+ * booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
+ * moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
+ * the same string. There is no `bookings` migration in this change, and there
+ * must not be: `webhooks/opportunity.ts` records 552 duplicate prod bookings
+ * from a destination uid moving under that id.
+ *
+ * The fallbacks answer for a section whose pair is missing or names no
+ * endpoint — a divider-less items array, and a genuinely destinationless CRMS
+ * order (where the caller passes `""` and skips the group downstream).
+ *
+ * @param items - The document's flat items array
+ * @param destinations - The document's destination pairs, joined by `uid`
+ * @param fallbackDeliveryUid - Endpoint for a section whose pair supplies none
+ * @param fallbackCollectionUid - Defaults to `fallbackDeliveryUid`
  */
 export function groupByDestination(
   items: LineItem[],
+  destinations: readonly DestinationPairLike[],
   fallbackDeliveryUid: string,
   fallbackCollectionUid?: string,
 ): DestinationGroup[] {
@@ -2369,6 +2409,10 @@ export function groupByDestination(
   }
 
   const collectionFallback = fallbackCollectionUid || fallbackDeliveryUid;
+  const pairByUid = new Map<string, DestinationPairLike>();
+  for (const pair of destinations ?? []) {
+    if (pair?.uid) pairByUid.set(pair.uid, pair);
+  }
 
   const groups: DestinationGroup[] = [];
   let current: DestinationGroup | null = null;
@@ -2376,9 +2420,11 @@ export function groupByDestination(
   for (const item of items) {
     if (item.type === "destination") {
       if (current) groups.push(current);
+      const pair = item.uid ? pairByUid.get(item.uid) : undefined;
       current = {
-        uid_delivery: item.uid_delivery || fallbackDeliveryUid,
-        uid_collection: item.uid_collection || collectionFallback,
+        uid: item.uid ?? null,
+        uid_delivery: pair?.delivery?.uid || fallbackDeliveryUid,
+        uid_collection: pair?.collection?.uid || collectionFallback,
         items: [],
         packing_list_delivery: [],
         packing_list_collection: [],
@@ -2388,6 +2434,7 @@ export function groupByDestination(
 
     if (!current) {
       current = {
+        uid: null,
         uid_delivery: fallbackDeliveryUid,
         uid_collection: collectionFallback,
         items: [],
@@ -2410,6 +2457,7 @@ export function groupByDestination(
 
   if (groups.length === 0) {
     return [{
+      uid: null,
       uid_delivery: fallbackDeliveryUid,
       uid_collection: collectionFallback,
       items: [],
@@ -2550,14 +2598,25 @@ export interface PackingListItem {
  * (delegates to {@link consolidateItems}). When false (default), returns
  * expanded entries with `group_name` preserved.
  *
- * Pass `destinationUid` to scope to a single destination; omit for the full order.
+ * Pass `destinationDividerUid` to scope to a single destination section; omit
+ * for the full order.
+ *
+ * ⚠️ **That parameter is the DIVIDER's uid, and it used to be a
+ * `destinations/{uid}` endpoint id** — matched against the divider's
+ * `uid_delivery` *or* its `uid_collection`, so a document whose delivery and
+ * collection legs differ was reachable under two different values and two
+ * sections delivering to one address were **both** returned as one list. The
+ * divider's uid is the section's identity and matches exactly one section.
+ * (No caller passed the old argument: the parameter is reached only through the
+ * `it.orders.buildPackingList` template helper, and no template calls it —
+ * measured across the `templates` repo, 2026-08-25.)
  *
  * Excludes structural rows, surcharges, transaction fees, and services.
  */
 export function buildPackingList(
   items: LineItem[],
   consolidated?: boolean,
-  destinationUid?: string,
+  destinationDividerUid?: string,
 ): PackingListItem[] | ConsolidatedItem[] {
   if (!Array.isArray(items)) {
     throw new Error("items must be an array");
@@ -2565,13 +2624,12 @@ export function buildPackingList(
 
   // Scope to destination if requested
   let scoped: LineItem[];
-  if (destinationUid) {
+  if (destinationDividerUid) {
     scoped = [];
     let inDestination = false;
     for (const item of items) {
       if (item.type === "destination") {
-        inDestination = item.uid_delivery === destinationUid ||
-          item.uid_collection === destinationUid;
+        inDestination = item.uid === destinationDividerUid;
         continue;
       }
       if (inDestination) scoped.push(item);
