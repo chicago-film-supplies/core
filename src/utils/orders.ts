@@ -2111,14 +2111,15 @@ export interface DestinationPairUidResult<P extends DestinationPairLike> {
   /** The pairs in their original order, each carrying the uid of its divider. */
   destinations: (P & { uid: string })[];
   /**
-   * Indices into the INPUT array of pairs no divider names. Under the pair-uid
-   * model such a pair is unwritable — nothing can address it and no line can
-   * reach it — so a caller writing a document must refuse rather than mint.
+   * Indices into the INPUT array of pairs no rung could match to a divider.
+   * Under the pair-uid model such a pair is unaddressable — no line reaches it
+   * through `item.path` and no divider names it — so a caller writing a
+   * document should refuse rather than mint.
    *
-   * ⚠️ Each of these still carries a `uid` in `destinations`, minted by
-   * `fallbackUid`, so the array is well-formed for a caller that has decided to
-   * proceed anyway (a migration reporting rather than halting). **The presence
-   * of a uid is not a claim that the pair is joined.**
+   * ⚠️ Each of these still carries a `uid` in `destinations` (its own, or one
+   * from `fallbackUid`), so the array stays well-formed for a caller that has
+   * decided to proceed anyway — a migration reporting rather than halting.
+   * **The presence of a uid is not a claim that the pair is joined.**
    */
   orphanPairs: number[];
   /** Uids of destination dividers no pair answers. */
@@ -2130,45 +2131,58 @@ export interface DestinationPairUidResult<P extends DestinationPairLike> {
  * destination DIVIDERS (`items[]`) and its destination PAIRS
  * (`destinations[]`).
  *
- * Under the pair-uid model a pair's identity IS its divider's uid
- * ({@link DocDestinationType.uid}). This function derives that from the join
- * the corpus already carries — `divider.uid_delivery`/`uid_collection` against
+ * A pair's identity IS its divider's uid ({@link DocDestinationType.uid}).
+ * Where a pair does not yet state one, this derives it from the join the corpus
+ * already carries — `divider.uid_delivery`/`uid_collection` against
  * `pair.delivery.uid`/`collection.uid` — so the same rule serves the migration
- * and every writer during the expand window, rather than one rule per caller.
+ * and every writer during the expand window rather than one rule per caller.
  *
- * ⚠️ **This exists because the OLD join is the only evidence available today.**
- * Once an input carries `pair.uid` outright, a writer should take it and call
- * this only as the fallback for a caller that does not yet state one. Deriving
- * from endpoints forever would keep alive the very coupling the model removes.
+ * ⚠️ **The endpoint derivation is TRANSITIONAL and must stay subordinate.**
+ * Once an input carries `pair.uid` outright the derivation is dead code for
+ * that caller. Deriving from the endpoints forever would keep alive the exact
+ * value-join the pair uid exists to remove.
  *
- * ## The two rungs, and why there is no third
+ * ## The rungs, in strict precedence
  *
- * 1. **Endpoint match** — a divider claims the first unclaimed pair whose
- *    `(delivery.uid, collection.uid)` equals its own `(uid_delivery,
+ * 0. **A stated uid wins.** If the pair already names a divider this document
+ *    carries, that is its identity and nothing re-derives it.
+ *
+ *    🔴 **This rung is not an optimization, and inverting it is a live
+ *    defect.** `createInvoice`'s projected arm inherits each pair's uid from
+ *    its source order, where it is already correct; re-deriving those from the
+ *    endpoints would let one order's divider claim another order's pair
+ *    whenever two orders happen to deliver to the same address — silently
+ *    re-pointing a section of a multi-order invoice.
+ * 1. **Endpoint match** — an unclaimed divider takes the first unassigned pair
+ *    whose `(delivery.uid, collection.uid)` equals its own `(uid_delivery,
  *    uid_collection)`. Walked in document order, so repeated endpoints pair
  *    k-th with k-th.
- * 2. **The FORCED leftover** — if exactly one divider and exactly one pair are
- *    left unclaimed, they are each other's only possible partner, so pairing
- *    them is a deduction rather than a guess.
+ * 2. **The FORCED leftover** — if exactly one divider and exactly one pair
+ *    remain, they are each other's only possible partner, so pairing them is a
+ *    deduction rather than a guess.
  *
  * 🔴 **There is deliberately no ordinal rung beyond that.** Two-or-more
  * leftovers on both sides is precisely the state a drifted multi-destination
  * document is in, and pairing those by position is what
  * `destinationsForItems`'s own comment calls *"the tempting fix… silently
- * wrong the first time a multi-destination document drifted."* Those are
- * reported through `orphanPairs`/`orphanDividers` for the caller to refuse or
- * escalate.
+ * wrong the first time a multi-destination document drifted."* Both sides are
+ * reported instead.
+ *
+ * ⚠️ **Idempotent by construction**, which is what lets a writer call it
+ * unconditionally: run it twice and rung 0 answers everything the first run
+ * assigned.
  *
  * Measured 2026-08-25, prod and dev identically: **996 of 996 orders, 987 of
  * 988 divider-bearing invoices and 996 of 996 fulfillments carry exactly one
  * divider and one pair, and every one of them joins on rung 1.** The single
  * exception is invoice #2241 (1 divider, 2 pairs), which reaches
- * `orphanPairs` and needs a human.
+ * `orphanPairs`.
  *
  * @param items - The document's items array. Non-destination rows are ignored.
  * @param destinations - The document's destination pairs, in stored order.
- * @param fallbackUid - Mints a uid for an orphan pair. Defaults to
- *   `crypto.randomUUID`; injectable so a migration can be deterministic.
+ * @param fallbackUid - Mints a uid for a pair that states none and matches no
+ *   divider. Defaults to `crypto.randomUUID`; injectable so a migration can be
+ *   deterministic.
  */
 export function assignDestinationPairUids<P extends DestinationPairLike>(
   items: readonly DestinationDividerLike[],
@@ -2176,44 +2190,54 @@ export function assignDestinationPairUids<P extends DestinationPairLike>(
   fallbackUid: () => string = () => crypto.randomUUID(),
 ): DestinationPairUidResult<P> {
   const dividers = items.filter((it) => it.type === "destination");
-  /** Pair index → divider uid. */
-  const assigned = new Map<number, string>();
-  const claimed = new Set<number>();
-  const unmatchedDividers: DestinationDividerLike[] = [];
+  const dividerUids = new Set(dividers.map((d) => d.uid));
+  /** Pair index → the divider uid that answers it. */
+  const assigned: (string | undefined)[] = destinations.map(() => undefined);
+  const claimed = new Set<string>();
+
+  // Rung 0 — a stated identity wins, once. A second pair repeating a claimed
+  // uid falls through to the rungs below and, failing those, is reported: two
+  // pairs cannot be the same row.
+  destinations.forEach((pair, i) => {
+    const stated = pair.uid;
+    if (stated && dividerUids.has(stated) && !claimed.has(stated)) {
+      assigned[i] = stated;
+      claimed.add(stated);
+    }
+  });
 
   // Rung 1 — endpoint match, in document order.
   for (const divider of dividers) {
+    if (claimed.has(divider.uid)) continue;
     const index = destinations.findIndex((pair, i) =>
-      !claimed.has(i) &&
+      assigned[i] === undefined &&
       (pair.delivery?.uid ?? null) === (divider.uid_delivery ?? null) &&
       (pair.collection?.uid ?? null) === (divider.uid_collection ?? null)
     );
-    if (index === -1) {
-      unmatchedDividers.push(divider);
-      continue;
-    }
-    claimed.add(index);
-    assigned.set(index, divider.uid);
+    if (index === -1) continue;
+    assigned[index] = divider.uid;
+    claimed.add(divider.uid);
   }
 
   // Rung 2 — the forced leftover, and ONLY when it is forced.
-  const leftoverPairs = destinations
-    .map((_, i) => i)
-    .filter((i) => !claimed.has(i));
-  if (unmatchedDividers.length === 1 && leftoverPairs.length === 1) {
-    claimed.add(leftoverPairs[0]);
-    assigned.set(leftoverPairs[0], unmatchedDividers[0].uid);
-    unmatchedDividers.length = 0;
-    leftoverPairs.length = 0;
+  const freeDividers = dividers.filter((d) => !claimed.has(d.uid));
+  const freePairs = assigned
+    .map((uid, i) => (uid === undefined ? i : -1))
+    .filter((i) => i >= 0);
+  if (freeDividers.length === 1 && freePairs.length === 1) {
+    assigned[freePairs[0]] = freeDividers[0].uid;
+    claimed.add(freeDividers[0].uid);
+    freeDividers.length = 0;
+    freePairs.length = 0;
   }
 
   return {
     destinations: destinations.map((pair, i) => ({
       ...pair,
-      uid: assigned.get(i) ?? pair.uid ?? fallbackUid(),
+      uid: assigned[i] ?? pair.uid ?? fallbackUid(),
     })),
-    orphanPairs: leftoverPairs,
-    orphanDividers: unmatchedDividers.map((d) => d.uid),
+    orphanPairs: freePairs,
+    orphanDividers: freeDividers.map((d) => d.uid),
   };
 }
 

@@ -3239,6 +3239,40 @@ Deno.test("assignDestinationPairUids keeps an already-stated uid on an orphan pa
   assertEquals(destinations[0].uid, D2);
 });
 
+Deno.test("assignDestinationPairUids: a STATED uid outranks the endpoint match", () => {
+  // 🔴 The multi-order invoice case. Two orders deliver to one address, so the
+  // endpoints cannot tell the two pairs apart — but each pair arrived from its
+  // own order already carrying its divider's uid. Inverting this precedence
+  // lets the first divider claim the second order's pair.
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [divider(D1, "destA", "destA"), divider(D2, "destA", "destA")],
+    [{ ...pair("destA", "destA"), uid: D2 }, { ...pair("destA", "destA"), uid: D1 }],
+  );
+  assertEquals(destinations.map((d) => d.uid), [D2, D1]);
+  assertEquals(orphanPairs, []);
+  assertEquals(orphanDividers, []);
+});
+
+Deno.test("assignDestinationPairUids is idempotent — a second run changes nothing", () => {
+  const items = [divider(D1, "destA", "destB"), divider(D2, "destC", "destD")];
+  const once = assignDestinationPairUids(items, [pair("destA", "destB"), pair("destC", "destD")]);
+  const twice = assignDestinationPairUids(items, once.destinations);
+  assertEquals(twice.destinations.map((d) => d.uid), once.destinations.map((d) => d.uid));
+  assertEquals(twice.orphanPairs, []);
+  assertEquals(twice.orphanDividers, []);
+});
+
+Deno.test("assignDestinationPairUids reports a pair repeating another pair's uid", () => {
+  // Two pairs cannot be the same row. The second one loses rung 0 (the uid is
+  // already claimed), matches no endpoint, and is reported rather than
+  // silently sharing an identity.
+  const { orphanPairs } = assignDestinationPairUids(
+    [divider(D1, "destA", "destA")],
+    [{ ...pair("destA", "destA"), uid: D1 }, { ...pair("destZ", "destZ"), uid: D1 }],
+  );
+  assertEquals(orphanPairs, [1]);
+});
+
 Deno.test("assignDestinationPairUids ignores non-destination items", () => {
   const { destinations } = assignDestinationPairUids(
     [
