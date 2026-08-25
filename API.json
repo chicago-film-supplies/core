@@ -1113,7 +1113,7 @@
         {
           "kind": "interface",
           "name": "DestinationType",
-          "declaration": "interface DestinationType {\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
+          "declaration": "interface DestinationType {\n  uid?: string;\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
           "doc": "A destination pair — delivery and collection endpoints.\n\n`customer_collecting` is true when the customer picks up the items at our\nwarehouse for the delivery side of this pair. `customer_returning` is true\nwhen the customer drops the items off at our warehouse for the collection\nside. Both default to false (we deliver / we collect)."
         },
         {
@@ -6454,7 +6454,7 @@
         {
           "kind": "interface",
           "name": "DestinationType",
-          "declaration": "interface DestinationType {\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
+          "declaration": "interface DestinationType {\n  uid?: string;\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
           "doc": "A destination pair — delivery and collection endpoints.\n\n`customer_collecting` is true when the customer picks up the items at our\nwarehouse for the delivery side of this pair. `customer_returning` is true\nwhen the customer drops the items off at our warehouse for the collection\nside. Both default to false (we deliver / we collect)."
         },
         {

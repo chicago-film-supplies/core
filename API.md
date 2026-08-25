@@ -2382,6 +2382,7 @@ side. Both default to false (we deliver / we collect).
 
 ```ts
 interface DestinationType {
+  uid?: string;
   dates: OrderDatesType;
   delivery: DestinationEndpointType;
   collection: DestinationEndpointType;
@@ -13333,6 +13334,7 @@ side. Both default to false (we deliver / we collect).
 
 ```ts
 interface DestinationType {
+  uid?: string;
   dates: OrderDatesType;
   delivery: DestinationEndpointType;
   collection: DestinationEndpointType;

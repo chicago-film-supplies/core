@@ -240,6 +240,51 @@ Deno.test("CreateOrderInput accepts per-pair customer_collecting/returning", () 
   assertEquals(CreateOrderInput.safeParse(input).success, true);
 });
 
+Deno.test("CreateOrderInput PRESERVES a destination pair's uid — it used to be stripped", () => {
+  // 🔴 The boundary half of the pair-uid model. `Destination` is `z.object`, so
+  // until this field was declared a client-sent `uid` was silently dropped here
+  // and the server had nothing to join on but `divider.uid_delivery` — which is
+  // the field the contract step deletes. The manager has minted the correct
+  // value since `buildDestinationPairWithDivider` landed and ships the whole
+  // pair; this is what stops it being thrown away.
+  const dividerUid = "11111111-1111-4111-8111-111111111111";
+  const result = CreateOrderInput.safeParse({
+    uid: "testorder10000000000",
+    organization: { uid: "testorg1000000000000" },
+    status: "draft",
+    destinations: [{ ...validDestination, uid: dividerUid }],
+  });
+  assertEquals(result.success, true);
+  if (result.success) assertEquals(result.data.destinations?.[0].uid, dividerUid);
+});
+
+Deno.test("CreateOrderInput still accepts a destination pair with NO uid", () => {
+  // The widening never rejects what was previously valid: a caller that states
+  // nothing falls to the endpoint derivation, which is every caller today.
+  const result = CreateOrderInput.safeParse({
+    uid: "testorder10000000000",
+    organization: { uid: "testorg1000000000000" },
+    status: "draft",
+    destinations: [validDestination],
+  });
+  assertEquals(result.success, true);
+  if (result.success) assertEquals(result.data.destinations?.[0].uid, undefined);
+});
+
+Deno.test("a destination pair's uid REFUSES a destinations doc id", () => {
+  // ⚠️ Typed `z.uuid()`, matching the stored pair and the divider arm it names —
+  // deliberately not `ItemUid`, which also admits a 20-char `FirestoreId`.
+  // Accepting one would let a caller state the very `destinations/{uid}` value
+  // the identity exists to stop being the join.
+  const result = CreateOrderInput.safeParse({
+    uid: "testorder10000000000",
+    organization: { uid: "testorg1000000000000" },
+    status: "draft",
+    destinations: [{ ...validDestination, uid: "notauuidatall0000000" }],
+  });
+  assertEquals(result.success, false);
+});
+
 Deno.test("DocDestination defaults customer_collecting/returning to false", () => {
   const result = DocDestination.safeParse({
     uid: "11111111-1111-4111-8111-111111111111",

@@ -3324,6 +3324,59 @@ Deno.test("assignDestinationPairUids: a STATED uid outranks the endpoint match",
   assertEquals(orphanDividers, []);
 });
 
+/**
+ * A divider as it looks AFTER the contract step — `uid_delivery`/`uid_collection`
+ * deleted from the arm. The two tests below are the pair that says whether the
+ * contract is reachable yet, and they must be read together.
+ */
+const bareDivider = (uid: string) => ({ uid, type: "destination" });
+
+Deno.test("a STATED pair uid joins with NO endpoint fields at all — the contract step's join", () => {
+  // 🔴 This is the whole prerequisite for deleting `uid_delivery`/`uid_collection`
+  // from `DestinationDividerArm`. Rung 1 dies with those fields, so rung 0 has to
+  // carry a multi-destination document on its own — which it can only do if the
+  // pair STATES its uid. `Destination` (the order create/update input arm) gained
+  // an optional `uid` for exactly this; before that it was `z.object`, so a
+  // client-sent uid was stripped at the boundary.
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [bareDivider(D1), bareDivider(D2)],
+    [{ ...pair("destA", "destA"), uid: D2 }, { ...pair("destA", "destA"), uid: D1 }],
+  );
+  assertEquals(destinations.map((d) => d.uid), [D2, D1]);
+  assertEquals(orphanPairs, []);
+  assertEquals(orphanDividers, []);
+});
+
+Deno.test("without a stated uid, a multi-destination document has NO join once the endpoints go", () => {
+  // 🔴 The companion, and the reason the one above is not merely nice to have.
+  // Two destinations, no endpoint fields, no stated uid: every rung misses, both
+  // pairs are minted a uid naming no divider, and api-cloudrun's
+  // `findDestinationJoinIssues` refuses the write with a 400.
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [bareDivider(D1), bareDivider(D2)],
+    [pair("destA", "destA"), pair("destB", "destB")],
+    () => "MINTED",
+  );
+  assertEquals(destinations.map((d) => d.uid), ["MINTED", "MINTED"]);
+  assertEquals(orphanPairs, [0, 1]);
+  assertEquals(orphanDividers, [D1, D2]);
+});
+
+Deno.test("ONE destination still joins with no endpoints and no stated uid — why the gap hides", () => {
+  // ⚠️ Rung 2 — the forced leftover — answers this with nothing to go on, and
+  // every one of the 2,980 prod documents is 1 divider : 1 pair. So the corpus,
+  // both audits and the write guard all report clean on a build where the
+  // multi-destination join has been removed. The failure waits for the first
+  // second destination.
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [bareDivider(D1)],
+    [pair("destA", "destA")],
+  );
+  assertEquals(destinations.map((d) => d.uid), [D1]);
+  assertEquals(orphanPairs, []);
+  assertEquals(orphanDividers, []);
+});
+
 Deno.test("assignDestinationPairUids is idempotent — a second run changes nothing", () => {
   const items = [divider(D1, "destA", "destB"), divider(D2, "destC", "destD")];
   const once = assignDestinationPairUids(items, [pair("destA", "destB"), pair("destC", "destD")]);

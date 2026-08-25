@@ -250,6 +250,36 @@ export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.s
  * side. Both default to false (we deliver / we collect).
  */
 export interface DestinationType {
+  /**
+   * **The pair's identity — the destination DIVIDER's uid** — stated by the
+   * client rather than derived. See {@link DocDestinationType.uid} for what the
+   * identity IS and why `delivery.uid` cannot be it.
+   *
+   * ⚠️ **Optional here and REQUIRED on the stored pair, and that asymmetry is
+   * the whole point of this field.** A client that states it is answered by
+   * `assignDestinationPairUids` rung 0 and nothing derives; a client that omits
+   * it falls to the endpoint derivation, which is what every caller does today.
+   *
+   * 🔴 **Declaring it is what lets the endpoint derivation die.** `Destination`
+   * is `z.object`, so an undeclared key is STRIPPED at the boundary — the
+   * manager has minted the correct value since
+   * `buildDestinationPairWithDivider` landed and ships the whole pair, and it
+   * was being thrown away here. Without this field the ONLY join a native
+   * create has is rung 1 (`divider.uid_delivery` against `pair.delivery.uid`),
+   * so removing those two divider fields at the contract step would leave a
+   * multi-destination create with no join at all: measured on
+   * `assignDestinationPairUids`, two destinations with the endpoint fields gone
+   * yields two MINTED pair uids naming no divider — 2 orphan dividers and 2
+   * orphan pairs, which api-cloudrun's `findDestinationJoinIssues` refuses with
+   * a 400.
+   *
+   * ⚠️ **And the one-destination case hides it completely.** Rung 2 — the
+   * forced leftover — answers a single divider beside a single pair with no
+   * endpoints at all, and every one of the 2,980 prod documents is 1:1. So the
+   * corpus, the audits and the write guard would all report clean right up to
+   * the first multi-destination order.
+   */
+  uid?: string;
   dates: OrderDatesType;
   delivery: DestinationEndpointType;
   collection: DestinationEndpointType;
@@ -261,6 +291,13 @@ export interface DestinationType {
 
 /** Zod schema for a destination pair. */
 export const Destination: z.ZodType<DestinationType> = z.object({
+  // `z.uuid()`, matching the STORED pair (`DocDestination.uid`) and the divider
+  // arm this value names (`DestinationDividerArm.uid`) — deliberately NOT
+  // `ItemUid`, which also admits a 20-char `FirestoreId` and would therefore
+  // accept the `destinations/{uid}` document id this identity exists not to be.
+  // All 2,980 prod destination dividers are uuid-shaped. See
+  // {@link DestinationType.uid}.
+  uid: z.uuid().optional(),
   dates: OrderDates,
   delivery: DestinationEndpoint,
   collection: DestinationEndpoint,
