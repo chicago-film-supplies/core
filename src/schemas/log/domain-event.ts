@@ -189,6 +189,34 @@ export const DOMAIN_EVENT_MSGS = [
   //
   // `{ invoice_uid, order_uid, jurisdiction, delivery_uid, collection_uid }`.
   "invoice_destination_override_dropped",
+
+  // A document was written whose destination DIVIDERS and destination PAIRS
+  // could not be joined — `assignDestinationPairUids` (`@cfs/core/utils/orders`)
+  // left a divider with no pair, or a pair no divider names.
+  //
+  // Under the pair-uid model `destinations[i].uid` IS the divider's uid, so an
+  // unjoined row is a row nothing can address: no line reaches that pair
+  // through `item.path`, and no divider names it. The write still lands during
+  // the expand window (the pair is given a minted uid so the array stays
+  // well-formed), which is exactly why it has to say so — the alternative is a
+  // document that looks complete and prices a section at a jurisdiction nobody
+  // stated.
+  //
+  // ⚠️ **This is the FIRST instrument that has ever looked at that join.**
+  // `uid_delivery` is client-authored on all four write surfaces and the only
+  // server-side minting writes the PAIR's endpoint, never the divider's — so a
+  // request could set the two to different values, at create or update, on
+  // either document, with no error. Measured 2026-08-25: 0 of 2,981 stored
+  // documents are unjoined, the single exception being invoice #2241 (1
+  // divider, 2 pairs), which is a known pre-existing defect.
+  //
+  // `warn`, not `error`: nothing here can decide what the operator meant, and
+  // refusing the write is Phase 4's job — once the corpus is backfilled the
+  // biconditional becomes a `validateBeforeWrite` invariant and this record
+  // becomes the thing that should already have gone quiet.
+  //
+  // `{ collection, doc_uid, operation, orphan_pairs, orphan_dividers }`.
+  "destination_pair_unjoined",
 ] as const;
 
 /** Discriminated msg union for Domain-archetype log records. */
