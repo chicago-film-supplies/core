@@ -210,8 +210,6 @@ Deno.test("InvoiceSchema accepts destination item in items array", () => {
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
         name: "Main Venue",
-        uid_delivery: "del10000000000000000",
-        uid_collection: "col10000000000000000",
         description: "",
       },
       ...validInvoice.items,
@@ -228,8 +226,6 @@ Deno.test("InvoiceSchema accepts mixed items (line + group + destination)", () =
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
         name: "Main Venue",
-        uid_delivery: "del10000000000000000",
-        uid_collection: null,
         description: "",
       },
       {
@@ -290,7 +286,7 @@ Deno.test("CreateInvoiceInput accepts items with path and destination fields", (
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Venue", uid_delivery: "del10000000000000000", uid_collection: "col10000000000000000" },
+      { uid: "dest1000000000000000", type: "destination", name: "Venue" },
       { uid: "group100000000000000", type: "group", name: "Lighting" },
       { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["dest1000000000000000", "group100000000000000"] },
     ],
@@ -374,8 +370,6 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
         name: "Main Venue",
-        uid_delivery: "del10000000000000000",
-        uid_collection: null,
         description: "",
       },
       {
@@ -416,7 +410,7 @@ Deno.test("CreateInvoiceInput accepts order divider items", () => {
     organization: { uid: "org10000000000000000" },
     items: [
       { uid: "orderdiv100000000000", type: "order", name: "Order #1001" },
-      { uid: "dest1000000000000000", type: "destination", name: "Venue", uid_delivery: "del10000000000000000", path: ["orderdiv100000000000"] },
+      { uid: "dest1000000000000000", type: "destination", name: "Venue", path: ["orderdiv100000000000"] },
       { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["orderdiv100000000000", "dest1000000000000000"] },
     ],
   };

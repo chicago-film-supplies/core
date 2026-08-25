@@ -1124,13 +1124,13 @@ Deno.test("calculateReplacementTotals multi-tax on replacement", () => {
 
 Deno.test("getGroupPath finds destination and group", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "dest-1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     { type: "group", uid: "g1", name: "Camera", path: ["d1", "g1"] },
     makeItem({ uid: "item-1", path: ["d1", "g1", "item-1"] }),
   ];
   const result = getGroupPath(items, 2);
-  // The DIVIDER's uid, not its `uid_delivery` — see the docblock. The fixture
-  // deliberately keeps the two distinct so this assertion can tell them apart.
+  // The DIVIDER's uid — which is now the only thing a divider carries to be
+  // identified by, since the contract step deleted its endpoint copy.
   assertEquals(result.destination, "d1");
   assertEquals(result.group, "g1");
   assertEquals(result.product, null); // parent is group (structural), not a product
@@ -1138,7 +1138,7 @@ Deno.test("getGroupPath finds destination and group", () => {
 
 Deno.test("getGroupPath returns product parent for component", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "dest-1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     makeItem({ uid: "parent-1", path: ["d1", "parent-1"] }),
     makeItem({ uid: "child-1", path: ["d1", "parent-1", "child-1"] }),
   ];
@@ -1173,7 +1173,7 @@ Deno.test("consolidateItems deduplicates by uid", () => {
 
 Deno.test("consolidateItems skips structural items", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "d1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     { type: "group", uid: "g1", name: "G1", path: ["d1", "g1"] },
     makeItem({ uid: "p1", path: ["d1", "g1", "p1"] }),
   ];
@@ -1442,7 +1442,7 @@ Deno.test("getGroupTotals returns zeros for empty group", () => {
 
 Deno.test("buildPackingList returns expanded items with group context", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "d1", uid_collection: "d1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     { type: "group", uid: "g1", name: "Tables", path: ["d1", "g1"] },
     makeItem({ uid: "p1", type: "rental", name: "Round Table", path: ["d1", "g1", "p1"] }),
     makeItem({ uid: "p2", type: "sale", name: "Tablecloth", path: ["d1", "g1", "p2"] }),
@@ -1467,7 +1467,7 @@ Deno.test("buildPackingList returns expanded items with group context", () => {
 
 Deno.test("buildPackingList excludes surcharges, fees, and structural items", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "d1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     makeItem({ uid: "p1", type: "rental", path: ["d1", "p1"] }),
     { type: "surcharge", uid: "s1", name: "Damage Waiver", path: ["d1", "s1"] },
     { type: "transaction_fee", uid: "f1", name: "CC Fee", path: ["d1", "f1"] },
@@ -1480,10 +1480,10 @@ Deno.test("buildPackingList excludes surcharges, fees, and structural items", ()
 
 Deno.test("buildPackingList scoped to destination", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "d1", uid_collection: "d1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     makeItem({ uid: "p1", type: "rental", path: ["d1", "p1"] }),
     makeItem({ uid: "p2", type: "sale", path: ["d1", "p2"] }),
-    { type: "destination", uid: "d2", name: "", path: ["d2"], uid_delivery: "d2", uid_collection: "d2" },
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
     makeItem({ uid: "p3", type: "rental", path: ["d2", "p3"] }),
   ];
   const result = buildPackingList(items, false, "d2");
@@ -1493,9 +1493,9 @@ Deno.test("buildPackingList scoped to destination", () => {
 
 Deno.test("buildPackingList consolidated deduplicates by uid", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "d1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     makeItem({ uid: "p1", type: "rental", quantity: 2, path: ["d1", "p1"] }),
-    { type: "destination", uid: "d2", name: "", path: ["d2"], uid_delivery: "d2" },
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
     makeItem({ uid: "p1", type: "rental", quantity: 3, path: ["d2", "p1"] }),
   ];
   const result = buildPackingList(items, true);
@@ -1506,9 +1506,9 @@ Deno.test("buildPackingList consolidated deduplicates by uid", () => {
 
 Deno.test("buildPackingList consolidated + destination scoped", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "d1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     makeItem({ uid: "p1", type: "rental", quantity: 2, path: ["d1", "p1"] }),
-    { type: "destination", uid: "d2", name: "", path: ["d2"], uid_delivery: "d2" },
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
     makeItem({ uid: "p1", type: "rental", quantity: 3, path: ["d2", "p1"] }),
     makeItem({ uid: "p2", type: "sale", quantity: 1, path: ["d2", "p2"] }),
   ];
@@ -1520,7 +1520,7 @@ Deno.test("buildPackingList consolidated + destination scoped", () => {
 
 Deno.test("buildPackingList returns empty for no eligible items", () => {
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"], uid_delivery: "d1" },
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
     { type: "surcharge", uid: "s1", name: "Surcharge", path: ["d1", "s1"] },
   ];
   assertEquals(buildPackingList(items).length, 0);
@@ -3226,13 +3226,12 @@ Deno.test("calculateItemPrice: the account does not move the total", () => {
 const D1 = "aaaaaaaa-1111-4111-8111-111111111111";
 const D2 = "bbbbbbbb-2222-4222-8222-222222222222";
 
-/** A destination divider naming its two endpoint documents. */
-const divider = (uid: string, delivery: string | null, collection: string | null) => ({
-  uid,
-  type: "destination",
-  uid_delivery: delivery,
-  uid_collection: collection,
-});
+/**
+ * A destination divider. ⚠️ It takes NO endpoints — the contract step deleted
+ * `uid_delivery`/`uid_collection` from the arm, so a divider carries an identity
+ * and nothing else for a rung to match on.
+ */
+const divider = (uid: string) => ({ uid, type: "destination" });
 
 /** A stored pair naming its two endpoint documents. */
 const pair = (delivery: string | null, collection: string | null) => ({
@@ -3242,7 +3241,7 @@ const pair = (delivery: string | null, collection: string | null) => ({
 
 Deno.test("assignDestinationPairUids joins on the endpoint uids — the whole live corpus", () => {
   const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
-    [divider(D1, "destA", "destB")],
+    [divider(D1)],
     [pair("destA", "destB")],
   );
   assertEquals(destinations[0].uid, D1);
@@ -3250,26 +3249,47 @@ Deno.test("assignDestinationPairUids joins on the endpoint uids — the whole li
   assertEquals(orphanDividers, []);
 });
 
-Deno.test("assignDestinationPairUids pairs repeated endpoints k-th with k-th", () => {
-  // Two sections delivering to ONE address — the case that makes `delivery.uid`
-  // unusable as an identity, and the reason this field exists.
-  const { destinations, orphanPairs } = assignDestinationPairUids(
-    [divider(D1, "destA", "destA"), divider(D2, "destA", "destA")],
-    [pair("destA", "destA"), pair("destA", "destA")],
+Deno.test("assignDestinationPairUids: two sections at ONE address are told apart by uid", () => {
+  // ⚠️ This test used to be "pairs repeated endpoints k-th with k-th", and it
+  // WAS the endpoint rung. The case it covers is the load-bearing one and has
+  // not changed: two sections of one order delivering to a single address, which
+  // is exactly what makes `delivery.uid` unusable as a row identity. What
+  // changed is the answer — each pair now STATES which divider it belongs to,
+  // so there is nothing to disambiguate by ordinal.
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [divider(D1), divider(D2)],
+    [{ ...pair("destA", "destA"), uid: D1 }, { ...pair("destA", "destA"), uid: D2 }],
   );
   assertEquals(destinations.map((d) => d.uid), [D1, D2]);
   assertEquals(orphanPairs, []);
+  assertEquals(orphanDividers, []);
 });
 
-Deno.test("assignDestinationPairUids takes the FORCED leftover when a divider was repointed", () => {
-  // The #662 shape: the pair moved and the divider did not (or vice versa). One
-  // divider and one pair are left over, so they are each other's only possible
-  // partner — a deduction, not a guess.
+Deno.test("assignDestinationPairUids takes the FORCED leftover when the pair states nothing", () => {
+  // The rung that carries every caller which has not been updated to send
+  // `pair.uid`. One divider and one pair are each other's only possible
+  // partner, so pairing them is a deduction rather than a guess — and with the
+  // endpoint rung gone this is the ONLY thing standing between such a caller
+  // and a refused write. It must not be removed as dead alongside rung 1.
   const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
-    [divider(D1, "destA", "destA"), divider(D2, "STALE", "STALE")],
-    [pair("destA", "destA"), pair("destB", "destB")],
+    [divider(D1)],
+    [pair("destA", "destA")],
   );
-  assertEquals(destinations.map((d) => d.uid), [D1, D2]);
+  assertEquals(destinations.map((d) => d.uid), [D1]);
+  assertEquals(orphanPairs, []);
+  assertEquals(orphanDividers, []);
+});
+
+Deno.test("assignDestinationPairUids: a STALE stated uid falls through to the leftover", () => {
+  // The #662 shape after the contract step: the pair names a divider this
+  // document does not carry (it was re-minted, or the pair came from elsewhere).
+  // Rung 0 skips it — `dividerUids.has(stated)` is false — and the leftover
+  // rung repairs it rather than preserving the disagreement.
+  const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
+    [divider(D1)],
+    [{ ...pair("destA", "destA"), uid: "cccccccc-3333-4333-8333-333333333333" }],
+  );
+  assertEquals(destinations.map((d) => d.uid), [D1]);
   assertEquals(orphanPairs, []);
   assertEquals(orphanDividers, []);
 });
@@ -3279,7 +3299,7 @@ Deno.test("assignDestinationPairUids REFUSES to guess beyond the forced leftover
   // ordinal rung `destinationsForItems` calls "silently wrong the first time a
   // multi-destination document drifted", so both sides are reported instead.
   const { orphanPairs, orphanDividers } = assignDestinationPairUids(
-    [divider(D1, "STALE1", "STALE1"), divider(D2, "STALE2", "STALE2")],
+    [divider(D1), divider(D2)],
     [pair("destA", "destA"), pair("destB", "destB")],
   );
   assertEquals(orphanPairs, [0, 1]);
@@ -3288,9 +3308,11 @@ Deno.test("assignDestinationPairUids REFUSES to guess beyond the forced leftover
 
 Deno.test("assignDestinationPairUids reports a pair no divider names — invoice #2241", () => {
   // One divider, two pairs: the single prod document that is not mechanical.
+  // The first pair states its divider; the second names nothing and no rung can
+  // reach it, because the leftover rung requires exactly one free on each side.
   const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
-    [divider(D1, "destA", "destA")],
-    [pair("destA", "destA"), pair("destB", "destB")],
+    [divider(D1)],
+    [{ ...pair("destA", "destA"), uid: D1 }, pair("destB", "destB")],
   );
   assertEquals(destinations[0].uid, D1);
   assertEquals(orphanPairs, [1]);
@@ -3316,20 +3338,13 @@ Deno.test("assignDestinationPairUids: a STATED uid outranks the endpoint match",
   // own order already carrying its divider's uid. Inverting this precedence
   // lets the first divider claim the second order's pair.
   const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
-    [divider(D1, "destA", "destA"), divider(D2, "destA", "destA")],
+    [divider(D1), divider(D2)],
     [{ ...pair("destA", "destA"), uid: D2 }, { ...pair("destA", "destA"), uid: D1 }],
   );
   assertEquals(destinations.map((d) => d.uid), [D2, D1]);
   assertEquals(orphanPairs, []);
   assertEquals(orphanDividers, []);
 });
-
-/**
- * A divider as it looks AFTER the contract step — `uid_delivery`/`uid_collection`
- * deleted from the arm. The two tests below are the pair that says whether the
- * contract is reachable yet, and they must be read together.
- */
-const bareDivider = (uid: string) => ({ uid, type: "destination" });
 
 Deno.test("a STATED pair uid joins with NO endpoint fields at all — the contract step's join", () => {
   // 🔴 This is the whole prerequisite for deleting `uid_delivery`/`uid_collection`
@@ -3339,7 +3354,7 @@ Deno.test("a STATED pair uid joins with NO endpoint fields at all — the contra
   // an optional `uid` for exactly this; before that it was `z.object`, so a
   // client-sent uid was stripped at the boundary.
   const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
-    [bareDivider(D1), bareDivider(D2)],
+    [divider(D1), divider(D2)],
     [{ ...pair("destA", "destA"), uid: D2 }, { ...pair("destA", "destA"), uid: D1 }],
   );
   assertEquals(destinations.map((d) => d.uid), [D2, D1]);
@@ -3353,7 +3368,7 @@ Deno.test("without a stated uid, a multi-destination document has NO join once t
   // pairs are minted a uid naming no divider, and api-cloudrun's
   // `findDestinationJoinIssues` refuses the write with a 400.
   const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
-    [bareDivider(D1), bareDivider(D2)],
+    [divider(D1), divider(D2)],
     [pair("destA", "destA"), pair("destB", "destB")],
     () => "MINTED",
   );
@@ -3369,7 +3384,7 @@ Deno.test("ONE destination still joins with no endpoints and no stated uid — w
   // multi-destination join has been removed. The failure waits for the first
   // second destination.
   const { destinations, orphanPairs, orphanDividers } = assignDestinationPairUids(
-    [bareDivider(D1)],
+    [divider(D1)],
     [pair("destA", "destA")],
   );
   assertEquals(destinations.map((d) => d.uid), [D1]);
@@ -3378,8 +3393,11 @@ Deno.test("ONE destination still joins with no endpoints and no stated uid — w
 });
 
 Deno.test("assignDestinationPairUids is idempotent — a second run changes nothing", () => {
-  const items = [divider(D1, "destA", "destB"), divider(D2, "destC", "destD")];
-  const once = assignDestinationPairUids(items, [pair("destA", "destB"), pair("destC", "destD")]);
+  const items = [divider(D1), divider(D2)];
+  const once = assignDestinationPairUids(items, [
+    { ...pair("destA", "destB"), uid: D1 },
+    { ...pair("destC", "destD"), uid: D2 },
+  ]);
   const twice = assignDestinationPairUids(items, once.destinations);
   assertEquals(twice.destinations.map((d) => d.uid), once.destinations.map((d) => d.uid));
   assertEquals(twice.orphanPairs, []);
@@ -3391,7 +3409,7 @@ Deno.test("assignDestinationPairUids reports a pair repeating another pair's uid
   // already claimed), matches no endpoint, and is reported rather than
   // silently sharing an identity.
   const { orphanPairs } = assignDestinationPairUids(
-    [divider(D1, "destA", "destA")],
+    [divider(D1)],
     [{ ...pair("destA", "destA"), uid: D1 }, { ...pair("destZ", "destZ"), uid: D1 }],
   );
   assertEquals(orphanPairs, [1]);
@@ -3401,7 +3419,7 @@ Deno.test("assignDestinationPairUids ignores non-destination items", () => {
   const { destinations } = assignDestinationPairUids(
     [
       { uid: "od-1", type: "order" },
-      divider(D1, "destA", "destB"),
+      divider(D1),
       { uid: "grp-1", type: "group" },
     ],
     [pair("destA", "destB")],

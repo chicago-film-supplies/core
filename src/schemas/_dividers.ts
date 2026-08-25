@@ -18,7 +18,7 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid } from "./_uid.ts";
+import { ItemUid } from "./_uid.ts";
 
 /** Destination divider in an order/invoice items array. */
 export const DestinationDividerArm = z.strictObject({
@@ -38,21 +38,14 @@ export const DestinationDividerArm = z.strictObject({
   // tokens as a person, so `Oak Brook Mall` was captured as `Jordan B Holloway`.
   name: z.string().max(200).meta({ pii: "none" }).default(""),
   path: z.array(ItemUid).default([]),
-  // ⚠️ **Tolerant window — step 11a of the destination campaign.** Was
-  // `.nullable().default(null)`, i.e. required in the parsed output. The
-  // divider's endpoints are a SECOND copy of the pair's own
-  // `delivery.uid`/`collection.uid`, joined by value; every writer has stopped
-  // emitting them, and the contract publish deletes both keys once the corpora
-  // are purged. `.optional()` is what makes all three states parse in the
-  // meantime — carried, explicitly null, and absent — so a purged document and
-  // an un-purged one are both writable while the purge runs.
-  //
-  // 🔴 **Do NOT re-add `.default(null)`.** `validateBeforeWrite` writes the RAW
-  // document, so a default never materializes anyway; what it does do is make
-  // the parsed OUTPUT type require the key, which is what stopped the builders
-  // from being able to omit it.
-  uid_delivery: FirestoreId.nullable().optional(),
-  uid_collection: FirestoreId.nullable().optional(),
+  // 🔴 **There is no `uid_delivery`/`uid_collection` here, and re-adding either
+  // re-opens api-cloudrun#662/#663/#664.** They were a SECOND copy of the pair's
+  // own `delivery.uid`/`collection.uid` — a join by VALUE across two arrays,
+  // where every one of those three defects is one copy moving without the other.
+  // A section's endpoint is reached through the PAIR its `uid` names
+  // (`destinations[i].uid === this divider's uid`), which is the only copy.
+  // Removed in three steps 2026-08-25: writers stopped, both corpora purged
+  // (2,981 prod documents / 2,980 dev, 0 failed), then this arm tightened.
   description: z.string().meta({ pii: "none" }).default(""),
 });
 

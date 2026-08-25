@@ -1443,7 +1443,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentDestinationItemType",
-          "declaration": "interface FulfillmentDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  description: string;\n}",
+          "declaration": "interface FulfillmentDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  description: string;\n}",
           "doc": "Destination divider in the fulfillment items array."
         },
         {
@@ -1479,7 +1479,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  quantity_order?: number;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  path_substituted_for?: string[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -1743,7 +1743,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -2391,7 +2391,7 @@
         {
           "kind": "interface",
           "name": "OrderDocDestinationItemType",
-          "declaration": "interface OrderDocDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  description: string;\n}",
+          "declaration": "interface OrderDocDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  description: string;\n}",
           "doc": "Destination divider item in the order document items array."
         },
         {
@@ -2475,7 +2475,7 @@
         {
           "kind": "interface",
           "name": "OrderItemDestinationType",
-          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
+          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -6120,7 +6120,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -6598,7 +6598,7 @@
         {
           "kind": "interface",
           "name": "OrderDocDestinationItemType",
-          "declaration": "interface OrderDocDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  description: string;\n}",
+          "declaration": "interface OrderDocDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  description: string;\n}",
           "doc": "Destination divider item in the order document items array."
         },
         {
@@ -6670,7 +6670,7 @@
         {
           "kind": "interface",
           "name": "OrderItemDestinationType",
-          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
+          "declaration": "interface OrderItemDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -6810,7 +6810,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentDestinationItemType",
-          "declaration": "interface FulfillmentDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  description: string;\n}",
+          "declaration": "interface FulfillmentDestinationItemType {\n  uid: string;\n  type: \"destination\";\n  name: string;\n  path: string[];\n  description: string;\n}",
           "doc": "Destination divider in the fulfillment items array."
         },
         {
@@ -6846,7 +6846,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  quantity_order?: number;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  path_substituted_for?: string[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -9926,7 +9926,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -11032,8 +11032,8 @@
         {
           "kind": "interface",
           "name": "DestinationDividerLike",
-          "declaration": "interface DestinationDividerLike {\n  uid: string;\n  type: string;\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n}",
-          "doc": "The shape {@link assignDestinationPairUids} needs from an items array."
+          "declaration": "interface DestinationDividerLike {\n  uid: string;\n  type: string;\n}",
+          "doc": "The shape {@link assignDestinationPairUids} needs from an items array.\n\n⚠️ **A uid and a type, and that is now the whole of it.** It also carried\n`uid_delivery`/`uid_collection` while the endpoint derivation existed; the\ncontract step deleted both from the divider arm, so there is nothing left for\na rung to match on but the identity the pair states."
         },
         {
           "kind": "interface",
@@ -11110,7 +11110,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  uid_delivery?: string | null;\n  uid_collection?: string | null;\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -11219,7 +11219,7 @@
           "kind": "function",
           "name": "assignDestinationPairUids",
           "signature": "assignDestinationPairUids(items: readonly DestinationDividerLike[], destinations: readonly P[], _: unknown): DestinationPairUidResult<P>",
-          "doc": "**The ONE author of `destinations[i].uid`** — the join between a document's\ndestination DIVIDERS (`items[]`) and its destination PAIRS\n(`destinations[]`).\n\nA pair's identity IS its divider's uid ({@link DocDestinationType.uid}).\nWhere a pair does not yet state one, this derives it from the join the corpus\nalready carries — `divider.uid_delivery`/`uid_collection` against\n`pair.delivery.uid`/`collection.uid` — so the same rule serves the migration\nand every writer during the expand window rather than one rule per caller.\n\n⚠️ **The endpoint derivation is TRANSITIONAL and must stay subordinate.**\nOnce an input carries `pair.uid` outright the derivation is dead code for\nthat caller. Deriving from the endpoints forever would keep alive the exact\nvalue-join the pair uid exists to remove.\n\n## The rungs, in strict precedence\n\n0. **A stated uid wins.** If the pair already names a divider this document\n   carries, that is its identity and nothing re-derives it.\n\n   🔴 **This rung is not an optimization, and inverting it is a live\n   defect.** `createInvoice`'s projected arm inherits each pair's uid from\n   its source order, where it is already correct; re-deriving those from the\n   endpoints would let one order's divider claim another order's pair\n   whenever two orders happen to deliver to the same address — silently\n   re-pointing a section of a multi-order invoice.\n1. **Endpoint match** — an unclaimed divider takes the first unassigned pair\n   whose `(delivery.uid, collection.uid)` equals its own `(uid_delivery,\n   uid_collection)`. Walked in document order, so repeated endpoints pair\n   k-th with k-th.\n2. **The FORCED leftover** — if exactly one divider and exactly one pair\n   remain, they are each other's only possible partner, so pairing them is a\n   deduction rather than a guess.\n\n🔴 **There is deliberately no ordinal rung beyond that.** Two-or-more\nleftovers on both sides is precisely the state a drifted multi-destination\ndocument is in, and pairing those by position is what\n`destinationsForItems`'s own comment calls *\"the tempting fix… silently\nwrong the first time a multi-destination document drifted.\"* Both sides are\nreported instead.\n\n⚠️ **Idempotent by construction**, which is what lets a writer call it\nunconditionally: run it twice and rung 0 answers everything the first run\nassigned.\n\nMeasured 2026-08-25, prod and dev identically: **996 of 996 orders, 987 of\n988 divider-bearing invoices and 996 of 996 fulfillments carry exactly one\ndivider and one pair, and every one of them joins on rung 1.** The single\nexception is invoice #2241 (1 divider, 2 pairs), which reaches\n`orphanPairs`.",
+          "doc": "**The ONE author of `destinations[i].uid`** — the join between a document's\ndestination DIVIDERS (`items[]`) and its destination PAIRS\n(`destinations[]`).\n\nA pair's identity IS its divider's uid ({@link DocDestinationType.uid}), and\na caller that states it is simply believed. This exists for the callers that\ndo not, and for the one shape where the answer is a deduction rather than a\nguess.\n\n## The rungs, in strict precedence\n\n0. **A stated uid wins.** If the pair already names a divider this document\n   carries, that is its identity and nothing re-derives it.\n\n   🔴 **This rung is not an optimization, and inverting it is a live\n   defect.** `createInvoice`'s projected arm inherits each pair's uid from\n   its source order, where it is already correct; re-deriving those would let\n   one order's divider claim another order's pair whenever two orders happen\n   to deliver to the same address — silently re-pointing a section of a\n   multi-order invoice.\n1. **The FORCED leftover** — if exactly one divider and exactly one pair\n   remain, they are each other's only possible partner, so pairing them is a\n   deduction rather than a guess.\n\n⚠️ **There used to be an ENDPOINT-MATCH rung between those two**, joining\n`divider.uid_delivery`/`uid_collection` against\n`pair.delivery.uid`/`collection.uid`. It died with those two fields at the\ncontract step, and it must not come back in any form: it was a join by VALUE\nacross two arrays, which is the mechanism api-cloudrun#662/#663/#664 each\ndescribe. What replaced it is the boundary — `Destination` (the order input\narm) carries an optional `uid`, so a caller states the identity instead of\nthe server inferring it.\n\n🔴 **There is deliberately no ordinal rung.** Two-or-more leftovers on both\nsides is precisely the state a drifted multi-destination document is in, and\npairing those by position is what `destinationsForItems`'s own comment calls\n*\"the tempting fix… silently wrong the first time a multi-destination\ndocument drifted.\"* Both sides are reported instead.\n\n⚠️ **Rung 1 is load-bearing and must not be removed as \"dead\" alongside the\nendpoint rung.** It is the only thing that lets a client which states no\n`pair.uid` write a single-destination document at all, which is every caller\nthat has not been updated.\n\n⚠️ **Idempotent by construction**, which is what lets a writer call it\nunconditionally: run it twice and rung 0 answers everything the first run\nassigned.\n\nMeasured 2026-08-25, prod and dev identically: **996 of 996 orders, 987 of\n988 divider-bearing invoices and 996 of 996 fulfillments carry exactly one\ndivider and one pair.** The single exception is invoice #2241 (1 divider, 2\npairs), which reaches `orphanPairs`.",
           "paramTags": [
             {
               "name": "items",

@@ -500,8 +500,6 @@ Deno.test("OrderSchema validates a complete document", () => {
         type: "destination",
         name: "Test Chicago Office",
         path: [],
-        uid_delivery: "testdest100000000000",
-        uid_collection: "testdest200000000000",
       },
       {
         uid: "550e8400-e29b-41d4-a716-446655440001",
@@ -626,8 +624,6 @@ Deno.test("OrderSchema rejects destination item with non-uuid uid", () => {
       type: "destination",
       name: "Test",
       path: [],
-      uid_delivery: null,
-      uid_collection: null,
     }],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);

@@ -101,8 +101,6 @@ export const orders: TypesenseCollectionConfig = {
       { name: "items.uid_order", type: "string[]", optional: true },
       { name: "items.order_number", type: "int32[]", optional: true },
       { name: "items.path", type: "string[]", optional: true, facet: false },
-      { name: "items.uid_delivery", type: "string[]", optional: true },
-      { name: "items.uid_collection", type: "string[]", optional: true },
       { name: "items.price", type: "object[]", optional: true },
       { name: "items.price.base_cents", type: "int64[]", optional: true, money: true },
       { name: "items.price.subtotal_cents", type: "int64[]", optional: true, money: true },

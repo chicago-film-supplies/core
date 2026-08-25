@@ -395,8 +395,6 @@ export interface OrderDocument {
     uid_order?: string;
     order_number?: number;
     path?: string[];
-    uid_delivery?: string;
-    uid_collection?: string;
     price?: {
       base_cents?: number;
       replacement_cents?: number;
@@ -479,8 +477,6 @@ export interface FulfillmentDocument {
     description?: string;
     stock_method?: string;
     path?: string[];
-    uid_delivery?: string;
-    uid_collection?: string;
     order_number?: number;
     uid_order?: string;
   }>;

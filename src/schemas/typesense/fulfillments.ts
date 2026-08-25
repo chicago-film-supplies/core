@@ -76,8 +76,6 @@ export const fulfillments: TypesenseCollectionConfig = {
       { name: "items.description", type: "string[]", stem: true, optional: true },
       { name: "items.stock_method", type: "string[]", facet: true, optional: true },
       { name: "items.path", type: "string[]", optional: true, facet: false },
-      { name: "items.uid_delivery", type: "string[]", optional: true },
-      { name: "items.uid_collection", type: "string[]", optional: true },
       { name: "items.order_number", type: "int32[]", optional: true },
       { name: "items.uid_order", type: "string[]", optional: true },
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },

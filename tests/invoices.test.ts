@@ -128,8 +128,6 @@ const DEST_9 = "00000000-0000-4000-8000-0000000de509";
 const ORDER_ID_1 = "Order000000000000001";
 const ORDER_ID_2 = "Order000000000000002";
 const DEL_1 = "Delivery000000000001";
-const DEL_2 = "Delivery000000000002";
-const COL_1 = "Collection0000000001";
 // Line-item uids (ItemUid — FirestoreId form).
 const ITEM_1 = "Item0000000000000001";
 const ITEM_2 = "Item0000000000000002";
@@ -305,8 +303,6 @@ Deno.test("buildOrderScopedItems projects order-only fields off line items", () 
       order_number: 1001,
       uid_order: ORDER_ID_1,
       zero_priced: false,
-      uid_delivery: DEL_1,
-      uid_collection: COL_1,
       // @ts-expect-error — inclusion_type not on LineItem type, but exists at runtime on OrderDocLineItem
       inclusion_type: "mandatory",
       price: {
@@ -349,8 +345,6 @@ Deno.test("buildOrderScopedItems preserves destination shape via OrderDocDestina
       type: "destination",
       name: "Main Venue",
       description: "first stop",
-      uid_delivery: DEL_1,
-      uid_collection: null,
       path: [destUid],
     },
   ];
@@ -544,8 +538,6 @@ Deno.test("syncOrderItems projects order-only fields off new items (strict schem
       uid: DEST_1,
       type: "destination",
       name: "Venue",
-      uid_delivery: DEL_1,
-      uid_collection: null,
       description: "",
       path: [DEST_1],
     },
@@ -1531,8 +1523,6 @@ Deno.test("validateInvoiceItemPaths flags stale structural uids inside an order 
     uid: DEST_2,
     type: "destination",
     name: "Other Venue",
-    uid_delivery: DEL_2,
-    uid_collection: null,
     path: [ORDER_DIV_1, DEST_2],
   };
   const items: InvoiceItem[] = [
@@ -1653,7 +1643,7 @@ const NO_EXPLANATIONS = { taxNameByUid: new Map<string, string>(), orderFrozen: 
 // project cleanly into the invoice divider scope via buildOrderScopedItems.
 const RESYNC_DEST: LineItem = {
   uid: DEST_1, type: "destination", name: "Main Venue",
-  uid_delivery: DEL_1, uid_collection: null, description: "", path: [DEST_1],
+  description: "", path: [DEST_1],
 };
 const RESYNC_LINE_A: LineItem = {
   uid: ITEM_1, type: "rental", name: "Spot Light", quantity: 2, path: [DEST_1, ITEM_1],
@@ -2413,7 +2403,7 @@ Deno.test("invoiceScopeDividersMatch: a missing group, and a divider at the wron
   // rather than the destination. A uid-set check would call this aligned.
   const wrongDepth = [
     orderDivider,
-    { uid: DEST_1, type: "destination", name: "Main Venue", description: "", uid_delivery: DEL_1, uid_collection: null, path: [ORDER_DIV_1, DEST_1] },
+    { uid: DEST_1, type: "destination", name: "Main Venue", description: "", uid_delivery: DEL_1, path: [ORDER_DIV_1, DEST_1] },
     { uid: GROUP_1, type: "group", name: "Lighting", description: "", path: [ORDER_DIV_1, GROUP_1] },
   ] as unknown as InvoiceItem[];
   assertEquals(invoiceScopeDividersMatch(wrongDepth, order, ORDER_DIV_1), false);

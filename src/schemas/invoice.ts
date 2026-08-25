@@ -790,8 +790,6 @@ export interface InvoiceItemInputDestinationType {
   name?: string;
   description?: string;
   path?: string[];
-  uid_delivery?: string | null;
-  uid_collection?: string | null;
 }
 
 // `z.strictObject`, unlike the line arm above — see the note on
@@ -817,8 +815,6 @@ const InvoiceItemInputDestinationInner = z.strictObject({
   // a stored divider already treats `null` and absent identically, and the
   // builder already writes `?? null`. It cannot break an older client either —
   // a widening never rejects what was previously valid.
-  uid_delivery: FirestoreId.nullable().optional(),
-  uid_collection: FirestoreId.nullable().optional(),
 });
 
 /** Zod schema for a destination divider (invoice input). */

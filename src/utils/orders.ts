@@ -134,8 +134,6 @@ export interface LineItem {
   price?: PriceObject;
   stock_method?: string;
   path: string[];
-  uid_delivery?: string | null;
-  uid_collection?: string | null;
   zero_priced?: boolean | null;
   description?: string;
   order_number?: number;
@@ -2201,12 +2199,17 @@ export function buildDestinationPairWithDivider(
 
 // ── The divider ↔ pair join ─────────────────────────────────────
 
-/** The shape {@link assignDestinationPairUids} needs from an items array. */
+/**
+ * The shape {@link assignDestinationPairUids} needs from an items array.
+ *
+ * ⚠️ **A uid and a type, and that is now the whole of it.** It also carried
+ * `uid_delivery`/`uid_collection` while the endpoint derivation existed; the
+ * contract step deleted both from the divider arm, so there is nothing left for
+ * a rung to match on but the identity the pair states.
+ */
 export interface DestinationDividerLike {
   uid: string;
   type: string;
-  uid_delivery?: string | null;
-  uid_collection?: string | null;
 }
 
 /** The shape {@link assignDestinationPairUids} needs from a destinations array. */
@@ -2241,16 +2244,10 @@ export interface DestinationPairUidResult<P extends DestinationPairLike> {
  * destination DIVIDERS (`items[]`) and its destination PAIRS
  * (`destinations[]`).
  *
- * A pair's identity IS its divider's uid ({@link DocDestinationType.uid}).
- * Where a pair does not yet state one, this derives it from the join the corpus
- * already carries — `divider.uid_delivery`/`uid_collection` against
- * `pair.delivery.uid`/`collection.uid` — so the same rule serves the migration
- * and every writer during the expand window rather than one rule per caller.
- *
- * ⚠️ **The endpoint derivation is TRANSITIONAL and must stay subordinate.**
- * Once an input carries `pair.uid` outright the derivation is dead code for
- * that caller. Deriving from the endpoints forever would keep alive the exact
- * value-join the pair uid exists to remove.
+ * A pair's identity IS its divider's uid ({@link DocDestinationType.uid}), and
+ * a caller that states it is simply believed. This exists for the callers that
+ * do not, and for the one shape where the answer is a deduction rather than a
+ * guess.
  *
  * ## The rungs, in strict precedence
  *
@@ -2259,24 +2256,33 @@ export interface DestinationPairUidResult<P extends DestinationPairLike> {
  *
  *    🔴 **This rung is not an optimization, and inverting it is a live
  *    defect.** `createInvoice`'s projected arm inherits each pair's uid from
- *    its source order, where it is already correct; re-deriving those from the
- *    endpoints would let one order's divider claim another order's pair
- *    whenever two orders happen to deliver to the same address — silently
- *    re-pointing a section of a multi-order invoice.
- * 1. **Endpoint match** — an unclaimed divider takes the first unassigned pair
- *    whose `(delivery.uid, collection.uid)` equals its own `(uid_delivery,
- *    uid_collection)`. Walked in document order, so repeated endpoints pair
- *    k-th with k-th.
- * 2. **The FORCED leftover** — if exactly one divider and exactly one pair
+ *    its source order, where it is already correct; re-deriving those would let
+ *    one order's divider claim another order's pair whenever two orders happen
+ *    to deliver to the same address — silently re-pointing a section of a
+ *    multi-order invoice.
+ * 1. **The FORCED leftover** — if exactly one divider and exactly one pair
  *    remain, they are each other's only possible partner, so pairing them is a
  *    deduction rather than a guess.
  *
- * 🔴 **There is deliberately no ordinal rung beyond that.** Two-or-more
- * leftovers on both sides is precisely the state a drifted multi-destination
- * document is in, and pairing those by position is what
- * `destinationsForItems`'s own comment calls *"the tempting fix… silently
- * wrong the first time a multi-destination document drifted."* Both sides are
- * reported instead.
+ * ⚠️ **There used to be an ENDPOINT-MATCH rung between those two**, joining
+ * `divider.uid_delivery`/`uid_collection` against
+ * `pair.delivery.uid`/`collection.uid`. It died with those two fields at the
+ * contract step, and it must not come back in any form: it was a join by VALUE
+ * across two arrays, which is the mechanism api-cloudrun#662/#663/#664 each
+ * describe. What replaced it is the boundary — `Destination` (the order input
+ * arm) carries an optional `uid`, so a caller states the identity instead of
+ * the server inferring it.
+ *
+ * 🔴 **There is deliberately no ordinal rung.** Two-or-more leftovers on both
+ * sides is precisely the state a drifted multi-destination document is in, and
+ * pairing those by position is what `destinationsForItems`'s own comment calls
+ * *"the tempting fix… silently wrong the first time a multi-destination
+ * document drifted."* Both sides are reported instead.
+ *
+ * ⚠️ **Rung 1 is load-bearing and must not be removed as "dead" alongside the
+ * endpoint rung.** It is the only thing that lets a client which states no
+ * `pair.uid` write a single-destination document at all, which is every caller
+ * that has not been updated.
  *
  * ⚠️ **Idempotent by construction**, which is what lets a writer call it
  * unconditionally: run it twice and rung 0 answers everything the first run
@@ -2284,9 +2290,8 @@ export interface DestinationPairUidResult<P extends DestinationPairLike> {
  *
  * Measured 2026-08-25, prod and dev identically: **996 of 996 orders, 987 of
  * 988 divider-bearing invoices and 996 of 996 fulfillments carry exactly one
- * divider and one pair, and every one of them joins on rung 1.** The single
- * exception is invoice #2241 (1 divider, 2 pairs), which reaches
- * `orphanPairs`.
+ * divider and one pair.** The single exception is invoice #2241 (1 divider, 2
+ * pairs), which reaches `orphanPairs`.
  *
  * @param items - The document's items array. Non-destination rows are ignored.
  * @param destinations - The document's destination pairs, in stored order.
@@ -2316,20 +2321,7 @@ export function assignDestinationPairUids<P extends DestinationPairLike>(
     }
   });
 
-  // Rung 1 — endpoint match, in document order.
-  for (const divider of dividers) {
-    if (claimed.has(divider.uid)) continue;
-    const index = destinations.findIndex((pair, i) =>
-      assigned[i] === undefined &&
-      (pair.delivery?.uid ?? null) === (divider.uid_delivery ?? null) &&
-      (pair.collection?.uid ?? null) === (divider.uid_collection ?? null)
-    );
-    if (index === -1) continue;
-    assigned[index] = divider.uid;
-    claimed.add(divider.uid);
-  }
-
-  // Rung 2 — the forced leftover, and ONLY when it is forced.
+  // Rung 1 — the forced leftover, and ONLY when it is forced.
   const freeDividers = dividers.filter((d) => !claimed.has(d.uid));
   const freePairs = assigned
     .map((uid, i) => (uid === undefined ? i : -1))
