@@ -9870,6 +9870,12 @@
           "doc": "The structural divider hierarchy of an INVOICE's items array, outermost\nfirst — one level deeper than an order's, because an invoice can bill\nseveral orders and separates them with an `order` divider."
         },
         {
+          "kind": "variable",
+          "name": "INVOICE_OVERRIDABLE_PAIR_FIELDS",
+          "declaration": "const INVOICE_OVERRIDABLE_PAIR_FIELDS: \"jurisdiction\"[];",
+          "doc": "The destination-pair fields an invoice OWNS — compared by nothing and\n**reconciled** per field by {@link carryOverridablePairFields}.\n\nONE list, with its membership set and the carry derived from it, for the\nreason {@link INVOICE_ONLY_ITEM_FIELDS} states: four hand-maintained copies of\none fact is how `crms_id` came to be absent from every one of them.\n\n⚠️ **Named *overridable*, not *only*.** The item-side list names fields the\nORDER does not carry at all, which is what makes *\"present on the invoice\nwins\"* safe there. `jurisdiction` is carried by **both** documents, with the\norder's as the default — so the carry here is an override *detection*\n({@link syncScalarWithOverride}), never a presence test. See\n{@link carryOverridablePairFields} for why the distinction is load-bearing.\n\n⚠️ One literal, no spread — core#43 is the standing case where JSR's npm\n`.d.ts` emit TRUNCATED a spread inside an `as const`.\n\n⚠️ **Exported for a consumer that cannot use the carry beside it.** The CRMS\ninvoice rebuild (`api-cloudrun/src/services/webhooks/invoice.ts`) rebuilds\n`destinations` wholesale from the source order and therefore has **no `prev`\nto compare against** — the third row of api-cloudrun's carry-forward table,\nwhere *\"the operator edited it\"* collapses to *\"a non-null value is stored\"*.\nIt needs this LIST and cannot use {@link carryOverridablePairFields}, whose\nwhole mechanism is the three-way comparison. The list is exported rather than\nthe rule copied, because two hand-maintained copies of one field set in one\ndomain is api-cloudrun#593 verbatim."
+        },
+        {
           "kind": "typeAlias",
           "name": "InvoiceDestinationPair",
           "declaration": "type InvoiceDestinationPair = InvoiceDocDestinationType;",

@@ -20661,6 +20661,39 @@ several orders and separates them with an `order` divider.
 const INVOICE_ITEM_LEVELS: "order" | "destination" | "group"[];
 ```
 
+### `INVOICE_OVERRIDABLE_PAIR_FIELDS`
+
+The destination-pair fields an invoice OWNS — compared by nothing and
+**reconciled** per field by {@link carryOverridablePairFields}.
+
+ONE list, with its membership set and the carry derived from it, for the
+reason {@link INVOICE_ONLY_ITEM_FIELDS} states: four hand-maintained copies of
+one fact is how `crms_id` came to be absent from every one of them.
+
+⚠️ **Named *overridable*, not *only*.** The item-side list names fields the
+ORDER does not carry at all, which is what makes *"present on the invoice
+wins"* safe there. `jurisdiction` is carried by **both** documents, with the
+order's as the default — so the carry here is an override *detection*
+({@link syncScalarWithOverride}), never a presence test. See
+{@link carryOverridablePairFields} for why the distinction is load-bearing.
+
+⚠️ One literal, no spread — core#43 is the standing case where JSR's npm
+`.d.ts` emit TRUNCATED a spread inside an `as const`.
+
+⚠️ **Exported for a consumer that cannot use the carry beside it.** The CRMS
+invoice rebuild (`api-cloudrun/src/services/webhooks/invoice.ts`) rebuilds
+`destinations` wholesale from the source order and therefore has **no `prev`
+to compare against** — the third row of api-cloudrun's carry-forward table,
+where *"the operator edited it"* collapses to *"a non-null value is stored"*.
+It needs this LIST and cannot use {@link carryOverridablePairFields}, whose
+whole mechanism is the three-way comparison. The list is exported rather than
+the rule copied, because two hand-maintained copies of one field set in one
+domain is api-cloudrun#593 verbatim.
+
+```ts
+const INVOICE_OVERRIDABLE_PAIR_FIELDS: "jurisdiction"[];
+```
+
 ### `InvoiceDestinationPair`
 
 Invoice-side destination pair: a {@link DocDestinationType} plus a `uid_order`

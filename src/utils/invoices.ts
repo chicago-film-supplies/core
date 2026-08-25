@@ -1728,8 +1728,18 @@ const PAIR_MATCH_EXCLUDED: ReadonlySet<string> = new Set(["uid_order", "dates"])
  *
  * ⚠️ One literal, no spread — core#43 is the standing case where JSR's npm
  * `.d.ts` emit TRUNCATED a spread inside an `as const`.
+ *
+ * ⚠️ **Exported for a consumer that cannot use the carry beside it.** The CRMS
+ * invoice rebuild (`api-cloudrun/src/services/webhooks/invoice.ts`) rebuilds
+ * `destinations` wholesale from the source order and therefore has **no `prev`
+ * to compare against** — the third row of api-cloudrun's carry-forward table,
+ * where *"the operator edited it"* collapses to *"a non-null value is stored"*.
+ * It needs this LIST and cannot use {@link carryOverridablePairFields}, whose
+ * whole mechanism is the three-way comparison. The list is exported rather than
+ * the rule copied, because two hand-maintained copies of one field set in one
+ * domain is api-cloudrun#593 verbatim.
  */
-const INVOICE_OVERRIDABLE_PAIR_FIELDS = ["jurisdiction"] as const;
+export const INVOICE_OVERRIDABLE_PAIR_FIELDS = ["jurisdiction"] as const;
 
 /** Membership form of {@link INVOICE_OVERRIDABLE_PAIR_FIELDS}, for key filtering. */
 const INVOICE_OVERRIDABLE_PAIR_FIELD_SET: ReadonlySet<string> = new Set(
