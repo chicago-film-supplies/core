@@ -205,8 +205,32 @@ export const INTEGRATION_EVENT_MSGS = [
   "sync_collection_completed",
   "sync_collection_skipped",
   "sync_started",
+  // `{ error_message }` — the `cache-geocodes` write failed. The geocode itself
+  // already succeeded and is returned, so this never fails a request; it is here
+  // because a persistently failing cache write turns every geocode into a live
+  // Mapbox call.
   "geocode_cache_write_failed",
+  // `{ query, poi_query, mapbox_id }` — the address arms missed and the
+  // POI-by-name fallback answered. `query` is the address as asked, `poi_query`
+  // the venue-name form. Info, not a warning: it is the fallback working.
   "geocode_poi_fallback",
+  // Two emitters, distinguishable by `reason`, and two records for one event is
+  // intended — the library one names the MECHANISM, the caller one names the
+  // BUSINESS CONTEXT.
+  //
+  //  - `lib/geocode.ts`: `{ reason: "no_place_agreement", rejected_arms,
+  //    queried_city, feature_city }` (api-cloudrun#675). Emitted ONCE, at the
+  //    terminal throw, and only when an arm answered and was REFUSED for
+  //    disagreeing with the query about where it is — never per arm, because a
+  //    refusal a later arm rescued is not a failure, and never on a plain miss.
+  //    ⚠️ Postcodes are deliberately absent: `CacheGeocodesSchema` tags
+  //    city/region/country `pii: "none"` and leaves postcode under the
+  //    object-level `mask`, and this record mirrors that.
+  //  - the callers (`services/orders.ts`, `services/webhooks/opportunity.ts`):
+  //    `{ error_message, crms_id? }` and NO `reason` — the full address is in
+  //    `error_message`. Each then writes `address_coordinates = null`, which is
+  //    the whole reason a refusal can end at the same throw as a miss without
+  //    any caller changing.
   "geocoding_failed",
   "member_geocode_skipped",
   "user_name_cascade_batch",
