@@ -46,7 +46,14 @@ export const TEMPLATE_EVENT_MSGS = [
   "template_sandbox_fast_forwarded",
   "template_sandbox_force_resynced",
   "template_sync_skipped_no_app",
+  // ⚠️ One per document family, and the THIRD is the moment to generalise
+  // rather than the moment to add a fourth. The packing list will want
+  // `get_packing_list_template_failed`; at that point prefer a single
+  // `get_template_family_failed` carrying the collections in passthrough
+  // fields, and retire these two together so no log query is left half
+  // migrated. Two is still cheaper to read than a parameterised message.
   "get_quote_template_failed",
+  "get_invoice_template_failed",
   "golden_diff_oidc_identity_rejected",
   "golden_diff_oidc_unconfigured",
   "golden_diff_oidc_verify_failed",
