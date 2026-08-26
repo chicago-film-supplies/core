@@ -10670,9 +10670,25 @@
         },
         {
           "kind": "function",
+          "name": "getDestinationPairItemName",
+          "signature": "getDestinationPairItemName(destination: DestinationType, index: number): string",
+          "doc": "Build a display name for a destination pair from its delivery/collection addresses.\nFalls back to \"Destination N\" when no addresses are present.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "getDestinationsLegend",
           "signature": "getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral",
           "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getGroupItems",
+          "signature": "getGroupItems(items: LineItem[], index: number): LineItem[]",
+          "doc": "Collect the child product items belonging to a collapsible section.\n\nDestination / group: walk forward to the next divider of the same or\nouter level, collecting every line item.\n\nProduct: walk only its own contiguous subtree (via `getItemSubtreeRange`)\nand return the immediate children (`path.at(-2) === item.uid`). Under the\nwithin-parent uniqueness invariant, `path.at(-2) === uid` is unambiguous\ninside the subtree; constraining to the subtree range protects against\naccidental cross-parent collisions if an upstream invariant violation\nslips through.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10727,25 +10743,17 @@
         },
         {
           "kind": "function",
-          "name": "isPreTaxItem",
-          "signature": "isPreTaxItem(item: LineItem): item is PreTaxLineItem",
-          "doc": "Determine whether a line item participates in subtotal/discount/tax calculations.\nStandalone predicate (not composed) because TS doesn't support negated predicates.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "isPriceableItem",
-          "signature": "isPriceableItem(item: LineItem): item is PriceableLineItem",
-          "doc": "Determine whether a line item is priceable (has a price object, not a structural item).",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "isSameAsDeliveryDates",
           "signature": "isSameAsDeliveryDates(dates: OrderDatesType): boolean",
           "doc": "Whether charge dates match the delivery/collection dates\n(i.e. no custom charge period has been set).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isSameAsDeliveryDestination",
+          "signature": "isSameAsDeliveryDestination(destination: DestinationType): boolean",
+          "doc": "Whether a destination's collection endpoint matches its delivery endpoint\n(address, contact, and instructions are all equal).",
           "paramTags": [],
           "returnsTag": null
         },

@@ -53,6 +53,11 @@
  * fulfillment line has none, because a packing list is not a money document.
  * `orderHasRentals` reads `type`, and `rental` is a `FULFILLMENT_LINE_ITEM_TYPES`
  * member, so it answers truthfully and can still drive a collection leg.
+ *
+ * ⚠️ `isSameAsDeliveryDates` has an address-shaped sibling,
+ * `isSameAsDeliveryDestination`, and a packing list showing both legs needs
+ * both — collapsing a return that goes back where it came from. It is exported
+ * below rather than here because it is not part of the shared five.
  */
 export {
   getDestinationsLegend,
@@ -82,15 +87,37 @@ export {
 } from "./orders.ts";
 
 /**
- * Structural helpers shared with the other document namespaces — a fulfillment's
- * `items[]` obeys the same five invariants, and `path` is its row identity.
+ * Structure and MOVEMENT — the two things a fulfillment is actually about.
+ *
+ * The test for what belongs in this namespace is the document's own subject: a
+ * fulfillment describes inventory moving, not money changing hands. So the
+ * whole priced surface of `utils/orders.ts` is deliberately absent — the
+ * thirteen `calculate*` / `get*Totals` / `isTaxableCoa` / `isTransactionFeeItem`
+ * helpers, and `getDefaultChargeDays`, whose "chargeable days" is a billing
+ * duration. None of them are merely unneeded here: a fulfillment line has no
+ * `price` object at all, and `transaction_fee` is not a
+ * `FULFILLMENT_LINE_ITEM_TYPES` member, so they are inapplicable rather than
+ * unused.
+ *
+ * ⚠️ **`isPreTaxItem` and `isPriceableItem` are absent for the same reason**,
+ * even though they are predicates rather than arithmetic: both answer FALSE for
+ * every fulfillment line, so exporting them would advertise a helper that can
+ * only ever say no. That is the difference between them and `orderHasDiscount` /
+ * `orderHasTax` above, which are also always-false here and are still exported —
+ * those two are part of the SHARED FIVE, a contract the `u` prop depends on and
+ * a ratchet asserts across all three namespaces. A contract is kept even where
+ * an arm of it is trivially satisfied; a convenience is not.
+ *
+ * `getGroupPath` is also left out: its own docstring says the value "is only
+ * ever a UI collapse key", which is a manager concern rather than a document one.
  */
 export {
+  getDestinationPairItemName,
+  getGroupItems,
   getItemSubtreeRange,
   getParentProductUid,
   getStructuralUids,
-  isPriceableItem,
-  isPreTaxItem,
+  isSameAsDeliveryDestination,
   type ItemPathIssue,
   type ItemUniquenessIssue,
 } from "./orders.ts";

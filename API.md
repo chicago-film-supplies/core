@@ -22202,6 +22202,11 @@ stored-denorm one: **the residual is discarded on purpose.**
 (Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero
 recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
 
+### `getDestinationPairItemName(destination: DestinationType, index: number): string`
+
+Build a display name for a destination pair from its delivery/collection addresses.
+Falls back to "Destination N" when no addresses are present.
+
 ### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
 
 Pair-derived legend strings for the order's start/end dates.
@@ -22216,6 +22221,20 @@ Mapping:
   end:   customer_returning  === true → "In Store Return", else → "Pickup"
 
 Empty input returns empty strings.
+
+### `getGroupItems(items: LineItem[], index: number): LineItem[]`
+
+Collect the child product items belonging to a collapsible section.
+
+Destination / group: walk forward to the next divider of the same or
+outer level, collecting every line item.
+
+Product: walk only its own contiguous subtree (via `getItemSubtreeRange`)
+and return the immediate children (`path.at(-2) === item.uid`). Under the
+within-parent uniqueness invariant, `path.at(-2) === uid` is unambiguous
+inside the subtree; constraining to the subtree range protects against
+accidental cross-parent collisions if an upstream invariant violation
+slips through.
 
 ### `getItemSubtreeRange(items: T[], index: number): typeLiteral`
 
@@ -22279,19 +22298,15 @@ order (where the caller passes `""` and skips the group downstream).
 - `fallbackDeliveryUid` — Endpoint for a section whose pair supplies none
 - `fallbackCollectionUid` — Defaults to `fallbackDeliveryUid`
 
-### `isPreTaxItem(item: LineItem): item is PreTaxLineItem`
-
-Determine whether a line item participates in subtotal/discount/tax calculations.
-Standalone predicate (not composed) because TS doesn't support negated predicates.
-
-### `isPriceableItem(item: LineItem): item is PriceableLineItem`
-
-Determine whether a line item is priceable (has a price object, not a structural item).
-
 ### `isSameAsDeliveryDates(dates: OrderDatesType): boolean`
 
 Whether charge dates match the delivery/collection dates
 (i.e. no custom charge period has been set).
+
+### `isSameAsDeliveryDestination(destination: DestinationType): boolean`
+
+Whether a destination's collection endpoint matches its delivery endpoint
+(address, contact, and instructions are all equal).
 
 ### `orderHasDiscount(items: LineItem[]): boolean`
 
