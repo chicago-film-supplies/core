@@ -9937,6 +9937,12 @@
         },
         {
           "kind": "interface",
+          "name": "OrderInvoiceCoverage",
+          "declaration": "interface OrderInvoiceCoverage {\n  uninvoiced: LineItem[];\n  unmatched: UnmatchedInvoiceLine[];\n  compared: string[];\n  unaligned: string[];\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
           "name": "PreTaxLineItem",
           "declaration": "interface PreTaxLineItem {\n  type: PreTaxItemType;\n  quantity: number;\n  price: PriceObject;\n}",
           "doc": "A pre-tax line item with a full price object — every type the contract table\nmarks `pricing: \"pre_tax\"`.\n\nThe member list is DERIVED from `ITEM_CONTRACTS`, not written out. It used to\nbe the literal `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\nwhich made this a sixth place to remember when an item type was added."
@@ -9994,6 +10000,12 @@
           "name": "TransactionFeeLineItem",
           "declaration": "interface TransactionFeeLineItem {\n  type: FromTotalItemType;\n  quantity: number;\n  price: PriceObject;\n}",
           "doc": "A transaction fee line item.\n\nCarries the same `PriceObject` every other line carries — a fee is an\nordinary line whose `price.formula` is `percent_of_total`, not a second price\nshape. It differs from a `PreTaxLineItem` only in that it is priced FROM the\ndocument total rather than into it, which is why it has its own predicate and\nits own pass in `calculateOrderTotals`."
+        },
+        {
+          "kind": "interface",
+          "name": "UnmatchedInvoiceLine",
+          "declaration": "interface UnmatchedInvoiceLine {\n  invoiceUid: string;\n  item: InvoiceItem;\n}",
+          "doc": "An invoice line with no counterpart on the order it is scoped to."
         },
         {
           "kind": "function",
@@ -10141,6 +10153,27 @@
           "signature": "computeItemPaths(items: T[], _: unknown): T[]",
           "doc": "Compute full structural paths for a flat items array AND linearize it\ndepth-first with `zero_priced` items sorted before priced ones inside each\nparent's direct-children block.\n\nEach item's path = [structural context...] + [component ancestry...] + [self uid].\n\nClient-sent paths carry component ancestry (from ProductComponent.path).\nThis function prepends structural context (dest/group) and appends self uid.\n\n`path` has exactly ONE author: the resolved parent. Per (destination, group)\nblock, in order:\n 1. Resolve each line item's parent — the last segment of the client-supplied\n    path that names another line item IN THE SAME BLOCK (structural uids and\n    the item's own uid are skipped, as are orphan segments that resolve to no\n    item in the block, e.g. catalog-only intermediate kit uids). No parent\n    resolves to a block root. Parent cycles are broken deterministically.\n 2. Derive `path` as `[...parent.path, self uid]`, or `[...structural prefix,\n    self uid]` at a block root. Deriving from the parent's own path rather\n    than from the client's chain is what makes ancestry transitively\n    consistent: a client chain that skips or misnames an intermediate cannot\n    survive, and `path.at(-2)` is the resolved parent BY CONSTRUCTION.\n 3. Emit depth-first from that same parent relation — each parent followed by\n    its full subtree before the next sibling — stable-sorting `zero_priced\n    === true` before priced within each parent's direct children. Drag-drop\n    reorders preserve intra-band order. Destination and group dividers keep\n    their source positions; only the line items between them are reordered.\n\nSteps 2 and 3 read the SAME resolved parent, so the written path and the\nemitted position cannot disagree. (They used to be decided independently —\nthe path from a globally-filtered client chain, the position from a\nblock-scoped bucketing — and a parent living in a different block was a\nstable fixed point of the pair: 26 such order items in prod.)\n\nPure: returns a fresh array of fresh items. Inputs are not mutated, so it is\nsafe to pass items that originate from a Solid store proxy (the manager app\nroutes reordered arrays through this function inside `setEntity` updaters).\nCallers should replace their working array with the return value.\n\nPost-condition (under the within-parent uniqueness invariant): a parent and\nits full subtree occupy a contiguous index range, so `getItemSubtreeRange`\nand `getGroupItems` can rely on path-prefix matching alone. Unconditionally:\nevery returned `path` is non-empty and ends in the item's own uid.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "computeOrderInvoiceCoverage",
+          "signature": "computeOrderInvoiceCoverage(orderUid: string, orderItems: LineItem[], invoices: ReadonlyArray<typeLiteral>): OrderInvoiceCoverage",
+          "doc": "**Is this order fully invoiced?** — the ORDER-first, union-across-invoices\nquestion, and the complement of {@link computeInvoiceSyncStatus}.\n\nThe two are easy to confuse and answer different things. `computeInvoiceSyncStatus`\nstands on ONE invoice and asks whether each of its lines still agrees with the\norder, collapsing *missing* / *removed* / *differs* into a single\n`out_of_sync` flag. This stands on the ORDER and asks which of its lines no\nlive invoice bills — so it unions every linked invoice, and a line billed on\ninvoice A is covered even though invoice B lacks it. **Neither can be derived\nfrom the other**: prod order #1000 is billed by #2385 and #2388, and every one\nof its lines is `out_of_sync` on at least one of them while exactly one line\nis genuinely unbilled.\n\nIt deliberately says nothing about lines that DIFFER. A matched-but-drifted\nline is covered here and is `computeInvoiceSyncStatus`'s subject; measured\n2026-08-25 the corpus carries 1,653 drifted lines against 177 uninvoiced ones,\nso folding the two would bury this answer in the other's.\n\n⚠️ **`void` invoices are skipped, drafts are NOT.** A draft states the intent\nto bill and is one click from doing so; measured on the whole prod corpus,\nexcluding drafts changes the answer on **0** orders, so the simpler rule costs\nnothing. Voiding, by contrast, un-bills — counting a void invoice's lines as\ncovered is how an order reads fully invoiced while nobody is being charged.\n\n🔴 **Every scope is gated on {@link invoiceScopeDividersMatch} FIRST, and that\ngate is the difference between a signal and an artifact.** This comparison is\nkeyed on `path`, so where the two trees disagree structurally no pair is ever\ncompared and EVERY order line reports uninvoiced while EVERY invoice line\nreports unmatched. That is not hypothetical: **966 of 969 prod pairs were\nunaligned on 2026-08-10** (CRMS-authored invoices carried none of their\norder's `group` dividers), `repair-invoice-structure.ts` took it to 0, one\nreappeared on 2026-08-12, and the corpus reads 989 aligned / 0 unaligned on\n2026-08-25. **Alignment is a measurement, not a property.**\n\nSo the gate is fail-closed rather than advisory: if ANY linked scope is\nunaligned, `uninvoiced` and `unmatched` come back **empty** and the uid is in\n`unaligned` — the caller renders \"not computed\" and cannot render a number.\nReturning a partial union beside an `unaligned` list the caller might not read\nwould be the same policing this repo keeps replacing with unrepresentability,\nand it fails in the dangerous direction: an unaligned scope's lines are\nuncounted, so every line it bills reads UNBILLED.\n\n⚠️ **`unmatched` is not a defect count.** Nothing in the stored state separates\n\"the order dropped this line after it was billed\" from \"an operator added it\non the invoice on purpose\", and the second is ordinary: of 190 such lines on\nprod, 143 are `replacement` charges raised at billing time. Only\n`transaction_fee` is excluded, because it is a document-level charge\n(`pricing: \"from_total\"`) that has no order counterpart by construction.\n`custom-` uids are NOT filtered — that is a presentation judgment, and this\nreturns the item so the caller can make it.\n\nAn invoice whose scope holds no items at all is `compared` and contributes\nnothing; that is an order this invoice does not bill, not a structural\ndisagreement, so it must not suppress the answer the way `unaligned` does.",
+          "paramTags": [
+            {
+              "name": "orderUid",
+              "doc": "The source order's uid — which IS its divider's uid on every\ninvoice that bills it (Option B; the transitional `uid_order` field is gone)."
+            },
+            {
+              "name": "orderItems",
+              "doc": "The order's full `items` array, dividers included — the\nalignment predicate reads them."
+            },
+            {
+              "name": "invoices",
+              "doc": "Every invoice linked to the order, live or void."
+            }
+          ],
           "returnsTag": null
         },
         {

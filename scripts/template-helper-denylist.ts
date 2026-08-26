@@ -185,6 +185,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "projectOrderItemToInvoiceItem",
     "adoptOrderDividerStructure", // re-hangs an invoice on the order's dividers (write-path)
     "invoiceScopeDividersMatch", // structural alignment predicate — audit + endpoint
+    // Order-first coverage. Not a render helper: it needs every LINKED
+    // INVOICE's items, which a render context never holds (a template is
+    // handed one document), and its answer is an operator advisory.
+    "computeOrderInvoiceCoverage",
   ],
   // The line builders, denylisted whole. Every one of them CONSTRUCTS a line
   // item from a Typesense `ProductDocument` — a write-path input a render context

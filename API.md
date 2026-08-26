@@ -20843,6 +20843,17 @@ interface OrderDestinationSyncResult {
 }
 ```
 
+### `OrderInvoiceCoverage`
+
+```ts
+interface OrderInvoiceCoverage {
+  uninvoiced: LineItem[];
+  unmatched: UnmatchedInvoiceLine[];
+  compared: string[];
+  unaligned: string[];
+}
+```
+
 ### `PreTaxLineItem`
 
 A pre-tax line item with a full price object — every type the contract table
@@ -20984,6 +20995,17 @@ interface TransactionFeeLineItem {
   type: FromTotalItemType;
   quantity: number;
   price: PriceObject;
+}
+```
+
+### `UnmatchedInvoiceLine`
+
+An invoice line with no counterpart on the order it is scoped to.
+
+```ts
+interface UnmatchedInvoiceLine {
+  invoiceUid: string;
+  item: InvoiceItem;
 }
 ```
 
@@ -21249,6 +21271,71 @@ Post-condition (under the within-parent uniqueness invariant): a parent and
 its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
 and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
 every returned `path` is non-empty and ends in the item's own uid.
+
+### `computeOrderInvoiceCoverage(orderUid: string, orderItems: LineItem[], invoices: ReadonlyArray<typeLiteral>): OrderInvoiceCoverage`
+
+**Is this order fully invoiced?** — the ORDER-first, union-across-invoices
+question, and the complement of {@link computeInvoiceSyncStatus}.
+
+The two are easy to confuse and answer different things. `computeInvoiceSyncStatus`
+stands on ONE invoice and asks whether each of its lines still agrees with the
+order, collapsing *missing* / *removed* / *differs* into a single
+`out_of_sync` flag. This stands on the ORDER and asks which of its lines no
+live invoice bills — so it unions every linked invoice, and a line billed on
+invoice A is covered even though invoice B lacks it. **Neither can be derived
+from the other**: prod order #1000 is billed by #2385 and #2388, and every one
+of its lines is `out_of_sync` on at least one of them while exactly one line
+is genuinely unbilled.
+
+It deliberately says nothing about lines that DIFFER. A matched-but-drifted
+line is covered here and is `computeInvoiceSyncStatus`'s subject; measured
+2026-08-25 the corpus carries 1,653 drifted lines against 177 uninvoiced ones,
+so folding the two would bury this answer in the other's.
+
+⚠️ **`void` invoices are skipped, drafts are NOT.** A draft states the intent
+to bill and is one click from doing so; measured on the whole prod corpus,
+excluding drafts changes the answer on **0** orders, so the simpler rule costs
+nothing. Voiding, by contrast, un-bills — counting a void invoice's lines as
+covered is how an order reads fully invoiced while nobody is being charged.
+
+🔴 **Every scope is gated on {@link invoiceScopeDividersMatch} FIRST, and that
+gate is the difference between a signal and an artifact.** This comparison is
+keyed on `path`, so where the two trees disagree structurally no pair is ever
+compared and EVERY order line reports uninvoiced while EVERY invoice line
+reports unmatched. That is not hypothetical: **966 of 969 prod pairs were
+unaligned on 2026-08-10** (CRMS-authored invoices carried none of their
+order's `group` dividers), `repair-invoice-structure.ts` took it to 0, one
+reappeared on 2026-08-12, and the corpus reads 989 aligned / 0 unaligned on
+2026-08-25. **Alignment is a measurement, not a property.**
+
+So the gate is fail-closed rather than advisory: if ANY linked scope is
+unaligned, `uninvoiced` and `unmatched` come back **empty** and the uid is in
+`unaligned` — the caller renders "not computed" and cannot render a number.
+Returning a partial union beside an `unaligned` list the caller might not read
+would be the same policing this repo keeps replacing with unrepresentability,
+and it fails in the dangerous direction: an unaligned scope's lines are
+uncounted, so every line it bills reads UNBILLED.
+
+⚠️ **`unmatched` is not a defect count.** Nothing in the stored state separates
+"the order dropped this line after it was billed" from "an operator added it
+on the invoice on purpose", and the second is ordinary: of 190 such lines on
+prod, 143 are `replacement` charges raised at billing time. Only
+`transaction_fee` is excluded, because it is a document-level charge
+(`pricing: "from_total"`) that has no order counterpart by construction.
+`custom-` uids are NOT filtered — that is a presentation judgment, and this
+returns the item so the caller can make it.
+
+An invoice whose scope holds no items at all is `compared` and contributes
+nothing; that is an order this invoice does not bill, not a structural
+disagreement, so it must not suppress the answer the way `unaligned` does.
+
+**Parameters**
+
+- `orderUid` — The source order's uid — which IS its divider's uid on every
+invoice that bills it (Option B; the transitional `uid_order` field is gone).
+- `orderItems` — The order's full `items` array, dividers included — the
+alignment predicate reads them.
+- `invoices` — Every invoice linked to the order, live or void.
 
 ### `derivePaymentStatus(currentStatus: InvoiceStatusType, amountPaidCents: number, amountDueCents: number, _: unknown): InvoiceStatusType`
 

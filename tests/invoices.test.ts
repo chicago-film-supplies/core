@@ -9,6 +9,7 @@ import {
   carryForwardOverrides,
   computeInvoiceItemPaths,
   computeInvoiceSyncStatus,
+  computeOrderInvoiceCoverage,
   derivePaymentStatus,
   flattenForXero,
   getOrderScopedItems,
@@ -39,6 +40,7 @@ import {
 import type {
   InvoiceDocItemType,
   FirestoreTimestampType,
+  InvoiceStatusType,
   JurisdictionType,
   OrderDocDatesType,
   SettlementReasonType,
@@ -1748,6 +1750,223 @@ Deno.test("computeInvoiceSyncStatus: order line missing from the invoice is out_
 Deno.test("computeInvoiceSyncStatus: invoice line the order dropped is out_of_sync", () => {
   const status = computeInvoiceSyncStatus(baselineInvoice(), [RESYNC_DEST, RESYNC_LINE_A], ORDER_DIV_1, NO_EXPLANATIONS);
   assertEquals(status.get(KEY_B), "out_of_sync");
+});
+
+// ── computeOrderInvoiceCoverage (order-first, union across invoices) ──
+
+const ITEM_C = "Item000000000000000C";
+
+/** A third order line, so one invoice can bill a strict subset of the order. */
+const RESYNC_LINE_C: LineItem = {
+  uid: ITEM_C, type: "replacement", name: "Replacement: Spot Light", quantity: 1, path: [DEST_1, ITEM_C],
+  stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
+  price: {
+    base_cents: 50000, chargeable_days: null, formula: "fixed",
+    subtotal_cents: 50000, subtotal_discounted_cents: 50000, discount: null, taxes: [], total_cents: 50000, replacement_cents: 0,
+  },
+} as unknown as LineItem;
+
+const THREE_LINE_ORDER: LineItem[] = [RESYNC_DEST, RESYNC_LINE_A, RESYNC_LINE_B, RESYNC_LINE_C];
+
+/** One invoice billing only the named order lines, hung on the order's skeleton. */
+function invoiceBilling(uid: string, lines: LineItem[], status: InvoiceStatusType = "issued") {
+  return {
+    uid,
+    status,
+    items: [orderDivider, ...buildOrderScopedItems([RESYNC_DEST, ...lines], ORDER_DIV_1)] as InvoiceItem[],
+  };
+}
+
+Deno.test("computeOrderInvoiceCoverage: unions across invoices — a line billed by ONE of two is covered", () => {
+  // The prod #1000 shape: neither invoice carries the whole order, and between
+  // them they carry all of it. An invoice-first answer calls every line
+  // out_of_sync on at least one invoice; the union calls the order clean.
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A, RESYNC_LINE_B]),
+    invoiceBilling("Invoice00000000002388", [RESYNC_LINE_C]),
+  ]);
+  assertEquals(result.uninvoiced.length, 0);
+  assertEquals(result.unmatched.length, 0);
+  assertEquals(result.compared.length, 2);
+  assertEquals(result.unaligned.length, 0);
+});
+
+Deno.test("computeOrderInvoiceCoverage: the line no invoice bills is the only one reported", () => {
+  // #1000's real state: `6Hs34R9G6D6467yzElQI`, a priced replacement on neither
+  // invoice. One line, not "every line the other invoice lacks".
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A]),
+    invoiceBilling("Invoice00000000002388", [RESYNC_LINE_B]),
+  ]);
+  assertEquals(result.uninvoiced.map((i) => i.uid), [ITEM_C]);
+});
+
+Deno.test("computeOrderInvoiceCoverage: dividers are structure and are never 'uninvoiced'", () => {
+  // The destination divider is on both documents, but even an invoice that
+  // carried no divider at all must not make one show up as an unbilled item.
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A, RESYNC_LINE_B, RESYNC_LINE_C]),
+  ]);
+  assertEquals(result.uninvoiced.length, 0);
+  assertEquals(result.uninvoiced.some((i) => i.uid === DEST_1), false);
+});
+
+Deno.test("computeOrderInvoiceCoverage: a VOID invoice covers nothing", () => {
+  // Voiding un-bills. Counting its lines as covered is how an order reads
+  // fully invoiced while nobody is being charged.
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A, RESYNC_LINE_B, RESYNC_LINE_C], "void"),
+  ]);
+  assertEquals(result.uninvoiced.map((i) => i.uid), [ITEM_1, ITEM_2, ITEM_C]);
+  assertEquals(result.compared.length, 0);
+});
+
+Deno.test("computeOrderInvoiceCoverage: a DRAFT invoice does cover", () => {
+  // Deliberate, and measured: excluding drafts changes the answer on 0 prod
+  // orders, so the simpler rule costs nothing.
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A, RESYNC_LINE_B, RESYNC_LINE_C], "draft"),
+  ]);
+  assertEquals(result.uninvoiced.length, 0);
+});
+
+Deno.test("computeOrderInvoiceCoverage: an UNALIGNED scope is reported and counted NOWHERE", () => {
+  // 🔴 The artifact this gate exists to prevent. Strip the destination divider
+  // from the invoice and every path is one segment short, so a path-keyed diff
+  // pairs nothing: without the gate this returns all three lines uninvoiced AND
+  // all three unmatched — which is exactly what 966 of 969 prod pairs looked
+  // like on 2026-08-10. The assertion is `0`, not `3`.
+  const flattened = [
+    orderDivider,
+    ...buildOrderScopedItems(THREE_LINE_ORDER, ORDER_DIV_1)
+      .filter((it) => it.uid !== DEST_1)
+      .map((it) => ({ ...it, path: [ORDER_DIV_1, it.uid] })),
+  ] as InvoiceItem[];
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    { uid: "Invoice00000000002385", status: "issued", items: flattened },
+  ]);
+  assertEquals(result.unaligned, ["Invoice00000000002385"]);
+  assertEquals(result.compared.length, 0);
+  assertEquals(result.uninvoiced.length, 0);
+  assertEquals(result.unmatched.length, 0);
+
+  // Fail-closed companion, inline: the 0s above must be the GATE, not an empty
+  // input. Run the same path-keyed pairing the function would have run without
+  // it and show it pairs nothing — 3 order lines with no invoice counterpart
+  // and 3 invoice lines with no order counterpart, which is the artifact.
+  assertEquals(invoiceScopeDividersMatch(flattened, THREE_LINE_ORDER, ORDER_DIV_1), false);
+  const invoiceRelKeys = new Set(
+    flattened.filter((it) => isInvoiceLineItem(it as InvoiceDocItemType)).map((it) => it.path.slice(1).join("/")),
+  );
+  const orderKeys = new Set(
+    THREE_LINE_ORDER.filter((it) => it.type !== "destination").map((it) => (it.path ?? []).join("/")),
+  );
+  assertEquals(orderKeys.size, 3);
+  assertEquals(invoiceRelKeys.size, 3);
+  assertEquals([...orderKeys].filter((k) => invoiceRelKeys.has(k)).length, 0);
+});
+
+Deno.test("computeOrderInvoiceCoverage: one unaligned scope suppresses the WHOLE answer", () => {
+  // Not just its own contribution. An aligned sibling's coverage is real but
+  // partial, and a partial union is indistinguishable from a complete one at
+  // the call site — so it would report the unaligned invoice's lines as unbilled.
+  const aligned = invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A, RESYNC_LINE_B]);
+  const flattened = [
+    orderDivider,
+    ...buildOrderScopedItems([RESYNC_DEST, RESYNC_LINE_C], ORDER_DIV_1)
+      .filter((it) => it.uid !== DEST_1)
+      .map((it) => ({ ...it, path: [ORDER_DIV_1, it.uid] })),
+  ] as InvoiceItem[];
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    aligned,
+    { uid: "Invoice00000000002388", status: "issued", items: flattened },
+  ]);
+  assertEquals(result.compared, ["Invoice00000000002385"]);
+  assertEquals(result.unaligned, ["Invoice00000000002388"]);
+  assertEquals(result.uninvoiced.length, 0); // NOT [ITEM_C] — that would be a guess
+});
+
+Deno.test("computeOrderInvoiceCoverage: an aligned corpus still answers — the gate is not a mute button", () => {
+  // Companion to the two above, and the reason they are credible: a suppressed
+  // answer and a clean one both read `uninvoiced: []`, so prove the aligned
+  // path produces a NON-EMPTY answer from the same shape. Re-run the previous
+  // test's inputs with the second invoice hung on the order's real skeleton.
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A, RESYNC_LINE_B]),
+    invoiceBilling("Invoice00000000002388", []),
+  ]);
+  assertEquals(result.unaligned.length, 0);
+  assertEquals(result.compared.length, 2);
+  assertEquals(result.uninvoiced.map((i) => i.uid), [ITEM_C]);
+});
+
+Deno.test("computeOrderInvoiceCoverage: a transaction_fee on the invoice is never 'unmatched'", () => {
+  // A card fee is a document-level charge with no order counterpart by
+  // construction — prod #2385 and #2388 both carry one. Reporting it would fire
+  // on every card-paid invoice in the corpus.
+  const fee = {
+    ...lineItemBase,
+    uid: "Item00000000000000FEE",
+    type: "transaction_fee",
+    name: "Card Fee",
+    quantity: 1,
+    path: [ORDER_DIV_1, "Item00000000000000FEE"],
+  } as unknown as InvoiceItem;
+  const inv = invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A, RESYNC_LINE_B, RESYNC_LINE_C]);
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    { ...inv, items: [...inv.items, fee] },
+  ]);
+  assertEquals(result.unmatched.length, 0);
+});
+
+Deno.test("computeOrderInvoiceCoverage: an invoice-only product line IS unmatched, once across invoices", () => {
+  // A `custom-` line or a replacement raised at billing is genuinely on the
+  // invoice and not on the order. It is reported — and deduped by path, so two
+  // invoices carrying the same added line count it once, not twice.
+  const extra = {
+    ...lineItemBase,
+    uid: "custom-0000000000000001",
+    type: "service",
+    name: "Shipping",
+    quantity: 1,
+    path: [ORDER_DIV_1, DEST_1, "custom-0000000000000001"],
+  } as unknown as InvoiceItem;
+  const a = invoiceBilling("Invoice00000000002385", [RESYNC_LINE_A, RESYNC_LINE_B, RESYNC_LINE_C]);
+  const b = invoiceBilling("Invoice00000000002388", [RESYNC_LINE_A]);
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    { ...a, items: [...a.items, extra] },
+    { ...b, items: [...b.items, extra] },
+  ]);
+  assertEquals(result.unmatched.length, 1);
+  assertEquals(result.unmatched[0].item.uid, "custom-0000000000000001");
+  assertEquals(result.unmatched[0].invoiceUid, "Invoice00000000002385");
+});
+
+Deno.test("computeOrderInvoiceCoverage: the same uid at two paths is two rows", () => {
+  // `uid` is NOT a row identity — it repeats within one document on 18% of prod
+  // orders. The same product as a standalone line and as a component of another
+  // must be covered independently.
+  const componentA: LineItem = { ...RESYNC_LINE_B, path: [DEST_1, ITEM_1, ITEM_2] } as LineItem;
+  const orderItems: LineItem[] = [RESYNC_DEST, RESYNC_LINE_A, componentA, RESYNC_LINE_B];
+  // The invoice bills only the standalone occurrence.
+  const billed: LineItem[] = [RESYNC_DEST, RESYNC_LINE_A, RESYNC_LINE_B];
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, orderItems, [
+    { uid: "Invoice00000000002385", status: "issued", items: [orderDivider, ...buildOrderScopedItems(billed, ORDER_DIV_1)] as InvoiceItem[] },
+  ]);
+  assertEquals(result.uninvoiced.length, 1);
+  assertEquals(result.uninvoiced[0].path, [DEST_1, ITEM_1, ITEM_2]);
+});
+
+Deno.test("computeOrderInvoiceCoverage: an invoice with no scoped items is compared, not unaligned", () => {
+  // An invoice linked to the order that bills none of it is an order this
+  // invoice does not cover — not a structural disagreement, so it must not
+  // suppress the answer the way `unaligned` does.
+  const result = computeOrderInvoiceCoverage(ORDER_DIV_1, THREE_LINE_ORDER, [
+    { uid: "Invoice00000000002385", status: "issued", items: [] },
+  ]);
+  assertEquals(result.unaligned.length, 0);
+  assertEquals(result.compared, ["Invoice00000000002385"]);
+  assertEquals(result.uninvoiced.length, 3);
 });
 
 Deno.test("resyncInvoiceLines per-line: re-projects only the targeted line, sibling untouched", () => {
