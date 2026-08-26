@@ -2144,10 +2144,11 @@ export interface DestinationPairWithDivider {
  * ⚠️ **There used to be THREE couplings and there is now one.** The divider also
  * carried `uid_delivery`/`uid_collection`, copies of the pair's own
  * `delivery.uid`/`collection.uid`, and this function emitted them from the
- * pair's endpoints so they could not disagree. Step 11 of
- * `api-cloudrun/.claude/plans/destination-pair-identity.md` stops emitting them
- * here — the first of the three steps that removes them, before the corpus purge
- * and before the schema drops the field. **Nothing is lost:** a reader wanting
+ * pair's endpoints so they could not disagree. This function stopped emitting
+ * them first — the earliest of the three steps that removed them, before the
+ * corpus purge and before the schema dropped the field, because a strict schema
+ * refuses a document carrying a key it no longer declares
+ * (api-cloudrun#662/#663/#664). **Nothing is lost:** a reader wanting
  * this section's endpoint asks the pair the uid names, which is the only copy.
  *
  * 🔴 **Every one of api-cloudrun#662, #663 and #664 is one of those three
@@ -2365,9 +2366,9 @@ export interface DestinationGroup {
  * ⚠️ **`destinations` is a required parameter and used to be absent, because
  * the endpoints used to be read off the divider itself** — the second copy that
  * api-cloudrun#662/#663/#664 are all instances of. The divider now carries only
- * its `uid`; the endpoints live on the pair that uid addresses, and step 11 of
- * `api-cloudrun/.claude/plans/destination-pair-identity.md` deletes
- * `uid_delivery`/`uid_collection` from the divider outright. Reading them here
+ * its `uid`; the endpoints live on the pair that uid addresses, and the contract
+ * step deleted `uid_delivery`/`uid_collection` from the divider outright
+ * (api-cloudrun#662/#663/#664). Reading them here
  * again would re-open the class.
  *
  * ✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is

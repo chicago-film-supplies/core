@@ -843,12 +843,12 @@ export interface DocumentTaxContext {
  * the rung this function's own earlier comment called *"the tempting fix…
  * silently wrong the first time a multi-destination document drifted."* Under
  * the uid join a divider that names no pair is a **defect to report**, not a
- * position to guess from — Phase 4 of
- * `api-cloudrun/.claude/plans/destination-pair-identity.md` refuses it at
- * write.
+ * position to guess from — api-cloudrun's write guard
+ * (`api-cloudrun/src/lib/firestoreWrite.ts`) refuses it at write.
  *
  * ⚠️ **The single-entry rung is KEPT, and it is a deduction rather than a
- * guess** — the same distinction `assignDestinationPairUids`' rung 2 draws.
+ * guess** — the same distinction `assignDestinationPairUids`' forced-leftover
+ * rung draws.
  * With exactly one destination on the document there is no other answer to
  * pick, so nothing is being inferred from position.
  */
