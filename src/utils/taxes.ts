@@ -761,8 +761,22 @@ export interface TaxDestination {
  */
 export interface DocumentTaxContext {
   /**
-   * The document's `destinations[]`, **in document order**. Order matters:
-   * it is the fallback key when a divider names no `uid_delivery`.
+   * The document's `destinations[]`, as stored.
+   *
+   * ⚠️ **Array POSITION is not load-bearing, and this docblock claimed the
+   * opposite until 2026-08-26.** It said order was "the fallback key when a
+   * divider names no `uid_delivery`" — doubly dead: a divider carries no
+   * endpoint field to name (deleted from `DestinationDividerArm` at the
+   * api-cloudrun#662/#663/#664 contract step), and there is no positional
+   * fallback to fall back to. {@link destinationsForItems} has exactly one
+   * JOIN — `divider.uid === pair.uid` — and its own rung table is the statement
+   * of record, so read it there rather than restating it here.
+   *
+   * 🔴 The only other rung is the SINGLE-ENTRY deduction, which needs
+   * `destinations.length === 1` — where order is meaningless by construction.
+   * The divider-INDEX rung is **deleted and must not come back**; a docblock
+   * telling a caller that position matters is an argument for exactly the rung
+   * {@link destinationsForItems} forbids.
    */
   destinations: ReadonlyArray<TaxDestination | null | undefined>;
   /** Level 2 — `organizations/{uid}.jurisdiction_claim`. */

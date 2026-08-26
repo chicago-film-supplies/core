@@ -21035,10 +21035,17 @@ What it does:
   divider the order carries is placed at the order's position; an invoice-side
   divider the order lacks is dropped. A divider the invoice ALREADY carries
   under the same uid keeps its own row — only its `path` moves. That is
-  deliberate: 112 prod invoices hold destination dividers whose
-  `uid_delivery`/`uid_collection` point at a different `destinations` doc than
-  the order's, and that staleness is a real difference the badge should keep
-  showing, not something a structural repair should quietly overwrite.
+  deliberate, because this pass is **structure-only**: it re-hangs rows and
+  never restates their content, so an invoice-side row's own fields survive
+  whatever else moves around them.
+  ⚠️ The ORIGINAL justification is dead and must not be re-derived. It argued
+  from 112 prod invoices whose destination dividers named a different
+  `destinations` doc than the order's — but a divider carries no
+  `uid_delivery`/`uid_collection` at all any more (deleted from
+  `DestinationDividerArm` at the api-cloudrun#662/#663/#664 contract step and
+  purged from both corpora). An endpoint divergence now lives on the PAIR
+  (`destinations[i].delivery.uid`), which is api-cloudrun#676's subject and
+  nothing this function reads.
 - **Re-paths each paired line** to `[orderDividerUid, ...orderLine.path]`.
 - **Adds, removes, re-prices, re-names and re-quantifies nothing.** An order
   line the invoice does not carry is NOT added; an invoice line the order does
