@@ -63,6 +63,7 @@
     "./utils/dates": "./src/utils/dates.ts",
     "./utils/icons": "./src/utils/icons.ts",
     "./utils/invoices": "./src/utils/invoices.ts",
+    "./utils/fulfillments": "./src/utils/fulfillments.ts",
     "./utils/locations": "./src/utils/locations.ts",
     "./utils/allocation": "./src/utils/allocation.ts",
     "./utils/stock": "./src/utils/stock.ts",

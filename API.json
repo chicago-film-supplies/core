@@ -3363,8 +3363,8 @@
         {
           "kind": "variable",
           "name": "TEMPLATE_SOURCE_COLLECTIONS",
-          "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\"[];",
-          "doc": "Collections that can serve as data sources for templates."
+          "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\" | \"fulfillments\"[];",
+          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set."
         },
         {
           "kind": "variable",
@@ -8386,8 +8386,8 @@
         {
           "kind": "variable",
           "name": "TEMPLATE_SOURCE_COLLECTIONS",
-          "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\"[];",
-          "doc": "Collections that can serve as data sources for templates."
+          "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\" | \"fulfillments\"[];",
+          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set."
         },
         {
           "kind": "variable",
@@ -10595,6 +10595,181 @@
           "name": "validateItemUniqueness",
           "signature": "validateItemUniqueness(items: T[]): ItemUniquenessIssue[]",
           "doc": "Assert that within each items array, no two entries share the same `uid`\nAND the same immediate structural parent. The immediate structural parent\nis the second-to-last `path` segment (or `null` for items whose path is\njust `[self.uid]`).\n\nThis is the uniqueness invariant orders/invoices rely on so that path-based\nline identity is unambiguous. Violations indicate a duplicate that should\nbe merged — manager's `mergeStagedIntoOrder` (`manager/src/stores/orders.ts`)\nand the migration script consolidate.\n\nReturns `[]` when uniqueness holds.\n\nNOTE: assumes the self-INCLUDED `path` convention. Product `components`\nexclude self from `path` — use {@link validateComponentUniqueness} for them.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/fulfillments",
+      "moduleDoc": "Shared fulfillment utility functions for CFS applications.\n\nA thin namespace over `./orders.ts`, and deliberately so: a fulfillment's\n`items[]` is the same structural shape an order's is — every member of\n`FulfillmentItemType` is assignable to {@link LineItem} — and its\n`destinations[]` is the same `DocDestinationType`. So the helpers a packing\nlist needs are already written; what was missing was a namespace to reach\nthem under.\n\n```ts\nimport { buildPackingList } from \"@cfs/core/utils/fulfillments\";\n\nconst toPick = buildPackingList(fulfillment.items);\n```\n\n## Why this module exists at all\n\n`fulfillments` became a template SOURCE collection so a packing list can be\nrendered from what was actually PICKED rather than from what was ordered — a\nfulfillment line carries `quantity` beside `quantity_order`, and\n`path_substituted_for` when a picker swapped one item for another. None of\nthat exists on the order, so an order-sourced packing list can only ever\ndescribe intent.\n\nA template's `it.*` namespaces are resolved from its collections\n(`availableUtilNamespaces`), so a fulfillments-sourced family gets\n`it.fulfillments` and **no `it.orders`**. Without this module it would get no\ndocument helpers at all.\n\n⚠️ **Re-exports, never reimplementations.** The alternative — mapping\n`fulfillments` to the string `\"orders\"` in `TEMPLATE_COLLECTION_UTILS` — would\nput `it.orders` on a document that is not an order, which is exactly the\nconfusion the per-collection namespaces exist to remove. And a hand-written\ncopy would drift; `tests/template-helpers.test.ts` asserts these are the SAME\nfunction objects as the orders bindings, so a copy fails rather than diverges.",
+      "symbols": [
+        {
+          "kind": "typeAlias",
+          "name": "ConsolidatedItem",
+          "declaration": "type ConsolidatedItem = ConsolidatedItemType;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "DestinationGroup",
+          "declaration": "interface DestinationGroup {\n  uid: string | null;\n  uid_delivery: string;\n  uid_collection: string;\n  items: LineItem[];\n  packing_list_delivery: LineItem[];\n  packing_list_collection: LineItem[];\n}",
+          "doc": "A destination section with its delivery/collection UIDs and child items."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "GroupPath",
+          "declaration": "type GroupPath = GroupPathType;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "ItemPathIssue",
+          "declaration": "interface ItemPathIssue {\n  index: number;\n  uid: string | undefined;\n  path: string[];\n  expected: string[];\n}",
+          "doc": "A single path mismatch reported by {@link validateItemPaths} or\n{@link validateInvoiceItemPaths} (re-exported from `@cfs/core/utils/invoices`)."
+        },
+        {
+          "kind": "interface",
+          "name": "ItemUniquenessIssue",
+          "declaration": "interface ItemUniquenessIssue {\n  index: number;\n  uid: string;\n  parentUid: string | null;\n  firstIndex: number;\n}",
+          "doc": "A single uniqueness violation reported by {@link validateItemUniqueness}\n(and the invoice-scoped variant in `@cfs/core/utils/invoices`)."
+        },
+        {
+          "kind": "interface",
+          "name": "LineItem",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
+          "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
+        },
+        {
+          "kind": "interface",
+          "name": "PackingListItem",
+          "declaration": "interface PackingListItem {\n  uid: string;\n  name: string;\n  type: string;\n  quantity: number;\n  stock_method: string;\n  group_name: string | null;\n}",
+          "doc": "An expanded packing list entry preserving group context."
+        },
+        {
+          "kind": "interface",
+          "name": "StructuralItem",
+          "declaration": "interface StructuralItem {\n  uid: string;\n  type: ItemTypeType;\n  path?: string[];\n}",
+          "doc": "The item surface the structural/path helpers read: identity, type, and path.\n\nNarrower than {@link LineItem} deliberately — these helpers never look at\n`name`, `price` or `quantity`, and callers legitimately hold items that have\nnone of them yet (api-cloudrun's CRMS `ItemLike` is exactly this shape). Typing\nthem at `LineItem` is what forced `as unknown as LineItem[]` at those sites."
+        },
+        {
+          "kind": "function",
+          "name": "buildPackingList",
+          "signature": "buildPackingList(items: LineItem[], consolidated?: boolean, destinationDividerUid?: string): PackingListItem[] | ConsolidatedItem[]",
+          "doc": "Build a packing list from order line items.\n\nWhen `consolidated` is true, deduplicates by product UID and sums quantities\n(delegates to {@link consolidateItems}). When false (default), returns\nexpanded entries with `group_name` preserved.\n\nPass `destinationDividerUid` to scope to a single destination section; omit\nfor the full order.\n\n⚠️ **That parameter is the DIVIDER's uid, and it used to be a\n`destinations/{uid}` endpoint id** — matched against the divider's\n`uid_delivery` *or* its `uid_collection`, so a document whose delivery and\ncollection legs differ was reachable under two different values and two\nsections delivering to one address were **both** returned as one list. The\ndivider's uid is the section's identity and matches exactly one section.\n(No caller passed the old argument: the parameter is reached only through the\n`it.orders.buildPackingList` template helper, and no template calls it —\nmeasured across the `templates` repo, 2026-08-25.)\n\nExcludes structural rows, surcharges, transaction fees, and services.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "consolidateItems",
+          "signature": "consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]",
+          "doc": "Deduplicate line items by product UID and sum quantities.\n\n## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`\n\n`total_price` is the authoritative figure — it is a sum of line totals, and\nsumming money is exact. `unit_price` is derived from it by a division that\nusually has a remainder, so the two are related by *rounding*, not by\nmultiplication: 3 units totalling $100 give `unit_price` $33.33, and\n`33.33 × 3` is $99.99.\n\n**That is correct, and it is written down here because it does not look\ncorrect.** The field exists so `bookings` can be queried as a flat per-line\nfact table — sortable, filterable, \"show me every line over $500/unit\" — and\nfor that a single representative per-unit figure is exactly right. It is\nnever summed and never reconciled against; anything that multiplies it back\nto recover a total should read `total_price_cents` instead. The four money÷quantity\nsites in CFS have four different residual contracts, and this is the\nstored-denorm one: **the residual is discarded on purpose.**\n\n(Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero\nrecomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getDestinationsLegend",
+          "signature": "getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral",
+          "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getItemSubtreeRange",
+          "signature": "getItemSubtreeRange(items: T[], index: number): typeLiteral",
+          "doc": "Return the contiguous index range covering an item and every descendant of it,\nderived purely from `path` (not from item types or adjacency rules).\n\n`computeItemPaths` lays items out depth-first, so descendants of `items[index]`\nare always contiguous starting at `index + 1` and run until the first item\nwhose path does not start with `items[index].path`.\n\nGeneric over any `{ path: string[] }` so it works on order line items, invoice\nline items (whose paths are scoped by an order divider uid), and any other\npath-keyed flat array.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getParentProductUid",
+          "signature": "getParentProductUid(item: StructuralItem, structuralUids: Set<string>): string | null",
+          "doc": "Get the parent product uid from an item's path.\nReturns null for non-components (where path.at(-2) is a structural uid or absent).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getStructuralUids",
+          "signature": "getStructuralUids(items: StructuralItem[]): Set<string>",
+          "doc": "Build a set of structural item uids (dest/group) from items array.\nUsed to distinguish structural path elements from product parent refs.\n\nOrder-shaped by default. `computeItemPaths` does NOT call this — it derives\nthe set from whichever `levels` it was handed, so an invoice's `order`\ndividers count as structural there too. That asymmetry is why this keeps its\nown two-type test rather than reading `ITEM_CONTRACTS[type].kind`: switching\nto the contract would silently make `order` dividers structural here, for\nevery invoice caller.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "groupByDestination",
+          "signature": "groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]",
+          "doc": "Slice the flat items array into destination sections, each carrying the\nendpoints its PAIR names.\n\n⚠️ **`destinations` is a required parameter and used to be absent, because\nthe endpoints used to be read off the divider itself** — the second copy that\napi-cloudrun#662/#663/#664 are all instances of. The divider now carries only\nits `uid`; the endpoints live on the pair that uid addresses, and the contract\nstep deleted `uid_delivery`/`uid_collection` from the divider outright\n(api-cloudrun#662/#663/#664). Reading them here\nagain would re-open the class.\n\n✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is\na `destinations/{uid}` document id and it is the third segment of every\nbooking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it\nmoves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,\nthe same string. There is no `bookings` migration in this change, and there\nmust not be: `webhooks/opportunity.ts` records 552 duplicate prod bookings\nfrom a destination uid moving under that id.\n\nThe fallbacks answer for a section whose pair is missing or names no\nendpoint — a divider-less items array, and a genuinely destinationless CRMS\norder (where the caller passes `\"\"` and skips the group downstream).",
+          "paramTags": [
+            {
+              "name": "items",
+              "doc": "The document's flat items array"
+            },
+            {
+              "name": "destinations",
+              "doc": "The document's destination pairs, joined by `uid`"
+            },
+            {
+              "name": "fallbackDeliveryUid",
+              "doc": "Endpoint for a section whose pair supplies none"
+            },
+            {
+              "name": "fallbackCollectionUid",
+              "doc": "Defaults to `fallbackDeliveryUid`"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isPreTaxItem",
+          "signature": "isPreTaxItem(item: LineItem): item is PreTaxLineItem",
+          "doc": "Determine whether a line item participates in subtotal/discount/tax calculations.\nStandalone predicate (not composed) because TS doesn't support negated predicates.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isPriceableItem",
+          "signature": "isPriceableItem(item: LineItem): item is PriceableLineItem",
+          "doc": "Determine whether a line item is priceable (has a price object, not a structural item).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isSameAsDeliveryDates",
+          "signature": "isSameAsDeliveryDates(dates: OrderDatesType): boolean",
+          "doc": "Whether charge dates match the delivery/collection dates\n(i.e. no custom charge period has been set).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orderHasDiscount",
+          "signature": "orderHasDiscount(items: LineItem[]): boolean",
+          "doc": "Check whether any pre-tax line item has a discount.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orderHasRentals",
+          "signature": "orderHasRentals(items: LineItem[]): boolean",
+          "doc": "Check whether any line item is a rental.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orderHasTax",
+          "signature": "orderHasTax(items: LineItem[]): boolean",
+          "doc": "Check whether any pre-tax line item has taxes applied.",
           "paramTags": [],
           "returnsTag": null
         }

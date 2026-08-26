@@ -36,6 +36,13 @@ export type TemplateCollectionType = TemplateSourceCollectionType | TemplateTarg
 export const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, string>> = {
   orders: "orders",
   invoices: "invoices",
+  // A packing list renders from what was PICKED, not from what was ordered: a
+  // fulfillment line carries `quantity` beside `quantity_order`, and
+  // `path_substituted_for` when a picker swapped an item. `it.fulfillments` is a
+  // re-export namespace over `utils/orders` — the items and destinations are the
+  // same structural shapes — rather than a mapping to the string "orders", which
+  // would put `it.orders` on a document that is not an order.
+  fulfillments: "fulfillments",
 };
 
 /**

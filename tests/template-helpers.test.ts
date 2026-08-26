@@ -33,6 +33,7 @@ import * as contactNameUtils from "../src/utils/contact-name.ts";
 import * as dateUtils from "../src/utils/dates.ts";
 import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
+import * as fulfillmentUtils from "../src/utils/fulfillments.ts";
 import * as locationUtils from "../src/utils/locations.ts";
 import * as moneyUtils from "../src/utils/money.ts";
 import * as movementUtils from "../src/utils/movements.ts";
@@ -70,6 +71,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   "contact-name": contactNameUtils,
   dates: dateUtils,
   icons: iconUtils,
+  fulfillments: fulfillmentUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,
@@ -327,6 +329,14 @@ Deno.test("availableUtilNamespaces resolves the union of source + target", () =>
   );
   // Source and target agreeing must not duplicate.
   assertEquals(availableUtilNamespaces(["invoices"], ["invoices"]), ["dates", "money", "icons", "invoices"]);
+  // The packing list: rendered FROM a fulfillment, produced INTO packing_lists.
+  // `packing_lists` contributes nothing, so the whole document surface is
+  // `it.fulfillments` — and there is deliberately no `it.orders`, because the
+  // document being rendered is not an order.
+  assertEquals(
+    availableUtilNamespaces(["fulfillments"], ["packing_lists"]),
+    ["dates", "money", "icons", "fulfillments"],
+  );
   // Always-on survives an empty collection set — `money` because every document
   // a template renders carries money, `icons` because a glyph is not a property
   // of the source collection (and a footer partial can have no other kind).
@@ -370,9 +380,15 @@ const SHARED_DOC_HELPERS = [
   "orderHasTax",
 ] as const;
 
-Deno.test("the shared sub-interface is exported by BOTH document namespaces", () => {
+Deno.test("the shared sub-interface is exported by EVERY document namespace", () => {
   for (const name of SHARED_DOC_HELPERS) {
-    for (const [ns, mod] of [["orders", orderUtils], ["invoices", invoiceUtils]] as const) {
+    for (
+      const [ns, mod] of [
+        ["orders", orderUtils],
+        ["invoices", invoiceUtils],
+        ["fulfillments", fulfillmentUtils],
+      ] as const
+    ) {
       const fn = (mod as Record<string, unknown>)[name];
       assertExists(fn, `it.${ns}.${name} is missing — a shared partial calling u.${name}() throws for that family`);
       assertEquals(
@@ -384,20 +400,21 @@ Deno.test("the shared sub-interface is exported by BOTH document namespaces", ()
   }
 });
 
-Deno.test("the two namespaces agree on ARITY, not just on the name", () => {
+Deno.test("the document namespaces agree on IDENTITY, not just on the name", () => {
   // A name check alone stays green against a re-export that resolves to a
   // different function — which is exactly what a hand-written invoice-side
   // reimplementation would be. `src/utils/invoices.ts` re-exports the orders binding, so
   // identity is the strongest available assertion and the cheapest to keep.
   for (const name of SHARED_DOC_HELPERS) {
     const o = (orderUtils as Record<string, unknown>)[name];
-    const i = (invoiceUtils as Record<string, unknown>)[name];
-    assertEquals(
-      i,
-      o,
-      `it.invoices.${name} is not the same function as it.orders.${name} — ` +
-        `a shared partial would behave differently per family`,
-    );
+    for (const [ns, mod] of [["invoices", invoiceUtils], ["fulfillments", fulfillmentUtils]] as const) {
+      assertEquals(
+        (mod as Record<string, unknown>)[name],
+        o,
+        `it.${ns}.${name} is not the same function as it.orders.${name} — ` +
+          `a shared partial would behave differently per family`,
+      );
+    }
   }
 });
 
@@ -409,9 +426,14 @@ Deno.test("every shared helper is reachable from a real family's resolved namesp
   const families: Array<[string, TemplateCollectionType[], TemplateCollectionType[]]> = [
     ["quote", ["orders"], ["quotes"]],
     ["invoice", ["invoices"], ["invoices"]],
-    ["packing-list", ["orders"], ["packing_lists"]],
+    // A packing list renders from what was PICKED — see TEMPLATE_COLLECTION_UTILS.
+    ["packing-list", ["fulfillments"], ["packing_lists"]],
   ];
-  const byNamespace: Record<string, unknown> = { orders: orderUtils, invoices: invoiceUtils };
+  const byNamespace: Record<string, unknown> = {
+    orders: orderUtils,
+    invoices: invoiceUtils,
+    fulfillments: fulfillmentUtils,
+  };
 
   for (const [family, sources, targets] of families) {
     const resolved = availableUtilNamespaces(sources, targets);

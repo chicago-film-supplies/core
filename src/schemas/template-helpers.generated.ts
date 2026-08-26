@@ -58,6 +58,18 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "toChicagoStartOfDay", expr: "it.dates.toChicagoStartOfDay(input)", desc: "Canonicalize to Chicago local midnight for the calendar date containing the input instant. Use for fields that semantically represent a date (invoice.date, invoice.due_date, payments[].date). Idempotent.", returns: "string" },
     { name: "toChicagoYmd", expr: "it.dates.toChicagoYmd(input)", desc: "Format an ISO datetime as the Chicago calendar date in `YYYY-MM-DD` form. The inverse of {@link toChicagoStartOfDay} — use to populate `<input type=\"date\">` from a canonical Chicago-offset value.", returns: "string" },
   ],
+  "fulfillments": [
+    { name: "buildPackingList", expr: "it.fulfillments.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
+    { name: "consolidateItems", expr: "it.fulfillments.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities.", returns: "ConsolidatedItem[]" },
+    { name: "getDestinationsLegend", expr: "it.fulfillments.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
+    { name: "groupByDestination", expr: "it.fulfillments.groupByDestination(items, destinations, fallbackDeliveryUid, fallbackCollectionUid)", desc: "Slice the flat items array into destination sections, each carrying the endpoints its PAIR names.", returns: "DestinationGroup[]" },
+    { name: "isPreTaxItem", expr: "it.fulfillments.isPreTaxItem(item)", desc: "Determine whether a line item participates in subtotal/discount/tax calculations. Standalone predicate (not composed) because TS doesn't support negated predicates.", returns: "item is PreTaxLineItem" },
+    { name: "isPriceableItem", expr: "it.fulfillments.isPriceableItem(item)", desc: "Determine whether a line item is priceable (has a price object, not a structural item).", returns: "item is PriceableLineItem" },
+    { name: "isSameAsDeliveryDates", expr: "it.fulfillments.isSameAsDeliveryDates(dates)", desc: "Whether charge dates match the delivery/collection dates (i.e. no custom charge period has been set).", returns: "boolean" },
+    { name: "orderHasDiscount", expr: "it.fulfillments.orderHasDiscount(items)", desc: "Check whether any pre-tax line item has a discount.", returns: "boolean" },
+    { name: "orderHasRentals", expr: "it.fulfillments.orderHasRentals(items)", desc: "Check whether any line item is a rental.", returns: "boolean" },
+    { name: "orderHasTax", expr: "it.fulfillments.orderHasTax(items)", desc: "Check whether any pre-tax line item has taxes applied.", returns: "boolean" },
+  ],
   "icons": [
     { name: "has", expr: "it.icons.has(name)", desc: "Whether `name` is a known icon (following aliases).", returns: "boolean" },
     { name: "svg", expr: "it.icons.svg(name, arg2)", desc: "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.", returns: "string" },

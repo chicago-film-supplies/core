@@ -28,7 +28,13 @@ import {
 } from "./common.ts";
 
 /** Collections that can serve as data sources for templates. */
-export const TEMPLATE_SOURCE_COLLECTIONS = ["orders", "invoices"] as const;
+/**
+ * ⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered
+ * FROM a fulfillment and produced INTO `packing_lists`; nothing produces a
+ * fulfillment document from a template. The two lists are deliberately not the
+ * same set.
+ */
+export const TEMPLATE_SOURCE_COLLECTIONS = ["orders", "invoices", "fulfillments"] as const;
 /** Firestore collection that provides data to a template. */
 export type TemplateSourceCollectionType = typeof TEMPLATE_SOURCE_COLLECTIONS[number];
 
