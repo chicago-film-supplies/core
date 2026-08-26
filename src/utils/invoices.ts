@@ -45,6 +45,37 @@ export {
   validateItemUniqueness,
 } from "./orders.ts";
 
+/**
+ * The **shared document sub-interface** — helpers a template partial may call
+ * for either family.
+ *
+ * These five are named `order*` and live in `src/utils/orders.ts` because that is where
+ * the order document was modelled first, but not one of them reads anything an
+ * invoice lacks: the three `orderHas*` predicates take `LineItem`, the
+ * structural supertype every member of `OrderDocItemType`, `InvoiceDocItemType`
+ * and `FulfillmentItemType` is assignable to; `InvoiceDocDestinationType`
+ * **extends** `DocDestinationType`; and an invoice destination's `dates` is the
+ * same `OrderDocDates`.
+ *
+ * ⚠️ **This is what makes a SHARED template partial possible at all.** A partial
+ * that writes `it.orders.orderHasTax(…)` can only ever serve an orders-source
+ * family — `availableUtilNamespaces(["invoices"], ["invoices"])` resolves
+ * `{dates, money, icons, invoices}` and no `it.orders`, so the same markup
+ * throws for an invoice. The pattern the templates repo uses instead is to take
+ * the family's namespace object as a prop (`u`) and call `u.orderHasTax(…)`,
+ * which is only sound while both namespaces really do export the same names.
+ * `tests/template-helpers.test.ts` asserts that rather than assuming it —
+ * re-exporting here and nowhere else would leave "the two namespaces agree" an
+ * unchecked claim that shared partials are built on.
+ */
+export {
+  getDestinationsLegend,
+  isSameAsDeliveryDates,
+  orderHasDiscount,
+  orderHasRentals,
+  orderHasTax,
+} from "./orders.ts";
+
 import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,

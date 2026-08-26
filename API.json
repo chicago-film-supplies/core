@@ -10219,6 +10219,14 @@
         },
         {
           "kind": "function",
+          "name": "getDestinationsLegend",
+          "signature": "getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral",
+          "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "getItemSubtreeRange",
           "signature": "getItemSubtreeRange(items: T[], index: number): typeLiteral",
           "doc": "Return the contiguous index range covering an item and every descendant of it,\nderived purely from `path` (not from item types or adjacency rules).\n\n`computeItemPaths` lays items out depth-first, so descendants of `items[index]`\nare always contiguous starting at `index + 1` and run until the first item\nwhose path does not start with `items[index].path`.\n\nGeneric over any `{ path: string[] }` so it works on order line items, invoice\nline items (whose paths are scoped by an order divider uid), and any other\npath-keyed flat array.",
@@ -10367,9 +10375,41 @@
         },
         {
           "kind": "function",
+          "name": "isSameAsDeliveryDates",
+          "signature": "isSameAsDeliveryDates(dates: OrderDatesType): boolean",
+          "doc": "Whether charge dates match the delivery/collection dates\n(i.e. no custom charge period has been set).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isTransactionFeeItem",
           "signature": "isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem",
           "doc": "Determine whether a line item is a transaction fee.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orderHasDiscount",
+          "signature": "orderHasDiscount(items: LineItem[]): boolean",
+          "doc": "Check whether any pre-tax line item has a discount.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orderHasRentals",
+          "signature": "orderHasRentals(items: LineItem[]): boolean",
+          "doc": "Check whether any line item is a rental.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orderHasTax",
+          "signature": "orderHasTax(items: LineItem[]): boolean",
+          "doc": "Check whether any pre-tax line item has taxes applied.",
           "paramTags": [],
           "returnsTag": null
         },

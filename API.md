@@ -21375,6 +21375,21 @@ The membership test is `ITEM_CONTRACTS[type].kind`. It used to be a local
 `STRUCTURAL_TYPES` set — a thirteenth hand-written copy of the divider list,
 and the only one that answered "billable" for a type it had never heard of.
 
+### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
+
+Pair-derived legend strings for the order's start/end dates.
+
+Each pair contributes a label based on its `customer_collecting` /
+`customer_returning` flags. Labels are deduped and joined with " / ", so
+a mixed-mode order (one pair we deliver, one pair the customer picks up)
+renders as "In Store Pickup / Delivery".
+
+Mapping:
+  start: customer_collecting === true → "In Store Pickup", else → "Delivery"
+  end:   customer_returning  === true → "In Store Return", else → "Pickup"
+
+Empty input returns empty strings.
+
 ### `getItemSubtreeRange(items: T[], index: number): typeLiteral`
 
 Return the contiguous index range covering an item and every descendant of it,
@@ -21598,9 +21613,26 @@ order-input item without being handed a stored price that does not exist yet.
 
 Determine whether a line item is priceable (has a price object, not a structural item).
 
+### `isSameAsDeliveryDates(dates: OrderDatesType): boolean`
+
+Whether charge dates match the delivery/collection dates
+(i.e. no custom charge period has been set).
+
 ### `isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem`
 
 Determine whether a line item is a transaction fee.
+
+### `orderHasDiscount(items: LineItem[]): boolean`
+
+Check whether any pre-tax line item has a discount.
+
+### `orderHasRentals(items: LineItem[]): boolean`
+
+Check whether any line item is a rental.
+
+### `orderHasTax(items: LineItem[]): boolean`
+
+Check whether any pre-tax line item has taxes applied.
 
 ### `projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType`
 

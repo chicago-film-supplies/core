@@ -50,6 +50,7 @@ import {
   availableUtilNamespaces,
   TEMPLATE_COLLECTION_UTILS,
 } from "../src/schemas/template-context.ts";
+import type { TemplateCollectionType } from "../src/schemas/template-context.ts";
 import { TEMPLATE_HELPER_DENYLIST } from "../scripts/template-helper-denylist.ts";
 
 /** Every `./utils/*` entrypoint, keyed by the namespace the generator emits. */
@@ -337,6 +338,92 @@ Deno.test("availableUtilNamespaces takes lists (forward-compatible with multi-co
     availableUtilNamespaces(["orders", "invoices"], ["quotes", "packing_lists"]),
     ["dates", "money", "icons", "orders", "invoices"],
   );
+});
+
+// ── The shared document sub-interface ───────────────────────────────
+//
+// A template partial shared between the quote and the invoice cannot NAME a
+// util namespace: `availableUtilNamespaces` resolves `it.orders` for one family
+// and `it.invoices` for the other, so `it.orders.orderHasTax(…)` in shared
+// markup throws for every invoice. The templates repo passes the family's
+// namespace object in as a prop (`u`) and calls `u.orderHasTax(…)` instead —
+// which is sound only while both namespaces really do export the same names
+// with the same arities.
+//
+// That is a claim about two modules, so it is asserted here rather than left to
+// the re-export line in `utils/invoices.ts` to imply. Dropping one of these
+// re-exports would otherwise be a silent 500 in a shared partial, on the invoice
+// only, at render time — and the golden gate would not see it until an invoice
+// family with a golden existed.
+
+/**
+ * Helpers a shared template partial may call through a family-supplied `u`.
+ *
+ * Adding to this list is a real decision: it must hold for EVERY family whose
+ * namespace can be passed as `u`, which today means orders and invoices.
+ */
+const SHARED_DOC_HELPERS = [
+  "getDestinationsLegend",
+  "isSameAsDeliveryDates",
+  "orderHasDiscount",
+  "orderHasRentals",
+  "orderHasTax",
+] as const;
+
+Deno.test("the shared sub-interface is exported by BOTH document namespaces", () => {
+  for (const name of SHARED_DOC_HELPERS) {
+    for (const [ns, mod] of [["orders", orderUtils], ["invoices", invoiceUtils]] as const) {
+      const fn = (mod as Record<string, unknown>)[name];
+      assertExists(fn, `it.${ns}.${name} is missing — a shared partial calling u.${name}() throws for that family`);
+      assertEquals(
+        typeof fn,
+        "function",
+        `it.${ns}.${name} is not callable`,
+      );
+    }
+  }
+});
+
+Deno.test("the two namespaces agree on ARITY, not just on the name", () => {
+  // A name check alone stays green against a re-export that resolves to a
+  // different function — which is exactly what a hand-written invoice-side
+  // reimplementation would be. `src/utils/invoices.ts` re-exports the orders binding, so
+  // identity is the strongest available assertion and the cheapest to keep.
+  for (const name of SHARED_DOC_HELPERS) {
+    const o = (orderUtils as Record<string, unknown>)[name];
+    const i = (invoiceUtils as Record<string, unknown>)[name];
+    assertEquals(
+      i,
+      o,
+      `it.invoices.${name} is not the same function as it.orders.${name} — ` +
+        `a shared partial would behave differently per family`,
+    );
+  }
+});
+
+Deno.test("every shared helper is reachable from a real family's resolved namespaces", () => {
+  // The property that actually matters at render time: for each family, the
+  // namespace list its collections resolve to must contain a namespace that
+  // carries the whole shared set. Asserting the modules alone would stay green
+  // if a family stopped resolving to either of them.
+  const families: Array<[string, TemplateCollectionType[], TemplateCollectionType[]]> = [
+    ["quote", ["orders"], ["quotes"]],
+    ["invoice", ["invoices"], ["invoices"]],
+    ["packing-list", ["orders"], ["packing_lists"]],
+  ];
+  const byNamespace: Record<string, unknown> = { orders: orderUtils, invoices: invoiceUtils };
+
+  for (const [family, sources, targets] of families) {
+    const resolved = availableUtilNamespaces(sources, targets);
+    const carrier = resolved.find((ns) =>
+      ns in byNamespace &&
+      SHARED_DOC_HELPERS.every((h) => typeof (byNamespace[ns] as Record<string, unknown>)[h] === "function")
+    );
+    assertExists(
+      carrier,
+      `the ${family} family resolves to [${resolved.join(", ")}], none of which carries the shared sub-interface`,
+    );
+  }
 });
 
 // ── Staleness ───────────────────────────────────────────────────────
