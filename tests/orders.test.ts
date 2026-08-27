@@ -3876,7 +3876,7 @@ Deno.test("assembleLinePrice — it ASSERTS the money it is handed (Seam F)", ()
 
 Deno.test("priceTransactionFeeLine and costTransactionFees deliberately DISAGREE about subtotal_cents", () => {
   // 🔴 They used to be held apart by living in different repos. They now sit
-  // ~150 lines apart in one file, and this is what stops the next reader
+  // ~330 lines apart in one file, and this is what stops the next reader
   // "tidying" one into the other.
   //
   // `costTransactionFees` writes the DISCOUNTED amount into all three price

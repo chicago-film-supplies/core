@@ -24597,7 +24597,7 @@ is unaffected either way: {@link sumDocumentTotals} costs fees through
 {@link costTransactionFees}, which recomputes from `base_cents`/`quantity`
 and never reads the stored subtotal.
 
-⚠️ **The two now sit ~150 lines apart in one file, deliberately disagreeing
+⚠️ **The two now sit ~330 lines apart in one file, deliberately disagreeing
 about what `subtotal_cents` means for a fee.** They used to be held apart by
 living in different repos. `tests/orders.test.ts` pins the disagreement, so
 "tidying" one into the other goes red rather than double-discounting a live
