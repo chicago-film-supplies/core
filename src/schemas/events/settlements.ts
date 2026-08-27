@@ -3,7 +3,7 @@
  *
  * Uses the package's established `<aggregate>.<past_tense>` vocabulary rather
  * than forking a new one. The envelope's `correlation_id` carries the
- * settlement's `uid_session`, so a batch payment or a multi-invoice allocation
+ * settlement's `uuid_session`, so a batch payment or a multi-invoice allocation
  * is one correlated group in both the journal and the notification stream.
  *
  * Note the envelope wraps *the whole document* — it is a change-notification

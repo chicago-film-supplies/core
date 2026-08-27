@@ -46,7 +46,7 @@ function makeSettlement(overrides: Record<string, unknown> = {}) {
     date: "2026-08-01T14:32:07.881-05:00",
     date_fs: mockTimestamp,
     reference: null,
-    uid_session: "0195f3a1-0000-7000-8000-000000000001",
+    uuid_session: "0195f3a1-0000-7000-8000-000000000001",
     reverses: null,
     uid_credit_note: null,
     number_credit_note: null,

@@ -191,7 +191,7 @@ const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
  * and treats the value as an absolute write, not a partial patch. Version is
  * required for optimistic concurrency.
  *
- * {@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to
+ * {@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to
  * retry once a breakdown change also appends to the movement journal — see the
  * field's own note.
  */
@@ -205,7 +205,7 @@ export interface UpdateBookingInputType {
    * A breakdown change now appends movement events, and appending is not
    * idempotent the way an absolute-set write was: a lost response plus the
    * manager's retry would say the operator returned the units twice. Every
-   * movement's document id is `{uid_session}|{type}|{subject}`, so a retry
+   * movement's document id is `{uuid_session}|{type}|{subject}`, so a retry
    * carrying the same session resolves to the same documents and collapses to
    * one event by construction.
    *
@@ -215,7 +215,7 @@ export interface UpdateBookingInputType {
    * mattered. Mint it per operator action (not per request, and not per
    * keystroke) and reuse it across retries of that action.
    */
-  uid_session: string;
+  uuid_session: string;
 }
 
 /** Zod schema for UpdateBookingInput. */
@@ -231,7 +231,7 @@ export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
     returned: z.int().min(0),
   }).optional(),
   version: z.int().min(0),
-  uid_session: z.uuid(),
+  uuid_session: z.uuid(),
 });
 
 // ── Bulk update input (PUT /fulfillments/{uid}/bookings) ───────
@@ -277,15 +277,15 @@ export interface BulkBookingUpdateInputType {
    * picker action cascading onto a kit's component bookings — so the rows share
    * a session. They cannot collide on it: a movement's id carries the subject,
    * and every row addresses a different booking. See
-   * {@link UpdateBookingInputType.uid_session}.
+   * {@link UpdateBookingInputType.uuid_session}.
    */
-  uid_session: string;
+  uuid_session: string;
 }
 
 export const BulkBookingUpdateInput: z.ZodType<BulkBookingUpdateInputType> = z.object({
   version: z.int().min(0),
   updates: z.array(BookingUpdate).min(1),
-  uid_session: z.uuid(),
+  uuid_session: z.uuid(),
 });
 
 /**
@@ -294,7 +294,6 @@ export const BulkBookingUpdateInput: z.ZodType<BulkBookingUpdateInputType> = z.o
  */
 export interface BulkBookingUpdateResponseType {
   success: true;
-  order_completed: boolean;
   oos_records_written: number;
   results: Array<{ uid: string; version: number }>;
 }
@@ -302,7 +301,6 @@ export interface BulkBookingUpdateResponseType {
 export const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType> =
   z.object({
     success: z.literal(true),
-    order_completed: z.boolean(),
     oos_records_written: z.int().min(0),
     results: z.array(z.object({
       uid: BookingId,

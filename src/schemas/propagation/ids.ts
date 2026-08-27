@@ -56,6 +56,7 @@ export type TransactionId =
   | "bulk-checkout-order"
   | "bulk-return-order"
   | "bulk-fulfillment-bookings"
+  | "cross-order-return"
   | "finalize-order"
   | "process-order-docs"
   // out-of-service.ts

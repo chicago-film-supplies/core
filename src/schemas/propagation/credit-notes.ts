@@ -193,7 +193,7 @@ const allocateCreditNoteRules: CollectionRule[] = [
       },
       {
         source: [],
-        target: ["uid_session"],
+        target: ["uuid_session"],
         transform:
           "one session id shared by every settlement in the allocation, so a multi-invoice apply is recoverable as a unit",
       },

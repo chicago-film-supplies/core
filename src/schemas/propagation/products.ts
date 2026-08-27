@@ -364,7 +364,7 @@ const createProductMovementRule: CollectionRule = {
   target: "transactions",
   mode: "co-write",
   invariant:
-    "A product created with an opening balance appends ONE movement to the journal in the same transaction, at the derived id {uid_session}|{type}|{subject} — so a retried create resolves to the same document instead of appending a second opening balance. Absent when the product opens at zero.",
+    "A product created with an opening balance appends ONE movement to the journal in the same transaction, at the derived id {uuid_session}|{type}|{subject} — so a retried create resolves to the same document instead of appending a second opening balance. Absent when the product opens at zero.",
   transaction: "create-product",
   enforced_by: [
     {
@@ -381,7 +381,7 @@ const createProductMovementRule: CollectionRule = {
       source: [],
       target: ["uid"],
       transform:
-        "movementId(uid_session, type, uid_product) — derived, so a retry is idempotent",
+        "movementId(uuid_session, type, uid_product) — derived, so a retry is idempotent",
     },
     {
       source: [],

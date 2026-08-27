@@ -76,7 +76,7 @@ export interface Settlement {
 
   // ── grouping, correction ──────────────────────────────────────────
   /** One per operator action — groups a batch payment or a multi-invoice allocation. */
-  uid_session: string;
+  uuid_session: string;
   /**
    * The settlement this one retracts. **Provenance only, never arithmetic** —
    * the totals are a signed fold over every row, and a reversal contributes by
@@ -212,7 +212,7 @@ export const SettlementSchema: z.ZodType<Settlement> = z.strictObject({
   date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
   reference: z.string().nullable().meta({ column: true, label: "Reference" }),
-  uid_session: z.uuid(),
+  uuid_session: z.uuid(),
   reverses: FirestoreId.nullable(),
   uid_credit_note: FirestoreId.nullable(),
   number_credit_note: z.string().nullable(),

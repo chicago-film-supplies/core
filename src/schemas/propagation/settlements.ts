@@ -403,7 +403,7 @@ const voidInvoiceRules: CollectionRule[] = [
         source: ["uid"],
         target: ["reverses"],
         transform:
-          "one reverser per unreversed settlement, sharing one uid_session",
+          "one reverser per unreversed settlement, sharing one uuid_session",
       },
     ],
   },
@@ -446,7 +446,7 @@ const voidInvoiceFromCrmsRules: CollectionRule[] = [
         source: ["uid"],
         target: ["reverses"],
         transform:
-          "one reverser per unreversed settlement, sharing one uid_session",
+          "one reverser per unreversed settlement, sharing one uuid_session",
       },
     ],
   },
@@ -489,7 +489,7 @@ const voidInvoiceFromXeroRules: CollectionRule[] = [
         source: ["uid"],
         target: ["reverses"],
         transform:
-          "one reverser per unreversed settlement, sharing one uid_session",
+          "one reverser per unreversed settlement, sharing one uuid_session",
       },
     ],
   },

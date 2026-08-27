@@ -119,4 +119,18 @@ export const UPLOADCARE_CANDIDATE_EXEMPTIONS: ReadonlyMap<string, string> = new 
     "uploadcare-worklist::uuid",
     "the work list's own entry id; a record of an upload that is usually about to be deleted, not a stable reference — same reasoning as the two fields it replaces",
   ],
+  // The session grouping key. It IS a v4 uuid — which is the whole point of the
+  // api-cloudrun#506 rename off `uid_session`, since a `uid_*` name claims a
+  // DOCUMENT reference and this references none — but it is client-minted to
+  // group one operator action and derive a movement id, and names no file. The
+  // `/uuid/i` segment test cannot tell the two apart by name, so these are the
+  // one-line price of the correct field name. Both leaves are the same fact.
+  [
+    "settlements::uuid_session",
+    "client-minted v4 uuid grouping one operator action; a settlement id derives from it and it names no CDN file",
+  ],
+  [
+    "transactions::uuid_session",
+    "client-minted v4 uuid grouping one operator action; the movement's document id is `{uuid_session}|{type}|{subject}` and it names no CDN file",
+  ],
 ]);

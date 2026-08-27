@@ -3,7 +3,7 @@
  *
  * An append-only journal of inventory movement. Every event is **one subject**
  * (a booking for custody events, a product for ownership events) plus a set of
- * signed lines, grouped with its siblings by a client-minted `uid_session`.
+ * signed lines, grouped with its siblings by a client-minted `uuid_session`.
  *
  * The collection keeps its name — the journal was migrated in place — but the
  * document is a `Movement`, not the old current-state `Transaction`.
@@ -433,9 +433,9 @@ export const MovementCost: z.ZodType<MovementCostType> = z.strictObject({
 /** A movement-journal event. */
 export interface Movement {
   /**
-   * `{uid_session}|{type}|{subject}`. Equals the document id.
+   * `{uuid_session}|{type}|{subject}`. Equals the document id.
    *
-   * One shape, no auto-id alternative: `uid_session` is required on every
+   * One shape, no auto-id alternative: `uuid_session` is required on every
    * movement, so the migration has to mint one for each historical row
    * regardless — and once it has, deriving the id costs nothing and spares every
    * reader a "which shape is this" branch. The corpus is re-keyed rather than
@@ -473,7 +473,7 @@ export interface Movement {
 
   // ── grouping, idempotency, correction ─────────────────────────────
   /** One per operator action. Client-minted, so a retry storm collapses. */
-  uid_session: string;
+  uuid_session: string;
   /** The uid of the movement this one negates. */
   reverses: string | null;
 
@@ -672,7 +672,7 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
   reference: z.string().meta({ column: true, label: "Reference" }),
-  uid_session: z.uuid(),
+  uuid_session: z.uuid(),
   // Required-but-nullable; all 932 prod movements carry the KEY as `null`
   // (2026-08-23) because no movement has been reversed yet. Not dead — the
   // reversal path reads it at `:535`. CLAUDE.md § "Is a field dead?".
@@ -748,7 +748,7 @@ export interface CreateTransactionInputType {
   total_cost_cents: number;
   date: string;
   reference: string;
-  uid_session: string;
+  uuid_session: string;
   allocations?: MovementAllocationInputType[];
   serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
 }
@@ -756,7 +756,7 @@ export interface CreateTransactionInputType {
 /**
  * Input schema for creating a manual movement.
  *
- * `uid` is gone: the document id is derived (`{uid_session}|{type}|{subject}`),
+ * `uid` is gone: the document id is derived (`{uuid_session}|{type}|{subject}`),
  * which is what makes a retried create idempotent instead of appending a second
  * event. `allocations` is optional — absent means the server allocates.
  */
@@ -767,7 +767,7 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
   total_cost_cents: z.int().min(0),
   date: chicagoInstant(),
   reference: z.string(),
-  uid_session: z.uuid(),
+  uuid_session: z.uuid(),
   allocations: z.array(MovementAllocationInput).min(1).optional(),
   serialized_details: z.object({
     asset_tags: z.array(z.string()).default([]),
@@ -819,7 +819,7 @@ export const UpdateTransactionInput: z.ZodType<UpdateTransactionInputType> = z.o
 
 /** Input for reversing a movement. */
 export interface ReverseTransactionInputType {
-  uid_session: string;
+  uuid_session: string;
   reference: string;
   date?: string;
 }
@@ -830,7 +830,7 @@ export interface ReverseTransactionInputType {
  * disagree with what it reverses.
  */
 export const ReverseTransactionInput: z.ZodType<ReverseTransactionInputType> = z.object({
-  uid_session: z.uuid(),
+  uuid_session: z.uuid(),
   reference: z.string(),
   date: chicagoInstant().optional(),
 });
@@ -841,7 +841,7 @@ export interface CreateStoreTransferInputType {
   quantity: number;
   date: string;
   reference: string;
-  uid_session: string;
+  uuid_session: string;
   from: MovementAllocationInputType[];
   to: MovementAllocationInputType[];
   serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
@@ -860,7 +860,7 @@ export const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType> =
   quantity: z.number().int().positive(),
   date: chicagoInstant(),
   reference: z.string(),
-  uid_session: z.uuid(),
+  uuid_session: z.uuid(),
   from: z.array(MovementAllocationInput).min(1),
   to: z.array(MovementAllocationInput).min(1),
   serialized_details: z.object({

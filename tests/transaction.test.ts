@@ -87,7 +87,7 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     date: "2026-03-01T00:00:00Z",
     date_fs: mockTimestamp,
     reference: "test",
-    uid_session: SESSION,
+    uuid_session: SESSION,
     reverses: null,
     serialized_details: null,
     created_by: { uid: "test-bot", name: "Test Bot" },
@@ -125,7 +125,7 @@ Deno.test("the reversal of every type is writable — its contract is mirrored",
     const forward = movement(type);
     const reversal = movement(type, {
       uid: `${REVERSAL_SESSION}|${type}|${forward.uid_booking ?? PRODUCT}`,
-      uid_session: REVERSAL_SESSION,
+      uuid_session: REVERSAL_SESSION,
       reverses: forward.uid,
       lines: (forward.lines as Array<{ quantity: number; location: { from: unknown; to: unknown } }>)
         .map((l) => ({ quantity: l.quantity, location: { from: l.location.to, to: l.location.from } })),
@@ -148,7 +148,7 @@ Deno.test("a reversal still may not name the WRONG KIND of place", () => {
   const forward = movement("purchase");
   const bogus = movement("purchase", {
     uid: `${REVERSAL_SESSION}|purchase|${PRODUCT}`,
-    uid_session: REVERSAL_SESSION,
+    uuid_session: REVERSAL_SESSION,
     reverses: forward.uid,
     lines: [{ quantity: 2, location: { from: atBooking, to: null } }],
   });
@@ -414,7 +414,7 @@ Deno.test("an ownership-only type forbids uid_booking", () => {
 
 Deno.test("uid is the derived composite — there is no auto-id alternative", () => {
   assertEquals(MovementSchema.safeParse(movement("check_out")).success, true);
-  // The corpus is re-keyed by the migration rather than carried: uid_session is
+  // The corpus is re-keyed by the migration rather than carried: uuid_session is
   // required on every movement anyway, so a historical row gets a session and
   // therefore a derived id too.
   const autoId = movement("purchase", { uid: "legacytxn00000000000" });
@@ -438,9 +438,9 @@ Deno.test("uid rejects a malformed derived id", () => {
   }
 });
 
-Deno.test("uid_session must be a uuid", () => {
+Deno.test("uuid_session must be a uuid", () => {
   assertEquals(
-    MovementSchema.safeParse(movement("check_out", { uid_session: "session-1" })).success,
+    MovementSchema.safeParse(movement("check_out", { uuid_session: "session-1" })).success,
     false,
   );
 });
@@ -510,7 +510,7 @@ const validCreateInput = {
   total_cost_cents: 250000,
   date: "2026-03-01T00:00:00Z",
   reference: "PO-001",
-  uid_session: SESSION,
+  uuid_session: SESSION,
 };
 
 Deno.test("every displayed transaction type is one CreateTransactionInput accepts", () => {
@@ -569,10 +569,10 @@ Deno.test("CreateTransactionInput repeats a location freely — it is two rows, 
 });
 
 Deno.test("CreateTransactionInput requires a session and never honours a client uid", () => {
-  const { uid_session: _drop, ...noSession } = validCreateInput;
+  const { uuid_session: _drop, ...noSession } = validCreateInput;
   assertEquals(CreateTransactionInput.safeParse(noSession).success, false);
 
-  // The document id is derived (`{uid_session}|{type}|{subject}`), which is what
+  // The document id is derived (`{uuid_session}|{type}|{subject}`), which is what
   // makes a retried create idempotent. A client-supplied `uid` is stripped by the
   // non-strict input object rather than 400'd — what matters is that it cannot
   // reach the writer and displace the derived id.
@@ -613,7 +613,7 @@ Deno.test("CreateStoreTransferInput is one event with both sides", () => {
     quantity: 4,
     date: "2026-03-01T00:00:00Z",
     reference: "move",
-    uid_session: SESSION,
+    uuid_session: SESSION,
     from: [{ uid_location: LOC_A, quantity: 4 }],
     to: [{ uid_location: LOC_B, quantity: 4 }],
   };

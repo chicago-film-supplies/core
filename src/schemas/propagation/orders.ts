@@ -997,7 +997,7 @@ const updateBookingRules: CollectionRule[] = [
     target: "transactions",
     mode: "co-write",
     invariant:
-      "A breakdown change appends movement events. The picker sends an ABSOLUTE breakdown; `deriveCustodyTransitions` translates the delta into at most one movement PER TYPE per booking — `prep`, then `check_out` (rental) or `sale`, or `check_in` / `sale_return` / `mark_damaged` / `mark_lost` on the way back. Each event's document id is the derived `{uid_session}|{type}|{booking uid}`, which is what makes the append idempotent under the client's retry: a replay resolves onto the same documents and is accepted when its content hash matches, rejected 409 when it does not. An un-prepped check-out is normalized as an implicit `prep` followed by a `check_out` so neither type occurs twice in one session. A sale's units lost or damaged in transit emit NOTHING — ownership dropped at the sale, so placing them at an out-of-service record would drive quantity_in_service negative. Only the fulfillment ladder emits: `orders`/`opportunity` writers project a breakdown from order STATUS, and quoted→reserved→prepped all sit at a locations doc, so nothing moves.",
+      "A breakdown change appends movement events. The picker sends an ABSOLUTE breakdown; `deriveCustodyTransitions` translates the delta into at most one movement PER TYPE per booking — `prep`, then `check_out` (rental) or `sale`, or `check_in` / `sale_return` / `mark_damaged` / `mark_lost` on the way back. Each event's document id is the derived `{uuid_session}|{type}|{booking uid}`, which is what makes the append idempotent under the client's retry: a replay resolves onto the same documents and is accepted when its content hash matches, rejected 409 when it does not. An un-prepped check-out is normalized as an implicit `prep` followed by a `check_out` so neither type occurs twice in one session. A sale's units lost or damaged in transit emit NOTHING — ownership dropped at the sale, so placing them at an out-of-service record would drive quantity_in_service negative. Only the fulfillment ladder emits: `orders`/`opportunity` writers project a breakdown from order STATUS, and quoted→reserved→prepped all sit at a locations doc, so nothing moves.",
     enforced_by: [CUSTODY_REPLAY],
     transaction: "update-booking",
     fields: [
@@ -1200,6 +1200,7 @@ const bulkCheckoutOrderTransaction: TransactionDefinition = {
     "update-booking:transactions-to-ledger",
     "update-booking:transactions-to-locations",
     "update-booking:booking-to-order",
+    "update-order:order-to-fulfillment",
     "update-booking:booking-to-cards",
   ],
 };
@@ -1216,6 +1217,7 @@ const bulkReturnOrderTransaction: TransactionDefinition = {
     "update-booking:transactions-to-ledger",
     "update-booking:transactions-to-locations",
     "update-booking:booking-to-order",
+    "update-order:order-to-fulfillment",
     "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
     "cowrite-thread:out-of-service-to-thread",
@@ -1242,6 +1244,42 @@ const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
     "update-booking:transactions-to-ledger",
     "update-booking:transactions-to-locations",
     "update-booking:booking-to-order",
+    "update-order:order-to-fulfillment",
+    "update-booking:booking-to-cards",
+    "create-out-of-service-record:sources-to-record",
+    "cowrite-thread:out-of-service-to-thread",
+    "cowrite-thread:thread-to-out-of-service",
+  ],
+};
+
+// ── cross-order-return ─────────────────────────────────────────────
+//
+// POST /returns — a worker is handed items back and checks them in WITHOUT an
+// order in the path. Same work as `bulk-return-order`, and therefore the same
+// steps; what differs is only the SCOPE, so it declares no rule of its own.
+//
+// ⚠️ It exists as a separate id rather than borrowing `bulk-return-order`
+// because a borrowed transaction id turns the drift check off silently — the
+// logger would resolve the record against a step list describing a different
+// path, and `rules_expected` would stop describing what actually ran.
+//
+// The loop over distinct orders is what makes it cross-order: `target_counts`
+// SUMS across them, and `source_doc_id` is the session uuid rather than an
+// order, because there is no single order to name.
+
+const crossOrderReturnTransaction: TransactionDefinition = {
+  id: "cross-order-return",
+  description:
+    "Apply per-booking returned/lost/damaged deltas across bookings belonging to ANY number of orders, in one operator session. Reuses update-booking rules per row, including OOS cowrite for lost/damaged deltas and the per-destination card status recompute; each distinct order touched is finalized and may auto-complete. Identical in kind to bulk-return-order — only the scope differs, so it declares the same steps and no new rule.",
+  steps: [
+    "update-booking:booking-to-self",
+    ...STOCK_STEPS,
+    "update-booking:booking-to-out-of-service",
+    "update-booking:booking-to-transactions",
+    "update-booking:transactions-to-ledger",
+    "update-booking:transactions-to-locations",
+    "update-booking:booking-to-order",
+    "update-order:order-to-fulfillment",
     "update-booking:booking-to-cards",
     "create-out-of-service-record:sources-to-record",
     "cowrite-thread:out-of-service-to-thread",
@@ -1350,6 +1388,7 @@ export const orders: PropagationModule = {
     bulkCheckoutOrderTransaction,
     bulkReturnOrderTransaction,
     bulkFulfillmentBookingsTransaction,
+    crossOrderReturnTransaction,
     finalizeOrderTransaction,
     processOrderDocsTransaction,
   ],

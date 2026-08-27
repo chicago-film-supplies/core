@@ -474,7 +474,7 @@ arrays with 400.
 interface BulkBookingUpdateInputType {
   version: number;
   updates: BookingUpdateType[];
-  uid_session: string;
+  uuid_session: string;
 }
 ```
 
@@ -492,7 +492,6 @@ Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row
 ```ts
 interface BulkBookingUpdateResponseType {
   success: true;
-  order_completed: boolean;
   oos_records_written: number;
   results: Array<typeLiteral>;
 }
@@ -1927,7 +1926,7 @@ interface CreateStoreTransferInputType {
   quantity: number;
   date: string;
   reference: string;
-  uid_session: string;
+  uuid_session: string;
   from: MovementAllocationInputType[];
   to: MovementAllocationInputType[];
   serialized_details?: typeLiteral | null;
@@ -2013,7 +2012,7 @@ interface CreateTrackingCategoryInputType {
 
 Input schema for creating a manual movement.
 
-`uid` is gone: the document id is derived (`{uid_session}|{type}|{subject}`),
+`uid` is gone: the document id is derived (`{uuid_session}|{type}|{subject}`),
 which is what makes a retried create idempotent instead of appending a second
 event. `allocations` is optional — absent means the server allocates.
 
@@ -2033,7 +2032,7 @@ interface CreateTransactionInputType {
   total_cost_cents: number;
   date: string;
   reference: string;
-  uid_session: string;
+  uuid_session: string;
   allocations?: MovementAllocationInputType[];
   serialized_details?: typeLiteral | null;
 }
@@ -4503,7 +4502,7 @@ interface Movement {
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string;
-  uid_session: string;
+  uuid_session: string;
   reverses: string | null;
   sources: DocSourceType[];
   query_by_sources: string[];
@@ -4625,7 +4624,7 @@ interface MovementCustodyType {
 ### `MovementId`
 
 `transactions.uid` for a movement-journal event — the deterministic composite
-`{uid_session}|{type}|{subject}`, where the subject is a product id (ownership
+`{uuid_session}|{type}|{subject}`, where the subject is a product id (ownership
 events) or a `BookingId` (custody events).
 
 **The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is
@@ -6469,7 +6468,7 @@ Input for reversing a movement.
 
 ```ts
 interface ReverseTransactionInputType {
-  uid_session: string;
+  uuid_session: string;
   reference: string;
   date?: string;
 }
@@ -6771,7 +6770,7 @@ interface Settlement {
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
-  uid_session: string;
+  uuid_session: string;
   reverses: string | null;
   uid_credit_note: string | null;
   number_credit_note: string | null;
@@ -7831,7 +7830,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-organization" | "update-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "reset-fulfillment" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-return" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-organization" | "update-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "reset-fulfillment" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
 ```
 
 ### `TransactionLogRecord`
@@ -8017,7 +8016,7 @@ next state (all 7 keys); the service requires `sum(breakdown) === quantity`
 and treats the value as an absolute write, not a partial patch. Version is
 required for optimistic concurrency.
 
-{@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to
+{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to
 retry once a breakdown change also appends to the movement journal — see the
 field's own note.
 
@@ -8026,7 +8025,7 @@ interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
   version: number;
-  uid_session: string;
+  uuid_session: string;
 }
 ```
 
@@ -9775,7 +9774,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-organization" | "update-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "reset-fulfillment" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-return" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-organization" | "update-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "reset-fulfillment" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
 ```
 
 ### `aggregates`
@@ -10565,7 +10564,7 @@ const ListId: z.ZodType<string>;
 ### `MovementId`
 
 `transactions.uid` for a movement-journal event — the deterministic composite
-`{uid_session}|{type}|{subject}`, where the subject is a product id (ownership
+`{uuid_session}|{type}|{subject}`, where the subject is a product id (ownership
 events) or a `BookingId` (custody events).
 
 **The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is
@@ -11448,7 +11447,7 @@ arrays with 400.
 interface BulkBookingUpdateInputType {
   version: number;
   updates: BookingUpdateType[];
-  uid_session: string;
+  uuid_session: string;
 }
 ```
 
@@ -11466,7 +11465,6 @@ Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row
 ```ts
 interface BulkBookingUpdateResponseType {
   success: true;
-  order_completed: boolean;
   oos_records_written: number;
   results: Array<typeLiteral>;
 }
@@ -11490,7 +11488,7 @@ next state (all 7 keys); the service requires `sum(breakdown) === quantity`
 and treats the value as an absolute write, not a partial patch. Version is
 required for optimistic concurrency.
 
-{@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to
+{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to
 retry once a breakdown change also appends to the movement journal — see the
 field's own note.
 
@@ -11499,7 +11497,7 @@ interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
   version: number;
-  uid_session: string;
+  uuid_session: string;
 }
 ```
 
@@ -15363,7 +15361,7 @@ interface Settlement {
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
-  uid_session: string;
+  uuid_session: string;
   reverses: string | null;
   uid_credit_note: string | null;
   number_credit_note: string | null;
@@ -15755,7 +15753,7 @@ Movement document schema — Firestore collection: `transactions`
 
 An append-only journal of inventory movement. Every event is **one subject**
 (a booking for custody events, a product for ownership events) plus a set of
-signed lines, grouped with its siblings by a client-minted `uid_session`.
+signed lines, grouped with its siblings by a client-minted `uuid_session`.
 
 The collection keeps its name — the journal was migrated in place — but the
 document is a `Movement`, not the old current-state `Transaction`.
@@ -15826,7 +15824,7 @@ interface CreateStoreTransferInputType {
   quantity: number;
   date: string;
   reference: string;
-  uid_session: string;
+  uuid_session: string;
   from: MovementAllocationInputType[];
   to: MovementAllocationInputType[];
   serialized_details?: typeLiteral | null;
@@ -15837,7 +15835,7 @@ interface CreateStoreTransferInputType {
 
 Input schema for creating a manual movement.
 
-`uid` is gone: the document id is derived (`{uid_session}|{type}|{subject}`),
+`uid` is gone: the document id is derived (`{uuid_session}|{type}|{subject}`),
 which is what makes a retried create idempotent instead of appending a second
 event. `allocations` is optional — absent means the server allocates.
 
@@ -15857,7 +15855,7 @@ interface CreateTransactionInputType {
   total_cost_cents: number;
   date: string;
   reference: string;
-  uid_session: string;
+  uuid_session: string;
   allocations?: MovementAllocationInputType[];
   serialized_details?: typeLiteral | null;
 }
@@ -15930,7 +15928,7 @@ interface Movement {
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string;
-  uid_session: string;
+  uuid_session: string;
   reverses: string | null;
   sources: DocSourceType[];
   query_by_sources: string[];
@@ -16132,7 +16130,7 @@ Input for reversing a movement.
 
 ```ts
 interface ReverseTransactionInputType {
-  uid_session: string;
+  uuid_session: string;
   reference: string;
   date?: string;
 }

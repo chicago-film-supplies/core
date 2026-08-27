@@ -219,7 +219,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateInputType",
-          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uid_session: string;\n}",
+          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uuid_session: string;\n}",
           "doc": "Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions\nfor one order in a single Firestore transaction.\n\nTop-level `version` is the fulfillment doc version at read time. Currently\nadvisory: a stale value 409s. Per-row `version` carries each booking's\ncurrent version for optimistic concurrency.\n\nNo fixed cap on `updates.length`. Bound only by the real Firestore limits\n(270s tx duration, 10 MiB request size). The bulk service rejects empty\narrays with 400."
         },
         {
@@ -231,7 +231,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateResponseType",
-          "declaration": "interface BulkBookingUpdateResponseType {\n  success: true;\n  order_completed: boolean;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n}",
+          "declaration": "interface BulkBookingUpdateResponseType {\n  success: true;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n}",
           "doc": "Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row\n`results` carry the post-write booking versions in input order."
         },
         {
@@ -909,7 +909,7 @@
         {
           "kind": "interface",
           "name": "CreateStoreTransferInputType",
-          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  quantity: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  from: MovementAllocationInputType[];\n  to: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  quantity: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  from: MovementAllocationInputType[];\n  to: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
           "doc": "Input for creating a store-to-store transfer."
         },
         {
@@ -952,12 +952,12 @@
           "kind": "variable",
           "name": "CreateTransactionInput",
           "declaration": "const CreateTransactionInput: z.ZodType<CreateTransactionInputType>;",
-          "doc": "Input schema for creating a manual movement.\n\n`uid` is gone: the document id is derived (`{uid_session}|{type}|{subject}`),\nwhich is what makes a retried create idempotent instead of appending a second\nevent. `allocations` is optional — absent means the server allocates."
+          "doc": "Input schema for creating a manual movement.\n\n`uid` is gone: the document id is derived (`{uuid_session}|{type}|{subject}`),\nwhich is what makes a retried create idempotent instead of appending a second\nevent. `allocations` is optional — absent means the server allocates."
         },
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {
@@ -2115,7 +2115,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -2164,7 +2164,7 @@
           "kind": "variable",
           "name": "MovementId",
           "declaration": "const MovementId: z.ZodType<string>;",
-          "doc": "`transactions.uid` for a movement-journal event — the deterministic composite\n`{uid_session}|{type}|{subject}`, where the subject is a product id (ownership\nevents) or a `BookingId` (custody events).\n\n**The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is\nitself `a:b:c`, so a colon-joined id would carry 2 colons for a product\nsubject and 4 for a booking one — variable arity that no `split(\":\")` can\ndisambiguate.\n\n**The `type` segment is load-bearing too:** one operator action legitimately\nproduces several event types against one subject (\"return 2, mark 1 damaged\"\nis two picker actions on one booking), so session+subject alone would collide.\nIt is matched loosely here (`[a-z][a-z_]*`) rather than against\n`MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse\ndependency would be a cycle, and the `type` **field** is the authority\nanyway. The id only has to be well-formed and stable.\n\nThis is the sanctioned use of a derived id: it is what makes an append-only\nevent idempotent under the manager's retry-on-409, exactly as the derived\n`bookings` id makes a booking upsert idempotent."
+          "doc": "`transactions.uid` for a movement-journal event — the deterministic composite\n`{uuid_session}|{type}|{subject}`, where the subject is a product id (ownership\nevents) or a `BookingId` (custody events).\n\n**The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is\nitself `a:b:c`, so a colon-joined id would carry 2 colons for a product\nsubject and 4 for a booking one — variable arity that no `split(\":\")` can\ndisambiguate.\n\n**The `type` segment is load-bearing too:** one operator action legitimately\nproduces several event types against one subject (\"return 2, mark 1 damaged\"\nis two picker actions on one booking), so session+subject alone would collide.\nIt is matched loosely here (`[a-z][a-z_]*`) rather than against\n`MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse\ndependency would be a cycle, and the `type` **field** is the authority\nanyway. The id only has to be well-formed and stable.\n\nThis is the sanctioned use of a derived id: it is what makes an append-only\nevent idempotent under the manager's retry-on-409, exactly as the derived\n`bookings` id makes a booking upsert idempotent."
         },
         {
           "kind": "variable",
@@ -3039,7 +3039,7 @@
         {
           "kind": "interface",
           "name": "ReverseTransactionInputType",
-          "declaration": "interface ReverseTransactionInputType {\n  uid_session: string;\n  reference: string;\n  date?: string;\n}",
+          "declaration": "interface ReverseTransactionInputType {\n  uuid_session: string;\n  reference: string;\n  date?: string;\n}",
           "doc": "Input for reversing a movement."
         },
         {
@@ -3165,7 +3165,7 @@
         {
           "kind": "interface",
           "name": "Settlement",
-          "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string;\n  uid_organization: string;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string;\n  uid_organization: string;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uuid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "One settlement event against an invoice."
         },
         {
@@ -3669,7 +3669,7 @@
         {
           "kind": "typeAlias",
           "name": "TransactionId",
-          "declaration": "type TransactionId = \"create-order\" | \"update-order\" | \"update-booking\" | \"bulk-checkout-order\" | \"bulk-return-order\" | \"bulk-fulfillment-bookings\" | \"finalize-order\" | \"process-order-docs\" | \"create-out-of-service-record\" | \"update-out-of-service-record\" | \"create-transaction\" | \"reverse-transaction\" | \"create-store-transfer\" | \"create-product\" | \"update-product\" | \"create-organization\" | \"update-organization\" | \"create-contact\" | \"update-contact\" | \"create-user\" | \"update-user\" | \"delete-user\" | \"create-invoice\" | \"update-invoice\" | \"create-settlement\" | \"reverse-settlement\" | \"sync-xero-settlement\" | \"void-invoice\" | \"void-invoice-from-crms\" | \"void-invoice-from-xero\" | \"create-credit-note\" | \"allocate-credit-note\" | \"void-credit-note\" | \"update-fulfillment-items\" | \"reset-fulfillment\" | \"create-holiday-definition\" | \"update-holiday-definition\" | \"delete-holiday-definition\" | \"create-location\" | \"update-location\" | \"create-role\" | \"create-comment\" | \"delete-comment\" | \"create-card\" | \"delete-card\" | \"create-template\" | \"manage-draft\" | \"publish-template\" | \"create-recurrence\" | \"materialize-horizon\" | \"update-recurrence\" | \"delete-recurrence\" | \"update-card-scope-following\" | \"update-card-scope-all\" | \"delete-card-scope-this\" | \"delete-card-scope-following\" | \"delete-card-scope-all\" | \"crms-invoice-upsert\" | \"crms-opportunity-order\" | \"crms-member-organization\" | \"crms-member-contact\";",
+          "declaration": "type TransactionId = \"create-order\" | \"update-order\" | \"update-booking\" | \"bulk-checkout-order\" | \"bulk-return-order\" | \"bulk-fulfillment-bookings\" | \"cross-order-return\" | \"finalize-order\" | \"process-order-docs\" | \"create-out-of-service-record\" | \"update-out-of-service-record\" | \"create-transaction\" | \"reverse-transaction\" | \"create-store-transfer\" | \"create-product\" | \"update-product\" | \"create-organization\" | \"update-organization\" | \"create-contact\" | \"update-contact\" | \"create-user\" | \"update-user\" | \"delete-user\" | \"create-invoice\" | \"update-invoice\" | \"create-settlement\" | \"reverse-settlement\" | \"sync-xero-settlement\" | \"void-invoice\" | \"void-invoice-from-crms\" | \"void-invoice-from-xero\" | \"create-credit-note\" | \"allocate-credit-note\" | \"void-credit-note\" | \"update-fulfillment-items\" | \"reset-fulfillment\" | \"create-holiday-definition\" | \"update-holiday-definition\" | \"delete-holiday-definition\" | \"create-location\" | \"update-location\" | \"create-role\" | \"create-comment\" | \"delete-comment\" | \"create-card\" | \"delete-card\" | \"create-template\" | \"manage-draft\" | \"publish-template\" | \"create-recurrence\" | \"materialize-horizon\" | \"update-recurrence\" | \"delete-recurrence\" | \"update-card-scope-following\" | \"update-card-scope-all\" | \"delete-card-scope-this\" | \"delete-card-scope-following\" | \"delete-card-scope-all\" | \"crms-invoice-upsert\" | \"crms-opportunity-order\" | \"crms-member-organization\" | \"crms-member-contact\";",
           "doc": "Every `TransactionDefinition.id` in the catalog.\n\n⚠️ Disjoint from {@link RuleId} — verified, and asserted in\n`tests/propagation.test.ts`. The two namespaces are told apart by their type\nnow, not by the shape of the call that consumes them."
         },
         {
@@ -3759,8 +3759,8 @@
         {
           "kind": "interface",
           "name": "UpdateBookingInputType",
-          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uid_session: string;\n}",
-          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
+          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uuid_session: string;\n}",
+          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
         },
         {
           "kind": "variable",
@@ -4634,7 +4634,7 @@
         {
           "kind": "typeAlias",
           "name": "TransactionId",
-          "declaration": "type TransactionId = \"create-order\" | \"update-order\" | \"update-booking\" | \"bulk-checkout-order\" | \"bulk-return-order\" | \"bulk-fulfillment-bookings\" | \"finalize-order\" | \"process-order-docs\" | \"create-out-of-service-record\" | \"update-out-of-service-record\" | \"create-transaction\" | \"reverse-transaction\" | \"create-store-transfer\" | \"create-product\" | \"update-product\" | \"create-organization\" | \"update-organization\" | \"create-contact\" | \"update-contact\" | \"create-user\" | \"update-user\" | \"delete-user\" | \"create-invoice\" | \"update-invoice\" | \"create-settlement\" | \"reverse-settlement\" | \"sync-xero-settlement\" | \"void-invoice\" | \"void-invoice-from-crms\" | \"void-invoice-from-xero\" | \"create-credit-note\" | \"allocate-credit-note\" | \"void-credit-note\" | \"update-fulfillment-items\" | \"reset-fulfillment\" | \"create-holiday-definition\" | \"update-holiday-definition\" | \"delete-holiday-definition\" | \"create-location\" | \"update-location\" | \"create-role\" | \"create-comment\" | \"delete-comment\" | \"create-card\" | \"delete-card\" | \"create-template\" | \"manage-draft\" | \"publish-template\" | \"create-recurrence\" | \"materialize-horizon\" | \"update-recurrence\" | \"delete-recurrence\" | \"update-card-scope-following\" | \"update-card-scope-all\" | \"delete-card-scope-this\" | \"delete-card-scope-following\" | \"delete-card-scope-all\" | \"crms-invoice-upsert\" | \"crms-opportunity-order\" | \"crms-member-organization\" | \"crms-member-contact\";",
+          "declaration": "type TransactionId = \"create-order\" | \"update-order\" | \"update-booking\" | \"bulk-checkout-order\" | \"bulk-return-order\" | \"bulk-fulfillment-bookings\" | \"cross-order-return\" | \"finalize-order\" | \"process-order-docs\" | \"create-out-of-service-record\" | \"update-out-of-service-record\" | \"create-transaction\" | \"reverse-transaction\" | \"create-store-transfer\" | \"create-product\" | \"update-product\" | \"create-organization\" | \"update-organization\" | \"create-contact\" | \"update-contact\" | \"create-user\" | \"update-user\" | \"delete-user\" | \"create-invoice\" | \"update-invoice\" | \"create-settlement\" | \"reverse-settlement\" | \"sync-xero-settlement\" | \"void-invoice\" | \"void-invoice-from-crms\" | \"void-invoice-from-xero\" | \"create-credit-note\" | \"allocate-credit-note\" | \"void-credit-note\" | \"update-fulfillment-items\" | \"reset-fulfillment\" | \"create-holiday-definition\" | \"update-holiday-definition\" | \"delete-holiday-definition\" | \"create-location\" | \"update-location\" | \"create-role\" | \"create-comment\" | \"delete-comment\" | \"create-card\" | \"delete-card\" | \"create-template\" | \"manage-draft\" | \"publish-template\" | \"create-recurrence\" | \"materialize-horizon\" | \"update-recurrence\" | \"delete-recurrence\" | \"update-card-scope-following\" | \"update-card-scope-all\" | \"delete-card-scope-this\" | \"delete-card-scope-following\" | \"delete-card-scope-all\" | \"crms-invoice-upsert\" | \"crms-opportunity-order\" | \"crms-member-organization\" | \"crms-member-contact\";",
           "doc": "Every `TransactionDefinition.id` in the catalog.\n\n⚠️ Disjoint from {@link RuleId} — verified, and asserted in\n`tests/propagation.test.ts`. The two namespaces are told apart by their type\nnow, not by the shape of the call that consumes them."
         },
         {
@@ -5019,7 +5019,7 @@
           "kind": "variable",
           "name": "MovementId",
           "declaration": "const MovementId: z.ZodType<string>;",
-          "doc": "`transactions.uid` for a movement-journal event — the deterministic composite\n`{uid_session}|{type}|{subject}`, where the subject is a product id (ownership\nevents) or a `BookingId` (custody events).\n\n**The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is\nitself `a:b:c`, so a colon-joined id would carry 2 colons for a product\nsubject and 4 for a booking one — variable arity that no `split(\":\")` can\ndisambiguate.\n\n**The `type` segment is load-bearing too:** one operator action legitimately\nproduces several event types against one subject (\"return 2, mark 1 damaged\"\nis two picker actions on one booking), so session+subject alone would collide.\nIt is matched loosely here (`[a-z][a-z_]*`) rather than against\n`MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse\ndependency would be a cycle, and the `type` **field** is the authority\nanyway. The id only has to be well-formed and stable.\n\nThis is the sanctioned use of a derived id: it is what makes an append-only\nevent idempotent under the manager's retry-on-409, exactly as the derived\n`bookings` id makes a booking upsert idempotent."
+          "doc": "`transactions.uid` for a movement-journal event — the deterministic composite\n`{uuid_session}|{type}|{subject}`, where the subject is a product id (ownership\nevents) or a `BookingId` (custody events).\n\n**The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is\nitself `a:b:c`, so a colon-joined id would carry 2 colons for a product\nsubject and 4 for a booking one — variable arity that no `split(\":\")` can\ndisambiguate.\n\n**The `type` segment is load-bearing too:** one operator action legitimately\nproduces several event types against one subject (\"return 2, mark 1 damaged\"\nis two picker actions on one booking), so session+subject alone would collide.\nIt is matched loosely here (`[a-z][a-z_]*`) rather than against\n`MOVEMENT_TYPES` — `schemas/transaction.ts` imports this module, so the reverse\ndependency would be a cycle, and the `type` **field** is the authority\nanyway. The id only has to be well-formed and stable.\n\nThis is the sanctioned use of a derived id: it is what makes an append-only\nevent idempotent under the manager's retry-on-409, exactly as the derived\n`bookings` id makes a booking upsert idempotent."
         },
         {
           "kind": "variable",
@@ -5478,7 +5478,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateInputType",
-          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uid_session: string;\n}",
+          "declaration": "interface BulkBookingUpdateInputType {\n  version: number;\n  updates: BookingUpdateType[];\n  uuid_session: string;\n}",
           "doc": "Body of `PUT /fulfillments/{uid}/bookings` — applies N booking transitions\nfor one order in a single Firestore transaction.\n\nTop-level `version` is the fulfillment doc version at read time. Currently\nadvisory: a stale value 409s. Per-row `version` carries each booking's\ncurrent version for optimistic concurrency.\n\nNo fixed cap on `updates.length`. Bound only by the real Firestore limits\n(270s tx duration, 10 MiB request size). The bulk service rejects empty\narrays with 400."
         },
         {
@@ -5490,7 +5490,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateResponseType",
-          "declaration": "interface BulkBookingUpdateResponseType {\n  success: true;\n  order_completed: boolean;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n}",
+          "declaration": "interface BulkBookingUpdateResponseType {\n  success: true;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n}",
           "doc": "Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row\n`results` carry the post-write booking versions in input order."
         },
         {
@@ -5502,8 +5502,8 @@
         {
           "kind": "interface",
           "name": "UpdateBookingInputType",
-          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uid_session: string;\n}",
-          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
+          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uuid_session: string;\n}",
+          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
         }
       ]
     },
@@ -7348,7 +7348,7 @@
         {
           "kind": "interface",
           "name": "Settlement",
-          "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string;\n  uid_organization: string;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string;\n  uid_organization: string;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uuid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "One settlement event against an invoice."
         },
         {
@@ -7553,7 +7553,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/transaction",
-      "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Three axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — the seven keys      |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — a `prep`, where reserved and\nprepped units sit on the same shelf, or a cost-only adjustment.",
+      "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uuid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Three axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — the seven keys      |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — a `prep`, where reserved and\nprepped units sit on the same shelf, or a cost-only adjustment.",
       "symbols": [
         {
           "kind": "variable",
@@ -7570,19 +7570,19 @@
         {
           "kind": "interface",
           "name": "CreateStoreTransferInputType",
-          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  quantity: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  from: MovementAllocationInputType[];\n  to: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  quantity: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  from: MovementAllocationInputType[];\n  to: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
           "doc": "Input for creating a store-to-store transfer."
         },
         {
           "kind": "variable",
           "name": "CreateTransactionInput",
           "declaration": "const CreateTransactionInput: z.ZodType<CreateTransactionInputType>;",
-          "doc": "Input schema for creating a manual movement.\n\n`uid` is gone: the document id is derived (`{uid_session}|{type}|{subject}`),\nwhich is what makes a retried create idempotent instead of appending a second\nevent. `allocations` is optional — absent means the server allocates."
+          "doc": "Input schema for creating a manual movement.\n\n`uid` is gone: the document id is derived (`{uuid_session}|{type}|{subject}`),\nwhich is what makes a retried create idempotent instead of appending a second\nevent. `allocations` is optional — absent means the server allocates."
         },
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {
@@ -7600,7 +7600,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -7696,7 +7696,7 @@
         {
           "kind": "interface",
           "name": "ReverseTransactionInputType",
-          "declaration": "interface ReverseTransactionInputType {\n  uid_session: string;\n  reference: string;\n  date?: string;\n}",
+          "declaration": "interface ReverseTransactionInputType {\n  uuid_session: string;\n  reference: string;\n  date?: string;\n}",
           "doc": "Input for reversing a movement."
         },
         {

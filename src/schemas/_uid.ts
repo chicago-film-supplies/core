@@ -102,7 +102,7 @@ export const BookingId: z.ZodType<string> = bookingId;
 
 /**
  * `transactions.uid` for a movement-journal event — the deterministic composite
- * `{uid_session}|{type}|{subject}`, where the subject is a product id (ownership
+ * `{uuid_session}|{type}|{subject}`, where the subject is a product id (ownership
  * events) or a `BookingId` (custody events).
  *
  * **The separator is `|`, not `:`, and that is load-bearing.** A `BookingId` is

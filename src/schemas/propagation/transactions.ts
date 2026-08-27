@@ -242,7 +242,7 @@ const createTransactionRules: CollectionRule[] = [
 const createTransactionTransaction: TransactionDefinition = {
   id: "create-transaction",
   description:
-    "Appends a movement to the journal, folds its lines onto the inventory ledger and the location documents, and rebuilds the product's `stock/{P}` projection when quantity_held actually moved. The document id is the derived {uid_session}|{type}|{subject}, so a retried create resolves to the same document instead of appending a second event. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: A movement that moves quantity_held — a pure placement move leaves quantity_held untouched and SKIPS the rebuild.",
+    "Appends a movement to the journal, folds its lines onto the inventory ledger and the location documents, and rebuilds the product's `stock/{P}` projection when quantity_held actually moved. The document id is the derived {uuid_session}|{type}|{subject}, so a retried create resolves to the same document instead of appending a second event. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: A movement that moves quantity_held — a pure placement move leaves quantity_held untouched and SKIPS the rebuild.",
   steps: [
     "create-transaction:transaction-to-ledger",
     "create-transaction:transaction-to-locations",

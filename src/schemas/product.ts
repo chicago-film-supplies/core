@@ -562,7 +562,7 @@ export interface CreateProductInputType {
     total_cost_cents: number;
     date: string;
     reference: string;
-    uid_session: string;
+    uuid_session: string;
     allocations: MovementAllocationInputType[];
   };
 }
@@ -611,7 +611,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     description: z.string().nullable().optional(),
   }),
   // The opening-balance movement. No `uid`: a movement's document id is derived
-  // (`{uid_session}|{type}|{subject}`), which is what makes a retried create
+  // (`{uuid_session}|{type}|{subject}`), which is what makes a retried create
   // idempotent rather than appending a second event.
   transaction: z.object({
     type: z.enum(["purchase", "make", "find"]),
@@ -619,7 +619,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     total_cost_cents: z.int(),
     date: chicagoInstant(),
     reference: z.string(),
-    uid_session: z.uuid(),
+    uuid_session: z.uuid(),
     allocations: z.array(MovementAllocationInput).min(1),
   }).optional(),
 }).refine(
