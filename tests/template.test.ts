@@ -78,6 +78,48 @@ Deno.test("FixtureMetaSchema rejects unknown keys", () => {
   );
 });
 
+// ── `params` — the state a fixture is golden-gated at (api-cloudrun#608) ──
+
+Deno.test("FixtureMetaSchema accepts an entry declaring a param state", () => {
+  assertEquals(
+    FixtureMetaSchema.safeParse({
+      slug: "zero-priced-components-hidden",
+      label: "Components hidden",
+      description: "The hidden-and-rolled-up state of hide_zero_priced_components.",
+      params: { hide_zero_priced_components: true },
+    }).success,
+    true,
+  );
+});
+
+Deno.test("FixtureMetaSchema keeps `params` OPTIONAL — absent means the family's defaults", () => {
+  // The rollout is readers-first and therefore additive: every stored
+  // `fixtures[]` entry predates this field, and an absent one is not a gap —
+  // it is the statement "this fixture renders at the declared defaults".
+  const res = FixtureMetaSchema.safeParse({
+    slug: "s",
+    label: "l",
+    description: "why this one and not its siblings",
+  });
+  assertEquals(res.success, true);
+  if (res.success) assertEquals(res.data.params, undefined);
+});
+
+Deno.test("FixtureMetaSchema rejects a non-boolean param value", () => {
+  // TEMPLATE_PARAM_TYPES is ["boolean"], and `resolveRenderParams` throws on a
+  // non-boolean provided value — so accepting one here would only move the
+  // failure from the sidecar to the render.
+  assertEquals(
+    FixtureMetaSchema.safeParse({
+      slug: "s",
+      label: "l",
+      description: "why this one and not its siblings",
+      params: { collection_leg: "true" },
+    }).success,
+    false,
+  );
+});
+
 Deno.test("TemplateSchema defaults fixtures to []", () => {
   const res = TemplateSchema.safeParse(baseFamily());
   assertEquals(res.success, true);

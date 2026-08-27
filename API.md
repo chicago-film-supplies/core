@@ -3011,13 +3011,26 @@ Files remain authoritative for *discovery*: every reader globs the directory
 and left-joins this manifest, so an orphaned entry (slug with no matching
 file) is ignored at render/golden time and never breaks a render. The
 `templates` repo's `lint-fixtures.ts` is what fails drift in either
-direction.
+direction. ⚠️ **`params` makes a MISSING entry meaningful** in a way a
+missing `description` never was: no entry means the fixture renders at the
+family's declared defaults, which is a rendering rather than an absence.
+
+⚠️ **`params` is here rather than in the golden's FILENAME, and the rule
+behind that generalises** (api-cloudrun#608): a golden's filename may encode
+only what is DERIVABLE from the family's own declaration — the render frame,
+say, which the sidecar's `render` block already states. *Which* param states
+are worth freezing is a CHOICE, and every other coverage choice already lives
+in this manifest, because a fixture set is exactly a coverage argument.
+Encoding it in the filename would break the one-golden-per-fixture parity
+`lint-fixtures.ts` check 4 asserts, and would still need a second
+declaration saying which states to gate — 2^N is not the answer.
 
 ```ts
 interface FixtureMeta {
   slug: string;
   label: string;
   description: string;
+  params?: Record<string, boolean>;
 }
 ```
 
@@ -17625,13 +17638,26 @@ Files remain authoritative for *discovery*: every reader globs the directory
 and left-joins this manifest, so an orphaned entry (slug with no matching
 file) is ignored at render/golden time and never breaks a render. The
 `templates` repo's `lint-fixtures.ts` is what fails drift in either
-direction.
+direction. ⚠️ **`params` makes a MISSING entry meaningful** in a way a
+missing `description` never was: no entry means the fixture renders at the
+family's declared defaults, which is a rendering rather than an absence.
+
+⚠️ **`params` is here rather than in the golden's FILENAME, and the rule
+behind that generalises** (api-cloudrun#608): a golden's filename may encode
+only what is DERIVABLE from the family's own declaration — the render frame,
+say, which the sidecar's `render` block already states. *Which* param states
+are worth freezing is a CHOICE, and every other coverage choice already lives
+in this manifest, because a fixture set is exactly a coverage argument.
+Encoding it in the filename would break the one-golden-per-fixture parity
+`lint-fixtures.ts` check 4 asserts, and would still need a second
+declaration saying which states to gate — 2^N is not the answer.
 
 ```ts
 interface FixtureMeta {
   slug: string;
   label: string;
   description: string;
+  params?: Record<string, boolean>;
 }
 ```
 

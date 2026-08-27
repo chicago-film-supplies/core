@@ -75,7 +75,19 @@ export interface TemplateDependsOn {
  * and left-joins this manifest, so an orphaned entry (slug with no matching
  * file) is ignored at render/golden time and never breaks a render. The
  * `templates` repo's `lint-fixtures.ts` is what fails drift in either
- * direction.
+ * direction. ⚠️ **`params` makes a MISSING entry meaningful** in a way a
+ * missing `description` never was: no entry means the fixture renders at the
+ * family's declared defaults, which is a rendering rather than an absence.
+ *
+ * ⚠️ **`params` is here rather than in the golden's FILENAME, and the rule
+ * behind that generalises** (api-cloudrun#608): a golden's filename may encode
+ * only what is DERIVABLE from the family's own declaration — the render frame,
+ * say, which the sidecar's `render` block already states. *Which* param states
+ * are worth freezing is a CHOICE, and every other coverage choice already lives
+ * in this manifest, because a fixture set is exactly a coverage argument.
+ * Encoding it in the filename would break the one-golden-per-fixture parity
+ * `lint-fixtures.ts` check 4 asserts, and would still need a second
+ * declaration saying which states to gate — 2^N is not the answer.
  */
 export interface FixtureMeta {
   /** Filename slug — the join key to `fixtures/<git_path>/<slug>.json`. */
@@ -84,6 +96,20 @@ export interface FixtureMeta {
   label: string;
   /** Why this fixture exists — what it covers that no other fixture does. */
   description: string;
+  /**
+   * The render-param state this fixture is rendered — and golden-gated — at.
+   *
+   * Absent means the family's declared defaults, which is what every fixture
+   * did before this existed. Present, it is passed to `resolveRenderParams` as
+   * the *provided* map, so it is validated strictly: a key the family does not
+   * declare, or a non-boolean value, throws rather than being ignored.
+   *
+   * This is the ONLY way a non-default param state gets a golden. Without it a
+   * param that selects half a document — the packing list's delivery/collection
+   * leg — has that half ungated for the life of the family, and no threshold or
+   * re-bless reaches it.
+   */
+  params?: Record<string, boolean>;
 }
 
 /** Zod schema for a fixture manifest entry. */
@@ -95,6 +121,12 @@ export const FixtureMetaSchema: z.ZodType<FixtureMeta> = z.strictObject({
   // template's coverage, never customer data (the fixture *document* is where
   // PII would live, and that is sanitized on capture by `applyPii`).
   description: z.string().min(1).max(2000).meta({ pii: "none" }),
+  // Optional and additive, which is what makes the rollout readers-first: every
+  // stored family's `fixtures[]` predates this and stays valid. The reverse
+  // order would not work — `TemplateSchema` is strict like all of them, so a
+  // sidecar carrying this field fails the family write outright until every
+  // reader is on a version that declares it (api-cloudrun#443's failure class).
+  params: z.record(z.string(), z.boolean()).optional(),
 });
 
 /** A thin template *family* document — identity + rollups, no content/status. */
