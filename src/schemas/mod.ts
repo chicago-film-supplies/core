@@ -611,6 +611,8 @@ export {
   type BulkBookingUpdateInputType,
   BulkBookingUpdateResponse,
   type BulkBookingUpdateResponseType,
+  UpdateBookingResponse,
+  type UpdateBookingResponseType,
 } from "./booking.ts";
 
 export {

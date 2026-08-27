@@ -231,8 +231,8 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateResponseType",
-          "declaration": "interface BulkBookingUpdateResponseType {\n  success: true;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n}",
-          "doc": "Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row\n`results` carry the post-write booking versions in input order."
+          "declaration": "interface BulkBookingUpdateResponseType {\n  success: boolean;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n  failures: Array<typeLiteral>;\n  chunks: number;\n}",
+          "doc": "Response from `PUT /fulfillments/{uid}/bookings`. Per-row `results` carry the\npost-write booking versions in input order.\n\n⚠️ **`success` is a boolean, not `true`** — and that is a fact about the\nserver, not a loosening. Rows commit in transaction-sized chunks\n(api-cloudrun#391), so a failure after an earlier chunk has committed is a\nPARTIAL success: the earlier writes exist and cannot be rolled back. A\n`z.literal(true)` cannot describe that state, so the route restated the whole\nshape inline rather than use this one — which is the drift api-cloudrun#624\nitem 3 names. `failures` + `chunks` are what make the partial case legible to\na client (manager#272).\n\nThere is deliberately **no `order_completed`**. It was edge-triggered — true\nonly when THIS run flipped the order into `complete` — while its name read\nlevel-triggered, so a replayed request reported `false` for an order that IS\ncomplete. Completion is level-triggered at the call site, where the client's\norder listener already holds `status === \"complete\"`."
         },
         {
           "kind": "variable",
@@ -3764,6 +3764,18 @@
         },
         {
           "kind": "variable",
+          "name": "UpdateBookingResponse",
+          "declaration": "const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "UpdateBookingResponseType",
+          "declaration": "interface UpdateBookingResponseType {\n  success: boolean;\n  version: number;\n  oos_records_written: number;\n}",
+          "doc": "Response from `PUT /bookings/{uid}` — the single-row form.\n\nOne row plans to exactly one chunk, so it cannot partially succeed and\ncarries no `failures`/`chunks`. Kept a distinct shape from\n{@link BulkBookingUpdateResponseType} for that reason rather than sharing\none loosened type: N rows and one row genuinely differ in what can go wrong."
+        },
+        {
+          "kind": "variable",
           "name": "UpdateCardInput",
           "declaration": "const UpdateCardInput: z.ZodType<UpdateCardInputType>;",
           "doc": "Zod schema for updating a card. Lock enforcement happens at the service\nlayer (api-cloudrun) — the schema accepts any field, then service rejects\nwith FIELD_LOCKED if the card's `locked[]` contains the field name."
@@ -5490,8 +5502,8 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateResponseType",
-          "declaration": "interface BulkBookingUpdateResponseType {\n  success: true;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n}",
-          "doc": "Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row\n`results` carry the post-write booking versions in input order."
+          "declaration": "interface BulkBookingUpdateResponseType {\n  success: boolean;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n  failures: Array<typeLiteral>;\n  chunks: number;\n}",
+          "doc": "Response from `PUT /fulfillments/{uid}/bookings`. Per-row `results` carry the\npost-write booking versions in input order.\n\n⚠️ **`success` is a boolean, not `true`** — and that is a fact about the\nserver, not a loosening. Rows commit in transaction-sized chunks\n(api-cloudrun#391), so a failure after an earlier chunk has committed is a\nPARTIAL success: the earlier writes exist and cannot be rolled back. A\n`z.literal(true)` cannot describe that state, so the route restated the whole\nshape inline rather than use this one — which is the drift api-cloudrun#624\nitem 3 names. `failures` + `chunks` are what make the partial case legible to\na client (manager#272).\n\nThere is deliberately **no `order_completed`**. It was edge-triggered — true\nonly when THIS run flipped the order into `complete` — while its name read\nlevel-triggered, so a replayed request reported `false` for an order that IS\ncomplete. Completion is level-triggered at the call site, where the client's\norder listener already holds `status === \"complete\"`."
         },
         {
           "kind": "variable",
@@ -5504,6 +5516,18 @@
           "name": "UpdateBookingInputType",
           "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uuid_session: string;\n}",
           "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
+        },
+        {
+          "kind": "variable",
+          "name": "UpdateBookingResponse",
+          "declaration": "const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "UpdateBookingResponseType",
+          "declaration": "interface UpdateBookingResponseType {\n  success: boolean;\n  version: number;\n  oos_records_written: number;\n}",
+          "doc": "Response from `PUT /bookings/{uid}` — the single-row form.\n\nOne row plans to exactly one chunk, so it cannot partially succeed and\ncarries no `failures`/`chunks`. Kept a distinct shape from\n{@link BulkBookingUpdateResponseType} for that reason rather than sharing\none loosened type: N rows and one row genuinely differ in what can go wrong."
         }
       ]
     },

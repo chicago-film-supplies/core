@@ -486,14 +486,31 @@ const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType>;
 
 ### `BulkBookingUpdateResponseType`
 
-Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row
-`results` carry the post-write booking versions in input order.
+Response from `PUT /fulfillments/{uid}/bookings`. Per-row `results` carry the
+post-write booking versions in input order.
+
+⚠️ **`success` is a boolean, not `true`** — and that is a fact about the
+server, not a loosening. Rows commit in transaction-sized chunks
+(api-cloudrun#391), so a failure after an earlier chunk has committed is a
+PARTIAL success: the earlier writes exist and cannot be rolled back. A
+`z.literal(true)` cannot describe that state, so the route restated the whole
+shape inline rather than use this one — which is the drift api-cloudrun#624
+item 3 names. `failures` + `chunks` are what make the partial case legible to
+a client (manager#272).
+
+There is deliberately **no `order_completed`**. It was edge-triggered — true
+only when THIS run flipped the order into `complete` — while its name read
+level-triggered, so a replayed request reported `false` for an order that IS
+complete. Completion is level-triggered at the call site, where the client's
+order listener already holds `status === "complete"`.
 
 ```ts
 interface BulkBookingUpdateResponseType {
-  success: true;
+  success: boolean;
   oos_records_written: number;
   results: Array<typeLiteral>;
+  failures: Array<typeLiteral>;
+  chunks: number;
 }
 ```
 
@@ -8029,6 +8046,29 @@ interface UpdateBookingInputType {
 }
 ```
 
+### `UpdateBookingResponse`
+
+```ts
+const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType>;
+```
+
+### `UpdateBookingResponseType`
+
+Response from `PUT /bookings/{uid}` — the single-row form.
+
+One row plans to exactly one chunk, so it cannot partially succeed and
+carries no `failures`/`chunks`. Kept a distinct shape from
+{@link BulkBookingUpdateResponseType} for that reason rather than sharing
+one loosened type: N rows and one row genuinely differ in what can go wrong.
+
+```ts
+interface UpdateBookingResponseType {
+  success: boolean;
+  version: number;
+  oos_records_written: number;
+}
+```
+
 ### `UpdateCardInput`
 
 Zod schema for updating a card. Lock enforcement happens at the service
@@ -11459,14 +11499,31 @@ const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType>;
 
 ### `BulkBookingUpdateResponseType`
 
-Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row
-`results` carry the post-write booking versions in input order.
+Response from `PUT /fulfillments/{uid}/bookings`. Per-row `results` carry the
+post-write booking versions in input order.
+
+⚠️ **`success` is a boolean, not `true`** — and that is a fact about the
+server, not a loosening. Rows commit in transaction-sized chunks
+(api-cloudrun#391), so a failure after an earlier chunk has committed is a
+PARTIAL success: the earlier writes exist and cannot be rolled back. A
+`z.literal(true)` cannot describe that state, so the route restated the whole
+shape inline rather than use this one — which is the drift api-cloudrun#624
+item 3 names. `failures` + `chunks` are what make the partial case legible to
+a client (manager#272).
+
+There is deliberately **no `order_completed`**. It was edge-triggered — true
+only when THIS run flipped the order into `complete` — while its name read
+level-triggered, so a replayed request reported `false` for an order that IS
+complete. Completion is level-triggered at the call site, where the client's
+order listener already holds `status === "complete"`.
 
 ```ts
 interface BulkBookingUpdateResponseType {
-  success: true;
+  success: boolean;
   oos_records_written: number;
   results: Array<typeLiteral>;
+  failures: Array<typeLiteral>;
+  chunks: number;
 }
 ```
 
@@ -11498,6 +11555,29 @@ interface UpdateBookingInputType {
   breakdown?: indexedAccess;
   version: number;
   uuid_session: string;
+}
+```
+
+### `UpdateBookingResponse`
+
+```ts
+const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType>;
+```
+
+### `UpdateBookingResponseType`
+
+Response from `PUT /bookings/{uid}` — the single-row form.
+
+One row plans to exactly one chunk, so it cannot partially succeed and
+carries no `failures`/`chunks`. Kept a distinct shape from
+{@link BulkBookingUpdateResponseType} for that reason rather than sharing
+one loosened type: N rows and one row genuinely differ in what can go wrong.
+
+```ts
+interface UpdateBookingResponseType {
+  success: boolean;
+  version: number;
+  oos_records_written: number;
 }
 ```
 

@@ -289,24 +289,69 @@ export const BulkBookingUpdateInput: z.ZodType<BulkBookingUpdateInputType> = z.o
 });
 
 /**
- * Successful response from `PUT /fulfillments/{uid}/bookings`. Per-row
- * `results` carry the post-write booking versions in input order.
+ * Response from `PUT /fulfillments/{uid}/bookings`. Per-row `results` carry the
+ * post-write booking versions in input order.
+ *
+ * ⚠️ **`success` is a boolean, not `true`** — and that is a fact about the
+ * server, not a loosening. Rows commit in transaction-sized chunks
+ * (api-cloudrun#391), so a failure after an earlier chunk has committed is a
+ * PARTIAL success: the earlier writes exist and cannot be rolled back. A
+ * `z.literal(true)` cannot describe that state, so the route restated the whole
+ * shape inline rather than use this one — which is the drift api-cloudrun#624
+ * item 3 names. `failures` + `chunks` are what make the partial case legible to
+ * a client (manager#272).
+ *
+ * There is deliberately **no `order_completed`**. It was edge-triggered — true
+ * only when THIS run flipped the order into `complete` — while its name read
+ * level-triggered, so a replayed request reported `false` for an order that IS
+ * complete. Completion is level-triggered at the call site, where the client's
+ * order listener already holds `status === "complete"`.
  */
 export interface BulkBookingUpdateResponseType {
-  success: true;
+  /** False when at least one chunk failed after another had already committed. */
+  success: boolean;
   oos_records_written: number;
   results: Array<{ uid: string; version: number }>;
+  /** Rows no chunk committed. Empty whenever `success` is true. */
+  failures: Array<{ uid: string; error: string }>;
+  /** Transactions the rows were split across. 1 for the p50 order. */
+  chunks: number;
 }
 
 export const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType> =
   z.object({
-    success: z.literal(true),
+    success: z.boolean(),
     oos_records_written: z.int().min(0),
     results: z.array(z.object({
       uid: BookingId,
       version: z.int().min(0),
     })),
+    failures: z.array(z.object({
+      uid: BookingId,
+      error: z.string(),
+    })),
+    chunks: z.int().min(1),
   });
+
+/**
+ * Response from `PUT /bookings/{uid}` — the single-row form.
+ *
+ * One row plans to exactly one chunk, so it cannot partially succeed and
+ * carries no `failures`/`chunks`. Kept a distinct shape from
+ * {@link BulkBookingUpdateResponseType} for that reason rather than sharing
+ * one loosened type: N rows and one row genuinely differ in what can go wrong.
+ */
+export interface UpdateBookingResponseType {
+  success: boolean;
+  version: number;
+  oos_records_written: number;
+}
+
+export const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType> = z.object({
+  success: z.boolean(),
+  version: z.int().min(0),
+  oos_records_written: z.int().min(0),
+});
 
 /** Zod schema for Booking. */
 export const BookingSchema: z.ZodType<Booking> = z.strictObject({
