@@ -50,6 +50,7 @@ import type {
   PreTaxItemType,
   FromTotalItemType,
   RateType,
+  TaxRefType,
   Tax as SchemaTax,
 } from "../schemas/mod.ts";
 import { itemContract } from "../schemas/mod.ts";
@@ -625,7 +626,8 @@ export function isPreTaxPricingItem(item: PricingItem): item is PreTaxPricingIte
  * The exact {@link isPreTaxItem} / {@link isPreTaxPricingItem} pairing, applied
  * to the fee family (core#56). It exists so a writer holding an item it has not
  * built yet can reach the fee pricer without inventing `uid`, `name` and `path`
- * — which is what `api-cloudrun/src/lib/transactionFeeLine.ts` was doing.
+ * — which an api-cloudrun shim was doing until api-cloudrun#570 moved the fee
+ * pricer here and deleted it. {@link priceTransactionFeeLine} is the caller.
  *
  * ⚠️ The `quantity` check is load-bearing HERE in a way it is not at the
  * `LineItem` surface: `PricingItem.quantity` is `?: number` by design, because
@@ -1052,6 +1054,350 @@ export function calculateItemTotalCents(
 
   const { total_cents } = calculateItemPrice(item, taxes);
   return total_cents;
+}
+
+// ── The one line-price author ────────────────────────────────────
+//
+// Assembling a stored line's `price` object used to be one copy per writer —
+// six in `api-cloudrun/src/`, one in a repair script, and four more in the
+// manager — so teaching the system a new item type cost one edit per writer and
+// needed a static ratchet purely to guarantee the last one was not forgotten
+// (api-cloudrun#570, and `286a7b78` for the worked example). The branch lives
+// here now, once, for the server and the client alike.
+//
+// The price object decomposes into THREE halves, not two:
+//
+//   declared   `base_cents`, `base_percent`, `chargeable_days`, `formula`,
+//              `replacement_cents` — the caller's input, a CRMS payload, Xero
+//   computed   the five keys of {@link LinePriceMoney} — the pricer
+//   projected  `taxes_base` — the WRITER, from a source only it knows: the
+//              line's charged taxes for the two order writers, the PRODUCT's
+//              taxes for the product cascade. It does not exist until after the
+//              pricer has run, and it is not money, so it fits in neither of
+//              the other two and is passed in explicitly.
+
+/**
+ * The money half of a stored line price — the shape {@link calculateItemPrice}
+ * already returns, so a writer can swap one call for the other without
+ * reshaping anything around it.
+ *
+ * `taxes` is `PriceModifier[]` rather than `never[]` on the fee branch for that
+ * assignability — it is always empty there, and
+ * {@link priceTransactionFeeLine} is where that is decided, not where it is
+ * hoped.
+ */
+export interface LinePriceMoney {
+  subtotal_cents: number;
+  subtotal_discounted_cents: number;
+  discount: Discount | null;
+  taxes: PriceModifier[];
+  total_cents: number;
+}
+
+/**
+ * Is this item TYPE priced from the document total?
+ *
+ * The same single fact as {@link isTransactionFeePricingItem}, asked of a type
+ * alone. It exists because one writer legitimately has to decide before it has
+ * a price object to decide on: `setInvoiceItem` (the CRMS invoice ingest)
+ * resolves the line type first and then uses it to pick a tax class, a formula
+ * and a day count, all of which are inputs to the price rather than outputs of
+ * it. Asking that writer to assemble a provisional price object just to reach
+ * the item-level predicate would be inventing a value to interrogate.
+ *
+ * Reads `ITEM_CONTRACTS[type].pricing` — the same single fact every other
+ * predicate here reads — rather than testing `type === "transaction_fee"`.
+ *
+ * ⚠️ **Do not reintroduce `type === "transaction_fee"` at a call site.** That
+ * is the shape this package deleted when it collapsed three type-literal lists
+ * into `ITEM_CONTRACTS`, and re-growing one is how the next `from_total` type
+ * gets handled in five places out of six.
+ */
+export function isFromTotalItemType(type: string): boolean {
+  return itemContract(type)?.pricing === "from_total";
+}
+
+/**
+ * Price one `transaction_fee` line for storage.
+ *
+ * ## The stored amount is `base_cents × quantity`, and the basis is not read
+ *
+ * A **flat** fee (`formula: "fixed"`) is priced entirely from its own fields, so
+ * the document basis is irrelevant and is passed as `0`.
+ * {@link calculateTransactionFeeAmountCents} falls through to the ordinary
+ * per-unit subtotal for any formula that is not `percent_of_total`, honouring
+ * the discount — a flat fee is legitimate and `checkItemPriceFormula`
+ * (`@cfs/core/schemas/common.ts`) deliberately does not assert the converse.
+ *
+ * This is what keeps the CRMS window honest: during it CRMS remains the author
+ * of the fee amount and CFS computes nothing, so there is nothing for the two to
+ * drift about. The rate authority moves at cutover, not here.
+ *
+ * ## ⚠️ `subtotal_cents` is load-bearing for Xero, and this is where it differs
+ * ## from {@link costTransactionFees}
+ *
+ * {@link costTransactionFees} writes the SAME discounted amount into all three
+ * of `subtotal_cents` / `subtotal_discounted_cents` / `total_cents`. That is
+ * right for what it feeds — {@link getTransactionFeeTotals} reads only
+ * `total_cents` — but it is the wrong thing to STORE, because `xeroLineMoney`
+ * (`api-cloudrun/src/lib/xeroBodies.ts`) derives `UnitAmount` from
+ * `price.subtotal_cents` and derives `DiscountRate` from
+ * `price.discount.amount_cents` over that same base. Storing the discounted
+ * amount in `subtotal_cents` would hand Xero a pre-discounted unit price AND
+ * the discount rate to apply to it — the discount taken twice, on a live ledger
+ * with no dev tenant.
+ *
+ * So this returns the pre-discount subtotal in `subtotal_cents`, exactly as
+ * {@link calculateItemPrice} does for every other line type. The totals rollup
+ * is unaffected either way: {@link sumDocumentTotals} costs fees through
+ * {@link costTransactionFees}, which recomputes from `base_cents`/`quantity`
+ * and never reads the stored subtotal.
+ *
+ * ⚠️ **The two now sit ~150 lines apart in one file, deliberately disagreeing
+ * about what `subtotal_cents` means for a fee.** They used to be held apart by
+ * living in different repos. `tests/orders.test.ts` pins the disagreement, so
+ * "tidying" one into the other goes red rather than double-discounting a live
+ * Xero ledger.
+ *
+ * ## Taxes are `[]` structurally, not by policy
+ *
+ * `ITEM_CONTRACTS` gives `transaction_fee` `pricing: "from_total"`, and every
+ * tax path here gates on {@link isPreTaxItem} / {@link isPreTaxPricingItem} —
+ * so a fee is untaxable by construction rather than by a data carve-out on COA
+ * 4700. That structural exemption is the payoff the whole migration bought, and
+ * returning anything but `[]` here would hand it back.
+ *
+ * ## No money arithmetic happens here
+ *
+ * Every cent comes out of {@link calculateTransactionFeeAmountCents}. The
+ * single expression below is an integer subtraction of two exact cent counts,
+ * which is closed under the storage quantum (`cfs-money`: add/subtract/
+ * multiply-by-integer are exact; 0 wrong in 200,000 measured). Nothing here
+ * rounds, so nothing here can round differently from the pre-tax path.
+ *
+ * @param item the line being priced — input shape or stored shape, either works.
+ * @throws Error on a non-fee item, or on a `percent_of_total` price. The second
+ *   is deliberate: such a line's amount is only knowable in the totals pass
+ *   ({@link costTransactionFees}), so pricing one here would store a **zero**,
+ *   and a zero fee is dropped from the rollup entirely
+ *   ({@link getTransactionFeeTotals} skips `amount_cents === 0`) and pushes
+ *   `UnitAmount: 0` to Xero. Failing loudly is the only safe answer; teaching
+ *   this path to store a percent fee is the CRMS-cutover issue's work
+ *   (api-cloudrun#571), not a gap. CRMS cannot author one, so it is unreachable
+ *   from the webhook paths.
+ */
+export function priceTransactionFeeLine(item: PricingItem): LinePriceMoney {
+  if (!isTransactionFeePricingItem(item)) {
+    throw new Error(
+      "Item is not a transaction fee: wrong type, or missing price/quantity",
+    );
+  }
+  if (item.price.formula === "percent_of_total") {
+    throw new Error(
+      "A percent_of_total fee is priced from the document total in the totals " +
+        "pass (costTransactionFees), not at line-build time — storing one here " +
+        "would write a zero amount",
+    );
+  }
+
+  const subtotal_discounted_cents = calculateTransactionFeeAmountCents(item, 0);
+
+  // The undiscounted subtotal, from the SAME function over a discount-free
+  // copy — so both numbers come out of one implementation and cannot round
+  // differently. Reimplementing `base × quantity` here would be a second money
+  // author for the same line, which is the thing this function exists to
+  // prevent.
+  const subtotal_cents = item.price.discount
+    ? calculateTransactionFeeAmountCents(
+      { ...item, price: { ...item.price, discount: null } },
+      0,
+    )
+    : subtotal_discounted_cents;
+
+  return {
+    subtotal_cents,
+    subtotal_discounted_cents,
+    // Integer subtraction of two exact cent counts — closed, nothing rounds.
+    // Signed: `calculateItemSubtotal` deliberately admits a `flat` discount
+    // larger than the line, so this can legitimately be negative.
+    discount: item.price.discount
+      ? {
+        rate: item.price.discount.rate,
+        type: item.price.discount.type,
+        amount_cents: subtotal_cents - subtotal_discounted_cents,
+      }
+      : null,
+    taxes: [],
+    // No tax term: a fee is never taxed, so the total IS the discounted amount.
+    total_cents: subtotal_discounted_cents,
+  };
+}
+
+/**
+ * THE branch decision — the one place a new item type is taught how its money
+ * is computed.
+ *
+ * Three arms, and the residual one **throws**. It used to be
+ * `isPreTaxPricingItem(…) ? price : {…all zeros}` at one writer, read as a safe
+ * fallback for structural items. It is not one: a divider has already been
+ * filtered out by every caller, so by here the item is a LINE, and a line with
+ * no price is a defect rather than a shape. Adding a fee arm beside the zeros
+ * would have fixed the fee and left the next item type to zero itself the same
+ * way, so the branch is closed instead: priced, or refused by name.
+ *
+ * ⚠️ The three arms are NOT a partition of two — an item can be neither pre-tax
+ * nor from-total. A `destination`/`group` divider has `pricing: "none"`, and an
+ * item off a Firestore document can carry a type with no contract at all.
+ *
+ * @param label an identifier for the refusal message — a line uid, typically.
+ *   Message quality only; nothing branches on it.
+ * @throws Error when the item's type has no pricing rule, and (through
+ *   {@link priceTransactionFeeLine}) on a `percent_of_total` fee. Callers that
+ *   need an HTTP status convert at their own boundary — this package throws
+ *   plain `Error` by convention throughout.
+ */
+export function computeLineMoney(
+  item: PricingItem,
+  taxes: Tax[],
+  label?: string,
+): LinePriceMoney {
+  if (isPreTaxPricingItem(item)) return calculateItemPrice(item, taxes);
+  if (isTransactionFeePricingItem(item)) return priceTransactionFeeLine(item);
+  throw new Error(
+    `Line ${label ?? "(unidentified)"} has type "${item.type}", which has no ` +
+      `pricing rule — it is neither a pre-tax line nor a transaction fee`,
+  );
+}
+
+/**
+ * Assemble a stored line `price` object from its declared half and its money
+ * half.
+ *
+ * Generic in the caller's own price shape, so an order caller keeps
+ * `replacement_cents` and an invoice caller can never gain one — **the spread
+ * carries the shape, and this function never names it.** That is what lets one
+ * implementation serve both documents; a builder that knew which document it
+ * was building for would have to be right about it at every call site.
+ *
+ * ## The fee normalization, applied once
+ *
+ * On a `from_total` line four things are forced, and each is forced **only
+ * where the key is already present** on `declared` — so an invoice line never
+ * gains a `replacement_cents` it does not declare:
+ *
+ * - `replacement_cents: null` — `ITEM_CONTRACTS.transaction_fee.replacement` is
+ *   `forbidden` and `checkItemContract` reads `!= null`, so a `0` fails as
+ *   surely as a real amount. A stored `sale` line legitimately carries `0`, and
+ *   the product cascade RE-TYPES such a line in place.
+ * - `taxes: []` — the structural exemption above.
+ * - `chargeable_days: null` — ⚠️ **this one is NOT derivable from
+ *   `ITEM_CONTRACTS`**, unlike the other three. There is no such axis on
+ *   `ItemContract`. It is asserted here as a new fact, on arithmetic
+ *   inertness: a fee's `formula` is `fixed`, where `getDaysFactor` returns 1
+ *   regardless, so a stored day count would be a number that explains nothing.
+ * - `taxes_base: []` — only when the caller authors the key at all; see below.
+ *
+ * ## `taxesBase` is the PROJECTED half
+ *
+ * Supplied by the writer because only the writer knows the source: the line's
+ * own charged taxes for the CRMS-order and native-order writers, and the
+ * **product's** taxes for the product-write cascade, which is a product-default
+ * snapshot rather than what the line charges. Deriving it here would silently
+ * replace that snapshot.
+ *
+ * **Omitting `taxesBase` means "this writer does not author the key"**, and the
+ * result then carries none — which is what keeps the CRMS invoice writer's
+ * 8-key literal at 8 keys. Widening a writer's key set is not free: the items
+ * array is `isEqual`-diffed on every CRMS event, so a new key on ~9k stored
+ * lines reads as a replacement on each, bumps `version`, and re-pushes every
+ * CRMS invoice to Xero against a ~1,000/day cap.
+ *
+ * ⚠️ **Never introduce a key holding `undefined`.** Firestore rejects it
+ * outright and lodash `isEqual` counts it as a difference from an absent key.
+ * The spread form below is the one `projectOrderItemToInvoiceItem` uses.
+ *
+ * ## It asserts the money it is handed
+ *
+ * Two writers supply their own {@link LinePriceMoney} rather than computing one
+ * — the CRMS invoice ingest (money from CRMS) and the Xero restate script
+ * (money from Xero) — and between them they account for the whole stored
+ * invoice corpus. The identities {@link calculateItemPrice} guarantees by
+ * construction are therefore *unguaranteed* on exactly the path where the money
+ * did not come from this package, so they are checked here rather than assumed.
+ * A location ratchet needs a value assertion beside it.
+ *
+ * ## No arithmetic
+ *
+ * This function computes nothing. It spreads already-computed integer cents and
+ * carries the 4dp rate families (`base_percent`, `discount.rate`,
+ * `taxes[].rate`) through untouched — a rate is not an amount, and a spread
+ * cannot commit the `beta.117` class of defect.
+ *
+ * @throws Error when the supplied money fails one of its internal identities.
+ */
+export function assembleLinePrice<P extends object>(
+  declared: P,
+  money: LinePriceMoney,
+  item: PricingItem,
+  opts?: { taxesBase?: TaxRefType[] },
+): P & LinePriceMoney & { taxes_base?: TaxRefType[] } {
+  const isFee = isFromTotalItemType(item.type);
+
+  // Built through a string-keyed record rather than a spread literal so the
+  // presence checks below can be written against a generic `P` at all. The
+  // one cast is on the way OUT, where the intersection is the whole claim.
+  const out: Record<string, unknown> = {};
+  Object.assign(out, declared, money);
+
+  if (isFee) {
+    out.taxes = [];
+    if ("chargeable_days" in out) out.chargeable_days = null;
+    if ("replacement_cents" in out) out.replacement_cents = null;
+  }
+  if (opts?.taxesBase !== undefined) {
+    out.taxes_base = isFee ? [] : opts.taxesBase;
+  }
+
+  assertLineMoneyIdentities(out as unknown as LinePriceMoney, item.type);
+
+  return out as P & LinePriceMoney & { taxes_base?: TaxRefType[] };
+}
+
+/**
+ * The two identities {@link calculateItemPrice} produces by construction, and
+ * which a caller-supplied {@link LinePriceMoney} can violate:
+ *
+ * ```
+ * discount.amount_cents === subtotal_cents − subtotal_discounted_cents
+ * total_cents           === subtotal_discounted_cents + Σ taxes[].amount_cents
+ * ```
+ *
+ * Whole cents on both sides — a money comparison is never a float epsilon.
+ * `discount: null` asserts nothing: a line with no discount says nothing about
+ * the two subtotals, and the CRMS ingest legitimately derives a subtotal that
+ * differs from its charge total for reasons other than a discount.
+ */
+function assertLineMoneyIdentities(money: LinePriceMoney, type: string): void {
+  if (money.discount) {
+    const expected = money.subtotal_cents - money.subtotal_discounted_cents;
+    if (money.discount.amount_cents !== expected) {
+      throw new Error(
+        `Line price is internally inconsistent (type "${type}"): ` +
+          `discount.amount_cents is ${money.discount.amount_cents} but ` +
+          `subtotal_cents − subtotal_discounted_cents is ${expected}`,
+      );
+    }
+  }
+  let taxSumCents = 0;
+  for (const t of money.taxes) taxSumCents += t.amount_cents;
+  const expectedTotal = money.subtotal_discounted_cents + taxSumCents;
+  if (money.total_cents !== expectedTotal) {
+    throw new Error(
+      `Line price is internally inconsistent (type "${type}"): total_cents is ` +
+        `${money.total_cents} but subtotal_discounted_cents + Σ taxes is ` +
+        `${expectedTotal}`,
+    );
+  }
 }
 
 // ── Aggregation functions ────────────────────────────────────────

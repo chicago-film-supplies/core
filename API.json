@@ -11370,6 +11370,12 @@
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
+          "kind": "interface",
+          "name": "LinePriceMoney",
+          "declaration": "interface LinePriceMoney {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: Discount | null;\n  taxes: PriceModifier[];\n  total_cents: number;\n}",
+          "doc": "The money half of a stored line price — the shape {@link calculateItemPrice}\nalready returns, so a writer can swap one call for the other without\nreshaping anything around it.\n\n`taxes` is `PriceModifier[]` rather than `never[]` on the fee branch for that\nassignability — it is always empty there, and\n{@link priceTransactionFeeLine} is where that is decided, not where it is\nhoped."
+        },
+        {
           "kind": "variable",
           "name": "ORDER_ITEM_LEVELS",
           "declaration": "const ORDER_ITEM_LEVELS: \"destination\" | \"group\"[];",
@@ -11470,6 +11476,14 @@
           "name": "TransactionFeePricingItem",
           "declaration": "type TransactionFeePricingItem = PricingItem & typeLiteral;",
           "doc": "A {@link PricingItem} that has passed {@link isTransactionFeePricingItem}."
+        },
+        {
+          "kind": "function",
+          "name": "assembleLinePrice",
+          "signature": "assembleLinePrice(declared: P, money: LinePriceMoney, item: PricingItem, opts?: typeLiteral): P & LinePriceMoney & typeLiteral",
+          "doc": "Assemble a stored line `price` object from its declared half and its money\nhalf.\n\nGeneric in the caller's own price shape, so an order caller keeps\n`replacement_cents` and an invoice caller can never gain one — **the spread\ncarries the shape, and this function never names it.** That is what lets one\nimplementation serve both documents; a builder that knew which document it\nwas building for would have to be right about it at every call site.\n\n## The fee normalization, applied once\n\nOn a `from_total` line four things are forced, and each is forced **only\nwhere the key is already present** on `declared` — so an invoice line never\ngains a `replacement_cents` it does not declare:\n\n- `replacement_cents: null` — `ITEM_CONTRACTS.transaction_fee.replacement` is\n  `forbidden` and `checkItemContract` reads `!= null`, so a `0` fails as\n  surely as a real amount. A stored `sale` line legitimately carries `0`, and\n  the product cascade RE-TYPES such a line in place.\n- `taxes: []` — the structural exemption above.\n- `chargeable_days: null` — ⚠️ **this one is NOT derivable from\n  `ITEM_CONTRACTS`**, unlike the other three. There is no such axis on\n  `ItemContract`. It is asserted here as a new fact, on arithmetic\n  inertness: a fee's `formula` is `fixed`, where `getDaysFactor` returns 1\n  regardless, so a stored day count would be a number that explains nothing.\n- `taxes_base: []` — only when the caller authors the key at all; see below.\n\n## `taxesBase` is the PROJECTED half\n\nSupplied by the writer because only the writer knows the source: the line's\nown charged taxes for the CRMS-order and native-order writers, and the\n**product's** taxes for the product-write cascade, which is a product-default\nsnapshot rather than what the line charges. Deriving it here would silently\nreplace that snapshot.\n\n**Omitting `taxesBase` means \"this writer does not author the key\"**, and the\nresult then carries none — which is what keeps the CRMS invoice writer's\n8-key literal at 8 keys. Widening a writer's key set is not free: the items\narray is `isEqual`-diffed on every CRMS event, so a new key on ~9k stored\nlines reads as a replacement on each, bumps `version`, and re-pushes every\nCRMS invoice to Xero against a ~1,000/day cap.\n\n⚠️ **Never introduce a key holding `undefined`.** Firestore rejects it\noutright and lodash `isEqual` counts it as a difference from an absent key.\nThe spread form below is the one `projectOrderItemToInvoiceItem` uses.\n\n## It asserts the money it is handed\n\nTwo writers supply their own {@link LinePriceMoney} rather than computing one\n— the CRMS invoice ingest (money from CRMS) and the Xero restate script\n(money from Xero) — and between them they account for the whole stored\ninvoice corpus. The identities {@link calculateItemPrice} guarantees by\nconstruction are therefore *unguaranteed* on exactly the path where the money\ndid not come from this package, so they are checked here rather than assumed.\nA location ratchet needs a value assertion beside it.\n\n## No arithmetic\n\nThis function computes nothing. It spreads already-computed integer cents and\ncarries the 4dp rate families (`base_percent`, `discount.rate`,\n`taxes[].rate`) through untouched — a rate is not an amount, and a spread\ncannot commit the `beta.117` class of defect.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -11594,6 +11608,19 @@
           "signature": "computeItemTaxAmountCents(tax: Pick<Tax, \"rate\" | \"type\">, subtotalDiscountedCents: number, quantity: number): number",
           "doc": "Pure per-item tax amount for one tax against a given subtotal.\n`percent` → `subtotalDiscounted × rate/100`; `flat` → `rate × quantity`.\n\n`subtotalDiscounted` is a **parameter** (not recomputed) so both the order\npath (which passes its `calculateItemSubtotal` result) and the CRMS invoice\nwebhook (which passes its `charge_total`-authoritative stored subtotal) share\none formula. Lives here (base module) and is re-exported from\n`@cfs/core/utils/taxes` to avoid a `taxes ↔ orders` import cycle.\n\nExact: both factors are applied as `× n ÷ d` over integer cents and rounded\nhalf-up exactly once (core#47). The form this replaced was\n`currency(subtotalDiscounted).multiply(tax.rate / 100)` — a pre-divided float\nratio, and **the one percent-of-money path that never migrated to integer\ncents**: inside a single `calculateItemPrice` call the discount on a line was\nalready exact BigInt while the tax on that same line was not. It was measured\nbenign across CFS's six live rates, which is precisely why it survived; the\nsweep in `tests/orders.test.ts` is what makes a future rate or magnitude\nunable to change that silently.\n\nA negative `subtotalDiscounted` is legal — `calculateItemSubtotal` lets a flat\ndiscount exceed its line rather than clamping — so the rounding is half *away\nfrom zero* and the tax carries the subtotal's sign, exactly as the currency.js\nform did.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "computeLineMoney",
+          "signature": "computeLineMoney(item: PricingItem, taxes: Tax[], label?: string): LinePriceMoney",
+          "doc": "THE branch decision — the one place a new item type is taught how its money\nis computed.\n\nThree arms, and the residual one **throws**. It used to be\n`isPreTaxPricingItem(…) ? price : {…all zeros}` at one writer, read as a safe\nfallback for structural items. It is not one: a divider has already been\nfiltered out by every caller, so by here the item is a LINE, and a line with\nno price is a defect rather than a shape. Adding a fee arm beside the zeros\nwould have fixed the fee and left the next item type to zero itself the same\nway, so the branch is closed instead: priced, or refused by name.\n\n⚠️ The three arms are NOT a partition of two — an item can be neither pre-tax\nnor from-total. A `destination`/`group` divider has `pricing: \"none\"`, and an\nitem off a Firestore document can carry a type with no contract at all.",
+          "paramTags": [
+            {
+              "name": "label",
+              "doc": "an identifier for the refusal message — a line uid, typically.\nMessage quality only; nothing branches on it."
+            }
+          ],
           "returnsTag": null
         },
         {
@@ -11751,6 +11778,14 @@
         },
         {
           "kind": "function",
+          "name": "isFromTotalItemType",
+          "signature": "isFromTotalItemType(type: string): boolean",
+          "doc": "Is this item TYPE priced from the document total?\n\nThe same single fact as {@link isTransactionFeePricingItem}, asked of a type\nalone. It exists because one writer legitimately has to decide before it has\na price object to decide on: `setInvoiceItem` (the CRMS invoice ingest)\nresolves the line type first and then uses it to pick a tax class, a formula\nand a day count, all of which are inputs to the price rather than outputs of\nit. Asking that writer to assemble a provisional price object just to reach\nthe item-level predicate would be inventing a value to interrogate.\n\nReads `ITEM_CONTRACTS[type].pricing` — the same single fact every other\npredicate here reads — rather than testing `type === \"transaction_fee\"`.\n\n⚠️ **Do not reintroduce `type === \"transaction_fee\"` at a call site.** That\nis the shape this package deleted when it collapsed three type-literal lists\ninto `ITEM_CONTRACTS`, and re-growing one is how the next `from_total` type\ngets handled in five places out of six.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isPreTaxItem",
           "signature": "isPreTaxItem(item: LineItem): item is PreTaxLineItem",
           "doc": "Determine whether a line item participates in subtotal/discount/tax calculations.\nStandalone predicate (not composed) because TS doesn't support negated predicates.",
@@ -11809,7 +11844,7 @@
           "kind": "function",
           "name": "isTransactionFeePricingItem",
           "signature": "isTransactionFeePricingItem(item: PricingItem): item is TransactionFeePricingItem",
-          "doc": "{@link isTransactionFeeItem} at the {@link PricingItem} surface — the same\nchecks, narrowing to a shape the pricing pipeline can read rather than to a\nstored line item.\n\nThe exact {@link isPreTaxItem} / {@link isPreTaxPricingItem} pairing, applied\nto the fee family (core#56). It exists so a writer holding an item it has not\nbuilt yet can reach the fee pricer without inventing `uid`, `name` and `path`\n— which is what `api-cloudrun/src/lib/transactionFeeLine.ts` was doing.\n\n⚠️ The `quantity` check is load-bearing HERE in a way it is not at the\n`LineItem` surface: `PricingItem.quantity` is `?: number` by design, because\nthe whole point of the shape is to describe an item mid-construction. A\ncaller reaching this predicate with the quantity not yet resolved is the\nexpected case, not a malformed document.",
+          "doc": "{@link isTransactionFeeItem} at the {@link PricingItem} surface — the same\nchecks, narrowing to a shape the pricing pipeline can read rather than to a\nstored line item.\n\nThe exact {@link isPreTaxItem} / {@link isPreTaxPricingItem} pairing, applied\nto the fee family (core#56). It exists so a writer holding an item it has not\nbuilt yet can reach the fee pricer without inventing `uid`, `name` and `path`\n— which an api-cloudrun shim was doing until api-cloudrun#570 moved the fee\npricer here and deleted it. {@link priceTransactionFeeLine} is the caller.\n\n⚠️ The `quantity` check is load-bearing HERE in a way it is not at the\n`LineItem` surface: `PricingItem.quantity` is `?: number` by design, because\nthe whole point of the shape is to describe an item mid-construction. A\ncaller reaching this predicate with the quantity not yet resolved is the\nexpected case, not a malformed document.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11835,6 +11870,19 @@
           "signature": "orderHasTax(items: LineItem[]): boolean",
           "doc": "Check whether any pre-tax line item has taxes applied.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "priceTransactionFeeLine",
+          "signature": "priceTransactionFeeLine(item: PricingItem): LinePriceMoney",
+          "doc": "Price one `transaction_fee` line for storage.\n\n## The stored amount is `base_cents × quantity`, and the basis is not read\n\nA **flat** fee (`formula: \"fixed\"`) is priced entirely from its own fields, so\nthe document basis is irrelevant and is passed as `0`.\n{@link calculateTransactionFeeAmountCents} falls through to the ordinary\nper-unit subtotal for any formula that is not `percent_of_total`, honouring\nthe discount — a flat fee is legitimate and `checkItemPriceFormula`\n(`@cfs/core/schemas/common.ts`) deliberately does not assert the converse.\n\nThis is what keeps the CRMS window honest: during it CRMS remains the author\nof the fee amount and CFS computes nothing, so there is nothing for the two to\ndrift about. The rate authority moves at cutover, not here.\n\n## ⚠️ `subtotal_cents` is load-bearing for Xero, and this is where it differs\n## from {@link costTransactionFees}\n\n{@link costTransactionFees} writes the SAME discounted amount into all three\nof `subtotal_cents` / `subtotal_discounted_cents` / `total_cents`. That is\nright for what it feeds — {@link getTransactionFeeTotals} reads only\n`total_cents` — but it is the wrong thing to STORE, because `xeroLineMoney`\n(`api-cloudrun/src/lib/xeroBodies.ts`) derives `UnitAmount` from\n`price.subtotal_cents` and derives `DiscountRate` from\n`price.discount.amount_cents` over that same base. Storing the discounted\namount in `subtotal_cents` would hand Xero a pre-discounted unit price AND\nthe discount rate to apply to it — the discount taken twice, on a live ledger\nwith no dev tenant.\n\nSo this returns the pre-discount subtotal in `subtotal_cents`, exactly as\n{@link calculateItemPrice} does for every other line type. The totals rollup\nis unaffected either way: {@link sumDocumentTotals} costs fees through\n{@link costTransactionFees}, which recomputes from `base_cents`/`quantity`\nand never reads the stored subtotal.\n\n⚠️ **The two now sit ~150 lines apart in one file, deliberately disagreeing\nabout what `subtotal_cents` means for a fee.** They used to be held apart by\nliving in different repos. `tests/orders.test.ts` pins the disagreement, so\n\"tidying\" one into the other goes red rather than double-discounting a live\nXero ledger.\n\n## Taxes are `[]` structurally, not by policy\n\n`ITEM_CONTRACTS` gives `transaction_fee` `pricing: \"from_total\"`, and every\ntax path here gates on {@link isPreTaxItem} / {@link isPreTaxPricingItem} —\nso a fee is untaxable by construction rather than by a data carve-out on COA\n4700. That structural exemption is the payoff the whole migration bought, and\nreturning anything but `[]` here would hand it back.\n\n## No money arithmetic happens here\n\nEvery cent comes out of {@link calculateTransactionFeeAmountCents}. The\nsingle expression below is an integer subtraction of two exact cent counts,\nwhich is closed under the storage quantum (`cfs-money`: add/subtract/\nmultiply-by-integer are exact; 0 wrong in 200,000 measured). Nothing here\nrounds, so nothing here can round differently from the pre-tax path.",
+          "paramTags": [
+            {
+              "name": "item",
+              "doc": "the line being priced — input shape or stored shape, either works."
+            }
+          ],
           "returnsTag": null
         },
         {

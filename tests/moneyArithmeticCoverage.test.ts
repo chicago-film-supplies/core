@@ -259,6 +259,97 @@ Deno.test("moneyArithmeticCoverage — float money epsilons are catalogued, and 
   );
 });
 
+// ── Ratchet E: the pre-tax pricers have ONE branch point ─────────────
+//
+// core's H-equivalent, and it is new: the fee/pre-tax/refused branch lived in
+// `api-cloudrun` until api-cloudrun#570 moved it here, and api's Ratchet H is
+// what guarded it there. Moving the branch without moving a guard would have
+// removed one silently, so this arm arrives in the same wave.
+//
+// The claim: **`computeLineMoney` is the only place in `src/` that decides
+// whether a line is priced pre-tax**, and every other call to
+// `calculateItemPrice` / `calculateItemSubtotal` / `calculateItemTax` is either
+// one of those functions composing the others, or a TOTALS pass that has
+// already narrowed through `isPreTaxItem` on its own loop.
+//
+// Per-file EXACT counts, not a file allowlist: a blessed file is otherwise a
+// licence for the next call to appear in it unreviewed. That is the shape api's
+// Ratchet H settled on after exactly that happened.
+
+const PRETAX_PRICER_RE = /\b(?:calculateItemPrice|calculateItemSubtotal|calculateItemTax)\s*\(/;
+/** A declaration is not a call. */
+const PRICER_DECL_RE = /^\s*export\s+function\s+(?:calculateItemPrice|calculateItemSubtotal|calculateItemTax)\s*\(/;
+
+/**
+ * Every call site, with what narrows it and an exact count.
+ *
+ * ⚠️ A count here is a claim that has to be re-derived when the file changes,
+ * which is the point: bumping one is a deliberate edit, and a new call in a
+ * listed file reddens rather than hiding behind a blessed filename.
+ */
+const PRETAX_PRICER_SITES = new Map<string, { count: number; why: string }>([
+  [
+    "src/utils/orders.ts",
+    {
+      // 1 — `computeLineMoney`, THE branch point (the whole reason for this arm).
+      // 5 — internal composition: `calculateItemDiscountCents`,
+      //     `calculateItemTax`, `calculateItemPrice` (×2 — subtotal and tax),
+      //     `calculateItemTotalCents`, all of which narrow through
+      //     `isPreTaxPricingItem` inside the callee before any arithmetic.
+      // 2 — the totals pass: `getTaxTotals` and `sumDocumentTotals`, each of
+      //     which `continue`s on `!isPreTaxItem(item)` on the line above.
+      count: 8,
+      why: "the branch point itself, plus the pricers composing each other and " +
+        "the two totals loops that narrow with isPreTaxItem on their own line",
+    },
+  ],
+  [
+    "src/utils/taxes.ts",
+    {
+      // `materializeDocumentTax`'s spread-based rewrite — `continue`s on
+      // `!isPreTaxItem(item)` immediately above. It legitimately does NOT go
+      // through `computeLineMoney`: it re-prices lines it has just re-taxed,
+      // and a fee is not one of them by construction.
+      count: 1,
+      why: "materializeDocumentTax, guarded by isPreTaxItem on the line above",
+    },
+  ],
+]);
+
+Deno.test("moneyArithmeticCoverage — computeLineMoney is the only pre-tax branch point", async () => {
+  const hits = (await grep(PRETAX_PRICER_RE))
+    // The generated template-helper catalogue holds these names as STRINGS in a
+    // UI manifest, not as calls. It is regenerated from `deno doc`, so a hit
+    // there is an export existing, which is not what this arm asks about.
+    .filter((h) => h.file !== "src/schemas/template-helpers.generated.ts")
+    .filter((h) => !PRICER_DECL_RE.test(h.text) && !/^export function/.test(h.text));
+
+  const counts = new Map<string, number>();
+  for (const h of hits) counts.set(h.file, (counts.get(h.file) ?? 0) + 1);
+
+  const unlisted = [...counts.keys()].filter((f) => !PRETAX_PRICER_SITES.has(f)).sort();
+  assertEquals(
+    unlisted,
+    [],
+    "A pre-tax pricer is called in a file this arm has never seen. Route it through " +
+      "`computeLineMoney` — which is the one place the fee/pre-tax/refused branch is " +
+      "decided — or catalogue it here with what narrows it and an exact count:\n" +
+      unlisted.map((f) => `  + ${f}`).join("\n"),
+  );
+
+  const drifted: string[] = [];
+  for (const [file, { count, why }] of PRETAX_PRICER_SITES) {
+    const actual = counts.get(file) ?? 0;
+    if (actual !== count) drifted.push(`  ${file}: catalogued ${count} (${why}), found ${actual}`);
+  }
+  assertEquals(
+    drifted.join("\n"),
+    "",
+    "A catalogued pre-tax-pricer count moved. Re-derive it deliberately — a bare bump " +
+      "is how the next unguarded call hides on an already-blessed path:\n" + drifted.join("\n"),
+  );
+});
+
 // ── Non-vacuity ──────────────────────────────────────────────────────
 
 Deno.test("moneyArithmeticCoverage — the scans bite (non-vacuity)", async () => {
@@ -308,4 +399,40 @@ Deno.test("moneyArithmeticCoverage — the scans bite (non-vacuity)", async () =
   assertEquals(LOCAL_REDEF_RE.test('import { toCents } from "./money.ts";'), false, "LOCAL_REDEF_RE flags an import");
   assertEquals(FLOAT_EPSILON_RE.test("Math.abs(x) <= 0.005"), true, "FLOAT_EPSILON_RE stopped matching");
   assertEquals(FLOAT_EPSILON_RE.test("const x = 10.01;"), false, "FLOAT_EPSILON_RE matches a decimal tail");
+
+  // Ratchet E's floor. A static walker's extraction fails in BOTH directions —
+  // under-extraction invents an empty set that passes, over-extraction blesses
+  // a real site — so both the token and the declaration filter are asserted
+  // against planted strings, and the census is asserted non-empty.
+  assertEquals(
+    PRETAX_PRICER_RE.test("const p = calculateItemPrice(item, taxes);"),
+    true,
+    "PRETAX_PRICER_RE stopped matching a call",
+  );
+  assertEquals(
+    PRETAX_PRICER_RE.test("// calculateItemPriceish is not one of them"),
+    false,
+    "PRETAX_PRICER_RE matches a longer identifier — the \\b boundary is gone",
+  );
+  assertEquals(
+    PRICER_DECL_RE.test("export function calculateItemSubtotal("),
+    true,
+    "PRICER_DECL_RE stopped matching a declaration — every declaration would count as a call",
+  );
+  assertEquals(
+    PRICER_DECL_RE.test("  const { total_cents } = calculateItemPrice(item, taxes);"),
+    false,
+    "PRICER_DECL_RE swallows a real call",
+  );
+  const pricerHits = (await grep(PRETAX_PRICER_RE))
+    .filter((h) => h.file !== "src/schemas/template-helpers.generated.ts")
+    .filter((h) => !PRICER_DECL_RE.test(h.text) && !/^export function/.test(h.text));
+  assertEquals(
+    pricerHits.length >= 8,
+    true,
+    `Ratchet E found ${pricerHits.length} pre-tax-pricer calls and there must be at least 8 ` +
+      `(computeLineMoney, the pricers composing each other, and the two totals loops). ` +
+      `A collapse to zero means the walker or the regex broke, not that core stopped ` +
+      `pricing lines.`,
+  );
 });

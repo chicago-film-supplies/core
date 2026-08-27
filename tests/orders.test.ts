@@ -19,6 +19,7 @@ import {
   OrderDocLineItem,
 } from "../src/schemas/mod.ts";
 import {
+  assembleLinePrice,
   calculateItemDiscountCents,
   calculateItemPrice,
   calculateItemSubtotal,
@@ -30,6 +31,8 @@ import {
   calculateTransactionFeeAmountCents,
   calculateOrderTotals,
   calculateReplacementTotals,
+  computeLineMoney,
+  costTransactionFees,
   buildPackingList,
   buildQueryByDates,
   deriveOrderDateEnvelope,
@@ -52,6 +55,7 @@ import {
   groupByDestination,
   assignDestinationPairUids,
   buildDestinationPairWithDivider,
+  isFromTotalItemType,
   isPriceableItem,
   isPreTaxItem,
   isPreTaxPricingItem,
@@ -64,6 +68,8 @@ import {
   getDefaultChargeDays,
   syncChargeDaysToItems,
   type LineItem,
+  type LinePriceMoney,
+  priceTransactionFeeLine,
   type PricingItem,
   type PriceObject,
   type Tax,
@@ -193,7 +199,8 @@ Deno.test("isTransactionFeeItem returns false when quantity is not a number", ()
 Deno.test("isTransactionFeePricingItem accepts an item with no uid, name or path", () => {
   // The whole point of the widening: a writer holding an item it has not built
   // yet reaches the fee pricer without inventing identity fields. This is the
-  // shape `api-cloudrun/src/lib/transactionFeeLine.ts` was shimming.
+  // shape an api-cloudrun shim was faking until api-cloudrun#570 moved the fee
+  // pricer here; `priceTransactionFeeLine` narrows through this predicate now.
   const midConstruction = {
     type: "transaction_fee",
     quantity: 1,
@@ -3533,4 +3540,459 @@ Deno.test("buildDestinationPairWithDivider: an unstated jurisdiction is ABSENT, 
     jurisdiction: "rantoul",
   }).pair;
   assertEquals(stated.jurisdiction, "rantoul");
+});
+
+// ── The one line-price author (api-cloudrun#570) ──────────────────
+//
+// These cases were absorbed from api-cloudrun's fee-pricer test when the
+// calculator moved here — ABSORBED, not deleted: that file called itself the
+// VALUE half of api's Ratchet H, which is a LOCATION ratchet and cannot prove
+// the fee branch computes the right money. The force has to survive the move,
+// so it lands here.
+//
+// ⚠️ **One of its seven cases deliberately did NOT move**: "a discount is
+// honoured, and `subtotal_cents` stays PRE-discount" asserts through
+// `api-cloudrun/src/lib/xeroBodies.ts`'s `xeroLineMoney`, which this package
+// cannot import. It lives on in `api-cloudrun/tests/unit/linePrice.test.ts`,
+// and it is the Xero-boundary one — so the "deleting either half leaves a green
+// ratchet over an untested behaviour" warning now spans two files in two repos.
+
+/** A flat fee line's pricing inputs — the shape every writer holds. */
+const flatFee = (
+  base_cents: number,
+  quantity: number,
+  discount: { rate: number; type: "percent" | "flat" } | null = null,
+): PricingItem => ({
+  type: "transaction_fee",
+  quantity,
+  price: { base_cents, formula: "fixed", chargeable_days: null, discount, taxes: [] },
+});
+
+Deno.test("priceTransactionFeeLine — a flat fee is base_cents x quantity, exactly", () => {
+  assertEquals(priceTransactionFeeLine(flatFee(1234, 1)), {
+    subtotal_cents: 1234,
+    subtotal_discounted_cents: 1234,
+    discount: null,
+    taxes: [],
+    total_cents: 1234,
+  });
+
+  // Multiply-by-an-integer is closed under the cent quantum — nothing rounds.
+  assertEquals(priceTransactionFeeLine(flatFee(499, 3)).total_cents, 1497);
+
+  // The live prod shape: order #915's Card Fee, 4.00% of a tax-inclusive total,
+  // stored as a flat amount CRMS authored.
+  assertEquals(priceTransactionFeeLine(flatFee(21_733, 1)).total_cents, 21_733);
+});
+
+Deno.test("priceTransactionFeeLine — taxes are [] even when the input carries refs", () => {
+  // The structural claim, asserted against an input that tries the opposite: a
+  // fee is untaxable through `ITEM_CONTRACTS`, not untaxed by configuration.
+  // Card Fee sits on COA 4700, an ACTIVE REVENUE account — so nothing about the
+  // retired COA gate would have exempted it, and this is the only thing that does.
+  const withTaxRefs: PricingItem = {
+    ...flatFee(1000, 1),
+    price: { ...flatFee(1000, 1).price, taxes: [{ uid: "some-chicago-sales-tax" }] },
+  };
+  assertEquals(priceTransactionFeeLine(withTaxRefs).taxes, []);
+  assertEquals(priceTransactionFeeLine(withTaxRefs).total_cents, 1000);
+});
+
+Deno.test("priceTransactionFeeLine — a NEGATIVE discount is carried, not clamped", () => {
+  // `calculateItemSubtotal` deliberately admits a `flat` discount larger than
+  // the line — `roundDivHalfAwayFromZero` exists so `f(-x) === -f(x)` holds —
+  // and the subtraction below is the one arithmetic expression in this function.
+  // It has to be exercised on the signed arm.
+  //
+  // The corpus premise this used to lean on ("every sampled Card Fee line
+  // carries `discount: null`") is a present-tense claim about prod, which is the
+  // exact class of exemption that expired silently on 2026-08-18.
+  //
+  // `flat` rate is DOLLARS PER UNIT: $15.00 off a $10.00 single-unit line.
+  const money = priceTransactionFeeLine(flatFee(1_000, 1, { rate: 15, type: "flat" }));
+  assertEquals(money.subtotal_cents, 1_000);
+  assertEquals(money.subtotal_discounted_cents, -500);
+  assertEquals(money.discount?.amount_cents, 1_500);
+  assertEquals(money.total_cents, -500, "no tax term on a fee, so total IS the discounted amount");
+});
+
+Deno.test("priceTransactionFeeLine — a percent_of_total fee is REFUSED, never zeroed", () => {
+  // Its amount is only knowable in the totals pass. Pricing one here would store
+  // a zero, and `getTransactionFeeTotals` DROPS a zero from the rollup entirely
+  // while `xeroLineMoney` would push `UnitAmount: 0`. Failing loudly is the only
+  // safe answer; teaching this path to store a percent fee is the CRMS-cutover
+  // issue's work (api-cloudrun#571).
+  assertThrows(
+    () =>
+      priceTransactionFeeLine({
+        type: "transaction_fee",
+        quantity: 1,
+        price: { base_cents: 0, base_percent: 4, formula: "percent_of_total", discount: null, taxes: [] },
+      }),
+    Error,
+    "percent_of_total",
+  );
+});
+
+Deno.test("priceTransactionFeeLine — refuses a line that is not a fee", () => {
+  assertThrows(
+    () => priceTransactionFeeLine({ type: "sale", quantity: 1, price: { base_cents: 100, formula: "fixed" } }),
+    Error,
+    "not a transaction fee",
+  );
+});
+
+Deno.test("isFromTotalItemType and isTransactionFeePricingItem read one fact and cannot disagree", () => {
+  assertEquals(isFromTotalItemType("transaction_fee"), true);
+  assertEquals(isFromTotalItemType("sale"), false);
+  assertEquals(isFromTotalItemType("group"), false);
+  // A type with no contract at all — these items come off Firestore documents,
+  // so a predicate is not a parse.
+  assertEquals(isFromTotalItemType("not_a_type"), false);
+
+  assertEquals(isTransactionFeePricingItem(flatFee(100, 1)), true);
+  assertEquals(
+    isTransactionFeePricingItem({ type: "sale", quantity: 1, price: { base_cents: 100 } }),
+    false,
+  );
+  // ⚠️ NOT the negation of `isPreTaxPricingItem`: a divider is neither, which is
+  // why `computeLineMoney` needs three arms and not two.
+  assertEquals(isTransactionFeePricingItem({ type: "group", quantity: 0 }), false);
+  // A fee with no price object is not priceable as one.
+  assertEquals(isTransactionFeePricingItem({ type: "transaction_fee", quantity: 1 }), false);
+});
+
+Deno.test("computeLineMoney — three arms, and the residual one throws by name", () => {
+  const preTax = makeItem({ type: "sale", quantity: 2 }, {
+    base_cents: 10_000,
+    formula: "fixed",
+    taxes: [{ uid: "chi-sales-tax" }],
+  }) as PricingItem;
+  assertEquals(computeLineMoney(preTax, TAXES), calculateItemPrice(preTax, TAXES));
+
+  const fee = flatFee(4_360, 1);
+  assertEquals(computeLineMoney(fee, TAXES), priceTransactionFeeLine(fee));
+
+  // A divider has `pricing: "none"` — neither arm fits, and the old shape of
+  // this branch (`isPreTaxPricingItem(…) ? price : {…all zeros}`) stored a $0
+  // line instead of saying so.
+  assertThrows(
+    () => computeLineMoney({ type: "group", quantity: 0 }, TAXES, "line-abc"),
+    Error,
+    "line-abc",
+  );
+  assertThrows(
+    () => computeLineMoney({ type: "group", quantity: 0 }, TAXES, "line-abc"),
+    Error,
+    "no pricing rule",
+  );
+});
+
+Deno.test("assembleLinePrice — an ORDER shape keeps replacement_cents, an INVOICE shape never gains one", () => {
+  const money: LinePriceMoney = {
+    subtotal_cents: 10_000,
+    subtotal_discounted_cents: 10_000,
+    discount: null,
+    taxes: [],
+    total_cents: 10_000,
+  };
+  const item: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 10_000, formula: "fixed" } };
+
+  const orderPrice = assembleLinePrice(
+    { base_cents: 10_000, base_percent: null, chargeable_days: null, formula: "fixed", replacement_cents: 25_000 },
+    money,
+    item,
+  );
+  assertEquals(orderPrice.replacement_cents, 25_000);
+
+  // The invoice shape declares no `replacement_cents` at all. The generic spread
+  // carries the caller's shape, so there is nothing to add one.
+  const invoicePrice = assembleLinePrice(
+    { base_cents: 10_000, base_percent: null, chargeable_days: null, formula: "fixed" },
+    money,
+    item,
+  );
+  assertEquals("replacement_cents" in invoicePrice, false);
+});
+
+Deno.test("assembleLinePrice — the fee normalization fires ONLY where the key is present", () => {
+  const fee = flatFee(4_360, 1);
+  const money = priceTransactionFeeLine(fee);
+
+  // An ORDER-shaped fee line: both keys present, both forced to null. A stored
+  // `sale` line legitimately carries `replacement_cents: 0`, and
+  // `ITEM_CONTRACTS.transaction_fee.replacement` is `forbidden`, which
+  // `checkItemContract` reads as `!= null` — so `0` fails as surely as a real
+  // amount. This is the product cascade's re-type case.
+  const orderFee = assembleLinePrice(
+    { base_cents: 4_360, base_percent: null, chargeable_days: 5, formula: "fixed" as const, replacement_cents: 0 },
+    money,
+    fee,
+  );
+  assertEquals(orderFee.chargeable_days, null);
+  assertEquals(orderFee.replacement_cents, null);
+
+  // An INVOICE-shaped fee line: `chargeable_days` is forced, and no
+  // `replacement_cents` key appears out of nowhere.
+  const invoiceFee = assembleLinePrice(
+    { base_cents: 4_360, base_percent: null, chargeable_days: 5, formula: "fixed" as const },
+    money,
+    fee,
+  );
+  assertEquals(invoiceFee.chargeable_days, null);
+  assertEquals("replacement_cents" in invoiceFee, false);
+});
+
+Deno.test("assembleLinePrice — a fee's taxes are forced to [], and a non-fee's are the caller's", () => {
+  const fee = flatFee(1_000, 1);
+  // A given-money caller (the Xero restate script) that resolved tax refs for a
+  // line it had not yet recognised as a fee. The structural exemption wins.
+  const withTax = assembleLinePrice(
+    { base_cents: 1_000, chargeable_days: null, formula: "fixed" as const },
+    {
+      subtotal_cents: 1_000,
+      subtotal_discounted_cents: 1_000,
+      discount: null,
+      taxes: [],
+      total_cents: 1_000,
+    },
+    fee,
+  );
+  assertEquals(withTax.taxes, []);
+
+  const sale: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
+  const taxed = assembleLinePrice(
+    { base_cents: 1_000, chargeable_days: null, formula: "fixed" as const },
+    {
+      subtotal_cents: 1_000,
+      subtotal_discounted_cents: 1_000,
+      discount: null,
+      taxes: [{ uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount_cents: 103 }],
+      total_cents: 1_103,
+    },
+    sale,
+  );
+  assertEquals(taxed.taxes.length, 1);
+  assertEquals(taxed.total_cents, 1_103);
+});
+
+Deno.test("assembleLinePrice — taxesBase OMITTED authors no key; supplied on a fee is []", () => {
+  const money: LinePriceMoney = {
+    subtotal_cents: 1_000,
+    subtotal_discounted_cents: 1_000,
+    discount: null,
+    taxes: [],
+    total_cents: 1_000,
+  };
+  const sale: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
+  const declared = { base_cents: 1_000, chargeable_days: null, formula: "fixed" as const };
+
+  // The CRMS invoice writer authors an 8-key literal and no `taxes_base`.
+  // Widening it would read as a replacement on ~9k stored lines, bump `version`
+  // and re-push every CRMS invoice to Xero against a ~1,000/day cap.
+  assertEquals("taxes_base" in assembleLinePrice(declared, money, sale), false);
+
+  const withBase = assembleLinePrice(declared, money, sale, {
+    taxesBase: [{ uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.25, type: "percent" }],
+  });
+  assertEquals(withBase.taxes_base, [
+    { uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.25, type: "percent" },
+  ]);
+
+  // A fee is untaxable through `ITEM_CONTRACTS`, so there is no would-be tax to
+  // record — but the key still appears, because this writer authors it.
+  const feeWithBase = assembleLinePrice(declared, money, flatFee(1_000, 1), {
+    taxesBase: [{ uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.25, type: "percent" }],
+  });
+  assertEquals(feeWithBase.taxes_base, []);
+});
+
+Deno.test("assembleLinePrice — money wins over a stale declared half", () => {
+  // The product-write cascade spreads the STORED price as its declared half, so
+  // it arrives carrying yesterday's money keys. Spread order is the only thing
+  // that makes that safe.
+  const sale: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
+  const out = assembleLinePrice(
+    { base_cents: 1_000, formula: "fixed" as const, subtotal_cents: 999_999, total_cents: 999_999 },
+    {
+      subtotal_cents: 1_000,
+      subtotal_discounted_cents: 1_000,
+      discount: null,
+      taxes: [],
+      total_cents: 1_000,
+    },
+    sale,
+  );
+  assertEquals(out.subtotal_cents, 1_000);
+  assertEquals(out.total_cents, 1_000);
+});
+
+Deno.test("assembleLinePrice — it ASSERTS the money it is handed (Seam F)", () => {
+  // Two writers supply their own money rather than computing one — the CRMS
+  // invoice ingest and the Xero restate script — and between them they account
+  // for the whole stored invoice corpus. `calculateItemPrice` guarantees these
+  // identities by construction; a hand-built `LinePriceMoney` does not.
+  const sale: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
+  const declared = { base_cents: 1_000, chargeable_days: null, formula: "fixed" as const };
+
+  assertThrows(
+    () =>
+      assembleLinePrice(declared, {
+        subtotal_cents: 1_000,
+        subtotal_discounted_cents: 900,
+        // 99 where the two subtotals differ by 100.
+        discount: { rate: 10, type: "percent", amount_cents: 99 },
+        taxes: [],
+        total_cents: 900,
+      }, sale),
+    Error,
+    "discount.amount_cents",
+  );
+
+  assertThrows(
+    () =>
+      assembleLinePrice(declared, {
+        subtotal_cents: 1_000,
+        subtotal_discounted_cents: 1_000,
+        discount: null,
+        taxes: [{ uid: "t", name: "T", rate: 10, type: "percent", amount_cents: 100 }],
+        // 1_000 where discounted + Σ taxes is 1_100.
+        total_cents: 1_000,
+      }, sale),
+    Error,
+    "total_cents",
+  );
+
+  // ...and the honest arm passes, so the two above are not green by accident.
+  const ok = assembleLinePrice(declared, {
+    subtotal_cents: 1_000,
+    subtotal_discounted_cents: 900,
+    discount: { rate: 10, type: "percent", amount_cents: 100 },
+    taxes: [{ uid: "t", name: "T", rate: 10, type: "percent", amount_cents: 92 }],
+    total_cents: 992,
+  }, sale);
+  assertEquals(ok.total_cents, 992);
+});
+
+Deno.test("priceTransactionFeeLine and costTransactionFees deliberately DISAGREE about subtotal_cents", () => {
+  // 🔴 They used to be held apart by living in different repos. They now sit
+  // ~150 lines apart in one file, and this is what stops the next reader
+  // "tidying" one into the other.
+  //
+  // `costTransactionFees` writes the DISCOUNTED amount into all three price
+  // fields, which is right for what it feeds: `getTransactionFeeTotals` reads
+  // only `total_cents`. Storing that would hand Xero a pre-discounted
+  // `UnitAmount` AND a `DiscountRate` to apply to it — the discount taken twice,
+  // on a live ledger with no dev tenant. So the STORED form keeps
+  // `subtotal_cents` pre-discount.
+  const stored = priceTransactionFeeLine(flatFee(10_000, 1, { rate: 10, type: "percent" }));
+  assertEquals(stored.subtotal_cents, 10_000, "STORED: pre-discount");
+  assertEquals(stored.subtotal_discounted_cents, 9_000);
+
+  const feeLine: LineItem = {
+    uid: "cc-fee",
+    name: "Card Fee",
+    path: ["cc-fee"],
+    type: "transaction_fee",
+    quantity: 1,
+    price: {
+      base_cents: 10_000,
+      base_percent: null,
+      replacement_cents: null,
+      formula: "fixed",
+      chargeable_days: null,
+      discount: { rate: 10, type: "percent", amount_cents: 1_000 },
+      subtotal_cents: 10_000,
+      subtotal_discounted_cents: 9_000,
+      taxes: [],
+      taxes_base: [],
+      total_cents: 9_000,
+    },
+  };
+  const costedPrice = costTransactionFees([feeLine], 0)[0]?.price;
+  if (!costedPrice) throw new Error("costTransactionFees dropped the fee line");
+  assertEquals(costedPrice.subtotal_cents, 9_000, "ROLLUP: discounted, in all three");
+  assertEquals(costedPrice.subtotal_discounted_cents, 9_000);
+  assertEquals(costedPrice.total_cents, 9_000);
+
+  // The disagreement, named. If this line ever passes, one of them was tidied.
+  assertEquals(stored.subtotal_cents === costedPrice.subtotal_cents, false);
+});
+
+Deno.test("THE MIGRATION INVARIANT — retyping sale -> transaction_fee does not move totals.total_cents", () => {
+  const chicagoRental: Tax = { uid: "tax-rental", name: "Chicago Rental Tax", rate: 9, type: "percent" };
+
+  // A prod-shaped order: one taxed rental, plus the Card Fee under its own
+  // "Transaction Fee(s)" group divider — which is where prod actually puts it.
+  const items = (feeType: "sale" | "transaction_fee"): LineItem[] => [
+    { uid: "dest-1", name: "Destination", type: "destination", path: ["dest-1"] },
+    { uid: "grp-1", name: "Gear", type: "group", path: ["dest-1", "grp-1"] },
+    {
+      uid: "prod-rental",
+      name: "Camera",
+      type: "rental",
+      quantity: 2,
+      path: ["dest-1", "grp-1", "prod-rental"],
+      price: {
+        base_cents: 50_000,
+        base_percent: null,
+        replacement_cents: 250_000,
+        formula: "five_day_week",
+        chargeable_days: 5,
+        discount: null,
+        subtotal_cents: 100_000,
+        subtotal_discounted_cents: 100_000,
+        taxes: [
+          { uid: "tax-rental", name: "Chicago Rental Tax", rate: 9, type: "percent", amount_cents: 9_000 },
+        ],
+        taxes_base: [{ uid: "tax-rental", name: "Chicago Rental Tax", rate: 9, type: "percent" }],
+        total_cents: 109_000,
+      },
+    },
+    { uid: "grp-fee", name: "Transaction Fee(s)", type: "group", path: ["dest-1", "grp-fee"] },
+    {
+      uid: "77LKBYcC09u1PZFhxmDJ",
+      name: "Card Fee",
+      type: feeType,
+      quantity: 1,
+      path: ["dest-1", "grp-fee", "77LKBYcC09u1PZFhxmDJ"],
+      price: {
+        // 4.00% of (100,000 subtotal + 9,000 tax) = 4,360 — the rate prod's four
+        // most recent Card Fee orders carry, against the tax-INCLUSIVE total.
+        base_cents: 4_360,
+        base_percent: null,
+        // The contract change, stated in the fixture: prod's `sale` fee line
+        // carries `replacement_cents: 0`, and `transaction_fee`'s contract is
+        // `forbidden`, which `checkItemContract` reads as `!= null`.
+        replacement_cents: feeType === "sale" ? 0 : null,
+        formula: "fixed",
+        chargeable_days: null,
+        discount: null,
+        subtotal_cents: 4_360,
+        subtotal_discounted_cents: 4_360,
+        taxes: [],
+        taxes_base: [],
+        total_cents: 4_360,
+      },
+    },
+  ];
+
+  const before = calculateOrderTotals(items("sale"), [chicagoRental]);
+  const after = calculateOrderTotals(items("transaction_fee"), [chicagoRental]);
+
+  // The whole point: the same money, differently modelled.
+  assertEquals(after.total_cents, before.total_cents);
+  assertEquals(after.total_cents, 113_360);
+
+  // ...and it MOVED, rather than the assertion holding because both are empty.
+  assertEquals(before.subtotal_discounted_cents, 104_360);
+  assertEquals(before.transaction_fees, []);
+  assertEquals(after.subtotal_discounted_cents, 100_000);
+  assertEquals(after.transaction_fees, [
+    { uid: "77LKBYcC09u1PZFhxmDJ", name: "Card Fee", rate: 43.6, type: "flat", amount_cents: 4_360 },
+  ]);
+
+  // The tax base is unchanged, which is the half a reader will doubt: a fee is
+  // not an `isPreTaxItem`, so it never entered `getTaxTotals` even as a `sale`.
+  assertEquals(after.taxes, before.taxes);
 });

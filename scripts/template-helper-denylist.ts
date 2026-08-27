@@ -136,6 +136,21 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // because a template legitimately re-totals a subset (a per-destination
     // block); this one only ever reproduces what those two already returned.
     "sumDocumentTotals",
+    // The line-price author (api-cloudrun#570). All four are WRITE-path: they
+    // decide how a stored `price` object is computed and assembled, and a
+    // render context already holds the object they produce. Re-running one at
+    // render time is the `sumDocumentTotals` trap at the line level — a
+    // document disagreeing with itself — and `assembleLinePrice` in particular
+    // would advertise a helper whose first argument is a half-built price a
+    // template never has.
+    "assembleLinePrice",
+    "computeLineMoney",
+    "priceTransactionFeeLine",
+    // The type-level predicate the three above branch on. A template that needs
+    // to know a line is a fee reads `it.…type`, or the visible
+    // `isTransactionFeeItem` / `isPreTaxItem` pair, which take the STORED shape
+    // a render context actually holds.
+    "isFromTotalItemType",
     "validatePathsAgainst", // path machinery, parameterised — write-path only
     // `isPreTaxItem` at the PricingItem surface — the guard the three pricing
     // entry points use so a writer can price an order-INPUT item. A template
