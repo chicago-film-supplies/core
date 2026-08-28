@@ -133,7 +133,7 @@ const createOrganizationRules: CollectionRule[] = [
     target: "organizations",
     mode: "co-write",
     invariant:
-      "A node's `path` is `[...its RESOLVED parent's path, itself]` — derived from the parent that EXISTS, never from a chain the client sent, so a chain that skips, misnames or over-claims an intermediate cannot survive a write. A create with no `uid_parent` is a root. ⚠️ **The API never MINTS an ancestor**, which is why this rule is not called `mint-ancestors`: a create names a parent that already exists or it is a root, and the only writer that invents a node is `scripts/migrate-organization-tree.ts`, which logs no propagation and makes no CRMS or Xero call. A rule id no writer fires is a claim the coverage ratchet correctly refuses.",
+      "A node's `path` is `[...its RESOLVED parent's path, itself]` — derived from the parent that EXISTS, never from a chain the client sent, so a chain that skips, misnames or over-claims an intermediate cannot survive a write. A create with no `uid_parent` is a root. ⚠️ **The API never MINTS an ancestor**, which is why this rule is not called `mint-ancestors`: a create names a parent that already exists or it is a root, and the only writer that invents a node is api-cloudrun's one-shot tree migration script (`scripts/migrate-organization-tree.ts` — not yet written), which logs no propagation and makes no CRMS or Xero call. A rule id no writer fires is a claim the coverage ratchet correctly refuses.",
     enforced_by: [ORG_NODE_TO_TREE],
     transaction: "create-organization",
     fields: [
