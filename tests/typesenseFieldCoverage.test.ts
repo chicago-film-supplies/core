@@ -102,6 +102,18 @@ const DERIVED_FIELDS: Record<string, string> = {
   "fulfillments:dates.charge_start_fs": "deriveOrderDateEnvelope — same as orders",
   "fulfillments:dates.charge_end_fs": "deriveOrderDateEnvelope — same as orders",
 
+  // ── orgLevel (@cfs/core/utils/organizations), applied in api-cloudrun's
+  //    `translateForTypesense` before `translateObject`.
+  //    Typesense cannot facet on an ARRAY'S LENGTH, and the level is
+  //    `ORG_LEVELS[path.length - 1]`. There is no stored `level` and there must
+  //    not be — it could then disagree with `path`, which is the whole class the
+  //    tree makes unrepresentable.
+  //    ⚠️ The derivation FUNCTION is core's; only its application is api's.
+  //    That is deliberate and it is the shape core#69 is about — the projection
+  //    is declared here and transformed there, so neither repo can derive it
+  //    alone.
+  "organizations:level": "orgLevel (@cfs/core/utils/organizations) — ORG_LEVELS[path.length - 1], applied in api-cloudrun's translateForTypesense",
+
   // ── postProcess (api-cloudrun lib/typesenseTranslate.ts)
   "orders:deliveries": "postProcess — any destination pair with customer_collecting !== true",
   "orders:pickups": "postProcess — any destination pair with customer_returning !== true",

@@ -148,6 +148,13 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
     "dates.days_active": { label: "Days Active", cell: "plain" },
     "dates.days_charged": { label: "Days Charged", cell: "plain" },
   },
+  // The THIRD key. `level` has no Firestore field to hang a label on — it is
+  // `ORG_LEVELS[path.length - 1]`, derived at index time because Typesense
+  // cannot facet on an array's length and there is no stored `level` to
+  // annotate. See `schemas/typesense/organizations.ts`.
+  organizations: {
+    level: { label: "Level", cell: "plain" },
+  },
   fulfillments: {
     deliveries: { label: "Deliveries", cell: "bool" },
     pickups: { label: "Pickups", cell: "bool" },
