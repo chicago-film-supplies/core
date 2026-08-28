@@ -105,7 +105,7 @@ const ORG_REPARENT_TO_DESCENDANTS: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
   clause:
-    "a re-parent rewriting the whole subtree's `path` and `query_by_organizations`, with `path.slice(0, -1)` still equal to each node's parent's path afterwards. Paired with a corpus detector — `api-cloudrun/scripts/audit-organization-tree.ts` re-asserts every invariant over both environments and exits non-zero on a violation, which none of the six older org rules has.",
+    "a re-parent rewriting the whole subtree's `path` and `query_by_organizations`, with `path.slice(0, -1)` still equal to each node's parent's path afterwards. To be paired with a corpus detector — `api-cloudrun/scripts/audit-organization-tree.ts`, not yet written, which will re-assert every invariant over both environments and exit non-zero on a violation. None of the six older org rules has one, so a cascade that stops firing in production is caught by nothing until someone reads a stale name on screen.",
   gates: true,
 };
 
