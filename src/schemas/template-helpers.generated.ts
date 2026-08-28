@@ -155,6 +155,11 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
+  "sessions": [
+    { name: "groupSessionItemsByOrder", expr: "it.sessions.groupSessionItemsByOrder(items)", desc: "Split a session's rows into one group per order.", returns: "SessionOrderGroup[]" },
+    { name: "sessionItemPlaces", expr: "it.sessions.sessionItemPlaces(lines)", desc: "The distinct places a row's units moved between, as `{from, to}` labels.", returns: "Array<typeLiteral>" },
+    { name: "sessionQuantity", expr: "it.sessions.sessionQuantity(items)", desc: "Total units across a set of rows.", returns: "number" },
+  ],
   "stock": [
 
   ],

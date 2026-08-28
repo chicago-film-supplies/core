@@ -810,6 +810,15 @@ export {
 } from "./quote.ts";
 
 export {
+  MovementSessionItemSchema,
+  MovementSessionOrderRefSchema,
+  MovementSessionSchema,
+  type MovementSession,
+  type MovementSessionItem,
+  type MovementSessionOrderRef,
+} from "./movement-session.ts";
+
+export {
   TEMPLATE_SOURCE_COLLECTIONS,
   TEMPLATE_TARGET_COLLECTIONS,
   TEMPLATE_SURFACES,
@@ -1487,6 +1496,8 @@ export type { TemplateHelperEntry } from "./template-helpers.generated.ts";
 export { templateHelpers } from "./template-helpers.generated.ts";
 
 // ── Template render context (which `it.*` namespaces a template gets) ──
+
+export { TEMPLATE_COLLECTION_SCHEMAS, templateSchemaFor } from "./template-schemas.ts";
 
 export type { TemplateCollectionType } from "./template-context.ts";
 export {

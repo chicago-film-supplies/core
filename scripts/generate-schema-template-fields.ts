@@ -16,28 +16,33 @@
  * `deno task check:generated` diffs against the committed copy, so the
  * staleness gate never has to write into `src/` to prove the file is current.
  */
-import { isCollectionName, schemaFor } from "../src/schemas/mod.ts";
 import { TEMPLATE_SOURCE_COLLECTIONS, TEMPLATE_TARGET_COLLECTIONS } from "../src/schemas/template.ts";
+import { templateSchemaFor } from "../src/schemas/template-schemas.ts";
+import type { TemplateCollectionType } from "../src/schemas/template-context.ts";
 import { type SchemaField, walkSchema } from "./schema-walk.ts";
 
 /**
- * Every collection a template can read from or produce.
+ * Every collection a template can read from or produce, paired with its schema.
  *
- * Filtered to those with a walkable schema in the `schemas` map: `packing_lists`
- * has none, so it is simply absent from the output — no skip branch or error
- * needed, and the generated type is `Partial` to match. Targets reuse the exact
- * same PII-omission + field-hiding walk as sources: a target's fields are an
- * output shape, but a `redact` path must never surface either way.
+ * Collections with no schema are simply absent from the output — no skip branch
+ * or error needed, and the generated type is `Partial` to match. Targets reuse
+ * the exact same PII-omission + field-hiding walk as sources: a target's fields
+ * are an output shape, but a `redact` path must never surface either way.
  *
- * ⚠️ **The filter is {@link isCollectionName}, so it NARROWS.** It used to be
- * `(collection) => schemas[collection]` — the same runtime check, indexing a
- * mapped type by a `string`, which is an implicit `any` (TS7053) and left
- * `walkSchema` taking an unchecked argument. Same guard, now paying for itself
- * at compile time, which is what that helper exists for.
+ * 🔴 **The lookup is {@link templateSchemaFor}, NOT `isCollectionName`.** It was
+ * the latter until api-cloudrun#700, which made "has a walkable schema" and "is
+ * a Firestore collection" the same question. They are not: `movement-sessions`
+ * is a source with a real schema and no collection, and under the old filter it
+ * would have been dropped **silently** — the direction that reports clean.
+ * `tests/schema-fields.test.ts` asserts every SOURCE survives, so the drop is
+ * now a failure rather than an empty panel.
  */
-const COLLECTIONS = [
-  ...new Set<string>([...TEMPLATE_SOURCE_COLLECTIONS, ...TEMPLATE_TARGET_COLLECTIONS]),
-].filter(isCollectionName);
+const COLLECTIONS: TemplateCollectionType[] = [
+  ...new Set<TemplateCollectionType>([
+    ...TEMPLATE_SOURCE_COLLECTIONS,
+    ...TEMPLATE_TARGET_COLLECTIONS,
+  ]),
+].filter((collection) => templateSchemaFor(collection) !== undefined);
 
 /**
  * Render the whole generated module as a string.
@@ -53,7 +58,8 @@ export function renderTemplateSchemaFields(): string {
   const entries: string[] = [];
 
   for (const collection of COLLECTIONS) {
-    const fields: SchemaField[] = walkSchema(schemaFor(collection));
+    // Non-null: `COLLECTIONS` is exactly the members this lookup answers for.
+    const fields: SchemaField[] = walkSchema(templateSchemaFor(collection)!);
 
     const fieldLines = fields
       .map((f) => `    { path: ${JSON.stringify(f.path)}, type: ${JSON.stringify(f.type)} },`)

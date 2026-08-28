@@ -43,6 +43,13 @@ export const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, s
   // same structural shapes — rather than a mapping to the string "orders", which
   // would put `it.orders` on a document that is not an order.
   fulfillments: "fulfillments",
+  // A receipt renders one operator ACTION — the fold of every movement sharing
+  // a `uuid_session`. `it.sessions` is a small namespace of its own rather than
+  // a mapping to "movements": `utils/movements.ts` is the LEDGER fold
+  // (`applyMovementToLedger`, `costOfUnits`), and a receipt is a statement about
+  // what a person handed over, not an accounting operation. Same test as
+  // `fulfillments` above — the document's own subject decides.
+  "movement-sessions": "sessions",
 };
 
 /**

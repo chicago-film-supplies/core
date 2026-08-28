@@ -64,10 +64,19 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "computeStockAvailability",
     "peakStockConsumption",
   ],
-  // The movement-journal fold, denylisted whole for the same reason as
-  // `stock`: every one of these takes an InventoryLedger or a Movement,
-  // and a render context holds neither — templates render orders, invoices and
-  // quotes. Surfacing them would be pure dead surface in the helper panel.
+  // The movement-journal fold, denylisted whole — but ⚠️ **the reason is no
+  // longer uniform, and the sentence that stood here is stale.** It read "a
+  // render context holds neither an InventoryLedger nor a Movement", which was
+  // true while templates rendered only orders, invoices and quotes. Since
+  // api-cloudrun#700 a `movement-sessions`-sourced family renders a fold of the
+  // journal, and `it.doc.items[].lines` IS a `MovementLineType[]` — so two of
+  // the eight below now have a reachable argument:
+  //
+  //   - `heldDelta` / `movementHeldDelta` — REACHABLE, and denied only because
+  //     no family calls them yet. Lift the entry in the change that adds the
+  //     call, alongside the re-export in `utils/sessions.ts`.
+  //   - the other six — still unreachable: each takes an `InventoryLedger` or a
+  //     whole `Movement` document, and a session's items are neither.
   movements: [
     "applyMovementToLedger", // the ledger fold — write-path only
     "deriveServiceQuantities", // ledger derivation — write-path only

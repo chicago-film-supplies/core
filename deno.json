@@ -44,8 +44,10 @@
     "./schemas/typesense": "./src/schemas/typesense/mod.ts",
     "./schemas/typesense/cards": "./src/schemas/typesense/cards.ts",
     "./schemas/quote": "./src/schemas/quote.ts",
+    "./schemas/movement-session": "./src/schemas/movement-session.ts",
     "./schemas/template": "./src/schemas/template.ts",
     "./schemas/template-context": "./src/schemas/template-context.ts",
+    "./schemas/template-schemas": "./src/schemas/template-schemas.ts",
     "./schemas/webhook-event": "./src/schemas/webhook-event.ts",
     "./schemas/log": "./src/schemas/log/mod.ts",
     "./schemas/pii": "./src/schemas/pii/mod.ts",
@@ -73,6 +75,7 @@
     "./utils/orders": "./src/utils/orders.ts",
     "./utils/organizations": "./src/utils/organizations.ts",
     "./utils/products": "./src/utils/products.ts",
+    "./utils/sessions": "./src/utils/sessions.ts",
     "./utils/taxes": "./src/utils/taxes.ts",
     "./utils/templates": "./src/utils/templates.ts",
     "./utils/citations": "./src/utils/citations.ts"

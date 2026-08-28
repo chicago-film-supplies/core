@@ -12,6 +12,7 @@
 import { assert, assertEquals, assertExists, assertNotEquals } from "@std/assert";
 import { z } from "zod";
 import { TEMPLATE_SOURCE_COLLECTIONS, TEMPLATE_TARGET_COLLECTIONS } from "../src/schemas/template.ts";
+import { templateSchemaFor } from "../src/schemas/template-schemas.ts";
 import { isCollectionName, schemaFor } from "../src/schemas/mod.ts";
 import { templateSchemaFields } from "../src/schemas/template-schema-fields.generated.ts";
 import type { SchemaField } from "../src/schemas/template-schema-fields.generated.ts";
@@ -29,10 +30,20 @@ function fieldsFor(collection: string): SchemaField[] {
   return fields;
 }
 
-/** Collections we expect to be present: every source, plus targets with a schema. */
+/**
+ * Collections we expect to be present: every source, plus targets with a schema.
+ *
+ * 🔴 **The filter is the SCHEMA map, not `isCollectionName`.** It was the latter
+ * until api-cloudrun#700, and the swap is not cosmetic: `movement-sessions` is a
+ * source with a schema and no Firestore collection, so under the old filter it
+ * was emitted by the generator and then **excluded from the three hygiene
+ * assertions below** — the `_fs`, `created_at`/`updated_at` and `query_by_`
+ * checks — while every other assertion still passed. A guard that stops
+ * covering a member reports exactly the same green as one that covers it.
+ */
 const PRESENT_COLLECTIONS = [
   ...new Set<string>([...TEMPLATE_SOURCE_COLLECTIONS, ...TEMPLATE_TARGET_COLLECTIONS]),
-].filter((c) => isCollectionName(c));
+].filter((c) => templateSchemaFor(c) !== undefined);
 
 // ── Structural tests ────────────────────────────────────────────────
 

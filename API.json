@@ -2185,6 +2185,42 @@
           "doc": "Zod schema for a Movement."
         },
         {
+          "kind": "interface",
+          "name": "MovementSession",
+          "declaration": "interface MovementSession {\n  uuid_session: string;\n  date: string;\n  types: MovementTypeType[];\n  numbers: number[];\n  quantity: number;\n  created_by: ActorRefType;\n  orders: MovementSessionOrderRef[];\n  organization: typeLiteral | null;\n  items: MovementSessionItem[];\n}",
+          "doc": "The fold of every movement sharing one `uuid_session` — what a receipt\nrenders.\n\nNot stored anywhere. Rebuilt on demand from the journal, which is append-only\nand idempotent under `movementContentHash`, so the fold is stable: printing\nthe same receipt twice produces the same document."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementSessionItem",
+          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  lines: MovementLineType[];\n  serialized_details: typeLiteral | null;\n  reference: string;\n}",
+          "doc": "One movement, joined to what a receipt has to name.\n\nCalled `items` on the session for the same reason orders, invoices and\nfulfillments call theirs that way: `partials/shared/*.eta` is written against\na document with an `items[]`, and a fourth spelling would make the shared\nmarkup un-shareable."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementSessionItemSchema",
+          "declaration": "const MovementSessionItemSchema: z.ZodType<MovementSessionItem>;",
+          "doc": "Zod schema for one folded movement."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementSessionOrderRef",
+          "declaration": "interface MovementSessionOrderRef {\n  uid: string;\n  number: number;\n}",
+          "doc": "One order a session touched, named the way a receipt prints it."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementSessionOrderRefSchema",
+          "declaration": "const MovementSessionOrderRefSchema: z.ZodType<MovementSessionOrderRef>;",
+          "doc": "Zod schema for a session's order reference."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementSessionSchema",
+          "declaration": "const MovementSessionSchema: z.ZodType<MovementSession>;",
+          "doc": "Zod schema for a folded movement session."
+        },
+        {
           "kind": "variable",
           "name": "MovementTypeEnum",
           "declaration": "const MovementTypeEnum: z.ZodType<MovementTypeType>;",
@@ -3338,6 +3374,12 @@
         },
         {
           "kind": "variable",
+          "name": "TEMPLATE_COLLECTION_SCHEMAS",
+          "declaration": "const TEMPLATE_COLLECTION_SCHEMAS: Partial<Record<TemplateCollectionType, z.ZodType>>;",
+          "doc": "The document schema for each template source and target that has one.\n\n⚠️ **Not derived from `schemas` by a filter.** A filter over the collection\nregistry is what this map replaces: it silently dropped any source the\nregistry did not know, which is the whole `movement-sessions` case, and it\ndropped it in the direction that reports clean."
+        },
+        {
+          "kind": "variable",
           "name": "TEMPLATE_COLLECTION_UTILS",
           "declaration": "const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, string>>;",
           "doc": "Collection → the `@cfs/core/utils` namespace injected for it, exposed as\n`it.<namespace>` inside a template.\n\n`Partial` on purpose: a collection need not have a utils namespace.\n`quotes` and `packing_lists` have none — templates *produce* those, they\ndon't compute over them.\n\nValues must be valid `it.<ns>` identifiers. `contact-name` is deliberately\nunmapped for that reason; a future collection needing it would map to\n`\"contactName\"`."
@@ -3363,8 +3405,8 @@
         {
           "kind": "variable",
           "name": "TEMPLATE_SOURCE_COLLECTIONS",
-          "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\" | \"fulfillments\"[];",
-          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set."
+          "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\" | \"fulfillments\" | \"movement-sessions\"[];",
+          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set.\n\n🔴 **`movement-sessions` is NOT a Firestore collection, and the field is\nstill called `collection_source`.** A receipt renders the fold of\n`transactions where uuid_session == …` — one operator action — and nothing is\nstored at that path (`schemas/movement-session.ts`, api-cloudrun#700). A\ntemplate source needs a *schema*, which it has\n({@link TEMPLATE_COLLECTION_SCHEMAS}); only fixture CAPTURE needs a document,\nand that path branches. The field keeps its name deliberately: renaming it is\na STORED change across every `templates` document, every\n`templates/<git_path>.meta.json` sidecar and the manager, which buys nothing\nthis docstring does not."
         },
         {
           "kind": "variable",
@@ -3375,8 +3417,8 @@
         {
           "kind": "variable",
           "name": "TEMPLATE_TARGET_COLLECTIONS",
-          "declaration": "const TEMPLATE_TARGET_COLLECTIONS: \"quotes\" | \"packing_lists\" | \"invoices\"[];",
-          "doc": "Collections that templates can produce documents for."
+          "declaration": "const TEMPLATE_TARGET_COLLECTIONS: \"quotes\" | \"packing_lists\" | \"invoices\" | \"receipts\"[];",
+          "doc": "Collections that templates can produce documents for.\n\n`packing_lists` and `receipts` have no schema and no stored rows — a template\nproduces them, nothing computes over them, so {@link TEMPLATE_COLLECTION_SCHEMAS}\nomits both and the generated field reference is `Partial` to match."
         },
         {
           "kind": "variable",
@@ -4542,6 +4584,14 @@
           "name": "templateSchemaFields",
           "declaration": "const templateSchemaFields: Partial<Record<TemplateSourceCollectionType | TemplateTargetCollectionType, SchemaField[]>>;",
           "doc": "Pre-compiled document field metadata for every template source and target\ncollection. Source collections are always present; a target is present only if\nit has a walkable schema — `packing_lists` has none, hence `Partial`."
+        },
+        {
+          "kind": "function",
+          "name": "templateSchemaFor",
+          "signature": "templateSchemaFor(collection: string): z.ZodType | undefined",
+          "doc": "The schema for a template collection, or `undefined` when it has none.\n\nA function rather than a bare map read so consumers that start from a runtime\nstring — a fixture's stored `collection_source`, an MCP argument — have one\ndoor, and so the `Partial` index is narrowed in one place instead of at each\ncall site.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -8392,6 +8442,48 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/schemas/movement-session",
+      "moduleDoc": "Movement session — the fold of one operator ACTION, and the first template\nsource that is **not** a Firestore collection.\n\nOne press of Check In writes one movement per booking it touched, all sharing\na client-minted `uuid_session` (`schemas/transaction.ts`). A movement is the\nunit the ledger records (\"2 of this product came back\"); a *session* is the\nunit a human recognises (\"I checked in the crate\"), and it is the unit a\nreceipt is printed at. So a receipt renders from a fold of\n`transactions where uuid_session == …`, not from any stored document.\n\n## Why this schema exists rather than a `movement-sessions` collection\n\nA template's `collection_source` resolves through four mechanisms, and only\nONE of them needs a collection — `captureFixture`'s point-get. The other\nthree need a **schema**: the field reference panel\n(`schemas/template-schema-fields.generated.ts`), fixture validation\n(`schemaForCollection`) and fixture PII sanitisation (`applyPii`). The render\npath needs neither: it takes a plain object.\n\nSo `movement-sessions` is a source with a schema and no collection, resolved\nthrough {@link TEMPLATE_COLLECTION_SCHEMAS} rather than through the Firestore\ncollection registry. api-cloudrun#700 records the three options that were\nrefused and why: a source with NO schema is refused by an existing ratchet\n(`tests/schema-fields.test.ts` — *\"every source collection has a non-empty\nfield array\"*), registering it in `schemas` would make\n`isCollectionName(\"movement-sessions\")` true for a path that does not exist,\nand storing the fold would cache an ANSWER and buy only a reprint identity\nthat {@link MovementSession.numbers} already provides.\n\n⚠️ **This is NOT the manager's `MovementSession`**\n(`manager/src/utils/movementSessions.ts`), which is a client-side grouping\nover movement rows a page already holds — generic over the four fields it\nreads, with no joins. This one is the printable document: it carries the\nproduct names, order numbers and organization that a movement does **not**,\nbecause a movement carries `uid_product` and no product name at all.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "MovementSession",
+          "declaration": "interface MovementSession {\n  uuid_session: string;\n  date: string;\n  types: MovementTypeType[];\n  numbers: number[];\n  quantity: number;\n  created_by: ActorRefType;\n  orders: MovementSessionOrderRef[];\n  organization: typeLiteral | null;\n  items: MovementSessionItem[];\n}",
+          "doc": "The fold of every movement sharing one `uuid_session` — what a receipt\nrenders.\n\nNot stored anywhere. Rebuilt on demand from the journal, which is append-only\nand idempotent under `movementContentHash`, so the fold is stable: printing\nthe same receipt twice produces the same document."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementSessionItem",
+          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  lines: MovementLineType[];\n  serialized_details: typeLiteral | null;\n  reference: string;\n}",
+          "doc": "One movement, joined to what a receipt has to name.\n\nCalled `items` on the session for the same reason orders, invoices and\nfulfillments call theirs that way: `partials/shared/*.eta` is written against\na document with an `items[]`, and a fourth spelling would make the shared\nmarkup un-shareable."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementSessionItemSchema",
+          "declaration": "const MovementSessionItemSchema: z.ZodType<MovementSessionItem>;",
+          "doc": "Zod schema for one folded movement."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementSessionOrderRef",
+          "declaration": "interface MovementSessionOrderRef {\n  uid: string;\n  number: number;\n}",
+          "doc": "One order a session touched, named the way a receipt prints it."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementSessionOrderRefSchema",
+          "declaration": "const MovementSessionOrderRefSchema: z.ZodType<MovementSessionOrderRef>;",
+          "doc": "Zod schema for a session's order reference."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementSessionSchema",
+          "declaration": "const MovementSessionSchema: z.ZodType<MovementSession>;",
+          "doc": "Zod schema for a folded movement session."
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/schemas/template",
       "moduleDoc": "",
       "symbols": [
@@ -8410,8 +8502,8 @@
         {
           "kind": "variable",
           "name": "TEMPLATE_SOURCE_COLLECTIONS",
-          "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\" | \"fulfillments\"[];",
-          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set."
+          "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\" | \"fulfillments\" | \"movement-sessions\"[];",
+          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set.\n\n🔴 **`movement-sessions` is NOT a Firestore collection, and the field is\nstill called `collection_source`.** A receipt renders the fold of\n`transactions where uuid_session == …` — one operator action — and nothing is\nstored at that path (`schemas/movement-session.ts`, api-cloudrun#700). A\ntemplate source needs a *schema*, which it has\n({@link TEMPLATE_COLLECTION_SCHEMAS}); only fixture CAPTURE needs a document,\nand that path branches. The field keeps its name deliberately: renaming it is\na STORED change across every `templates` document, every\n`templates/<git_path>.meta.json` sidecar and the manager, which buys nothing\nthis docstring does not."
         },
         {
           "kind": "variable",
@@ -8422,8 +8514,8 @@
         {
           "kind": "variable",
           "name": "TEMPLATE_TARGET_COLLECTIONS",
-          "declaration": "const TEMPLATE_TARGET_COLLECTIONS: \"quotes\" | \"packing_lists\" | \"invoices\"[];",
-          "doc": "Collections that templates can produce documents for."
+          "declaration": "const TEMPLATE_TARGET_COLLECTIONS: \"quotes\" | \"packing_lists\" | \"invoices\" | \"receipts\"[];",
+          "doc": "Collections that templates can produce documents for.\n\n`packing_lists` and `receipts` have no schema and no stored rows — a template\nproduces them, nothing computes over them, so {@link TEMPLATE_COLLECTION_SCHEMAS}\nomits both and the generated field reference is `Partial` to match."
         },
         {
           "kind": "interface",
@@ -8531,6 +8623,26 @@
             }
           ],
           "returnsTag": "Deduped namespace list, always-on first, in collection order."
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/template-schemas",
+      "moduleDoc": "Collection → the Zod schema a template's `it.doc` is validated against.\n\nThe companion of `TEMPLATE_COLLECTION_UTILS` (`schemas/template-context.ts`):\nthat map answers *which helpers does this collection get*, this one answers\n*what shape is its document*. Both are keyed on the same\n`TemplateCollectionType` and both are `Partial` — a collection need not have\neither.\n\n## Why this is not just `schemaFor(collection)`\n\nBecause a template SOURCE is not always a Firestore collection.\n`movement-sessions` is the fold of `transactions where uuid_session == …` —\nthe operator action a receipt is printed at — and no document is stored at\nthat path (api-cloudrun#700). Resolving sources through the Firestore\ncollection registry made \"is a template source\" and \"is a collection\" the\nsame question; they are not, and this map is where they stop being.\n\nEvery entry that IS a collection names the same schema instance\n`schemaFor` returns, asserted by identity in `tests/template-schemas.test.ts`\nrather than trusted — a second table that merely *agrees* today is a table\nthat drifts.\n\n## Absences are answers\n\n`packing_lists` and `receipts` are TARGETS with no schema, and templates\n*produce* those rather than compute over them, so there is nothing to\nvalidate and nothing to walk. The generated field reference\n(`schemas/template-schema-fields.generated.ts`) is `Partial` for exactly this\nreason, and its staleness test asserts `packing_lists` stays absent.\n\n⚠️ **A source, unlike a target, must be present.** Fixture validation, fixture\nPII sanitisation and the field reference panel all resolve through here, so a\nsource with no entry ships a family that can hold no fixture, therefore no\ngolden, therefore no gate. `tests/schema-fields.test.ts` refuses it.\n\n## What a non-collection source is, and is NOT, swept by\n\nSeveral of this package's ratchets derive their corpus from the `schemas`\nrecord, so a schema outside it is outside them. Stated rather than left to be\ndiscovered, because an unnamed gap reads as covered:\n\n- **`tests/pii.test.ts` — COVERED, via a fourth arm added for exactly this.**\n  A receipt is printed and handed to a customer and its fixtures are committed\n  to git, so an untagged name or email is a permanent leak. Measured before\n  the arm existed: a planted untagged `email` on `MovementSessionSchema`\n  passed all nine assertions.\n- **`tests/inert-defaults.test.ts` — COVERED already**, because it scans the\n  `schemas/mod.ts` barrel rather than the registry.\n- **`tests/uploadcareRef.test.ts` — NOT covered, and correctly so.** That lint\n  exists so the CDN sweep can tell a live file reference from a dead one; a\n  document that is never stored holds no reference the sweep could reach, so\n  there is nothing for it to protect. The asymmetry with PII above is the\n  point: a fixture leaks PII forever and cannot orphan a CDN file.\n- **`typesense-parity` / `display-columns` / `display-defaults` / `testing` /\n  `initial` — NOT covered, and inapplicable**: each answers a question about a\n  Firestore collection (an index, a column set, a seeded test document).",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "TEMPLATE_COLLECTION_SCHEMAS",
+          "declaration": "const TEMPLATE_COLLECTION_SCHEMAS: Partial<Record<TemplateCollectionType, z.ZodType>>;",
+          "doc": "The document schema for each template source and target that has one.\n\n⚠️ **Not derived from `schemas` by a filter.** A filter over the collection\nregistry is what this map replaces: it silently dropped any source the\nregistry did not know, which is the whole `movement-sessions` case, and it\ndropped it in the direction that reports clean."
+        },
+        {
+          "kind": "function",
+          "name": "templateSchemaFor",
+          "signature": "templateSchemaFor(collection: string): z.ZodType | undefined",
+          "doc": "The schema for a template collection, or `undefined` when it has none.\n\nA function rather than a bare map read so consumers that start from a runtime\nstring — a fixture's stored `collection_source`, an MCP argument — have one\ndoor, and so the `Partial` index is narrowed in one place instead of at each\ncall site.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },
@@ -12034,6 +12146,42 @@
             }
           ],
           "returnsTag": "New array with the component and its descendants removed"
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/sessions",
+      "moduleDoc": "Pure helpers over a movement SESSION — the document a receipt renders.\n\n```ts\nimport { groupSessionItemsByOrder } from \"@cfs/core/utils/sessions\";\n```\n\nA session is the fold of every movement sharing one `uuid_session`\n(`schemas/movement-session.ts`): one press of Check In, one printable record.\nThis namespace is what `it.sessions` resolves to for a\n`movement-sessions`-sourced template.\n\n## What belongs here, and what deliberately does not\n\nThe test is `utils/fulfillments.ts`'s: **the document's own subject.** A\nreceipt states what physically changed hands, so it needs the grouping a\ncross-order session forces and the direction each row moved. It does **not**\nneed the ledger fold — `applyMovementToLedger`, `costOfUnits`,\n`applyOutOfServiceReason` and `LedgerFoldResult` stay in `utils/movements.ts`,\nwhere the writers use them. Those are how a movement changes stock; a receipt\nis a statement about what a person handed over, and putting an accounting\nfold on it would advertise arithmetic no template should be doing.\n\n⚠️ **`movementHeldDelta` is deliberately NOT re-exported**, even though it is\nthe one helper in `utils/movements.ts` whose argument a receipt actually holds\n(`items[].lines` is a `MovementLineType[]`). It answers \"did units come back\ninto CFS custody\" — a real question, with no template asking it yet. Re-export\nit when a family calls it, and lift its `TEMPLATE_HELPER_DENYLIST` entry in the\nsame change; shipping it now would be the dead helper-panel surface that\ndenylist exists to prevent.\n\n⚠️ **There is no movement-type LABEL helper here, deliberately.** The manager\nrenders a type with a generic `startCase(camelCase(t))`\n(`manager/src/components/inventory/MovementTimeline.tsx`), and a hand-written\nmap in core would be a second authority that disagrees with it the first time\neither side is edited — for wording, which is a template's own business.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "SessionOrderGroup",
+          "declaration": "interface SessionOrderGroup {\n  uid_order: string | null;\n  order_number: number | null;\n  items: MovementSessionItem[];\n  quantity: number;\n}",
+          "doc": "One order's rows within a session, in the order the journal returned them."
+        },
+        {
+          "kind": "function",
+          "name": "groupSessionItemsByOrder",
+          "signature": "groupSessionItemsByOrder(items: readonly MovementSessionItem[]): SessionOrderGroup[]",
+          "doc": "Split a session's rows into one group per order.\n\n⚠️ **A session can span orders, and that is the point of the surface it comes\nfrom.** `POST /returns` accepts whatever a worker was handed back — an item\nfrom order A returned alongside order B is the driving case — so a receipt\nthat printed one flat list would give the customer no way to see which of\ntheir jobs each line settled.\n\nInsertion order is preserved rather than sorted by order number: the fold\nhands rows over in journal order, and re-sorting here would silently disagree\nwith the session timeline the operator saw when they pressed the button.\n\nA row with no `uid_order` gets its own `null` group rather than being dropped\n— a manual movement swept into a session is still something the customer was\nhanded.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "sessionItemPlaces",
+          "signature": "sessionItemPlaces(lines: readonly MovementLineType[]): Array<typeLiteral>",
+          "doc": "The distinct places a row's units moved between, as `{from, to}` labels.\n\nA template cannot read Firestore, so it can only print what a `DocSource`\nalready carries — `label` when the writer set one, otherwise nothing. Returned\nas a list because one movement can draw from several shelves.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "sessionQuantity",
+          "signature": "sessionQuantity(items: readonly MovementSessionItem[]): number",
+          "doc": "Total units across a set of rows.\n\nSums `quantity`, the movement's own count, and **not** the absolute value of\nits lines: a row that moves units between two places carries one quantity and\ntwo line sides, so summing lines would double it.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },

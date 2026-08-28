@@ -63,6 +63,7 @@ import {
   SENSITIVE_NAME_FIELD,
 } from "../src/schemas/pii/dictionary.ts";
 import { RUNTIME_DENYLIST } from "../src/schemas/pii/runtime-denylist.ts";
+import { TEMPLATE_COLLECTION_SCHEMAS } from "../src/schemas/template-schemas.ts";
 import { resolveLeafValues, sampleValues } from "./helpers/sample-value.ts";
 
 // ── Coverage sources ─────────────────────────────────────────────────
@@ -99,6 +100,18 @@ function coverageSources(): Map<z.ZodType, string> {
     if (!/Input$/.test(key)) continue;
     if (!isZodSchema(value)) continue;
     if (!out.has(value)) out.set(value, key);
+  }
+
+  // 4. Template source/target schemas. Every one that IS a collection is already
+  //    in source 1 and dedupes on instance identity — this source exists for the
+  //    ones that are NOT. `movement-sessions` is a document a receipt is
+  //    PRINTED from and handed to a customer, and it is in none of the three
+  //    registries above: not a collection, not a log arm, not named `*Input`.
+  //    Measured before this arm was added: an untagged `contact_email` planted
+  //    on `MovementSessionSchema` passed all nine assertions.
+  for (const [collection, schema] of Object.entries(TEMPLATE_COLLECTION_SCHEMAS)) {
+    if (!schema) continue;
+    if (!out.has(schema)) out.set(schema, `template:${collection}`);
   }
 
   return out;

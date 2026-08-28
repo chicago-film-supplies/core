@@ -33,13 +33,40 @@ import {
  * FROM a fulfillment and produced INTO `packing_lists`; nothing produces a
  * fulfillment document from a template. The two lists are deliberately not the
  * same set.
+ *
+ * 🔴 **`movement-sessions` is NOT a Firestore collection, and the field is
+ * still called `collection_source`.** A receipt renders the fold of
+ * `transactions where uuid_session == …` — one operator action — and nothing is
+ * stored at that path (`schemas/movement-session.ts`, api-cloudrun#700). A
+ * template source needs a *schema*, which it has
+ * ({@link TEMPLATE_COLLECTION_SCHEMAS}); only fixture CAPTURE needs a document,
+ * and that path branches. The field keeps its name deliberately: renaming it is
+ * a STORED change across every `templates` document, every
+ * `templates/<git_path>.meta.json` sidecar and the manager, which buys nothing
+ * this docstring does not.
  */
-export const TEMPLATE_SOURCE_COLLECTIONS = ["orders", "invoices", "fulfillments"] as const;
+export const TEMPLATE_SOURCE_COLLECTIONS = [
+  "orders",
+  "invoices",
+  "fulfillments",
+  "movement-sessions",
+] as const;
 /** Firestore collection that provides data to a template. */
 export type TemplateSourceCollectionType = typeof TEMPLATE_SOURCE_COLLECTIONS[number];
 
-/** Collections that templates can produce documents for. */
-export const TEMPLATE_TARGET_COLLECTIONS = ["quotes", "packing_lists", "invoices"] as const;
+/**
+ * Collections that templates can produce documents for.
+ *
+ * `packing_lists` and `receipts` have no schema and no stored rows — a template
+ * produces them, nothing computes over them, so {@link TEMPLATE_COLLECTION_SCHEMAS}
+ * omits both and the generated field reference is `Partial` to match.
+ */
+export const TEMPLATE_TARGET_COLLECTIONS = [
+  "quotes",
+  "packing_lists",
+  "invoices",
+  "receipts",
+] as const;
 /** Firestore collection that a template produces documents for. */
 export type TemplateTargetCollectionType = typeof TEMPLATE_TARGET_COLLECTIONS[number];
 
