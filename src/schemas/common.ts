@@ -1421,12 +1421,86 @@ export const Address: z.ZodType<AddressType | null> = z.strictObject({
   pii: "mask",
 });
 
+// ── Organization tree ───────────────────────────────────────────────
+
+/** One node of an organization's ancestor chain. */
+export interface OrgPathNodeType {
+  uid: string;
+  name: string;
+  derived: boolean;
+}
+
+/**
+ * One node of the chain.
+ *
+ * `name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}
+ * exactly — so `composeOrgName` can never return `""`, and the nine embedded
+ * organization snapshots' own `.min(1).max(100)` is satisfied by construction.
+ *
+ * 🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model
+ * had `uid_tree: string[]` + `name_tree: string[]` held in element-for-element
+ * alignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were
+ * each one copy moving without the other in exactly that shape, and the ruling
+ * is explicit: *a join by VALUE across two arrays… re-adding either re-opens*
+ * all three. A single array of nodes makes index-misalignment
+ * **unrepresentable** rather than `superRefine`-checked.
+ *
+ * It also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact
+ * segment equality (`=== "name"`), so a field called `name_tree` would be
+ * invisible to it and the customer name would have lost its `pii: "mask"`
+ * classification with the gate still green. Inside a node the segment is
+ * literally `name`, and the existing gate keeps working.
+ *
+ * `derived` marks an AUTO-MINTED node — readable from this document alone, with
+ * no ancestor fan-out, which is what lets a leaf render its own label.
+ */
+export const OrgPathNode: z.ZodType<OrgPathNodeType> = z.strictObject({
+  uid: FirestoreId,
+  name: z.string().min(1).max(100).meta({ pii: "mask" }),
+  derived: z.boolean(),
+});
+
 // ── Document organization snapshot ──────────────────────────────────
 
 /** The customer-organization snapshot embedded on an order/invoice/credit note. */
 export interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
+  /**
+   * The customer's position in the organization tree AT THE MOMENT THIS
+   * DOCUMENT WAS WRITTEN — the same `{uid, name, derived}[]` the organization
+   * document carries.
+   *
+   * 🔴 **Stored rather than looked up live, and the COST ASYMMETRY is why —
+   * not the consumer count.** Dropping an unused field later is the four-step
+   * removal: annoying, tractable, mechanical. **A snapshot you did not take
+   * cannot be recovered.** Backfilling this a year from now would have to
+   * reconstruct the tree *as it was at each document's write time*, and nothing
+   * records that.
+   *
+   * ⭐ **And there is a window that closes.** At migration time the tree is
+   * brand new, so *"the tree as it was when this document was written"* equals
+   * *"the tree now"* for EVERY historical document — the backfill is exact and
+   * free. The moment the first re-parent lands, it stops being either.
+   *
+   * ⚠️ **The composed `name` beside it is not a substitute.** It freezes the
+   * chain TEXTUALLY, which cannot be grouped on, joined on, or parsed back if
+   * the delimiter ever changes — the same argument the tree already makes for
+   * `path` over a delimited string, one level out. An Org Statement handed to a
+   * customer and re-rendered later must resolve the chain it was BUILT from, or
+   * a re-parent silently rewrites history on an issued document.
+   *
+   * Scoped to the three document types that get re-rendered or reported on —
+   * orders, invoices and credit notes, which is exactly what this snapshot
+   * covers. The light shapes (`bookings`, `out-of-service`, `cards`,
+   * `fulfillments`) are operational and short-lived, so a live lookup is fine;
+   * the EDGES (`contacts.organizations[]`, `destinations.organizations[]`) store
+   * the addressed uid only, which is a separate rule and still holds.
+   *
+   * `.optional()` through the expand third, for the disjoint-accepted-sets
+   * reason the `crms_id` comment below spells out at length.
+   */
+  path?: OrgPathNodeType[];
   crms_id?: number | null;
   /**
    * Level 2 of the jurisdiction precedence — the customer's standing claim,
@@ -1510,6 +1584,7 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
     uid: FirestoreId.nullable(),
     // No `label` — the heading is the "Organization" carried by the key above.
     name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
+    path: z.array(OrgPathNode).min(1).max(3).optional(),
     crms_id: z.int().nullable().optional(),
     // REQUIRED as of api-cloudrun#489 — the contract third of
     // expand/migrate/contract, and the reason it took three steps is worth

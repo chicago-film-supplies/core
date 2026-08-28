@@ -2767,6 +2767,7 @@ The customer-organization snapshot embedded on an order/invoice/credit note.
 interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
+  path?: OrgPathNodeType[];
   crms_id?: number | null;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -10582,6 +10583,7 @@ The customer-organization snapshot embedded on an order/invoice/credit note.
 interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
+  path?: OrgPathNodeType[];
   crms_id?: number | null;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -10972,6 +10974,47 @@ Allowed values for out-of-service reason.
 
 ```ts
 type OOSReasonType = indexedAccess;
+```
+
+### `OrgPathNode`
+
+One node of the chain.
+
+`name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}
+exactly — so `composeOrgName` can never return `""`, and the nine embedded
+organization snapshots' own `.min(1).max(100)` is satisfied by construction.
+
+🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model
+had `uid_tree: string[]` + `name_tree: string[]` held in element-for-element
+alignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were
+each one copy moving without the other in exactly that shape, and the ruling
+is explicit: *a join by VALUE across two arrays… re-adding either re-opens*
+all three. A single array of nodes makes index-misalignment
+**unrepresentable** rather than `superRefine`-checked.
+
+It also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact
+segment equality (`=== "name"`), so a field called `name_tree` would be
+invisible to it and the customer name would have lost its `pii: "mask"`
+classification with the gate still green. Inside a node the segment is
+literally `name`, and the existing gate keeps working.
+
+`derived` marks an AUTO-MINTED node — readable from this document alone, with
+no ancestor fan-out, which is what lets a leaf render its own label.
+
+```ts
+const OrgPathNode: z.ZodType<OrgPathNodeType>;
+```
+
+### `OrgPathNodeType`
+
+One node of an organization's ancestor chain.
+
+```ts
+interface OrgPathNodeType {
+  uid: string;
+  name: string;
+  derived: boolean;
+}
 ```
 
 ### `PRE_TAX_ITEM_TYPES`
@@ -14571,47 +14614,6 @@ One level of the organization tree.
 
 ```ts
 type OrgLevel = indexedAccess;
-```
-
-### `OrgPathNode`
-
-One node of the chain.
-
-`name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}
-exactly — so `composeOrgName` can never return `""`, and the nine embedded
-organization snapshots' own `.min(1).max(100)` is satisfied by construction.
-
-🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model
-had `uid_tree: string[]` + `name_tree: string[]` held in element-for-element
-alignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were
-each one copy moving without the other in exactly that shape, and the ruling
-is explicit: *a join by VALUE across two arrays… re-adding either re-opens*
-all three. A single array of nodes makes index-misalignment
-**unrepresentable** rather than `superRefine`-checked.
-
-It also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact
-segment equality (`=== "name"`), so a field called `name_tree` would be
-invisible to it and the customer name would have lost its `pii: "mask"`
-classification with the gate still green. Inside a node the segment is
-literally `name`, and the existing gate keeps working.
-
-`derived` marks an AUTO-MINTED node — readable from this document alone, with
-no ancestor fan-out, which is what lets a leaf render its own label.
-
-```ts
-const OrgPathNode: z.ZodType<OrgPathNodeType>;
-```
-
-### `OrgPathNodeType`
-
-One node of an organization's ancestor chain.
-
-```ts
-interface OrgPathNodeType {
-  uid: string;
-  name: string;
-  derived: boolean;
-}
 ```
 
 ### `Organization`
