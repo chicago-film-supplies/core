@@ -18,9 +18,13 @@ export {
 export {
   OrganizationSchema,
   OrganizationContact,
+  OrgPathNode,
+  ORG_LEVELS,
   CreateOrganizationInput,
   UpdateOrganizationInput,
   NewContactInput,
+  type OrgLevel,
+  type OrgPathNodeType,
   type Organization,
   type OrganizationContactType,
   type CreateOrganizationInputType,

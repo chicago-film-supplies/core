@@ -1,10 +1,19 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 
 /** A real 20-char Firestore id — `FirestoreId` rejects anything else, and a
  * fixture that fails on the uid makes a "rejects a bad name" test pass for the
  * wrong reason. */
 const ORG_ID = "x0fdH2hFqKY9HsOsEmi4";
-import { buildOrganizationSnapshot } from "../src/utils/organizations.ts";
+import {
+  buildOrganizationSnapshot,
+  composeOrgName,
+  computeOrganizationNode,
+  orgLevel,
+  orgOwnName,
+  orgParentUid,
+  orgRootUid,
+  validateOrganizationTree,
+} from "../src/utils/organizations.ts";
 import { DocumentOrganizationSnapshot, type Organization } from "../src/schemas/mod.ts";
 
 const ORG = {
@@ -150,4 +159,167 @@ Deno.test("the shared snapshot now REFUSES a tax_profile — api-cloudrun#596 it
       `a stored ${value} must be refused — that is what made the migration a precondition`,
     );
   }
+});
+
+// ─── The tree ───────────────────────────────────────────────────────────────
+//
+// ⚠️ **Every negative case below plants ONE violation into an otherwise valid
+// node.** A hand-spelled invalid fixture makes a test pass for the wrong reason
+// — `tests/organization.test.ts` records two of this file's siblings already
+// doing that — and here it is worse than usual: the four one-document
+// invariants and the three context invariants can each mask another.
+
+const ROOT_ID = "aaaaaaaaaaaaaaaaaaaa";
+const PROJECT_ID = "bbbbbbbbbbbbbbbbbbbb";
+const DEPT_ID = "cccccccccccccccccccc";
+const TYPE_ID = "dddddddddddddddddddd";
+
+const rootNode = { uid: ROOT_ID, name: "Netflix Productions, LLC", derived: false };
+const projectNode = { uid: PROJECT_ID, name: "Saturn Return", derived: false };
+const deptNode = { uid: DEPT_ID, name: "Locations", derived: false };
+
+const rootDoc = { uid: ROOT_ID, path: [rootNode], uid_department_type: null };
+const projectDoc = { uid: PROJECT_ID, path: [rootNode, projectNode], uid_department_type: null };
+const deptDoc = { uid: DEPT_ID, path: [rootNode, projectNode, deptNode], uid_department_type: TYPE_ID };
+
+Deno.test("computeOrganizationNode is the ONE author — path is [...parent.path, self]", () => {
+  const root = computeOrganizationNode(rootNode, null);
+  assertEquals(root.path, [rootNode]);
+  assertEquals(root.query_by_organizations, [ROOT_ID]);
+
+  const project = computeOrganizationNode(projectNode, { uid: ROOT_ID, path: root.path });
+  assertEquals(project.path, [rootNode, projectNode]);
+  assertEquals(project.query_by_organizations, [ROOT_ID, PROJECT_ID]);
+
+  const dept = computeOrganizationNode(deptNode, { uid: PROJECT_ID, path: project.path });
+  assertEquals(dept.path, [rootNode, projectNode, deptNode]);
+  assertEquals(dept.query_by_organizations, [ROOT_ID, PROJECT_ID, DEPT_ID]);
+});
+
+Deno.test("computeOrganizationNode refuses a fourth level — a SEASON is part of the project title", () => {
+  assertThrows(
+    () => computeOrganizationNode({ uid: "eeeeeeeeeeeeeeeeeeee", name: "S2", derived: false }, { uid: DEPT_ID, path: deptDoc.path }),
+    Error,
+    "3 levels",
+  );
+});
+
+Deno.test("computeOrganizationNode refuses a cycle — a node cannot be its own ancestor", () => {
+  assertThrows(
+    () => computeOrganizationNode(rootNode, { uid: PROJECT_ID, path: projectDoc.path }),
+    Error,
+    "its own path",
+  );
+});
+
+Deno.test("computeOrganizationNode refuses an un-backfilled parent rather than minting a wrong path", () => {
+  assertThrows(
+    () => computeOrganizationNode(projectNode, { uid: ROOT_ID, path: undefined }),
+    Error,
+    "has no path",
+  );
+});
+
+Deno.test("the derivations are READ OFF path — there is no stored level, root or parent", () => {
+  assertEquals(orgLevel(rootDoc), "organization");
+  assertEquals(orgLevel(projectDoc), "project");
+  assertEquals(orgLevel(deptDoc), "department");
+  assertEquals(orgLevel({ path: undefined }), null);
+
+  assertEquals(orgRootUid(deptDoc), ROOT_ID);
+  assertEquals(orgParentUid(deptDoc), PROJECT_ID);
+  assertEquals(orgParentUid(rootDoc), null, "a root's parent is null");
+  assertEquals(orgOwnName(deptDoc), "Locations");
+});
+
+Deno.test("composeOrgName joins the operator-named segments and drops the derived ones", () => {
+  assertEquals(composeOrgName(deptDoc.path), "Netflix Productions, LLC / Saturn Return / Locations");
+  assertEquals(
+    composeOrgName([rootNode, { uid: PROJECT_ID, name: "(default)", derived: true }, { uid: DEPT_ID, name: "(default)", derived: true }]),
+    "Netflix Productions, LLC",
+    "a fully-derived chain renders as its root alone",
+  );
+});
+
+Deno.test("composeOrgName can never return an empty string — invariant 2 guarantees a named root", () => {
+  // `path[0].derived === false` is asserted on the document, so at least one
+  // segment always survives the filter. This is the property the nine embedded
+  // snapshots' own `.min(1).max(100)` depends on.
+  assertEquals(composeOrgName([rootNode]).length > 0, true);
+  assertEquals(composeOrgName([{ ...rootNode, derived: true }]), "Netflix Productions, LLC", "even a hostile all-derived path falls back to the chain rather than to \"\"");
+});
+
+Deno.test("composeOrgName elides the MIDDLE before it shortens, and never truncates the tail", () => {
+  // 50 is Xero's contact-name cap, passed in — core owns the algorithm, api owns
+  // the constant.
+  // ⚠️ **52, not the 50 the plan doc claimed.** The measurement matters in the
+  // direction that makes the branch live rather than theoretical, so the
+  // correction only strengthens it — but a figure quoted as "exactly at the cap"
+  // is one edit from reading as "fits".
+  const full = "Netflix Productions, LLC / Saturn Return / Locations";
+  assertEquals(full.length, 52, "the live case is TWO characters over Xero's 50 — this is not a theoretical branch");
+
+  const elided = composeOrgName(deptDoc.path, { maxLength: 50 });
+  assertEquals(elided, "Netflix Productions, LLC / … / Locations");
+  assertEquals(elided.length <= 50, true);
+  assertEquals(elided.endsWith("Locations"), true, "the LEAF is the identity — it maps to a Xero contact and therefore to a receivable");
+});
+
+Deno.test("composeOrgName shortens the ROOT when eliding the middle is not enough", () => {
+  const longRoot = { uid: ROOT_ID, name: "A Very Long Legal Entity Name That Will Not Fit Anywhere", derived: false };
+  const out = composeOrgName([longRoot, projectNode, deptNode], { maxLength: 30 });
+  assertEquals(out.length <= 30, true);
+  assertEquals(out.endsWith("Locations"), true, "the leaf survives whole");
+  assertEquals(out.includes("…"), true, "the elision is VISIBLE — a silent drop makes a real two-level path and an elided three-level one indistinguishable in Xero");
+});
+
+Deno.test("composeOrgName keeps the leaf when even the leaf alone is over budget", () => {
+  const out = composeOrgName([rootNode, projectNode, { uid: DEPT_ID, name: "Transportation and Logistics", derived: false }], { maxLength: 12 });
+  assertEquals(out.length <= 12, true);
+  assertEquals(out.startsWith("Transport"), true, "there is nothing more identifying left to preserve");
+});
+
+Deno.test("validateOrganizationTree — invariant 5: the ancestors ARE the parent's path", () => {
+  assertEquals(validateOrganizationTree(deptDoc, projectDoc, []), []);
+  assertEquals(validateOrganizationTree(rootDoc, null, []), []);
+
+  const stale = { ...deptDoc, path: [rootNode, { ...projectNode, name: "Saturn Return (old)" }, deptNode] };
+  const violations = validateOrganizationTree(stale, projectDoc, []);
+  assertEquals(violations.length, 1);
+  assertEquals(violations[0].includes("did not reach this node"), true);
+
+  const wrongDepth = validateOrganizationTree(deptDoc, rootDoc, []);
+  assertEquals(wrongDepth.length, 1);
+  assertEquals(wrongDepth[0].includes("ancestor"), true);
+});
+
+Deno.test("validateOrganizationTree — invariant 6: sibling names are unique, case-folded, among NON-derived siblings", () => {
+  const sibling = { uid: "ffffffffffffffffffff", path: [rootNode, projectNode, { uid: "ffffffffffffffffffff", name: "  locations ", derived: false }], uid_department_type: null };
+  const violations = validateOrganizationTree(deptDoc, projectDoc, [sibling]);
+  assertEquals(violations.length, 1);
+  assertEquals(violations[0].includes("already named"), true);
+
+  const derivedSibling = { ...sibling, path: [rootNode, projectNode, { uid: "ffffffffffffffffffff", name: "Locations", derived: true }] };
+  assertEquals(
+    validateOrganizationTree(deptDoc, projectDoc, [derivedSibling]),
+    [],
+    "a MINTED sibling does not hold a name against an operator-named one — two `(default)` nodes under one parent is a transient state of the mint, not a collision",
+  );
+});
+
+Deno.test("validateOrganizationTree — invariant 6b: department-type uniqueness is a plain EQUALITY check", () => {
+  // This is what the vocabulary buys: comparing catalog uids rather than
+  // case-folding two strings that may be `Transportation` and `Transpo`.
+  const sibling = {
+    uid: "ffffffffffffffffffff",
+    path: [rootNode, projectNode, { uid: "ffffffffffffffffffff", name: "Transpo", derived: false }],
+    uid_department_type: TYPE_ID,
+  };
+  const violations = validateOrganizationTree(deptDoc, projectDoc, [sibling]);
+  assertEquals(violations.length, 1);
+  assertEquals(violations[0].includes("department type"), true, "the NAMES differ and the guard still fires — which a string compare could not do");
+});
+
+Deno.test("validateOrganizationTree returns [] for an un-backfilled node rather than inventing findings", () => {
+  assertEquals(validateOrganizationTree({ uid: ROOT_ID, path: undefined, uid_department_type: null }, null, []), []);
 });

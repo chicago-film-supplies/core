@@ -2,6 +2,7 @@
  * Organization document schema — Firestore collection: organizations
  */
 import { z } from "zod";
+import { chicagoStartOfDay } from "./_datetime.ts";
 import { FirestoreId, ThreadId } from "./_uid.ts";
 import {
   ActorRef,
@@ -39,12 +40,166 @@ export const OrganizationContact: z.ZodType<OrganizationContactType> = z.strictO
 });
 
 /**
+ * The three levels of the organization tree, root first.
+ *
+ * ⚠️ **`as const` on a tuple is the core#43 construct** — its declaration is not
+ * syntactically derivable, so `deno task check:declarations` needs the type
+ * written out or JSR publishes a wrong `.d.ts`. Hence the explicit annotation
+ * rather than a bare `as const`.
+ *
+ * ⚠️ **There is no stored `level` field, and there must not be.** The level is
+ * `ORG_LEVELS[path.length - 1]` — read off `path`, so the entire class of
+ * "`level` says department but the node sits at depth 2" is unrepresentable
+ * rather than policed. Same for root, parent and the composed display name.
+ */
+export const ORG_LEVELS: readonly ["organization", "project", "department"] = [
+  "organization",
+  "project",
+  "department",
+] as const;
+
+/** One level of the organization tree. */
+export type OrgLevel = typeof ORG_LEVELS[number];
+
+/** One node of an organization's ancestor chain. */
+export interface OrgPathNodeType {
+  uid: string;
+  name: string;
+  derived: boolean;
+}
+
+/**
+ * One node of the chain.
+ *
+ * `name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}
+ * exactly — so `composeOrgName` can never return `""`, and the nine embedded
+ * organization snapshots' own `.min(1).max(100)` is satisfied by construction.
+ *
+ * 🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model
+ * had `uid_tree: string[]` + `name_tree: string[]` held in element-for-element
+ * alignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were
+ * each one copy moving without the other in exactly that shape, and the ruling
+ * is explicit: *a join by VALUE across two arrays… re-adding either re-opens*
+ * all three. A single array of nodes makes index-misalignment
+ * **unrepresentable** rather than `superRefine`-checked.
+ *
+ * It also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact
+ * segment equality (`=== "name"`), so a field called `name_tree` would be
+ * invisible to it and the customer name would have lost its `pii: "mask"`
+ * classification with the gate still green. Inside a node the segment is
+ * literally `name`, and the existing gate keeps working.
+ *
+ * `derived` marks an AUTO-MINTED node — readable from this document alone, with
+ * no ancestor fan-out, which is what lets a leaf render its own label.
+ */
+export const OrgPathNode: z.ZodType<OrgPathNodeType> = z.strictObject({
+  uid: FirestoreId,
+  name: z.string().min(1).max(100).meta({ pii: "mask" }),
+  derived: z.boolean(),
+});
+
+/**
  * Full organization document schema (Firestore document shape).
  */
 export interface Organization {
   uid: string;
   name: string;
-  crms_id: number;
+  /**
+   * Self-inclusive ancestor chain, root first: `[org, project, department]`.
+   * `path.at(-1).uid === uid`.
+   *
+   * **THE structural fact.** Level, root, parent and the composed display name
+   * are all READ OFF IT (`orgLevel` / `orgRootUid` / `orgParentUid` /
+   * `composeOrgName` in `@cfs/core/utils/organizations`), so none of them can
+   * drift from it — there is no `level`, `uid_parent` or `uid_root` to disagree.
+   *
+   * Same name, same shape and same recurrence as `order.items[].path`
+   * (`core/src/utils/order-lines.ts` documents self-inclusive):
+   *
+   *     path = [...parent.path, { uid, name, derived }]
+   *
+   * ⚠️ **`path`, not `uid_path` or `uid_tree`.** `core/CLAUDE.md` § *UID
+   * property naming* reserves `uid_{descriptor}` for a SCALAR reference to one
+   * other document, and `_uid.ts` puts array-element ids in a deliberately
+   * separate concern — its shape table already reads *"`ItemUid` …
+   * `path[]` segments"*, so `path` is this codebase's established name for a
+   * self-inclusive ancestor chain of ids.
+   *
+   * ⚠️ **No `.default([])`.** `item.path` carries one and it never
+   * materializes: `validateBeforeWrite` writes the RAW document and discards
+   * `result.data`. Construct this completely.
+   *
+   * `.optional()` for one release cycle — the expand third of the additive
+   * rollout. It becomes required once the corpus is backfilled.
+   */
+  path?: OrgPathNodeType[];
+  /**
+   * Flat mirror of `path.map(n => n.uid)` — **FIRESTORE-ONLY, for exactly one
+   * reader.**
+   *
+   * Firestore's `array-contains` compares whole elements, so it cannot match a
+   * uid inside an array of objects; this is what makes
+   * `where("query_by_organizations", "array-contains", uid)` answer "every
+   * descendant of X". ⚠️ **Typesense needs no mirror at all** —
+   * `enable_nested_fields` is on, so it indexes `path.uid` natively and
+   * `filter_by: path.uid:=X` answers the same question. Every *read* surface
+   * uses Typesense; the mirror exists for the rename cascade's `scanCascadeIds`,
+   * which is a write path and therefore cannot depend on a rebuildable,
+   * eventually-consistent projection.
+   *
+   * ⚠️ **Named for the collection it points at**, which is the established
+   * convention (`contacts.query_by_organizations`,
+   * `destinations.query_by_organizations`, `organizations.query_by_contacts`).
+   * One semantic wrinkle: on those collections it means *"the orgs this document
+   * is attached to"*; here it means *"my ancestors, including me"* — the same
+   * convention, self-referentially.
+   */
+  query_by_organizations?: string[];
+  /**
+   * Provenance for an AUTO-MINTED node, so a later realignment can find the
+   * population when someone names the real production. `null` on an
+   * operator-named node.
+   *
+   * ⚠️ Distinct from `path[i].derived`, which is the ANCESTORS' state
+   * denormalized so a leaf renders its own label with no fan-out. Two facts, not
+   * two spellings — and they overlap in exactly one place, which the tree
+   * validator pins: `derived_from === null ⟺ path.at(-1).derived === false`.
+   */
+  derived_from?: { source_uid: string; reason: "minted-root" | "minted-project" | "minted-department" } | null;
+  /**
+   * The `department-types` catalog entry this DEPARTMENT node is named from —
+   * `null` on an organization or project node, and on a *derived* department.
+   *
+   * 🔴 **Stored as a REF, not just a matching name.** Storing only the name
+   * means a catalog rename cannot find its population — the same *"pair on what
+   * the field is a fact about"* rule that governs every carry-forward in this
+   * codebase. `path.at(-1).name` stays a denorm of the catalog entry's name and
+   * a rename cascades to it (bounded: a department is a LEAF, so its name
+   * appears in no other node's `path`).
+   */
+  uid_department_type?: string | null;
+  /**
+   * Project-level facts — the production's shoot window.
+   *
+   * ⚠️ **NOT nullable on the outer object.** `null` and
+   * `{ start: null, wrap: null }` would be two spellings of one fact, which is
+   * the defect `core/CLAUDE.md` names under *"Required, not merely
+   * non-optional"*. Precedent: `CardDatesType`, `OOSDates`, `booking.dates`.
+   *
+   * ACTIVE/DORMANT stays DERIVED from this window — no stored status.
+   */
+  dates?: { start: string | null; wrap: string | null };
+  /**
+   * 🔴 **Nullable because a non-leaf node has no CRMS counterpart, which is a
+   * real answer rather than "unknown".** `createOrganization` POSTs a live CRMS
+   * member to obtain this, and a minted root or project must not create one.
+   *
+   * ⚠️ **`null` here is only meaningful because the minting writer stamps an
+   * explicit `null`.** `orders.crms_id` reads identically and is REQUIRED,
+   * because `createOrder` writes an explicit `null` — *same census, opposite
+   * verdicts, and only the writer distinguishes them* (`core/CLAUDE.md`).
+   */
+  crms_id: number | null;
   xero_id: string | null;
   /**
    * This customer's standing jurisdiction claim — **level 2** of the
@@ -117,11 +272,110 @@ export interface Organization {
   updated_at: FirestoreTimestampType;
 }
 
+/**
+ * The four invariants that read **ONE document and nothing else**.
+ *
+ * 🔴 **Their independence is the whole point.** The rest of the tree guard is a
+ * fixed-point check — *"`path` equals what the recompute produces"* — which is
+ * defined in terms of the normalizer and can therefore only ever agree with it.
+ * When `computeInvoiceItemPaths` returned its input unchanged on a divider-less
+ * invoice, exactly that shape of guard certified **79 provably-wrong items as
+ * clean, corpus-wide**. So these four are asserted DIRECTLY, and the
+ * parent-chain recurrence is safe *because* they stand beside it.
+ *
+ * 🔴 **Invariant 1 is invisible to the existing drift guard, and that is why it
+ * is here rather than in api-cloudrun.** `assertValidForWrite` /
+ * `assertValidPatch` read `doc.uid` and compare it to `ref.id`; nothing checks
+ * `path.at(-1).uid`. So `path` carries a SECOND copy of the document's own id
+ * that only this refinement defends.
+ *
+ * ⚠️ Every arm is guarded on `path` being present, because `path` is
+ * `.optional()` through the expand third of the rollout. That guard comes out
+ * with the optionality.
+ */
+function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
+  const path = doc.path;
+  if (path === undefined) return;
+
+  // 1. self-inclusive: the last node IS this document.
+  if (path.length > 0 && path[path.length - 1].uid !== doc.uid) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path", path.length - 1, "uid"],
+      message: `path is self-inclusive: path.at(-1).uid must equal uid (${doc.uid}), got ${path[path.length - 1].uid}`,
+    });
+  }
+
+  // 2. a root is always operator-named, so `composeOrgName` can never return "".
+  if (path.length > 0 && path[0].derived) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path", 0, "derived"],
+      message: "the root node is always operator-named — path[0].derived must be false, or a composed name could be empty",
+    });
+  }
+
+  // 3. `derived_from` and the leaf's own `derived` are two facts, and this is
+  //    the one place they overlap.
+  if (doc.derived_from !== undefined && path.length > 0) {
+    const leafDerived = path[path.length - 1].derived;
+    if ((doc.derived_from === null) !== (leafDerived === false)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["derived_from"],
+        message: `derived_from === null must agree with path.at(-1).derived === false (derived_from is ${doc.derived_from === null ? "null" : "set"}, leaf derived is ${leafDerived})`,
+      });
+    }
+  }
+
+  // 4. the Firestore-only flat mirror is exactly the uids of `path`.
+  if (doc.query_by_organizations !== undefined) {
+    const expected = path.map((n) => n.uid);
+    const actual = doc.query_by_organizations;
+    if (actual.length !== expected.length || expected.some((uid, i) => actual[i] !== uid)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["query_by_organizations"],
+        message: `query_by_organizations must equal path.map(n => n.uid) — expected [${expected.join(", ")}], got [${actual.join(", ")}]`,
+      });
+    }
+  }
+
+  // 8 (the half that is a one-document check). A typed department names a
+  //   catalog entry; nothing else may.
+  if (doc.uid_department_type !== undefined && path.length > 0) {
+    const isTypedDepartment = path.length === 3 && !path[path.length - 1].derived;
+    if ((doc.uid_department_type !== null) !== isTypedDepartment) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["uid_department_type"],
+        message: `uid_department_type is set on exactly the TYPED departments (path.length === 3 and not derived) — this node is depth ${path.length}${path.length > 0 && path[path.length - 1].derived ? " and derived" : ""}`,
+      });
+    }
+  }
+}
+
 /** Zod schema for a full organization Firestore document. */
 export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask", column: true, label: "Name", linkTo: "organizationDetail" }),
-  crms_id: z.int(),
+  // ⚠️ `column: true` WITHOUT a `label`, so each node's heading composes from
+  // the key that holds it — see `core/CLAUDE.md` § *Display columns*. It is not
+  // in `displayDefaults.columns` yet: the scalar `name` is still the sort field
+  // and the first column, and T10 forbids a rollup shadowing a declared column,
+  // so the swap lands in the same commit as the `name` removal.
+  path: z.array(OrgPathNode).min(1).max(3).optional().meta({ column: true, label: "Tree" }),
+  query_by_organizations: z.array(z.string()).optional(),
+  derived_from: z.strictObject({
+    source_uid: FirestoreId,
+    reason: z.enum(["minted-root", "minted-project", "minted-department"]),
+  }).nullable().optional(),
+  uid_department_type: FirestoreId.nullable().optional(),
+  dates: z.strictObject({
+    start: chicagoStartOfDay().nullable().meta({ column: true, label: "Start" }),
+    wrap: chicagoStartOfDay().nullable().meta({ column: true, label: "Wrap" }),
+  }).optional().meta({ label: "Dates" }),
+  crms_id: z.int().nullable(),
   xero_id: z.uuid().nullable(),
   // ⚠️ The "Required (no `.default(\"tax_applied\")`) … TAX_PROFILES[0]" note
   // that stood here described `tax_profile` and outlived it, sitting above a
@@ -150,7 +404,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
-}).meta({
+}).superRefine(checkOrganizationNode).meta({
   title: "Organization",
   collection: "organizations",
   displayDefaults: {
@@ -183,7 +437,28 @@ export const NewContactInput: z.ZodType<NewContactInputType> = z.object({
  */
 export interface CreateOrganizationInputType {
   uid: string;
+  /**
+   * The node's OWN name — one segment, not the composed display string.
+   * `composeOrgName(path)` is what renders the full label, and nothing anywhere
+   * splits a string to recover the hierarchy.
+   */
   name: string;
+  /**
+   * The parent to hang this node under, or `null`/absent for a root.
+   *
+   * ⚠️ **The server derives `path` from the RESOLVED parent, never from a chain
+   * the client sends** — the same one-author rule `computeItemPaths` enforces on
+   * `items[].path`, so a client that skips, misnames or over-claims an
+   * intermediate cannot survive a write.
+   */
+  uid_parent?: string | null;
+  /**
+   * The `department-types` entry a DEPARTMENT node names itself from. Required
+   * by the tree validator on a typed department and refused elsewhere; the
+   * server denormalizes its name into `path.at(-1).name`.
+   */
+  uid_department_type?: string | null;
+  dates?: { start: string | null; wrap: string | null };
   /**
    * The two tax AXES a client states — the customer's standing jurisdiction
    * claim (level 2) and whether they are exempt.
@@ -206,6 +481,12 @@ export interface CreateOrganizationInputType {
 export const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType> = z.object({
   uid: FirestoreId,
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
+  uid_parent: FirestoreId.nullable().optional(),
+  uid_department_type: FirestoreId.nullable().optional(),
+  dates: z.object({
+    start: chicagoStartOfDay().nullable(),
+    wrap: chicagoStartOfDay().nullable(),
+  }).optional(),
   jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   billing_address: Address,
@@ -220,7 +501,27 @@ export const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType> = z
  */
 export interface UpdateOrganizationInputType {
   uid?: string;
+  /** The node's OWN name — one segment. See {@link CreateOrganizationInputType}. */
   name?: string;
+  /**
+   * Re-parent this node, rewriting its whole subtree's `path`.
+   *
+   * ⚠️ **Absent and explicit `null` are DIFFERENT here**, which is why this is
+   * not simply `?: string`. Absent means *leave the parent alone*; `null` means
+   * *promote this node to a root*. That is the same split
+   * `updateInvoice`'s destination-jurisdiction edit uses (api-cloudrun#630), and
+   * it is what keeps this off core#70's *"an optional value can be set but never
+   * unset"* surface.
+   *
+   * 🔴 **A re-parent gets its OWN propagation transaction id**, never a borrowed
+   * `update-organization`: it fires a different rule set (the subtree rewrite
+   * plus every name/snapshot rule, once per descendant), so `rules_expected`
+   * genuinely differs — and a borrowed transaction id turns the drift warning
+   * off silently.
+   */
+  uid_parent?: string | null;
+  uid_department_type?: string | null;
+  dates?: { start: string | null; wrap: string | null };
   /** The AXES — see {@link CreateOrganizationInputType}. */
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -237,6 +538,12 @@ export interface UpdateOrganizationInputType {
 export const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType> = z.object({
   uid: FirestoreId.optional(),
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }).optional(),
+  uid_parent: FirestoreId.nullable().optional(),
+  uid_department_type: FirestoreId.nullable().optional(),
+  dates: z.object({
+    start: chicagoStartOfDay().nullable(),
+    wrap: chicagoStartOfDay().nullable(),
+  }).optional(),
   jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   description: z.string().optional(),

@@ -40,7 +40,36 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // `Organization` DOCUMENT — a shape no render context ever holds (a template
   // sees `it.doc.organization`, which is this function's OUTPUT). Emitting it
   // would advertise a helper whose one argument is unreachable from a template.
-  organizations: ["buildOrganizationSnapshot"],
+  //
+  // 🔴 **And the whole namespace is denylisted, on a stronger ground than
+  // per-symbol usefulness: `it.organizations` is NOT INJECTED.** It appears in
+  // neither `TEMPLATE_COLLECTION_UTILS` nor `ALWAYS_ON_UTIL_NAMESPACES`
+  // (`src/schemas/template-context.ts`), so every helper here would be
+  // *"documentation promising a global that throws at render time"* — the exact
+  // defect that file records `it.money` having had for eleven helpers.
+  //
+  // ⚠️ Two of these could never be emitted even if the namespace were injected:
+  // `computeOrganizationNode` is the ONE AUTHOR of `path` and
+  // `validateOrganizationTree` is its guard — both are write-path, and a
+  // template calling either is a category error rather than a mistake.
+  // `orgRootUid` / `orgParentUid` return document IDs, which a rendered document
+  // never prints.
+  //
+  // ⭐ `composeOrgName` is the one genuine candidate for promotion, and the
+  // condition is explicit: it becomes render-useful the moment
+  // `DocumentOrganizationSnapshot` carries `path` AND `organizations` is added
+  // to one of the two injection lists. Until both hold, emitting it is worse
+  // than omitting it.
+  organizations: [
+    "buildOrganizationSnapshot",
+    "composeOrgName",
+    "computeOrganizationNode",
+    "orgLevel",
+    "orgOwnName",
+    "orgParentUid",
+    "orgRootUid",
+    "validateOrganizationTree",
+  ],
   // Stock primitives — the interval rules and the two consumption definitions.
   // Denylisted whole, for the same reason as `movements`:
   // every one takes a booking breakdown, an OOS record or a Firestore timestamp

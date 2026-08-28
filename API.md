@@ -1820,6 +1820,9 @@ crms_id and xero_id are obtained from external APIs — not in input.
 interface CreateOrganizationInputType {
   uid: string;
   name: string;
+  uid_parent?: string | null;
+  uid_department_type?: string | null;
+  dates?: typeLiteral;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
@@ -5122,6 +5125,24 @@ never accepted from a manual write.
 const ORDER_USER_STATUSES: "draft" | "quoted" | "reserved" | "canceled"[];
 ```
 
+### `ORG_LEVELS`
+
+The three levels of the organization tree, root first.
+
+⚠️ **`as const` on a tuple is the core#43 construct** — its declaration is not
+syntactically derivable, so `deno task check:declarations` needs the type
+written out or JSR publishes a wrong `.d.ts`. Hence the explicit annotation
+rather than a bare `as const`.
+
+⚠️ **There is no stored `level` field, and there must not be.** The level is
+`ORG_LEVELS[path.length - 1]` — read off `path`, so the entire class of
+"`level` says department but the node sits at depth 2" is unrepresentable
+rather than policed. Same for root, parent and the composed display name.
+
+```ts
+const ORG_LEVELS: readonly ["organization", "project", "department"];
+```
+
 ### `Order`
 
 Full order document schema (Firestore document shape).
@@ -5569,6 +5590,55 @@ type OrderUpdated = EventEnvelope<Order> & typeLiteral;
 type OrderUserStatusType = indexedAccess;
 ```
 
+### `OrgLevel`
+
+One level of the organization tree.
+
+```ts
+type OrgLevel = indexedAccess;
+```
+
+### `OrgPathNode`
+
+One node of the chain.
+
+`name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}
+exactly — so `composeOrgName` can never return `""`, and the nine embedded
+organization snapshots' own `.min(1).max(100)` is satisfied by construction.
+
+🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model
+had `uid_tree: string[]` + `name_tree: string[]` held in element-for-element
+alignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were
+each one copy moving without the other in exactly that shape, and the ruling
+is explicit: *a join by VALUE across two arrays… re-adding either re-opens*
+all three. A single array of nodes makes index-misalignment
+**unrepresentable** rather than `superRefine`-checked.
+
+It also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact
+segment equality (`=== "name"`), so a field called `name_tree` would be
+invisible to it and the customer name would have lost its `pii: "mask"`
+classification with the gate still green. Inside a node the segment is
+literally `name`, and the existing gate keeps working.
+
+`derived` marks an AUTO-MINTED node — readable from this document alone, with
+no ancestor fan-out, which is what lets a leaf render its own label.
+
+```ts
+const OrgPathNode: z.ZodType<OrgPathNodeType>;
+```
+
+### `OrgPathNodeType`
+
+One node of an organization's ancestor chain.
+
+```ts
+interface OrgPathNodeType {
+  uid: string;
+  name: string;
+  derived: boolean;
+}
+```
+
 ### `Organization`
 
 Full organization document schema (Firestore document shape).
@@ -5577,7 +5647,12 @@ Full organization document schema (Firestore document shape).
 interface Organization {
   uid: string;
   name: string;
-  crms_id: number;
+  path?: OrgPathNodeType[];
+  query_by_organizations?: string[];
+  derived_from?: typeLiteral | null;
+  uid_department_type?: string | null;
+  dates?: typeLiteral;
+  crms_id: number | null;
   xero_id: string | null;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -8500,6 +8575,9 @@ Input schema for PUT /organizations/:uid — partial update.
 interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
+  uid_parent?: string | null;
+  uid_department_type?: string | null;
+  dates?: typeLiteral;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -14436,6 +14514,9 @@ crms_id and xero_id are obtained from external APIs — not in input.
 interface CreateOrganizationInputType {
   uid: string;
   name: string;
+  uid_parent?: string | null;
+  uid_department_type?: string | null;
+  dates?: typeLiteral;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
@@ -14466,6 +14547,73 @@ interface NewContactInputType {
 }
 ```
 
+### `ORG_LEVELS`
+
+The three levels of the organization tree, root first.
+
+⚠️ **`as const` on a tuple is the core#43 construct** — its declaration is not
+syntactically derivable, so `deno task check:declarations` needs the type
+written out or JSR publishes a wrong `.d.ts`. Hence the explicit annotation
+rather than a bare `as const`.
+
+⚠️ **There is no stored `level` field, and there must not be.** The level is
+`ORG_LEVELS[path.length - 1]` — read off `path`, so the entire class of
+"`level` says department but the node sits at depth 2" is unrepresentable
+rather than policed. Same for root, parent and the composed display name.
+
+```ts
+const ORG_LEVELS: readonly ["organization", "project", "department"];
+```
+
+### `OrgLevel`
+
+One level of the organization tree.
+
+```ts
+type OrgLevel = indexedAccess;
+```
+
+### `OrgPathNode`
+
+One node of the chain.
+
+`name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}
+exactly — so `composeOrgName` can never return `""`, and the nine embedded
+organization snapshots' own `.min(1).max(100)` is satisfied by construction.
+
+🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model
+had `uid_tree: string[]` + `name_tree: string[]` held in element-for-element
+alignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were
+each one copy moving without the other in exactly that shape, and the ruling
+is explicit: *a join by VALUE across two arrays… re-adding either re-opens*
+all three. A single array of nodes makes index-misalignment
+**unrepresentable** rather than `superRefine`-checked.
+
+It also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact
+segment equality (`=== "name"`), so a field called `name_tree` would be
+invisible to it and the customer name would have lost its `pii: "mask"`
+classification with the gate still green. Inside a node the segment is
+literally `name`, and the existing gate keeps working.
+
+`derived` marks an AUTO-MINTED node — readable from this document alone, with
+no ancestor fan-out, which is what lets a leaf render its own label.
+
+```ts
+const OrgPathNode: z.ZodType<OrgPathNodeType>;
+```
+
+### `OrgPathNodeType`
+
+One node of an organization's ancestor chain.
+
+```ts
+interface OrgPathNodeType {
+  uid: string;
+  name: string;
+  derived: boolean;
+}
+```
+
 ### `Organization`
 
 Full organization document schema (Firestore document shape).
@@ -14474,7 +14622,12 @@ Full organization document schema (Firestore document shape).
 interface Organization {
   uid: string;
   name: string;
-  crms_id: number;
+  path?: OrgPathNodeType[];
+  query_by_organizations?: string[];
+  derived_from?: typeLiteral | null;
+  uid_department_type?: string | null;
+  dates?: typeLiteral;
+  crms_id: number | null;
   xero_id: string | null;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -14539,6 +14692,9 @@ Input schema for PUT /organizations/:uid — partial update.
 interface UpdateOrganizationInputType {
   uid?: string;
   name?: string;
+  uid_parent?: string | null;
+  uid_department_type?: string | null;
+  dates?: typeLiteral;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -25273,6 +25429,21 @@ against the contract table, and the direct `path.length >= 1` /
 
 Organization helpers.
 
+### `ORG_NAME_DELIMITER`
+
+The default separator between composed name segments.
+
+⚠️ **This is the ONLY place a delimiter exists, and it is never stored.** The
+v1 corpus proves a parse is hopeless — four conventions in live use, unstable
+segment ORDER, a double space before one slash (`Leading Edge Media  / Queen`),
+commas inside segments (`Twentieth Television: Insight, UKOP`), and production
+titles that will contain colons. **Nothing anywhere splits a string to recover
+the hierarchy**; `path` is the structure and this is a rendering choice.
+
+```ts
+const ORG_NAME_DELIMITER: " / ";
+```
+
 ### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "name" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
 
 Build the denormalized organization snapshot an order, invoice or credit note
@@ -25330,6 +25501,88 @@ carrying a `jurisdiction_claim` are exactly the 3 with a location profile,
 and the remaining 277 (`tax_applied`) carry neither. Absent on the
 organization already means *asserts nothing*, so there is no third state to
 destroy. See {@link DocumentOrganizationSnapshotType.jurisdiction_claim}.
+
+### `composeOrgName(path: readonly OrgPathNodeType[], _: unknown): string`
+
+Render an organization node's display name from its `path`.
+
+Pure, no I/O — shared verbatim by the manager, the templates renderer and
+api-cloudrun's Xero boundary, so the label a customer sees on an invoice and
+the label the operator sees in the picker cannot drift.
+
+**Non-empty by construction.** A root is always operator-named (invariant 2,
+enforced in `schemas/organization.ts`), so at least one segment always
+survives the `derived` filter and this can never return `""` — which is what
+satisfies the nine embedded snapshots' own `.min(1)` without a second check.
+
+## When it does not fit
+
+⚠️ **`maxLength` is a PARAMETER, never a constant baked in here.** Xero's
+50-character contact-name cap lives beside the other Xero-shaped concerns in
+`api-cloudrun/src/lib/`. Core owns the algorithm; api owns the boundary
+constant. Putting Xero's number in a package the manager and the templates
+renderer also consume is the same mistake the line-price rule refuses.
+
+The order is **elide the middle, then shorten the ROOT — never the tail**:
+
+1. Drop `derived` segments and join.
+2. Over budget with ≥3 segments: replace the middle with `…`.
+3. Still over: shorten the ROOT, keeping the leaf whole. The leaf is the
+   identity — it is what maps to a Xero contact and therefore to a receivable
+   — so truncating the tail is precisely the wrong end. That is what
+   `trimXeroName` does today, and it is why this function exists.
+
+`Netflix Productions, LLC / Saturn Return / Locations` is **exactly 50**, so
+this is live behaviour rather than a theoretical branch.
+
+### `computeOrganizationNode(node: typeLiteral, parent: Pick<Organization, "uid" | "path"> | null): typeLiteral`
+
+**The ONE author of `path` and `query_by_organizations`.** No writer builds
+either by hand — the same rule `computeItemPaths` carries for `items[].path`,
+and for the same reason: a chain the client sends can skip, misname or
+over-claim an intermediate, so the server derives it from the RESOLVED parent
+or not at all.
+
+Throws rather than returning a partial result, because every caller is a write
+path and a silently-wrong `path` is a row identity that addresses the wrong
+subtree.
+
+### `orgLevel(node: Pick<Organization, "path">): OrgLevel | null`
+
+The level a node sits at, read off `path` — never stored, so it cannot drift.
+
+### `orgOwnName(node: Pick<Organization, "path">): string | null`
+
+This node's OWN name — one segment, not the composed label.
+
+### `orgParentUid(node: Pick<Organization, "path">): string | null`
+
+This node's parent — `path.at(-2).uid`.
+
+⚠️ **`null` is TWO answers here and the caller must not conflate them**: a
+root (a one-element `path`) and a node with no `path` yet. Check `orgLevel`
+first when the difference matters.
+
+### `orgRootUid(node: Pick<Organization, "path">): string | null`
+
+The root of this node's tree — `path[0].uid`. `null` before the backfill.
+
+### `validateOrganizationTree(node: Pick<Organization, "uid" | "path" | "uid_department_type">, parent: Pick<Organization, "uid" | "path"> | null, siblings: readonly Pick<Organization, "uid" | "path" | "uid_department_type">[]): string[]`
+
+The tree invariants that need MORE than one document — 5 through 8.
+
+🔴 **1 through 4 are NOT here, deliberately.** They live on
+`OrganizationSchema` as a `superRefine`, because they read one document and
+nothing else, and that independence is what keeps this function honest.
+Invariant 5 is a fixed-point check — *"my path is my parent's path plus me"* —
+defined in terms of {@link computeOrganizationNode} and therefore only ever
+able to agree with it. It is safe **because** four properties that hold
+independently of the walk stand beside it. A guard that can only consult its
+own oracle is not a guard: that is exactly the shape that certified 79
+provably-wrong item paths as clean, corpus-wide.
+
+Returns every violation rather than throwing on the first, so an audit reports
+a whole document at once. An empty array means the node is well-formed.
 
 ## `@cfs/core/utils/products`
 

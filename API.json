@@ -861,7 +861,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -2395,6 +2395,12 @@
           "doc": "Statuses an operator may set directly via UpdateOrderInput.status.\n`active` and `complete` are computed by the booking workflow and are\nnever accepted from a manual write."
         },
         {
+          "kind": "variable",
+          "name": "ORG_LEVELS",
+          "declaration": "const ORG_LEVELS: readonly [\"organization\", \"project\", \"department\"];",
+          "doc": "The three levels of the organization tree, root first.\n\n⚠️ **`as const` on a tuple is the core#43 construct** — its declaration is not\nsyntactically derivable, so `deno task check:declarations` needs the type\nwritten out or JSR publishes a wrong `.d.ts`. Hence the explicit annotation\nrather than a bare `as const`.\n\n⚠️ **There is no stored `level` field, and there must not be.** The level is\n`ORG_LEVELS[path.length - 1]` — read off `path`, so the entire class of\n\"`level` says department but the node sits at depth 2\" is unrepresentable\nrather than policed. Same for root, parent and the composed display name."
+        },
+        {
           "kind": "interface",
           "name": "Order",
           "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id: number | null;\n  crms_status?: string;\n  subject?: string;\n  reference?: string | null;\n  xero_id?: string | null;\n  uid_thread: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -2599,9 +2605,27 @@
           "doc": ""
         },
         {
+          "kind": "typeAlias",
+          "name": "OrgLevel",
+          "declaration": "type OrgLevel = indexedAccess;",
+          "doc": "One level of the organization tree."
+        },
+        {
+          "kind": "variable",
+          "name": "OrgPathNode",
+          "declaration": "const OrgPathNode: z.ZodType<OrgPathNodeType>;",
+          "doc": "One node of the chain.\n\n`name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}\nexactly — so `composeOrgName` can never return `\"\"`, and the nine embedded\norganization snapshots' own `.min(1).max(100)` is satisfied by construction.\n\n🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model\nhad `uid_tree: string[]` + `name_tree: string[]` held in element-for-element\nalignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were\neach one copy moving without the other in exactly that shape, and the ruling\nis explicit: *a join by VALUE across two arrays… re-adding either re-opens*\nall three. A single array of nodes makes index-misalignment\n**unrepresentable** rather than `superRefine`-checked.\n\nIt also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact\nsegment equality (`=== \"name\"`), so a field called `name_tree` would be\ninvisible to it and the customer name would have lost its `pii: \"mask\"`\nclassification with the gate still green. Inside a node the segment is\nliterally `name`, and the existing gate keeps working.\n\n`derived` marks an AUTO-MINTED node — readable from this document alone, with\nno ancestor fan-out, which is what lets a leaf render its own label."
+        },
+        {
+          "kind": "interface",
+          "name": "OrgPathNodeType",
+          "declaration": "interface OrgPathNodeType {\n  uid: string;\n  name: string;\n  derived: boolean;\n}",
+          "doc": "One node of an organization's ancestor chain."
+        },
+        {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  path?: OrgPathNodeType[];\n  query_by_organizations?: string[];\n  derived_from?: typeLiteral | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -3975,7 +3999,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         },
         {
@@ -6980,7 +7004,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -6996,9 +7020,33 @@
           "doc": "New contact data submitted inline when creating/updating an organization."
         },
         {
+          "kind": "variable",
+          "name": "ORG_LEVELS",
+          "declaration": "const ORG_LEVELS: readonly [\"organization\", \"project\", \"department\"];",
+          "doc": "The three levels of the organization tree, root first.\n\n⚠️ **`as const` on a tuple is the core#43 construct** — its declaration is not\nsyntactically derivable, so `deno task check:declarations` needs the type\nwritten out or JSR publishes a wrong `.d.ts`. Hence the explicit annotation\nrather than a bare `as const`.\n\n⚠️ **There is no stored `level` field, and there must not be.** The level is\n`ORG_LEVELS[path.length - 1]` — read off `path`, so the entire class of\n\"`level` says department but the node sits at depth 2\" is unrepresentable\nrather than policed. Same for root, parent and the composed display name."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "OrgLevel",
+          "declaration": "type OrgLevel = indexedAccess;",
+          "doc": "One level of the organization tree."
+        },
+        {
+          "kind": "variable",
+          "name": "OrgPathNode",
+          "declaration": "const OrgPathNode: z.ZodType<OrgPathNodeType>;",
+          "doc": "One node of the chain.\n\n`name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}\nexactly — so `composeOrgName` can never return `\"\"`, and the nine embedded\norganization snapshots' own `.min(1).max(100)` is satisfied by construction.\n\n🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model\nhad `uid_tree: string[]` + `name_tree: string[]` held in element-for-element\nalignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were\neach one copy moving without the other in exactly that shape, and the ruling\nis explicit: *a join by VALUE across two arrays… re-adding either re-opens*\nall three. A single array of nodes makes index-misalignment\n**unrepresentable** rather than `superRefine`-checked.\n\nIt also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact\nsegment equality (`=== \"name\"`), so a field called `name_tree` would be\ninvisible to it and the customer name would have lost its `pii: \"mask\"`\nclassification with the gate still green. Inside a node the segment is\nliterally `name`, and the existing gate keeps working.\n\n`derived` marks an AUTO-MINTED node — readable from this document alone, with\nno ancestor fan-out, which is what lets a leaf render its own label."
+        },
+        {
+          "kind": "interface",
+          "name": "OrgPathNodeType",
+          "declaration": "interface OrgPathNodeType {\n  uid: string;\n  name: string;\n  derived: boolean;\n}",
+          "doc": "One node of an organization's ancestor chain."
+        },
+        {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  crms_id: number;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  path?: OrgPathNodeType[];\n  query_by_organizations?: string[];\n  derived_from?: typeLiteral | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -7028,7 +7076,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         }
       ]
@@ -12120,10 +12168,72 @@
       "moduleDoc": "Organization helpers.",
       "symbols": [
         {
+          "kind": "variable",
+          "name": "ORG_NAME_DELIMITER",
+          "declaration": "const ORG_NAME_DELIMITER: \" / \";",
+          "doc": "The default separator between composed name segments.\n\n⚠️ **This is the ONLY place a delimiter exists, and it is never stored.** The\nv1 corpus proves a parse is hopeless — four conventions in live use, unstable\nsegment ORDER, a double space before one slash (`Leading Edge Media  / Queen`),\ncommas inside segments (`Twentieth Television: Insight, UKOP`), and production\ntitles that will contain colons. **Nothing anywhere splits a string to recover\nthe hierarchy**; `path` is the structure and this is a rendering choice."
+        },
+        {
           "kind": "function",
           "name": "buildOrganizationSnapshot",
           "signature": "buildOrganizationSnapshot(org: Pick<Organization, \"uid\" | \"name\" | \"crms_id\" | \"jurisdiction_claim\" | \"tax_exempt\" | \"xero_id\" | \"billing_address\">, _: unknown): DocumentOrganizationSnapshotType",
           "doc": "Build the denormalized organization snapshot an order, invoice or credit note\nembeds.\n\n**The one builder, because four hand-maintained literals is what api-cloudrun\n#486 was.** `createOrder`, `updateOrder`'s organization branch, the CRMS\nopportunity webhook and `createInvoice` each assembled this block by hand,\nand the three order-side copies were one field short of the invoice's: they\ncarried no `tax_profile`. Nothing on the order write path could see a\ntax-exempt customer, so `repriceOrderItemsForProfile` passed a hardcoded\n`\"tax_applied\"` — the same customer's invoices went untaxed and their orders\nwent taxed, hidden only by CRMS stamping the profile from the opportunity\nheader.\n\n⚠️ **This pins WHERE the snapshot is built, not WHAT it holds** — the\nRatchet-G lesson. api-cloudrun's writer-parity test is the value assertion\nbeside it: one order created natively and one through the CRMS opportunity\npath, same commercial facts, must produce byte-identical `organization`\nblocks.\n\n`|| null` rather than `?? null` on `crms_id` and `xero_id` is deliberate and\nmatches every call site it replaces — a `crms_id` of `0` is not a CRMS id.\n\n## The tax axes, and why they are emitted UNCONDITIONALLY\n\n`jurisdiction_claim` and `tax_exempt` are the pair that retires\n`tax_profile` (api-cloudrun#596 item 1). Carrying them HERE is what makes\nevery writer dual-write for free — the alternative was two more fields in\neach hand-rolled literal, which is the failure mode this function exists to\nend.\n\n⚠️ **Always written, never omitted.** That signal has now done its job and\nchanged meaning: while `tax_profile` was still the fallback, an ABSENT axis\nmeant *\"this snapshot predates the axes, read the enum\"*. The whole corpus is\nmigrated and this builder no longer emits an enum for anything to fall back\nto, so an absent axis is now simply a snapshot no writer has touched since —\nand `null`/`false` remains the real answer. Omitting on absence would still\nbe wrong, for the surviving half of the reason: it would leave a reader\nunable to distinguish it from a customer who asserts nothing.\n\n🔴 **`tax_profile` is NOT emitted any more (api-cloudrun#596 item 3).** It is\n`.optional()` on the snapshot for one release cycle — the expand third — and\nthis is the writer half of the same step: storage cannot be emptied while a\nshared builder keeps refilling it. ⚠️ The credit-note idempotency hash reads\nthis block, and dropping the field from it moves NOTHING, because\n`creditNoteContentHash` is never persisted — api-cloudrun recomputes it from\nthe stored document on both sides of every comparison, so both sides always\nagree. That refutes what api-cloudrun#596 said was the blocker here.\n\n⚠️ **`?? null` / `?? false` is lossless on the measured corpus, not a\nflattening** — prod 2026-08-21: 291 organizations, and the 11 carrying\n`tax_exempt: true` are exactly the 11 whose profile is `tax_exempt`, the 3\ncarrying a `jurisdiction_claim` are exactly the 3 with a location profile,\nand the remaining 277 (`tax_applied`) carry neither. Absent on the\norganization already means *asserts nothing*, so there is no third state to\ndestroy. See {@link DocumentOrganizationSnapshotType.jurisdiction_claim}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "composeOrgName",
+          "signature": "composeOrgName(path: readonly OrgPathNodeType[], _: unknown): string",
+          "doc": "Render an organization node's display name from its `path`.\n\nPure, no I/O — shared verbatim by the manager, the templates renderer and\napi-cloudrun's Xero boundary, so the label a customer sees on an invoice and\nthe label the operator sees in the picker cannot drift.\n\n**Non-empty by construction.** A root is always operator-named (invariant 2,\nenforced in `schemas/organization.ts`), so at least one segment always\nsurvives the `derived` filter and this can never return `\"\"` — which is what\nsatisfies the nine embedded snapshots' own `.min(1)` without a second check.\n\n## When it does not fit\n\n⚠️ **`maxLength` is a PARAMETER, never a constant baked in here.** Xero's\n50-character contact-name cap lives beside the other Xero-shaped concerns in\n`api-cloudrun/src/lib/`. Core owns the algorithm; api owns the boundary\nconstant. Putting Xero's number in a package the manager and the templates\nrenderer also consume is the same mistake the line-price rule refuses.\n\nThe order is **elide the middle, then shorten the ROOT — never the tail**:\n\n1. Drop `derived` segments and join.\n2. Over budget with ≥3 segments: replace the middle with `…`.\n3. Still over: shorten the ROOT, keeping the leaf whole. The leaf is the\n   identity — it is what maps to a Xero contact and therefore to a receivable\n   — so truncating the tail is precisely the wrong end. That is what\n   `trimXeroName` does today, and it is why this function exists.\n\n`Netflix Productions, LLC / Saturn Return / Locations` is **exactly 50**, so\nthis is live behaviour rather than a theoretical branch.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "computeOrganizationNode",
+          "signature": "computeOrganizationNode(node: typeLiteral, parent: Pick<Organization, \"uid\" | \"path\"> | null): typeLiteral",
+          "doc": "**The ONE author of `path` and `query_by_organizations`.** No writer builds\neither by hand — the same rule `computeItemPaths` carries for `items[].path`,\nand for the same reason: a chain the client sends can skip, misname or\nover-claim an intermediate, so the server derives it from the RESOLVED parent\nor not at all.\n\nThrows rather than returning a partial result, because every caller is a write\npath and a silently-wrong `path` is a row identity that addresses the wrong\nsubtree.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orgLevel",
+          "signature": "orgLevel(node: Pick<Organization, \"path\">): OrgLevel | null",
+          "doc": "The level a node sits at, read off `path` — never stored, so it cannot drift.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orgOwnName",
+          "signature": "orgOwnName(node: Pick<Organization, \"path\">): string | null",
+          "doc": "This node's OWN name — one segment, not the composed label.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orgParentUid",
+          "signature": "orgParentUid(node: Pick<Organization, \"path\">): string | null",
+          "doc": "This node's parent — `path.at(-2).uid`.\n\n⚠️ **`null` is TWO answers here and the caller must not conflate them**: a\nroot (a one-element `path`) and a node with no `path` yet. Check `orgLevel`\nfirst when the difference matters.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orgRootUid",
+          "signature": "orgRootUid(node: Pick<Organization, \"path\">): string | null",
+          "doc": "The root of this node's tree — `path[0].uid`. `null` before the backfill.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "validateOrganizationTree",
+          "signature": "validateOrganizationTree(node: Pick<Organization, \"uid\" | \"path\" | \"uid_department_type\">, parent: Pick<Organization, \"uid\" | \"path\"> | null, siblings: readonly Pick<Organization, \"uid\" | \"path\" | \"uid_department_type\">[]): string[]",
+          "doc": "The tree invariants that need MORE than one document — 5 through 8.\n\n🔴 **1 through 4 are NOT here, deliberately.** They live on\n`OrganizationSchema` as a `superRefine`, because they read one document and\nnothing else, and that independence is what keeps this function honest.\nInvariant 5 is a fixed-point check — *\"my path is my parent's path plus me\"* —\ndefined in terms of {@link computeOrganizationNode} and therefore only ever\nable to agree with it. It is safe **because** four properties that hold\nindependently of the walk stand beside it. A guard that can only consult its\nown oracle is not a guard: that is exactly the shape that certified 79\nprovably-wrong item paths as clean, corpus-wide.\n\nReturns every violation rather than throwing on the first, so an audit reports\na whole document at once. An empty array means the node is well-formed.",
           "paramTags": [],
           "returnsTag": null
         }

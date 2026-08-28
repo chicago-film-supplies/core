@@ -119,3 +119,141 @@ Deno.test("UpdateOrganizationInput accepts partial update", () => {
   const input = { name: "New Name", version: 1 };
   assertEquals(UpdateOrganizationInput.safeParse(input).success, true);
 });
+
+// ─── The tree: the four invariants that read ONE document ───────────────────
+//
+// 🔴 **Asserted DIRECTLY, and that is the point.** The rest of the tree guard is
+// a fixed-point check — "`path` equals what the recompute produces" — which is
+// defined in terms of the normalizer and can therefore only ever agree with it.
+// Exactly that shape certified 79 provably-wrong item paths as clean,
+// corpus-wide, for as long as `computeInvoiceItemPaths` had a hole in it.
+//
+// Each case plants ONE violation into an otherwise valid document, so none can
+// pass because of a second, unrelated failure.
+
+const ROOT_ID = "aaaaaaaaaaaaaaaaaaaa";
+const PROJECT_ID = "bbbbbbbbbbbbbbbbbbbb";
+const TYPE_ID = "dddddddddddddddddddd";
+const SELF_ID = "testorg1000000000000";
+
+const treeRoot = { uid: ROOT_ID, name: "Netflix Productions, LLC", derived: false };
+const treeProject = { uid: PROJECT_ID, name: "Saturn Return", derived: false };
+const treeSelf = { uid: SELF_ID, name: "Locations", derived: false };
+
+/** A valid DEPARTMENT node, so each negative below differs from it by one field. */
+const validTreeOrganization = (overrides: Record<string, unknown> = {}) =>
+  validOrganization({
+    path: [treeRoot, treeProject, treeSelf],
+    query_by_organizations: [ROOT_ID, PROJECT_ID, SELF_ID],
+    derived_from: null,
+    uid_department_type: TYPE_ID,
+    ...overrides,
+  });
+
+Deno.test("OrganizationSchema accepts a complete department node", () => {
+  const result = OrganizationSchema.safeParse(validTreeOrganization());
+  assertEquals(result.success, true, JSON.stringify(result.error?.issues));
+});
+
+Deno.test("tree invariant 1 — path is SELF-INCLUSIVE, and nothing else defends that", () => {
+  // `assertValidForWrite` / `assertValidPatch` read `doc.uid` and compare it to
+  // `ref.id`; neither can see `path.at(-1).uid`. So `path` carries a second copy
+  // of the document's own id that only this refinement guards.
+  const doc = validTreeOrganization({ path: [treeRoot, treeProject, { ...treeSelf, uid: PROJECT_ID }] });
+  assertEquals(OrganizationSchema.safeParse(doc).success, false);
+});
+
+Deno.test("tree invariant 2 — a root is always operator-named, so a composed name can never be empty", () => {
+  const doc = validTreeOrganization({ path: [{ ...treeRoot, derived: true }, treeProject, treeSelf] });
+  assertEquals(OrganizationSchema.safeParse(doc).success, false);
+});
+
+Deno.test("tree invariant 3 — derived_from and the leaf's own `derived` are ONE fact in two places", () => {
+  // A derived leaf with no provenance…
+  assertEquals(
+    OrganizationSchema.safeParse(validTreeOrganization({
+      path: [treeRoot, treeProject, { ...treeSelf, name: "(default)", derived: true }],
+      uid_department_type: null,
+    })).success,
+    false,
+  );
+  // …and provenance on an operator-named leaf.
+  assertEquals(
+    OrganizationSchema.safeParse(validTreeOrganization({
+      derived_from: { source_uid: ROOT_ID, reason: "minted-department" },
+    })).success,
+    false,
+  );
+});
+
+Deno.test("tree invariant 4 — query_by_organizations IS path.map(n => n.uid), order included", () => {
+  assertEquals(
+    OrganizationSchema.safeParse(validTreeOrganization({ query_by_organizations: [ROOT_ID, PROJECT_ID] })).success,
+    false,
+    "a short mirror",
+  );
+  assertEquals(
+    OrganizationSchema.safeParse(validTreeOrganization({ query_by_organizations: [SELF_ID, PROJECT_ID, ROOT_ID] })).success,
+    false,
+    "the right uids in the wrong order — this is what makes it a MIRROR rather than a set",
+  );
+});
+
+Deno.test("tree — uid_department_type is set on exactly the TYPED departments", () => {
+  assertEquals(
+    OrganizationSchema.safeParse(validTreeOrganization({ path: [treeRoot, { ...treeSelf, name: "Saturn Return" }], query_by_organizations: [ROOT_ID, SELF_ID] })).success,
+    false,
+    "a PROJECT may not name a department-type entry",
+  );
+  assertEquals(
+    OrganizationSchema.safeParse(validTreeOrganization({
+      path: [treeRoot, treeProject, { ...treeSelf, name: "(default)", derived: true }],
+      derived_from: { source_uid: ROOT_ID, reason: "minted-department" },
+    })).success,
+    false,
+    "a DERIVED department has no catalog entry — a minted `(default)` needs no row, which falls out of the model rather than needing a special case",
+  );
+});
+
+Deno.test("tree — the depth cap is a SCHEMA constraint, not only a writer one", () => {
+  const doc = validTreeOrganization({
+    path: [treeRoot, treeProject, { uid: "eeeeeeeeeeeeeeeeeeee", name: "S2", derived: false }, treeSelf],
+    query_by_organizations: [ROOT_ID, PROJECT_ID, "eeeeeeeeeeeeeeeeeeee", SELF_ID],
+  });
+  assertEquals(OrganizationSchema.safeParse(doc).success, false);
+});
+
+Deno.test("tree — crms_id is nullable, because a NON-LEAF node has no CRMS counterpart", () => {
+  // `null` is a real answer here — "this node is not a leaf" — not "unknown".
+  // ⚠️ It is only meaningful because the minting writer stamps an explicit
+  // `null`: `orders.crms_id` reads identically and is REQUIRED, because
+  // `createOrder` writes one. Same census, opposite verdicts.
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ crms_id: null })).success, true);
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ crms_id: undefined })).success, false, "nullable, never optional");
+});
+
+Deno.test("tree — an un-backfilled organization still parses, through the expand third", () => {
+  // Every arm of the refinement is guarded on `path` being present; that guard
+  // comes out in the same commit as the optionality.
+  assertEquals(OrganizationSchema.safeParse(validOrganization()).success, true);
+});
+
+Deno.test("CreateOrganizationInput carries uid_parent — the server derives path from the RESOLVED parent", () => {
+  assertEquals(
+    CreateOrganizationInput.safeParse({ uid: "testorg1000000000000", name: "Locations", uid_parent: PROJECT_ID, uid_department_type: TYPE_ID, billing_address: validAddress }).success,
+    true,
+  );
+});
+
+Deno.test("UpdateOrganizationInput distinguishes ABSENT from an explicit null uid_parent", () => {
+  // Absent means "leave the parent alone"; `null` means "promote to a root".
+  // Collapsing them is core#70's *"an optional value can be set but never
+  // unset"* surface, which this model stays off.
+  const absent = UpdateOrganizationInput.safeParse({ name: "New Name", version: 1 });
+  assertEquals(absent.success, true);
+  assertEquals("uid_parent" in (absent.data ?? {}), false);
+
+  const explicitNull = UpdateOrganizationInput.safeParse({ uid_parent: null, version: 1 });
+  assertEquals(explicitNull.success, true);
+  assertEquals(explicitNull.data?.uid_parent, null);
+});
