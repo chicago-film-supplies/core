@@ -69,37 +69,6 @@ export type OrgLevel = typeof ORG_LEVELS[number];
 export interface Organization {
   uid: string;
   /**
-   * ⚠️ **The LEGACY delimited scalar, on its way out** — `path.at(-1).name` is
-   * the node's own segment and `composeOrgName(path)` is the display name. This
-   * holds whatever single string predated the tree
-   * (`"Netflix Productions, LLC - Office"`), and after a rename through the tree
-   * UI it holds the node's OWN segment (`"Office"`) instead. **Read `path`.**
-   *
-   * ⚠️ **Optional as of the `v13 → v14` swap, and REMOVED once the corpus is
-   * purged** (api-cloudrun#709). The two steps cannot be combined: a
-   * `z.strictObject` refuses a stored document carrying a key it does not
-   * declare, so the purge must PRECEDE the removal — and the purge needs this
-   * `.optional()` to be legal in the meantime.
-   *
-   * 🔴 **The loosening in turn needed the Typesense collection bump, and the
-   * reason is not the storage schema at all.** `organizations` declared
-   * `default_sorting_field: "name"`, and Typesense refuses that outright over an
-   * optional field — probed against a live dev collection 2026-08-28:
-   * *"Default sorting field `name` cannot be an optional field."* (A control
-   * with `optional: false` created cleanly, so the probe was measuring the right
-   * thing.) The sort field is now `updated_at`, which is `int64` and
-   * non-optional, and `name` is declared `optional: true` on the index side.
-   *
-   * ⚠️ Until the purge runs, this field is still the SOURCE of the index's
-   * `name`. The composed producer has to be live BEFORE the corpus is stripped,
-   * or every organization loses its label in search.
-   *
-   * ⚠️ `CreateOrganizationInput.name` / `UpdateOrganizationInput.name` are NOT
-   * this field and STAY. They are the wire name of the node's OWN segment,
-   * which is what `path.at(-1).name` stores.
-   */
-  name?: string;
-  /**
    * Self-inclusive ancestor chain, root first: `[org, project, department]`.
    * `path.at(-1).uid === uid`.
    *
@@ -127,7 +96,7 @@ export interface Organization {
    * `.optional()` for one release cycle — the expand third of the additive
    * rollout. It becomes required once the corpus is backfilled.
    */
-  path?: OrgPathNodeType[];
+  path: OrgPathNodeType[];
   /**
    * Flat mirror of `path.map(n => n.uid)` — **FIRESTORE-ONLY, for exactly one
    * reader.**
@@ -157,7 +126,7 @@ export interface Organization {
    * wherever the field really is a list of foreign uids
    * (`contacts.query_by_organizations`, `organizations.query_by_contacts`).
    */
-  query_by_path?: string[];
+  query_by_path: string[];
   /**
    * Provenance for an AUTO-MINTED node, so a later realignment can find the
    * population when someone names the real production. `null` on an
@@ -168,7 +137,7 @@ export interface Organization {
    * two spellings — and they overlap in exactly one place, which the tree
    * validator pins: `derived_from === null ⟺ path.at(-1).derived === false`.
    */
-  derived_from?: { source_uid: string; reason: "minted-root" | "minted-project" | "minted-department" } | null;
+  derived_from: { source_uid: string; reason: "minted-root" | "minted-project" | "minted-department" } | null;
   /**
    * The `department-types` catalog entry this DEPARTMENT node is named from —
    * `null` on an organization or project node, and on a *derived* department.
@@ -180,7 +149,7 @@ export interface Organization {
    * a rename cascades to it (bounded: a department is a LEAF, so its name
    * appears in no other node's `path`).
    */
-  uid_department_type?: string | null;
+  uid_department_type: string | null;
   /**
    * Project-level facts — the production's shoot window.
    *
@@ -361,19 +330,18 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
 /** Zod schema for a full organization Firestore document. */
 export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1, "Organization name is required").max(100).optional().meta({ pii: "mask", column: true, label: "Name", linkTo: "organizationDetail" }),
   // ⚠️ `column: true` WITHOUT a `label`, so each node's heading composes from
   // the key that holds it — see `core/CLAUDE.md` § *Display columns*. It is not
   // in `displayDefaults.columns` yet: the scalar `name` is still the sort field
   // and the first column, and T10 forbids a rollup shadowing a declared column,
   // so the swap lands in the same commit as the `name` removal.
-  path: z.array(OrgPathNode).min(1).max(3).optional().meta({ column: true, label: "Tree" }),
-  query_by_path: z.array(z.string()).optional(),
+  path: z.array(OrgPathNode).min(1).max(3).meta({ column: true, label: "Tree" }),
+  query_by_path: z.array(z.string()),
   derived_from: z.strictObject({
     source_uid: FirestoreId,
     reason: z.enum(["minted-root", "minted-project", "minted-department"]),
-  }).nullable().optional(),
-  uid_department_type: FirestoreId.nullable().optional(),
+  }).nullable(),
+  uid_department_type: FirestoreId.nullable(),
   dates: z.strictObject({
     start: chicagoStartOfDay().nullable().meta({ column: true, label: "Start" }),
     wrap: chicagoStartOfDay().nullable().meta({ column: true, label: "Wrap" }),
@@ -411,9 +379,13 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   title: "Organization",
   collection: "organizations",
   displayDefaults: {
-    columns: ["name", "contacts", "emails", "phones"],
+    // ⚠️ **`name` is gone from the Firestore document**, so the FIRESTORE-side
+    // table leads with the tree and sorts on nothing. The composed label lives
+    // only on the Typesense side, where `TYPESENSE_ROLLUP_COLUMNS.organizations`
+    // declares it — a Firestore reader holds `path` and composes for itself.
+    columns: ["path", "contacts", "emails", "phones"],
     filters: {},
-    sort: { column: "name", direction: "asc" },
+    sort: { column: null, direction: "asc" },
   },
 });
 

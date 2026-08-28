@@ -123,7 +123,7 @@ const createOrganizationRules: CollectionRule[] = [
     transaction: "create-organization",
     fields: [
       { source: ["uid"], target: ["organizations", "uid"] },
-      { source: ["name"], target: ["organizations", "name"] },
+      { source: ["path"], target: ["organizations", "name"] },
       { source: ["uid"], target: ["query_by_organizations"] },
     ],
   },
@@ -169,7 +169,7 @@ const updateOrganizationRules: CollectionRule[] = [
     enforced_by: [ORG_NAME_TO_CONTACTS],
     transaction: "update-organization",
     fields: [
-      { source: ["name"], target: ["organizations", "name"] },
+      { source: ["path"], target: ["organizations", "name"] },
     ],
   },
   {
@@ -183,7 +183,7 @@ const updateOrganizationRules: CollectionRule[] = [
     transaction: "update-organization",
     trigger: "name change — targets active orders (not complete/canceled)",
     fields: [
-      { source: ["name"], target: ["organization", "name"] },
+      { source: ["path"], target: ["organization", "name"] },
     ],
   },
   {
@@ -213,7 +213,7 @@ const updateOrganizationRules: CollectionRule[] = [
     transaction: "update-organization",
     trigger: "name change — targets active invoices (not paid/void)",
     fields: [
-      { source: ["name"], target: ["organization", "name"] },
+      { source: ["path"], target: ["organization", "name"] },
     ],
   },
   {
@@ -322,7 +322,7 @@ const nameToDescendantsRule: CollectionRule = {
   enforced_by: [ORG_NAME_TO_DESCENDANTS],
   transaction: "update-organization",
   fields: [
-    { source: ["name"], target: ["path"] },
+    { source: ["path"], target: ["path"] },
   ],
 };
 

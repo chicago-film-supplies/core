@@ -272,7 +272,7 @@ const createOrderRules: CollectionRule[] = [
     transaction: "create-order",
     fields: [
       { source: ["uid"], target: ["organization", "uid"] },
-      { source: ["name"], target: ["organization", "name"] },
+      { source: ["path"], target: ["organization", "name"] },
       { source: ["crms_id"], target: ["organization", "crms_id"] },
       { source: ["xero_id"], target: ["organization", "xero_id"] },
       {
@@ -648,7 +648,7 @@ const updateOrderRules: CollectionRule[] = [
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["organization", "uid"] },
-      { source: ["name"], target: ["organization", "name"] },
+      { source: ["path"], target: ["organization", "name"] },
       { source: ["crms_id"], target: ["organization", "crms_id"] },
       { source: ["xero_id"], target: ["organization", "xero_id"] },
       {

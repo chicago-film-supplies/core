@@ -54,6 +54,24 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
     uid_booking: BOOKING_ID,
     custody: { from: "quoted", to: "prepped" },
   },
+  // ⚠️ **Second entry, added when `path` became required** (api-cloudrun#709).
+  // The organization tree's invariant 4 is `query_by_path === path.map(n => uid)`
+  // — a CROSS-FIELD equality, which is exactly the class the walker's docstring
+  // says it cannot derive: it can generate a valid `path` and a valid
+  // `query_by_path` independently, and no structural rule makes the second echo
+  // the first. Invariants 1 and 3 are the same shape (`path.at(-1).uid === uid`,
+  // `derived_from === null ⟺ path.at(-1).derived === false`), so all three are
+  // satisfied here by one hand-written node.
+  //
+  // ⭐ It counts as the walker keeping up, not falling behind: nothing about the
+  // structure changed, a schema gained a cross-field refinement — the one thing
+  // this list exists to absorb.
+  organization: {
+    path: [{ uid: "AAAAAAAAAAAAAAAAAAAA", name: "Fixture Org", derived: false }],
+    query_by_path: ["AAAAAAAAAAAAAAAAAAAA"],
+    derived_from: null,
+    uid_department_type: null,
+  },
 };
 
 /** Distinct schemas from the registry, keyed by their first (singular) name. */
@@ -106,9 +124,10 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   }
   assertEquals(failures, [], failures.join("\n"));
 
-  // The escape hatch is the measurement. Structural coverage is 56/57 without
-  // it; if this grows, the walker has stopped keeping up with the schemas.
-  assertEquals(Object.keys(OVERRIDES).length, 1, "a schema now needs hand-written fixture knowledge");
+  // The escape hatch is the measurement. Structural coverage is 55/57 without
+  // it; if this grows for a reason OTHER than a new cross-field refinement, the
+  // walker has stopped keeping up with the schemas.
+  assertEquals(Object.keys(OVERRIDES).length, 2, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {

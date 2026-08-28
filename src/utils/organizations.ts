@@ -300,7 +300,6 @@ export function buildOrganizationSnapshot(
   org: Pick<
     Organization,
     | "uid"
-    | "name"
     | "path"
     | "crms_id"
     | "jurisdiction_claim"
@@ -318,15 +317,12 @@ export function buildOrganizationSnapshot(
     // and every writer that reaches this builder inherits it: fixing it here
     // fixed roughly eight api-cloudrun call sites at once.
     //
-    // ⚠️ The fallback is for the transition ONLY. It went from "the legacy
-    // string" to `?? ""` when `Organization.name` became optional
-    // (api-cloudrun#709), which is a real narrowing of what it can rescue — so
-    // what makes it acceptable is that the branch is now UNREACHABLE on both
-    // corpora: prod and dev are 100% pathed as of 2026-08-28, the CRMS member
-    // webhook no longer mints pathless organizations, and arm 0 of
-    // `api-cloudrun/scripts/audit-organization-tree.ts` is the standing detector
-    // that says so. It disappears entirely when `path` becomes required.
-    name: org.path?.length ? composeOrgName(org.path) : (org.name ?? ""),
+    // ⭐ **No fallback any more, and its removal is the point.** It existed only
+    // while `Organization.name` did; `path` is required as of this publish, so
+    // there is exactly one way to name an organization and it is this one. The
+    // compile error the removal produced here is what the fallback was left in
+    // place to raise (api-cloudrun#709).
+    name: composeOrgName(org.path),
     crms_id: org.crms_id || null,
     jurisdiction_claim: org.jurisdiction_claim ?? null,
     tax_exempt: org.tax_exempt ?? false,

@@ -154,6 +154,15 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   // annotate. See `schemas/typesense/organizations.ts`.
   organizations: {
     level: { label: "Level", cell: "plain" },
+    // 🔴 **`name` is a ROLLUP now, not a Firestore column** (api-cloudrun#709).
+    // The stored scalar is gone; the index's `name` is
+    // `composeOrgName(path)`, produced at write time by api-cloudrun's
+    // `translateForTypesense`. It has no storage leaf to hang a `column`
+    // annotation on, which is exactly what this table is for.
+    //
+    // ⚠️ `cell: "link"` keeps the org-detail navigation the removed
+    // `linkTo: "organizationDetail"` provided.
+    name: { label: "Name", cell: "link" },
   },
   fulfillments: {
     deliveries: { label: "Deliveries", cell: "bool" },

@@ -33,7 +33,14 @@ const actor = { uid: "testuser100000000000", name: "Test User" };
  */
 const validOrganization = (overrides: Record<string, unknown> = {}) => ({
   uid: "testorg1000000000000",
-  name: "Acme",
+  // ⚠️ **No `name` scalar, and the four tree fields stated.** The scalar was
+  // removed and `path` made required (api-cloudrun#709), so this is what a
+  // minimal valid organization now IS — a fixture carrying the old shape would
+  // fail every arm below for the wrong reason.
+  path: [{ uid: "testorg1000000000000", name: "Acme", derived: false }],
+  query_by_path: ["testorg1000000000000"],
+  derived_from: null,
+  uid_department_type: null,
   crms_id: 1,
   xero_id: null as string | null,
   emails: [] as string[],
@@ -50,7 +57,8 @@ const validOrganization = (overrides: Record<string, unknown> = {}) => ({
 
 Deno.test("OrganizationSchema validates a complete document", () => {
   const doc = validOrganization({
-    name: "Acme Corp",
+    // The name is the path node's, not a scalar override.
+    path: [{ uid: "testorg1000000000000", name: "Acme Corp", derived: false }],
     crms_id: 100,
     xero_id: "00000000-0000-4000-8000-000000000001",
     emails: ["info@acme.com"],

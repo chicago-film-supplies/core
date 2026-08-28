@@ -85,6 +85,17 @@ const DERIVED_FIELDS: Record<string, string> = {
   //    Orders and fulfillments stopped persisting a top-level `dates`; the flat
   //    envelope is synthesized from per-destination dates because Typesense
   //    cannot sort on a value inside an array.
+  // ── composeOrgName(path), applied in api-cloudrun's `translateForTypesense`
+  //    on the SOURCE document, before `stripUndeclaredFields`.
+  //
+  // 🔴 **The placement is load-bearing and is why this entry names it.** The
+  // Typesense config declares `path`, `path.uid` and `path.name` but never
+  // `path.derived`, so a producer running after the strip sees a path with the
+  // flag gone — and `composeOrgName` filters with `!n.derived`, where
+  // `!undefined` is TRUE. Every minted `(default)` segment then survives into
+  // the label. Populated by `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts`,
+  // which plants a derived segment precisely to catch that.
+  "organizations:name": "composeOrgName(path) — the stored scalar was removed (api-cloudrun#709)",
   "orders:dates": "deriveOrderDateEnvelope — synthesized, never stored",
   "orders:dates.delivery_start_fs": "deriveOrderDateEnvelope — envelope min over destinations[]",
   "orders:dates.delivery_end_fs": "deriveOrderDateEnvelope — envelope max over destinations[]",

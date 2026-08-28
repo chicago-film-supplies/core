@@ -5644,11 +5644,10 @@ Full organization document schema (Firestore document shape).
 ```ts
 interface Organization {
   uid: string;
-  name?: string;
-  path?: OrgPathNodeType[];
-  query_by_path?: string[];
-  derived_from?: typeLiteral | null;
-  uid_department_type?: string | null;
+  path: OrgPathNodeType[];
+  query_by_path: string[];
+  derived_from: typeLiteral | null;
+  uid_department_type: string | null;
   dates?: typeLiteral;
   crms_id: number | null;
   xero_id: string | null;
@@ -14618,11 +14617,10 @@ Full organization document schema (Firestore document shape).
 ```ts
 interface Organization {
   uid: string;
-  name?: string;
-  path?: OrgPathNodeType[];
-  query_by_path?: string[];
-  derived_from?: typeLiteral | null;
-  uid_department_type?: string | null;
+  path: OrgPathNodeType[];
+  query_by_path: string[];
+  derived_from: typeLiteral | null;
+  uid_department_type: string | null;
   dates?: typeLiteral;
   crms_id: number | null;
   xero_id: string | null;
@@ -25442,7 +25440,7 @@ the hierarchy**; `path` is the structure and this is a rendering choice.
 const ORG_NAME_DELIMITER: " / ";
 ```
 
-### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "name" | "path" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
+### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "path" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
 
 Build the denormalized organization snapshot an order, invoice or credit note
 embeds.

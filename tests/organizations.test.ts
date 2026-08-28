@@ -16,9 +16,17 @@ import {
 } from "../src/utils/organizations.ts";
 import { DocumentOrganizationSnapshot, type Organization } from "../src/schemas/mod.ts";
 
+const ORG_OWN_NAME = "Kenwood TV Productions Inc";
 const ORG = {
   uid: ORG_ID,
-  name: "Kenwood TV Productions Inc",
+  // ⚠️ **A `path`, and no `name` scalar** — the same lesson this fixture's own
+  // note below records, applied to itself. The scalar was removed and `path`
+  // made required (api-cloudrun#709), so an organization carrying the one and
+  // not the other is no longer a document the corpus could hold.
+  path: [{ uid: ORG_ID, name: ORG_OWN_NAME, derived: false }],
+  query_by_path: [ORG_ID],
+  derived_from: null,
+  uid_department_type: null,
   crms_id: 4321,
   // 🔴 **The axes, not the enum — and the fixture had to move for the
   // assertions to mean anything.** It carried `tax_profile: "tax_frankfort"`
@@ -88,7 +96,9 @@ Deno.test("buildOrganizationSnapshot: overrides win, for the CRMS member_id case
   // rather than a reason to keep a fourth hand-written literal.
   const snapshot = buildOrganizationSnapshot(ORG, { crms_id: 9999 });
   assertEquals(snapshot.crms_id, 9999);
-  assertEquals(snapshot.name, ORG.name);
+  // The COMPOSED name — a depth-1 node composes to its own segment, which is
+  // what makes this assertion identical in value and different in meaning.
+  assertEquals(snapshot.name, ORG_OWN_NAME);
   assertEquals(snapshot.jurisdiction_claim, "frankfort");
 });
 
@@ -214,7 +224,9 @@ Deno.test("computeOrganizationNode refuses a cycle — a node cannot be its own 
 
 Deno.test("computeOrganizationNode refuses an un-backfilled parent rather than minting a wrong path", () => {
   assertThrows(
-    () => computeOrganizationNode(projectNode, { uid: ROOT_ID, path: undefined }),
+    // See the cast note below — a pathless parent is unrepresentable in the
+    // type but still refused at runtime, which is what this asserts.
+    () => computeOrganizationNode(projectNode, { uid: ROOT_ID, path: undefined } as unknown as Pick<Organization, "uid" | "path">),
     Error,
     "has no path",
   );
@@ -224,7 +236,11 @@ Deno.test("the derivations are READ OFF path — there is no stored level, root 
   assertEquals(orgLevel(rootDoc), "organization");
   assertEquals(orgLevel(projectDoc), "project");
   assertEquals(orgLevel(deptDoc), "department");
-  assertEquals(orgLevel({ path: undefined }), null);
+// ⚠️ Cast: `path` is REQUIRED as of the `name` removal, so this state is
+  // unrepresentable in the TYPE — but a Firestore document is not type-checked,
+  // and these functions still defend against one that lacks it. The cast is what
+  // keeps that runtime guard covered now that the compiler forbids the input.
+  assertEquals(orgLevel({ path: undefined } as unknown as Pick<Organization, "path">), null);
 
   assertEquals(orgRootUid(deptDoc), ROOT_ID);
   assertEquals(orgParentUid(deptDoc), PROJECT_ID);
@@ -321,5 +337,5 @@ Deno.test("validateOrganizationTree — invariant 6b: department-type uniqueness
 });
 
 Deno.test("validateOrganizationTree returns [] for an un-backfilled node rather than inventing findings", () => {
-  assertEquals(validateOrganizationTree({ uid: ROOT_ID, path: undefined, uid_department_type: null }, null, []), []);
+  assertEquals(validateOrganizationTree({ uid: ROOT_ID, path: undefined, uid_department_type: null } as unknown as Parameters<typeof validateOrganizationTree>[0], null, []), []);
 });
