@@ -2625,7 +2625,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  path?: OrgPathNodeType[];\n  query_by_organizations?: string[];\n  derived_from?: typeLiteral | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  path?: OrgPathNodeType[];\n  query_by_path?: string[];\n  derived_from?: typeLiteral | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -7046,7 +7046,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  path?: OrgPathNodeType[];\n  query_by_organizations?: string[];\n  derived_from?: typeLiteral | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  name: string;\n  path?: OrgPathNodeType[];\n  query_by_path?: string[];\n  derived_from?: typeLiteral | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -12193,7 +12193,7 @@
           "kind": "function",
           "name": "computeOrganizationNode",
           "signature": "computeOrganizationNode(node: typeLiteral, parent: Pick<Organization, \"uid\" | \"path\"> | null): typeLiteral",
-          "doc": "**The ONE author of `path` and `query_by_organizations`.** No writer builds\neither by hand — the same rule `computeItemPaths` carries for `items[].path`,\nand for the same reason: a chain the client sends can skip, misname or\nover-claim an intermediate, so the server derives it from the RESOLVED parent\nor not at all.\n\nThrows rather than returning a partial result, because every caller is a write\npath and a silently-wrong `path` is a row identity that addresses the wrong\nsubtree.",
+          "doc": "**The ONE author of `path` and `query_by_path`.** No writer builds\neither by hand — the same rule `computeItemPaths` carries for `items[].path`,\nand for the same reason: a chain the client sends can skip, misname or\nover-claim an intermediate, so the server derives it from the RESOLVED parent\nor not at all.\n\nThrows rather than returning a partial result, because every caller is a write\npath and a silently-wrong `path` is a row identity that addresses the wrong\nsubtree.",
           "paramTags": [],
           "returnsTag": null
         },

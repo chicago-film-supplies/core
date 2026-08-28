@@ -133,7 +133,7 @@ export function composeOrgName(
 }
 
 /**
- * **The ONE author of `path` and `query_by_organizations`.** No writer builds
+ * **The ONE author of `path` and `query_by_path`.** No writer builds
  * either by hand — the same rule `computeItemPaths` carries for `items[].path`,
  * and for the same reason: a chain the client sends can skip, misname or
  * over-claim an intermediate, so the server derives it from the RESOLVED parent
@@ -146,7 +146,7 @@ export function composeOrgName(
 export function computeOrganizationNode(
   node: { uid: string; name: string; derived: boolean },
   parent: Pick<Organization, "uid" | "path"> | null,
-): { path: OrgPathNodeType[]; query_by_organizations: string[] } {
+): { path: OrgPathNodeType[]; query_by_path: string[] } {
   if (parent !== null && (parent.path === undefined || parent.path.length === 0)) {
     throw new Error(`organization ${parent.uid} has no path — it cannot be a parent until it is backfilled`);
   }
@@ -164,7 +164,7 @@ export function computeOrganizationNode(
   if (path.some((n, i) => path.findIndex((m) => m.uid === n.uid) !== i)) {
     throw new Error(`organization ${node.uid} would appear twice in its own path — a node cannot be its own ancestor`);
   }
-  return { path, query_by_organizations: path.map((n) => n.uid) };
+  return { path, query_by_path: path.map((n) => n.uid) };
 }
 
 /**

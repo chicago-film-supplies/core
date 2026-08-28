@@ -144,7 +144,7 @@ const treeSelf = { uid: SELF_ID, name: "Locations", derived: false };
 const validTreeOrganization = (overrides: Record<string, unknown> = {}) =>
   validOrganization({
     path: [treeRoot, treeProject, treeSelf],
-    query_by_organizations: [ROOT_ID, PROJECT_ID, SELF_ID],
+    query_by_path: [ROOT_ID, PROJECT_ID, SELF_ID],
     derived_from: null,
     uid_department_type: TYPE_ID,
     ...overrides,
@@ -186,14 +186,14 @@ Deno.test("tree invariant 3 — derived_from and the leaf's own `derived` are ON
   );
 });
 
-Deno.test("tree invariant 4 — query_by_organizations IS path.map(n => n.uid), order included", () => {
+Deno.test("tree invariant 4 — query_by_path IS path.map(n => n.uid), order included", () => {
   assertEquals(
-    OrganizationSchema.safeParse(validTreeOrganization({ query_by_organizations: [ROOT_ID, PROJECT_ID] })).success,
+    OrganizationSchema.safeParse(validTreeOrganization({ query_by_path: [ROOT_ID, PROJECT_ID] })).success,
     false,
     "a short mirror",
   );
   assertEquals(
-    OrganizationSchema.safeParse(validTreeOrganization({ query_by_organizations: [SELF_ID, PROJECT_ID, ROOT_ID] })).success,
+    OrganizationSchema.safeParse(validTreeOrganization({ query_by_path: [SELF_ID, PROJECT_ID, ROOT_ID] })).success,
     false,
     "the right uids in the wrong order — this is what makes it a MIRROR rather than a set",
   );
@@ -201,7 +201,7 @@ Deno.test("tree invariant 4 — query_by_organizations IS path.map(n => n.uid), 
 
 Deno.test("tree — uid_department_type is set on exactly the TYPED departments", () => {
   assertEquals(
-    OrganizationSchema.safeParse(validTreeOrganization({ path: [treeRoot, { ...treeSelf, name: "Saturn Return" }], query_by_organizations: [ROOT_ID, SELF_ID] })).success,
+    OrganizationSchema.safeParse(validTreeOrganization({ path: [treeRoot, { ...treeSelf, name: "Saturn Return" }], query_by_path: [ROOT_ID, SELF_ID] })).success,
     false,
     "a PROJECT may not name a department-type entry",
   );
@@ -218,7 +218,7 @@ Deno.test("tree — uid_department_type is set on exactly the TYPED departments"
 Deno.test("tree — the depth cap is a SCHEMA constraint, not only a writer one", () => {
   const doc = validTreeOrganization({
     path: [treeRoot, treeProject, { uid: "eeeeeeeeeeeeeeeeeeee", name: "S2", derived: false }, treeSelf],
-    query_by_organizations: [ROOT_ID, PROJECT_ID, "eeeeeeeeeeeeeeeeeeee", SELF_ID],
+    query_by_path: [ROOT_ID, PROJECT_ID, "eeeeeeeeeeeeeeeeeeee", SELF_ID],
   });
   assertEquals(OrganizationSchema.safeParse(doc).success, false);
 });

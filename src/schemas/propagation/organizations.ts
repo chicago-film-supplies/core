@@ -89,7 +89,7 @@ const ORG_NODE_TO_TREE: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/unit/organizationTreeCoverage.test.ts",
   clause:
-    "that `computeOrganizationNode` is the ONE author of `path`/`query_by_organizations` — no writer in `src/` or `scripts/` builds either array by hand. The four one-document invariants are enforced by `OrganizationSchema`'s own refinement at every `validateBeforeWrite`, so they need no separate walker; this ratchet covers the authorship rule the schema cannot see. Hermetic, in `deno task gate`.",
+    "that `computeOrganizationNode` is the ONE author of `path`/`query_by_path` — no writer in `src/` or `scripts/` builds either array by hand. The four one-document invariants are enforced by `OrganizationSchema`'s own refinement at every `validateBeforeWrite`, so they need no separate walker; this ratchet covers the authorship rule the schema cannot see. Hermetic, in `deno task gate`.",
   gates: true,
 };
 
@@ -97,7 +97,7 @@ const ORG_NAME_TO_DESCENDANTS: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
   clause:
-    "a node's own rename rewriting `path[i].name` on every descendant. ⚠️ The fan-out resolves its population with `where(\"query_by_organizations\", \"array-contains\", uid)` — a RANGE READ, so it must run OUTSIDE the transaction that writes those nodes, which is exactly the overlap `ContendedRangeError` refuses. Max measured descendant count is 11 (Netflix).",
+    "a node's own rename rewriting `path[i].name` on every descendant. ⚠️ The fan-out resolves its population with `where(\"query_by_path\", \"array-contains\", uid)` — a RANGE READ, so it must run OUTSIDE the transaction that writes those nodes, which is exactly the overlap `ContendedRangeError` refuses. Max measured descendant count is 11 (Netflix).",
   gates: true,
 };
 
@@ -105,7 +105,7 @@ const ORG_REPARENT_TO_DESCENDANTS: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
   clause:
-    "a re-parent rewriting the whole subtree's `path` and `query_by_organizations`, with `path.slice(0, -1)` still equal to each node's parent's path afterwards. To be paired with a corpus detector — `api-cloudrun/scripts/audit-organization-tree.ts`, not yet written, which will re-assert every invariant over both environments and exit non-zero on a violation. None of the six older org rules has one, so a cascade that stops firing in production is caught by nothing until someone reads a stale name on screen.",
+    "a re-parent rewriting the whole subtree's `path` and `query_by_path`, with `path.slice(0, -1)` still equal to each node's parent's path afterwards. To be paired with a corpus detector — `api-cloudrun/scripts/audit-organization-tree.ts`, not yet written, which will re-assert every invariant over both environments and exit non-zero on a violation. None of the six older org rules has one, so a cascade that stops firing in production is caught by nothing until someone reads a stale name on screen.",
   gates: true,
 };
 
@@ -138,7 +138,7 @@ const createOrganizationRules: CollectionRule[] = [
     transaction: "create-organization",
     fields: [
       { source: ["path"], target: ["path"] },
-      { source: ["path"], target: ["query_by_organizations"] },
+      { source: ["path"], target: ["query_by_path"] },
       { source: ["uid"], target: ["derived_from", "source_uid"] },
     ],
   },
@@ -333,12 +333,12 @@ const reparentRules: CollectionRule[] = [
     target: "organizations",
     mode: "fan-out",
     invariant:
-      "Re-parenting a node rewrites `path` and `query_by_organizations` on the node and its whole subtree, recomputed through `computeOrganizationNode` rather than patched. ⚠️ Stored copies of the tree on OTHER collections are NOT rewritten: an edge stores the addressed node's uid only, and a document snapshot's `path` is frozen at write time deliberately — a re-parent must not rewrite history on an issued document.",
+      "Re-parenting a node rewrites `path` and `query_by_path` on the node and its whole subtree, recomputed through `computeOrganizationNode` rather than patched. ⚠️ Stored copies of the tree on OTHER collections are NOT rewritten: an edge stores the addressed node's uid only, and a document snapshot's `path` is frozen at write time deliberately — a re-parent must not rewrite history on an issued document.",
     enforced_by: [ORG_REPARENT_TO_DESCENDANTS],
     transaction: "reparent-organization",
     fields: [
       { source: ["path"], target: ["path"] },
-      { source: ["path"], target: ["query_by_organizations"] },
+      { source: ["path"], target: ["query_by_path"] },
     ],
   },
 ];

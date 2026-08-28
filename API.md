@@ -5649,7 +5649,7 @@ interface Organization {
   uid: string;
   name: string;
   path?: OrgPathNodeType[];
-  query_by_organizations?: string[];
+  query_by_path?: string[];
   derived_from?: typeLiteral | null;
   uid_department_type?: string | null;
   dates?: typeLiteral;
@@ -14625,7 +14625,7 @@ interface Organization {
   uid: string;
   name: string;
   path?: OrgPathNodeType[];
-  query_by_organizations?: string[];
+  query_by_path?: string[];
   derived_from?: typeLiteral | null;
   uid_department_type?: string | null;
   dates?: typeLiteral;
@@ -25539,7 +25539,7 @@ this is live behaviour rather than a theoretical branch.
 
 ### `computeOrganizationNode(node: typeLiteral, parent: Pick<Organization, "uid" | "path"> | null): typeLiteral`
 
-**The ONE author of `path` and `query_by_organizations`.** No writer builds
+**The ONE author of `path` and `query_by_path`.** No writer builds
 either by hand — the same rule `computeItemPaths` carries for `items[].path`,
 and for the same reason: a chain the client sends can skip, misname or
 over-claim an intermediate, so the server derives it from the RESOLVED parent

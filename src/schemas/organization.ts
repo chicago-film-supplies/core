@@ -104,7 +104,7 @@ export interface Organization {
    *
    * Firestore's `array-contains` compares whole elements, so it cannot match a
    * uid inside an array of objects; this is what makes
-   * `where("query_by_organizations", "array-contains", uid)` answer "every
+   * `where("query_by_path", "array-contains", uid)` answer "every
    * descendant of X". ⚠️ **Typesense needs no mirror at all** —
    * `enable_nested_fields` is on, so it indexes `path.uid` natively and
    * `filter_by: path.uid:=X` answers the same question. Every *read* surface
@@ -112,14 +112,22 @@ export interface Organization {
    * which is a write path and therefore cannot depend on a rebuildable,
    * eventually-consistent projection.
    *
-   * ⚠️ **Named for the collection it points at**, which is the established
-   * convention (`contacts.query_by_organizations`,
-   * `destinations.query_by_organizations`, `organizations.query_by_contacts`).
-   * One semantic wrinkle: on those collections it means *"the orgs this document
-   * is attached to"*; here it means *"my ancestors, including me"* — the same
-   * convention, self-referentially.
+   * 🔴 **`query_by_path`, NOT `query_by_organizations` — and the departure from
+   * the `query_by_<collection>` convention is deliberate.** On every other
+   * collection that name means *"the organizations this document is attached
+   * to"*; here it would mean *"my ancestors, including me"*. Two meanings under
+   * one name in one codebase is a reader trap, and it is also literally
+   * unguardable: an arm of api-cloudrun's org-tree ratchet asserting that
+   * nothing hand-builds this array could not tell an org node's chain from the
+   * five legitimate `contacts.query_by_organizations` writers — which sit in the
+   * same two files it has to walk.
+   *
+   * So this one names the QUESTION — *"whose path am I in?"* — rather than a
+   * target collection it does not really point at. The convention still holds
+   * wherever the field really is a list of foreign uids
+   * (`contacts.query_by_organizations`, `organizations.query_by_contacts`).
    */
-  query_by_organizations?: string[];
+  query_by_path?: string[];
   /**
    * Provenance for an AUTO-MINTED node, so a later realignment can find the
    * population when someone names the real production. `null` on an
@@ -294,14 +302,14 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
   }
 
   // 4. the Firestore-only flat mirror is exactly the uids of `path`.
-  if (doc.query_by_organizations !== undefined) {
+  if (doc.query_by_path !== undefined) {
     const expected = path.map((n) => n.uid);
-    const actual = doc.query_by_organizations;
+    const actual = doc.query_by_path;
     if (actual.length !== expected.length || expected.some((uid, i) => actual[i] !== uid)) {
       ctx.addIssue({
         code: "custom",
-        path: ["query_by_organizations"],
-        message: `query_by_organizations must equal path.map(n => n.uid) — expected [${expected.join(", ")}], got [${actual.join(", ")}]`,
+        path: ["query_by_path"],
+        message: `query_by_path must equal path.map(n => n.uid) — expected [${expected.join(", ")}], got [${actual.join(", ")}]`,
       });
     }
   }
@@ -330,7 +338,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   // and the first column, and T10 forbids a rollup shadowing a declared column,
   // so the swap lands in the same commit as the `name` removal.
   path: z.array(OrgPathNode).min(1).max(3).optional().meta({ column: true, label: "Tree" }),
-  query_by_organizations: z.array(z.string()).optional(),
+  query_by_path: z.array(z.string()).optional(),
   derived_from: z.strictObject({
     source_uid: FirestoreId,
     reason: z.enum(["minted-root", "minted-project", "minted-department"]),

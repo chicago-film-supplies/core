@@ -185,15 +185,15 @@ const deptDoc = { uid: DEPT_ID, path: [rootNode, projectNode, deptNode], uid_dep
 Deno.test("computeOrganizationNode is the ONE author — path is [...parent.path, self]", () => {
   const root = computeOrganizationNode(rootNode, null);
   assertEquals(root.path, [rootNode]);
-  assertEquals(root.query_by_organizations, [ROOT_ID]);
+  assertEquals(root.query_by_path, [ROOT_ID]);
 
   const project = computeOrganizationNode(projectNode, { uid: ROOT_ID, path: root.path });
   assertEquals(project.path, [rootNode, projectNode]);
-  assertEquals(project.query_by_organizations, [ROOT_ID, PROJECT_ID]);
+  assertEquals(project.query_by_path, [ROOT_ID, PROJECT_ID]);
 
   const dept = computeOrganizationNode(deptNode, { uid: PROJECT_ID, path: project.path });
   assertEquals(dept.path, [rootNode, projectNode, deptNode]);
-  assertEquals(dept.query_by_organizations, [ROOT_ID, PROJECT_ID, DEPT_ID]);
+  assertEquals(dept.query_by_path, [ROOT_ID, PROJECT_ID, DEPT_ID]);
 });
 
 Deno.test("computeOrganizationNode refuses a fourth level — a SEASON is part of the project title", () => {

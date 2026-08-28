@@ -30,7 +30,7 @@ export const organizations: TypesenseCollectionConfig = {
       // side.** `enable_nested_fields` is already on above and `contacts.uid` is
       // declared exactly this way, so `filter_by: path.uid:=<rootUid>` answers
       // "every descendant of X" with no extra field. The Firestore-only
-      // `query_by_organizations` mirror exists because Firestore's
+      // `query_by_path` mirror exists because Firestore's
       // `array-contains` compares WHOLE elements and cannot match a uid inside
       // an array of objects — that is a limitation of the other store, not a
       // shape this one needs.
