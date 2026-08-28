@@ -33,6 +33,7 @@ import { outOfService } from "./out-of-service.ts";
 import { transactions as transactionsModule } from "./transactions.ts";
 import { storeTransfers } from "./store-transfers.ts";
 import { products } from "./products.ts";
+import { departmentTypes } from "./department-types.ts";
 import { organizations } from "./organizations.ts";
 import { contacts } from "./contacts.ts";
 import { users } from "./users.ts";
@@ -91,6 +92,7 @@ const MODULES: readonly PropagationModule[] = [
   transactionsModule,
   storeTransfers,
   products,
+  departmentTypes,
   organizations,
   contacts,
   users,

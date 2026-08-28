@@ -71,6 +71,8 @@ export type TransactionId =
   | "create-product"
   | "update-product"
   // organizations.ts
+  | "create-department-type"
+  | "update-department-type"
   | "create-organization"
   | "update-organization"
   // 🔴 **A re-parent gets its OWN id, never a borrowed `update-organization`.**
@@ -203,6 +205,7 @@ export type RuleId =
   // organizations.ts
   | "create-org:org-to-contacts"
   | "create-org:node-to-tree"
+  | "update-department-type:name-to-departments"
   | "update-org:name-to-contacts"
   | "update-org:name-to-orders"
   | "update-org:billing-to-orders"
