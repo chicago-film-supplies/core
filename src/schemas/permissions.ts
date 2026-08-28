@@ -80,6 +80,15 @@ export const PERMISSIONS = [
   "locationTypes.update",
   "locationTypes.delete",
 
+  // ⚠️ `.delete` routes nowhere, deliberately — deactivation is a `PUT` setting
+  // `active: false`. It matches `locationTypes.delete` and `taxes.delete`, both
+  // of which exist and route nowhere for the same reason, and it is what makes
+  // the Firestore rule expressible without minting a permission later.
+  "departmentTypes.create",
+  "departmentTypes.read",
+  "departmentTypes.update",
+  "departmentTypes.delete",
+
   "stores.create",
   "stores.read",
   "stores.update",

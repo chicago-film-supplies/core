@@ -93,7 +93,7 @@ function isInputOptional(node: z.ZodType): boolean {
 
 Deno.test("corpus gate — every registry schema has a minimal fixture that parses", () => {
   const all = distinctSchemas();
-  assertEquals(all.size, 56, "registry size moved; re-measure the override list");
+  assertEquals(all.size, 57, "registry size moved; re-measure the override list");
 
   const failures: string[] = [];
   for (const [name, schema] of all) {
@@ -106,7 +106,7 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   }
   assertEquals(failures, [], failures.join("\n"));
 
-  // The escape hatch is the measurement. Structural coverage is 55/56 without
+  // The escape hatch is the measurement. Structural coverage is 56/57 without
   // it; if this grows, the walker has stopped keeping up with the schemas.
   assertEquals(Object.keys(OVERRIDES).length, 1, "a schema now needs hand-written fixture knowledge");
 });

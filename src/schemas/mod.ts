@@ -520,6 +520,15 @@ export {
 } from "./destination.ts";
 
 export {
+  DepartmentTypeSchema,
+  CreateDepartmentTypeInput,
+  UpdateDepartmentTypeInput,
+  type DepartmentType,
+  type CreateDepartmentTypeInputType,
+  type UpdateDepartmentTypeInputType,
+} from "./department-type.ts";
+
+export {
   LocationTypeSchema,
   CreateLocationTypeInput,
   UpdateLocationTypeInput,
@@ -995,6 +1004,7 @@ import type { InventoryLedger } from "./inventory-ledger.ts";
 import type { Invite } from "./invite.ts";
 import type { Invoice } from "./invoice.ts";
 import type { Location } from "./location.ts";
+import type { DepartmentType } from "./department-type.ts";
 import type { LocationType } from "./location-type.ts";
 import type { Order } from "./order.ts";
 import type { Organization } from "./organization.ts";
@@ -1095,6 +1105,7 @@ import { InventoryLedgerSchema } from "./inventory-ledger.ts";
 import { InviteSchema } from "./invite.ts";
 import { InvoiceSchema } from "./invoice.ts";
 import { LocationSchema } from "./location.ts";
+import { DepartmentTypeSchema } from "./department-type.ts";
 import { LocationTypeSchema } from "./location-type.ts";
 import { OrderSchema } from "./order.ts";
 import { OrganizationSchema } from "./organization.ts";
@@ -1210,6 +1221,8 @@ export interface CollectionDocs {
   locations: Location;
   "location-type": LocationType;
   "location-types": LocationType;
+  "department-type": DepartmentType;
+  "department-types": DepartmentType;
   order: Order;
   orders: Order;
   fulfillment: Fulfillment;
@@ -1312,6 +1325,7 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "list": ListSchema, "lists": ListSchema,
   "location": LocationSchema, "locations": LocationSchema,
   "location-type": LocationTypeSchema, "location-types": LocationTypeSchema,
+  "department-type": DepartmentTypeSchema, "department-types": DepartmentTypeSchema,
   "order": OrderSchema, "orders": OrderSchema,
   "fulfillment": FulfillmentSchema, "fulfillments": FulfillmentSchema,
   "organization": OrganizationSchema, "organizations": OrganizationSchema,
