@@ -43,6 +43,33 @@ export interface XeroSyncState {
    * its Cloud Task by. Advances only after a successful push.
    */
   pushed_hash: string;
+  /**
+   * `hash48` of the Xero quote **body** that was last successfully pushed —
+   * the SECOND, independent watermark (api-cloudrun#703).
+   *
+   * The two answer different questions and neither replaces the other:
+   *
+   * | | `pushed_hash` | `pushed_body_hash` |
+   * |---|---|---|
+   * | question | *has the order moved since we pushed?* | *would we send the same bytes?* |
+   * | cost | free — pure, from the order alone | 1–4 Firestore reads, O(items) |
+   * | where | the enqueue gate + the Cloud Task name | inside the task, before the first Xero call |
+   *
+   * 🔴 **The body hash is a PURE SUPPRESSOR, and that is the property that makes
+   * it safe.** It is only ever reached once the cheap gate has already fired, so
+   * it can never *add* a push. That matters because the body is not a pure
+   * function of the order — it folds in `product.price.coa_revenue`,
+   * `product.xero_code`, the `tracking-categories` corpus and the `taxes` docs,
+   * two of which ride process-lifetime memo caches with no TTL. As a suppressor,
+   * two instances with divergent caches merely disagree about whether to skip;
+   * as an *enqueue* gate they would push work back and forth at each other,
+   * unbounded, against a live ~1,000-call/day quota.
+   *
+   * ⚠️ Nullable **and** optional: every sidecar written before this field
+   * existed still has to parse a `z.strictObject`, and "we have never recorded a
+   * body" is a real state that must be distinguishable from any hash value.
+   */
+  pushed_body_hash?: string | null;
   pushed_at: FirestoreTimestampType;
 }
 
@@ -50,6 +77,7 @@ export interface XeroSyncState {
 export const XeroSyncStateSchema: z.ZodType<XeroSyncState> = z.strictObject({
   uid: z.literal("state"),
   pushed_hash: z.string().min(1).meta({ column: true, label: "Pushed Hash" }),
+  pushed_body_hash: z.string().min(1).nullable().optional().meta({ column: true, label: "Pushed Body Hash" }),
   pushed_at: FirestoreTimestamp.meta({ column: true, label: "Pushed" }),
 }).meta({
   title: "Xero Sync State",

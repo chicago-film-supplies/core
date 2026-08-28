@@ -1113,7 +1113,7 @@
         {
           "kind": "interface",
           "name": "DestinationDoc",
-          "declaration": "interface DestinationDoc {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface DestinationDoc {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  products?: UidNameRefType[];\n  contacts?: DestinationContactRefType[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a destination (a physical address used in orders)."
         },
         {
@@ -4281,7 +4281,7 @@
         {
           "kind": "interface",
           "name": "XeroSyncState",
-          "declaration": "interface XeroSyncState {\n  uid: \"state\";\n  pushed_hash: string;\n  pushed_at: FirestoreTimestampType;\n}",
+          "declaration": "interface XeroSyncState {\n  uid: \"state\";\n  pushed_hash: string;\n  pushed_body_hash?: string | null;\n  pushed_at: FirestoreTimestampType;\n}",
           "doc": "The per-order Xero-quote sync watermark (`orders/{uid}/xero-sync/state`)."
         },
         {
@@ -5942,7 +5942,7 @@
         {
           "kind": "interface",
           "name": "Destination",
-          "declaration": "interface Destination {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  query_by_organizations?: string[];\n  products?: UidNameRefType[];\n  query_by_products?: string[];\n  contacts?: DestinationContactRefType[];\n  query_by_contacts?: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Destination {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  organizations?: UidNameRefType[];\n  products?: UidNameRefType[];\n  contacts?: DestinationContactRefType[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a destination (a physical address used in orders)."
         },
         {
@@ -12176,7 +12176,7 @@
         {
           "kind": "function",
           "name": "buildOrganizationSnapshot",
-          "signature": "buildOrganizationSnapshot(org: Pick<Organization, \"uid\" | \"name\" | \"crms_id\" | \"jurisdiction_claim\" | \"tax_exempt\" | \"xero_id\" | \"billing_address\">, _: unknown): DocumentOrganizationSnapshotType",
+          "signature": "buildOrganizationSnapshot(org: Pick<Organization, \"uid\" | \"name\" | \"path\" | \"crms_id\" | \"jurisdiction_claim\" | \"tax_exempt\" | \"xero_id\" | \"billing_address\">, _: unknown): DocumentOrganizationSnapshotType",
           "doc": "Build the denormalized organization snapshot an order, invoice or credit note\nembeds.\n\n**The one builder, because four hand-maintained literals is what api-cloudrun\n#486 was.** `createOrder`, `updateOrder`'s organization branch, the CRMS\nopportunity webhook and `createInvoice` each assembled this block by hand,\nand the three order-side copies were one field short of the invoice's: they\ncarried no `tax_profile`. Nothing on the order write path could see a\ntax-exempt customer, so `repriceOrderItemsForProfile` passed a hardcoded\n`\"tax_applied\"` — the same customer's invoices went untaxed and their orders\nwent taxed, hidden only by CRMS stamping the profile from the opportunity\nheader.\n\n⚠️ **This pins WHERE the snapshot is built, not WHAT it holds** — the\nRatchet-G lesson. api-cloudrun's writer-parity test is the value assertion\nbeside it: one order created natively and one through the CRMS opportunity\npath, same commercial facts, must produce byte-identical `organization`\nblocks.\n\n`|| null` rather than `?? null` on `crms_id` and `xero_id` is deliberate and\nmatches every call site it replaces — a `crms_id` of `0` is not a CRMS id.\n\n## The tax axes, and why they are emitted UNCONDITIONALLY\n\n`jurisdiction_claim` and `tax_exempt` are the pair that retires\n`tax_profile` (api-cloudrun#596 item 1). Carrying them HERE is what makes\nevery writer dual-write for free — the alternative was two more fields in\neach hand-rolled literal, which is the failure mode this function exists to\nend.\n\n⚠️ **Always written, never omitted.** That signal has now done its job and\nchanged meaning: while `tax_profile` was still the fallback, an ABSENT axis\nmeant *\"this snapshot predates the axes, read the enum\"*. The whole corpus is\nmigrated and this builder no longer emits an enum for anything to fall back\nto, so an absent axis is now simply a snapshot no writer has touched since —\nand `null`/`false` remains the real answer. Omitting on absence would still\nbe wrong, for the surviving half of the reason: it would leave a reader\nunable to distinguish it from a customer who asserts nothing.\n\n🔴 **`tax_profile` is NOT emitted any more (api-cloudrun#596 item 3).** It is\n`.optional()` on the snapshot for one release cycle — the expand third — and\nthis is the writer half of the same step: storage cannot be emptied while a\nshared builder keeps refilling it. ⚠️ The credit-note idempotency hash reads\nthis block, and dropping the field from it moves NOTHING, because\n`creditNoteContentHash` is never persisted — api-cloudrun recomputes it from\nthe stored document on both sides of every comparison, so both sides always\nagree. That refutes what api-cloudrun#596 said was the blocker here.\n\n⚠️ **`?? null` / `?? false` is lossless on the measured corpus, not a\nflattening** — prod 2026-08-21: 291 organizations, and the 11 carrying\n`tax_exempt: true` are exactly the 11 whose profile is `tax_exempt`, the 3\ncarrying a `jurisdiction_claim` are exactly the 3 with a location profile,\nand the remaining 277 (`tax_applied`) carry neither. Absent on the\norganization already means *asserts nothing*, so there is no third state to\ndestroy. See {@link DocumentOrganizationSnapshotType.jurisdiction_claim}.",
           "paramTags": [],
           "returnsTag": null

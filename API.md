@@ -2395,11 +2395,8 @@ interface DestinationDoc {
   address: AddressType | null;
   mapbox_ids: string[];
   organizations?: UidNameRefType[];
-  query_by_organizations?: string[];
   products?: UidNameRefType[];
-  query_by_products?: string[];
   contacts?: DestinationContactRefType[];
-  query_by_contacts?: string[];
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -9220,6 +9217,7 @@ The per-order Xero-quote sync watermark (`orders/{uid}/xero-sync/state`).
 interface XeroSyncState {
   uid: "state";
   pushed_hash: string;
+  pushed_body_hash?: string | null;
   pushed_at: FirestoreTimestampType;
 }
 ```
@@ -12445,11 +12443,8 @@ interface Destination {
   address: AddressType | null;
   mapbox_ids: string[];
   organizations?: UidNameRefType[];
-  query_by_organizations?: string[];
   products?: UidNameRefType[];
-  query_by_products?: string[];
   contacts?: DestinationContactRefType[];
-  query_by_contacts?: string[];
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -25447,7 +25442,7 @@ the hierarchy**; `path` is the structure and this is a rendering choice.
 const ORG_NAME_DELIMITER: " / ";
 ```
 
-### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "name" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
+### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "name" | "path" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
 
 Build the denormalized organization snapshot an order, invoice or credit note
 embeds.
