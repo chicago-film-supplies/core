@@ -263,7 +263,12 @@ For the full Zod 4 API reference, read `.claude/zod-llms.txt` (auto-fetched from
 
 - `src/schemas/common.ts` — shared fragments (Email, Phone, Address, Coordinates, TimestampFields)
 - `src/schemas/contact.ts` — contact document + input schemas
-- `src/schemas/organization.ts` — organization document schema
+- `src/schemas/organization.ts` — organization document schema. ⚠️ **It carries a 1–3 level TREE**
+  (`ORG_LEVELS`, `path: OrgPathNode[]`, self-inclusive, root first) and a document-level
+  `superRefine` holding the four invariants that read ONE document. Level, root, parent and the
+  composed display name are all READ OFF `path` in `src/utils/organizations.ts` — none is stored, so
+  none can drift from it. Deep reference:
+  `api-cloudrun/.claude/skills/organization-tree/SKILL.md`.
 - `src/schemas/mod.ts` — re-exports everything (the `@cfs/core/schemas` barrel)
 - `src/schemas/propagation/` — the propagation catalog; **one module object per file**, see below
 - `src/utils/` — pure helper modules (`@cfs/core/utils/*`)
@@ -591,8 +596,15 @@ the wrong reason, before the change that would have hidden it.
 an absent key, `.nullable()` keeps the defect representable under a different
 spelling (`8bb64f7`). **Keep `.nullable()` only where `null` is a real answer**
 that a writer actually produces: `orders.crms_id` is null for a CFS-native order,
-`taxes.effective_from` is null for "no statutory date recorded". Never reach for
-`.nullable()` or `.default()` as a cushion to make a tightening land.
+`taxes.effective_from` is null for "no statutory date recorded".
+⭐ **`organizations.crms_id` was LOOSENED to nullable on 2026-08-28, and that is a new adjudication
+of this rule rather than an exception to it.** `null` is a real answer — *this node is not a leaf and
+therefore has no CRMS counterpart* — not "unknown", and the org tree's migration is the writer that
+produces it, stamping an explicit `null` on every minted ancestor. It sits directly beside
+`orders.crms_id`, which reads identically and is REQUIRED because `createOrder` writes one: same
+census, opposite verdicts, and only the writer distinguishes them.
+
+Never reach for `.nullable()` or `.default()` as a cushion to make a tightening land.
 
 **A declaration's optionality should carry its reason.** 166 of 211 optional
 declarations state none; the 45 that do each cite a corpus count and name their
