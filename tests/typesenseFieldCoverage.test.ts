@@ -57,7 +57,7 @@
  * `gate.sh`, so api-cloudrun's "check it is in `gate.sh`, not merely in
  * `tests/unit/`" rule does not transfer here.
  */
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { z } from "zod";
 
 import { FIRESTORE_TIMESTAMP_META, FirestoreTimestamp } from "../src/schemas/common.ts";
@@ -900,4 +900,109 @@ Deno.test("document-map companion: the parser finds real keys, and reports a mis
 
   // And a parse that stops reaching the block returns empty rather than lying.
   assertEquals(documentMapKeys("export interface SomethingElse {\n  a: B;\n}"), []);
+});
+
+// ── A non-optional declaration must be backed by a non-nullable leaf ────────
+//
+// 🔴 **Typesense answers `HTTP 400 — Field <x> has an incorrect type` for a
+// `null` in a field the config declared required**, and the sync for that
+// document fails permanently. It looks like nothing until a document without
+// the value arrives.
+//
+// `organizations.billing_address` carried exactly this for the whole life of
+// the collection: `Organization.billing_address` is `Address.nullable()`, the
+// config said the object was required, and it never bit because all 292 real
+// customer records happened to have an address. The org tree's 30 MINTED
+// ancestors — a root has no billing address by construction — were the first
+// documents to exercise it, and all 30 failed to index while every real
+// organization synced fine.
+//
+// ⚠️ **That is a present-tense claim about the CORPUS standing in for a claim
+// about the SCHEMA**, which is Ratchet H's lesson in `api-cloudrun/CLAUDE.md`,
+// and it was reachable through the API the whole time: `CreateOrganizationInput`
+// accepts a null `billing_address`.
+
+/**
+ * Declarations that are non-optional over an optional leaf and MUST stay that
+ * way, with the reason. Both are `default_sorting_field`s, and Typesense
+ * requires that field to be non-optional — so making them honest is not
+ * available; the collection would fail to create.
+ *
+ * ⚠️ Each is therefore a live hazard, not a blessed pattern: the first tag
+ * written without a `count` fails to index. The fix is to make `count` REQUIRED
+ * on the storage schema (it is maintained by an incremental `± 1` in the
+ * products writer and is present on every row today), not to widen this list.
+ */
+const NON_OPTIONAL_OVER_OPTIONAL_LEAF: Record<string, string> = {
+  "tags:count": "`count` is this collection's default_sorting_field, which Typesense requires to be non-optional",
+  "tracking-categories:count": "declared int32 for sorting alongside tags; same shape, same constraint",
+};
+
+Deno.test("typesense coverage: a non-optional declaration is backed by a non-nullable leaf", async () => {
+  const { typesenseSchemas } = await import("../src/schemas/typesense/mod.ts");
+  const { schemas } = await import("../src/schemas/mod.ts");
+  const { resolveZodField } = await import("../src/schemas/zod-walk.ts");
+
+  const offenders: string[] = [];
+  let checked = 0;
+  for (const [alias, cfg] of Object.entries(typesenseSchemas)) {
+    const doc = (schemas as Record<string, unknown>)[cfg.firestoreCollection];
+    if (!doc) continue;
+    for (const f of cfg.schema.fields) {
+      if (f.optional === true || f.name === "id") continue;
+      const leaf = resolveZodField(doc as never, f.name, { unwrap: false });
+      if (!leaf) continue; // a derived field — covered by DERIVED_FIELDS above
+      checked++;
+      // deno-lint-ignore no-explicit-any
+      let n: any = leaf;
+      const wrappers: string[] = [];
+      while (n?._zod?.def) {
+        wrappers.push(n._zod.def.type);
+        n = n._zod.def.innerType;
+      }
+      if (!wrappers.some((w) => w === "nullable" || w === "optional")) continue;
+      const key = `${alias}:${f.name}`;
+      if (key in NON_OPTIONAL_OVER_OPTIONAL_LEAF) continue;
+      offenders.push(`${key}  (leaf is ${wrappers.join(" > ")})`);
+    }
+  }
+
+  // Non-vacuity: the walk must actually reach a meaningful number of
+  // declarations, or a resolver change would make this pass over nothing.
+  assert(checked > 100, `only ${checked} non-optional declarations resolved — the walk stopped reaching the configs`);
+
+  assertEquals(
+    offenders.sort(),
+    [],
+    "These Typesense fields are declared NON-OPTIONAL over a leaf the storage schema " +
+      "allows to be null or absent. Typesense answers HTTP 400 for such a document and " +
+      "its sync fails permanently — invisibly, until the first document without the " +
+      "value arrives.\n\nFix by adding `optional: true` to the declaration, or by making " +
+      "the storage field required.\n\n" + offenders.join("\n"),
+  );
+});
+
+Deno.test("non-optional-over-nullable companion: the arm catches a real over-claim", () => {
+  // The exact shape that broke `organizations.billing_address`: a required
+  // object declaration over a `.nullable()` leaf. Planted structurally so the
+  // arm cannot pass by failing to walk.
+  const nullableLeaf = z.strictObject({ a: z.string() }).nullable();
+  // deno-lint-ignore no-explicit-any
+  let n: any = nullableLeaf;
+  const wrappers: string[] = [];
+  while (n?._zod?.def) {
+    wrappers.push(n._zod.def.type);
+    n = n._zod.def.innerType;
+  }
+  assert(wrappers.includes("nullable"), `the wrapper walk missed a .nullable(): got [${wrappers.join(", ")}]`);
+
+  // …and a plain required leaf is NOT flagged.
+  // deno-lint-ignore no-explicit-any
+  let m: any = z.string();
+  const plain: string[] = [];
+  while (m?._zod?.def) {
+    plain.push(m._zod.def.type);
+    m = m._zod.def.innerType;
+  }
+  assertEquals(plain.some((w) => w === "nullable" || w === "optional"), false);
 });

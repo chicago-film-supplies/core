@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for organizations. */
 export const organizations: TypesenseCollectionConfig = {
   alias: "organizations",
-  version: 12,
+  version: 13,
   firestoreCollection: "organizations",
-  collectionName: "organizations_v12",
+  collectionName: "organizations_v13",
   schema: {
-    name: "organizations_v12",
+    name: "organizations_v13",
     enable_nested_fields: true,
     // `/` joins the composed name's segments (`ORG_NAME_DELIMITER`), so without
     // it a search for "Locations" cannot match
@@ -73,7 +73,21 @@ export const organizations: TypesenseCollectionConfig = {
       { name: "tax_exempt", type: "bool", facet: true, optional: true },
       { name: "emails", type: "string[]", stem: true, optional: true },
       { name: "phones", type: "string[]", optional: true },
-      ...typesenseAddressFields("billing_address", { sortFull: true, parentOptional: false }),
+      // 🔴 **`parentOptional` must be TRUE: `Organization.billing_address` is
+      // `Address.nullable()` and always has been.** The config claimed the object
+      // was required, and Typesense answers `HTTP 400 — Field billing_address has
+      // an incorrect type` for a null. It never bit because every one of the 292
+      // real customer records happened to carry an address — a present-tense
+      // claim about the CORPUS, standing in for a claim about the SCHEMA, which
+      // is the hazard `api-cloudrun/CLAUDE.md` names under Ratchet H.
+      //
+      // The org tree's 30 MINTED ancestors are the first documents to exercise
+      // it: a minted root has no billing address by construction, so all 30
+      // failed to index while every real organization synced fine. ⚠️ The same
+      // 400 was already reachable through the API — `CreateOrganizationInput`
+      // accepts a null `billing_address` — so this was a live latent defect, not
+      // one the migration introduced.
+      ...typesenseAddressFields("billing_address", { sortFull: true }),
       { name: "contacts", type: "object[]" },
       { name: "contacts.uid", type: "string[]", facet: false, optional: true },
       { name: "contacts.first_name", type: "string[]", stem: true, facet: false, optional: true },
