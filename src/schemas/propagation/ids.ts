@@ -73,6 +73,12 @@ export type TransactionId =
   // organizations.ts
   | "create-organization"
   | "update-organization"
+  // 🔴 **A re-parent gets its OWN id, never a borrowed `update-organization`.**
+  // It fires a different rule set — the subtree rewrite plus every name and
+  // snapshot rule, once per descendant — so `rules_expected` genuinely differs.
+  // Six writers borrowed `update-invoice`, which declares exactly one step, and
+  // a borrowed transaction id turns the drift warning off SILENTLY.
+  | "reparent-organization"
   // contacts.ts
   | "create-contact"
   | "update-contact"
@@ -196,6 +202,7 @@ export type RuleId =
   | "update-product:product-to-draft-orders"
   // organizations.ts
   | "create-org:org-to-contacts"
+  | "create-org:mint-ancestors"
   | "update-org:name-to-contacts"
   | "update-org:name-to-orders"
   | "update-org:billing-to-orders"
@@ -203,6 +210,8 @@ export type RuleId =
   | "update-org:billing-to-invoices"
   | "update-org:tax-axes-to-orders"
   | "update-org:contacts-change"
+  | "update-org:name-to-descendants"
+  | "reparent-org:tree-to-descendants"
   // contacts.ts
   | "create-contact:contact-to-orgs"
   | "create-contact:link-to-user"

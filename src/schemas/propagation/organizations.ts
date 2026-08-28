@@ -85,6 +85,30 @@ const ORG_TAX_AXES_TO_ORDERS: EnforcementRef = {
   gates: true,
 };
 
+const ORG_MINT_ANCESTORS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/organizationTreeCoverage.test.ts",
+  clause:
+    "that `computeOrganizationNode` is the ONE author of `path`/`query_by_organizations` — no writer in `src/` or `scripts/` builds either array by hand. The four one-document invariants are enforced by `OrganizationSchema`'s own refinement at every `validateBeforeWrite`, so they need no separate walker; this ratchet covers the authorship rule the schema cannot see. Hermetic, in `deno task gate`.",
+  gates: true,
+};
+
+const ORG_NAME_TO_DESCENDANTS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
+  clause:
+    "a node's own rename rewriting `path[i].name` on every descendant. ⚠️ The fan-out resolves its population with `where(\"query_by_organizations\", \"array-contains\", uid)` — a RANGE READ, so it must run OUTSIDE the transaction that writes those nodes, which is exactly the overlap `ContendedRangeError` refuses. Max measured descendant count is 11 (Netflix).",
+  gates: true,
+};
+
+const ORG_REPARENT_TO_DESCENDANTS: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
+  clause:
+    "a re-parent rewriting the whole subtree's `path` and `query_by_organizations`, with `path.slice(0, -1)` still equal to each node's parent's path afterwards. Paired with a corpus detector — `api-cloudrun/scripts/audit-organization-tree.ts` re-asserts every invariant over both environments and exits non-zero on a violation, which none of the six older org rules has.",
+  gates: true,
+};
+
 // ── create-organization ──────────────────────────────────────────
 
 const createOrganizationRules: CollectionRule[] = [
@@ -103,6 +127,21 @@ const createOrganizationRules: CollectionRule[] = [
       { source: ["uid"], target: ["query_by_organizations"] },
     ],
   },
+  {
+    id: "create-org:mint-ancestors",
+    source: "organizations",
+    target: "organizations",
+    mode: "co-write",
+    invariant:
+      "A node's `path` is `[...its RESOLVED parent's path, itself]` — derived from the parent that exists, never from a chain the client sent. Where an ancestor does not exist yet it is MINTED, carrying `derived: true` and a `derived_from` provenance so a later realignment can find the population.",
+    enforced_by: [ORG_MINT_ANCESTORS],
+    transaction: "create-organization",
+    fields: [
+      { source: ["path"], target: ["path"] },
+      { source: ["path"], target: ["query_by_organizations"] },
+      { source: ["uid"], target: ["derived_from", "source_uid"] },
+    ],
+  },
 ];
 
 const createOrganizationTransaction: TransactionDefinition = {
@@ -111,6 +150,7 @@ const createOrganizationTransaction: TransactionDefinition = {
     "Creates an organization with bidirectional contact cross-references and a cowritten default thread. CRMS + Xero sync runs pre/post-transaction.",
   steps: [
     "create-org:org-to-contacts",
+    "create-org:mint-ancestors",
     "cowrite-thread:organizations-to-thread",
     "cowrite-thread:thread-to-organizations",
   ],
@@ -272,6 +312,50 @@ const updateOrganizationRules: CollectionRule[] = [
   },
 ];
 
+const nameToDescendantsRule: CollectionRule = {
+  id: "update-org:name-to-descendants",
+  source: "organizations",
+  target: "organizations",
+  mode: "fan-out",
+  invariant:
+    "Every descendant embeds this node's name in its own `path`, so a rename must rewrite `path[i].name` on all of them. ⚠️ It pushes each affected LEAF's Xero contact rename (one call per leaf — Xero renders an invoice's contact from the live contact record, so CFS never touches a Xero invoice to rename a customer), and only where the COMPOSED name actually changed.",
+  enforced_by: [ORG_NAME_TO_DESCENDANTS],
+  transaction: "update-organization",
+  fields: [
+    { source: ["name"], target: ["path"] },
+  ],
+};
+
+const reparentRules: CollectionRule[] = [
+  {
+    id: "reparent-org:tree-to-descendants",
+    source: "organizations",
+    target: "organizations",
+    mode: "fan-out",
+    invariant:
+      "Re-parenting a node rewrites `path` and `query_by_organizations` on the node and its whole subtree, recomputed through `computeOrganizationNode` rather than patched. ⚠️ Stored copies of the tree on OTHER collections are NOT rewritten: an edge stores the addressed node's uid only, and a document snapshot's `path` is frozen at write time deliberately — a re-parent must not rewrite history on an issued document.",
+    enforced_by: [ORG_REPARENT_TO_DESCENDANTS],
+    transaction: "reparent-organization",
+    fields: [
+      { source: ["path"], target: ["path"] },
+      { source: ["path"], target: ["query_by_organizations"] },
+    ],
+  },
+];
+
+const reparentOrganizationTransaction: TransactionDefinition = {
+  id: "reparent-organization",
+  description:
+    "Moves an organization node to a new parent (or promotes it to a root), rewriting its subtree's `path`. Its OWN transaction rather than a borrowed `update-organization`: it fires the tree rewrite plus every name and snapshot rule once per descendant, so `rules_expected` genuinely differs — and a borrowed transaction id turns the drift warning off silently.",
+  steps: [
+    "reparent-org:tree-to-descendants",
+    "update-org:name-to-descendants",
+    "update-org:name-to-contacts",
+    "update-org:name-to-orders",
+    "update-org:name-to-invoices",
+  ],
+};
+
 const updateOrganizationTransaction: TransactionDefinition = {
   id: "update-organization",
   description:
@@ -284,6 +368,7 @@ const updateOrganizationTransaction: TransactionDefinition = {
     "update-org:billing-to-invoices",
     "update-org:tax-axes-to-orders",
     "update-org:contacts-change",
+    "update-org:name-to-descendants",
   ],
 };
 
@@ -293,9 +378,12 @@ export const organizations: PropagationModule = {
   rules: [
     ...createOrganizationRules,
     ...updateOrganizationRules,
+    nameToDescendantsRule,
+    ...reparentRules,
   ],
   transactions: [
     createOrganizationTransaction,
     updateOrganizationTransaction,
+    reparentOrganizationTransaction,
   ],
 };
