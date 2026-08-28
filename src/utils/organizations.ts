@@ -318,12 +318,15 @@ export function buildOrganizationSnapshot(
     // and every writer that reaches this builder inherits it: fixing it here
     // fixed roughly eight api-cloudrun call sites at once.
     //
-    // ⚠️ The fallback is for the transition ONLY, and it is load-bearing until
-    // `path` is required: an un-migrated node — or one minted by a writer that
-    // does not build a path — has nothing to compose from, and storing "" on an
-    // order's customer is worse than storing the legacy string. It goes when
-    // `name` is removed, and that compile error is exactly its purpose.
-    name: org.path?.length ? composeOrgName(org.path) : org.name,
+    // ⚠️ The fallback is for the transition ONLY. It went from "the legacy
+    // string" to `?? ""` when `Organization.name` became optional
+    // (api-cloudrun#709), which is a real narrowing of what it can rescue — so
+    // what makes it acceptable is that the branch is now UNREACHABLE on both
+    // corpora: prod and dev are 100% pathed as of 2026-08-28, the CRMS member
+    // webhook no longer mints pathless organizations, and arm 0 of
+    // `api-cloudrun/scripts/audit-organization-tree.ts` is the standing detector
+    // that says so. It disappears entirely when `path` becomes required.
+    name: org.path?.length ? composeOrgName(org.path) : (org.name ?? ""),
     crms_id: org.crms_id || null,
     jurisdiction_claim: org.jurisdiction_claim ?? null,
     tax_exempt: org.tax_exempt ?? false,

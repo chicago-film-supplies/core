@@ -75,21 +75,30 @@ export interface Organization {
    * (`"Netflix Productions, LLC - Office"`), and after a rename through the tree
    * UI it holds the node's OWN segment (`"Office"`) instead. **Read `path`.**
    *
-   * 🔴 **It stays REQUIRED until the Typesense `v13 → v14` swap, and the reason
-   * is not the storage schema** (api-cloudrun#709). `organizations` declares
-   * `default_sorting_field: "name"`, so loosening this leaf to `.optional()`
-   * makes the index declaration a non-optional field over an optional leaf —
-   * which `tests/typesenseFieldCoverage.test.ts` refuses, because Typesense
-   * answers HTTP 400 for such a document and the sync then fails permanently and
-   * invisibly. So the loosening cannot ship ahead of the collection bump that
-   * moves the sort field and the first display column off it; it lands WITH that
-   * swap, and the corpus purge goes between the two.
+   * ⚠️ **Optional as of the `v13 → v14` swap, and REMOVED once the corpus is
+   * purged** (api-cloudrun#709). The two steps cannot be combined: a
+   * `z.strictObject` refuses a stored document carrying a key it does not
+   * declare, so the purge must PRECEDE the removal — and the purge needs this
+   * `.optional()` to be legal in the meantime.
+   *
+   * 🔴 **The loosening in turn needed the Typesense collection bump, and the
+   * reason is not the storage schema at all.** `organizations` declared
+   * `default_sorting_field: "name"`, and Typesense refuses that outright over an
+   * optional field — probed against a live dev collection 2026-08-28:
+   * *"Default sorting field `name` cannot be an optional field."* (A control
+   * with `optional: false` created cleanly, so the probe was measuring the right
+   * thing.) The sort field is now `updated_at`, which is `int64` and
+   * non-optional, and `name` is declared `optional: true` on the index side.
+   *
+   * ⚠️ Until the purge runs, this field is still the SOURCE of the index's
+   * `name`. The composed producer has to be live BEFORE the corpus is stripped,
+   * or every organization loses its label in search.
    *
    * ⚠️ `CreateOrganizationInput.name` / `UpdateOrganizationInput.name` are NOT
    * this field and STAY. They are the wire name of the node's OWN segment,
    * which is what `path.at(-1).name` stores.
    */
-  name: string;
+  name?: string;
   /**
    * Self-inclusive ancestor chain, root first: `[org, project, department]`.
    * `path.at(-1).uid === uid`.
@@ -352,7 +361,7 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
 /** Zod schema for a full organization Firestore document. */
 export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask", column: true, label: "Name", linkTo: "organizationDetail" }),
+  name: z.string().min(1, "Organization name is required").max(100).optional().meta({ pii: "mask", column: true, label: "Name", linkTo: "organizationDetail" }),
   // ⚠️ `column: true` WITHOUT a `label`, so each node's heading composes from
   // the key that holds it — see `core/CLAUDE.md` § *Display columns*. It is not
   // in `displayDefaults.columns` yet: the scalar `name` is still the sort field

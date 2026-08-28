@@ -5644,7 +5644,7 @@ Full organization document schema (Firestore document shape).
 ```ts
 interface Organization {
   uid: string;
-  name: string;
+  name?: string;
   path?: OrgPathNodeType[];
   query_by_path?: string[];
   derived_from?: typeLiteral | null;
@@ -14618,7 +14618,7 @@ Full organization document schema (Firestore document shape).
 ```ts
 interface Organization {
   uid: string;
-  name: string;
+  name?: string;
   path?: OrgPathNodeType[];
   query_by_path?: string[];
   derived_from?: typeLiteral | null;

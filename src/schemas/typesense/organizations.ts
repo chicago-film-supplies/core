@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for organizations. */
 export const organizations: TypesenseCollectionConfig = {
   alias: "organizations",
-  version: 13,
+  version: 14,
   firestoreCollection: "organizations",
-  collectionName: "organizations_v13",
+  collectionName: "organizations_v14",
   schema: {
-    name: "organizations_v13",
+    name: "organizations_v14",
     enable_nested_fields: true,
     // `/` joins the composed name's segments (`ORG_NAME_DELIMITER`), so without
     // it a search for "Locations" cannot match
@@ -16,7 +16,11 @@ export const organizations: TypesenseCollectionConfig = {
     token_separators: ["(", ")", "-", "+", " ", "/"],
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
-      { name: "name", type: "string", sort: true, stem: true, facet: false },
+      // ⚠️ **`optional: true` because `Organization.name` is being REMOVED**
+      // (api-cloudrun#709). It is still fed by the stored scalar today and by
+      // `composeOrgName(path)` once the producer lands; the flag is what lets
+      // the corpus be purged between those two states without the sync 400ing.
+      { name: "name", type: "string", sort: true, stem: true, facet: false, optional: true },
       { name: "description", type: "string", stem: true, optional: true },
       // `optional: true` because `Organization.crms_id` is now NULLABLE: a
       // minted root or project has no CRMS counterpart and must not create one.
@@ -105,7 +109,19 @@ export const organizations: TypesenseCollectionConfig = {
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "updated_at", type: "int64", sort: true, index: true, facet: false },
     ],
-    default_sorting_field: "name",
+    // 🔴 **Moved off `name` in v14, and Typesense forced the choice.** Probed
+    // against a live dev collection 2026-08-28: creating a collection whose
+    // `default_sorting_field` is an `optional: true` field is refused outright —
+    // *"Default sorting field `name` cannot be an optional field."* — while the
+    // same config with `optional: false` created cleanly. So `name` could not
+    // become optional while it was the sort field, and it has to become optional
+    // before the corpus can be purged.
+    //
+    // `updated_at` is `int64`, `sort: true` and the only non-optional sortable
+    // numeric here. ⚠️ This is Typesense's TIE-BREAKER for relevance ranking,
+    // not the table's default sort — that is `displayDefaults.sort` below, which
+    // still reads `name` ascending.
+    default_sorting_field: "updated_at",
   },
   synonyms: [],
   displayDefaults: {
