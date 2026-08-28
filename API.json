@@ -8076,7 +8076,7 @@
         {
           "kind": "interface",
           "name": "OrganizationDocument",
-          "declaration": "interface OrganizationDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  crms_id: number;\n  crms_id_str?: string;\n  xero_id?: string;\n  jurisdiction_claim?: string;\n  tax_exempt?: boolean;\n  emails?: string[];\n  phones?: string[];\n  billing_address: TypesenseAddressFields;\n  contacts: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  last_order?: number;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface OrganizationDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  level?: string;\n  xero_id?: string;\n  jurisdiction_claim?: string;\n  tax_exempt?: boolean;\n  emails?: string[];\n  phones?: string[];\n  billing_address: TypesenseAddressFields;\n  contacts: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  last_order?: number;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for organizations."
         },
         {

@@ -528,10 +528,36 @@ export interface OutOfServiceDocument {
 export interface OrganizationDocument {
   id: string;
   uid: string;
+  /**
+   * The COMPOSED label — `composeOrgName(path)`, derived at index time.
+   *
+   * ⚠️ **Not the stored scalar `name`.** A migrated node still carries the
+   * operator's old delimited string there until its first rename, after which it
+   * carries the node's OWN segment alone; neither is a label. This field is what
+   * every search surface renders, and it is why a consumer never needs `path`
+   * (whose `derived` flag is not indexed, so a hit cannot be re-composed).
+   */
   name: string;
   description?: string;
-  crms_id: number;
+  /**
+   * 🔴 **Optional because `Organization.crms_id` is NULLABLE** — a minted root or
+   * project has no CRMS counterpart and must not create one, and the config
+   * declares it optional for exactly that reason. It read `number` here for as
+   * long as the index has carried the tree — core#57's failure class, where the
+   * config moved and the hand-written document type did not.
+   */
+  crms_id?: number;
   crms_id_str?: string;
+  /**
+   * `ORG_LEVELS[path.length - 1]`, DERIVED at index time — Typesense cannot facet
+   * on an array's length, and there is no stored `level` (a stored one is the
+   * copy that could disagree with `path`).
+   *
+   * A facet and a declared column, which together are what make a
+   * `level:=department` filter legal through the manager's generic filter
+   * surface rather than an undeclared one its rules refuse.
+   */
+  level?: string;
   xero_id?: string;
   jurisdiction_claim?: string;
   tax_exempt?: boolean;

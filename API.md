@@ -17132,8 +17132,9 @@ interface OrganizationDocument {
   uid: string;
   name: string;
   description?: string;
-  crms_id: number;
+  crms_id?: number;
   crms_id_str?: string;
+  level?: string;
   xero_id?: string;
   jurisdiction_claim?: string;
   tax_exempt?: boolean;
