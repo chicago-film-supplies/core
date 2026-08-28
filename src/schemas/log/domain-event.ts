@@ -48,6 +48,16 @@ export const DOMAIN_EVENT_MSGS = [
   "organization_check_failed",
   "organization_no_crms_id",
   "organization_no_xero_id",
+  // A rename's Xero contact push was REFUSED because the ContactID is held by
+  // more than one organization (api-cloudrun#702 — six prod pairs share one).
+  // `xeroContactUpdateName` is keyed on ContactID with no uniqueness check, so
+  // pushing would relabel the OTHER organization's live receivable with a name
+  // nobody chose for it. ⚠️ The CFS-side rename still lands — refusing that too
+  // would leave an operator unable to correct a name at all. The repair is a
+  // merge or a distinguishing rename, which is a decision about a live ledger.
+  // `{ organization_uid, xero_id, holder_uids }`. Emitted from
+  // `api-cloudrun/src/services/organizations.ts` in api-cloudrun.
+  "organization_xero_id_shared",
   "receive_invoice_hook_failed",
   "receive_member_update_failed",
   "receive_opportunity_hook_failed",
