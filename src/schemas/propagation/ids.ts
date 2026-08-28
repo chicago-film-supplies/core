@@ -202,7 +202,7 @@ export type RuleId =
   | "update-product:product-to-draft-orders"
   // organizations.ts
   | "create-org:org-to-contacts"
-  | "create-org:mint-ancestors"
+  | "create-org:node-to-tree"
   | "update-org:name-to-contacts"
   | "update-org:name-to-orders"
   | "update-org:billing-to-orders"

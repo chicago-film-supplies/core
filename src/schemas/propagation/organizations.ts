@@ -85,7 +85,7 @@ const ORG_TAX_AXES_TO_ORDERS: EnforcementRef = {
   gates: true,
 };
 
-const ORG_MINT_ANCESTORS: EnforcementRef = {
+const ORG_NODE_TO_TREE: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/unit/organizationTreeCoverage.test.ts",
   clause:
@@ -128,13 +128,13 @@ const createOrganizationRules: CollectionRule[] = [
     ],
   },
   {
-    id: "create-org:mint-ancestors",
+    id: "create-org:node-to-tree",
     source: "organizations",
     target: "organizations",
     mode: "co-write",
     invariant:
-      "A node's `path` is `[...its RESOLVED parent's path, itself]` — derived from the parent that exists, never from a chain the client sent. Where an ancestor does not exist yet it is MINTED, carrying `derived: true` and a `derived_from` provenance so a later realignment can find the population.",
-    enforced_by: [ORG_MINT_ANCESTORS],
+      "A node's `path` is `[...its RESOLVED parent's path, itself]` — derived from the parent that EXISTS, never from a chain the client sent, so a chain that skips, misnames or over-claims an intermediate cannot survive a write. A create with no `uid_parent` is a root. ⚠️ **The API never MINTS an ancestor**, which is why this rule is not called `mint-ancestors`: a create names a parent that already exists or it is a root, and the only writer that invents a node is `scripts/migrate-organization-tree.ts`, which logs no propagation and makes no CRMS or Xero call. A rule id no writer fires is a claim the coverage ratchet correctly refuses.",
+    enforced_by: [ORG_NODE_TO_TREE],
     transaction: "create-organization",
     fields: [
       { source: ["path"], target: ["path"] },
@@ -150,7 +150,7 @@ const createOrganizationTransaction: TransactionDefinition = {
     "Creates an organization with bidirectional contact cross-references and a cowritten default thread. CRMS + Xero sync runs pre/post-transaction.",
   steps: [
     "create-org:org-to-contacts",
-    "create-org:mint-ancestors",
+    "create-org:node-to-tree",
     "cowrite-thread:organizations-to-thread",
     "cowrite-thread:thread-to-organizations",
   ],
