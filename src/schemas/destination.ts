@@ -41,11 +41,8 @@ export interface Destination {
   address: AddressType | null;
   mapbox_ids: string[];
   organizations?: UidNameRefType[];
-  query_by_organizations?: string[];
   products?: UidNameRefType[];
-  query_by_products?: string[];
   contacts?: DestinationContactRefType[];
-  query_by_contacts?: string[];
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -58,16 +55,29 @@ export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   // Required (no `.default([])`): the Typesense config declares it so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
   mapbox_ids: z.array(z.string()),
+  // ⚠️ **No `query_by_*` twin on ANY of these three, and the absence is the
+  // decision** (api-cloudrun#650). A flat uid mirror exists so Firestore's
+  // `array-contains` can match a uid nested inside an array of objects — which
+  // is why `contacts.query_by_organizations` and `organizations.query_by_path`
+  // both carry one and must keep it. On `destinations` the three mirrors had no
+  // writer and no reader, and were stripped from both corpora on 2026-08-28
+  // (188 documents each for `organizations`/`products`, 166 for `contacts`).
+  //
+  // 🔴 They are not merely unused — wiring them up would have been WRONG. All
+  // three match branches of `findOrCreateDestination` return the found uid and
+  // write nothing back, so `organizations[]` means *"the org that first created
+  // this address"*, not *"every org that uses it"*. A mirror cannot be more
+  // correct than the array it mirrors, and a faithful mirror of an incomplete
+  // array is worse than none because it reads as authoritative. The
+  // ancestor-scoped picker that these were kept for is a read-only search
+  // surface, and Typesense already indexes `organizations.uid` directly.
   organizations: z.array(UidNameRef).optional().meta({ label: "Organizations" }),
-  query_by_organizations: z.array(z.string()).optional(),
   products: z.array(UidNameRef).optional().meta({ label: "Products" }),
-  query_by_products: z.array(z.string()).optional(),
-  // `contacts`/`query_by_contacts`: declared ahead of use. 192 of 458 prod
-  // destinations carry the key, none with an element (2026-08-23) — the feature
-  // has not shipped. Deliberately carries no issue; this line is the record.
+  // `contacts`: declared ahead of use. 192 of 458 prod destinations carried the
+  // key, none with an element (2026-08-23) — the feature has not shipped.
+  // Deliberately carries no issue; this line is the record.
   // CLAUDE.md § "Is a field dead?".
   contacts: z.array(DestinationContactRef).optional(),
-  query_by_contacts: z.array(z.string()).optional(),
   version: z.int().min(0).default(0),
   ...TimestampFields,
 }).meta({

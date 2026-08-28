@@ -18,7 +18,6 @@ Deno.test("DestinationSchema validates a complete document", () => {
     },
     mapbox_ids: ["test-mbx-1"],
     organizations: [{ uid: "testorg1000000000000", name: "Acme" }],
-    query_by_organizations: ["testorg1000000000000"],
     ...ts,
   };
   assertEquals(DestinationSchema.safeParse(doc).success, true);
