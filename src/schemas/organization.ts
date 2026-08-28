@@ -68,6 +68,27 @@ export type OrgLevel = typeof ORG_LEVELS[number];
  */
 export interface Organization {
   uid: string;
+  /**
+   * ⚠️ **The LEGACY delimited scalar, on its way out** — `path.at(-1).name` is
+   * the node's own segment and `composeOrgName(path)` is the display name. This
+   * holds whatever single string predated the tree
+   * (`"Netflix Productions, LLC - Office"`), and after a rename through the tree
+   * UI it holds the node's OWN segment (`"Office"`) instead. **Read `path`.**
+   *
+   * 🔴 **It stays REQUIRED until the Typesense `v13 → v14` swap, and the reason
+   * is not the storage schema** (api-cloudrun#709). `organizations` declares
+   * `default_sorting_field: "name"`, so loosening this leaf to `.optional()`
+   * makes the index declaration a non-optional field over an optional leaf —
+   * which `tests/typesenseFieldCoverage.test.ts` refuses, because Typesense
+   * answers HTTP 400 for such a document and the sync then fails permanently and
+   * invisibly. So the loosening cannot ship ahead of the collection bump that
+   * moves the sort field and the first display column off it; it lands WITH that
+   * swap, and the corpus purge goes between the two.
+   *
+   * ⚠️ `CreateOrganizationInput.name` / `UpdateOrganizationInput.name` are NOT
+   * this field and STAY. They are the wire name of the node's OWN segment,
+   * which is what `path.at(-1).name` stores.
+   */
   name: string;
   /**
    * Self-inclusive ancestor chain, root first: `[org, project, department]`.
