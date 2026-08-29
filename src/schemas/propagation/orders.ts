@@ -1287,6 +1287,46 @@ const crossOrderReturnTransaction: TransactionDefinition = {
   ],
 };
 
+// ── cross-order-checkout ───────────────────────────────────────────
+//
+// POST /checkouts — a worker takes gear out for several jobs in one trip and
+// checks the whole cart out at once, WITHOUT an order in the path. Same work as
+// `bulk-checkout-order`, and therefore the same steps; only the SCOPE differs,
+// so it declares no rule of its own.
+//
+// ⚠️ It exists as a separate id rather than borrowing `bulk-checkout-order`
+// because a borrowed transaction id turns the drift check off silently — the
+// logger would resolve the record against a step list describing a different
+// path, and `rules_expected` would stop describing what actually ran. The same
+// argument `cross-order-return` makes against borrowing `bulk-return-order`.
+//
+// 🔴 **The symmetry with `cross-order-return` is NOT complete, and the gap is
+// the point.** Returning is the direction that cannot be scoped by an order —
+// a worker is handed a crate and refusing half of it is the defect `POST
+// /returns` removes — so `returnOrder` DISCOVERS nothing and the order was only
+// ever an assertion. Checking out is the opposite: `checkoutOrder` calls
+// `readOrderBookings` to discover what to take, so the order is its INPUT. The
+// cross-order form therefore takes EXPLICIT booking rows and never a scope; a
+// scope form would put an irreversible cross-customer sale transfer one call
+// away. `checkoutOrder` filters (it discovered); the cross-order form refuses
+// (it was told).
+
+const crossOrderCheckoutTransaction: TransactionDefinition = {
+  id: "cross-order-checkout",
+  description:
+    "Flip explicitly named reserved/prepped bookings belonging to ANY number of orders to active, moving their quantities into breakdown.out in one operator session. Reuses update-booking rules per row, including the per-destination card status recompute; each distinct order touched is finalized. Identical in kind to bulk-checkout-order — only the scope differs, so it declares the same steps and no new rule. Unlike cross-order-return it takes explicit rows rather than a scope, because check-out is discovered from an order and being handed the wrong row must be a refusal rather than a silent transfer.",
+  steps: [
+    "update-booking:booking-to-self",
+    ...STOCK_STEPS,
+    "update-booking:booking-to-transactions",
+    "update-booking:transactions-to-ledger",
+    "update-booking:transactions-to-locations",
+    "update-booking:booking-to-order",
+    "update-order:order-to-fulfillment",
+    "update-booking:booking-to-cards",
+  ],
+};
+
 // ── finalize-order ─────────────────────────────────────────────────
 //
 // The idempotent recompute that runs after a batch of booking writes: it
@@ -1389,6 +1429,7 @@ export const orders: PropagationModule = {
     bulkReturnOrderTransaction,
     bulkFulfillmentBookingsTransaction,
     crossOrderReturnTransaction,
+    crossOrderCheckoutTransaction,
     finalizeOrderTransaction,
     processOrderDocsTransaction,
   ],
