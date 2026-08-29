@@ -433,8 +433,29 @@ total_cents: z.int().meta({ column: true, label: "Total" }),
   (`PriceModifier.rate`, `TaxRef.rate`, `Discount.rate`, `Tax.rate`), one
   constant, so a new `RateType` member is one edit.
 - **Computed Typesense fields** have no Firestore field to hang a label on and go
-  in `TYPESENSE_ROLLUP_COLUMNS` (`src/schemas/display-columns.ts`) — 19 entries,
-  all `deriveOrderDateEnvelope` / `postProcess` output.
+  in `TYPESENSE_ROLLUP_COLUMNS` (`src/schemas/display-columns.ts`) — **re-derive
+  the count from the file; do not quote one from here.** This line said *19
+  entries, all `deriveOrderDateEnvelope` / `postProcess` output* and both halves
+  had rotted: there were 21, and `organizations:name` comes from
+  `translateForTypesense` while `deliveries` / `pickups` come from
+  `coerceArrayFields`.
+- ⚠️ **That table is for DISPLAY COLUMNS, and it is not where a derived field
+  declares its producer.** `DERIVED_FIELDS` in
+  `tests/typesenseFieldCoverage.test.ts` is. The two are easy to confuse and T10
+  will not catch it: T10 runs one way only — every rollup key must name a
+  declared field — so there is **no** arm forcing a derived field to have a
+  rollup entry, and a facet key that should never render as a column (raw uids,
+  e.g. `fulfillments:destinations.pick_bucket`) correctly has none.
+- 🔴 **A `DERIVED_FIELDS` entry asserts a producer exists and nothing checks that
+  it does — so it needs a POPULATION assertion beside it.** The value is prose,
+  and naming the producer *truthfully* is not enough: `deliveries` / `pickups`
+  named `postProcess`, which was exactly right and exactly the bug, because
+  `postProcess` runs after `stripUndeclaredFields` has deleted the undeclared
+  fields the predicates read. 644 of 1,000 documents in each of the prod `orders`
+  and `fulfillments` indexes carried a wrong value, both facets returned a single
+  value, and every static gate here was green
+  (`api-cloudrun/tests/unit/typesenseDestinationDerived.test.ts`,
+  `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts`).
 
 Enforced by `tests/display-columns.test.ts`: **T8** every `displayDefaults.columns`
 key (Typesense *and* Firestore) is a declared column; **T9** every column composes
