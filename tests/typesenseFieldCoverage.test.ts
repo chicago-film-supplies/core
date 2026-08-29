@@ -125,16 +125,34 @@ const DERIVED_FIELDS: Record<string, string> = {
   //    alone.
   "organizations:level": "orgLevel (@cfs/core/utils/organizations) — ORG_LEVELS[path.length - 1], applied in api-cloudrun's translateForTypesense",
 
-  // ── postProcess (api-cloudrun lib/typesenseTranslate.ts)
-  "orders:deliveries": "postProcess — any destination pair with customer_collecting !== true",
-  "orders:pickups": "postProcess — any destination pair with customer_returning !== true",
-  "fulfillments:deliveries": "postProcess — same rule as orders:deliveries",
-  "fulfillments:pickups": "postProcess — same rule as orders:pickups",
-
   // ── coerceArrayFields (api-cloudrun lib/typesenseTranslate.ts), deliberately
-  //    computed BEFORE stripUndeclaredFields drops items[].quantity_order.
+  //    computed BEFORE stripUndeclaredFields drops the fields they read.
+  //
+  // 🔴 **All five of these read a destination or item field the config does NOT
+  // declare, and the placement is the whole correctness of them.**
+  // `stripUndeclaredFields` deletes every undeclared key, and `postProcess` runs
+  // AFTER it — so a producer there reads `undefined`.
+  //
+  // ⚠️ `deliveries` and `pickups` used to run in `postProcess` and this table
+  // said so. `destinations[].customer_collecting` / `customer_returning` are not
+  // declared on `orders` or `fulfillments`, so both predicates read `undefined`,
+  // `undefined !== true` is TRUE, and **every document with at least one
+  // destination indexed `deliveries: true, pickups: true`** — two constant-true
+  // facets per collection, offered to operators as filters. Measured on prod
+  // 2026-08-29 before the repair: 1,000 of 1,000 orders and 1,000 of 1,000
+  // fulfillments indexed `true` on both, against a truth of 644 documents
+  // carrying at least one wrong value (621 `deliveries`, 641 `pickups`).
+  // The value assertion that would have caught it is
+  // `api-cloudrun/tests/unit/typesenseDestinationDerived.test.ts`, which plants
+  // a customer-collect leg — the same shape as `typesenseOrgLevel.test.ts`.
+  "orders:deliveries": "coerceArrayFields — any destination pair with customer_collecting !== true",
+  "orders:pickups": "coerceArrayFields — any destination pair with customer_returning !== true",
+  "fulfillments:deliveries": "coerceArrayFields — same rule as orders:deliveries",
+  "fulfillments:pickups": "coerceArrayFields — same rule as orders:pickups",
   "fulfillments:has_conflicts":
     "coerceArrayFields — any item whose picker quantity diverges from the order's projection",
+  "fulfillments:destinations.pick_bucket":
+    "coerceArrayFields — per leg, `customer_collecting ? \"customer-collect\" : delivery.uid`",
 };
 
 const NUMERIC_TYPES: ReadonlySet<string> = new Set([

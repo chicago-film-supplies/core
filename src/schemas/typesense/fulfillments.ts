@@ -12,11 +12,11 @@ import { typesenseAddressFields } from "./types.ts";
  */
 export const fulfillments: TypesenseCollectionConfig = {
   alias: "fulfillments",
-  version: 6,
+  version: 7,
   firestoreCollection: "fulfillments",
-  collectionName: "fulfillments_v6",
+  collectionName: "fulfillments_v7",
   schema: {
-    name: "fulfillments_v6",
+    name: "fulfillments_v7",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -29,7 +29,7 @@ export const fulfillments: TypesenseCollectionConfig = {
       { name: "subject", type: "string", sort: true, stem: true, optional: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
       { name: "organization", type: "object" },
-      { name: "organization.uid", type: "string", facet: false, optional: true },
+      { name: "organization.uid", type: "string", facet: true, optional: true },
       { name: "organization.name", type: "string", sort: true, stem: true, facet: false },
       { name: "dates", type: "object" },
       { name: "dates.delivery_start_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
@@ -68,6 +68,22 @@ export const fulfillments: TypesenseCollectionConfig = {
       { name: "destinations.dates.charge_end_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "destinations.dates.days_active", type: "int32[]", optional: true },
       { name: "destinations.dates.days_charged", type: "int32[]", optional: true },
+      // The by-destination roll-up key, one entry per destination pair.
+      //
+      // 🔴 **Customer collect is its OWN bucket, and it has to be settled at
+      // INDEX time.** Typesense cannot correlate element *i* of
+      // `destinations.delivery.uid` with element *i* of a sibling array, so a
+      // document-level flag cannot say WHICH leg is a collect — and without the
+      // split one warehouse row swallows the answer (prod: 621 of 1,000 legs).
+      // Deriving the key per leg makes that defect unrepresentable rather than
+      // policed.
+      //
+      // ⚠️ **Produced by `coerceArrayFields`, NOT `postProcess`** — see the
+      // `fulfillments:destinations.pick_bucket` entry in
+      // `tests/typesenseFieldCoverage.test.ts`. `customer_collecting` is not a
+      // declared field here, so `stripUndeclaredFields` deletes it, and a
+      // producer running after the strip reads `undefined` for every leg.
+      { name: "destinations.pick_bucket", type: "string[]", facet: true, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.uid", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },
