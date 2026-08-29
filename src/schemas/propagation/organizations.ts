@@ -119,6 +119,30 @@ const ORG_NAME_TO_INVOICES_CORPUS: EnforcementRef = {
 
 const ORG_NAME_TO_INVOICES: EnforcementRef[] = [ORG_NAME_TO_INVOICES_TEST, ORG_NAME_TO_INVOICES_CORPUS];
 
+/**
+ * The order-derived pair (api-cloudrun#711, api-cloudrun#717).
+ *
+ * ⚠️ **The detector's oracle is the parent ORDER, not the organization**, and
+ * that is deliberately STRONGER than the rule it enforces. A booking is not a
+ * billing document — it has no customer of its own and carries no money a name
+ * could misattribute — so there is no point in time at which one disagreeing
+ * with its own order was correct, and the check needs no status predicate.
+ * Comparing against the live organization instead would flag every booking on a
+ * terminal order whose customer has since been renamed (~879 of 1,000 prod
+ * orders), which is the detector nobody keeps switched on.
+ *
+ * It also catches a SECOND writer this rule does not describe: an order
+ * repointed to a different organization, which strands its bookings the same way
+ * and is fixed in `updateOrder`'s booking-rebuild gate.
+ */
+const ORG_NAME_TO_ORDER_CHILDREN_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+  clause:
+    "rows `bookings←orders` and `fulfillments←orders` — each order-derived `organization` snapshot against its own order's, unfiltered. 171 bookings + 28 fulfillments repaired 2026-08-29 after an earlier repair rewrote their orders and left them behind.",
+  gates: true,
+};
+
 const ORG_BILLING_TO_INVOICES_TEST: EnforcementRef = {
   kind: "test",
   ref:
@@ -301,6 +325,33 @@ const updateOrganizationRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-org:name-to-bookings",
+    source: "organizations",
+    target: "bookings",
+    mode: "fan-out",
+    invariant: "A booking's organization snapshot follows its own order's",
+    enforced_by: [ORG_NAME_TO_ORDER_CHILDREN_CORPUS],
+    transaction: "update-organization",
+    trigger:
+      "name change — fans out over the orders the cascade rewrote, which is already scoped to non-terminal. A terminal order's snapshot is frozen, so its bookings stay in agreement and there is nothing to write.",
+    fields: [
+      { source: ["path"], target: ["organization", "name"] },
+    ],
+  },
+  {
+    id: "update-org:name-to-fulfillments",
+    source: "organizations",
+    target: "fulfillments",
+    mode: "fan-out",
+    invariant: "A fulfillment's organization snapshot follows its own order's",
+    enforced_by: [ORG_NAME_TO_ORDER_CHILDREN_CORPUS],
+    transaction: "update-organization",
+    trigger: "name change — one fulfillment per rewritten order, keyed by the order's uid",
+    fields: [
+      { source: ["path"], target: ["organization", "name"] },
+    ],
+  },
+  {
     id: "update-org:billing-to-invoices",
     source: "organizations",
     target: "invoices",
@@ -450,6 +501,8 @@ const updateOrganizationTransaction: TransactionDefinition = {
     "update-org:billing-to-orders",
     "update-org:name-to-invoices",
     "update-org:billing-to-invoices",
+    "update-org:name-to-bookings",
+    "update-org:name-to-fulfillments",
     "update-org:tax-axes-to-orders",
     "update-org:contacts-change",
     "update-org:name-to-descendants",

@@ -210,6 +210,8 @@ export type RuleId =
   | "update-org:name-to-orders"
   | "update-org:billing-to-orders"
   | "update-org:name-to-invoices"
+  | "update-org:name-to-bookings"
+  | "update-org:name-to-fulfillments"
   | "update-org:billing-to-invoices"
   | "update-org:tax-axes-to-orders"
   | "update-org:contacts-change"
