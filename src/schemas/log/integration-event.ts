@@ -146,6 +146,17 @@ export const INTEGRATION_EVENT_MSGS = [
   "dns_record_check_resolve_failed",
   "location_integrity_check",
   "location_integrity_check_failed",
+  // The nightly net under api-cloudrun#723: a stock-bearing order line whose
+  // booking does not exist, so its units read as available. One emission per
+  // finding and SILENT when clean, so any occurrence is real — which is why the
+  // `_failed` twin is not optional. A detect-only sweep whose read throws is
+  // otherwise indistinguishable from a clean run, and "nobody would know either
+  // way" is the defect it exists to remove, not a smaller version of it.
+  // Reuses `invariant` / `doc_id` / `detail` from the location-integrity block
+  // rather than minting order-shaped fields: the alert groups on exactly those
+  // three, so a new detector needs no new rule.
+  "order_projection_check",
+  "order_projection_check_failed",
   // The backstop under the DEFERRED stock rebuild (api-cloudrun#358). The
   // rebuild's enqueue is post-commit and therefore not transactional with Firestore,
   // so a crash or an exhausted retry budget leaves a summary stale with nothing
