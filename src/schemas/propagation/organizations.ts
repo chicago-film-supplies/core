@@ -17,11 +17,18 @@ import type {
 // cascade reaching zero targets is indistinguishable from one with nothing to
 // do unless something reads the other side.
 //
-// ⚠️ None of them has a CORPUS detector. `audit-denorm-freshness.ts` holds
-// twelve embedded-name rows and none is organizations→{orders, invoices,
-// contacts}, though the table is exactly the shape that would hold them — so a
-// cascade that stops firing in production is caught by nothing until someone
-// reads a stale name on screen.
+// ⭐ **They now have a CORPUS detector too** (api-cloudrun#711).
+// `audit-denorm-freshness.ts` carries six organization rows comparing each
+// stored copy against `composeOrgName(path)` re-derived from the source, scoped
+// to exactly what each cascade claims to maintain — the order and invoice rows
+// import the cascade's own frozen-status predicates rather than restating them.
+//
+// ⚠️ **It found 63 stale denorms on prod the first time it ran**, all of them
+// tree-migration residue: the migration rewrote `path` in place, so no rename
+// fired, so nothing carried the new composed label to the copies. That is the
+// exact failure this comment used to say nobody would notice — *"caught by
+// nothing until someone reads a stale name on screen"* — and it went unnoticed
+// for a day because the only thing that could have seen it did not exist.
 
 const ORG_CONTACT_BACKREF: EnforcementRef = {
   kind: "test",
@@ -32,56 +39,111 @@ const ORG_CONTACT_BACKREF: EnforcementRef = {
   gates: true,
 };
 
-const ORG_NAME_TO_CONTACTS: EnforcementRef = {
+const ORG_NAME_TO_CONTACTS_TEST: EnforcementRef = {
   kind: "test",
   ref:
     "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to linked contacts",
   clause:
-    "the rename reaching the linked contacts' embedded org entry. Writer-path only — no corpus walk exists for this denorm.",
+    "the rename reaching the linked contacts' embedded org entry, on THAT write. The corpus half is beside it.",
   gates: true,
 };
 
-const ORG_NAME_TO_ORDERS: EnforcementRef = {
+/** The corpus half — api-cloudrun#711. */
+const ORG_NAME_TO_CONTACTS_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+  clause:
+    "row `update-org:name-to-contacts` — every `contacts.organizations[].name` against `composeOrgName(path)` re-derived from the organization, over ALL edges (a contact is not an issued document, so nothing about it is frozen). It also reports an edge naming an organization that no longer exists.",
+  gates: true,
+};
+
+const ORG_NAME_TO_CONTACTS: EnforcementRef[] = [ORG_NAME_TO_CONTACTS_TEST, ORG_NAME_TO_CONTACTS_CORPUS];
+
+const ORG_NAME_TO_ORDERS_TEST: EnforcementRef = {
   kind: "test",
   ref:
     "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to active orders",
   clause:
-    "the rename reaching an ACTIVE order's `organization.name`. Writer-path only; `audit-denorm-freshness.ts` has no organizations→orders row, so corpus staleness is undetected.",
+    "the rename reaching an ACTIVE order's `organization.name`, on THAT write. The corpus half is beside it.",
   gates: true,
 };
 
-const ORG_BILLING_TO_ORDERS: EnforcementRef = {
+/** The corpus half — api-cloudrun#711. */
+const ORG_NAME_TO_ORDERS_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+  clause:
+    "row `update-org:name-to-orders` — `orders.organization.name` against the re-derived composed label, scoped to NON-TERMINAL orders by the cascade's own predicate (`ORG_CASCADE_FROZEN_ORDER_STATUSES`, imported rather than restated). Drift on a terminal order is counted separately and never fails: prod carries 469 of those and they are the design.",
+  gates: true,
+};
+
+const ORG_NAME_TO_ORDERS: EnforcementRef[] = [ORG_NAME_TO_ORDERS_TEST, ORG_NAME_TO_ORDERS_CORPUS];
+
+const ORG_BILLING_TO_ORDERS_TEST: EnforcementRef = {
   kind: "test",
   ref:
     "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates billing_address change to active orders",
   clause:
-    "the billing-address change reaching an active order's embedded snapshot. Writer-path only.",
+    "the billing-address change reaching an active order's embedded snapshot, on THAT write. The corpus half is beside it.",
   gates: true,
 };
 
-const ORG_NAME_TO_INVOICES: EnforcementRef = {
+/** The corpus half — api-cloudrun#711. */
+const ORG_BILLING_TO_ORDERS_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+  clause:
+    "row `update-org:billing-to-orders` — `orders.organization.billing_address` against the organization's own, same non-terminal scope. Structural equality, so a key-order difference is not drift.",
+  gates: true,
+};
+
+const ORG_BILLING_TO_ORDERS: EnforcementRef[] = [ORG_BILLING_TO_ORDERS_TEST, ORG_BILLING_TO_ORDERS_CORPUS];
+
+const ORG_NAME_TO_INVOICES_TEST: EnforcementRef = {
   kind: "test",
   ref:
     "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to active invoices",
   clause:
-    "the rename reaching an active invoice's `organization.name`. Writer-path only.",
+    "the rename reaching an active invoice's `organization.name`, on THAT write. The corpus half is beside it.",
   gates: true,
 };
 
-const ORG_BILLING_TO_INVOICES: EnforcementRef = {
+/** The corpus half — api-cloudrun#711. */
+const ORG_NAME_TO_INVOICES_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+  clause:
+    "row `update-org:name-to-invoices` — same comparison, scoped to UNSETTLED invoices by `SETTLED_STATUSES`.",
+  gates: true,
+};
+
+const ORG_NAME_TO_INVOICES: EnforcementRef[] = [ORG_NAME_TO_INVOICES_TEST, ORG_NAME_TO_INVOICES_CORPUS];
+
+const ORG_BILLING_TO_INVOICES_TEST: EnforcementRef = {
   kind: "test",
   ref:
     "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates billing_address change to active invoices",
   clause:
-    "the billing-address change reaching an active invoice. Writer-path only.",
+    "the billing-address change reaching an active invoice, on THAT write. The corpus half is beside it.",
   gates: true,
 };
+
+/** The corpus half — api-cloudrun#711. */
+const ORG_BILLING_TO_INVOICES_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+  clause:
+    "row `update-org:billing-to-invoices` — same comparison and scope as the name row.",
+  gates: true,
+};
+
+const ORG_BILLING_TO_INVOICES: EnforcementRef[] = [ORG_BILLING_TO_INVOICES_TEST, ORG_BILLING_TO_INVOICES_CORPUS];
 
 const ORG_TAX_AXES_TO_ORDERS: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
   clause:
-    "an org tax-AXES change (`jurisdiction_claim` / `tax_exempt`) RE-PRICING every non-terminal, un-invoiced order — not merely re-stamping the snapshot. Unlike its five siblings this cascade moves money, so the assertion is on `items[].price.taxes` and `totals`, not on a copied string. Paired with a corpus detector, which the name/billing rules do not have: `api-cloudrun/scripts/audit-order-tax-snapshot.ts` walks both directions (snapshot vs live org, and stored taxes vs recomputed).",
+    "an org tax-AXES change (`jurisdiction_claim` / `tax_exempt`) RE-PRICING every non-terminal, un-invoiced order — not merely re-stamping the snapshot. Unlike its five siblings this cascade moves money, so the assertion is on `items[].price.taxes` and `totals`, not on a copied string. Its corpus detector is a DIFFERENT one from theirs and stays so: `api-cloudrun/scripts/audit-order-tax-snapshot.ts` walks both directions (snapshot vs live org, and stored taxes vs recomputed), which is a re-COMPUTATION rather than a string comparison.",
   gates: true,
 };
 
@@ -93,7 +155,7 @@ const ORG_NODE_TO_TREE: EnforcementRef = {
   gates: true,
 };
 
-const ORG_NAME_TO_DESCENDANTS: EnforcementRef = {
+const ORG_NAME_TO_DESCENDANTS_TEST: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
   clause:
@@ -101,11 +163,33 @@ const ORG_NAME_TO_DESCENDANTS: EnforcementRef = {
   gates: true,
 };
 
+/**
+ * The corpus half — `audit-organization-tree.ts` arm 5.
+ *
+ * ⚠️ **`path[i].name` needs no row in `audit-denorm-freshness.ts` and must not
+ * get one.** Arm 5 already compares every node's `path.slice(0, -1)` to its
+ * parent's own `path`, segment by segment including `name`, over the whole
+ * corpus — so a stale ancestor segment is caught at the highest node carrying
+ * it. A second implementation would be a second oracle for one fact.
+ */
+const ORG_NAME_TO_DESCENDANTS_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-organization-tree.ts",
+  clause:
+    "arm 5 — `validateOrganizationTree` over every node, asserting `path.slice(0, -1)` equals the parent's own `path` on uid, name AND derived. It plants a violation of every arm on each invocation, so a walker that stopped reaching the corpus reddens rather than reporting clean.",
+  gates: true,
+};
+
+const ORG_NAME_TO_DESCENDANTS: EnforcementRef[] = [
+  ORG_NAME_TO_DESCENDANTS_TEST,
+  ORG_NAME_TO_DESCENDANTS_CORPUS,
+];
+
 const ORG_REPARENT_TO_DESCENDANTS: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
   clause:
-    "a re-parent rewriting the whole subtree's `path` and `query_by_path`, with `path.slice(0, -1)` still equal to each node's parent's path afterwards. To be paired with a corpus detector — `api-cloudrun/scripts/audit-organization-tree.ts`, not yet written, which will re-assert every invariant over both environments and exit non-zero on a violation. None of the six older org rules has one, so a cascade that stops firing in production is caught by nothing until someone reads a stale name on screen.",
+    "a re-parent rewriting the whole subtree's `path` and `query_by_path`, with `path.slice(0, -1)` still equal to each node's parent's path afterwards. Paired with `api-cloudrun/scripts/audit-organization-tree.ts`, which re-asserts every invariant over both environments and exits non-zero on a violation — arm 5 is the corpus half of this rule, and it self-tests every arm on each invocation. The six older org rules now have their own detector too (api-cloudrun#711).",
   gates: true,
 };
 
@@ -166,7 +250,7 @@ const updateOrganizationRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "Contacts display their org names — must stay current when org is renamed",
-    enforced_by: [ORG_NAME_TO_CONTACTS],
+    enforced_by: ORG_NAME_TO_CONTACTS,
     transaction: "update-organization",
     fields: [
       { source: ["path"], target: ["organizations", "name"] },
@@ -179,7 +263,7 @@ const updateOrganizationRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "Active orders carry a denormalized org name that must stay current",
-    enforced_by: [ORG_NAME_TO_ORDERS],
+    enforced_by: ORG_NAME_TO_ORDERS,
     transaction: "update-organization",
     trigger: "name change — targets active orders (not complete/canceled)",
     fields: [
@@ -193,7 +277,7 @@ const updateOrganizationRules: CollectionRule[] = [
     mode: "fan-out",
     invariant:
       "Active orders carry the org billing address for quote/invoice generation",
-    enforced_by: [ORG_BILLING_TO_ORDERS],
+    enforced_by: ORG_BILLING_TO_ORDERS,
     transaction: "update-organization",
     trigger: "billing_address change — targets active orders",
     fields: [
@@ -209,7 +293,7 @@ const updateOrganizationRules: CollectionRule[] = [
     target: "invoices",
     mode: "fan-out",
     invariant: "Active invoices display the org name",
-    enforced_by: [ORG_NAME_TO_INVOICES],
+    enforced_by: ORG_NAME_TO_INVOICES,
     transaction: "update-organization",
     trigger: "name change — targets active invoices (not paid/void)",
     fields: [
@@ -222,7 +306,7 @@ const updateOrganizationRules: CollectionRule[] = [
     target: "invoices",
     mode: "fan-out",
     invariant: "Active invoices carry the org billing address",
-    enforced_by: [ORG_BILLING_TO_INVOICES],
+    enforced_by: ORG_BILLING_TO_INVOICES,
     transaction: "update-organization",
     trigger: "billing_address change — targets active invoices",
     fields: [
@@ -319,7 +403,7 @@ const nameToDescendantsRule: CollectionRule = {
   mode: "fan-out",
   invariant:
     "Every descendant embeds this node's name in its own `path`, so a rename must rewrite `path[i].name` on all of them. ⚠️ It pushes each affected LEAF's Xero contact rename (one call per leaf — Xero renders an invoice's contact from the live contact record, so CFS never touches a Xero invoice to rename a customer), and only where the COMPOSED name actually changed.",
-  enforced_by: [ORG_NAME_TO_DESCENDANTS],
+  enforced_by: ORG_NAME_TO_DESCENDANTS,
   transaction: "update-organization",
   fields: [
     { source: ["path"], target: ["path"] },
