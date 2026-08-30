@@ -19,6 +19,7 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
+import { TemplateParamSchema, type TemplateParam } from "./template-version.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -177,6 +178,20 @@ export interface Template {
    * are authoritative for discovery — this list carries each fixture's reason
    * (see {@link FixtureMeta}). Defaults to `[]` for a never-captured family. */
   fixtures: FixtureMeta[];
+  /**
+   * Render params declared by the family's ACTIVE published version, projected
+   * from the git sidecar. A COPY — the version doc is authoritative and
+   * `renderDocument` resolves against it — carried here so a client that
+   * already holds the family can offer a param picker with no extra read.
+   * `publishFromMerge` writes family and version from one resolved value, so
+   * `family.params === activeVersion.params` holds by construction.
+   *
+   * ⚠️ This is the DECLARATION (an array of `{key, type, label?, default?}`).
+   * The value map a document records — `Quote.params`, `Invoice.pdf_params`,
+   * `pdf_versions[].params` — is a `Record<string, boolean>`. Different things,
+   * different shapes.
+   */
+  params: TemplateParam[];
   /** Rollup: uids of versions currently in `draft` status. */
   draft_uids: string[];
   /** Rollup: total versions ever published in this family. */
@@ -207,6 +222,9 @@ export const TemplateSchema: z.ZodType<Template> = z.strictObject({
     components: z.array(z.string()).default([]),
   }),
   fixtures: z.array(FixtureMetaSchema).default([]),
+  // Required and no `.default([])`: `publishFromMerge` is the sole writer and
+  // stamps it from the same resolved value it puts on the version doc.
+  params: z.array(TemplateParamSchema),
   draft_uids: z.array(FirestoreId).default([]),
   // `version_count` and `version` are required (no `.default(0)`): the
   // Typesense config declares both so, and a `.default()` never materializes

@@ -585,12 +585,26 @@ export interface Invoice {
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
-  pdf_versions?: Array<{
+  /**
+   * Render params the CURRENT draft PDF was rendered at — the twin of
+   * `pdf_generated_at`, for the artifact `uploadcare_uuid` points at. The map
+   * `resolveRenderParams` returned inside `renderDocument`, handed back by it
+   * rather than re-derived. `{}` means none were recorded.
+   */
+  pdf_params: Record<string, boolean>;
+  pdf_versions: Array<{
     version: number;
     uploadcare_uuid: string;
     created_at: FirestoreTimestampType;
     created_by: ActorRefType;
     deleted_at: FirestoreTimestampType | null;
+    /**
+     * The render params this version's PDF was actually rendered at, as the
+     * renderer resolved them. `{}` means none were recorded (every row written
+     * before the field existed — of which there are none, the array being
+     * empty corpus-wide when it landed).
+     */
+    params: Record<string, boolean>;
   }>;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   /**
@@ -651,15 +665,19 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   xero_id: z.uuid().nullable(),
   uploadcare_uuid: uploadcareRef(z.string().nullable().default(null)),
   pdf_generated_at: FirestoreTimestamp.nullable().default(null),
-  // Optional, not `.default([])`: the default never materializes (raw-doc write)
-  // and 82 prod invoices already lack the field, so a required type licenses
-  // unguarded `.map`/`.find` reads that 500 on those docs. Optional makes
-  // `deno task check` fail on exactly those accesses.
-  // Declared ahead of use, and a PRODUCT question rather than a schema one:
-  // 876 of 1,019 prod invoices carry the key, every one as `[]`, and the other
-  // 143 lack it (2026-08-23). PDFs are generated — `pdf_generated_at` and
-  // `uploadcare_uuid` are set — but nothing ever appends to this journal.
-  // Whether that append path is still intended is tracked separately.
+  // Required and no `.default({})`: a default never materializes on a write
+  // (`validateBeforeWrite` discards `result.data`), so it would only license a
+  // future writer to forget the stamp. `generateInvoicePdf` is the sole author.
+  pdf_params: z.record(z.string(), z.boolean()),
+  // REQUIRED as of the documents-menu campaign (api-cloudrun#651), and the
+  // writer is what licenses it: `createInvoice` has always written
+  // `pdf_versions: []` on create (`services/invoices.ts`), so the 143 prod
+  // invoices lacking the key are legacy, not output of the current create path
+  // — backfilled to `[]` in the same campaign. Contrast `crms_id` four lines
+  // below, same census shape and deliberately NOT tightened, because
+  // `createInvoice` writes no top-level `crms_id` at all.
+  // The journal now has a client: manager's Documents menu appends through
+  // `saveInvoicePdfVersion` and lists these rows.
   pdf_versions: z.array(z.strictObject({
     version: z.number(),
     uploadcare_uuid: uploadcareRef(z.string()),
@@ -668,7 +686,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     // invoice's, and it sits inside an array nothing tabulates.
     created_by: ActorRef,
     deleted_at: FirestoreTimestamp.nullable(),
-  })).optional(),
+    params: z.record(z.string(), z.boolean()),
+  })),
   // NOT tightened — see the interface. `createInvoice` writes no top-level
   // `crms_id`; the 1,019/1,019 reading is about the CRMS ingest.
   crms_id: z.int().nullable().optional(),

@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
   ContactSchema,
+  InvoiceSchema,
   OrganizationSchema,
   DestinationSchema,
   LocationSchema,
@@ -114,6 +115,18 @@ Deno.test("getInitialValues — records default to empty object", () => {
   const userResult = getInitialValues(UserSchema);
   assertEquals(userResult.prefs_firestore, {});
   assertEquals(userResult.prefs_typesense, {});
+});
+
+Deno.test("getInitialValues — the invoice PDF stamps seed to their empty states", () => {
+  // 1.6 of the documents-menu plan rests on the claim that the TYPE-DERIVED
+  // zero is already the right seed for these fields, so none of them needs
+  // `.meta({ initial })`. That is a claim, so it gets an assertion: `{}` for
+  // the record and `[]` for the array genuinely ARE the blank states — unlike
+  // the `z.boolean().default(true)` case `.meta({ initial })` was invented for,
+  // where the derived zero (`false`) is the wrong answer.
+  const result = getInitialValues(InvoiceSchema);
+  assertEquals(result.pdf_params, {});
+  assertEquals(result.pdf_versions, []);
 });
 
 Deno.test("getInitialValues — template enums use first value", () => {

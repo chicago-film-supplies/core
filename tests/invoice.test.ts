@@ -908,3 +908,62 @@ Deno.test("Invoice.due_date is NOT nullable — the clear verb is wire-only", ()
   assertEquals(shape.due_date_fs.safeParse(null).success, false);
   assertEquals(shape.due_date_fs.safeParse(undefined).success, true);
 });
+
+/**
+ * The PDF journal and its render-param stamps (api-cloudrun#651).
+ *
+ * `pdf_versions` is required as of the documents-menu campaign — licensed by
+ * `createInvoice`, which has always written `pdf_versions: []` on create, so the
+ * 143 prod invoices lacking the key are legacy rather than current output. The
+ * two `params` maps record what each artifact was ACTUALLY rendered at, as
+ * `resolveRenderParams` resolved it; `{}` means nothing was recorded.
+ */
+Deno.test("InvoiceSchema accepts a pdf_versions row carrying its render params", () => {
+  const res = InvoiceSchema.safeParse({
+    ...validInvoice,
+    pdf_versions: [{
+      version: 1,
+      uploadcare_uuid: "11111111-2222-4333-8444-555555555555",
+      created_at: mockTimestamp,
+      created_by: { uid: "u1000000000000000000", name: "Tester" },
+      deleted_at: null,
+      params: { hide_zero_priced_components: true },
+    }],
+  });
+  assertEquals(res.success, true);
+});
+
+Deno.test("InvoiceSchema rejects a pdf_versions row with no params key", () => {
+  const res = InvoiceSchema.safeParse({
+    ...validInvoice,
+    pdf_versions: [{
+      version: 1,
+      uploadcare_uuid: "11111111-2222-4333-8444-555555555555",
+      created_at: mockTimestamp,
+      created_by: { uid: "u1000000000000000000", name: "Tester" },
+      deleted_at: null,
+    }],
+  });
+  assertEquals(res.success, false);
+});
+
+Deno.test("InvoiceSchema rejects a non-boolean render param value", () => {
+  const withDraft = { ...validInvoice, pdf_params: { hide_zero_priced_components: "true" } };
+  assertEquals(InvoiceSchema.safeParse(withDraft).success, false);
+});
+
+Deno.test("InvoiceSchema requires pdf_versions", () => {
+  const doc = { ...validInvoice } as Record<string, unknown>;
+  delete doc.pdf_versions;
+  assertEquals(InvoiceSchema.safeParse(doc).success, false);
+});
+
+Deno.test("InvoiceSchema requires pdf_params", () => {
+  const doc = { ...validInvoice } as Record<string, unknown>;
+  delete doc.pdf_params;
+  assertEquals(InvoiceSchema.safeParse(doc).success, false);
+});
+
+Deno.test("InvoiceSchema accepts an empty pdf_params — the 'nothing recorded' state", () => {
+  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, pdf_params: {} }).success, true);
+});

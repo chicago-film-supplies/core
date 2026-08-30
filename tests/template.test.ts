@@ -24,6 +24,7 @@ function baseFamily(extra: Record<string, unknown> = {}): Record<string, unknown
     surfaces: ["order"],
     uid_active: null,
     depends_on: { components: [] },
+    params: [],
     draft_uids: [],
     version_count: 0,
     last_published_at: null,
@@ -149,6 +150,47 @@ Deno.test("TemplateSchema rejects a fixtures[] entry with no description", () =>
         { slug: "tax-exempt", label: "Tax-exempt customer" },
       ],
     }),
+  );
+  assertEquals(res.success, false);
+});
+
+/**
+ * `params[]` on the family — a projection of the ACTIVE version's declaration,
+ * carried so a client holding the family can offer a param picker with no
+ * second read. Required, so a family written without it is a loud failure
+ * rather than a picker that silently offers nothing.
+ */
+Deno.test("TemplateSchema accepts a family declaring params", () => {
+  const res = TemplateSchema.safeParse(
+    baseFamily({
+      params: [{ key: "hide_zero_priced_components", type: "boolean", label: "Hide zero-priced components", default: false }],
+    }),
+  );
+  assertEquals(res.success, true);
+  if (res.success) assertEquals(res.data.params.length, 1);
+});
+
+Deno.test("TemplateSchema rejects a family with no params key", () => {
+  // The point of decision 8: required with no `.default()`, so a writer that
+  // forgets the projection gets a ValidationError rather than a family doc that
+  // reads as "this template declares no params".
+  const family = baseFamily();
+  delete family.params;
+  assertEquals(TemplateSchema.safeParse(family).success, false);
+});
+
+Deno.test("TemplateSchema rejects a params entry with an out-of-vocabulary type", () => {
+  // Proves TemplateParamSchema is really wired in rather than a bare
+  // z.array(z.unknown()) — `type` is the closed vocabulary.
+  const res = TemplateSchema.safeParse(
+    baseFamily({ params: [{ key: "leg", type: "string" }] }),
+  );
+  assertEquals(res.success, false);
+});
+
+Deno.test("TemplateSchema rejects an undeclared key inside a params entry", () => {
+  const res = TemplateSchema.safeParse(
+    baseFamily({ params: [{ key: "leg", type: "boolean", nope: true }] }),
   );
   assertEquals(res.success, false);
 });

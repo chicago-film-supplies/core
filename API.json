@@ -1689,7 +1689,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -3003,7 +3003,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -3651,7 +3651,7 @@
         {
           "kind": "interface",
           "name": "Template",
-          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  params: TemplateParam[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A thin template *family* document — identity + rollups, no content/status."
         },
         {
@@ -6310,7 +6310,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_versions?: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string | null;\n  reference?: string | null;\n  external_notes?: string | null;\n  internal_notes?: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -8606,7 +8606,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -8720,7 +8720,7 @@
         {
           "kind": "interface",
           "name": "Template",
-          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  params: TemplateParam[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A thin template *family* document — identity + rollups, no content/status."
         },
         {

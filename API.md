@@ -3616,7 +3616,8 @@ interface Invoice {
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
-  pdf_versions?: Array<typeLiteral>;
+  pdf_params: Record<string, boolean>;
+  pdf_versions: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
   uid_thread: string;
@@ -6548,6 +6549,7 @@ interface Quote {
   version: number | null;
   is_draft: boolean;
   uploadcare_uuid: string | null;
+  params: Record<string, boolean>;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -7928,6 +7930,7 @@ interface Template {
   active_semver?: string | null;
   depends_on: TemplateDependsOn;
   fixtures: FixtureMeta[];
+  params: TemplateParam[];
   draft_uids: string[];
   version_count: number;
   last_published_at: FirestoreTimestampType | null;
@@ -13170,7 +13173,8 @@ interface Invoice {
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
-  pdf_versions?: Array<typeLiteral>;
+  pdf_params: Record<string, boolean>;
+  pdf_versions: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
   uid_thread: string;
@@ -18255,6 +18259,7 @@ interface Quote {
   version: number | null;
   is_draft: boolean;
   uploadcare_uuid: string | null;
+  params: Record<string, boolean>;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -18540,6 +18545,7 @@ interface Template {
   active_semver?: string | null;
   depends_on: TemplateDependsOn;
   fixtures: FixtureMeta[];
+  params: TemplateParam[];
   draft_uids: string[];
   version_count: number;
   last_published_at: FirestoreTimestampType | null;

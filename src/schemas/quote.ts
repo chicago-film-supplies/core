@@ -17,6 +17,16 @@ export interface Quote {
   version: number | null;
   is_draft: boolean;
   uploadcare_uuid: string | null;
+  /**
+   * The render params this PDF was actually rendered at — the map
+   * `resolveRenderParams` returned inside `renderDocument`, handed back by it
+   * rather than re-derived here. `{}` means none were recorded.
+   *
+   * ⚠️ In a quote template this is `it.doc.params` — the map THIS artifact was
+   * rendered at, which for a re-render is the previous one. The live render map
+   * is `it.params`.
+   */
+  params: Record<string, boolean>;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -31,6 +41,7 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   version: z.int().min(0).nullable(),
   is_draft: z.boolean(),
   uploadcare_uuid: uploadcareRef(z.string().nullable()),
+  params: z.record(z.string(), z.boolean()),
   deleted_at: FirestoreTimestamp.nullable(),
   expires_at: FirestoreTimestamp.nullable(),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
