@@ -408,8 +408,19 @@ export interface XeroBillPosting {
   offset_account: typeof XERO_OFFSET_ACCOUNTS[keyof typeof XERO_OFFSET_ACCOUNTS];
   /**
    * `1` the asset account is debited (stock in), `-1` it is credited (stock
-   * out). Always equals `getTransactionMultiplier(type)` — carried explicitly so
-   * the consumer never re-derives it, and so the recast source is complete.
+   * out). Carried explicitly so the consumer never re-derives it, and so the
+   * recast source is complete.
+   *
+   * 🔴 **This is the DOCUMENT's direction, not the type's, and the two differ on
+   * a reversal.** It used to be documented as *"always equals
+   * `getTransactionMultiplier(type)`"*, and that was the defect: a reversal
+   * keeps its original's type, so a reversed `find` claimed `+1` and posted a
+   * second increase. Measured live 2026-08-30 — prod Xero went
+   * `QuantityOnHand` 43 → 44 → 45 while the CFS ledger went 38 → 39 → 38
+   * (api-cloudrun#743).
+   *
+   * ⚠️ **The ACCOUNTS still come from the type** — see `xeroPostingFor`. Only
+   * this field follows the document.
    */
   direction: 1 | -1;
   /**
@@ -453,7 +464,23 @@ export type XeroPostingManualReason =
    * disposal by quantity at all. So CFS refuses rather than posting a journal
    * it cannot complete.
    */
-  | "capitalised_disposal";
+  | "capitalised_disposal"
+  /**
+   * A `purchase` running BACKWARDS — i.e. the reversal of one.
+   *
+   * Every other posting reverses inside the ACCPAY shape: the lines swap sign,
+   * the pair still nets to `0.00`, and AP never moves. A purchase is the one
+   * row where `zero_total` is false and the total IS the payable, so undoing it
+   * has to move real Accounts Payable — and the Xero instrument for that is an
+   * **ACCPAYCREDIT supplier credit note**, which this codebase does not build
+   * (`xeroBodies.ts` builds `ACCRECCREDIT`, i.e. customer credits, only).
+   *
+   * ⚠️ Emitting the decrease row instead would post `DR 5700 COGS: Inventory
+   * Shrink / CR asset` — booking a shrink expense for stock that was never
+   * lost, and leaving the payable standing. So a person does it: void the bill
+   * if it is unpaid, or raise a supplier credit if it is not.
+   */
+  | "reversed_purchase_needs_credit_note";
 
 /** Why a movement *should* post but cannot — permanent, and detected before any Xero call. */
 export type XeroPostingTerminalReason =
@@ -491,14 +518,46 @@ export type XeroPostingDecision =
  *
  * @param type The movement type.
  * @param productType `product.type` of the movement's subject.
+ * ## 🔴 The ACCOUNTS come from the type; the DIRECTION comes from the document
+ *
+ * These were one thing until api-cloudrun#743, and conflating them is what put
+ * two phantom units on the live tenant. A **reversal keeps its original's
+ * type** — `reverseTransaction` negates the lines and the cost, and `reverses`
+ * is what names the relationship — so `getTransactionMultiplier(type)` answers
+ * `+1` for a reversed `find` exactly as it does for the `find` it undoes.
+ *
+ * The fix is not a `isReversal` flag. `applyMovementToLedger` has always had
+ * this right and never consulted the multiplier at all: it folds
+ * `movementHeldDelta(movement.lines)`, and `negateLines`'s own docblock says
+ * why — *"because a line carries both sides, negating it needs no knowledge of
+ * the movement type."* So the direction is read from the same place the ledger
+ * reads it, and the bill cannot disagree with the ledger it mirrors.
+ *
+ * The accounts stay keyed on the type, because a reversal must post the
+ * ORIGINAL's accounts negated. Reversing a `find` is `DR 2510 / CR 1400` — a
+ * correction books no expense, and must not strand the original's 2510 credit;
+ * routing it to the decrease row's `5700 COGS: Inventory Shrink` would do both.
+ *
+ * @param type The movement type.
+ * @param productType `product.type` of the movement's subject.
  * @param costAmountCents `movement.cost.amount_cents`, or `null` when absent.
  *   Read **only** to tell a no-refund return from a refunded one — the zero is
  *   the decision. It is deliberately not consulted for the account choice.
+ * @param heldDelta `movementHeldDelta(movement.lines)` — what this DOCUMENT
+ *   does to `quantity_held`. Only its sign is read.
+ *
+ *   ⚠️ **`null` means "no document"** — enumerate the table by the type's own
+ *   direction. It is for asking *"does this (type, productType) pair ever
+ *   bill?"*, never for classifying a stored movement. It is deliberately NOT
+ *   optional-with-a-default: a forgotten argument defaulting to the forward
+ *   direction is precisely the silent wrong answer this parameter exists to
+ *   remove, so every call site is made to state which question it is asking.
  */
 export function xeroPostingFor(
   type: MovementTypeType,
   productType: ProductTypeType,
   costAmountCents: number | null,
+  heldDelta: number | null,
 ): XeroPostingDecision {
   // Custody-only steps and `transfer` carry no cost object at all.
   if (!hasCosts(type)) return { kind: "skip", reason: "no_cost_contract" };
@@ -508,7 +567,12 @@ export function xeroPostingFor(
   // A refunded return is settled against the customer, not a supplier. The zero
   // IS the decision — `MOVEMENT_CONTRACTS` makes `cost` required on
   // `sale_return` precisely so the amount can be zero and mean something.
-  if (type === "sale_return" && (costAmountCents ?? 0) > 0) {
+  //
+  // ⚠️ Read as a MAGNITUDE, because the question is what the FORWARD event was:
+  // a reversal carries the negated cost, so a `> 0` test on the stored value
+  // answers `false` for the reversal of a refunded return and would let it post
+  // an ACCPAY bill where the event it undoes posted nothing at all.
+  if (type === "sale_return" && Math.abs(costAmountCents ?? 0) > 0) {
     return { kind: "skip", reason: "refunded_return_posts_on_accrec" };
   }
 
@@ -521,31 +585,65 @@ export function xeroPostingFor(
     return { kind: "terminal", reason: "product_type_not_stock_bearing" };
   }
 
-  const direction = getTransactionMultiplier(type);
+  // The TYPE's own direction. It picks the ACCOUNTS — what kind of event this
+  // is — and nothing else.
+  const natural = getTransactionMultiplier(type);
+  if (natural === 0) return { kind: "terminal", reason: "no_ownership_direction" };
+
+  // The DOCUMENT's direction. Equal to `natural` for an ordinary movement and
+  // its negation for a reversal, which is the whole of the distinction.
+  const direction = heldDelta === null
+    ? natural
+    : heldDelta > 0
+    ? 1
+    : heldDelta < 0
+    ? -1
+    : 0;
+  // A cost-bearing movement whose lines net to zero moves no owned quantity, so
+  // there is nothing for the asset line to carry. Reached only from a stored
+  // document — `natural !== 0` already ruled the type out above — so it is a
+  // malformed document rather than a table row, and it must not post.
   if (direction === 0) return { kind: "terminal", reason: "no_ownership_direction" };
 
-  if (direction === 1) {
-    return {
-      kind: "bill",
-      asset_account,
-      offset_account: type === "purchase"
-        ? XERO_OFFSET_ACCOUNTS.accounts_payable
-        : XERO_OFFSET_ACCOUNTS.adjustment_clearing,
-      direction,
+  // ── Accounts, from `natural` ──────────────────────────────────────────
+  const offset_account = natural === 1
+    ? (type === "purchase"
       // Only a real purchase moves a payable; every other increase nets to zero.
-      zero_total: type !== "purchase",
-    };
-  }
+      ? XERO_OFFSET_ACCOUNTS.accounts_payable
+      : XERO_OFFSET_ACCOUNTS.adjustment_clearing)
+    : XERO_OFFSET_ACCOUNTS.inventory_shrink;
+  const zero_total = !(natural === 1 && type === "purchase");
 
-  // A decrease. Expensing a capitalised unit would silently misstate equity.
-  if (asset_account === XERO_ASSET_ACCOUNTS.fixed_asset_clearing) {
+  // ── The refusals ──────────────────────────────────────────────────────
+  //
+  // 🔴 **A reversal posts if and only if its FORWARD event posted.** That is the
+  // rule these two guards implement, and getting it wrong is not symmetrical:
+  // posting the reversal of something CFS never posted puts a ONE-SIDED entry in
+  // the tenant with no counterpart to net against.
+  //
+  // So each guard asks about BOTH directions, and for different reasons:
+  //
+  //  - `natural === -1` — the TYPE is a disposal, so the forward event was
+  //    already refused. Its reversal must be refused too, and it runs `+1`, so a
+  //    guard keyed only on the document's direction misses it. This is the arm a
+  //    reversed rental `write_off` takes; without it the function returns a bill
+  //    `DR 1999 / CR 5700` undoing a disposal that was never posted.
+  //  - `direction === -1` — THIS document removes a capitalised unit, whether it
+  //    is a rental `write_off` or the reversal of a rental `find`. The two read
+  //    identically to Xero and neither can clear accumulated depreciation.
+  if (
+    asset_account === XERO_ASSET_ACCOUNTS.fixed_asset_clearing &&
+    (natural === -1 || direction === -1)
+  ) {
     return { kind: "manual", reason: "capitalised_disposal" };
   }
-  return {
-    kind: "bill",
-    asset_account,
-    offset_account: XERO_OFFSET_ACCOUNTS.inventory_shrink,
-    direction,
-    zero_total: true,
-  };
+  // Undoing a purchase moves real AP, and the instrument for that is an
+  // ACCPAYCREDIT supplier credit note this codebase does not build. Only the
+  // document's direction matters here — no type resolves to a `natural === -1`
+  // purchase, so the forward is always the posting one.
+  if (direction === -1 && !zero_total) {
+    return { kind: "manual", reason: "reversed_purchase_needs_credit_note" };
+  }
+
+  return { kind: "bill", asset_account, offset_account, direction, zero_total };
 }

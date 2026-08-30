@@ -9880,6 +9880,22 @@ custody-only fulfillment step, a cost-only adjustment).
 partial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it
 cannot drift from it.
 
+🔴 **This answers a question about a TYPE. It cannot classify a DOCUMENT, and
+using it that way reached a live ledger.** A reversal keeps its original's
+type — `reverseTransaction` negates the lines and the cost, while `reverses`
+names the relationship — so this returns `+1` for a reversed `find` exactly as
+it does for the `find` being undone. `xeroPostingFor` derived a bill's
+direction from it and posted a second increase: prod Xero went
+`QuantityOnHand` 43 → 44 → 45 while the CFS ledger correctly went
+38 → 39 → 38 (api-cloudrun#743).
+
+⭐ **For a stored movement, use `movementHeldDelta(m.lines)`
+(`utils/movements.ts`) instead** — that is what `applyMovementToLedger` has
+always folded, and `negateLines`'s docblock says why it is the right source:
+*"because a line carries both sides, negating it needs no knowledge of the
+movement type."* A document's own lines cannot disagree with the ledger they
+produced; a type-level prediction can.
+
 ### `getTypesenseColumns(alias: string): DisplayTableColumn[]`
 
 Columns a Typesense surface offers for `alias` — the annotated set
@@ -16880,6 +16896,22 @@ custody-only fulfillment step, a cost-only adjustment).
 **Total** — it cannot throw. The financial-only types that used to make it
 partial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it
 cannot drift from it.
+
+🔴 **This answers a question about a TYPE. It cannot classify a DOCUMENT, and
+using it that way reached a live ledger.** A reversal keeps its original's
+type — `reverseTransaction` negates the lines and the cost, while `reverses`
+names the relationship — so this returns `+1` for a reversed `find` exactly as
+it does for the `find` being undone. `xeroPostingFor` derived a bill's
+direction from it and posted a second increase: prod Xero went
+`QuantityOnHand` 43 → 44 → 45 while the CFS ledger correctly went
+38 → 39 → 38 (api-cloudrun#743).
+
+⭐ **For a stored movement, use `movementHeldDelta(m.lines)`
+(`utils/movements.ts`) instead** — that is what `applyMovementToLedger` has
+always folded, and `negateLines`'s docblock says why it is the right source:
+*"because a line carries both sides, negating it needs no knowledge of the
+movement type."* A document's own lines cannot disagree with the ledger they
+produced; a type-level prediction can.
 
 ### `hasCosts(type: MovementTypeType): boolean`
 
@@ -24072,7 +24104,7 @@ type XeroPostingDecision = XeroBillPosting | typeLiteral | typeLiteral | typeLit
 Why a movement needs a person in the Xero UI.
 
 ```ts
-type XeroPostingManualReason = "capitalised_disposal";
+type XeroPostingManualReason = "capitalised_disposal" | "reversed_purchase_needs_credit_note";
 ```
 
 ### `XeroPostingSkipReason`
@@ -24182,7 +24214,7 @@ line carries both sides, negating it needs no knowledge of the movement type,
 and the per-kind contract makes the result either valid or rejected rather
 than silently lopsided.
 
-### `xeroPostingFor(type: MovementTypeType, productType: ProductTypeType, costAmountCents: number | null): XeroPostingDecision`
+### `xeroPostingFor(type: MovementTypeType, productType: ProductTypeType, costAmountCents: number | null, heldDelta: number | null): XeroPostingDecision`
 
 The posting table: what one movement does to the Xero ledger.
 
@@ -24207,9 +24239,39 @@ increase types; the contract is the authority and disagrees.
 
 - `type` — The movement type.
 - `productType` — `product.type` of the movement's subject.
+## 🔴 The ACCOUNTS come from the type; the DIRECTION comes from the document
+
+These were one thing until api-cloudrun#743, and conflating them is what put
+two phantom units on the live tenant. A **reversal keeps its original's
+type** — `reverseTransaction` negates the lines and the cost, and `reverses`
+is what names the relationship — so `getTransactionMultiplier(type)` answers
+`+1` for a reversed `find` exactly as it does for the `find` it undoes.
+
+The fix is not a `isReversal` flag. `applyMovementToLedger` has always had
+this right and never consulted the multiplier at all: it folds
+`movementHeldDelta(movement.lines)`, and `negateLines`'s own docblock says
+why — *"because a line carries both sides, negating it needs no knowledge of
+the movement type."* So the direction is read from the same place the ledger
+reads it, and the bill cannot disagree with the ledger it mirrors.
+
+The accounts stay keyed on the type, because a reversal must post the
+ORIGINAL's accounts negated. Reversing a `find` is `DR 2510 / CR 1400` — a
+correction books no expense, and must not strand the original's 2510 credit;
+routing it to the decrease row's `5700 COGS: Inventory Shrink` would do both.
+- `type` — The movement type.
+- `productType` — `product.type` of the movement's subject.
 - `costAmountCents` — `movement.cost.amount_cents`, or `null` when absent.
 Read **only** to tell a no-refund return from a refunded one — the zero is
 the decision. It is deliberately not consulted for the account choice.
+- `heldDelta` — `movementHeldDelta(movement.lines)` — what this DOCUMENT
+does to `quantity_held`. Only its sign is read.
+
+⚠️ **`null` means "no document"** — enumerate the table by the type's own
+direction. It is for asking *"does this (type, productType) pair ever
+bill?"*, never for classifying a stored movement. It is deliberately NOT
+optional-with-a-default: a forgotten argument defaulting to the forward
+direction is precisely the silent wrong answer this parameter exists to
+remove, so every call site is made to state which question it is asking.
 
 ## `@cfs/core/utils/order-lines`
 

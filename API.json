@@ -4565,7 +4565,7 @@
           "kind": "function",
           "name": "getTransactionMultiplier",
           "signature": "getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0",
-          "doc": "Returns +1 for movements that increase owned quantity, -1 for those that\ndecrease it, and 0 for those that leave it untouched (a `transfer`, a\ncustody-only fulfillment step, a cost-only adjustment).\n\n**Total** — it cannot throw. The financial-only types that used to make it\npartial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it\ncannot drift from it.",
+          "doc": "Returns +1 for movements that increase owned quantity, -1 for those that\ndecrease it, and 0 for those that leave it untouched (a `transfer`, a\ncustody-only fulfillment step, a cost-only adjustment).\n\n**Total** — it cannot throw. The financial-only types that used to make it\npartial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it\ncannot drift from it.\n\n🔴 **This answers a question about a TYPE. It cannot classify a DOCUMENT, and\nusing it that way reached a live ledger.** A reversal keeps its original's\ntype — `reverseTransaction` negates the lines and the cost, while `reverses`\nnames the relationship — so this returns `+1` for a reversed `find` exactly as\nit does for the `find` being undone. `xeroPostingFor` derived a bill's\ndirection from it and posted a second increase: prod Xero went\n`QuantityOnHand` 43 → 44 → 45 while the CFS ledger correctly went\n38 → 39 → 38 (api-cloudrun#743).\n\n⭐ **For a stored movement, use `movementHeldDelta(m.lines)`\n(`utils/movements.ts`) instead** — that is what `applyMovementToLedger` has\nalways folded, and `negateLines`'s docblock says why it is the right source:\n*\"because a line carries both sides, negating it needs no knowledge of the\nmovement type.\"* A document's own lines cannot disagree with the ledger they\nproduced; a type-level prediction can.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7997,7 +7997,7 @@
           "kind": "function",
           "name": "getTransactionMultiplier",
           "signature": "getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0",
-          "doc": "Returns +1 for movements that increase owned quantity, -1 for those that\ndecrease it, and 0 for those that leave it untouched (a `transfer`, a\ncustody-only fulfillment step, a cost-only adjustment).\n\n**Total** — it cannot throw. The financial-only types that used to make it\npartial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it\ncannot drift from it.",
+          "doc": "Returns +1 for movements that increase owned quantity, -1 for those that\ndecrease it, and 0 for those that leave it untouched (a `transfer`, a\ncustody-only fulfillment step, a cost-only adjustment).\n\n**Total** — it cannot throw. The financial-only types that used to make it\npartial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it\ncannot drift from it.\n\n🔴 **This answers a question about a TYPE. It cannot classify a DOCUMENT, and\nusing it that way reached a live ledger.** A reversal keeps its original's\ntype — `reverseTransaction` negates the lines and the cost, while `reverses`\nnames the relationship — so this returns `+1` for a reversed `find` exactly as\nit does for the `find` being undone. `xeroPostingFor` derived a bill's\ndirection from it and posted a second increase: prod Xero went\n`QuantityOnHand` 43 → 44 → 45 while the CFS ledger correctly went\n38 → 39 → 38 (api-cloudrun#743).\n\n⭐ **For a stored movement, use `movementHeldDelta(m.lines)`\n(`utils/movements.ts`) instead** — that is what `applyMovementToLedger` has\nalways folded, and `negateLines`'s docblock says why it is the right source:\n*\"because a line carries both sides, negating it needs no knowledge of the\nmovement type.\"* A document's own lines cannot disagree with the ledger they\nproduced; a type-level prediction can.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11522,7 +11522,7 @@
         {
           "kind": "typeAlias",
           "name": "XeroPostingManualReason",
-          "declaration": "type XeroPostingManualReason = \"capitalised_disposal\";",
+          "declaration": "type XeroPostingManualReason = \"capitalised_disposal\" | \"reversed_purchase_needs_credit_note\";",
           "doc": "Why a movement needs a person in the Xero UI."
         },
         {
@@ -11604,9 +11604,17 @@
         {
           "kind": "function",
           "name": "xeroPostingFor",
-          "signature": "xeroPostingFor(type: MovementTypeType, productType: ProductTypeType, costAmountCents: number | null): XeroPostingDecision",
+          "signature": "xeroPostingFor(type: MovementTypeType, productType: ProductTypeType, costAmountCents: number | null, heldDelta: number | null): XeroPostingDecision",
           "doc": "The posting table: what one movement does to the Xero ledger.\n\nPure and total — every `(MovementTypeType, ProductTypeType)` pair resolves,\nand it makes no Xero call, so the whole table is assertable at the byte level\nwithout a tenant. **This is the recast source v2 reads** (`erp-spec`\nADR-0020), which is why it returns a spec rather than emitting lines.\n\n**Derived from the contract, never hand-listed.** The direction comes from\n`getTransactionMultiplier` and the cost-bearingness from `hasCosts`, both of\nwhich read `MOVEMENT_CONTRACTS` — so a new movement type is classified by the\ncontract it declares rather than by remembering to extend a list here. The two\ncarve-outs (`opening_balance`, `sale`) are explicit *because* they are\nexceptions to that derivation, not because the table is enumerated.\n\n⚠️ **`trade_in` is a DECREASE**, on its contract (`from: locations`,\n`to: outside`), and therefore takes the disposal row — including the\ncapitalised-disposal refusal. A planning-era census grouped it with the\nincrease types; the contract is the authority and disagrees.",
           "paramTags": [
+            {
+              "name": "type",
+              "doc": "The movement type."
+            },
+            {
+              "name": "productType",
+              "doc": "`product.type` of the movement's subject.\n## 🔴 The ACCOUNTS come from the type; the DIRECTION comes from the document\n\nThese were one thing until api-cloudrun#743, and conflating them is what put\ntwo phantom units on the live tenant. A **reversal keeps its original's\ntype** — `reverseTransaction` negates the lines and the cost, and `reverses`\nis what names the relationship — so `getTransactionMultiplier(type)` answers\n`+1` for a reversed `find` exactly as it does for the `find` it undoes.\n\nThe fix is not a `isReversal` flag. `applyMovementToLedger` has always had\nthis right and never consulted the multiplier at all: it folds\n`movementHeldDelta(movement.lines)`, and `negateLines`'s own docblock says\nwhy — *\"because a line carries both sides, negating it needs no knowledge of\nthe movement type.\"* So the direction is read from the same place the ledger\nreads it, and the bill cannot disagree with the ledger it mirrors.\n\nThe accounts stay keyed on the type, because a reversal must post the\nORIGINAL's accounts negated. Reversing a `find` is `DR 2510 / CR 1400` — a\ncorrection books no expense, and must not strand the original's 2510 credit;\nrouting it to the decrease row's `5700 COGS: Inventory Shrink` would do both."
+            },
             {
               "name": "type",
               "doc": "The movement type."
@@ -11618,6 +11626,10 @@
             {
               "name": "costAmountCents",
               "doc": "`movement.cost.amount_cents`, or `null` when absent.\nRead **only** to tell a no-refund return from a refunded one — the zero is\nthe decision. It is deliberately not consulted for the account choice."
+            },
+            {
+              "name": "heldDelta",
+              "doc": "`movementHeldDelta(movement.lines)` — what this DOCUMENT\ndoes to `quantity_held`. Only its sign is read.\n\n⚠️ **`null` means \"no document\"** — enumerate the table by the type's own\ndirection. It is for asking *\"does this (type, productType) pair ever\nbill?\"*, never for classifying a stored movement. It is deliberately NOT\noptional-with-a-default: a forgotten argument defaulting to the forward\ndirection is precisely the silent wrong answer this parameter exists to\nremove, so every call site is made to state which question it is asking."
             }
           ],
           "returnsTag": null

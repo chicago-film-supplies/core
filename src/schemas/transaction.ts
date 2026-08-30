@@ -301,6 +301,22 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
  * **Total** — it cannot throw. The financial-only types that used to make it
  * partial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it
  * cannot drift from it.
+ *
+ * 🔴 **This answers a question about a TYPE. It cannot classify a DOCUMENT, and
+ * using it that way reached a live ledger.** A reversal keeps its original's
+ * type — `reverseTransaction` negates the lines and the cost, while `reverses`
+ * names the relationship — so this returns `+1` for a reversed `find` exactly as
+ * it does for the `find` being undone. `xeroPostingFor` derived a bill's
+ * direction from it and posted a second increase: prod Xero went
+ * `QuantityOnHand` 43 → 44 → 45 while the CFS ledger correctly went
+ * 38 → 39 → 38 (api-cloudrun#743).
+ *
+ * ⭐ **For a stored movement, use `movementHeldDelta(m.lines)`
+ * (`utils/movements.ts`) instead** — that is what `applyMovementToLedger` has
+ * always folded, and `negateLines`'s docblock says why it is the right source:
+ * *"because a line carries both sides, negating it needs no knowledge of the
+ * movement type."* A document's own lines cannot disagree with the ledger they
+ * produced; a type-level prediction can.
  */
 export function getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0 {
   const places = MOVEMENT_CONTRACTS[type].places;
