@@ -218,10 +218,12 @@ Deno.test("calculateBookingBreakdown: complete sale → all qty in out", () => {
 
 Deno.test("calculateBookingBreakdown: complete service/surcharge → all zeros, NOT quantity", () => {
   // Load-bearing, and until this test existed nothing pinned it despite ~439
-  // prod bookings riding the branch. `complete-stale-bookings.ts` computes
-  // `expectedSum = isService ? 0 : quantity` and THROWS when the projection
-  // disagrees — so a `complete` arm that gave service the rental or sale
-  // treatment would brick that script on every service booking.
+  // prod bookings riding the branch. `api-cloudrun/scripts/repair-booking-breakdowns.ts`
+  // derives `expectedSumAfter` from this rule and ABORTS its run when the
+  // projection disagrees — so a `complete` arm that gave service the rental or
+  // sale treatment would brick that script on every service booking. (It named
+  // `complete-stale-bookings.ts` until that script was deleted on 2026-08-30;
+  // this test is what pins the rule independently of either.)
   const prev = sample({ reserved: 4 });
   assertEquals(calculateBookingBreakdown("complete", "service", 4, prev), emptyBookingsBreakdown());
   assertEquals(calculateBookingBreakdown("complete", "surcharge", 4, prev), emptyBookingsBreakdown());

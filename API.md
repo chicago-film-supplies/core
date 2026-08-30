@@ -21006,9 +21006,12 @@ Two live consumer classes remain, and neither is the cascade:
 
 - **The manager's optimistic UI**, which applies the delta locally for instant
   feedback and lets the server's authoritative fold land after.
-- **api-cloudrun's operational repair scripts** (`repair-booking-breakdowns.ts`,
-  `complete-stale-bookings.ts`), which move one booking and adjust its parent
-  by exactly that booking's delta rather than re-folding the whole order.
+- **api-cloudrun's operational repair script**
+  `api-cloudrun/scripts/repair-booking-breakdowns.ts`, which moves one booking
+  and adjusts its parent by exactly that booking's delta rather than re-folding
+  the whole order. (Its former sibling `complete-stale-bookings.ts` was the
+  other, and was deleted on 2026-08-30 — its successor drives
+  `applyBookingUpdates` and so gets the whole-order fold instead.)
 
 So it is kept deliberately. **Do not reach for it to maintain a roll-up in a
 writer** — a delta is lossy the moment one is dropped, which is the failure

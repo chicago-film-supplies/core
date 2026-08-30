@@ -119,9 +119,12 @@ export function sumBookingsBreakdown(
  *
  * - **The manager's optimistic UI**, which applies the delta locally for instant
  *   feedback and lets the server's authoritative fold land after.
- * - **api-cloudrun's operational repair scripts** (`repair-booking-breakdowns.ts`,
- *   `complete-stale-bookings.ts`), which move one booking and adjust its parent
- *   by exactly that booking's delta rather than re-folding the whole order.
+ * - **api-cloudrun's operational repair script**
+ *   `api-cloudrun/scripts/repair-booking-breakdowns.ts`, which moves one booking
+ *   and adjusts its parent by exactly that booking's delta rather than re-folding
+ *   the whole order. (Its former sibling `complete-stale-bookings.ts` was the
+ *   other, and was deleted on 2026-08-30 — its successor drives
+ *   `applyBookingUpdates` and so gets the whole-order fold instead.)
  *
  * So it is kept deliberately. **Do not reach for it to maintain a roll-up in a
  * writer** — a delta is lossy the moment one is dropped, which is the failure
@@ -171,11 +174,16 @@ function openBucket(
  * How a `complete` order settles a booking, per item type.
  *
  * **`service` and `surcharge` settle to all-zeros, and that is load-bearing** —
- * `api-cloudrun/scripts/complete-stale-bookings.ts` computes
- * `expectedSum = isService ? 0 : quantity` and throws when the projection
- * disagrees. Prod holds ~439 service/surcharge bookings. The `Record` annotation
- * is what stops a new `ComponentTypeType` member from silently acquiring the
- * rental treatment.
+ * `api-cloudrun/scripts/repair-booking-breakdowns.ts` derives its own
+ * `expectedSumAfter` from this table (0 for a `complete` service/surcharge line,
+ * `quantity` otherwise) and ABORTS the whole run when the projection disagrees.
+ * Prod holds ~439 service/surcharge bookings. The `Record` annotation is what
+ * stops a new `ComponentTypeType` member from silently acquiring the rental
+ * treatment.
+ *
+ * ⚠️ The downstream enforcer named here used to be `complete-stale-bookings.ts`,
+ * deleted on 2026-08-30. The rule did not move with it — it lives here, and the
+ * test below pins it independently of any script.
  */
 const COMPLETE_BY_TYPE: Readonly<
   Record<ComponentTypeType, (quantity: number, prev: Booking["breakdown"]) => Booking["breakdown"]>
