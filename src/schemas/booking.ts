@@ -172,7 +172,14 @@ const BookingStoreLocationSchema: z.ZodType<BookingStoreLocation> = z.strictObje
   default: z.boolean(),
 });
 
-const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
+/**
+ * Zod schema for a booking's store allocation.
+ *
+ * Exported because the pick sheet carries it verbatim — *"where do I walk"* is
+ * the question that surface exists for, and a narrowed twin of this shape would
+ * be a copy to keep in step for no gain.
+ */
+export const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
   uid_store: FirestoreId,
   name: z.string().meta({ column: true }),
   default: z.boolean(),

@@ -194,6 +194,12 @@
         },
         {
           "kind": "variable",
+          "name": "BookingStoreSchema",
+          "declaration": "const BookingStoreSchema: z.ZodType<BookingStore>;",
+          "doc": "Zod schema for a booking's store allocation.\n\nExported because the pick sheet carries it verbatim — *\"where do I walk\"* is\nthe question that surface exists for, and a narrowed twin of this shape would\nbe a copy to keep in step for no gain."
+        },
+        {
+          "kind": "variable",
           "name": "BookingUpdate",
           "declaration": "const BookingUpdate: z.ZodType<BookingUpdateType>;",
           "doc": ""
@@ -2690,6 +2696,12 @@
         },
         {
           "kind": "variable",
+          "name": "PICK_SHEET_GATES",
+          "declaration": "const PICK_SHEET_GATES: \"all\" | \"crew\" | \"counter\"[];",
+          "doc": "Which legs a sheet admits.\n\n🔴 **`customer_collecting` and `customer_returning` are DIRECTIONAL and\nindependent, and treating them as one boolean is a measured defect rather\nthan a simplification.** Verified against the writer\n(`api-cloudrun/src/services/webhooks/opportunity.ts`): `customer_collecting`\nrepoints the **delivery** endpoint at our own store, `customer_returning`\nrepoints the **collection** endpoint. Nothing makes them move together, so\n`customer_collecting || customer_returning` over-suppresses — a leg we deliver\nand the customer returns has a REAL delivery endpoint, and hiding it means a\ncrew standing at that address is told nothing is out there.\n\n- `crew` — the leg's outbound work happens at the scoped place:\n  `!customer_collecting`. Reproduces the `destinations.pick_bucket` roll-up\n  row exactly, because that key is\n  `customer_collecting ? \"customer-collect\" : delivery.uid`.\n- `counter` — the leg has work at our own counter in EITHER direction:\n  `customer_collecting || customer_returning`.\n- `all` — no gate.\n\n⭐ **`crew` and `counter` deliberately OVERLAP rather than partition.** A leg\nwe deliver and the customer returns has crew work outbound and counter work\ninbound, so it belongs on both sheets, and each shows it to whoever has the\njob. A partition would have to pick one and be wrong for the other."
+        },
+        {
+          "kind": "variable",
           "name": "PLACE_KINDS",
           "declaration": "const PLACE_KINDS: \"locations\" | \"bookings\" | \"out-of-service\" | \"outside\"[];",
           "doc": "The kinds of place a unit can be in. `\"outside\"` is the absence of a place —\na `null` side of `location`, meaning outside CFS ownership entirely."
@@ -2729,6 +2741,96 @@
           "name": "Phone",
           "declaration": "const Phone: z.ZodType<string>;",
           "doc": "Phone string with length constraints.\n\nCarries `cell: \"phone\"` because a phone number is the one display type Zod\ncannot discriminate — it is a `z.string()` with a regex, structurally\nidentical to a subject line. Declared once, here, rather than recovered per\ncolumn by testing whether the path `includes(\"phone\")`. (An email needs no\nsuch marker: `z.email()` has its own `format`.)"
+        },
+        {
+          "kind": "interface",
+          "name": "PickSheet",
+          "declaration": "interface PickSheet {\n  scope: PickSheetScope;\n  gate: PickSheetGateType;\n  orders: PickSheetOrder[];\n  order_count: number;\n  destination_count: number;\n  quantity: number;\n  organizations: Array<typeLiteral>;\n  missing_order_uids: string[];\n  next_cursor: string | null;\n  notice: string | null;\n}",
+          "doc": "The aggregated pick sheet — one scope, one gate, N orders.\n\nOrders are in due order (each order's earliest leg, ties on uid) and each\norder's legs are in due order within it, so the first thing on the page is the\nfirst thing to do."
+        },
+        {
+          "kind": "interface",
+          "name": "PickSheetBooking",
+          "declaration": "interface PickSheetBooking {\n  uid: string;\n  uid_product: string;\n  name: string;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  shortage: number;\n  breakdown: BookingBreakdown;\n  stores: BookingStore[];\n}",
+          "doc": "One aggregate booking on a leg — custody, and where the units live.\n\n🔴 **No money.** A booking carries `unit_price_cents` and `total_price_cents`;\na pick sheet is a warehouse document and the fulfillment projection it is\nbuilt from is *\"no price, no financial flags\"*. Projecting the fields a picker\nneeds, rather than the whole booking, is what keeps that true by construction\ninstead of by convention."
+        },
+        {
+          "kind": "variable",
+          "name": "PickSheetBookingSchema",
+          "declaration": "const PickSheetBookingSchema: z.ZodType<PickSheetBooking>;",
+          "doc": "Zod schema for {@link PickSheetBooking}."
+        },
+        {
+          "kind": "interface",
+          "name": "PickSheetDestination",
+          "declaration": "interface PickSheetDestination {\n  uid: string;\n  name: string;\n  destination: DocDestinationType;\n  due_at: string | null;\n  quantity: number;\n  breakdown: BookingBreakdown;\n  bookings: PickSheetBooking[];\n  items: PickSheetItem[];\n}",
+          "doc": "One order's one destination leg — a section of the sheet.\n\nEach destination dispatches independently, so the totals here are the leg's\nown and never the order's."
+        },
+        {
+          "kind": "variable",
+          "name": "PickSheetDestinationSchema",
+          "declaration": "const PickSheetDestinationSchema: z.ZodType<PickSheetDestination>;",
+          "doc": "Zod schema for {@link PickSheetDestination}."
+        },
+        {
+          "kind": "variable",
+          "name": "PickSheetGateEnum",
+          "declaration": "const PickSheetGateEnum: z.ZodType<PickSheetGateType>;",
+          "doc": "Zod enum over {@link PICK_SHEET_GATES}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PickSheetGatePair",
+          "declaration": "type PickSheetGatePair = Pick<DocDestinationType, \"customer_collecting\" | \"customer_returning\">;",
+          "doc": "The structural minimum the gate reads off a destination pair.\n\nDeliberately not the whole {@link DocDestinationType}: asking for that would\nforce every test to build `dates`, two endpoints and a jurisdiction that the\npredicate never looks at."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PickSheetGateType",
+          "declaration": "type PickSheetGateType = indexedAccess;",
+          "doc": "One member of {@link PICK_SHEET_GATES}."
+        },
+        {
+          "kind": "interface",
+          "name": "PickSheetItem",
+          "declaration": "interface PickSheetItem {\n  item: FulfillmentItemType;\n  uid_booking: string | null;\n}",
+          "doc": "One line on a sheet — a fulfillment row, carried verbatim, plus the booking\nit resolves to.\n\n🔴 **`bookings` cannot be the row source, and this is the whole reason the\nsheet reads `fulfillments`.** There is no booking row for a `service` /\n`surcharge` / `transaction_fee` line, none for a `stock_method: \"none\"`\nproduct, and no dividers at all — so a bookings-derived sheet is silently\nshort, which is the one failure this surface refuses. Membership answers\n*which orders*; the sanitized fulfillment projection supplies every row."
+        },
+        {
+          "kind": "variable",
+          "name": "PickSheetItemSchema",
+          "declaration": "const PickSheetItemSchema: z.ZodType<PickSheetItem>;",
+          "doc": "Zod schema for {@link PickSheetItem}."
+        },
+        {
+          "kind": "interface",
+          "name": "PickSheetOrder",
+          "declaration": "interface PickSheetOrder {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  subject: string;\n  organization: typeLiteral;\n  destinations: PickSheetDestination[];\n}",
+          "doc": "One order on a sheet, with only the legs the scope and gate admitted."
+        },
+        {
+          "kind": "variable",
+          "name": "PickSheetOrderSchema",
+          "declaration": "const PickSheetOrderSchema: z.ZodType<PickSheetOrder>;",
+          "doc": "Zod schema for {@link PickSheetOrder}."
+        },
+        {
+          "kind": "variable",
+          "name": "PickSheetSchema",
+          "declaration": "const PickSheetSchema: z.ZodType<PickSheet>;",
+          "doc": "Zod schema for {@link PickSheet}."
+        },
+        {
+          "kind": "interface",
+          "name": "PickSheetScope",
+          "declaration": "interface PickSheetScope {\n  kind: \"destination\" | \"organization\";\n  uid: string;\n  name: string;\n  uids: string[];\n}",
+          "doc": "What a sheet was drawn for — echoed back so a stored or forwarded sheet says\nwhat it is an answer to.\n\n⚠️ For `kind: \"destination\"`, `uid` is the `destinations/{uid}` **address-book**\nid — the physical place, shared across orders, which is the only reason a\ncross-order sheet finds anything at all. It is NOT a destination divider's\nuid, which is per-document and joins nothing outside it. api-cloudrun#663 is\nthat pair confused the other way round."
+        },
+        {
+          "kind": "variable",
+          "name": "PickSheetScopeSchema",
+          "declaration": "const PickSheetScopeSchema: z.ZodType<PickSheetScope>;",
+          "doc": "Zod schema for {@link PickSheetScope}."
         },
         {
           "kind": "typeAlias",
@@ -4597,6 +4699,14 @@
         },
         {
           "kind": "function",
+          "name": "pickSheetGateAdmits",
+          "signature": "pickSheetGateAdmits(pair: PickSheetGatePair, gate: PickSheetGateType): boolean",
+          "doc": "Does this leg have work on a sheet gated this way? See {@link PICK_SHEET_GATES}.\n\n⚠️ **One owner, deliberately, and it lives in a schema module rather than a\nutil.** The rule is the closed vocabulary's own semantics — a second copy\nbeside the enum is exactly how the `||` defect above survived as long as it\ndid — and `src/utils/*` entrypoints are walked by the template-helper\ngenerator, which would advertise a warehouse predicate to PDF authors.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "resolveFieldMeta",
           "signature": "resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null",
           "doc": "Convenience: resolve a dotted path and read its meta in one call. Returns\n`null` when the path is unresolvable or the leaf has no meta.",
@@ -5590,6 +5700,12 @@
           "name": "BookingStoreLocation",
           "declaration": "interface BookingStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  default: boolean;\n}",
           "doc": "A specific location within a store allocated for a booking."
+        },
+        {
+          "kind": "variable",
+          "name": "BookingStoreSchema",
+          "declaration": "const BookingStoreSchema: z.ZodType<BookingStore>;",
+          "doc": "Zod schema for a booking's store allocation.\n\nExported because the pick sheet carries it verbatim — *\"where do I walk\"* is\nthe question that surface exists for, and a narrowed twin of this shape would\nbe a copy to keep in step for no gain."
         },
         {
           "kind": "variable",

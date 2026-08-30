@@ -424,6 +424,18 @@ interface BookingStoreLocation {
 }
 ```
 
+### `BookingStoreSchema`
+
+Zod schema for a booking's store allocation.
+
+Exported because the pick sheet carries it verbatim — *"where do I walk"* is
+the question that surface exists for, and a narrowed twin of this shape would
+be a copy to keep in step for no gain.
+
+```ts
+const BookingStoreSchema: z.ZodType<BookingStore>;
+```
+
 ### `BookingUpdate`
 
 ```ts
@@ -5771,6 +5783,37 @@ The full catalog of permissions. Adding a new route? Add its permission here fir
 const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
+### `PICK_SHEET_GATES`
+
+Which legs a sheet admits.
+
+🔴 **`customer_collecting` and `customer_returning` are DIRECTIONAL and
+independent, and treating them as one boolean is a measured defect rather
+than a simplification.** Verified against the writer
+(`api-cloudrun/src/services/webhooks/opportunity.ts`): `customer_collecting`
+repoints the **delivery** endpoint at our own store, `customer_returning`
+repoints the **collection** endpoint. Nothing makes them move together, so
+`customer_collecting || customer_returning` over-suppresses — a leg we deliver
+and the customer returns has a REAL delivery endpoint, and hiding it means a
+crew standing at that address is told nothing is out there.
+
+- `crew` — the leg's outbound work happens at the scoped place:
+  `!customer_collecting`. Reproduces the `destinations.pick_bucket` roll-up
+  row exactly, because that key is
+  `customer_collecting ? "customer-collect" : delivery.uid`.
+- `counter` — the leg has work at our own counter in EITHER direction:
+  `customer_collecting || customer_returning`.
+- `all` — no gate.
+
+⭐ **`crew` and `counter` deliberately OVERLAP rather than partition.** A leg
+we deliver and the customer returns has crew work outbound and counter work
+inbound, so it belongs on both sheets, and each shows it to whoever has the
+job. A partition would have to pick one and be wrong for the other.
+
+```ts
+const PICK_SHEET_GATES: "all" | "crew" | "counter"[];
+```
+
 ### `PLACE_KINDS`
 
 The kinds of place a unit can be in. `"outside"` is the absence of a place —
@@ -5858,6 +5901,203 @@ such marker: `z.email()` has its own `format`.)
 
 ```ts
 const Phone: z.ZodType<string>;
+```
+
+### `PickSheet`
+
+The aggregated pick sheet — one scope, one gate, N orders.
+
+Orders are in due order (each order's earliest leg, ties on uid) and each
+order's legs are in due order within it, so the first thing on the page is the
+first thing to do.
+
+```ts
+interface PickSheet {
+  scope: PickSheetScope;
+  gate: PickSheetGateType;
+  orders: PickSheetOrder[];
+  order_count: number;
+  destination_count: number;
+  quantity: number;
+  organizations: Array<typeLiteral>;
+  missing_order_uids: string[];
+  next_cursor: string | null;
+  notice: string | null;
+}
+```
+
+### `PickSheetBooking`
+
+One aggregate booking on a leg — custody, and where the units live.
+
+🔴 **No money.** A booking carries `unit_price_cents` and `total_price_cents`;
+a pick sheet is a warehouse document and the fulfillment projection it is
+built from is *"no price, no financial flags"*. Projecting the fields a picker
+needs, rather than the whole booking, is what keeps that true by construction
+instead of by convention.
+
+```ts
+interface PickSheetBooking {
+  uid: string;
+  uid_product: string;
+  name: string;
+  type: ComponentTypeType;
+  status: BookingStatusType;
+  quantity: number;
+  shortage: number;
+  breakdown: BookingBreakdown;
+  stores: BookingStore[];
+}
+```
+
+### `PickSheetBookingSchema`
+
+Zod schema for {@link PickSheetBooking}.
+
+```ts
+const PickSheetBookingSchema: z.ZodType<PickSheetBooking>;
+```
+
+### `PickSheetDestination`
+
+One order's one destination leg — a section of the sheet.
+
+Each destination dispatches independently, so the totals here are the leg's
+own and never the order's.
+
+```ts
+interface PickSheetDestination {
+  uid: string;
+  name: string;
+  destination: DocDestinationType;
+  due_at: string | null;
+  quantity: number;
+  breakdown: BookingBreakdown;
+  bookings: PickSheetBooking[];
+  items: PickSheetItem[];
+}
+```
+
+### `PickSheetDestinationSchema`
+
+Zod schema for {@link PickSheetDestination}.
+
+```ts
+const PickSheetDestinationSchema: z.ZodType<PickSheetDestination>;
+```
+
+### `PickSheetGateEnum`
+
+Zod enum over {@link PICK_SHEET_GATES}.
+
+```ts
+const PickSheetGateEnum: z.ZodType<PickSheetGateType>;
+```
+
+### `PickSheetGatePair`
+
+The structural minimum the gate reads off a destination pair.
+
+Deliberately not the whole {@link DocDestinationType}: asking for that would
+force every test to build `dates`, two endpoints and a jurisdiction that the
+predicate never looks at.
+
+```ts
+type PickSheetGatePair = Pick<DocDestinationType, "customer_collecting" | "customer_returning">;
+```
+
+### `PickSheetGateType`
+
+One member of {@link PICK_SHEET_GATES}.
+
+```ts
+type PickSheetGateType = indexedAccess;
+```
+
+### `PickSheetItem`
+
+One line on a sheet — a fulfillment row, carried verbatim, plus the booking
+it resolves to.
+
+🔴 **`bookings` cannot be the row source, and this is the whole reason the
+sheet reads `fulfillments`.** There is no booking row for a `service` /
+`surcharge` / `transaction_fee` line, none for a `stock_method: "none"`
+product, and no dividers at all — so a bookings-derived sheet is silently
+short, which is the one failure this surface refuses. Membership answers
+*which orders*; the sanitized fulfillment projection supplies every row.
+
+```ts
+interface PickSheetItem {
+  item: FulfillmentItemType;
+  uid_booking: string | null;
+}
+```
+
+### `PickSheetItemSchema`
+
+Zod schema for {@link PickSheetItem}.
+
+```ts
+const PickSheetItemSchema: z.ZodType<PickSheetItem>;
+```
+
+### `PickSheetOrder`
+
+One order on a sheet, with only the legs the scope and gate admitted.
+
+```ts
+interface PickSheetOrder {
+  uid: string;
+  number: number;
+  status: OrderStatusType;
+  subject: string;
+  organization: typeLiteral;
+  destinations: PickSheetDestination[];
+}
+```
+
+### `PickSheetOrderSchema`
+
+Zod schema for {@link PickSheetOrder}.
+
+```ts
+const PickSheetOrderSchema: z.ZodType<PickSheetOrder>;
+```
+
+### `PickSheetSchema`
+
+Zod schema for {@link PickSheet}.
+
+```ts
+const PickSheetSchema: z.ZodType<PickSheet>;
+```
+
+### `PickSheetScope`
+
+What a sheet was drawn for — echoed back so a stored or forwarded sheet says
+what it is an answer to.
+
+⚠️ For `kind: "destination"`, `uid` is the `destinations/{uid}` **address-book**
+id — the physical place, shared across orders, which is the only reason a
+cross-order sheet finds anything at all. It is NOT a destination divider's
+uid, which is per-document and joins nothing outside it. api-cloudrun#663 is
+that pair confused the other way round.
+
+```ts
+interface PickSheetScope {
+  kind: "destination" | "organization";
+  uid: string;
+  name: string;
+  uids: string[];
+}
+```
+
+### `PickSheetScopeSchema`
+
+Zod schema for {@link PickSheetScope}.
+
+```ts
+const PickSheetScopeSchema: z.ZodType<PickSheetScope>;
 ```
 
 ### `PiiClassification`
@@ -9800,6 +10040,16 @@ The contract for an item `type`, or `undefined` for a value outside
 `@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
 contract and every derived predicate answers `false` for it.
 
+### `pickSheetGateAdmits(pair: PickSheetGatePair, gate: PickSheetGateType): boolean`
+
+Does this leg have work on a sheet gated this way? See {@link PICK_SHEET_GATES}.
+
+⚠️ **One owner, deliberately, and it lives in a schema module rather than a
+util.** The rule is the closed vocabulary's own semantics — a second copy
+beside the enum is exactly how the `||` defect above survived as long as it
+did — and `src/utils/*` entrypoints are walked by the template-helper
+generator, which would advertise a warehouse predicate to PDF authors.
+
 ### `resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null`
 
 Convenience: resolve a dotted path and read its meta in one call. Returns
@@ -11752,6 +12002,18 @@ interface BookingStoreLocation {
   quantity: number;
   default: boolean;
 }
+```
+
+### `BookingStoreSchema`
+
+Zod schema for a booking's store allocation.
+
+Exported because the pick sheet carries it verbatim — *"where do I walk"* is
+the question that surface exists for, and a narrowed twin of this shape would
+be a copy to keep in step for no gain.
+
+```ts
+const BookingStoreSchema: z.ZodType<BookingStore>;
 ```
 
 ### `BookingUpdate`
