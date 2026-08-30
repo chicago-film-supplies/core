@@ -7,7 +7,7 @@ export const bookings: TypesenseCollectionConfig = {
   version: 5,
   firestoreCollection: "bookings",
   collectionName: "bookings_v5",
-  enabled: false,
+  enabled: true,
   schema: {
     name: "bookings_v5",
     enable_nested_fields: true,

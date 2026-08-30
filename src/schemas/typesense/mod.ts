@@ -222,6 +222,7 @@ export function getSearchAlias(collection: string): string | null {
 }
 
 export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permission>> = {
+  "bookings": "bookings.search",
   "cards": "cards.search",
   "chart-of-accounts": "chartOfAccounts.search",
   "comments": "comments.search",

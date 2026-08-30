@@ -144,6 +144,7 @@ export const PERMISSIONS = [
   "recurrences.delete",
 
   "bookings.read",
+  "bookings.search",
   "bookings.update",
   "chartOfAccounts.read",
   "chartOfAccounts.search",
