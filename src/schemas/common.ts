@@ -294,6 +294,7 @@ export const CFS_SOURCE_COLLECTIONS = [
   "products",
   "roles",
   "settlements",
+  "suppliers",
   "template-components",
   "templates",
   "templates-versions",

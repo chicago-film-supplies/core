@@ -100,6 +100,15 @@ export const PERMISSIONS = [
   "taxes.update",
   "taxes.delete",
 
+  "suppliers.create",
+  "suppliers.read",
+  "suppliers.update",
+  // Mints a permission that routes nowhere, matching `locationTypes.delete` —
+  // deactivation is a PUT setting `active: false`. It exists so
+  // `manager/firestore.rules` has a name to gate on.
+  "suppliers.delete",
+  "suppliers.search",
+
   "tags.create",
   "tags.read",
   "tags.update",

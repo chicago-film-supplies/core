@@ -533,6 +533,15 @@ export {
 } from "./department-type.ts";
 
 export {
+  SupplierSchema,
+  CreateSupplierInput,
+  UpdateSupplierInput,
+  type Supplier,
+  type CreateSupplierInputType,
+  type UpdateSupplierInputType,
+} from "./supplier.ts";
+
+export {
   LocationTypeSchema,
   CreateLocationTypeInput,
   UpdateLocationTypeInput,
@@ -1035,6 +1044,7 @@ import type { Order } from "./order.ts";
 import type { Organization } from "./organization.ts";
 import type { OutOfService } from "./out-of-service.ts";
 import type { Settlement } from "./settlement.ts";
+import type { Supplier } from "./supplier.ts";
 import type { CreditNote } from "./credit-note.ts";
 import type { PasswordReset } from "./password-reset.ts";
 import type { Product } from "./product.ts";
@@ -1136,6 +1146,7 @@ import { OrderSchema } from "./order.ts";
 import { OrganizationSchema } from "./organization.ts";
 import { OutOfServiceSchema } from "./out-of-service.ts";
 import { SettlementSchema } from "./settlement.ts";
+import { SupplierSchema } from "./supplier.ts";
 import { CreditNoteSchema } from "./credit-note.ts";
 import { PasswordResetSchema } from "./password-reset.ts";
 import { ProductSchema } from "./product.ts";
@@ -1277,6 +1288,8 @@ export interface CollectionDocs {
   "credit-notes": CreditNote;
   settlement: Settlement;
   settlements: Settlement;
+  supplier: Supplier;
+  suppliers: Supplier;
   stock: Stock;
   "stock-lock": StockLock;
   "stock-locks": StockLock;
@@ -1367,6 +1380,7 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "session": SessionSchema, "sessions": SessionSchema,
   "credit-note": CreditNoteSchema, "credit-notes": CreditNoteSchema,
   "settlement": SettlementSchema, "settlements": SettlementSchema,
+  "supplier": SupplierSchema, "suppliers": SupplierSchema,
   // `stock` is both the singular and the plural, so it takes one key rather than
   // the usual pair. `stock-locks` gets the pair like everything else.
   "stock": StockSchema,

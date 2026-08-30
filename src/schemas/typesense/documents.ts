@@ -967,6 +967,25 @@ export interface ThreadDocument {
   updated_at?: number;
 }
 
+// ── Suppliers ───────────────────────────────────────────────────────
+/**
+ * A supplier as indexed in Typesense.
+ *
+ * `xero_id` is optional here and `string | null` on the stored document: the
+ * translate path omits a null rather than sending one, matching the
+ * `optional: true` declaration in `typesense/suppliers.ts`.
+ */
+export interface SupplierDocument {
+  id: string;
+  uid: string;
+  name: string;
+  active: boolean;
+  xero_id?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  updated_at: number;
+}
+
 export interface TypesenseDocumentMap {
   bookings: BookingDocument;
   cards: CardDocument;
@@ -984,6 +1003,7 @@ export interface TypesenseDocumentMap {
   products: ProductDocument;
   stores: StoreDocument;
   tags: TagDocument;
+  suppliers: SupplierDocument;
   templates: TemplateDocument;
   "template-components": TemplateComponentDocument;
   threads: ThreadDocument;

@@ -74,6 +74,9 @@ export type TransactionId =
   // organizations.ts
   | "create-department-type"
   | "update-department-type"
+  // suppliers.ts
+  | "create-supplier"
+  | "update-supplier"
   | "create-organization"
   | "update-organization"
   // 🔴 **A re-parent gets its OWN id, never a borrowed `update-organization`.**

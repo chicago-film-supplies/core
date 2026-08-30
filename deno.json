@@ -36,6 +36,7 @@
     "./schemas/settlement": "./src/schemas/settlement.ts",
     "./schemas/stock": "./src/schemas/stock.ts",
     "./schemas/store": "./src/schemas/store.ts",
+    "./schemas/supplier": "./src/schemas/supplier.ts",
     "./schemas/tag": "./src/schemas/tag.ts",
     "./schemas/tracking-category": "./src/schemas/tracking-category.ts",
     "./schemas/transaction": "./src/schemas/transaction.ts",

@@ -368,10 +368,18 @@ separate, already-typed concern — `ItemUid` in `schemas/_uid.ts`, which is del
 Shapes live in `src/schemas/_uid.ts` (`FirestoreId`, `BookingId`, `ItemUid`, `QuoteId`,
 `MovementId`); this section is about **naming**, that module is about **form**.
 
-**Measured 2026-08-23** against the registry: 96 `CollectionDocs` keys resolving to **56 distinct
-document types — 41 declare `uid`, 15 do not**, and the 15 are deliberate, in four classes:
+**Re-measured 2026-08-30** against the registry: 100 `CollectionDocs` keys resolving to **58 distinct
+document types — 47 declare `uid`, 11 do not**, and the 11 are deliberate, in the classes below.
 
-- **The doc id is a credential** — `sessions`, `email-verifications`, `password-resets`,
+⚠️ **The previous stamp (2026-08-23: 96 / 56 / 41 declare, 15 do not) had gone stale in BOTH
+directions, and the enumeration under it was describing documents that no longer belong.** core#58's
+renames landed, so `sessions`, `webhook-events` and `mcp-oauth-authorize-requests` now declare `uid`
+and the child-document class is **empty** — `orders/{uid}/documents` was the gap it named and it is
+closed. Four of the six keys added since are `supplier`/`suppliers` and the `Supplier` type; the
+count is a census of a registry three repos write to, so **re-derive it, never adjust it** — the two
+halves moved by different amounts and no arithmetic on the old numbers reaches the new ones.
+
+- **The doc id is a credential** — `email-verifications`, `password-resets`,
   `mcp-oauth-codes`, `mcp-oauth-tokens`. The id is the bearer token (or `sha256(token)`), so copying
   it into the body widens what a log or export leak reveals and buys nothing: no reader needs it.
   ⚠️ Stated plainly, the package is **already inconsistent here** — `sessions` copies its token into
@@ -381,8 +389,10 @@ document types — 41 declare `uid`, 15 do not**, and the 15 are deliberate, in 
   `uploadcare-sweep`. Hot-path or TTL-swept plumbing with no readers of a body id.
   `cache-geocodes` would be worse than neutral: its id is `normalizeQuery(q)` while the body's
   `query` is the raw string, so a `uid` would be a **third** representation of one key.
-- **A child document with no identity at all** — `orders/{uid}/documents`. This one is a **gap**, not
-  a carve-out (core#58).
+- ~~**A child document with no identity at all** — `orders/{uid}/documents`.~~ **CLOSED (core#58).**
+  `OrderDocument` declares `uid`, so this class is empty. Kept as a line rather than deleted because
+  it was the one entry described as a gap rather than a carve-out, and "it was fixed" is what a
+  reader of the old list needs.
 - **The id is in the body under another name.** Three of these are **sanctioned carve-outs**, each
   for a reason that is not "we forgot":
   - **`roles.name`** — the doc id must BE the claim string, because `manager/firestore.rules` can
@@ -392,8 +402,11 @@ document types — 41 declare `uid`, 15 do not**, and the 15 are deliberate, in 
   - **`uploadcare-worklist.uuid`** — already correct: it genuinely **is** an Uploadcare UUID that
     doubles as the doc id, which is precisely what `uuid` means.
 
-  The rest of that class (`sessions.id`, `webhook-events.id`,
-  `mcp-oauth-authorize-requests.id`) are **not** carve-outs and are being renamed (core#58).
+  ~~The rest of that class (`sessions.id`, `webhook-events.id`, `mcp-oauth-authorize-requests.id`)
+  are **not** carve-outs and are being renamed (core#58).~~ **DONE** — all three declare `uid`, which
+  is where 6 of the 41 → 47 movement came from. ⚠️ The paragraph above it still says the package is
+  "already inconsistent here" because `sessions` copies its token into the body as `id`; that
+  sentence stands, and it is now the only member of its own observation.
 
 Also deliberately loose, and not carve-outs from this rule so much as different questions:
 `ActorRef.uid` (free-form historical actors), and the polymorphic `DocSource.uid` / `UidNameRef.uid`.

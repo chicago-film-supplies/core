@@ -49,6 +49,7 @@ export type {
   ProductDocument,
   ProductDocumentComponent,
   StoreDocument,
+  SupplierDocument,
   TagDocument,
   TemplateComponentDocument,
   TemplateDocument,
@@ -75,6 +76,7 @@ export { organizations } from "./organizations.ts";
 export { outOfService } from "./out-of-service.ts";
 export { products } from "./products.ts";
 export { stores } from "./stores.ts";
+export { suppliers } from "./suppliers.ts";
 export { tags } from "./tags.ts";
 export { trackingCategories } from "./tracking-categories.ts";
 export { templates } from "./templates.ts";
@@ -100,6 +102,7 @@ import { organizations } from "./organizations.ts";
 import { outOfService } from "./out-of-service.ts";
 import { products } from "./products.ts";
 import { stores } from "./stores.ts";
+import { suppliers } from "./suppliers.ts";
 import { tags } from "./tags.ts";
 import { trackingCategories } from "./tracking-categories.ts";
 import { templates } from "./templates.ts";
@@ -124,6 +127,7 @@ const allSchemas: TypesenseCollectionConfig[] = [
   outOfService,
   products,
   stores,
+  suppliers,
   tags,
   templates,
   templateComponents,
@@ -150,6 +154,7 @@ export type TypesenseAlias =
   | "out-of-service"
   | "products"
   | "stores"
+  | "suppliers"
   | "tags"
   | "templates"
   | "template-components"
@@ -237,6 +242,7 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "out-of-service": "outOfService.search",
   "products": "products.search",
   "stores": "stores.search",
+  "suppliers": "suppliers.search",
   "tags": "tags.search",
   "templates": "templates.search",
   // Components route through the template system — reuse templates.search rather

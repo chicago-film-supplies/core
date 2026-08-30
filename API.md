@@ -557,7 +557,7 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 `DocSource` shape is unchanged.
 
 ```ts
-const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
 ### `COAClass`
@@ -1238,6 +1238,8 @@ interface CollectionDocs {
   credit-notes: CreditNote;
   settlement: Settlement;
   settlements: Settlement;
+  supplier: Supplier;
+  suppliers: Supplier;
   stock: Stock;
   stock-lock: StockLock;
   stock-locks: StockLock;
@@ -1982,6 +1984,29 @@ interface CreateStoreTransferInputType {
   from: MovementAllocationInputType[];
   to: MovementAllocationInputType[];
   serialized_details?: typeLiteral | null;
+}
+```
+
+### `CreateSupplierInput`
+
+Zod schema for CreateSupplierInputType.
+
+```ts
+const CreateSupplierInput: z.ZodType<CreateSupplierInputType>;
+```
+
+### `CreateSupplierInputType`
+
+Input for creating a supplier.
+
+`uid` omitted — the server mints it. `active` omitted — the server
+materializes `true`, exactly as `createDepartmentType` does; there is no
+client-supplied initial state for it to get wrong. `xero_id` omitted — it is
+resolved against Xero and written back, never asserted by a caller.
+
+```ts
+interface CreateSupplierInputType {
+  name: string;
 }
 ```
 
@@ -4586,6 +4611,7 @@ interface Movement {
   query_by_uid_location: string[];
   serialized_details: typeLiteral | null;
   xero_id?: string | null;
+  supplier?: UidNameRefType | null;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -5782,7 +5808,7 @@ type OutOfServiceUpdated = EventEnvelope<OutOfService> & typeLiteral;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `PICK_SHEET_GATES`
@@ -7609,6 +7635,32 @@ interface SupersedeTaxInputType {
 }
 ```
 
+### `Supplier`
+
+A supplier document in Firestore.
+
+```ts
+interface Supplier {
+  uid: string;
+  name: string;
+  active: boolean;
+  xero_id: string | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `SupplierSchema`
+
+Zod schema for Supplier.
+
+```ts
+const SupplierSchema: z.ZodType<Supplier>;
+```
+
 ### `SyncErrorLogRecord`
 
 Structured log entry for a sync-pipeline failure.
@@ -8321,7 +8373,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-return" | "cross-order-checkout" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-organization" | "update-organization" | "reparent-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "reset-fulfillment" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-return" | "cross-order-checkout" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "create-organization" | "update-organization" | "reparent-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "reset-fulfillment" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
 ```
 
 ### `TransactionLogRecord`
@@ -8951,6 +9003,27 @@ interface UpdateStoreInputType {
   default?: boolean;
   active?: boolean;
   jurisdiction?: JurisdictionType;
+  version: number;
+}
+```
+
+### `UpdateSupplierInput`
+
+Zod schema for UpdateSupplierInputType.
+
+```ts
+const UpdateSupplierInput: z.ZodType<UpdateSupplierInputType>;
+```
+
+### `UpdateSupplierInputType`
+
+Input for updating a supplier — a PATCH, so both fields are optional.
+
+```ts
+interface UpdateSupplierInputType {
+  uid: string;
+  name?: string;
+  active?: boolean;
   version: number;
 }
 ```
@@ -10353,7 +10426,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-return" | "cross-order-checkout" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-organization" | "update-organization" | "reparent-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "reset-fulfillment" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-return" | "cross-order-checkout" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "create-organization" | "update-organization" | "reparent-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-crms" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "reset-fulfillment" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all" | "crms-invoice-upsert" | "crms-opportunity-order" | "crms-member-organization" | "crms-member-contact";
 ```
 
 ### `aggregates`
@@ -10651,7 +10724,7 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 `DocSource` shape is unchanged.
 
 ```ts
-const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
 ### `COARevenueEnum`
@@ -16295,6 +16368,78 @@ interface UpdateStoreInputType {
 }
 ```
 
+## `@cfs/core/schemas/supplier`
+
+### `CreateSupplierInput`
+
+Zod schema for CreateSupplierInputType.
+
+```ts
+const CreateSupplierInput: z.ZodType<CreateSupplierInputType>;
+```
+
+### `CreateSupplierInputType`
+
+Input for creating a supplier.
+
+`uid` omitted — the server mints it. `active` omitted — the server
+materializes `true`, exactly as `createDepartmentType` does; there is no
+client-supplied initial state for it to get wrong. `xero_id` omitted — it is
+resolved against Xero and written back, never asserted by a caller.
+
+```ts
+interface CreateSupplierInputType {
+  name: string;
+}
+```
+
+### `Supplier`
+
+A supplier document in Firestore.
+
+```ts
+interface Supplier {
+  uid: string;
+  name: string;
+  active: boolean;
+  xero_id: string | null;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `SupplierSchema`
+
+Zod schema for Supplier.
+
+```ts
+const SupplierSchema: z.ZodType<Supplier>;
+```
+
+### `UpdateSupplierInput`
+
+Zod schema for UpdateSupplierInputType.
+
+```ts
+const UpdateSupplierInput: z.ZodType<UpdateSupplierInputType>;
+```
+
+### `UpdateSupplierInputType`
+
+Input for updating a supplier — a PATCH, so both fields are optional.
+
+```ts
+interface UpdateSupplierInputType {
+  uid: string;
+  name?: string;
+  active?: boolean;
+  version: number;
+}
+```
+
 ## `@cfs/core/schemas/tag`
 
 ### `CreateTagInput`
@@ -16643,6 +16788,7 @@ interface Movement {
   query_by_uid_location: string[];
   serialized_details: typeLiteral | null;
   xero_id?: string | null;
+  supplier?: UidNameRefType | null;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -17573,6 +17719,27 @@ interface StoreDocument {
 }
 ```
 
+### `SupplierDocument`
+
+A supplier as indexed in Typesense.
+
+`xero_id` is optional here and `string | null` on the stored document: the
+translate path omits a null rather than sending one, matching the
+`optional: true` declaration in `typesense/suppliers.ts`.
+
+```ts
+interface SupplierDocument {
+  id: string;
+  uid: string;
+  name: string;
+  active: boolean;
+  xero_id?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  updated_at: number;
+}
+```
+
 ### `TagDocument`
 
 Typesense document type for tags.
@@ -17692,7 +17859,7 @@ interface TypesenseAddressFields {
 Union of all Typesense collection alias names.
 
 ```ts
-type TypesenseAlias = "bookings" | "cards" | "chart-of-accounts" | "comments" | "contacts" | "destinations" | "invoices" | "credit-notes" | "locations" | "orders" | "fulfillments" | "organizations" | "out-of-service" | "products" | "stores" | "tags" | "templates" | "template-components" | "threads" | "tracking-categories" | "users" | "webshop-products";
+type TypesenseAlias = "bookings" | "cards" | "chart-of-accounts" | "comments" | "contacts" | "destinations" | "invoices" | "credit-notes" | "locations" | "orders" | "fulfillments" | "organizations" | "out-of-service" | "products" | "stores" | "suppliers" | "tags" | "templates" | "template-components" | "threads" | "tracking-categories" | "users" | "webshop-products";
 ```
 
 ### `TypesenseCollectionConfig`
@@ -17792,6 +17959,7 @@ interface TypesenseDocumentMap {
   products: ProductDocument;
   stores: StoreDocument;
   tags: TagDocument;
+  suppliers: SupplierDocument;
   templates: TemplateDocument;
   template-components: TemplateComponentDocument;
   threads: ThreadDocument;
@@ -18157,6 +18325,38 @@ Typesense collection config for stores.
 
 ```ts
 const stores: TypesenseCollectionConfig;
+```
+
+### `suppliers`
+
+Typesense collection config for suppliers.
+
+Powers the manager's `<SearchSelect collection="suppliers" filters="active:=true">`
+on the transaction form — which is the only reason this collection is indexed
+at all. It is a couple of dozen documents, so capacity is a non-issue and the
+open VM-capacity question (api-cloudrun#726) is untouched.
+
+🔴 **`name` MUST stay `facet: false`, and it is the single line that decides
+whether the picker works.** `getQueryByStringFields`
+(`manager/src/stores/schemas.ts`) builds `query_by` from string fields that
+are `!f.facet` *and* covered by a declared display column. A faceted `name`
+is filtered out, `query_by` comes back empty, and every search returns zero
+rows **with no error**.
+
+`default_sorting_field: "name"` — a string, following
+`tracking-categories.ts`. Do NOT mint a synthetic int: `chart-of-accounts`
+sorts on an int because its `code` was already one, and `tags.count` is
+labelled a HAZARD in `core/tests/typesenseFieldCoverage.test.ts` precisely because the
+first document written without it fails to index. `Supplier.name` is required
+and non-nullable, which is what a `default_sorting_field` needs.
+
+⚠️ **`xero_id` is `optional: true` because its Zod leaf is `.nullable()`.** A
+non-optional declaration over a nullable leaf is the
+`organizations.billing_address` failure — an HTTP 400 that makes sync fail
+permanently and invisibly.
+
+```ts
+const suppliers: TypesenseCollectionConfig;
 ```
 
 ### `tags`
@@ -20739,7 +20939,7 @@ const RoleSummarySchema: z.ZodType<RoleSummary>;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `Permission`

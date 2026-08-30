@@ -51,6 +51,8 @@ import {
   FirestoreTimestamp,
   type FirestoreTimestampType,
   TimestampFields,
+  UidNameRef,
+  type UidNameRefType,
 } from "./common.ts";
 import { BookingBreakdownKeyEnum, type BookingBreakdownKeyType } from "./booking.ts";
 
@@ -538,6 +540,34 @@ export interface Movement {
    */
   xero_id?: string | null;
 
+  /**
+   * Who the stock was bought from, snapshotted `{uid, name}` at the time of
+   * purchase. `null` on every non-`purchase` type.
+   *
+   * ⚠️ **Optional, not required-nullable, and for the same reason as `xero_id`
+   * directly above** — 1,159 prod / 1,414 dev movements predate the field
+   * (measured 2026-08-30, both environments), so a required key would reject
+   * every stored document on its next write. 76 prod / 111 dev of them are
+   * `purchase` movements, which is the population that will eventually carry a
+   * value.
+   *
+   * 🔴 **The name is POINT-IN-TIME and deliberately does NOT cascade on a
+   * supplier rename.** A movement is an immutable historical record, so the
+   * supplier name *as it was when we bought* is the fact it should hold —
+   * rewriting it later would falsify history, which is the opposite of what a
+   * cascade does for a live order. The closest precedent agrees in spirit: the
+   * organization-name cascade scopes itself to not-yet-settled documents, and
+   * every movement is settled by nature. The refusal is recorded explicitly in
+   * `core/src/schemas/propagation/suppliers.ts` rather than left as a silent
+   * absence.
+   *
+   * ⚠️ **`xero_id` is NOT denormalized here on purpose.** The push reads it from
+   * the supplier document at push time, so a supplier whose Xero contact is
+   * created or re-adopted later still pushes correctly instead of carrying a
+   * frozen `null` on a row nothing ever rewrites.
+   */
+  supplier?: UidNameRefType | null;
+
   // ── standard ──────────────────────────────────────────────────────
   version: number;
   created_by: ActorRefType;
@@ -738,6 +768,13 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   // Optional, never required-nullable: 0 of 1,153 prod / 0 of 1,405 dev
   // movements carry the key (2026-08-30). See the interface docblock.
   xero_id: z.uuid().nullable().optional(),
+  // Optional for the same reason as `xero_id` above: 1,159 prod / 1,414 dev
+  // movements predate it (2026-08-30). ⚠️ The `.meta({ label })` is REQUIRED,
+  // not decoration — `UidNameRef.name` is annotated `column: true` with no label
+  // on purpose, so the key holding it must supply one, or
+  // `display-columns.test.ts` T9 fails on "every declared column composes a
+  // non-empty label".
+  supplier: UidNameRef.nullable().optional().meta({ label: "Supplier" }),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
