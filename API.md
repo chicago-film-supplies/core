@@ -4584,6 +4584,7 @@ interface Movement {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   serialized_details: typeLiteral | null;
+  xero_id?: string | null;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -16621,6 +16622,7 @@ interface Movement {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   serialized_details: typeLiteral | null;
+  xero_id?: string | null;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -20115,7 +20117,7 @@ Quota-gate arms (added 2026-07 with the daily-budget gate):
   a dropped write needing a human.
 
 ```ts
-const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
+const XERO_EVENT_MSGS: "xero_id_self_healed" | "xero_invoice_issued" | "xero_invoice_push_skipped" | "xero_invoice_twin_adopted" | "xero_invoice_twin_refused" | "xero_stock_adjustment_bill" | "xero_bill_pushed" | "xero_bill_push_skipped" | "xero_bill_twin_adopted" | "xero_bill_validation_rejected" | "xero_bill_terminal" | "xero_bill_enqueue_failed" | "xero_settlement_synced" | "xero_settlement_reaped" | "xero_settlement_resurrected" | "xero_manual_intervention_required" | "xero_payment_already_synced" | "xero_payment_appended" | "xero_payment_backfilled" | "xero_payment_processing_failed" | "xero_payment_sync" | "xero_payment_sync_skip" | "xero_payment_webhook_received" | "xero_quote_enqueue_failed" | "xero_quote_locked" | "xero_quote_noop" | "xero_quote_self_throttle" | "xero_quote_skip_draft" | "xero_quote_skip_missing_order" | "xero_quote_skip_no_org_crms_id" | "xero_quote_superseded" | "xero_quote_synced" | "xero_quote_tax_unmapped" | "xero_quote_validation_rejected" | "xero_quota_exhausted" | "xero_rate_limit" | "xero_write_deferred" | "xero_defer_escalated" | "xero_tracking_option_create_failed" | "xero_tax_rate_create_failed" | "xero_tracking_option_unresolved" | "xero_tracking_option_update_failed" | "xero_void_failed" | "xero_void_requires_manual_action" | "xero_webhook_invoice_not_found" | "xero_webhook_no_invoice"[];
 ```
 
 ### `XeroEventLogRecord`
@@ -20134,6 +20136,8 @@ interface XeroEventLogRecord {
   settlement_uid?: string;
   settlement_type?: string;
   credit_note_number?: string;
+  movement_uid?: string;
+  movement_number?: number;
   seam?: string;
   remedy?: string;
   xero_url?: string;
@@ -24010,6 +24014,77 @@ interface LocationPlacement {
 }
 ```
 
+### `XERO_ASSET_ACCOUNTS`
+
+The inventory asset accounts a movement's value can land on.
+
+Two, not four. The owner has decided to **capitalise everything** from next
+year, so the account choice collapses to the product type and the writer
+needs no capitalisation threshold at all. The `$1,000` line-total rule
+measured against the live corpus (97.7% agreement, against 78.7% for the
+per-unit phrasing) survives only as a *historical classifier* — it answers
+"how was this existing stock booked", which the history import must know
+because it decides whether a disposal posts to Xero at all. It is
+deliberately not encoded here.
+
+```ts
+const XERO_ASSET_ACCOUNTS: typeLiteral;
+```
+
+### `XERO_OFFSET_ACCOUNTS`
+
+The counter-account a movement's value is offset against.
+
+```ts
+const XERO_OFFSET_ACCOUNTS: typeLiteral;
+```
+
+### `XeroBillPosting`
+
+A movement that posts: exactly two lines, and what they are.
+
+```ts
+interface XeroBillPosting {
+  kind: "bill";
+  asset_account: indexedAccess;
+  offset_account: indexedAccess;
+  direction: 1 | -1;
+  zero_total: boolean;
+}
+```
+
+### `XeroPostingDecision`
+
+What the Xero seam should do with one movement.
+
+```ts
+type XeroPostingDecision = XeroBillPosting | typeLiteral | typeLiteral | typeLiteral;
+```
+
+### `XeroPostingManualReason`
+
+Why a movement needs a person in the Xero UI.
+
+```ts
+type XeroPostingManualReason = "capitalised_disposal";
+```
+
+### `XeroPostingSkipReason`
+
+Why a movement deliberately posts nothing.
+
+```ts
+type XeroPostingSkipReason = "no_cost_contract" | "opening_balance" | "sale_posts_on_accrec" | "refunded_return_posts_on_accrec";
+```
+
+### `XeroPostingTerminalReason`
+
+Why a movement *should* post but cannot — permanent, and detected before any Xero call.
+
+```ts
+type XeroPostingTerminalReason = "product_type_not_stock_bearing" | "no_ownership_direction";
+```
+
 ### `allocationSide(type: MovementTypeType): "from" | "to" | "both" | null`
 
 Which side of a line an operator-supplied allocation lands on, per the type's
@@ -24100,6 +24175,35 @@ Swap every line's `from` and `to`. This is the whole of a reversal: because a
 line carries both sides, negating it needs no knowledge of the movement type,
 and the per-kind contract makes the result either valid or rejected rather
 than silently lopsided.
+
+### `xeroPostingFor(type: MovementTypeType, productType: ProductTypeType, costAmountCents: number | null): XeroPostingDecision`
+
+The posting table: what one movement does to the Xero ledger.
+
+Pure and total — every `(MovementTypeType, ProductTypeType)` pair resolves,
+and it makes no Xero call, so the whole table is assertable at the byte level
+without a tenant. **This is the recast source v2 reads** (`erp-spec`
+ADR-0020), which is why it returns a spec rather than emitting lines.
+
+**Derived from the contract, never hand-listed.** The direction comes from
+`getTransactionMultiplier` and the cost-bearingness from `hasCosts`, both of
+which read `MOVEMENT_CONTRACTS` — so a new movement type is classified by the
+contract it declares rather than by remembering to extend a list here. The two
+carve-outs (`opening_balance`, `sale`) are explicit *because* they are
+exceptions to that derivation, not because the table is enumerated.
+
+⚠️ **`trade_in` is a DECREASE**, on its contract (`from: locations`,
+`to: outside`), and therefore takes the disposal row — including the
+capitalised-disposal refusal. A planning-era census grouped it with the
+increase types; the contract is the authority and disagrees.
+
+**Parameters**
+
+- `type` — The movement type.
+- `productType` — `product.type` of the movement's subject.
+- `costAmountCents` — `movement.cost.amount_cents`, or `null` when absent.
+Read **only** to tell a no-refund return from a refunded one — the zero is
+the decision. It is deliberately not consulted for the account choice.
 
 ## `@cfs/core/utils/order-lines`
 

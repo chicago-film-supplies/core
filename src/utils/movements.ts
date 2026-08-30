@@ -22,10 +22,11 @@ import type {
   Movement,
   MovementLineType,
   MovementTypeType,
+  ProductTypeType,
   StoreBreakdownEntry,
   StoreBreakdownLocation,
 } from "../schemas/mod.ts";
-import { MOVEMENT_CONTRACTS } from "../schemas/mod.ts";
+import { getTransactionMultiplier, hasCosts, MOVEMENT_CONTRACTS } from "../schemas/mod.ts";
 import { perUnitCostAt4dp, roundDivHalfUp } from "./money.ts";
 
 // ── Money ───────────────────────────────────────────────────────────
@@ -365,4 +366,186 @@ export function applyOutOfServiceReason(
   delta: number,
 ): InventoryLedger["out_of_service_breakdown"] {
   return { ...breakdown, [reason]: Math.max(0, breakdown[reason] + delta) };
+}
+
+// ── Xero posting ────────────────────────────────────────────────────
+
+/**
+ * The inventory asset accounts a movement's value can land on.
+ *
+ * Two, not four. The owner has decided to **capitalise everything** from next
+ * year, so the account choice collapses to the product type and the writer
+ * needs no capitalisation threshold at all. The `$1,000` line-total rule
+ * measured against the live corpus (97.7% agreement, against 78.7% for the
+ * per-unit phrasing) survives only as a *historical classifier* — it answers
+ * "how was this existing stock booked", which the history import must know
+ * because it decides whether a disposal posts to Xero at all. It is
+ * deliberately not encoded here.
+ */
+export const XERO_ASSET_ACCOUNTS = {
+  /** Retail Inventory — consumables, `product.type === "sale"`. */
+  retail: 1400,
+  /** Fixed Asset Clearing — the fleet, `product.type === "rental"`. */
+  fixed_asset_clearing: 1999,
+} as const;
+
+/** The counter-account a movement's value is offset against. */
+export const XERO_OFFSET_ACCOUNTS = {
+  /** Accounts Payable — a real supplier bill, and the only non-zero total. */
+  accounts_payable: 2000,
+  /** Inventory Adjustment Clearing — the $0 adjustment bills. */
+  adjustment_clearing: 2510,
+  /** COGS: Inventory Shrink — an expensed decrease. */
+  inventory_shrink: 5700,
+} as const;
+
+/** A movement that posts: exactly two lines, and what they are. */
+export interface XeroBillPosting {
+  kind: "bill";
+  /** Where the inventory value sits. */
+  asset_account: typeof XERO_ASSET_ACCOUNTS[keyof typeof XERO_ASSET_ACCOUNTS];
+  /** The counter-account the offset line carries. */
+  offset_account: typeof XERO_OFFSET_ACCOUNTS[keyof typeof XERO_OFFSET_ACCOUNTS];
+  /**
+   * `1` the asset account is debited (stock in), `-1` it is credited (stock
+   * out). Always equals `getTransactionMultiplier(type)` — carried explicitly so
+   * the consumer never re-derives it, and so the recast source is complete.
+   */
+  direction: 1 | -1;
+  /**
+   * Whether the two lines must cancel to exactly `0.00`.
+   *
+   * True for every posting except a real `purchase`. A bill that should total
+   * zero and does not is the defect that put $106 of phantom AP on the live
+   * ledger — assert it at the byte level, because there is no dev Xero tenant.
+   *
+   * ⭐ **It is also the "is the offset an explicit LINE?" discriminator**, which
+   * is what the bill builder actually needs. Accounts Payable is *implicit* in
+   * an ACCPAY bill — Xero credits it with the document total, and emitting a
+   * `2000` line would double it. `2510` and `5700` are real lines. Since AP is
+   * the only non-zero-total offset, `zero_total` answers both questions at once:
+   * emit the offset line when it is `true`, and only then.
+   */
+  zero_total: boolean;
+}
+
+/** Why a movement deliberately posts nothing. */
+export type XeroPostingSkipReason =
+  /** Custody-only or a `transfer` — no cost object, so nothing to post. */
+  | "no_cost_contract"
+  /** `opening_balance` — $0-cost CRMS seeding the history import replaces outright. */
+  | "opening_balance"
+  /** A `sale`'s cost side is COGS on the ACCREC invoice; a bill would double-count it. */
+  | "sale_posts_on_accrec"
+  /** A refunded return is customer money — an ACCREC credit note, not a supplier bill. */
+  | "refunded_return_posts_on_accrec";
+
+/** Why a movement needs a person in the Xero UI. */
+export type XeroPostingManualReason =
+  /**
+   * A capitalised unit left the fleet.
+   *
+   * The expensed entry (DR 5700 / CR asset) is *incomplete* for a capitalised
+   * unit: it never clears that unit's accumulated depreciation, and CFS has no
+   * depreciation model to compute it. The misstatement is silent — net PP&E
+   * understated, loss overstated, equity understated permanently, and the
+   * balance sheet still balances. Xero additionally cannot do a partial
+   * disposal by quantity at all. So CFS refuses rather than posting a journal
+   * it cannot complete.
+   */
+  | "capitalised_disposal";
+
+/** Why a movement *should* post but cannot — permanent, and detected before any Xero call. */
+export type XeroPostingTerminalReason =
+  /** A cost-bearing movement on a product type that bears no stock. */
+  | "product_type_not_stock_bearing"
+  /** A cost-bearing movement that neither enters nor leaves ownership. */
+  | "no_ownership_direction";
+
+/** What the Xero seam should do with one movement. */
+export type XeroPostingDecision =
+  | XeroBillPosting
+  | { kind: "skip"; reason: XeroPostingSkipReason }
+  | { kind: "manual"; reason: XeroPostingManualReason }
+  | { kind: "terminal"; reason: XeroPostingTerminalReason };
+
+/**
+ * The posting table: what one movement does to the Xero ledger.
+ *
+ * Pure and total — every `(MovementTypeType, ProductTypeType)` pair resolves,
+ * and it makes no Xero call, so the whole table is assertable at the byte level
+ * without a tenant. **This is the recast source v2 reads** (`erp-spec`
+ * ADR-0020), which is why it returns a spec rather than emitting lines.
+ *
+ * **Derived from the contract, never hand-listed.** The direction comes from
+ * `getTransactionMultiplier` and the cost-bearingness from `hasCosts`, both of
+ * which read `MOVEMENT_CONTRACTS` — so a new movement type is classified by the
+ * contract it declares rather than by remembering to extend a list here. The two
+ * carve-outs (`opening_balance`, `sale`) are explicit *because* they are
+ * exceptions to that derivation, not because the table is enumerated.
+ *
+ * ⚠️ **`trade_in` is a DECREASE**, on its contract (`from: locations`,
+ * `to: outside`), and therefore takes the disposal row — including the
+ * capitalised-disposal refusal. A planning-era census grouped it with the
+ * increase types; the contract is the authority and disagrees.
+ *
+ * @param type The movement type.
+ * @param productType `product.type` of the movement's subject.
+ * @param costAmountCents `movement.cost.amount_cents`, or `null` when absent.
+ *   Read **only** to tell a no-refund return from a refunded one — the zero is
+ *   the decision. It is deliberately not consulted for the account choice.
+ */
+export function xeroPostingFor(
+  type: MovementTypeType,
+  productType: ProductTypeType,
+  costAmountCents: number | null,
+): XeroPostingDecision {
+  // Custody-only steps and `transfer` carry no cost object at all.
+  if (!hasCosts(type)) return { kind: "skip", reason: "no_cost_contract" };
+  if (type === "opening_balance") return { kind: "skip", reason: "opening_balance" };
+  if (type === "sale") return { kind: "skip", reason: "sale_posts_on_accrec" };
+
+  // A refunded return is settled against the customer, not a supplier. The zero
+  // IS the decision — `MOVEMENT_CONTRACTS` makes `cost` required on
+  // `sale_return` precisely so the amount can be zero and mean something.
+  if (type === "sale_return" && (costAmountCents ?? 0) > 0) {
+    return { kind: "skip", reason: "refunded_return_posts_on_accrec" };
+  }
+
+  const asset_account = productType === "sale"
+    ? XERO_ASSET_ACCOUNTS.retail
+    : productType === "rental"
+    ? XERO_ASSET_ACCOUNTS.fixed_asset_clearing
+    : null;
+  if (asset_account === null) {
+    return { kind: "terminal", reason: "product_type_not_stock_bearing" };
+  }
+
+  const direction = getTransactionMultiplier(type);
+  if (direction === 0) return { kind: "terminal", reason: "no_ownership_direction" };
+
+  if (direction === 1) {
+    return {
+      kind: "bill",
+      asset_account,
+      offset_account: type === "purchase"
+        ? XERO_OFFSET_ACCOUNTS.accounts_payable
+        : XERO_OFFSET_ACCOUNTS.adjustment_clearing,
+      direction,
+      // Only a real purchase moves a payable; every other increase nets to zero.
+      zero_total: type !== "purchase",
+    };
+  }
+
+  // A decrease. Expensing a capitalised unit would silently misstate equity.
+  if (asset_account === XERO_ASSET_ACCOUNTS.fixed_asset_clearing) {
+    return { kind: "manual", reason: "capitalised_disposal" };
+  }
+  return {
+    kind: "bill",
+    asset_account,
+    offset_account: XERO_OFFSET_ACCOUNTS.inventory_shrink,
+    direction,
+    zero_total: true,
+  };
 }

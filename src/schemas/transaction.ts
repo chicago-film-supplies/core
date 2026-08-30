@@ -488,6 +488,40 @@ export interface Movement {
   // ── carried over unchanged ────────────────────────────────────────
   serialized_details: { asset_tags: string[]; serial_numbers: string[] } | null;
 
+  // ── external links ────────────────────────────────────────────────
+  /**
+   * The Xero `InvoiceID` of the ACCPAY bill this movement posted, or absent
+   * when it has never been pushed.
+   *
+   * **Optional, not required-nullable, and that is measured rather than
+   * chosen.** 0 of 1,153 prod and 0 of 1,405 dev movements carry the key in any
+   * form (2026-08-30), so a required-nullable declaration would reject every
+   * stored document on its next write. Absent means "never pushed" — exactly
+   * what `optional` says. Measured in BOTH environments deliberately, per
+   * `core/CLAUDE.md` § "Making a field REQUIRED": dev holds 252 movements prod
+   * does not, and prod-only is how a tightening ships broken.
+   *
+   * **No `.default()`.** `.default(x).optional()` is `Optional(Default(x))` and
+   * the default is DEAD (`core/CLAUDE.md`; `tests/inert-defaults.test.ts` is the
+   * ratchet). `movementScaffold` constructs this as `null` explicitly instead,
+   * because schema defaults never materialise on that write path.
+   *
+   * `z.uuid()`, not `z.uuidv4()`: every other `xero_id` in core is `z.uuid()`
+   * (`core/src/schemas/chart-of-accounts.ts`, `credit-note.ts`,
+   * `core/src/schemas/common.ts`, `product.ts`), and
+   * narrowing this one alone would make it stricter than the four beside it for
+   * no measured reason.
+   *
+   * ⚠️ **`xero_id == null` means "CFS holds no receipt", NOT "Xero holds no
+   * bill".** The POST and this write-back are not atomic, and for ACCPAY a
+   * retry does not self-heal the way ACCREC does — `POST /Invoices` upserts on
+   * `InvoiceNumber` for ACCREC only. The push service must adopt-or-create.
+   *
+   * Written only by the bill-push service via `validatedPatchDoc`; it is not
+   * balance-affecting, so it does not join `UpdateTransactionInput`.
+   */
+  xero_id?: string | null;
+
   // ── standard ──────────────────────────────────────────────────────
   version: number;
   created_by: ActorRefType;
@@ -685,6 +719,9 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
   }).nullable(),
+  // Optional, never required-nullable: 0 of 1,153 prod / 0 of 1,405 dev
+  // movements carry the key (2026-08-30). See the interface docblock.
+  xero_id: z.uuid().nullable().optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),

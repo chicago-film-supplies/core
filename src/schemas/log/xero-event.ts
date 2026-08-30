@@ -82,6 +82,59 @@ export const XERO_EVENT_MSGS = [
   // doc, so this log is the ONLY audit trail: it carries the returned bill
   // `xero_invoice_id`, the `delta` posted, and the pre-bill `quantity_on_hand`.
   "xero_stock_adjustment_bill",
+  // ── Movement bills (CFS as the ORIGINATOR of inventory movements) ──
+  //
+  // The push channel that makes the CFS movement journal — not CRMS, and not a
+  // synthetic after-the-fact adjustment — the thing that authors an ACCPAY bill.
+  // Every arm carries `movement_uid` + `movement_number`; the successful ones
+  // also carry the returned bill `xero_invoice_id`, which is what lands on
+  // `transactions.xero_id`.
+  //
+  // Deliberately NOT reusing the quote/invoice arms. `xero_quote_validation_rejected`
+  // is already borrowed by the invoice handler, and a third subject on it makes
+  // the alert unqueryable.
+  //
+  // A movement bill posted. `reason` carries the posting shape it resolved to.
+  "xero_bill_pushed",
+  // The push re-read the movement and found nothing to do — it already carries an
+  // `xero_id`, or `xeroPostingFor` returned `skip` (an `opening_balance`, a `sale`
+  // whose cost is COGS on the ACCREC side, a refunded return, a custody-only
+  // step). Benign and expected: intent is derived from the DOCUMENT, not the
+  // payload, so a re-run is a no-op. `reason` is the skip reason.
+  "xero_bill_push_skipped",
+  // Adopt-or-create found an existing ACCPAY bill for this `CFS-MOV-{number}` and
+  // adopted its GUID instead of POSTing a second one.
+  //
+  // 🔴 This arm is load-bearing in a way the ACCREC one is not. `POST /Invoices`
+  // upserts on `InvoiceNumber` for **ACCREC only** — for ACCPAY it does not, so
+  // nothing but this read-before-write stands between a redelivered task and a
+  // DUPLICATE live bill. `maxConcurrentDispatches: 1` does not prevent it:
+  // attempt 2 reads `xero_id == null` exactly as attempt 1 did, and attempts 4–5
+  // fall outside Xero's ~6-minute `Idempotency-Key` window.
+  "xero_bill_twin_adopted",
+  // Xero returned a 400 `ValidationException`. Terminal — the handler returns 200
+  // rather than retrying, because a malformed payload never becomes well-formed.
+  //
+  // ⚠️ An `Idempotency-Key` 400 is a FALSE terminal: Xero returns 400 on *same
+  // key, changed body* inside the 6-minute window. The body must be a pure
+  // function of the frozen movement — take `DueDate` from `movement.date`, never
+  // from `now` — or a real bill is silently dropped here.
+  "xero_bill_validation_rejected",
+  // A CFS-side terminal: an unmapped posting account, a supplier with no
+  // `ContactID`, a product with no `xero_code`, a cost-bearing movement on a
+  // product type that bears no stock. Permanent, and detected BEFORE any Xero
+  // call, so it is not a Xero `ValidationException`.
+  //
+  // 🔴 **This arm needs an alert rule beside it.** The 200-drop plus an alert on
+  // the error log IS the DLQ substitute; without the alert the 200 is a silent
+  // loss of a bill nothing will ever retry.
+  "xero_bill_terminal",
+  // The movement committed but its push task could not be enqueued. Swallowed
+  // and logged rather than 500ing on a write that landed — movements are
+  // append-only and never rewritten, so there is no "next touch" to self-heal on.
+  // The scheduler-driven sweep over `xero_id == null` is the backstop, and this
+  // arm is how you know it has work to do. Needs an alert.
+  "xero_bill_enqueue_failed",
   // ── Settlements (the `settlements` journal) ──
   // A settlement document was written from a Xero payment or credit-note
   // allocation. Carries `settlement_uid` + `settlement_type`.
@@ -175,6 +228,16 @@ export interface XeroEventLogRecord {
   settlement_uid?: string;
   settlement_type?: string;
   credit_note_number?: string;
+  /** The movement whose bill was pushed. Its uid IS the document id. */
+  movement_uid?: string;
+  /**
+   * `Movement.number` — what `CFS-MOV-{number}` is keyed on.
+   *
+   * Never reused, which is what makes it safe as a Xero `InvoiceNumber`: Xero
+   * frees a number on VOID/DELETE (prod holds four duplicate-number ACCREC pairs
+   * that way), so a reusable key would let a voided bill's number be re-minted.
+   */
+  movement_number?: number;
   /** Which manual-intervention seam fired. @see `xero_manual_intervention_required` */
   seam?: string;
   /** What a human must do about it — carried into the alert annotation. */
@@ -244,6 +307,8 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   settlement_uid: z.string().optional(),
   settlement_type: z.string().optional(),
   credit_note_number: z.string().optional(),
+  movement_uid: z.string().optional(),
+  movement_number: z.number().optional(),
   seam: z.string().optional(),
   remedy: z.string().optional(),
   xero_url: z.string().optional(),
