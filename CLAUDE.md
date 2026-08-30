@@ -132,6 +132,15 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
 ## Publish
 - git commit, git push to beta branch, gh action will trigger semantic release and publish
 
+### Before you cut the first beta of a piece of work — two checks, not one
+
+Every publish drags three pin bumps behind it (api-cloudrun's ~31 subpath entries, manager's npm alias, a templates PR), so a beta you could have avoided costs the whole cross-repo dance.
+
+1. ⭐ **Survey every closed vocabulary the change will NAME.** They are closed on purpose — a compile error beats a silent hole — but the compiler reveals them one at a time, each costing a publish. The ones that bite: transaction ids (`src/schemas/propagation/ids.ts`), log event names (`src/schemas/log/integration-event.ts`), `PERMISSIONS`, and the Typesense field sets. Grep for what you are about to name before you name it. A 2026-08-29 tier cost two publishes and six pin bumps for one transaction id and two log events, both knowable up front.
+2. ⚠️ **Then write the first CONSUMER against the new schema — because a survey sees a NAME and never a TYPE.** The pick-sheet tier ran check 1, correctly found it needed *no* new vocabulary member, and still took two betas: `beta.293` existed only to retype `next_cursor` from a `FirestoreId` to an opaque sort key and to make four counts scope-scoped rather than page-scoped. Both were invisible to a grep and obvious the moment real code used the shape. Exercise every new field far enough for the compiler and the serialization to argue with it, **then** publish.
+
+⭐ **A second beta caught before any pin is bumped costs one extra `sed`.** Caught after, it costs three repos.
+
 ## Commit conventions
 
 This repo uses [semantic-release](https://github.com/semantic-release/semantic-release) with the **Conventional Commits** preset. The commit message determines the version bump automatically.
@@ -173,6 +182,18 @@ feat!: remove deprecated AddressV1 schema
 Any commit that removes a field, renames an export, or changes validation in a way that could break consumers **must** be marked as breaking — either with `!` after the type or a `BREAKING CHANGE:` footer.
 
 ## Conventions
+
+### Promoting a type to core: a render model and a wire document are not the same type
+
+⭐ **When a second caller appears, "promote the type to core" is often a REWRITE with a shared vocabulary, not a move** — and treating it as a move is how a client concern leaks into a stored or transmitted contract.
+
+The worked example is the pick sheet (api-cloudrun#697). The manager's `PickSheetSection` carries whole `Booking` objects and a `Map` keyed by item path, and designates one **owner** occurrence per aggregate booking. None of that crosses a wire: a `Map` does not serialize, and those bookings carry `unit_price_cents` / `total_price_cents` onto a surface whose whole premise is *"no price, no financial flags"*. What core got instead was a serializable twin — the same relationship `schemas/movement-session.ts` already documents against the manager's own `MovementSession`.
+
+Two rules fell out of it, and both generalise:
+
+- **A display convention must not become a document field.** The owner rule exists because a TABLE must not draw one aggregate booking's quantities on N rows. A document has no such constraint, so the wire states the bookings once and every line that resolves to one carries the same id — *more* truthful than designating an arbitrary owner, and it is why the join stayed in the manager.
+- **Do not mint a closed vocabulary for a UI label.** Putting the fulfillment `stage` on the wire would have added a core-owned union to express something the seven `breakdown` buckets already say, with more information and no new vocabulary.
+
 
 ### Money arithmetic — never a float factor
 
