@@ -341,15 +341,29 @@ export const PickSheetOrderSchema: z.ZodType<PickSheetOrder> = z.strictObject({
 export interface PickSheet {
   scope: PickSheetScope;
   gate: PickSheetGateType;
+  /**
+   * The orders on THIS PAGE. `orders.length` is the page size; every count
+   * below is the whole scope.
+   */
   orders: PickSheetOrder[];
-  /** Distinct orders on this PAGE. Not a corpus count — see `next_cursor`. */
+  /**
+   * Distinct orders the scope and gate admit, **across every page**.
+   *
+   * ⚠️ **These four totals describe the SCOPE, not the page**, and there is
+   * deliberately no page-sized twin of any of them — `orders.length` already
+   * says that, and a pair of near-identical counters is how a reader ends up
+   * quoting the wrong one. *"How much is out at this destination"* has to be
+   * answerable from page 1 or the number is worse than absent; the fold runs
+   * over the whole membership slice before it is clipped, so the totals cost
+   * nothing.
+   */
   order_count: number;
-  /** Legs on this page, across its orders. */
+  /** Legs the scope and gate admit, across every page. */
   destination_count: number;
-  /** Units across every leg on this page. */
+  /** Units across every admitted leg, across every page. */
   quantity: number;
   /**
-   * Distinct organizations on this page, `null` counted once.
+   * Distinct organizations across every page, `null` counted once.
    *
    * A destination sheet spanning two customers is the case the order headers
    * exist for: a worker at a shared stage must not hand one production's gear to
@@ -367,12 +381,20 @@ export interface PickSheet {
    */
   missing_order_uids: string[];
   /**
-   * The last order uid on this page when more remain, else `null`.
+   * Where the next page resumes from — pass it back as `start_after`. `null` is
+   * the only end-of-results signal.
    *
    * ⚠️ **Pagination is by ORDER, never by row.** An order's legs and a leg's
    * lines are what a worker carries to one place; splitting them across pages
-   * would hand somebody half a section and no way to know it. `null` is the only
-   * end-of-results signal.
+   * would hand somebody half a section and no way to know it.
+   *
+   * ⚠️ **Opaque, and it is the whole SORT KEY rather than the last uid.** The
+   * sheet is ordered by `(due date, order uid)`, so a bare uid can only be
+   * resumed from by finding it again — and the order it names may legitimately
+   * have left the sheet by the next call, having been checked in. Carrying the
+   * key means the resume is a comparison against a value the caller already
+   * holds, which stays total when the corpus moves underneath it: no skips, no
+   * repeats, terminates.
    */
   next_cursor: string | null;
   /** Set only when the page was clipped — what happened and what to do. */
@@ -392,6 +414,6 @@ export const PickSheetSchema: z.ZodType<PickSheet> = z.strictObject({
     name: NameField,
   })).default([]),
   missing_order_uids: z.array(FirestoreId).default([]),
-  next_cursor: FirestoreId.nullable(),
+  next_cursor: z.string().nullable(),
   notice: z.string().nullable(),
 }).meta({ title: "PickSheet" });

@@ -131,6 +131,38 @@ Deno.test("schema: an unknown top-level key is refused", () => {
   assertEquals(PickSheetSchema.safeParse(sheet).success, false);
 });
 
+/**
+ * 🔴 The cursor is the whole SORT KEY, not the last order's uid.
+ *
+ * A bare uid could only be resumed from by finding that order again, and the
+ * order it names may legitimately have left the sheet by the next call — checked
+ * in, or completed. Typing this field as a document id is the tightening that
+ * would force that back, so it is asserted directly.
+ */
+Deno.test("schema: `next_cursor` is an opaque key, not a document id", () => {
+  const sheet = emptySheet() as Record<string, unknown>;
+  sheet.next_cursor = "2026-09-29T09:00:00.000-05:00|cccccccccccccccccccc";
+  const parsed = PickSheetSchema.parse(sheet) as PickSheet;
+  assertEquals(parsed.next_cursor, "2026-09-29T09:00:00.000-05:00|cccccccccccccccccccc");
+});
+
+/**
+ * The four counts describe the SCOPE, not the page — so a one-order page of a
+ * twelve-order sheet says twelve, and `orders.length` says one. Asserted because
+ * the natural mistake is to make them agree.
+ */
+Deno.test("schema: the counts are scope totals and outlive the page they arrive on", () => {
+  const sheet = emptySheet() as Record<string, unknown>;
+  sheet.order_count = 12;
+  sheet.destination_count = 14;
+  sheet.quantity = 312;
+  sheet.next_cursor = "|dddddddddddddddddddd";
+  const parsed = PickSheetSchema.parse(sheet) as PickSheet;
+  assertEquals(parsed.orders.length, 0);
+  assertEquals(parsed.order_count, 12);
+  assert(parsed.next_cursor !== null, "more pages remain, so the totals exceed this page");
+});
+
 Deno.test("schema: the gate is the closed vocabulary, not a free string", () => {
   const sheet = emptySheet() as Record<string, unknown>;
   sheet.gate = "outbound";
