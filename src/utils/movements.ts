@@ -464,23 +464,7 @@ export type XeroPostingManualReason =
    * disposal by quantity at all. So CFS refuses rather than posting a journal
    * it cannot complete.
    */
-  | "capitalised_disposal"
-  /**
-   * A `purchase` running BACKWARDS — i.e. the reversal of one.
-   *
-   * Every other posting reverses inside the ACCPAY shape: the lines swap sign,
-   * the pair still nets to `0.00`, and AP never moves. A purchase is the one
-   * row where `zero_total` is false and the total IS the payable, so undoing it
-   * has to move real Accounts Payable — and the Xero instrument for that is an
-   * **ACCPAYCREDIT supplier credit note**, which this codebase does not build
-   * (`xeroBodies.ts` builds `ACCRECCREDIT`, i.e. customer credits, only).
-   *
-   * ⚠️ Emitting the decrease row instead would post `DR 5700 COGS: Inventory
-   * Shrink / CR asset` — booking a shrink expense for stock that was never
-   * lost, and leaving the payable standing. So a person does it: void the bill
-   * if it is unpaid, or raise a supplier credit if it is not.
-   */
-  | "reversed_purchase_needs_credit_note";
+  | "capitalised_disposal";
 
 /** Why a movement *should* post but cannot — permanent, and detected before any Xero call. */
 export type XeroPostingTerminalReason =
@@ -637,13 +621,29 @@ export function xeroPostingFor(
   ) {
     return { kind: "manual", reason: "capitalised_disposal" };
   }
-  // Undoing a purchase moves real AP, and the instrument for that is an
-  // ACCPAYCREDIT supplier credit note this codebase does not build. Only the
-  // document's direction matters here — no type resolves to a `natural === -1`
-  // purchase, so the forward is always the posting one.
-  if (direction === -1 && !zero_total) {
-    return { kind: "manual", reason: "reversed_purchase_needs_credit_note" };
-  }
-
+  // ⭐ **A reversed purchase POSTS, and it needs no arm of its own.** Undoing a
+  // purchase moves real Accounts Payable, and the Xero instrument for that is an
+  // ACCPAYCREDIT supplier credit note — which api-cloudrun#746 built. So the two
+  // facts this row needs are already the two fields below: `direction === -1`
+  // selects `ACCPAYCREDIT` at the builder's one branch, and `zero_total === false`
+  // suppresses the offset line, leaving ONE line whose total IS the payable being
+  // credited back. The contact is the ORIGINAL's supplier, carried onto the
+  // reversal at the writer (`api-cloudrun/src/services/transactions.ts`), so the
+  // credit lands on the vendor that was billed.
+  //
+  // ⚠️ **This used to return `{ kind: "manual", reason:
+  // "reversed_purchase_needs_credit_note" }`**, and that member is now RETIRED
+  // from `XeroPostingManualReason` — a narrowing, so every consumer `switch`
+  // became a compile error rather than a silently dead arm. The refusal's stated
+  // reason (*"an instrument this codebase does not build"*) had been false since
+  // #746; api-cloudrun#755 is where it was measured and retired.
+  //
+  // 🔴 **What this does NOT do is ALLOCATE the credit against the original
+  // bill.** The note is raised against the supplier and sits as an unallocated
+  // credit until someone applies it — which is correct and conservative: Xero
+  // cannot allocate to a document CFS may not have posted (the guard above
+  // refuses a reversal whose original is VOIDED), and auto-allocation is an
+  // accounting call about a PAID bill rather than a coding one. That call is the
+  // remaining half of api-cloudrun#755.
   return { kind: "bill", asset_account, offset_account, direction, zero_total };
 }

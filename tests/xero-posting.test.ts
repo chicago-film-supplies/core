@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertNotEquals } from "@std/assert";
 import {
   MOVEMENT_TYPES,
   type MovementTypeType,
@@ -290,18 +290,43 @@ Deno.test("a reversed rental increase is a CAPITALISED DISPOSAL — a person pos
   });
 });
 
-Deno.test("a reversed PURCHASE needs a credit note, and must not post shrink", () => {
+Deno.test("a reversed PURCHASE posts an ACCPAYCREDIT, and must not post shrink", () => {
   const forward = xeroPostingFor("purchase", "sale", 330_000, +198);
-  assertEquals(forward.kind, "bill");
-  assertEquals((forward as { zero_total: boolean }).zero_total, false);
+  const reversed = xeroPostingFor("purchase", "sale", -330_000, -198);
+
+  // Narrowed rather than cast: the decision is a discriminated union, and a cast
+  // to a bare `{ offset_account }` would still compile if this row regressed to
+  // `manual` or `terminal` — reading the field off a member that does not carry
+  // it. The whole point of this test is which arm it lands in.
+  if (forward.kind !== "bill") throw new Error(`forward is ${forward.kind}`);
+  if (reversed.kind !== "bill") throw new Error(`reversed is ${reversed.kind}`);
+
+  assertEquals(forward.zero_total, false);
+  assertEquals(forward.direction, 1);
 
   // Undoing a purchase moves real Accounts Payable — the one row where the
-  // total IS the payable. Emitting the decrease row would book a shrink expense
-  // for stock that was never lost AND leave the payable standing.
-  assertEquals(xeroPostingFor("purchase", "sale", -330_000, -198), {
-    kind: "manual",
-    reason: "reversed_purchase_needs_credit_note",
+  // total IS the payable. It POSTS (api-cloudrun#755): `direction: -1` selects
+  // ACCPAYCREDIT at the builder's one branch and `zero_total: false` suppresses
+  // the offset line, so the document is a one-line supplier credit whose total
+  // is the payable being credited back.
+  assertEquals(reversed, {
+    kind: "bill",
+    asset_account: XERO_ASSET_ACCOUNTS.retail,
+    offset_account: XERO_OFFSET_ACCOUNTS.accounts_payable,
+    direction: -1,
+    zero_total: false,
   });
+
+  // 🔴 The fail-closed companion, and it is the whole point of the row. The
+  // wrong answer here is not "no post" — it is a post to `5700 Inventory
+  // Shrink`, which books a shrink expense for stock that was never lost AND
+  // leaves the payable standing. Both numbers look entirely plausible on the P&L.
+  assertNotEquals(reversed.offset_account, XERO_OFFSET_ACCOUNTS.inventory_shrink);
+
+  // And the pair nets: forward and reversal name the SAME account in opposite
+  // directions, which is what makes the two documents cancel in Xero.
+  assertEquals(forward.offset_account, reversed.offset_account);
+  assertEquals(forward.asset_account, reversed.asset_account);
 });
 
 Deno.test("heldDelta null means 'no document' — the table's own direction", () => {
