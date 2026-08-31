@@ -841,6 +841,18 @@ export interface CreateTransactionInputType {
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
   serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
+  /**
+   * Who the stock was bought from, on a `purchase`. `null`/absent everywhere
+   * else, and on a `purchase` until an operator picks one.
+   *
+   * 🔴 **The uid ONLY — the caller does NOT supply the name.** `Movement.supplier`
+   * is a `{uid, name}` snapshot, and a client that asserted the name could store
+   * one that never matched the supplier document. `CreateOrderInput.organization`
+   * is `{ uid }` for exactly this reason: the server owns the denorm, so the
+   * snapshot is true at the moment it is written by construction rather than by
+   * the client's good behaviour.
+   */
+  supplier?: { uid: string } | null;
 }
 
 /**
@@ -863,6 +875,8 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
   }).nullable().optional(),
+  // The uid alone; the writer resolves the name. See the interface docblock.
+  supplier: z.object({ uid: FirestoreId }).nullable().optional(),
 }).refine(
   // The scalar quantity must equal Σ per-location allocation, or the movement is
   // born desynced. `CreateProductInput` has carried the identical rule since

@@ -987,7 +987,7 @@
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n  supplier?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {
@@ -7934,7 +7934,7 @@
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n  supplier?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {

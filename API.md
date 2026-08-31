@@ -2112,6 +2112,7 @@ interface CreateTransactionInputType {
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
   serialized_details?: typeLiteral | null;
+  supplier?: typeLiteral | null;
 }
 ```
 
@@ -16710,6 +16711,7 @@ interface CreateTransactionInputType {
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
   serialized_details?: typeLiteral | null;
+  supplier?: typeLiteral | null;
 }
 ```
 
