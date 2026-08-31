@@ -4441,8 +4441,37 @@ Asset depreciation IS on the roadmap. When it lands:
   - **`depreciation` wants to be ONE type with a `book` field** on the cost
     object, not `depreciation_tax` + `depreciation_gaap`. As types they double
     every future cost-only event; as a field the book is one dimension.
-    The movement shape already exists: `lines: []` + a negative `cost`, the
-    same shape a late landed-cost adjustment uses.
+    🔴 **The movement shape does NOT already exist.** This note claimed it
+    did — *"`lines: []` + a negative `cost`, the same shape a late
+    landed-cost adjustment uses"* — and that was wrong in three independent
+    ways, each measured (core#75):
+      1. **No contract permits it.** `places: null` means "lines must be
+         empty", and the only entry carrying it is `prep`, whose `cost` is
+         `forbidden`. Every cost-bearing type has `places` set, and
+         `checkMovementContract` then requires at least one line — so
+         `MovementSchema` rejects `lines: []` beside a cost on **every**
+         {@link MOVEMENT_TYPES} member. `places: null` + `cost: "required"`
+         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.
+      2. **The fold would ignore it anyway.** `applyMovementToLedger`
+         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside
+         `delta > 0` / `delta < 0`, where `delta` is
+         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at
+         0; the same cost on one `+10` line moves it to 50000.
+      3. **And it could not reach Xero.** `xeroPostingFor`
+         (`utils/movements.ts`) terminals a cost-bearing movement whose lines
+         net to zero as `no_ownership_direction`, deliberately, because a
+         document like that is malformed today.
+    So a cost-only event needs all three gates opened, in one change: a
+    contract entry pairing `places: null` with `cost: "required"`, a
+    `delta === 0` arm in the fold — which owes its own decision about
+    `average_unit_cost`, since the basis moves while the quantity does not —
+    and a posting decision that is not derived from an ownership direction
+    there is none of.
+    The "late landed-cost adjustment" cited as precedent is not writable
+    today either, by the same mechanism. (1) and (2) are pinned in
+    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the
+    day someone mints the contract entry is the day a pin goes red rather
+    than the day the ledger silently stops moving.
   - **`disposal` wants to come back as its own type**, even though `write_off`
     already covers the mechanics (`out-of-service → null` + `cost`). Finance
     reporting a "disposals" line has to tell a disposal from a damage
@@ -9947,8 +9976,11 @@ after it. Type carries direction, reason carries why, and the contract's
 ### `getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0`
 
 Returns +1 for movements that increase owned quantity, -1 for those that
-decrease it, and 0 for those that leave it untouched (a `transfer`, a
-custody-only fulfillment step, a cost-only adjustment).
+decrease it, and 0 for those that leave it untouched (a `transfer`, or a
+custody-only fulfillment step). ⚠️ It used to list "a cost-only adjustment"
+as a third case; there is no such member, and there cannot be one until the
+two gates in the depreciation note on {@link MOVEMENT_TYPES} are opened
+(core#75).
 
 **Total** — it cannot throw. The financial-only types that used to make it
 partial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it
@@ -16637,8 +16669,11 @@ summation. `{from: null, to: L3}` reads "entered ownership at L3";
 `{from: L3, to: null}` reads "left ownership from L3"; both non-null is a
 move that leaves ownership untouched. A half-move is inexpressible.
 
-`lines: []` means **nothing physically moved** — a `prep`, where reserved and
-prepped units sit on the same shelf, or a cost-only adjustment.
+`lines: []` means **nothing physically moved** — today only a `prep`, where
+reserved and prepped units sit on the same shelf. ⚠️ It *reads* like the shape
+for a cost-only adjustment too, and that is the trap: no contract pairs
+`lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing
+if one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).
 
 ### `CUSTODY_PLACE_KINDS`
 
@@ -16743,8 +16778,37 @@ Asset depreciation IS on the roadmap. When it lands:
   - **`depreciation` wants to be ONE type with a `book` field** on the cost
     object, not `depreciation_tax` + `depreciation_gaap`. As types they double
     every future cost-only event; as a field the book is one dimension.
-    The movement shape already exists: `lines: []` + a negative `cost`, the
-    same shape a late landed-cost adjustment uses.
+    🔴 **The movement shape does NOT already exist.** This note claimed it
+    did — *"`lines: []` + a negative `cost`, the same shape a late
+    landed-cost adjustment uses"* — and that was wrong in three independent
+    ways, each measured (core#75):
+      1. **No contract permits it.** `places: null` means "lines must be
+         empty", and the only entry carrying it is `prep`, whose `cost` is
+         `forbidden`. Every cost-bearing type has `places` set, and
+         `checkMovementContract` then requires at least one line — so
+         `MovementSchema` rejects `lines: []` beside a cost on **every**
+         {@link MOVEMENT_TYPES} member. `places: null` + `cost: "required"`
+         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.
+      2. **The fold would ignore it anyway.** `applyMovementToLedger`
+         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside
+         `delta > 0` / `delta < 0`, where `delta` is
+         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at
+         0; the same cost on one `+10` line moves it to 50000.
+      3. **And it could not reach Xero.** `xeroPostingFor`
+         (`utils/movements.ts`) terminals a cost-bearing movement whose lines
+         net to zero as `no_ownership_direction`, deliberately, because a
+         document like that is malformed today.
+    So a cost-only event needs all three gates opened, in one change: a
+    contract entry pairing `places: null` with `cost: "required"`, a
+    `delta === 0` arm in the fold — which owes its own decision about
+    `average_unit_cost`, since the basis moves while the quantity does not —
+    and a posting decision that is not derived from an ownership direction
+    there is none of.
+    The "late landed-cost adjustment" cited as precedent is not writable
+    today either, by the same mechanism. (1) and (2) are pinned in
+    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the
+    day someone mints the contract entry is the day a pin goes red rather
+    than the day the ledger silently stops moving.
   - **`disposal` wants to come back as its own type**, even though `write_off`
     already covers the mechanics (`out-of-service → null` + `cost`). Finance
     reporting a "disposals" line has to tell a disposal from a damage
@@ -17038,8 +17102,11 @@ transaction on a product.
 ### `getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0`
 
 Returns +1 for movements that increase owned quantity, -1 for those that
-decrease it, and 0 for those that leave it untouched (a `transfer`, a
-custody-only fulfillment step, a cost-only adjustment).
+decrease it, and 0 for those that leave it untouched (a `transfer`, or a
+custody-only fulfillment step). ⚠️ It used to list "a cost-only adjustment"
+as a third case; there is no such member, and there cannot be one until the
+two gates in the depreciation note on {@link MOVEMENT_TYPES} are opened
+(core#75).
 
 **Total** — it cannot throw. The financial-only types that used to make it
 partial are gone; see {@link MOVEMENT_TYPES}. Derived from the contract so it
@@ -24306,7 +24373,7 @@ type XeroPostingDecision = XeroBillPosting | typeLiteral | typeLiteral | typeLit
 Why a movement needs a person in the Xero UI.
 
 ```ts
-type XeroPostingManualReason = "capitalised_disposal" | "reversed_purchase_needs_credit_note";
+type XeroPostingManualReason = "capitalised_disposal";
 ```
 
 ### `XeroPostingSkipReason`

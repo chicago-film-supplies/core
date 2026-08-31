@@ -18,7 +18,8 @@ import {
   movementHeldDelta,
   negateLines,
 } from "../src/utils/movements.ts";
-import type { InventoryLedger, MovementLineType } from "../src/schemas/mod.ts";
+import { MOVEMENT_CONTRACTS, MOVEMENT_TYPES } from "../src/schemas/mod.ts";
+import type { InventoryLedger, MovementContract, MovementLineType } from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const LOC_A = "testloc1000000000000";
@@ -394,6 +395,72 @@ Deno.test("a sale removes the weighted-average share, not the caller's number", 
   assertEquals(next.total_cost_basis_cents, 320000, "2 × $400 of basis left, not $900");
   assertEquals(costAppliedCents, -80000);
   assertEquals(next.average_unit_cost, 400);
+});
+
+// ── The cost-only shape: inert in the fold, and unwritable (core#75) ─
+//
+// The depreciation roadmap note in `schemas/transaction.ts` used to claim the
+// movement shape for a cost-only event already existed — `lines: []` beside a
+// `cost`. It does not, for two INDEPENDENT reasons, and each of these two tests
+// pins one. Whoever teaches the system depreciation has to repeal both in one
+// change, and repealing either alone leaves the other silently in force:
+// relaxing the contract without extending the fold writes a document that moves
+// no money, and extending the fold without the contract writes nothing at all.
+
+Deno.test("a cost-only fold is inert: `lines: []` beside a cost moves no basis", () => {
+  // ⚠️ This object is deliberately NOT a legal document — `MovementSchema`
+  // rejects `lines: []` on every cost-bearing type (the companion test below is
+  // why). It is called directly because inertness is a property of the fold,
+  // which is pure, and holds regardless of what can currently reach it.
+  const start = ledger({ quantity_held: 100, quantity_in_service: 100 });
+  const cost = { amount_cents: 50000, unit_cost: 0, unit_costs_cents: [] };
+
+  const { ledger: inert, costAppliedCents: none } = applyMovementToLedger(
+    start,
+    { type: "purchase", quantity: 0, lines: [], cost },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(movementHeldDelta([]), 0, "no lines, no delta");
+  assertEquals(inert.total_cost_basis_cents, 0, "delta === 0 falls through both cost branches");
+  assertEquals(none, 0, "nothing was applied, so nothing is there for a reversal to restore");
+  assertEquals(inert.quantity_held, 100);
+
+  // Fail-closed companion: the SAME ledger and the SAME cost DO move the basis
+  // the moment one line carries units, so the zeros above are the `delta === 0`
+  // fall-through and not a fixture that could never have moved anything.
+  const { ledger: moved, costAppliedCents: applied } = applyMovementToLedger(
+    start,
+    { type: "purchase", quantity: 10, lines: [line(10, null, at(LOC_A))], cost },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(moved.total_cost_basis_cents, 50000);
+  assertEquals(applied, 50000);
+  assertEquals(moved.quantity_held, 110);
+});
+
+Deno.test("no contract pairs `places: null` with a required cost — the fold could not fold it", () => {
+  // `places: null` ⇒ lines must be empty, so this pairing IS the cost-only
+  // shape, expressed in the one table that decides what a document may carry.
+  const costOnly = (c: MovementContract) => c.places === null && c.cost === "required";
+
+  for (const type of MOVEMENT_TYPES) {
+    assertEquals(
+      costOnly(MOVEMENT_CONTRACTS[type]),
+      false,
+      `${type} would be a cost-only movement, and the fold above ignores those`,
+    );
+  }
+
+  // Self-verifying: the loop only ever reports the ABSENCE of a member, which a
+  // predicate that can never return true reports just as cleanly. Plant the
+  // depreciation-shaped contract this exists to catch and assert it is caught.
+  assertEquals(
+    costOnly({ custody: "forbidden", cost: "required", places: null, booking: "forbidden" }),
+    true,
+    "a planted cost-only contract must be caught",
+  );
 });
 
 Deno.test("a transfer leaves the basis exactly where it was (#286 defect 1)", () => {
