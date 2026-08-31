@@ -779,7 +779,46 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
-}).superRefine(checkMovementContract).meta({
+}).superRefine(checkMovementContract).superRefine((doc, ctx) => {
+  // 🔴 **A stored `purchase` must name its supplier — but the rule is keyed on
+  // the KEY BEING PRESENT, not on the value, and that is a measurement rather
+  // than a softening.**
+  //
+  // Measured 2026-08-31, both environments: of 76 prod / 111 dev `purchase`
+  // movements, exactly **1** in each carries a `supplier` key at all. A flat
+  // "purchase ⇒ supplier" would make 75 prod / 110 dev STORED documents
+  // unparseable, which is the failure class `core/CLAUDE.md` § "Making a field
+  // REQUIRED" exists to prevent — and it is reachable, not theoretical:
+  // `reverseTransaction` copies the original's supplier onto a new movement of
+  // the SAME type, so reversing any historical purchase would throw, and
+  // reversal is the journal's only correction path.
+  //
+  // ⭐ Keying on presence loses nothing, because `movementScaffold` stamps the
+  // key on EVERY movement it writes. So any purchase written by current code is
+  // covered; only the pre-field corpus is exempt, and it is exempt by being
+  // structurally distinguishable rather than by an allowlist. This is the same
+  // absent-vs-null distinction `xero_id` two fields up already turns on.
+  //
+  // What this catches that `CreateTransactionInput` cannot: a writer that
+  // constructs a purchase movement WITHOUT going through `createTransaction` —
+  // Phase 4's history importer above all.
+  // ⚠️ `=== null`, NOT `== null` and NOT `"supplier" in doc`. Zod materializes an
+  // absent optional key as `undefined` on the parsed output, so both of those
+  // read a historical document — which carries no key at all — as a violation.
+  // Caught by `MovementSchema accepts a well-formed event of every type`, whose
+  // fixture sets no supplier: the first predicate here failed all 76 prod
+  // purchases in one line, which is the whole hazard this rule is shaped to
+  // avoid.
+  if (doc.type === "purchase" && doc.supplier === null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["supplier"],
+      message:
+        "a purchase must name the supplier it was bought from — its offset is Accounts Payable, " +
+        "so the bill it posts has to be billed to somebody",
+    });
+  }
+}).meta({
   title: "Movement",
   collection: "transactions",
   displayDefaults: {
@@ -899,6 +938,38 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
   {
     message: "quantity must equal the sum of per-location allocation quantities",
     path: ["quantity"],
+  },
+).refine(
+  // 🔴 **A `purchase` MUST name a supplier.** Its offset is real Accounts
+  // Payable and the document total IS the payable, so the bill has to be billed
+  // to somebody — and the only other candidate is the "Inventory Adjustments"
+  // placeholder, which is precisely the defect this whole channel exists to
+  // retire (api-cloudrun#727 put $106 of phantom AP against that contact).
+  //
+  // ⚠️ **This replaces a SKIP with a rejection, and that is the point.** The
+  // push already refused to post a supplier-less purchase — quietly, at info
+  // level, hours later, in a log nobody reads. Rejecting at the door turns "the
+  // operator forgot" into a 400 naming the field, at the moment they can still
+  // fix it. Prod movement #1161 is the worked example: a real $2.00 purchase
+  // recorded 2026-08-31 that silently posted nothing.
+  //
+  // ⚠️ The push's skip branch STAYS as a defensive fallback and must NOT become
+  // a terminal: 76 prod purchases predate this rule and can never acquire a
+  // supplier, and Phase 4 deliberately plans to make historical movements
+  // visible to the bill sweep. A terminal there would turn that backfill into
+  // 76 alerts.
+  //
+  // ⭐ **Consequence for Phase 4's history import**: it must resolve a supplier
+  // per purchase rather than importing them bare. That is not extra work — the
+  // Phase 0 report already derives the vendor set (62 contacts evidenced by a
+  // 1400/6500 line), which is exactly what this now obliges it to use.
+  (t) => t.type !== "purchase" || (t.supplier != null && t.supplier.uid.length > 0),
+  {
+    message: "a purchase must name the supplier it was bought from",
+    // Pathed at `supplier` so the manager renders the error ON the picker
+    // rather than as a form-level message the operator has to map back to a
+    // field themselves.
+    path: ["supplier"],
   },
 ) as z.ZodType<CreateTransactionInputType>;
 

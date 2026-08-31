@@ -37,6 +37,7 @@ const at = (uid: string) => ({ collection: "locations" as const, uid });
 const atBooking = { collection: "bookings" as const, uid: BOOKING };
 const atOos = { collection: "out-of-service" as const, uid: OOS };
 
+const SUPPLIER = "testsupp100000000000";
 const base = getInitialValues(MovementSchema) as Record<string, unknown>;
 
 /** A schema-valid movement of `type`, with every axis filled per its contract. */
@@ -83,6 +84,11 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     quantity: 2,
     custody: custodyNeeded ? custodyFor[type] ?? null : null,
     cost: contract.cost === "required" ? { amount_cents: -40000, unit_cost: 200, unit_costs_cents: [200, 200] } : null,
+    // ⚠️ A `purchase` MUST carry one — `base` comes from `getInitialValues`,
+    // which resolves a nullable to `null`, and a stored purchase with an
+    // explicit `null` supplier is exactly what the schema now refuses. This is
+    // the documented "a form seed may not parse" contract biting a fixture.
+    supplier: type === "purchase" ? { uid: SUPPLIER, name: "Test Supplier" } : null,
     lines,
     date: "2026-03-01T00:00:00Z",
     date_fs: mockTimestamp,
@@ -112,6 +118,43 @@ Deno.test("MovementSchema accepts a well-formed event of every type", () => {
       result.success,
       true,
       `${type} should parse: ${result.success ? "" : JSON.stringify(result.error.issues)}`,
+    );
+  }
+});
+
+Deno.test("a stored purchase with an explicit null supplier is REFUSED", () => {
+  const result = MovementSchema.safeParse({ ...movement("purchase"), supplier: null });
+  assertEquals(result.success, false);
+  assertEquals(
+    result.success ? [] : result.error.issues.map((i) => i.path.join(".")),
+    ["supplier"],
+  );
+});
+
+Deno.test("...but a stored purchase with NO supplier KEY is accepted — the historical corpus", () => {
+  // 🔴 The load-bearing arm. Measured 2026-08-31: of 76 prod / 111 dev
+  // `purchase` movements, exactly ONE in each carries a `supplier` key at all.
+  // A rule written as `== null` or `"supplier" in doc` reads all 75 remaining
+  // prod documents as violations — and it is REACHABLE, not theoretical:
+  // `reverseTransaction` copies the original's supplier onto a new movement of
+  // the same type, so reversing any historical purchase would throw, and
+  // reversal is the journal's only correction path.
+  //
+  // Both wrong predicates were written before this arm existed, and this is
+  // what caught them.
+  const { supplier: _absent, ...noKey } = movement("purchase");
+  assertEquals(MovementSchema.safeParse(noKey).success, true);
+});
+
+Deno.test("...and a non-purchase with a null supplier is accepted — the fail-closed companion", () => {
+  // Without this, the rule passes just as well written as "supplier must never
+  // be null", which would refuse every `find`, `write_off` and custody step —
+  // all of which `movementScaffold` stamps `supplier: null` on by design.
+  for (const type of ["find", "write_off", "check_out", "transfer"] as const) {
+    assertEquals(
+      MovementSchema.safeParse({ ...movement(type), supplier: null }).success,
+      true,
+      `${type} carries no payable, so a null supplier is its normal state`,
     );
   }
 });
@@ -503,6 +546,10 @@ Deno.test("getDisplayTransactionTypes(true) offers only stock-adding types", () 
  */
 // ── input schemas ───────────────────────────────────────────────────
 
+// ⚠️ Carries a `supplier` because its type is `purchase`, and a purchase
+// without one is now REJECTED. Every test below spreads this, so leaving it out
+// would turn each of them into "fails for SOME reason" — the exact shape that
+// lets a constraint be deleted with the suite still green.
 const validCreateInput = {
   uid_product: PRODUCT,
   type: "purchase",
@@ -511,6 +558,7 @@ const validCreateInput = {
   date: "2026-03-01T00:00:00Z",
   reference: "PO-001",
   uuid_session: SESSION,
+  supplier: { uid: SUPPLIER },
 };
 
 Deno.test("every displayed transaction type is one CreateTransactionInput accepts", () => {
@@ -547,6 +595,42 @@ Deno.test("opening_balance is accepted by the input but deliberately not display
   assertEquals(getDisplayTransactionTypes().includes("opening_balance"), false);
 });
 
+
+Deno.test("CreateTransactionInput REJECTS a purchase with no supplier", () => {
+  // A purchase's offset is real Accounts Payable and the document total IS the
+  // payable, so the bill must name somebody. The only other candidate is the
+  // adjustment placeholder, which is the defect the movement-bill channel exists
+  // to retire. Prod #1161 is the worked example: a real $2.00 purchase that
+  // silently posted nothing because it named no supplier.
+  const { supplier: _dropped, ...noSupplier } = validCreateInput;
+  const parsed = CreateTransactionInput.safeParse(noSupplier);
+  assertEquals(parsed.success, false);
+  // Pathed at the FIELD, so the manager renders it on the picker rather than as
+  // a form-level message the operator has to map back themselves.
+  assertEquals(parsed.error?.issues.some((i) => i.path.join(".") === "supplier"), true);
+
+  // An explicit null is the same answer as absent — the manager's "clear
+  // supplier" button sets null, and it must not be a way past the rule.
+  assertEquals(
+    CreateTransactionInput.safeParse({ ...validCreateInput, supplier: null }).success,
+    false,
+  );
+});
+
+Deno.test("...and a NON-purchase with no supplier is still accepted — the fail-closed companion", () => {
+  // Without this the refine above passes just as well when written as "a
+  // supplier is always required", which would reject every `find`, `write_off`
+  // and `adjustment_*` the picker offers. It is the arm that says the rule is
+  // about PURCHASES rather than about the field being mandatory.
+  const { supplier: _dropped, ...noSupplier } = validCreateInput;
+  for (const type of ["find", "make", "adjustment_increase", "write_off"]) {
+    assertEquals(
+      CreateTransactionInput.safeParse({ ...noSupplier, type }).success,
+      true,
+      `${type} carries no payable, so it needs no supplier`,
+    );
+  }
+});
 
 Deno.test("CreateTransactionInput accepts an event with no allocations (server allocates)", () => {
   assertEquals(CreateTransactionInput.safeParse(validCreateInput).success, true);
