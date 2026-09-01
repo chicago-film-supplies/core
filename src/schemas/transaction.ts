@@ -859,7 +859,17 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   displayDefaults: {
     // `total_cost` and `source.type` are gone — the cost object and `sources[]`
     // replaced them. `tests/display-defaults.test.ts` resolves every path here.
-    columns: ["date", "number", "quantity", "type", "reference"],
+    // `supplier.name`, not `supplier`: `UidNameRef.name` is the annotated node
+    // and the key holding it supplies the heading, so the column already exists
+    // and is already offered by the picker. Annotating the OBJECT too would mint
+    // a second column with the same heading — measured, both render.
+    //
+    // It is `null` on every ownership type but `purchase` (78 of 1,161 prod
+    // movements), so it is a mostly-empty default column. That is the shipped
+    // precedent rather than a new cost: `reference` below is SPARSER on the same
+    // denominator (72 of 1,161), and the rows this one does populate are
+    // precisely the ones the Held tab is opened for.
+    columns: ["date", "number", "quantity", "type", "reference", "supplier.name"],
     filters: {},
     sort: { column: "date", direction: "desc" },
     groupBy: [

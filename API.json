@@ -8280,6 +8280,18 @@
           "doc": "Typesense document type for out-of-service records."
         },
         {
+          "kind": "variable",
+          "name": "PULSE_COLLECTION",
+          "declaration": "const PULSE_COLLECTION: \"typesense-pulse\";",
+          "doc": "The Firestore collection the pulse documents live in.\n\nNamed here so the writer, the manager's listener, `manager/firestore.rules`,\n`readableCollections` and `devReplicaRules`' `SKIP_COLLECTIONS` all cite one\nconstant. 🔴 The dev-replica skip is not optional: prod's `mirror_top_level`\ntrigger matches `{collectionId}/{docId}` — *everything* — and mirroring a\npulse reproduces the 409 storm that put `typesense` on that list."
+        },
+        {
+          "kind": "variable",
+          "name": "PULSE_TOKEN_FIELD",
+          "declaration": "const PULSE_TOKEN_FIELD: \"t\";",
+          "doc": "The one field a pulse document carries: a random token.\n\nNamed rather than spelled at each site because the index exemption in\nTerraform has to name the same field, and a typo there is invisible — the\nwrite succeeds and the collection silently keeps its 500 writes/s ceiling."
+        },
+        {
           "kind": "interface",
           "name": "ProductDocument",
           "declaration": "interface ProductDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  tracking_category_name?: string;\n  type: string;\n  stock_method: string;\n  active: boolean;\n  component_only: boolean;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  webshop?: typeLiteral;\n  alternates?: Array<typeLiteral>;\n  crms_id?: number;\n  crms_id_str?: string;\n  uid_tracking_category?: string;\n  uid_linked_replacement?: string;\n  uid_linked_rental?: string;\n  xero_id?: string;\n  xero_tracking_option_id?: string;\n  crms_rate_id?: number;\n  crms_linked_rental_id?: number;\n  crms_linked_replacement_id?: number;\n  crms_linked_replacement_rate_id?: number;\n  shipping?: typeLiteral;\n  tags?: Array<typeLiteral>;\n  components?: ProductDocumentComponent[];\n  component_of?: ProductDocumentComponent[];\n  crms_stock_level_ids?: number[];\n  images?: string[];\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  updated_at: number;\n  created_at?: number;\n}",
@@ -8301,7 +8313,7 @@
           "kind": "variable",
           "name": "SEARCH_PERMISSION_BY_ALIAS",
           "declaration": "const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permission>>;",
-          "doc": ""
+          "doc": "Maps each Typesense alias to its `.search` RBAC permission.\n\nUsed by the drift-guard test (every enabled alias must map to a cataloged\npermission) and by the api-cloudrun scoped-key minter (resolve which parent\nkey to derive a user's scoped key from per granted `.search` permission).\n\n⚠️ **Every alias is mapped, `enabled: false` included** — 23 of 23, measured.\nThe docblock this replaces claimed disabled aliases were omitted and named\n`bookings` as one; `bookings` has been enabled for some time, `threads` is\nthe only disabled config, and it is mapped like the rest. A `Partial` record\nthat happens to be total is fine; a comment asserting a gap that does not\nexist is what sends the next reader looking for a fallback path."
         },
         {
           "kind": "interface",
@@ -8354,7 +8366,7 @@
         {
           "kind": "interface",
           "name": "TypesenseCollectionConfig",
-          "declaration": "interface TypesenseCollectionConfig {\n  alias: string;\n  version: number;\n  firestoreCollection: CollectionName;\n  collectionName: string;\n  schema: TypesenseSchema;\n  synonyms: TypesenseSynonym[];\n  displayDefaults: TypesenseDisplayDefaults;\n  enabled?: boolean;\n}",
+          "declaration": "interface TypesenseCollectionConfig {\n  alias: string;\n  version: number;\n  firestoreCollection: CollectionName;\n  collectionName: string;\n  schema: TypesenseSchema;\n  synonyms: TypesenseSynonym[];\n  displayDefaults: TypesenseDisplayDefaults;\n  enabled?: boolean;\n  pulseShards?: number;\n}",
           "doc": "Full collection config with alias, version, and Firestore mapping."
         },
         {
@@ -8592,6 +8604,54 @@
           "name": "products",
           "declaration": "const products: TypesenseCollectionConfig;",
           "doc": "Typesense collection config for products."
+        },
+        {
+          "kind": "function",
+          "name": "pulseCollectionForAlias",
+          "signature": "pulseCollectionForAlias(alias: string): string | null",
+          "doc": "The pulse key for a Typesense **alias** — for a client that holds an alias\n(because that is what it resolves a search client from) and needs the key the\nwriter used.\n\n`null` for an unknown alias, so a caller gets no tick rather than a tick\nkeyed on a string nothing writes.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "pulseCollectionOf",
+          "signature": "pulseCollectionOf(pulseId: string): string",
+          "doc": "The collection half of a pulse document id — the reader's door.\n\nReturns the whole id when it carries no separator, so an id minted by some\nother writer degrades to \"a collection nobody is listening for\" rather than\nto an empty key that would collide with every other malformed id.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "pulseDocId",
+          "signature": "pulseDocId(firestoreCollection: string, shard: number): string",
+          "doc": "The pulse document id for an explicit shard.\n\n⚠️ **Shard 0 is spelled `{collection}~0`, not `{collection}`.** Uniform ids\nmean the reader's suffix strip has no special case, which is the kind of\nbranch that works until the first single-shard collection is read.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "pulseDocIdForDocument",
+          "signature": "pulseDocIdForDocument(firestoreCollection: string, docId: string): string",
+          "doc": "The pulse document a given synced document's change should tick.\n\nThis is the writer's door: it selects the shard *and* mints the id, so an\nout-of-range shard is unrepresentable rather than something to remember.\n\nWhich document lands on which shard does not matter — delivery is\nat-least-once and unordered, and the reader counts ticks per collection\nrather than per shard. Spreading writes is the entire job.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "pulseShardIds",
+          "signature": "pulseShardIds(firestoreCollection: string): string[]",
+          "doc": "Every pulse document id a collection should have — what the hourly drift\ncheck provisions, and what the live audit compares against.\n\n🔴 **Create the absent ones; never `set` them all.** A blind write on an\nhourly job ticks every connected client every hour and re-searches\neverything, which is the failure this whole design is avoiding.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "pulseShardsFor",
+          "signature": "pulseShardsFor(firestoreCollection: string): number",
+          "doc": "How many pulse shards a collection writes to. `1` for anything unconfigured,\nwhich is also the right answer for a collection that is not synced at all.\n\n⚠️ **Raising this is safe; lowering it orphans documents.** Nothing reaps a\nshard that falls out of range, and an orphan costs every connected client a\nread on every connect. `api-cloudrun/scripts/audit-env-definitions.ts` is what catches it.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "variable",
@@ -9339,7 +9399,7 @@
         {
           "kind": "variable",
           "name": "TYPESENSE_EVENT_MSGS",
-          "declaration": "const TYPESENSE_EVENT_MSGS: \"typesense_alias_mismatch\" | \"typesense_batch_import_failed\" | \"typesense_build_delete_failed\" | \"typesense_cleanup_old_collections_failed\" | \"typesense_collection_created\" | \"typesense_count_mismatch\" | \"typesense_delete\" | \"typesense_import_failed\" | \"typesense_orphan_delete_failed\" | \"typesense_parent_keys_missing\" | \"typesense_parent_keys_parse_failed\" | \"typesense_purge_orphans_failed\" | \"typesense_reindex_enqueued\" | \"typesense_reindex_superseded\" | \"typesense_reindex_swapped\" | \"typesense_scoped_key_parent_missing\" | \"typesense_swap_alias_failed\" | \"typesense_sync_check_failed\" | \"typesense_sync_state\" | \"typesense_sync_synonyms_failed\" | \"typesense_synonyms_synced\" | \"typesense_translate_failed\" | \"typesense_upsert\"[];",
+          "declaration": "const TYPESENSE_EVENT_MSGS: \"typesense_alias_mismatch\" | \"typesense_batch_import_failed\" | \"typesense_build_delete_failed\" | \"typesense_cleanup_old_collections_failed\" | \"typesense_collection_created\" | \"typesense_count_mismatch\" | \"typesense_delete\" | \"typesense_import_failed\" | \"typesense_orphan_delete_failed\" | \"typesense_parent_keys_missing\" | \"typesense_parent_keys_parse_failed\" | \"typesense_pulse_failed\" | \"typesense_purge_orphans_failed\" | \"typesense_reindex_enqueued\" | \"typesense_reindex_superseded\" | \"typesense_reindex_swapped\" | \"typesense_scoped_key_parent_missing\" | \"typesense_swap_alias_failed\" | \"typesense_sync_check_failed\" | \"typesense_sync_state\" | \"typesense_sync_synonyms_failed\" | \"typesense_synonyms_synced\" | \"typesense_translate_failed\" | \"typesense_upsert\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {

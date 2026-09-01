@@ -17682,6 +17682,32 @@ interface OutOfServiceDocument {
 }
 ```
 
+### `PULSE_COLLECTION`
+
+The Firestore collection the pulse documents live in.
+
+Named here so the writer, the manager's listener, `manager/firestore.rules`,
+`readableCollections` and `devReplicaRules`' `SKIP_COLLECTIONS` all cite one
+constant. 🔴 The dev-replica skip is not optional: prod's `mirror_top_level`
+trigger matches `{collectionId}/{docId}` — *everything* — and mirroring a
+pulse reproduces the 409 storm that put `typesense` on that list.
+
+```ts
+const PULSE_COLLECTION: "typesense-pulse";
+```
+
+### `PULSE_TOKEN_FIELD`
+
+The one field a pulse document carries: a random token.
+
+Named rather than spelled at each site because the index exemption in
+Terraform has to name the same field, and a typo there is invisible — the
+write succeeds and the collection silently keeps its 500 writes/s ceiling.
+
+```ts
+const PULSE_TOKEN_FIELD: "t";
+```
+
 ### `ProductDocument`
 
 Typesense document type for products.
@@ -17764,6 +17790,19 @@ const QUERY_BY_PREFIX: "query_by_";
 ```
 
 ### `SEARCH_PERMISSION_BY_ALIAS`
+
+Maps each Typesense alias to its `.search` RBAC permission.
+
+Used by the drift-guard test (every enabled alias must map to a cataloged
+permission) and by the api-cloudrun scoped-key minter (resolve which parent
+key to derive a user's scoped key from per granted `.search` permission).
+
+⚠️ **Every alias is mapped, `enabled: false` included** — 23 of 23, measured.
+The docblock this replaces claimed disabled aliases were omitted and named
+`bookings` as one; `bookings` has been enabled for some time, `threads` is
+the only disabled config, and it is mapped like the rest. A `Partial` record
+that happens to be total is fine; a comment asserting a gap that does not
+exist is what sends the next reader looking for a fallback path.
 
 ```ts
 const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permission>>;
@@ -17945,6 +17984,7 @@ interface TypesenseCollectionConfig {
   synonyms: TypesenseSynonym[];
   displayDefaults: TypesenseDisplayDefaults;
   enabled?: boolean;
+  pulseShards?: number;
 }
 ```
 
@@ -18387,6 +18427,60 @@ Typesense collection config for products.
 ```ts
 const products: TypesenseCollectionConfig;
 ```
+
+### `pulseCollectionForAlias(alias: string): string | null`
+
+The pulse key for a Typesense **alias** — for a client that holds an alias
+(because that is what it resolves a search client from) and needs the key the
+writer used.
+
+`null` for an unknown alias, so a caller gets no tick rather than a tick
+keyed on a string nothing writes.
+
+### `pulseCollectionOf(pulseId: string): string`
+
+The collection half of a pulse document id — the reader's door.
+
+Returns the whole id when it carries no separator, so an id minted by some
+other writer degrades to "a collection nobody is listening for" rather than
+to an empty key that would collide with every other malformed id.
+
+### `pulseDocId(firestoreCollection: string, shard: number): string`
+
+The pulse document id for an explicit shard.
+
+⚠️ **Shard 0 is spelled `{collection}~0`, not `{collection}`.** Uniform ids
+mean the reader's suffix strip has no special case, which is the kind of
+branch that works until the first single-shard collection is read.
+
+### `pulseDocIdForDocument(firestoreCollection: string, docId: string): string`
+
+The pulse document a given synced document's change should tick.
+
+This is the writer's door: it selects the shard *and* mints the id, so an
+out-of-range shard is unrepresentable rather than something to remember.
+
+Which document lands on which shard does not matter — delivery is
+at-least-once and unordered, and the reader counts ticks per collection
+rather than per shard. Spreading writes is the entire job.
+
+### `pulseShardIds(firestoreCollection: string): string[]`
+
+Every pulse document id a collection should have — what the hourly drift
+check provisions, and what the live audit compares against.
+
+🔴 **Create the absent ones; never `set` them all.** A blind write on an
+hourly job ticks every connected client every hour and re-searches
+everything, which is the failure this whole design is avoiding.
+
+### `pulseShardsFor(firestoreCollection: string): number`
+
+How many pulse shards a collection writes to. `1` for anything unconfigured,
+which is also the right answer for a collection that is not synced at all.
+
+⚠️ **Raising this is safe; lowering it orphans documents.** Nothing reaps a
+shard that falls out of range, and an orphan costs every connected client a
+read on every connect. `api-cloudrun/scripts/audit-env-definitions.ts` is what catches it.
 
 ### `stores`
 
@@ -20082,7 +20176,7 @@ const TEMPLATE_EVENT_MSGS: "fixture_saved" | "fixture_deleted" | "template_aband
 Msg literals this archetype absorbs.
 
 ```ts
-const TYPESENSE_EVENT_MSGS: "typesense_alias_mismatch" | "typesense_batch_import_failed" | "typesense_build_delete_failed" | "typesense_cleanup_old_collections_failed" | "typesense_collection_created" | "typesense_count_mismatch" | "typesense_delete" | "typesense_import_failed" | "typesense_orphan_delete_failed" | "typesense_parent_keys_missing" | "typesense_parent_keys_parse_failed" | "typesense_purge_orphans_failed" | "typesense_reindex_enqueued" | "typesense_reindex_superseded" | "typesense_reindex_swapped" | "typesense_scoped_key_parent_missing" | "typesense_swap_alias_failed" | "typesense_sync_check_failed" | "typesense_sync_state" | "typesense_sync_synonyms_failed" | "typesense_synonyms_synced" | "typesense_translate_failed" | "typesense_upsert"[];
+const TYPESENSE_EVENT_MSGS: "typesense_alias_mismatch" | "typesense_batch_import_failed" | "typesense_build_delete_failed" | "typesense_cleanup_old_collections_failed" | "typesense_collection_created" | "typesense_count_mismatch" | "typesense_delete" | "typesense_import_failed" | "typesense_orphan_delete_failed" | "typesense_parent_keys_missing" | "typesense_parent_keys_parse_failed" | "typesense_pulse_failed" | "typesense_purge_orphans_failed" | "typesense_reindex_enqueued" | "typesense_reindex_superseded" | "typesense_reindex_swapped" | "typesense_scoped_key_parent_missing" | "typesense_swap_alias_failed" | "typesense_sync_check_failed" | "typesense_sync_state" | "typesense_sync_synonyms_failed" | "typesense_synonyms_synced" | "typesense_translate_failed" | "typesense_upsert"[];
 ```
 
 ### `TYPESENSE_SYNC_OUTCOMES`

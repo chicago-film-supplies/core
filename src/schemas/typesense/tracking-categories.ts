@@ -33,6 +33,7 @@ export const trackingCategories: TypesenseCollectionConfig = {
     default_sorting_field: "name",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "count", "products.name"],
     filters: {},

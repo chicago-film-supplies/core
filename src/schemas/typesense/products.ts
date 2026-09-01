@@ -169,6 +169,7 @@ export const products: TypesenseCollectionConfig = {
     { id: "hotspot-mifi", synonyms: ["hotspot", "mifi"] },
     { id: "can-bin", synonyms: ["can", "bin"] },
   ],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "type", "tracking_category_name", "tags.name", "components.name", "component_of.name", "alternates.name"],
     filters: { type: ["rental", "sale", "service"], active: [true] },

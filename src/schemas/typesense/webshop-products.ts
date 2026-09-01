@@ -91,6 +91,7 @@ export const webshopProducts: TypesenseCollectionConfig = {
     default_sorting_field: "name",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "type", "tags.name", "components.name", "component_of.name", "alternates.name"],
     filters: { type: ["rental", "sale", "service"], active: [true] },

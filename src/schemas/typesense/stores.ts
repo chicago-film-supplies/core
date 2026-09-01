@@ -25,6 +25,7 @@ export const stores: TypesenseCollectionConfig = {
     default_sorting_field: "default",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "active", "default"],
     filters: { active: [true] },

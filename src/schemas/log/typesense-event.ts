@@ -23,6 +23,12 @@ export const TYPESENSE_EVENT_MSGS = [
   "typesense_orphan_delete_failed",
   "typesense_parent_keys_missing",
   "typesense_parent_keys_parse_failed",
+  // The sync pulse write, when it does not land. Warn rather than error and
+  // rather than throwing: the sync it announces has already succeeded, so
+  // failing the upsert over a hint would be strictly worse. Staleness is bounded
+  // by the client's safety re-search and the hourly drift sweep, which is why
+  // the swallowed case is worth a log line rather than a retry loop.
+  "typesense_pulse_failed",
   "typesense_purge_orphans_failed",
   "typesense_reindex_enqueued",
   "typesense_reindex_superseded",

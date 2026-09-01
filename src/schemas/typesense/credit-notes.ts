@@ -96,6 +96,7 @@ export const creditNotes: TypesenseCollectionConfig = {
     default_sorting_field: "number",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: [
       "number",

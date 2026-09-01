@@ -131,6 +131,7 @@ export const orders: TypesenseCollectionConfig = {
     default_sorting_field: "number",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["number", "organization.name", "subject", "dates.delivery_start_fs", "dates.collection_start_fs", "status"],
     filters: { status: [] },

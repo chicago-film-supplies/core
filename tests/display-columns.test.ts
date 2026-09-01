@@ -232,6 +232,25 @@ Deno.test("T10: every rollup label is non-empty and not a raw field name", () =>
   assertEquals(bad, [], `Rollup headings that read like field names:\n${bad.join("\n")}`);
 });
 
+Deno.test("T10: the bookings charge-date rollups actually reach the column list", () => {
+  // A DECLARATION needs a POPULATION assertion beside it. The three arms above
+  // check the rollup table against itself and against the schema; none of them
+  // asserts that a rollup entry produces a column, which is the only thing the
+  // table exists to do. `bookings` is the case that proves it: every other
+  // field on that index resolves through a declared column or an `_fs` mirror,
+  // so a rollup that silently produced nothing would look exactly like the
+  // status quo it replaced.
+  const byKey = new Map(getTypesenseColumns("bookings").map((c) => [c.key, c]));
+  for (const [key, label] of [
+    ["dates.charge_start_fs", "Charge Start"],
+    ["dates.charge_end_fs", "Charge End"],
+  ]) {
+    const col = byKey.get(key);
+    assertEquals(col?.label, label, `bookings:${key} should be offered as "${label}"`);
+    assertEquals(col?.cell, "date", `bookings:${key} should render as a date`);
+  }
+});
+
 // ── T11: no column for a field the index does not carry ──────────────
 
 Deno.test("T11: every Typesense column names a field the collection declares", () => {

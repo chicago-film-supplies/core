@@ -302,6 +302,17 @@ export interface TypesenseCollectionConfig {
   displayDefaults: TypesenseDisplayDefaults;
   /** Whether this collection is actively synced to Typesense. Defaults to true. */
   enabled?: boolean;
+  /**
+   * How many sync-pulse shards this collection writes to. Defaults to 1.
+   *
+   * The pulse is one Firestore write per synced document, so a collection whose
+   * documents are committed in bulk concentrates writes on one key — a single
+   * checkout commits ~135 bookings in one transaction. Sharding spreads those
+   * writes; it does **not** reduce listener cost, which is one read per pulse
+   * write per connected client, so the right number is the smallest one that
+   * clears contention. See `typesense/pulse.ts`.
+   */
+  pulseShards?: number;
 }
 
 /** Zod schema for TypesenseCollectionConfig. */
@@ -320,6 +331,7 @@ export const TypesenseCollectionConfigSchema: z.ZodType<TypesenseCollectionConfi
   synonyms: z.array(TypesenseSynonymSchema),
   displayDefaults: TypesenseDisplayDefaultsSchema,
   enabled: z.boolean().optional(),
+  pulseShards: z.int().positive().optional(),
 });
 
 /**

@@ -85,6 +85,20 @@ export { threads } from "./threads.ts";
 export { users } from "./users.ts";
 export { webshopProducts } from "./webshop-products.ts";
 
+// The sync pulse — one door for minting, parsing and counting a pulse doc id,
+// so the writer (which holds a Firestore collection) and the manager (which
+// holds a Typesense alias) cannot key it differently. See `pulse.ts`.
+export {
+  PULSE_COLLECTION,
+  PULSE_TOKEN_FIELD,
+  pulseCollectionForAlias,
+  pulseCollectionOf,
+  pulseDocId,
+  pulseDocIdForDocument,
+  pulseShardIds,
+  pulseShardsFor,
+} from "./pulse.ts";
+
 import type { Permission } from "../permissions.ts";
 import type { TypesenseCollectionConfig } from "./types.ts";
 import { bookings } from "./bookings.ts";
@@ -179,16 +193,6 @@ export const typesenseEnabledCollections: Set<string> = new Set(
 );
 
 /**
- * Maps each Typesense alias to its `.search` RBAC permission.
- *
- * Used by the drift-guard test (every enabled alias must map to a cataloged
- * permission) and by the api-cloudrun scoped-key minter (resolve which parent
- * key to derive a user's scoped key from per granted `.search` permission).
- *
- * Disabled aliases (`enabled: false`, e.g. `bookings`) are omitted — no search
- * UI surface is expected for them until they are provisioned in Typesense.
- */
-/**
  * Look up the default sorting field for a Typesense collection. Returns
  * `null` when the alias is unknown or the config does not declare one.
  */
@@ -226,6 +230,20 @@ export function getSearchAlias(collection: string): string | null {
   return match?.alias ?? null;
 }
 
+/**
+ * Maps each Typesense alias to its `.search` RBAC permission.
+ *
+ * Used by the drift-guard test (every enabled alias must map to a cataloged
+ * permission) and by the api-cloudrun scoped-key minter (resolve which parent
+ * key to derive a user's scoped key from per granted `.search` permission).
+ *
+ * ⚠️ **Every alias is mapped, `enabled: false` included** — 23 of 23, measured.
+ * The docblock this replaces claimed disabled aliases were omitted and named
+ * `bookings` as one; `bookings` has been enabled for some time, `threads` is
+ * the only disabled config, and it is mapped like the rest. A `Partial` record
+ * that happens to be total is fine; a comment asserting a gap that does not
+ * exist is what sends the next reader looking for a fallback path.
+ */
 export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permission>> = {
   "bookings": "bookings.search",
   "cards": "cards.search",

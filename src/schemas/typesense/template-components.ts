@@ -28,6 +28,7 @@ export const templateComponents: TypesenseCollectionConfig = {
     default_sorting_field: "updated_at",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "git_path", "version_count"],
     filters: {},

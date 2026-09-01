@@ -27,6 +27,7 @@ export const tags: TypesenseCollectionConfig = {
     default_sorting_field: "count",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "count", "products.name"],
     filters: {},

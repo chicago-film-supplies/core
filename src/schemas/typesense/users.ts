@@ -27,6 +27,7 @@ export const users: TypesenseCollectionConfig = {
     default_sorting_field: "email",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["email", "name", "roles"],
     filters: {},

@@ -31,6 +31,7 @@ export const locations: TypesenseCollectionConfig = {
     default_sorting_field: "created_at",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "active", "default"],
     filters: { active: [true] },

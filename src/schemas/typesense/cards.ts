@@ -84,6 +84,7 @@ export const cards: TypesenseCollectionConfig = {
     default_sorting_field: "position",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     // `uid_list` and `uid_assignees` are not columns: they could only ever print
     // an opaque Firestore id.

@@ -42,8 +42,11 @@ export const outOfService: TypesenseCollectionConfig = {
     default_sorting_field: "updated_at",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
-    columns: ["number", "reason", "status", "organization.name", "quantity", "dates.start_fs"],
+    // Both ends of the window: this table is read against a date range, and a
+    // start with no end cannot say whether a record is still open.
+    columns: ["number", "reason", "status", "organization.name", "quantity", "dates.start_fs", "dates.end_fs"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },

@@ -124,6 +124,7 @@ export const organizations: TypesenseCollectionConfig = {
     default_sorting_field: "updated_at",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "contacts", "emails", "phones"],
     filters: {},

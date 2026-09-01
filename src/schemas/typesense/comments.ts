@@ -32,6 +32,7 @@ export const comments: TypesenseCollectionConfig = {
     default_sorting_field: "created_at",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["sources.collection", "created_by", "body_text", "updated_at"],
     filters: {},

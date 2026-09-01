@@ -66,8 +66,32 @@ export const bookings: TypesenseCollectionConfig = {
     default_sorting_field: "updated_at",
   },
   synonyms: [],
+  // 8, because one checkout commits ~135 bookings in a single transaction
+  // and every one of them writes a pulse. A HYPOTHESIS to be set by the burst
+  // test, not a defended number — sharding costs every connected client a read
+  // per pulse write, so the right value is the smallest that clears contention.
+  pulseShards: 8,
   displayDefaults: {
-    columns: ["number", "name", "status", "organization.name", "quantity"],
+    // `breakdown.*` in `BOOKING_BREAKDOWN_KEYS` lifecycle order, and read
+    // INSTEAD of inferring a stage from `status` — a booking can read
+    // `status: "reserved"` while `breakdown.out` is non-zero, which is exactly
+    // the split the stock panel's Booked tab exists to show.
+    //
+    // `quoted` is deliberately absent: `heldByBooking` excludes it, so it is
+    // outside the `Available + Booked + OOS = Held` identity and showing it
+    // beside the three terms that ARE in the sum would read as a fourth.
+    columns: [
+      "number",
+      "name",
+      "status",
+      "organization.name",
+      "quantity",
+      "breakdown.reserved",
+      "breakdown.prepped",
+      "breakdown.out",
+      "dates.start_fs",
+      "dates.end_fs",
+    ],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },

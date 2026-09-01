@@ -164,6 +164,15 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
     // `linkTo: "organizationDetail"` provided.
     name: { label: "Name", cell: "link" },
   },
+  // The two charge dates only. Every other `bookings` field resolves through a
+  // declared column or an `_fs` mirror; these two do not, because the ISO
+  // fields they mirror carry no `serverSortVia` and `mirrorSources` inverts
+  // exactly that annotation. Without an entry here they are indexed, sortable,
+  // and invisible.
+  bookings: {
+    "dates.charge_start_fs": { label: "Charge Start", cell: "date" },
+    "dates.charge_end_fs": { label: "Charge End", cell: "date" },
+  },
   fulfillments: {
     deliveries: { label: "Deliveries", cell: "bool" },
     pickups: { label: "Pickups", cell: "bool" },

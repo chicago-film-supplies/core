@@ -38,6 +38,7 @@ export const threads: TypesenseCollectionConfig = {
     default_sorting_field: "last_message_at",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["sources.collection", "title", "last_message_preview", "last_message_at", "comment_count"],
     filters: {},

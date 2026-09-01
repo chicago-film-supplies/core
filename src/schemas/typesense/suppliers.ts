@@ -52,6 +52,7 @@ export const suppliers: TypesenseCollectionConfig = {
     default_sorting_field: "name",
   },
   synonyms: [],
+  pulseShards: 1,
   displayDefaults: {
     columns: ["name", "active"],
     filters: { active: [true] },
