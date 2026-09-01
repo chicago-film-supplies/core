@@ -273,6 +273,10 @@ const createOrderRules: CollectionRule[] = [
     fields: [
       { source: ["uid"], target: ["organization", "uid"] },
       { source: ["path"], target: ["organization", "name"] },
+      // The same source feeds two targets: `name` is the chain COMPOSED to
+      // text, `path` is the chain itself. Both are frozen at write time by
+      // `buildOrganizationSnapshot`.
+      { source: ["path"], target: ["organization", "path"] },
       { source: ["crms_id"], target: ["organization", "crms_id"] },
       { source: ["xero_id"], target: ["organization", "xero_id"] },
       {
@@ -649,6 +653,10 @@ const updateOrderRules: CollectionRule[] = [
     fields: [
       { source: ["uid"], target: ["organization", "uid"] },
       { source: ["path"], target: ["organization", "name"] },
+      // The same source feeds two targets: `name` is the chain COMPOSED to
+      // text, `path` is the chain itself. Both are frozen at write time by
+      // `buildOrganizationSnapshot`.
+      { source: ["path"], target: ["organization", "path"] },
       { source: ["crms_id"], target: ["organization", "crms_id"] },
       { source: ["xero_id"], target: ["organization", "xero_id"] },
       {

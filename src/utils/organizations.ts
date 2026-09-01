@@ -323,6 +323,20 @@ export function buildOrganizationSnapshot(
     // compile error the removal produced here is what the fallback was left in
     // place to raise (api-cloudrun#709).
     name: composeOrgName(org.path),
+    // ⭐ **The FROZEN chain, and the reason it is stored beside the name it
+    // composes.** `name` above is this same fact flattened to text, which
+    // cannot be grouped on, joined on, or parsed back — see
+    // {@link DocumentOrganizationSnapshotType.path}. Writing it here is what
+    // makes every one of this builder's call sites freeze the chain for free.
+    //
+    // 🔴 **The field was declared, argued for at length, and emitted by NOTHING
+    // until this line.** Its backfill was written, applied and deleted in one
+    // commit (api-cloudrun `7fdc9880`, 2026-08-28) without the writer ever
+    // being opened — so the migration closed a window that reopened the instant
+    // it finished, and documents accrued pathless at ~5/day until 2026-09-01.
+    // ⭐ **A backfill whose writer is still shut is not a migration, it is a
+    // pause.** Open the writer first; run the backfill second.
+    path: org.path,
     crms_id: org.crms_id || null,
     jurisdiction_claim: org.jurisdiction_claim ?? null,
     tax_exempt: org.tax_exempt ?? false,
