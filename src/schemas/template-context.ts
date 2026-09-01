@@ -93,7 +93,7 @@ export const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, s
  * the point** — see `scripts/template-helper-denylist.ts`, which still denies the
  * other seven. `composeOrgName(path)` is the only way to render a customer name
  * from a frozen `DocumentOrganizationSnapshot.path`, which is what
- * `.claude/plans/org-name-is-derived.md` (api-cloudrun) needs before the stored
+ * `api-cloudrun/.claude/plans/org-name-is-derived.md` needs before the stored
  * `name` beside it can be dropped. The rest of the namespace is write-path
  * machinery or returns document IDs.
  */
