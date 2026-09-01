@@ -443,10 +443,12 @@ total_cents: z.int().meta({ column: true, label: "Total" }),
 ```
 
 - **`column: true` is opt-in.** Before this, a walker enumerated ~375 columns
-  across the manager's 14 live table surfaces and structural regexes generated a
-  heading for each — nobody chose either, so both drifted on every rename
-  ("Totals - Total Cents", `date_fs` → **"Fs"**). Opt-out would be that exclusion
-  predicate relocated, drifting the same way.
+  across what were then 14 live table surfaces in the manager, and structural
+  regexes generated a heading for each — nobody chose either, so both drifted on
+  every rename ("Totals - Total Cents", `date_fs` → **"Fs"**). Opt-out would be
+  that exclusion predicate relocated, drifting the same way. (13 surfaces and 303
+  declared columns as of 2026-08-31; `manager/src/stores/__tests__/declaredColumns.test.ts`
+  enumerates them, and is the copy to re-run rather than trust.)
 - **The heading composes down the key path** — see *Schema structure* above.
   Annotate a shared block once with no `label`; name it at each key.
 - **Never annotate an `_fs` mirror.** `dates.start_fs` is `dates.start` under the
