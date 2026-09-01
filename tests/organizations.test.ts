@@ -63,6 +63,28 @@ Deno.test("buildOrganizationSnapshot carries the AXES, and no longer the enum", 
   assertEquals("tax_profile" in snapshot, false);
 });
 
+Deno.test("buildOrganizationSnapshot FREEZES the chain, not just its composed text", () => {
+  // 🔴 **The arm that was missing for the field's whole life.** `path` was
+  // declared on the snapshot, argued for at length, and emitted by NOTHING —
+  // its backfill ran and was deleted without the writer ever being opened, so
+  // documents accrued pathless at ~5/day. Nothing failed, because nothing
+  // asked.
+  //
+  // ⭐ Asserted DIRECTLY against the organization's own chain rather than
+  // against `composeOrgName(snapshot.path)`, which would be a fixed point: it
+  // is defined in terms of the same input and can only ever agree. The whole
+  // point of storing the chain beside the text is that the text cannot be
+  // grouped on, joined on, or parsed back — so the test has to read the
+  // structure.
+  const snapshot = buildOrganizationSnapshot(ORG);
+  assertEquals(snapshot.path, ORG.path);
+  assertEquals(snapshot.path?.at(-1)?.uid, ORG_ID);
+  // And the pair stays coherent: the composed name is this same chain
+  // flattened, so a writer that emitted one without the other would be storing
+  // two facts that can disagree.
+  assertEquals(snapshot.name, composeOrgName(ORG.path));
+});
+
 Deno.test("buildOrganizationSnapshot produces a snapshot the shared schema accepts", () => {
   // The union taken on `name` and `billing_address` has to admit what the
   // builder emits, or the three writers that call it fail `validateBeforeWrite`
