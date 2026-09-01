@@ -36,33 +36,33 @@
  * `./utils/*` entrypoint so a new collection needs no generator change.
  */
 export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
-  // Write-path only. It assembles the embedded `organization` block from a live
-  // `Organization` DOCUMENT — a shape no render context ever holds (a template
-  // sees `it.doc.organization`, which is this function's OUTPUT). Emitting it
-  // would advertise a helper whose one argument is unreachable from a template.
+  // ⭐ **`composeOrgName` was promoted out of this list on 2026-09-01, and the
+  // condition that governed it was written down in advance**: it became
+  // render-useful the moment `DocumentOrganizationSnapshot` carried `path` AND
+  // `organizations` joined an injection list. The first landed in
+  // `10.0.0-beta.303`; the second is this change, adding `organizations` to
+  // `ALWAYS_ON_UTIL_NAMESPACES` (`src/schemas/template-context.ts`). It is the
+  // only way to render a customer name from a frozen chain, which is the
+  // prerequisite for api-cloudrun's `.claude/plans/org-name-is-derived.md`.
   //
-  // 🔴 **And the whole namespace is denylisted, on a stronger ground than
-  // per-symbol usefulness: `it.organizations` is NOT INJECTED.** It appears in
-  // neither `TEMPLATE_COLLECTION_UTILS` nor `ALWAYS_ON_UTIL_NAMESPACES`
-  // (`src/schemas/template-context.ts`), so every helper here would be
-  // *"documentation promising a global that throws at render time"* — the exact
-  // defect that file records `it.money` having had for eleven helpers.
+  // Everything else stays denied, and the namespace being injected is what makes
+  // that a real choice rather than a formality — each of these would now work if
+  // emitted:
   //
-  // ⚠️ Two of these could never be emitted even if the namespace were injected:
-  // `computeOrganizationNode` is the ONE AUTHOR of `path` and
-  // `validateOrganizationTree` is its guard — both are write-path, and a
-  // template calling either is a category error rather than a mistake.
-  // `orgRootUid` / `orgParentUid` return document IDs, which a rendered document
-  // never prints.
-  //
-  // ⭐ `composeOrgName` is the one genuine candidate for promotion, and the
-  // condition is explicit: it becomes render-useful the moment
-  // `DocumentOrganizationSnapshot` carries `path` AND `organizations` is added
-  // to one of the two injection lists. Until both hold, emitting it is worse
-  // than omitting it.
+  //   - `buildOrganizationSnapshot` — write-path. It assembles the embedded
+  //     `organization` block from a live `Organization` DOCUMENT, a shape no
+  //     render context ever holds: a template sees `it.doc.organization`, which
+  //     is this function's OUTPUT.
+  //   - `computeOrganizationNode` is the ONE AUTHOR of `path` and
+  //     `validateOrganizationTree` is its guard — both write-path, and a
+  //     template calling either is a category error rather than a mistake.
+  //   - `orgRootUid` / `orgParentUid` return document IDs, which a rendered
+  //     document never prints.
+  //   - `orgLevel` / `orgOwnName` answer questions about a node's POSITION.
+  //     A document names its customer; it does not report where that customer
+  //     sits in CFS's internal tree.
   organizations: [
     "buildOrganizationSnapshot",
-    "composeOrgName",
     "computeOrganizationNode",
     "orgLevel",
     "orgOwnName",

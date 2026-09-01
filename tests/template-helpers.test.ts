@@ -321,34 +321,36 @@ Deno.test("every emitted entry carries a description and a return type", () => {
 
 Deno.test("availableUtilNamespaces resolves the union of source + target", () => {
   // The live quote template.
-  assertEquals(availableUtilNamespaces(["orders"], ["quotes"]), ["dates", "money", "icons", "orders"]);
+  assertEquals(availableUtilNamespaces(["orders"], ["quotes"]), ["dates", "money", "icons", "organizations", "orders"]);
   // packing_lists contributes no namespace.
-  assertEquals(availableUtilNamespaces(["orders"], ["packing_lists"]), ["dates", "money", "icons", "orders"]);
+  assertEquals(availableUtilNamespaces(["orders"], ["packing_lists"]), ["dates", "money", "icons", "organizations", "orders"]);
   // The only combination where the target arm widens the union.
   assertEquals(
     availableUtilNamespaces(["orders"], ["invoices"]),
-    ["dates", "money", "icons", "orders", "invoices"],
+    ["dates", "money", "icons", "organizations", "orders", "invoices"],
   );
   // Source and target agreeing must not duplicate.
-  assertEquals(availableUtilNamespaces(["invoices"], ["invoices"]), ["dates", "money", "icons", "invoices"]);
+  assertEquals(availableUtilNamespaces(["invoices"], ["invoices"]), ["dates", "money", "icons", "organizations", "invoices"]);
   // The packing list: rendered FROM a fulfillment, produced INTO packing_lists.
   // `packing_lists` contributes nothing, so the whole document surface is
   // `it.fulfillments` — and there is deliberately no `it.orders`, because the
   // document being rendered is not an order.
   assertEquals(
     availableUtilNamespaces(["fulfillments"], ["packing_lists"]),
-    ["dates", "money", "icons", "fulfillments"],
+    ["dates", "money", "icons", "organizations", "fulfillments"],
   );
   // Always-on survives an empty collection set — `money` because every document
   // a template renders carries money, `icons` because a glyph is not a property
-  // of the source collection (and a footer partial can have no other kind).
-  assertEquals(availableUtilNamespaces([], []), ["dates", "money", "icons"]);
+  // of the source collection (and a footer partial can have no other kind), and
+  // `organizations` because every document names a customer and the one place
+  // that name is rendered is a partial shared across every collection.
+  assertEquals(availableUtilNamespaces([], []), ["dates", "money", "icons", "organizations"]);
 });
 
 Deno.test("availableUtilNamespaces takes lists (forward-compatible with multi-collection)", () => {
   assertEquals(
     availableUtilNamespaces(["orders", "invoices"], ["quotes", "packing_lists"]),
-    ["dates", "money", "icons", "orders", "invoices"],
+    ["dates", "money", "icons", "organizations", "orders", "invoices"],
   );
 });
 

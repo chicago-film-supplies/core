@@ -149,7 +149,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "orderHasTax", expr: "it.orders.orderHasTax(items)", desc: "Check whether any pre-tax line item has taxes applied.", returns: "boolean" },
   ],
   "organizations": [
-
+    { name: "composeOrgName", expr: "it.organizations.composeOrgName(path, arg2)", desc: "Render an organization node's display name from its `path`.", returns: "string" },
   ],
   "products": [
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },

@@ -80,8 +80,24 @@ export const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, s
  * isolated Chromium frame that loads no external resources, so inline SVG from a
  * util is the only icon a partial can have, and partials are shared across
  * collections.
+ *
+ * `organizations` is always on for the same two reasons, and it earns its place
+ * by the *usable* half rather than the *not a property of the collection* half.
+ * **Every document a template renders carries an `organization` block** — an
+ * order, an invoice, a quote, a receipt and a packing list all name the customer
+ * — and the one place that name is actually rendered is
+ * `partials/shared/letterhead.eta`, a partial shared across every collection.
+ * Keying it to a collection would mean listing it under all of them.
+ *
+ * ⚠️ **It exposes exactly ONE helper, `composeOrgName`, and the narrowness is
+ * the point** — see `scripts/template-helper-denylist.ts`, which still denies the
+ * other seven. `composeOrgName(path)` is the only way to render a customer name
+ * from a frozen `DocumentOrganizationSnapshot.path`, which is what
+ * `.claude/plans/org-name-is-derived.md` (api-cloudrun) needs before the stored
+ * `name` beside it can be dropped. The rest of the namespace is write-path
+ * machinery or returns document IDs.
  */
-export const ALWAYS_ON_UTIL_NAMESPACES: readonly string[] = ["dates", "money", "icons"];
+export const ALWAYS_ON_UTIL_NAMESPACES: readonly string[] = ["dates", "money", "icons", "organizations"];
 
 /**
  * Third-party libraries injected as `it.*` globals for every template
