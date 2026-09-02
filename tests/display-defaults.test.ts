@@ -110,10 +110,14 @@ Deno.test("booking displayDefaults use real Firestore paths (not aliases)", () =
   const meta = z.globalRegistry.get(BookingSchema) as
     | { displayDefaults?: { columns: string[]; sort: { column: string | null } } }
     | undefined;
+  // ⭐ `organization.path`, not `.name` — the FIRESTORE document carries the
+  // chain and no scalar (api-cloudrun#782), exactly as `orders` and `invoices`
+  // already do. The Typesense column stays `organization.name`, composed at
+  // index time and declared in TYPESENSE_ROLLUP_COLUMNS.
   assertEquals(meta?.displayDefaults?.columns, [
     "number",
     "status",
-    "organization.name",
+    "organization.path",
     "quantity",
     "dates.start",
     "dates.end",

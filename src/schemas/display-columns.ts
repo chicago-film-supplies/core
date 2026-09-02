@@ -170,6 +170,20 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
     // Same rollup as `orders` above — see the note there (api-cloudrun#780).
     "organization.name": { label: "Organization", cell: "link" },
   },
+  // ── The ORDER-DERIVED documents, population A1 of api-cloudrun#782 ──────────
+  //
+  // Same move as `orders` above, one relationship out: these carry a chain
+  // COPIED FROM THEIR ORDER rather than one of their own, and `name` is gone
+  // from their stored blocks. ⭐ The index keeps composing it for free —
+  // `composeSnapshotOrgName` keys on the PRESENCE OF A CHAIN, not on a list of
+  // collections — so the column, its `sort: true` and its `stem: true` search
+  // field all survive with no change to `typesenseTranslate.ts` at all.
+  //
+  // ⚠️ `cards` is deliberately absent: its collection config declares no
+  // organization fields, so there is no column to preserve.
+  "out-of-service": {
+    "organization.name": { label: "Organization", cell: "link" },
+  },
   organizations: {
     level: { label: "Level", cell: "plain" },
     // 🔴 **`name` is a ROLLUP now, not a Firestore column** (api-cloudrun#709).
@@ -188,10 +202,12 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   // exactly that annotation. Without an entry here they are indexed, sortable,
   // and invisible.
   bookings: {
+    "organization.name": { label: "Organization", cell: "link" },
     "dates.charge_start_fs": { label: "Charge Start", cell: "date" },
     "dates.charge_end_fs": { label: "Charge End", cell: "date" },
   },
   fulfillments: {
+    "organization.name": { label: "Organization", cell: "link" },
     deliveries: { label: "Deliveries", cell: "bool" },
     pickups: { label: "Pickups", cell: "bool" },
     has_conflicts: { label: "Conflicts", cell: "bool" },

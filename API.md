@@ -964,8 +964,7 @@ customers).
 ```ts
 interface CardOrganizationType {
   uid: string | null;
-  name: string;
-  path?: OrgPathNodeType[];
+  path: OrgPathNodeType[];
 }
 ```
 
@@ -11370,12 +11369,15 @@ The organization chain the document's ORDER was written against, copied
 verbatim. Shared by `bookings`, `fulfillments`, `out-of-service` and `cards` —
 population A1 of api-cloudrun#782.
 
-🔴 **Optional ONLY during expand.** Readers still take the `name` beside it;
-this is populated first so the corpus can be backfilled before anything
-depends on it. It becomes required and `name` is deleted in the contract step
-— readers stop, then the writer, then the corpus purge, then the schema
-contract, and a `z.strictObject` makes *required* and *deleted* disjoint
-accepted sets, so the order is not optional.
+⭐ **REQUIRED as of the contract step, and `name` is gone from these blocks.**
+`composeOrgName(path)` is now the only way to get a customer label off one of
+these documents. The corpus was backfilled first (9,214 prod documents), so
+adding the requirement strands nothing.
+
+⚠️ **`z.strictObject` makes *required* and *deleted* DISJOINT accepted sets**,
+so a stored document still carrying `name` is unwritable against this schema
+until it is purged. That window is deliberate and was authorised; the purge
+runs immediately after the deploy.
 
 ⭐ **It is the ORDER's chain, not the ORGANIZATION's, and that is the whole
 point.** `api-cloudrun/scripts/audit-denorm-freshness.ts` carries these as
@@ -11393,9 +11395,7 @@ the cascade exists because the ORDER changes, so `uid` alone would keep the
 cascade AND force every reader to join — strictly worse than either
 alternative.
 
-⚠️ **No `column` meta while `name` still carries it.** Two columns labelled
-Organization is a display-layer ambiguity that need not exist for the duration
-of the migration; the meta moves across at contract time.
+⭐ **The `column` meta moved here from `name`, which no longer exists.**
 
 ⭐ **`OrgPathNode.name` carries `pii: "mask"`, so the fixture sanitizer keeps
 masking through the move.** Worth stating because the walker masks by SCHEMA
@@ -11403,7 +11403,7 @@ META — deleting a `pii: "mask"` field silently stops masking that path, which
 is how a real organization name leaked raw during population B.
 
 ```ts
-const OrderDerivedOrgPath: z.ZodType<OrgPathNodeType[] | undefined>;
+const OrderDerivedOrgPath: z.ZodType<OrgPathNodeType[]>;
 ```
 
 ### `OrgPathNode`
@@ -12588,8 +12588,7 @@ customers).
 ```ts
 interface CardOrganizationType {
   uid: string | null;
-  name: string;
-  path?: OrgPathNodeType[];
+  path: OrgPathNodeType[];
 }
 ```
 

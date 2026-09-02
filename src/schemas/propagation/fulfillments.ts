@@ -159,7 +159,7 @@ const resetFulfillmentRules: CollectionRule[] = [
       { source: ["number"], target: ["number"] },
       { source: ["status"], target: ["status"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "path"], target: ["organization", "name"] },
+      { source: ["organization", "path"], target: ["organization", "path"] },
       {
         source: ["destinations"],
         target: ["destinations"],

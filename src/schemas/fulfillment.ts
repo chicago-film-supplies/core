@@ -162,7 +162,6 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.discriminatedUn
 /** Sanitized organization snapshot — uid and name only. */
 const FulfillmentOrganization = z.strictObject({
   uid: FirestoreId.nullable(),
-  name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
   path: OrderDerivedOrgPath,
 });
 
@@ -176,8 +175,7 @@ export interface Fulfillment {
   status: FulfillmentOrderStatusType;
   organization: {
     uid: string | null;
-    name: string;
-    path?: OrgPathNodeType[];
+    path: OrgPathNodeType[];
   };
   destinations: DocDestinationType[];
   items: FulfillmentItemType[];
@@ -215,7 +213,7 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   title: "Fulfillment",
   collection: "fulfillments",
   displayDefaults: {
-    columns: ["number", "organization.name", "subject", "status"],
+    columns: ["number", "organization.path", "subject", "status"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },

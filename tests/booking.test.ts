@@ -33,7 +33,13 @@ const validBooking = {
     charge_start_fs: null,
     charge_end: "2026-03-10T00:00:00Z",
   },
-  organization: { uid: "testorg1000000000000", name: "Test Acme Corp", crms_id: null },
+  organization: {
+    uid: "testorg1000000000000",
+    // The chain, copied from the order — `name` left this block at
+    // api-cloudrun#782's contract step, and `composeOrgName(path)` replaces it.
+    path: [{ uid: "testorg1000000000000", name: "Test Acme Corp", derived: false }],
+    crms_id: null,
+  },
   uid_destination_delivery: "testdest100000000000",
   uid_destination_collection: "testdest200000000000",
   created_at: mockTimestamp,

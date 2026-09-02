@@ -143,8 +143,7 @@ export interface OutOfService {
   canceled_at: FirestoreTimestampType | null;
   organization: {
     uid: string | null;
-    name: string;
-    path?: OrgPathNodeType[];
+    path: OrgPathNodeType[];
     crms_id: number | null;
   } | null;
   dates: OOSDates;
@@ -212,7 +211,6 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   canceled_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Canceled" }),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
-    name: z.string().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
     path: OrderDerivedOrgPath,
     crms_id: z.int().nullable(),
   }).nullable().meta({ label: "Organization" }),
@@ -234,7 +232,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   title: "Out of Service Record",
   collection: "out-of-service",
   displayDefaults: {
-    columns: ["number", "reason", "organization.name", "quantity", "dates.start", "dates.end"],
+    columns: ["number", "reason", "organization.path", "quantity", "dates.start", "dates.end"],
     filters: {},
     sort: { column: "number", direction: "desc" },
     groupBy: [

@@ -109,6 +109,19 @@ const DERIVED_FIELDS: Record<string, string> = {
   "orders:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#780)",
   "invoices:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#780)",
   "credit-notes:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#780)",
+  // ── The SAME derivation again, for the ORDER-DERIVED documents — population A1
+  //    of api-cloudrun#782. These carry a chain COPIED FROM THEIR ORDER, and
+  //    `composeSnapshotOrgName` picks them up for free: it keys on the PRESENCE
+  //    OF A CHAIN rather than on a list of collections, so giving these four a
+  //    `path` was the entire Typesense change. Nothing in `typesenseTranslate.ts`
+  //    names them.
+  //
+  // ⚠️ Added in the SAME publish that deleted `name` from those blocks, for the
+  // reason recorded above: this vocabulary has no expand phase. `cards` needs no
+  // entry — its collection config declares no organization fields at all.
+  "bookings:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#782)",
+  "fulfillments:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#782)",
+  "out-of-service:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#782)",
   "orders:dates": "deriveOrderDateEnvelope — synthesized, never stored",
   "orders:dates.delivery_start_fs": "deriveOrderDateEnvelope — envelope min over destinations[]",
   "orders:dates.delivery_end_fs": "deriveOrderDateEnvelope — envelope max over destinations[]",

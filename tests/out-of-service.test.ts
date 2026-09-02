@@ -115,7 +115,11 @@ Deno.test("OutOfServiceSchema rejects additional properties", () => {
 Deno.test("OutOfServiceSchema validates organization denormalization", () => {
   const doc = {
     ...validOOS,
-    organization: { uid: "testorg1000000000000", name: "Acme Co", crms_id: 42 },
+    organization: {
+      uid: "testorg1000000000000",
+      path: [{ uid: "testorg1000000000000", name: "Acme Co", derived: false }],
+      crms_id: 42,
+    },
   };
   assertEquals(OutOfServiceSchema.safeParse(doc).success, true);
 });

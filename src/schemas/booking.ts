@@ -149,8 +149,7 @@ export interface Booking {
   };
   organization: {
     uid: string | null;
-    name: string;
-    path?: OrgPathNodeType[];
+    path: OrgPathNodeType[];
     crms_id: number | null;
   };
   stores: BookingStore[];
@@ -397,7 +396,6 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   }),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
-    name: z.string().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
     path: OrderDerivedOrgPath,
     crms_id: z.int().nullable(),
   }).meta({ label: "Organization" }),
@@ -413,7 +411,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   title: "Booking",
   collection: "bookings",
   displayDefaults: {
-    columns: ["number", "status", "organization.name", "quantity", "dates.start", "dates.end"],
+    columns: ["number", "status", "organization.path", "quantity", "dates.start", "dates.end"],
     filters: {},
     sort: { column: "number", direction: "desc" },
     groupBy: [
