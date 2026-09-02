@@ -137,6 +137,16 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   Record<string, { label: string; cell: CellKind }>
 > = {
   orders: {
+    // 🔴 **`organization.name` is a ROLLUP now, not a Firestore column**
+    // (api-cloudrun#780) — the same move `organizations.name` made at #709, one
+    // level out. The stored scalar is gone from `DocumentOrganizationSnapshot`;
+    // the index's value is `composeOrgName(organization.path)`, produced at
+    // write time by api-cloudrun's `translateForTypesense`. With no storage leaf
+    // left to hang a `.meta({ column: true })` on, a rollup entry is the only
+    // way the column, its `sort: true` and its `stem: true` search field survive
+    // the removal — which is the half of this campaign that had to be preserved:
+    // *the document stops storing it; the projection keeps it.*
+    "organization.name": { label: "Organization", cell: "link" },
     deliveries: { label: "Deliveries", cell: "bool" },
     pickups: { label: "Pickups", cell: "bool" },
     "dates.delivery_start_fs": { label: "Delivery Start", cell: "date" },
@@ -152,6 +162,14 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   // `ORG_LEVELS[path.length - 1]`, derived at index time because Typesense
   // cannot facet on an array's length and there is no stored `level` to
   // annotate. See `schemas/typesense/organizations.ts`.
+  invoices: {
+    // Same rollup as `orders` above — see the note there (api-cloudrun#780).
+    "organization.name": { label: "Organization", cell: "link" },
+  },
+  "credit-notes": {
+    // Same rollup as `orders` above — see the note there (api-cloudrun#780).
+    "organization.name": { label: "Organization", cell: "link" },
+  },
   organizations: {
     level: { label: "Level", cell: "plain" },
     // 🔴 **`name` is a ROLLUP now, not a Firestore column** (api-cloudrun#709).

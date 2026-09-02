@@ -439,7 +439,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
     columns: [
       "number",
       "date",
-      "organization.name",
+      "organization.path",
       "reason",
       "totals.total_cents",
       "remaining_credit_cents",

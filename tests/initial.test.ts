@@ -104,8 +104,11 @@ Deno.test("getInitialValues — nested objects are recursed", () => {
   const result = getInitialValues(OrderSchema);
   assertEquals(typeof result.organization, "object");
   const org = result.organization as unknown as Record<string, unknown>;
-  assertEquals(org.name, "");
+  // `name` is gone from the snapshot (api-cloudrun#780); `path` is what the
+  // form seeds now, and `uid` is still the addressed organization.
+  assertEquals("name" in org, false);
   assertEquals(org.uid, null);
+  assertEquals(Array.isArray(org.path), true);
 });
 
 Deno.test("getInitialValues — records default to empty object", () => {

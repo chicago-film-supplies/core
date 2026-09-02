@@ -141,7 +141,6 @@ Deno.test("buildOrganizationSnapshot: overrides win, for the CRMS member_id case
  */
 const MINIMAL_SNAPSHOT = {
   uid: ORG_ID,
-  name: "A",
   path: [{ uid: ORG_ID, name: "A", derived: false }],
   xero_id: null,
 };
@@ -158,36 +157,25 @@ Deno.test("the shared snapshot admits both a present and an absent billing_addre
   );
 });
 
-Deno.test("the shared snapshot still rejects an out-of-bounds name", () => {
-  // Order's `[1, 100]` bounds are kept. Not a tightening in practice —
-  // `Organization.name` carries the same bounds and every snapshot is copied
-  // from it — but the assertion is what says the merge took the bounded side.
+Deno.test("the shared snapshot now REFUSES a name — the contract third of its removal", () => {
+  // 🔴 **This assertion has now been inverted TWICE, and the sequence is the
+  // expand/migrate/contract argument written as tests.** It began as *"rejects
+  // an out-of-bounds name"* (the merge of three hand-written literals took the
+  // bounded side), became *"admits an ABSENT name"* at `beta.306`, and is now
+  // the refusal — a `z.strictObject` rejects the undeclared key outright.
   //
-  // ⚠️ The bounds survive the field going `.optional()` deliberately: loosening
-  // them in the same step would quietly re-admit the empty string on the
-  // fossils still carrying one.
-  const { name: _dropped, ...base } = MINIMAL_SNAPSHOT;
-  assertEquals(DocumentOrganizationSnapshot.safeParse({ ...base, name: "" }).success, false);
+  // ⚠️ **The middle step is the one that made this safe**, and deleting it from
+  // the record would make the removal look like a two-step. Every order/invoice
+  // write validates the FULL document, so *required* and *deleted* have disjoint
+  // accepted sets: the corpus had to be emptied while BOTH parsed.
   assertEquals(
-    DocumentOrganizationSnapshot.safeParse({ ...base, name: "x".repeat(101) }).success,
+    DocumentOrganizationSnapshot.safeParse({ ...MINIMAL_SNAPSHOT, name: "A" }).success,
     false,
   );
-});
-
-Deno.test("the shared snapshot admits an ABSENT name — the migrate third of its removal", () => {
-  // 🔴 **Both single-step orderings break a live write path, which is why this
-  // parses rather than being deleted outright.** Every order/invoice write
-  // validates the FULL document and this is a `z.strictObject`, so `name`
-  // required and `name` deleted have DISJOINT accepted sets: delete-then-purge
-  // makes the 2,050 stored documents unwritable, purge-then-delete makes the
-  // purged ones unwritable by the build still deployed. Optional → empty
-  // storage → delete, the same three steps `tax_profile` and `path` each ran.
-  //
-  // ⭐ Paired with the arm above rather than replacing it: absent must parse
-  // AND a present one must still be bounded, for as long as fossils exist.
-  const { name: _dropped, ...withoutName } = MINIMAL_SNAPSHOT;
-  assertEquals(DocumentOrganizationSnapshot.safeParse(withoutName).success, true);
+  // …and the nameless shape is the only one now.
   assertEquals(DocumentOrganizationSnapshot.safeParse(MINIMAL_SNAPSHOT).success, true);
+  // The label comes from the chain, which is the whole point of the removal.
+  assertEquals(composeOrgName(MINIMAL_SNAPSHOT.path), "A");
 });
 
 Deno.test("the shared snapshot REFUSES a chain that ends somewhere else — api-cloudrun#775", () => {

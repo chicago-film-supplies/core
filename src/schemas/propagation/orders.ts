@@ -272,7 +272,7 @@ const createOrderRules: CollectionRule[] = [
     transaction: "create-order",
     fields: [
       { source: ["uid"], target: ["organization", "uid"] },
-      { source: ["path"], target: ["organization", "name"] },
+      { source: ["path"], target: ["organization", "path"] },
       // The same source feeds two targets: `name` is the chain COMPOSED to
       // text, `path` is the chain itself. Both are frozen at write time by
       // `buildOrganizationSnapshot`.
@@ -390,7 +390,7 @@ const createOrderRules: CollectionRule[] = [
       { source: ["status"], target: ["status"] },
       { source: ["subject"], target: ["subject"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "name"], target: ["organization", "name"] },
+      { source: ["organization", "path"], target: ["organization", "name"] },
       {
         source: ["organization", "crms_id"],
         target: ["organization", "crms_id"],
@@ -522,7 +522,7 @@ const createOrderRules: CollectionRule[] = [
       },
       { source: ["subject"], target: ["subject"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "name"], target: ["organization", "name"] },
+      { source: ["organization", "path"], target: ["organization", "name"] },
       {
         source: ["destinations", "delivery"],
         target: ["destination"],
@@ -596,7 +596,7 @@ const createOrderRules: CollectionRule[] = [
       { source: ["number"], target: ["number"] },
       { source: ["status"], target: ["status"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "name"], target: ["organization", "name"] },
+      { source: ["organization", "path"], target: ["organization", "name"] },
       {
         source: ["destinations"],
         target: ["destinations"],
@@ -652,7 +652,7 @@ const updateOrderRules: CollectionRule[] = [
     transaction: "update-order",
     fields: [
       { source: ["uid"], target: ["organization", "uid"] },
-      { source: ["path"], target: ["organization", "name"] },
+      { source: ["path"], target: ["organization", "path"] },
       // The same source feeds two targets: `name` is the chain COMPOSED to
       // text, `path` is the chain itself. Both are frozen at write time by
       // `buildOrganizationSnapshot`.
@@ -723,7 +723,7 @@ const updateOrderRules: CollectionRule[] = [
       { source: ["status"], target: ["status"] },
       { source: ["subject"], target: ["subject"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "name"], target: ["organization", "name"] },
+      { source: ["organization", "path"], target: ["organization", "name"] },
       {
         source: ["organization", "crms_id"],
         target: ["organization", "crms_id"],
@@ -807,7 +807,7 @@ const updateOrderRules: CollectionRule[] = [
       },
       { source: ["subject"], target: ["subject"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "name"], target: ["organization", "name"] },
+      { source: ["organization", "path"], target: ["organization", "name"] },
       {
         source: ["destinations", "delivery"],
         target: ["destination"],
@@ -852,7 +852,7 @@ const updateOrderRules: CollectionRule[] = [
       { source: ["number"], target: ["number"] },
       { source: ["status"], target: ["status"] },
       { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "name"], target: ["organization", "name"] },
+      { source: ["organization", "path"], target: ["organization", "name"] },
       {
         source: ["destinations"],
         target: ["destinations"],

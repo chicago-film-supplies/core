@@ -1305,7 +1305,7 @@
         {
           "kind": "interface",
           "name": "DocumentOrganizationSnapshotType",
-          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name?: string;\n  path: OrgPathNodeType[];\n  crms_id?: number | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
+          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  path: OrgPathNodeType[];\n  crms_id?: number | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
           "doc": "The customer-organization snapshot embedded on an order/invoice/credit note."
         },
         {
@@ -5136,7 +5136,7 @@
         {
           "kind": "interface",
           "name": "DocumentOrganizationSnapshotType",
-          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  name?: string;\n  path: OrgPathNodeType[];\n  crms_id?: number | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
+          "declaration": "interface DocumentOrganizationSnapshotType {\n  uid: string | null;\n  path: OrgPathNodeType[];\n  crms_id?: number | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  xero_id: string | null;\n  billing_address?: AddressType | null;\n}",
           "doc": "The customer-organization snapshot embedded on an order/invoice/credit note."
         },
         {

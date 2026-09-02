@@ -292,7 +292,13 @@ Deno.test("walker: masks destination instructions on OrderSchema", async () => {
     uid: "o1000000000000000000",
     number: 1,
     status: "draft",
-    organization: { uid: "org10000000000000000", name: "Acme Inc", xero_id: null },
+    organization: {
+      uid: "org10000000000000000",
+      // The customer name lives in the CHAIN now (api-cloudrun#780), and it
+      // still carries `pii: "mask"` there — which is what this walker checks.
+      path: [{ uid: "org10000000000000000", name: "Acme Inc", derived: false }],
+      xero_id: null,
+    },
     destinations: [
       {
         dates: {

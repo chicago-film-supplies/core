@@ -1467,42 +1467,6 @@ export const OrgPathNode: z.ZodType<OrgPathNodeType> = z.strictObject({
 export interface DocumentOrganizationSnapshotType {
   uid: string | null;
   /**
-   * The composed label, and **`.optional()` because it is being REMOVED** — the
-   * migrate third of expand/migrate/contract
-   * (`api-cloudrun/.claude/plans/org-name-is-derived.md` steps 4 and 5).
-   *
-   * 🔴 **Nothing writes it any more.** {@link buildOrganizationSnapshot} stopped
-   * emitting it in this same publish, and it is the sole author on every
-   * order/invoice write path; the rename cascade stopped moving it a publish
-   * earlier (api-cloudrun `d06095a3`). Every reader — api, manager, the Eta
-   * templates, the Typesense translator — composes `composeOrgName(path)`
-   * instead. So a stored value is a fossil from before that, and the next write
-   * of any kind drops it.
-   *
-   * 🔴 **Optional rather than deleted, because BOTH single-step orderings break
-   * the money path**, and neither break is visible in dev (both products deploy
-   * continuously from `main`). Every order/invoice write validates the FULL
-   * document — `updateOrder` clones the stored order and only rebuilds the
-   * snapshot when the organization itself changed — and this is a
-   * `z.strictObject`, so the required version and the deleted version have
-   * DISJOINT accepted sets:
-   *
-   * - delete first, purge second → the 2,050 stored documents still carrying
-   *   `name` are unwritable until the purge finishes;
-   * - purge first, delete second → the purged documents are unwritable by the
-   *   still-deployed build that requires it.
-   *
-   * ⭐ The same three-step this schema has now run twice — `tax_profile`
-   * (api-cloudrun#596 item 3: optional → empty storage → delete) and `path`
-   * (core#77, the mirror image). *Optional → empty storage → delete.*
-   *
-   * ⚠️ **The bounds stay while it is here.** `[1, 100]` is what made the merge
-   * of the three hand-written literals take the bounded side; loosening them in
-   * the same step as the optionality would quietly re-admit the empty string
-   * that {@link buildOrganizationSnapshot} used to be able to produce.
-   */
-  name?: string;
-  /**
    * The customer's position in the organization tree AT THE MOMENT THIS
    * DOCUMENT WAS WRITTEN — the same `{uid, name, derived}[]` the organization
    * document carries.
@@ -1686,12 +1650,30 @@ function checkDocumentOrganizationSnapshot(
 export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapshotType> = z
   .strictObject({
     uid: FirestoreId.nullable(),
-    // No `label` — the heading is the "Organization" carried by the key above.
-    // `.optional()` is the migrate third of the removal; see the field's
-    // docstring on {@link DocumentOrganizationSnapshotType} for why both
-    // single-step orderings break a live write path.
-    name: z.string().min(1).max(100).optional().meta({ pii: "mask", column: true }),
-    path: z.array(OrgPathNode).min(1).max(3),
+    // `name` was DELETED here — the contract third of its removal
+    // (`api-cloudrun/.claude/plans/org-name-is-derived.md`, api-cloudrun#780).
+    // It was the composed label stored beside the `path` it composes from, so
+    // the two could disagree and a rename cascade existed to stop them; every
+    // reader in all four repos now calls `composeOrgName(path)`.
+    //
+    // ⭐ **Three steps, not two, and the middle one is what made this safe.**
+    // Every order/invoice write validates the FULL document and this is a
+    // `z.strictObject`, so *required* and *deleted* have DISJOINT accepted sets:
+    // delete-then-purge makes every stored document unwritable, purge-then-delete
+    // makes every purged one unwritable by the build still deployed. Optional
+    // (`beta.306`) → stop the writer → empty storage → delete. Same dance
+    // `tax_profile` and `path` each ran on this schema.
+    //
+    // ⚠️ **The corpus was emptied FIRST, in both environments** — prod 2,052 and
+    // dev 2,223 documents re-scanned to 0 on 2026-09-02 — and nothing has minted
+    // the field since `beta.306`. A stored document carrying it now fails this
+    // parse, which is the point.
+    // ⚠️ `column: true` so the FIRESTORE-side table has something to lead with
+    // now that the composed scalar is gone — the same swap `OrganizationSchema`
+    // made at api-cloudrun#709. A Firestore reader holds the chain and composes
+    // for itself; the composed label survives only on the Typesense side, where
+    // `TYPESENSE_ROLLUP_COLUMNS` declares it.
+    path: z.array(OrgPathNode).min(1).max(3).meta({ column: true, label: "Organization" }),
     crms_id: z.int().nullable().optional(),
     // REQUIRED as of api-cloudrun#489 — the contract third of
     // expand/migrate/contract, and the reason it took three steps is worth

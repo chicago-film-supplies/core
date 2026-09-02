@@ -107,13 +107,27 @@ Deno.test("no query_by_ fields appear", () => {
   }
 });
 
-Deno.test("nested paths appear (e.g. organization.name)", () => {
+Deno.test("nested paths appear, and the customer name is reachable in each source", () => {
   for (const collection of TEMPLATE_SOURCE_COLLECTIONS) {
     const fields = fieldsFor(collection);
     const nested = fields.filter((f) => f.path.includes("."));
     assertNotEquals(nested.length, 0, `no nested fields in ${collection}`);
-    const orgName = fields.find((f) => f.path === "organization.name");
-    assertNotEquals(orgName, undefined, `organization.name missing in ${collection}`);
+
+    // 🔴 **The path DIFFERS by population, and that is the point rather than an
+    // inconvenience.** `organization.name` was this test's example until
+    // api-cloudrun#780 removed it from the three FROZEN document schemas — those
+    // now carry the chain and a template composes with
+    // `it.organizations.composeOrgName(...)`. The light shapes
+    // (`fulfillments`, and `movement-sessions`, which folds one per render) keep
+    // a plain `{uid, name}` and are population A's own, separate question.
+    //
+    // ⭐ Asserting "one of the two" rather than dropping the arm keeps it a real
+    // check: a template author must be able to reach the customer's name from
+    // EVERY source collection, whichever shape that source carries.
+    const reachable = fields.some((f) =>
+      f.path === "organization.path[].name" || f.path === "organization.name"
+    );
+    assertEquals(reachable, true, `no reachable customer name in ${collection}`);
   }
 });
 

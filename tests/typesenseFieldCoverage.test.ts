@@ -96,6 +96,19 @@ const DERIVED_FIELDS: Record<string, string> = {
   // the label. Populated by `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts`,
   // which plants a derived segment precisely to catch that.
   "organizations:name": "composeOrgName(path) — the stored scalar was removed (api-cloudrun#709)",
+  // ── The SAME derivation, one level out: the frozen snapshot on a document.
+  //    `translateForTypesense` composes these from `doc.organization.path` on
+  //    the SOURCE document (api-cloudrun `af52c9f1`), keyed on the CHAIN rather
+  //    than on a list of collection names — so a fourth snapshot-bearing
+  //    collection inherits it instead of being forgotten.
+  //
+  // ⚠️ Added in the SAME publish that deleted `DocumentOrganizationSnapshot.name`
+  // (api-cloudrun#780), because this vocabulary has **no expand phase**: the
+  // resolvability arm goes red the moment the leaf is gone, and the stale arm
+  // goes red if these are added while it is still there. One commit, both halves.
+  "orders:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#780)",
+  "invoices:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#780)",
+  "credit-notes:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#780)",
   "orders:dates": "deriveOrderDateEnvelope — synthesized, never stored",
   "orders:dates.delivery_start_fs": "deriveOrderDateEnvelope — envelope min over destinations[]",
   "orders:dates.delivery_end_fs": "deriveOrderDateEnvelope — envelope max over destinations[]",
@@ -973,23 +986,12 @@ const NON_OPTIONAL_OVER_OPTIONAL_LEAF: Record<string, string> = {
   "tags:count": "`count` is this collection's default_sorting_field, which Typesense requires to be non-optional",
   "tracking-categories:count": "declared int32 for sorting alongside tags; same shape, same constraint",
 
-  // ── The migrate window of `org-name-is-derived.md`, all three discharged by
-  //    the next publish. `translateForTypesense` has COMPOSED this field from
-  //    the document's own frozen `path` since api-cloudrun `af52c9f1`, so the
-  //    indexed value is present unconditionally and no `null` can reach
-  //    Typesense — `path` is required and `composeOrgName` cannot return "".
-  //
-  // 🔴 **The arm's `!leaf` skip is a PROXY for "produced at index time", and
-  // this is the window where the proxy is wrong.** A field that is both derived
-  // AND still resolves against a storage leaf has no home: `DERIVED_FIELDS`
-  // cannot hold it, because its own stale arm fails on an entry whose field
-  // still resolves. The leaf here is a fossil — `.optional()` and written by
-  // nothing — and when it is deleted these three become unresolvable, move into
-  // `DERIVED_FIELDS`, and the stale arm below turns their absence from this map
-  // into a requirement rather than a hope.
-  "orders:organization.name": "composed at index time by translateForTypesense from the frozen path; the storage leaf is a fossil being removed",
-  "invoices:organization.name": "same — composed from organization.path, never read from the leaf",
-  "credit-notes:organization.name": "same — composed from organization.path, never read from the leaf",
+  // ⭐ **The three `organization.name` entries that sat here are GONE**, and
+  // their removal was mechanical rather than remembered: `beta.307` deleted the
+  // storage leaf, so they stopped resolving, stopped being offenders, and the
+  // stale arm below went red until they were deleted. They now live in
+  // `DERIVED_FIELDS` above, which is where a field composed at index time
+  // belongs once nothing in storage backs it.
 };
 
 /**

@@ -470,7 +470,6 @@ const minimalDoc = {
   status: "draft",
   organization: {
     uid: null,
-    name: "Test Acme Corp",
     // Required since core#77. A stored snapshot always carries the frozen
     // chain — `buildOrganizationSnapshot` writes `path: org.path` and
     // `Organization.path` is itself required — so a fixture without one is not

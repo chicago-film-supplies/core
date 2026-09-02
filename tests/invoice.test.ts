@@ -50,7 +50,6 @@ const validInvoice = {
   due_date_fs: mockTimestamp,
   organization: {
     uid: "testorg1000000000000",
-    name: "Acme Corp",
     // Required since core#77 — every stored snapshot carries the frozen chain.
     path: [{ uid: "testorg1000000000000", name: "Acme Corp", derived: false }],
     xero_id: null,
