@@ -1536,7 +1536,7 @@ fourth step.
 ⚠️ **The index does NOT lose the column, and that is measured rather than
 hoped.** `contacts_v8` still declares `organizations.name`; api-cloudrun's
 `translateForTypesense` composes it at index time from the live organization
-(`src/lib/organizationNames.ts`). With storage emptied, a prod search by
+(`api-cloudrun/src/lib/organizationNames.ts`). With storage emptied, a prod search by
 `organizations.name` for *"Netflix"* still returns 7 contacts carrying
 "Netflix Productions, LLC / Saturn Return / Office". **A derived value is fine
 to DELIVER — the defect is storing it next to its input.**
@@ -12903,7 +12903,7 @@ fourth step.
 ⚠️ **The index does NOT lose the column, and that is measured rather than
 hoped.** `contacts_v8` still declares `organizations.name`; api-cloudrun's
 `translateForTypesense` composes it at index time from the live organization
-(`src/lib/organizationNames.ts`). With storage emptied, a prod search by
+(`api-cloudrun/src/lib/organizationNames.ts`). With storage emptied, a prod search by
 `organizations.name` for *"Netflix"* still returns 7 contacts carrying
 "Netflix Productions, LLC / Saturn Return / Office". **A derived value is fine
 to DELIVER — the defect is storing it next to its input.**

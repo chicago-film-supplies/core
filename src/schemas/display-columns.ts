@@ -188,7 +188,7 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   //
   // Unlike every rollup above, these compose from a chain the document does NOT
   // carry: the edge stores a uid alone, and api-cloudrun's `translateForTypesense`
-  // joins through an organization map (`src/lib/organizationNames.ts`) at index
+  // joins through an organization map (`api-cloudrun/src/lib/organizationNames.ts`) at index
   // time. So the storage leaf is gone and the column, its `stem: true` search
   // field and its link all live here.
   //
