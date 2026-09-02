@@ -124,11 +124,28 @@ Deno.test("buildOrganizationSnapshot: overrides win, for the CRMS member_id case
   assertEquals(snapshot.jurisdiction_claim, "frankfort");
 });
 
+/**
+ * A MINIMAL-VALID snapshot — every required field and nothing else.
+ *
+ * ⚠️ **Its existence is the point.** Each negative test below spreads it and
+ * breaks exactly one thing, so the assertion stays about that thing. Built by
+ * hand from the fixtures instead, a later tightening makes every one of them
+ * fail for a second reason and pass **vacuously** — the test still reports
+ * `success === false` while no longer testing its own subject. `path` became
+ * required in core#77 and would have done exactly that to all three.
+ */
+const MINIMAL_SNAPSHOT = {
+  uid: ORG_ID,
+  name: "A",
+  path: [{ uid: ORG_ID, name: "A", derived: false }],
+  xero_id: null,
+};
+
 Deno.test("the shared snapshot admits both a present and an absent billing_address", () => {
   // Order had it `.optional()`, invoice + credit note required with an explicit
   // stored `null`. Merging to either side alone makes existing documents of the
   // other unwritable, so both must parse.
-  const base = { uid: ORG_ID, name: "A", xero_id: null };
+  const base = MINIMAL_SNAPSHOT;
   assertEquals(DocumentOrganizationSnapshot.safeParse(base).success, true);
   assertEquals(
     DocumentOrganizationSnapshot.safeParse({ ...base, billing_address: null }).success,
@@ -140,7 +157,7 @@ Deno.test("the shared snapshot still rejects an out-of-bounds name", () => {
   // Order's `[1, 100]` bounds are kept. Not a tightening in practice —
   // `Organization.name` carries the same bounds and every snapshot is copied
   // from it — but the assertion is what says the merge took the bounded side.
-  const base = { uid: ORG_ID, xero_id: null };
+  const { name: _dropped, ...base } = MINIMAL_SNAPSHOT;
   assertEquals(DocumentOrganizationSnapshot.safeParse({ ...base, name: "" }).success, false);
   assertEquals(
     DocumentOrganizationSnapshot.safeParse({ ...base, name: "x".repeat(101) }).success,
@@ -168,11 +185,7 @@ Deno.test("the shared snapshot now REFUSES a tax_profile — api-cloudrun#596 it
   // API ran the optional schema. Reaching this state before that would have
   // refused every order write, the CRMS opportunity webhook included, whose
   // failures are silent drops.
-  const clean = DocumentOrganizationSnapshot.safeParse({
-    uid: ORG_ID,
-    name: "A",
-    xero_id: null,
-  });
+  const clean = DocumentOrganizationSnapshot.safeParse(MINIMAL_SNAPSHOT);
   assertEquals(clean.success, true, "a snapshot without the field is the only shape now");
 
   // 🔴 The half that makes this the CONTRACT rather than a restatement: a
@@ -181,16 +194,43 @@ Deno.test("the shared snapshot now REFUSES a tax_profile — api-cloudrun#596 it
   // rejected exactly like an invalid one.
   for (const value of ["tax_applied", "tax_frankfort", "tax_narnia"]) {
     assertEquals(
-      DocumentOrganizationSnapshot.safeParse({
-        uid: ORG_ID,
-        name: "A",
-        xero_id: null,
-        tax_profile: value,
-      }).success,
+      // Spread from the minimal-valid base, so `tax_profile` is the ONE thing
+      // wrong with this document — otherwise a later required field would make
+      // the refusal true for a reason this test is not about.
+      DocumentOrganizationSnapshot.safeParse({ ...MINIMAL_SNAPSHOT, tax_profile: value }).success,
       false,
       `a stored ${value} must be refused — that is what made the migration a precondition`,
     );
   }
+});
+
+Deno.test("the shared snapshot now REQUIRES path — core#77's contract third", () => {
+  // 🔴 **The whole value of this change, stated as the one thing it makes
+  // impossible.** `path` was declared, argued for at length, and emitted by
+  // NOTHING for months without a single failure — because `.optional()` meant no
+  // schema ever refused a document lacking it. api-cloudrun accrued pathless
+  // orders and invoices at ~5/day on exactly that hole.
+  //
+  // ⚠️ The direction is the SAFE one and this is the fact that says so: adding a
+  // requirement to a field every stored document already carries strands no
+  // reader, so it needs none of the four-step ordering a REMOVAL does. The
+  // precondition is a claim about the corpus — `missing: 0` on both
+  // environments over 2,049 chains, 2026-09-01 — not about this repo.
+  const { path: _dropped, ...pathless } = MINIMAL_SNAPSHOT;
+  assertEquals(
+    DocumentOrganizationSnapshot.safeParse(pathless).success,
+    false,
+    "a snapshot with no frozen chain must no longer parse",
+  );
+  assertEquals(DocumentOrganizationSnapshot.safeParse(MINIMAL_SNAPSHOT).success, true);
+
+  // The bounds came with it and are not incidental: `.min(1)` is what makes
+  // `composeOrgName` non-empty by construction, and `.max(3)` is ORG_LEVELS.
+  assertEquals(
+    DocumentOrganizationSnapshot.safeParse({ ...MINIMAL_SNAPSHOT, path: [] }).success,
+    false,
+    "an EMPTY chain is not a chain — it composes to no name at all",
+  );
 });
 
 // ─── The tree ───────────────────────────────────────────────────────────────

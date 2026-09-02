@@ -1498,10 +1498,31 @@ export interface DocumentOrganizationSnapshotType {
    * the EDGES (`contacts.organizations[]`, `destinations.organizations[]`) store
    * the addressed uid only, which is a separate rule and still holds.
    *
-   * `.optional()` through the expand third, for the disjoint-accepted-sets
-   * reason the `crms_id` comment below spells out at length.
+   * ⭐ **REQUIRED as of 2026-09-01 — the contract third of
+   * expand/migrate/contract** (core#77), and the direction is the SAFE one.
+   * Adding a requirement to a field every stored document already carries
+   * strands no reader; it is the mirror image of the removal hazard in
+   * `~/cfs/CLAUDE.md` (readers stop first, then the writer, then the corpus
+   * purge, then the schema contract), and it needs no cross-product deploy
+   * order at all.
+   *
+   * ⚠️ **The precondition is a claim about the CORPUS, so re-measure it rather
+   * than reading this line.** `api-cloudrun/scripts/audit-organization-snapshot-path.ts`
+   * is the instrument; it reported `missing: 0` / `dangling: 0` over 2,049
+   * chains on BOTH environments immediately before this landed.
+   *
+   * 🔴 **And that audit's population is NARROWER than this field's**, which is
+   * the thing to know if this ever has to be re-argued. Its first line is
+   * `if (!org?.uid) continue;`, so a snapshot naming no organization is skipped
+   * — while the schema still parses one. Measured directly across both envs
+   * on 2026-09-01: prod 0, dev **155** credit-notes carrying
+   * `{uid: null, …}` and no `path`. All 155 are leaked `test-credit-org`
+   * fixtures under derived (hex) document ids, so they slip the `test-` prefix
+   * safety net; prod holds none and the tightening is unaffected. The lesson is
+   * the tree audit's arm-0 lesson again: *an instrument whose population
+   * excludes the failure it exists to detect reports clean.*
    */
-  path?: OrgPathNodeType[];
+  path: OrgPathNodeType[];
   crms_id?: number | null;
   /**
    * Level 2 of the jurisdiction precedence — the customer's standing claim,
@@ -1585,7 +1606,7 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
     uid: FirestoreId.nullable(),
     // No `label` — the heading is the "Organization" carried by the key above.
     name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
-    path: z.array(OrgPathNode).min(1).max(3).optional(),
+    path: z.array(OrgPathNode).min(1).max(3),
     crms_id: z.int().nullable().optional(),
     // REQUIRED as of api-cloudrun#489 — the contract third of
     // expand/migrate/contract, and the reason it took three steps is worth

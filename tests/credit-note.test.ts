@@ -33,6 +33,8 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
     organization: {
       uid: ORG,
       name: "Acme Corp",
+      // Required since core#77 — every stored snapshot carries the frozen chain.
+      path: [{ uid: ORG, name: "Acme Corp", derived: false }],
       xero_id: null,
       billing_address: null,
     },

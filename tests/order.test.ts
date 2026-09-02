@@ -471,6 +471,14 @@ const minimalDoc = {
   organization: {
     uid: null,
     name: "Test Acme Corp",
+    // Required since core#77. A stored snapshot always carries the frozen
+    // chain — `buildOrganizationSnapshot` writes `path: org.path` and
+    // `Organization.path` is itself required — so a fixture without one is not
+    // a document any writer can produce. ⚠️ Note the deliberate asymmetry with
+    // `uid: null` beside it: this is the SNAPSHOT, which has no refinement tying
+    // the two together, and a fixture that is not a real customer still has to
+    // be a parseable document.
+    path: [{ uid: "testorg1000000000000", name: "Test Acme Corp", derived: false }],
     xero_id: null,
     // Required since api-cloudrun#489 — a stored snapshot always carries the
     // customer's profile, so a fixture without one is not a document any writer
@@ -587,7 +595,10 @@ Deno.test("OrderSchema rejects additional properties", () => {
 Deno.test("OrderSchema rejects additional properties on organization", () => {
   const doc = {
     ...minimalDoc,
-    organization: { uid: null, name: "Acme", extra: true },
+    // ⚠️ `path` is present so this stays a test about `extra`. Without it the
+    // parse would fail for TWO reasons and pass vacuously — a negative test that
+    // a later tightening silently rewrote into a test of the tightening.
+    organization: { uid: null, name: "Acme", path: minimalDoc.organization.path, extra: true },
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -611,7 +622,9 @@ Deno.test("OrderSchema rejects additional properties on destination dates", () =
 Deno.test("OrderSchema rejects missing organization name", () => {
   const doc = {
     ...minimalDoc,
-    organization: { uid: null },
+    // `path` present for the same reason as the `extra` case above: the
+    // assertion has to be about the missing NAME.
+    organization: { uid: null, path: minimalDoc.organization.path },
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });

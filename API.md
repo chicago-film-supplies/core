@@ -2818,7 +2818,7 @@ The customer-organization snapshot embedded on an order/invoice/credit note.
 interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
-  path?: OrgPathNodeType[];
+  path: OrgPathNodeType[];
   crms_id?: number | null;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -10972,7 +10972,7 @@ The customer-organization snapshot embedded on an order/invoice/credit note.
 interface DocumentOrganizationSnapshotType {
   uid: string | null;
   name: string;
-  path?: OrgPathNodeType[];
+  path: OrgPathNodeType[];
   crms_id?: number | null;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
