@@ -447,7 +447,7 @@
         {
           "kind": "interface",
           "name": "CardOrganizationType",
-          "declaration": "interface CardOrganizationType {\n  uid: string | null;\n  name: string;\n}",
+          "declaration": "interface CardOrganizationType {\n  uid: string | null;\n  name: string;\n  path?: OrgPathNodeType[];\n}",
           "doc": "Denormalized organization snapshot on order-derived event cards. Surfaces\n\"who is this card for?\" on every card-rendering surface (list, kanban,\ncalendar, dashboard) without joining back to the order. `uid` is nullable\nbecause some organizations exist without a CFS-side uid (legacy CRMS-only\ncustomers)."
         },
         {
@@ -5327,6 +5327,12 @@
         },
         {
           "kind": "variable",
+          "name": "OrderDerivedOrgPath",
+          "declaration": "const OrderDerivedOrgPath: z.ZodType<OrgPathNodeType[] | undefined>;",
+          "doc": "The organization chain the document's ORDER was written against, copied\nverbatim. Shared by `bookings`, `fulfillments`, `out-of-service` and `cards` —\npopulation A1 of api-cloudrun#782.\n\n🔴 **Optional ONLY during expand.** Readers still take the `name` beside it;\nthis is populated first so the corpus can be backfilled before anything\ndepends on it. It becomes required and `name` is deleted in the contract step\n— readers stop, then the writer, then the corpus purge, then the schema\ncontract, and a `z.strictObject` makes *required* and *deleted* disjoint\naccepted sets, so the order is not optional.\n\n⭐ **It is the ORDER's chain, not the ORGANIZATION's, and that is the whole\npoint.** `api-cloudrun/scripts/audit-denorm-freshness.ts` carries these as\n`rule: null, fails: true` on the ruling\n`api-cloudrun/scripts/repair-order-organization-snapshots.ts` settled: *an\norder-derived organization snapshot follows its order, ALWAYS.* Copying the\nchain preserves that by construction. Composing live from the organization\nwould break it — a terminal order's booking would show a name its own order\ndoes not carry, which is this campaign's own defect class one document over.\n\n⚠️ **This is why A1 takes `path` and NOT `uid` alone.** `uid` alone is right\nfor the org-sourced edges (`contacts.organizations[]`,\n`destinations.organizations[]`), where it genuinely deletes the cascade. Here\nthe cascade exists because the ORDER changes, so `uid` alone would keep the\ncascade AND force every reader to join — strictly worse than either\nalternative.\n\n⚠️ **No `column` meta while `name` still carries it.** Two columns labelled\nOrganization is a display-layer ambiguity that need not exist for the duration\nof the migration; the meta moves across at contract time.\n\n⭐ **`OrgPathNode.name` carries `pii: \"mask\"`, so the fixture sanitizer keeps\nmasking through the move.** Worth stating because the walker masks by SCHEMA\nMETA — deleting a `pii: \"mask\"` field silently stops masking that path, which\nis how a real organization name leaked raw during population B."
+        },
+        {
+          "kind": "variable",
           "name": "OrgPathNode",
           "declaration": "const OrgPathNode: z.ZodType<OrgPathNodeType>;",
           "doc": "One node of the chain.\n\n`name` is REQUIRED and non-empty on every node, matching {@link UidNameRefType}\nexactly — so `composeOrgName` can never return `\"\"`, and the nine embedded\norganization snapshots' own `.min(1).max(100)` is satisfied by construction.\n\n🔴 **ONE array of nodes, never two parallel arrays.** A draft of this model\nhad `uid_tree: string[]` + `name_tree: string[]` held in element-for-element\nalignment. `_dividers.ts` records that api-cloudrun#662, #663 and #664 were\neach one copy moving without the other in exactly that shape, and the ruling\nis explicit: *a join by VALUE across two arrays… re-adding either re-opens*\nall three. A single array of nodes makes index-misalignment\n**unrepresentable** rather than `superRefine`-checked.\n\nIt also closes a silent PII hole: `core/tests/pii.test.ts` matches on exact\nsegment equality (`=== \"name\"`), so a field called `name_tree` would be\ninvisible to it and the customer name would have lost its `pii: \"mask\"`\nclassification with the gate still green. Inside a node the segment is\nliterally `name`, and the existing gate keeps working.\n\n`derived` marks an AUTO-MINTED node — readable from this document alone, with\nno ancestor fan-out, which is what lets a leaf render its own label."
@@ -5920,7 +5926,7 @@
         {
           "kind": "interface",
           "name": "CardOrganizationType",
-          "declaration": "interface CardOrganizationType {\n  uid: string | null;\n  name: string;\n}",
+          "declaration": "interface CardOrganizationType {\n  uid: string | null;\n  name: string;\n  path?: OrgPathNodeType[];\n}",
           "doc": "Denormalized organization snapshot on order-derived event cards. Surfaces\n\"who is this card for?\" on every card-rendering surface (list, kanban,\ncalendar, dashboard) without joining back to the order. `uid` is nullable\nbecause some organizations exist without a CFS-side uid (legacy CRMS-only\ncustomers)."
         },
         {

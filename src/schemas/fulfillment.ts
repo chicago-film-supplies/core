@@ -24,8 +24,10 @@ import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import {
   type FirestoreTimestampType,
-  FULFILLMENT_LINE_ITEM_TYPES,
   type FulfillableItemType,
+  FULFILLMENT_LINE_ITEM_TYPES,
+  OrderDerivedOrgPath,
+  type OrgPathNodeType,
   StockMethodEnum,
   type StockMethodType,
   TimestampFields,
@@ -161,6 +163,7 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.discriminatedUn
 const FulfillmentOrganization = z.strictObject({
   uid: FirestoreId.nullable(),
   name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
+  path: OrderDerivedOrgPath,
 });
 
 /**
@@ -174,6 +177,7 @@ export interface Fulfillment {
   organization: {
     uid: string | null;
     name: string;
+    path?: OrgPathNodeType[];
   };
   destinations: DocDestinationType[];
   items: FulfillmentItemType[];

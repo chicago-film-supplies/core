@@ -965,6 +965,7 @@ customers).
 interface CardOrganizationType {
   uid: string | null;
   name: string;
+  path?: OrgPathNodeType[];
 }
 ```
 
@@ -11363,6 +11364,48 @@ Allowed values for out-of-service reason.
 type OOSReasonType = indexedAccess;
 ```
 
+### `OrderDerivedOrgPath`
+
+The organization chain the document's ORDER was written against, copied
+verbatim. Shared by `bookings`, `fulfillments`, `out-of-service` and `cards` —
+population A1 of api-cloudrun#782.
+
+🔴 **Optional ONLY during expand.** Readers still take the `name` beside it;
+this is populated first so the corpus can be backfilled before anything
+depends on it. It becomes required and `name` is deleted in the contract step
+— readers stop, then the writer, then the corpus purge, then the schema
+contract, and a `z.strictObject` makes *required* and *deleted* disjoint
+accepted sets, so the order is not optional.
+
+⭐ **It is the ORDER's chain, not the ORGANIZATION's, and that is the whole
+point.** `api-cloudrun/scripts/audit-denorm-freshness.ts` carries these as
+`rule: null, fails: true` on the ruling
+`api-cloudrun/scripts/repair-order-organization-snapshots.ts` settled: *an
+order-derived organization snapshot follows its order, ALWAYS.* Copying the
+chain preserves that by construction. Composing live from the organization
+would break it — a terminal order's booking would show a name its own order
+does not carry, which is this campaign's own defect class one document over.
+
+⚠️ **This is why A1 takes `path` and NOT `uid` alone.** `uid` alone is right
+for the org-sourced edges (`contacts.organizations[]`,
+`destinations.organizations[]`), where it genuinely deletes the cascade. Here
+the cascade exists because the ORDER changes, so `uid` alone would keep the
+cascade AND force every reader to join — strictly worse than either
+alternative.
+
+⚠️ **No `column` meta while `name` still carries it.** Two columns labelled
+Organization is a display-layer ambiguity that need not exist for the duration
+of the migration; the meta moves across at contract time.
+
+⭐ **`OrgPathNode.name` carries `pii: "mask"`, so the fixture sanitizer keeps
+masking through the move.** Worth stating because the walker masks by SCHEMA
+META — deleting a `pii: "mask"` field silently stops masking that path, which
+is how a real organization name leaked raw during population B.
+
+```ts
+const OrderDerivedOrgPath: z.ZodType<OrgPathNodeType[] | undefined>;
+```
+
 ### `OrgPathNode`
 
 One node of the chain.
@@ -12546,6 +12589,7 @@ customers).
 interface CardOrganizationType {
   uid: string | null;
   name: string;
+  path?: OrgPathNodeType[];
 }
 ```
 

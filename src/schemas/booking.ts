@@ -11,6 +11,8 @@ import {
   type ComponentTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  OrderDerivedOrgPath,
+  type OrgPathNodeType,
 } from "./common.ts";
 
 export const BOOKING_STATUSES = [
@@ -148,6 +150,7 @@ export interface Booking {
   organization: {
     uid: string | null;
     name: string;
+    path?: OrgPathNodeType[];
     crms_id: number | null;
   };
   stores: BookingStore[];
@@ -395,6 +398,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
+    path: OrderDerivedOrgPath,
     crms_id: z.int().nullable(),
   }).meta({ label: "Organization" }),
   stores: z.array(BookingStoreSchema).default([]).meta({ label: "Store" }),

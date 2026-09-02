@@ -343,6 +343,15 @@ const updateOrganizationRules: CollectionRule[] = [
       "name change — fans out over the orders the cascade rewrote, which is already scoped to non-terminal. A terminal order's snapshot is frozen, so its bookings stay in agreement and there is nothing to write.",
     fields: [
       { source: ["path"], target: ["organization", "name"] },
+      // ⭐ **The CHAIN, alongside the composed name — the expand half of
+      // api-cloudrun#782 (population A1).** What actually reaches a booking is
+      // its own ORDER's snapshot, which this cascade has just rewritten; the
+      // `organizations` source named here is that value one hop upstream.
+      // Carrying the chain is what lets a reader call `composeOrgName` locally,
+      // with no join, and it preserves the invariant above by construction —
+      // the booking holds the order's chain, so it cannot disagree with it.
+      // `name` is removed from this list at contract time.
+      { source: ["path"], target: ["organization", "path"] },
     ],
   },
   {
@@ -356,6 +365,8 @@ const updateOrganizationRules: CollectionRule[] = [
     trigger: "name change — one fulfillment per rewritten order, keyed by the order's uid",
     fields: [
       { source: ["path"], target: ["organization", "name"] },
+      // The chain, alongside the composed name — see `update-org:name-to-bookings`.
+      { source: ["path"], target: ["organization", "path"] },
     ],
   },
   {

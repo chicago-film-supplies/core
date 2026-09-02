@@ -35,6 +35,8 @@ import {
   type DocSourceType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  OrderDerivedOrgPath,
+  type OrgPathNodeType,
   TimestampFields,
 } from "./common.ts";
 import { CommentBody, type CommentBodyJson } from "./comment.ts";
@@ -181,12 +183,14 @@ export const CardAttachment: z.ZodType<CardAttachmentType> = z.strictObject({
 export interface CardOrganizationType {
   uid: string | null;
   name: string;
+  path?: OrgPathNodeType[];
 }
 
 /** Zod schema for CardOrganizationType. */
 export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject({
   uid: FirestoreId.nullable(),
   name: z.string().min(1).max(100).meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
+  path: OrderDerivedOrgPath,
 });
 
 // ── Firestore document ──────────────────────────────────────────────

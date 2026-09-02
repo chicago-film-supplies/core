@@ -27,6 +27,8 @@ import {
   type FirestoreTimestampType,
   OOSReasonEnum,
   type OOSReasonType,
+  OrderDerivedOrgPath,
+  type OrgPathNodeType,
   TimestampFields,
 } from "./common.ts";
 
@@ -142,6 +144,7 @@ export interface OutOfService {
   organization: {
     uid: string | null;
     name: string;
+    path?: OrgPathNodeType[];
     crms_id: number | null;
   } | null;
   dates: OOSDates;
@@ -210,6 +213,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
     name: z.string().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
+    path: OrderDerivedOrgPath,
     crms_id: z.int().nullable(),
   }).nullable().meta({ label: "Organization" }),
   dates: OOSDatesSchema,
