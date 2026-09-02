@@ -39,25 +39,6 @@ const ORG_CONTACT_BACKREF: EnforcementRef = {
   gates: true,
 };
 
-const ORG_NAME_TO_CONTACTS_TEST: EnforcementRef = {
-  kind: "test",
-  ref:
-    "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to linked contacts",
-  clause:
-    "the rename reaching the linked contacts' embedded org entry, on THAT write. The corpus half is beside it.",
-  gates: true,
-};
-
-/** The corpus half — api-cloudrun#711. */
-const ORG_NAME_TO_CONTACTS_CORPUS: EnforcementRef = {
-  kind: "audit",
-  ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
-  clause:
-    "row `update-org:name-to-contacts` — every `contacts.organizations[].name` against `composeOrgName(path)` re-derived from the organization, over ALL edges (a contact is not an issued document, so nothing about it is frozen). It also reports an edge naming an organization that no longer exists.",
-  gates: true,
-};
-
-const ORG_NAME_TO_CONTACTS: EnforcementRef[] = [ORG_NAME_TO_CONTACTS_TEST, ORG_NAME_TO_CONTACTS_CORPUS];
 
 const ORG_NAME_TO_ORDERS_TEST: EnforcementRef = {
   kind: "test",
@@ -267,19 +248,6 @@ const createOrganizationTransaction: TransactionDefinition = {
 // ── update-organization ──────────────────────────────────────────
 
 const updateOrganizationRules: CollectionRule[] = [
-  {
-    id: "update-org:name-to-contacts",
-    source: "organizations",
-    target: "contacts",
-    mode: "fan-out",
-    invariant:
-      "Contacts display their org names — must stay current when org is renamed",
-    enforced_by: ORG_NAME_TO_CONTACTS,
-    transaction: "update-organization",
-    fields: [
-      { source: ["path"], target: ["organizations", "name"] },
-    ],
-  },
   {
     id: "update-org:name-to-orders",
     source: "organizations",
@@ -501,7 +469,6 @@ const reparentOrganizationTransaction: TransactionDefinition = {
   steps: [
     "reparent-org:tree-to-descendants",
     "update-org:name-to-descendants",
-    "update-org:name-to-contacts",
     "update-org:name-to-orders",
     "update-org:name-to-invoices",
   ],
@@ -512,7 +479,6 @@ const updateOrganizationTransaction: TransactionDefinition = {
   description:
     "Updates an organization with name/billing cascades to contacts, active orders, and active invoices. CRMS + Xero sync post-transaction.",
   steps: [
-    "update-org:name-to-contacts",
     "update-org:name-to-orders",
     "update-org:billing-to-orders",
     "update-org:name-to-invoices",

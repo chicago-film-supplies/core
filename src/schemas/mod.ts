@@ -519,8 +519,10 @@ export {
 export {
   DestinationSchema,
   DestinationContactRef,
+  DestinationOrganizationRef,
   type Destination as DestinationDoc,
   type DestinationContactRefType,
+  type DestinationOrganizationRefType,
 } from "./destination.ts";
 
 export {

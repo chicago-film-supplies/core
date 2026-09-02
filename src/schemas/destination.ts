@@ -16,6 +16,44 @@ import {
 } from "./common.ts";
 
 /**
+ * Organization reference embedded in a destination document — **the uid alone**.
+ *
+ * 🔴 **Its OWN type rather than the shared `UidNameRef`, and that is not
+ * cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
+ * `product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
+ * campaign; making `name` optional in place would have weakened all four at
+ * once. Population A2 of
+ * `api-cloudrun/.claude/plans/org-name-is-derived.md` — see
+ * {@link ContactOrganizationType} for why the edge composes rather than stores,
+ * and for why `name` is optional only through the removal window.
+ *
+ * ⭐ **This edge was the campaign's clearest evidence, because nothing ever
+ * maintained it.** `contacts.organizations[].name` had a cascade and agreed with
+ * `composeOrgName(path)` on 214 of 214 prod edges; this one had none, and
+ * **218 of 470 disagreed** — fossils like
+ * `"20th Television - Deli Boys - S2: Locations"` against the live
+ * `"20th Television / Deli Boys S2 / Locations"` (measured 2026-09-02, both
+ * environments). A denormalization with no cascade is not a cheaper
+ * denormalization; it is a stale one.
+ *
+ * ⚠️ **`organizations[]` means *the org that first created this address***, not
+ * every org that uses it — all three match branches of `findOrCreateDestination`
+ * return the found uid and write nothing back. That is unchanged here, and it is
+ * why the array has no `query_by_*` mirror (see the field comment below).
+ */
+export interface DestinationOrganizationRefType {
+  uid: string;
+  /** @deprecated Being removed — see the type docstring. Compose instead. */
+  name?: string;
+}
+
+/** Zod schema for an organization reference embedded in a destination. */
+export const DestinationOrganizationRef: z.ZodType<DestinationOrganizationRefType> = z.strictObject({
+  uid: FirestoreId,
+  name: z.string().min(1).max(100).optional().meta({ pii: "none", column: true }),
+});
+
+/**
  * Contact reference embedded in a destination document.
  *
  * Mirrors the split-name shape used in `organizations.contacts[]` so that the
@@ -40,7 +78,7 @@ export interface Destination {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
-  organizations?: UidNameRefType[];
+  organizations?: DestinationOrganizationRefType[];
   products?: UidNameRefType[];
   contacts?: DestinationContactRefType[];
   version: number;
@@ -71,7 +109,7 @@ export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   // array is worse than none because it reads as authoritative. The
   // ancestor-scoped picker that these were kept for is a read-only search
   // surface, and Typesense already indexes `organizations.uid` directly.
-  organizations: z.array(UidNameRef).optional().meta({ label: "Organizations" }),
+  organizations: z.array(DestinationOrganizationRef).optional().meta({ label: "Organizations" }),
   products: z.array(UidNameRef).optional().meta({ label: "Products" }),
   // `contacts`: declared ahead of use. 192 of 458 prod destinations carried the
   // key, none with an element (2026-08-23) — the feature has not shipped.

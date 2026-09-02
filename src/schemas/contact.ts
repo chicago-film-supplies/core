@@ -18,17 +18,41 @@ import {
 } from "./common.ts";
 
 /**
- * Organization reference embedded in a contact document.
+ * Organization reference embedded in a contact document — **the uid alone**.
+ *
+ * 🔴 **`name` is OPTIONAL only for the length of the removal, and nothing may
+ * read it.** Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md`:
+ * a contact's employer is a LIVE fact, not a frozen one, so unlike an order's
+ * snapshot this edge stores no `path` either — the label is composed from the
+ * organization the uid addresses, every time it is produced. That is what makes
+ * staleness unrepresentable here rather than merely policed, and it is why
+ * `update-org:name-to-contacts` is DELETED rather than relocated.
+ *
+ * ⭐ **Optional is the middle of a three-step removal, not the destination.**
+ * A `z.strictObject` makes *field required* and *field deleted* disjoint
+ * accepted sets, so neither single-step ordering works: delete-first leaves
+ * every unpurged document unwritable, purge-first leaves every purged document
+ * unwritable by the build still deployed. The sequence is
+ * **optional → stop the writer → empty storage → delete**, and the writer stops
+ * in THIS publish (see `~/cfs/CLAUDE.md` § *Cross-repo publish/deploy order*).
+ *
+ * ⚠️ **The index does NOT lose the column.** `contacts_v8` still declares
+ * `organizations.name`; api-cloudrun's `translateForTypesense` composes it at
+ * index time from the live organization. A derived value is fine to DELIVER —
+ * the defect is storing it next to its input.
  */
 export interface ContactOrganizationType {
   uid: string;
-  name: string;
+  /** @deprecated Being removed — see the type docstring. Compose instead. */
+  name?: string;
 }
 
 /** Zod schema for an organization reference embedded in a contact. */
 export const ContactOrganization: z.ZodType<ContactOrganizationType> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
+  // ⚠️ Keeps `column: true` through the window: the Typesense column it
+  // annotates survives the removal, because the INDEX keeps composing a name.
+  name: z.string().min(1, "Organization name is required").max(100).optional().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
 });
 
 /**

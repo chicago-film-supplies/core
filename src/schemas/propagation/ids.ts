@@ -210,7 +210,6 @@ export type RuleId =
   | "create-org:org-to-contacts"
   | "create-org:node-to-tree"
   | "update-department-type:name-to-departments"
-  | "update-org:name-to-contacts"
   | "update-org:name-to-orders"
   | "update-org:billing-to-orders"
   | "update-org:name-to-invoices"

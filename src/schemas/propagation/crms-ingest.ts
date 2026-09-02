@@ -168,7 +168,6 @@ const crmsMemberOrganizationTransaction: TransactionDefinition = {
   steps: [
     "create-org:org-to-contacts",
     "update-org:contacts-change",
-    "update-org:name-to-contacts",
     "update-org:name-to-orders",
     "update-org:billing-to-orders",
     "update-org:tax-axes-to-orders",
