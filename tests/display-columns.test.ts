@@ -221,6 +221,42 @@ Deno.test("T10: no rollup shadows a column the schema already declares", () => {
   assertEquals(shadowed.sort(), [], "Rollups shadowing a declared column:\n" + shadowed.join("\n"));
 });
 
+Deno.test("T10: a rollup that renders as a LINK carries the linkTo its cell resolves through", () => {
+  // 🔴 **The arm that would have caught the un-linked Organization column.**
+  // `cell` chooses the RENDERER; manager's `TableCell` gates the link itself on
+  // `column.meta.linkTo` and falls back to plain text when it is absent. The
+  // rollup builder hard-coded `meta: {}`, so every `cell: "link"` rollup rendered
+  // as text from api-cloudrun#780 until 2026-09-02 — while the `organizations`
+  // entry's own comment asserted, in as many words, that `cell` was enough.
+  //
+  // ⚠️ This is the *declaration needs a population assertion beside it* rule
+  // aimed one level in: T10's other arms all ask whether an entry names
+  // something real, and none of them asks whether it WORKS.
+  const unlinked = Object.entries(TYPESENSE_ROLLUP_COLUMNS)
+    .flatMap(([alias, entries]) =>
+      Object.entries(entries)
+        .filter(([, v]) => v.cell === "link" && typeof v.meta?.linkTo !== "string")
+        .map(([field]) => `${alias}:${field}`)
+    )
+    .sort();
+  assertEquals(
+    unlinked,
+    [],
+    'Rollups declaring cell: "link" with no meta.linkTo — these render as plain text:\n' +
+      unlinked.join("\n"),
+  );
+});
+
+Deno.test("T10: …and the arm is reachable — a link rollup with no meta FAILS it", () => {
+  // The fail-closed companion. Every way this arm can break — a renamed `cell`
+  // value, a `meta` that stops being read — reports an empty list, which is
+  // indistinguishable from a clean table.
+  const planted = { "organization.name": { label: "Organization", cell: "link" as const } };
+  const caught = Object.entries(planted)
+    .filter(([, v]) => v.cell === "link" && typeof (v as { meta?: { linkTo?: unknown } }).meta?.linkTo !== "string");
+  assertEquals(caught.length, 1, "the planted un-linked rollup was not caught");
+});
+
 Deno.test("T10: every rollup label is non-empty and not a raw field name", () => {
   const bad = Object.entries(TYPESENSE_ROLLUP_COLUMNS)
     .flatMap(([alias, entries]) =>

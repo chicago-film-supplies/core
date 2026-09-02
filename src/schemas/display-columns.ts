@@ -134,7 +134,7 @@ function mirrorSources(schema: z.ZodType): Map<string, string> {
  */
 export const TYPESENSE_ROLLUP_COLUMNS: Record<
   string,
-  Record<string, { label: string; cell: CellKind }>
+  Record<string, { label: string; cell: CellKind; meta?: Record<string, unknown> }>
 > = {
   orders: {
     // 🔴 **`organization.name` is a ROLLUP now, not a Firestore column**
@@ -146,7 +146,7 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
     // way the column, its `sort: true` and its `stem: true` search field survive
     // the removal — which is the half of this campaign that had to be preserved:
     // *the document stops storing it; the projection keeps it.*
-    "organization.name": { label: "Organization", cell: "link" },
+    "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
     deliveries: { label: "Deliveries", cell: "bool" },
     pickups: { label: "Pickups", cell: "bool" },
     "dates.delivery_start_fs": { label: "Delivery Start", cell: "date" },
@@ -164,11 +164,11 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   // annotate. See `schemas/typesense/organizations.ts`.
   invoices: {
     // Same rollup as `orders` above — see the note there (api-cloudrun#780).
-    "organization.name": { label: "Organization", cell: "link" },
+    "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
   },
   "credit-notes": {
     // Same rollup as `orders` above — see the note there (api-cloudrun#780).
-    "organization.name": { label: "Organization", cell: "link" },
+    "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
   },
   // ── The ORDER-DERIVED documents, population A1 of api-cloudrun#782 ──────────
   //
@@ -182,7 +182,7 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   // ⚠️ `cards` is deliberately absent: its collection config declares no
   // organization fields, so there is no column to preserve.
   "out-of-service": {
-    "organization.name": { label: "Organization", cell: "link" },
+    "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
   },
   organizations: {
     level: { label: "Level", cell: "plain" },
@@ -192,9 +192,12 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
     // `translateForTypesense`. It has no storage leaf to hang a `column`
     // annotation on, which is exactly what this table is for.
     //
-    // ⚠️ `cell: "link"` keeps the org-detail navigation the removed
-    // `linkTo: "organizationDetail"` provided.
-    name: { label: "Name", cell: "link" },
+    // ⚠️ **`cell` alone does NOT keep the org-detail navigation** — this
+    // comment claimed it did, and was wrong for as long as the entry existed.
+    // `TableCell` reads `meta.linkTo`; `cell` only chooses the renderer. The
+    // `meta` below is what actually restores what the removed
+    // `linkTo: "organizationDetail"` annotation provided.
+    name: { label: "Name", cell: "link", meta: { linkTo: "organizationDetail" } },
   },
   // The two charge dates only. Every other `bookings` field resolves through a
   // declared column or an `_fs` mirror; these two do not, because the ISO
@@ -202,12 +205,12 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   // exactly that annotation. Without an entry here they are indexed, sortable,
   // and invisible.
   bookings: {
-    "organization.name": { label: "Organization", cell: "link" },
+    "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
     "dates.charge_start_fs": { label: "Charge Start", cell: "date" },
     "dates.charge_end_fs": { label: "Charge End", cell: "date" },
   },
   fulfillments: {
-    "organization.name": { label: "Organization", cell: "link" },
+    "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
     deliveries: { label: "Deliveries", cell: "bool" },
     pickups: { label: "Pickups", cell: "bool" },
     has_conflicts: { label: "Conflicts", cell: "bool" },
@@ -313,7 +316,15 @@ export function buildTypesenseColumns(
         label: rollup.label,
         sortable: field.sort === true,
         cell: rollup.cell,
-        meta: {},
+        // 🔴 **`meta` was hard-coded `{}` here, and that is what silently
+        // un-linked every rolled-up Organization column** (found 2026-09-02 by
+        // manager's `includeFields.test.tsx` shape arm, on the api-cloudrun#782
+        // pin bump). `TableCell` gates a link on `column.meta.linkTo`, NOT on
+        // `cell`, so `cell: "link"` with an empty meta renders plain text — and
+        // the comment on the `organizations` entry below asserted the opposite
+        // in as many words. A rollup has no Zod node to carry an annotation, so
+        // it has to declare its own.
+        meta: rollup.meta ?? {},
       });
       continue;
     }
