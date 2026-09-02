@@ -1506,9 +1506,13 @@ export interface DocumentOrganizationSnapshotType {
    * order at all.
    *
    * ⚠️ **The precondition is a claim about the CORPUS, so re-measure it rather
-   * than reading this line.** `api-cloudrun/scripts/audit-organization-snapshot-path.ts`
-   * is the instrument; it reported `missing: 0` / `dangling: 0` over 2,049
-   * chains on BOTH environments immediately before this landed.
+   * than reading this line.** The instrument at the time was
+   * `api-cloudrun/scripts/audit-organization-snapshot-path.ts`, which reported
+   * `missing: 0` / `dangling: 0` over 2,049 chains on BOTH environments
+   * immediately before this landed. ⚠️ **That script is DELETED** — its whole job
+   * was comparing the stored scalar against `composeOrgName(path)`, and the
+   * scalar is gone (api-cloudrun#780). The live instrument for the chain is
+   * `api-cloudrun/scripts/audit-denorm-freshness.ts`.
    *
    * 🔴 **And that audit's population is NARROWER than this field's**, which is
    * the thing to know if this ever has to be re-argued. Its first line is
