@@ -28,7 +28,7 @@ const validContact = (overrides: Record<string, unknown> = {}) => ({
   name: "John",
   emails: [] as string[],
   phones: [] as string[],
-  organizations: [] as Array<{ uid: string; name: string }>,
+  organizations: [] as Array<{ uid: string }>,
   query_by_organizations: [] as string[],
   uid_thread: "testthread0000000000",
   created_by: actor,
@@ -43,7 +43,7 @@ Deno.test("ContactSchema validates a complete contact document", () => {
     name: "John Doe",
     emails: ["john@example.com"],
     phones: ["1234567890"],
-    organizations: [{ uid: "testorg1000000000000", name: "Acme" }],
+    organizations: [{ uid: "testorg1000000000000" }],
     query_by_organizations: ["testorg1000000000000"],
   });
   assertEquals(ContactSchema.safeParse(doc).success, true);
@@ -115,7 +115,7 @@ Deno.test("CreateContactInput accepts full input", () => {
     last_name: "Doe",
     emails: ["john@example.com"],
     phones: ["1234567890"],
-    organizations: [{ uid: "testorg1000000000000", name: "Acme" }],
+    organizations: [{ uid: "testorg1000000000000" }],
   };
   assertEquals(CreateContactInput.safeParse(input).success, true);
 });

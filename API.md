@@ -1523,23 +1523,27 @@ organization the uid addresses, every time it is produced. That is what makes
 staleness unrepresentable here rather than merely policed, and it is why
 `update-org:name-to-contacts` is DELETED rather than relocated.
 
-⭐ **Optional is the middle of a three-step removal, not the destination.**
-A `z.strictObject` makes *field required* and *field deleted* disjoint
-accepted sets, so neither single-step ordering works: delete-first leaves
-every unpurged document unwritable, purge-first leaves every purged document
-unwritable by the build still deployed. The sequence is
-**optional → stop the writer → empty storage → delete**, and the writer stops
-in THIS publish (see `~/cfs/CLAUDE.md` § *Cross-repo publish/deploy order*).
+⭐ **The three-step removal is COMPLETE.** A `z.strictObject` makes *field
+required* and *field deleted* disjoint accepted sets, so neither single-step
+ordering works: delete-first leaves every unpurged document unwritable,
+purge-first leaves every purged document unwritable by the build still
+deployed. The sequence run was **optional → stop the writer → empty storage →
+delete**: `beta.310` made it optional, api-cloudrun `e2081775` stopped every
+writer and shipped as `v0.211.0`, and the corpus was emptied on 2026-09-02 —
+**684 prod edges and 685 dev, 0 carrying a name in either.** This is the
+fourth step.
 
-⚠️ **The index does NOT lose the column.** `contacts_v8` still declares
-`organizations.name`; api-cloudrun's `translateForTypesense` composes it at
-index time from the live organization. A derived value is fine to DELIVER —
-the defect is storing it next to its input.
+⚠️ **The index does NOT lose the column, and that is measured rather than
+hoped.** `contacts_v8` still declares `organizations.name`; api-cloudrun's
+`translateForTypesense` composes it at index time from the live organization
+(`src/lib/organizationNames.ts`). With storage emptied, a prod search by
+`organizations.name` for *"Netflix"* still returns 7 contacts carrying
+"Netflix Productions, LLC / Saturn Return / Office". **A derived value is fine
+to DELIVER — the defect is storing it next to its input.**
 
 ```ts
 interface ContactOrganizationType {
   uid: string;
-  name?: string;
 }
 ```
 
@@ -2514,11 +2518,10 @@ Organization reference embedded in a destination document — **the uid alone**.
 🔴 **Its OWN type rather than the shared `UidNameRef`, and that is not
 cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
 `product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
-campaign; making `name` optional in place would have weakened all four at
-once. Population A2 of
-`api-cloudrun/.claude/plans/org-name-is-derived.md` — see
+campaign; removing `name` from it would have changed all four at once.
+Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md` — see
 {@link ContactOrganizationType} for why the edge composes rather than stores,
-and for why `name` is optional only through the removal window.
+and for the four-step removal this is the last step of.
 
 ⭐ **This edge was the campaign's clearest evidence, because nothing ever
 maintained it.** `contacts.organizations[].name` had a cascade and agreed with
@@ -2537,7 +2540,6 @@ why the array has no `query_by_*` mirror (see the field comment below).
 ```ts
 interface DestinationOrganizationRefType {
   uid: string;
-  name?: string;
 }
 ```
 
@@ -12888,23 +12890,27 @@ organization the uid addresses, every time it is produced. That is what makes
 staleness unrepresentable here rather than merely policed, and it is why
 `update-org:name-to-contacts` is DELETED rather than relocated.
 
-⭐ **Optional is the middle of a three-step removal, not the destination.**
-A `z.strictObject` makes *field required* and *field deleted* disjoint
-accepted sets, so neither single-step ordering works: delete-first leaves
-every unpurged document unwritable, purge-first leaves every purged document
-unwritable by the build still deployed. The sequence is
-**optional → stop the writer → empty storage → delete**, and the writer stops
-in THIS publish (see `~/cfs/CLAUDE.md` § *Cross-repo publish/deploy order*).
+⭐ **The three-step removal is COMPLETE.** A `z.strictObject` makes *field
+required* and *field deleted* disjoint accepted sets, so neither single-step
+ordering works: delete-first leaves every unpurged document unwritable,
+purge-first leaves every purged document unwritable by the build still
+deployed. The sequence run was **optional → stop the writer → empty storage →
+delete**: `beta.310` made it optional, api-cloudrun `e2081775` stopped every
+writer and shipped as `v0.211.0`, and the corpus was emptied on 2026-09-02 —
+**684 prod edges and 685 dev, 0 carrying a name in either.** This is the
+fourth step.
 
-⚠️ **The index does NOT lose the column.** `contacts_v8` still declares
-`organizations.name`; api-cloudrun's `translateForTypesense` composes it at
-index time from the live organization. A derived value is fine to DELIVER —
-the defect is storing it next to its input.
+⚠️ **The index does NOT lose the column, and that is measured rather than
+hoped.** `contacts_v8` still declares `organizations.name`; api-cloudrun's
+`translateForTypesense` composes it at index time from the live organization
+(`src/lib/organizationNames.ts`). With storage emptied, a prod search by
+`organizations.name` for *"Netflix"* still returns 7 contacts carrying
+"Netflix Productions, LLC / Saturn Return / Office". **A derived value is fine
+to DELIVER — the defect is storing it next to its input.**
 
 ```ts
 interface ContactOrganizationType {
   uid: string;
-  name?: string;
 }
 ```
 
@@ -13018,11 +13024,10 @@ Organization reference embedded in a destination document — **the uid alone**.
 🔴 **Its OWN type rather than the shared `UidNameRef`, and that is not
 cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
 `product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
-campaign; making `name` optional in place would have weakened all four at
-once. Population A2 of
-`api-cloudrun/.claude/plans/org-name-is-derived.md` — see
+campaign; removing `name` from it would have changed all four at once.
+Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md` — see
 {@link ContactOrganizationType} for why the edge composes rather than stores,
-and for why `name` is optional only through the removal window.
+and for the four-step removal this is the last step of.
 
 ⭐ **This edge was the campaign's clearest evidence, because nothing ever
 maintained it.** `contacts.organizations[].name` had a cascade and agreed with
@@ -13041,7 +13046,6 @@ why the array has no `query_by_*` mirror (see the field comment below).
 ```ts
 interface DestinationOrganizationRefType {
   uid: string;
-  name?: string;
 }
 ```
 

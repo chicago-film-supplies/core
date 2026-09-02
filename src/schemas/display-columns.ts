@@ -184,6 +184,24 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   "out-of-service": {
     "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
   },
+  // ── The ORG-SOURCED EDGES, population A2 of api-cloudrun#782 ───────────────
+  //
+  // Unlike every rollup above, these compose from a chain the document does NOT
+  // carry: the edge stores a uid alone, and api-cloudrun's `translateForTypesense`
+  // joins through an organization map (`src/lib/organizationNames.ts`) at index
+  // time. So the storage leaf is gone and the column, its `stem: true` search
+  // field and its link all live here.
+  //
+  // ⭐ **`contacts` also lost `organizations.name` from its FIRESTORE
+  // `displayDefaults`** (see `contact.ts`) — T8 refuses a default naming no
+  // declared column, and there is no Firestore rollup table. Nothing visible is
+  // lost: the manager's contacts table is a `TypesenseTable`.
+  contacts: {
+    "organizations.name": { label: "Organizations", cell: "link", meta: { linkTo: "organizationDetail" } },
+  },
+  destinations: {
+    "organizations.name": { label: "Organizations", cell: "link", meta: { linkTo: "organizationDetail" } },
+  },
   organizations: {
     level: { label: "Level", cell: "plain" },
     // 🔴 **`name` is a ROLLUP now, not a Firestore column** (api-cloudrun#709).

@@ -21,11 +21,10 @@ import {
  * 🔴 **Its OWN type rather than the shared `UidNameRef`, and that is not
  * cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
  * `product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
- * campaign; making `name` optional in place would have weakened all four at
- * once. Population A2 of
- * `api-cloudrun/.claude/plans/org-name-is-derived.md` — see
+ * campaign; removing `name` from it would have changed all four at once.
+ * Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md` — see
  * {@link ContactOrganizationType} for why the edge composes rather than stores,
- * and for why `name` is optional only through the removal window.
+ * and for the four-step removal this is the last step of.
  *
  * ⭐ **This edge was the campaign's clearest evidence, because nothing ever
  * maintained it.** `contacts.organizations[].name` had a cascade and agreed with
@@ -43,14 +42,11 @@ import {
  */
 export interface DestinationOrganizationRefType {
   uid: string;
-  /** @deprecated Being removed — see the type docstring. Compose instead. */
-  name?: string;
 }
 
 /** Zod schema for an organization reference embedded in a destination. */
 export const DestinationOrganizationRef: z.ZodType<DestinationOrganizationRefType> = z.strictObject({
   uid: FirestoreId,
-  name: z.string().min(1).max(100).optional().meta({ pii: "none", column: true }),
 });
 
 /**

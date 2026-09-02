@@ -212,7 +212,12 @@ const createOrganizationRules: CollectionRule[] = [
     transaction: "create-organization",
     fields: [
       { source: ["uid"], target: ["organizations", "uid"] },
-      { source: ["path"], target: ["organizations", "name"] },
+      // ⭐ **The `["organizations","name"]` mapping is GONE, not repointed**
+      // (api-cloudrun#782). The edge stores the addressed uid alone and the label
+      // is composed from the organization wherever it is produced, so there is no
+      // second field for this co-write to author. What remains is the membership
+      // itself plus its flat `array-contains` mirror — which is the whole of what
+      // this edge ever meant.
       { source: ["uid"], target: ["query_by_organizations"] },
     ],
   },

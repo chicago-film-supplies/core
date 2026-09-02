@@ -122,6 +122,28 @@ const DERIVED_FIELDS: Record<string, string> = {
   "bookings:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#782)",
   "fulfillments:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#782)",
   "out-of-service:organization.name": "composeOrgName(organization.path) — the stored scalar was removed (api-cloudrun#782)",
+  // ── The ORG-SOURCED EDGES — population A2 of api-cloudrun#782, and the ONE
+  //    derivation here that does NOT read the document.
+  //
+  // 🔴 **Every entry above composes from a chain the document itself carries;
+  // these two have no chain at all.** The edge stores a uid alone, so
+  // `translateForTypesense` JOINS through an organization map loaded from
+  // Firestore (`api-cloudrun/src/lib/organizationNames.ts`) — never from the
+  // Typesense `organizations` collection, which declares no `path.derived` and
+  // would therefore keep every minted `(default)` segment.
+  //
+  // ⚠️ **So the failure mode is ABSENCE, not a wrong name**, which is the
+  // sharper end of this table's own warning that an entry asserts a producer and
+  // nothing checks that it runs. Two things stand beside it, and neither
+  // subsumes the other: `loadOrganizationNames` REFUSES an empty read (the
+  // population half — a map that never loaded), and
+  // `api-cloudrun/tests/unit/typesenseEdgeOrgNames.test.ts` asserts the composed
+  // VALUE, including that the live organization beats a stale stored scalar (the
+  // value half — a map loaded wrong). Measured on prod 2026-09-02: with storage
+  // emptied, a search by `organizations.name` for "Netflix" still returns 7
+  // contacts.
+  "contacts:organizations.name": "composeOrgName joined through the LIVE organization — the stored scalar was removed (api-cloudrun#782)",
+  "destinations:organizations.name": "composeOrgName joined through the LIVE organization — the stored scalar was removed (api-cloudrun#782)",
   "orders:dates": "deriveOrderDateEnvelope — synthesized, never stored",
   "orders:dates.delivery_start_fs": "deriveOrderDateEnvelope — envelope min over destinations[]",
   "orders:dates.delivery_end_fs": "deriveOrderDateEnvelope — envelope max over destinations[]",

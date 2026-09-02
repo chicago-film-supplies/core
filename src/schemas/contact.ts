@@ -28,31 +28,31 @@ import {
  * staleness unrepresentable here rather than merely policed, and it is why
  * `update-org:name-to-contacts` is DELETED rather than relocated.
  *
- * ⭐ **Optional is the middle of a three-step removal, not the destination.**
- * A `z.strictObject` makes *field required* and *field deleted* disjoint
- * accepted sets, so neither single-step ordering works: delete-first leaves
- * every unpurged document unwritable, purge-first leaves every purged document
- * unwritable by the build still deployed. The sequence is
- * **optional → stop the writer → empty storage → delete**, and the writer stops
- * in THIS publish (see `~/cfs/CLAUDE.md` § *Cross-repo publish/deploy order*).
+ * ⭐ **The three-step removal is COMPLETE.** A `z.strictObject` makes *field
+ * required* and *field deleted* disjoint accepted sets, so neither single-step
+ * ordering works: delete-first leaves every unpurged document unwritable,
+ * purge-first leaves every purged document unwritable by the build still
+ * deployed. The sequence run was **optional → stop the writer → empty storage →
+ * delete**: `beta.310` made it optional, api-cloudrun `e2081775` stopped every
+ * writer and shipped as `v0.211.0`, and the corpus was emptied on 2026-09-02 —
+ * **684 prod edges and 685 dev, 0 carrying a name in either.** This is the
+ * fourth step.
  *
- * ⚠️ **The index does NOT lose the column.** `contacts_v8` still declares
- * `organizations.name`; api-cloudrun's `translateForTypesense` composes it at
- * index time from the live organization. A derived value is fine to DELIVER —
- * the defect is storing it next to its input.
+ * ⚠️ **The index does NOT lose the column, and that is measured rather than
+ * hoped.** `contacts_v8` still declares `organizations.name`; api-cloudrun's
+ * `translateForTypesense` composes it at index time from the live organization
+ * (`src/lib/organizationNames.ts`). With storage emptied, a prod search by
+ * `organizations.name` for *"Netflix"* still returns 7 contacts carrying
+ * "Netflix Productions, LLC / Saturn Return / Office". **A derived value is fine
+ * to DELIVER — the defect is storing it next to its input.**
  */
 export interface ContactOrganizationType {
   uid: string;
-  /** @deprecated Being removed — see the type docstring. Compose instead. */
-  name?: string;
 }
 
 /** Zod schema for an organization reference embedded in a contact. */
 export const ContactOrganization: z.ZodType<ContactOrganizationType> = z.strictObject({
   uid: FirestoreId,
-  // ⚠️ Keeps `column: true` through the window: the Typesense column it
-  // annotates survives the removal, because the INDEX keeps composing a name.
-  name: z.string().min(1, "Organization name is required").max(100).optional().meta({ pii: "mask", column: true, linkTo: "organizationDetail" }),
 });
 
 /**
@@ -117,7 +117,16 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   title: "Contact",
   collection: "contacts",
   displayDefaults: {
-    columns: ["name", "emails", "phones", "organizations.name"],
+    // ⚠️ **`organizations.name` LEFT this list, and it had to.** It was a
+    // declared column only because `ContactOrganization.name` carried
+    // `column: true`; with the field gone there is no storage leaf to annotate,
+    // and display-columns **T8** refuses a `displayDefaults` key that names no
+    // declared column. The TYPESENSE surface keeps it — as a
+    // `TYPESENSE_ROLLUP_COLUMNS` entry, which is where a field computed at index
+    // time belongs — and that is the surface the manager's contacts table
+    // actually uses (`CollectionPage` renders a `TypesenseTable`). So no visible
+    // column is lost.
+    columns: ["name", "emails", "phones"],
     filters: {},
     sort: { column: "name", direction: "asc" },
   },
