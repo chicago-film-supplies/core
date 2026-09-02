@@ -2817,7 +2817,7 @@ The customer-organization snapshot embedded on an order/invoice/credit note.
 ```ts
 interface DocumentOrganizationSnapshotType {
   uid: string | null;
-  name: string;
+  name?: string;
   path: OrgPathNodeType[];
   crms_id?: number | null;
   jurisdiction_claim?: JurisdictionType | null;
@@ -10971,7 +10971,7 @@ The customer-organization snapshot embedded on an order/invoice/credit note.
 ```ts
 interface DocumentOrganizationSnapshotType {
   uid: string | null;
-  name: string;
+  name?: string;
   path: OrgPathNodeType[];
   crms_id?: number | null;
   jurisdiction_claim?: JurisdictionType | null;

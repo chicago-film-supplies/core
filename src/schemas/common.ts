@@ -1466,7 +1466,42 @@ export const OrgPathNode: z.ZodType<OrgPathNodeType> = z.strictObject({
 /** The customer-organization snapshot embedded on an order/invoice/credit note. */
 export interface DocumentOrganizationSnapshotType {
   uid: string | null;
-  name: string;
+  /**
+   * The composed label, and **`.optional()` because it is being REMOVED** — the
+   * migrate third of expand/migrate/contract
+   * (`api-cloudrun/.claude/plans/org-name-is-derived.md` steps 4 and 5).
+   *
+   * 🔴 **Nothing writes it any more.** {@link buildOrganizationSnapshot} stopped
+   * emitting it in this same publish, and it is the sole author on every
+   * order/invoice write path; the rename cascade stopped moving it a publish
+   * earlier (api-cloudrun `d06095a3`). Every reader — api, manager, the Eta
+   * templates, the Typesense translator — composes `composeOrgName(path)`
+   * instead. So a stored value is a fossil from before that, and the next write
+   * of any kind drops it.
+   *
+   * 🔴 **Optional rather than deleted, because BOTH single-step orderings break
+   * the money path**, and neither break is visible in dev (both products deploy
+   * continuously from `main`). Every order/invoice write validates the FULL
+   * document — `updateOrder` clones the stored order and only rebuilds the
+   * snapshot when the organization itself changed — and this is a
+   * `z.strictObject`, so the required version and the deleted version have
+   * DISJOINT accepted sets:
+   *
+   * - delete first, purge second → the 2,050 stored documents still carrying
+   *   `name` are unwritable until the purge finishes;
+   * - purge first, delete second → the purged documents are unwritable by the
+   *   still-deployed build that requires it.
+   *
+   * ⭐ The same three-step this schema has now run twice — `tax_profile`
+   * (api-cloudrun#596 item 3: optional → empty storage → delete) and `path`
+   * (core#77, the mirror image). *Optional → empty storage → delete.*
+   *
+   * ⚠️ **The bounds stay while it is here.** `[1, 100]` is what made the merge
+   * of the three hand-written literals take the bounded side; loosening them in
+   * the same step as the optionality would quietly re-admit the empty string
+   * that {@link buildOrganizationSnapshot} used to be able to produce.
+   */
+  name?: string;
   /**
    * The customer's position in the organization tree AT THE MOMENT THIS
    * DOCUMENT WAS WRITTEN — the same `{uid, name, derived}[]` the organization
@@ -1568,6 +1603,53 @@ export interface DocumentOrganizationSnapshotType {
 }
 
 /**
+ * The one invariant a snapshot can check reading **ITSELF and nothing else**:
+ * the chain's last node IS the organization the snapshot names.
+ *
+ * 🔴 **{@link Organization} has enforced this since the tree shipped
+ * (invariant 1); the SNAPSHOT never has, and the gap was live for four days.**
+ * Prod order #1010 carried `organization.uid` naming CRMS member 547 beside a
+ * frozen `path` describing member 552's tree, and it parsed, wrote and audited
+ * clean the whole time — because `uid` and `path` were two independent fields
+ * and nothing compared them (api-cloudrun#775, closed 2026-09-01 once CRMS was
+ * corrected and the member webhook converged the document).
+ *
+ * ⭐ **Direct, not a fixed point.** It is the same argument the four
+ * one-document organization invariants make: the rest of this campaign's
+ * guarding compares a stored value against `composeOrgName(path)`, which is
+ * defined in terms of `path` and can only ever agree with it. This arm consults
+ * `uid`, which the chain does not produce.
+ *
+ * ⚠️ **Tightened AFTER the repair, never before.** While #1010 was live this
+ * refinement would have made a `reserved` order unwritable — including by the
+ * webhook that fixed it. It is free today because `path.at(-1).uid === uid`
+ * holds on all 2,050 prod snapshots (measured 2026-09-01), and it stops being
+ * free the moment another backfill reintroduces the class, which is the whole
+ * reason to spend it now.
+ *
+ * ⚠️ **`uid: null` is exempt, and that is not a loophole.** The field is
+ * `.nullable()` — a snapshot naming no organization has no id for the leaf to
+ * equal, and dev holds 155 such credit-notes (leaked `test-credit-org`
+ * fixtures under hex ids, api-cloudrun#774). Prod holds none.
+ */
+function checkDocumentOrganizationSnapshot(
+  doc: DocumentOrganizationSnapshotType,
+  ctx: z.RefinementCtx,
+): void {
+  const path = doc.path;
+  if (doc.uid === null || !Array.isArray(path) || path.length === 0) return;
+  const leaf = path[path.length - 1];
+  if (leaf?.uid !== doc.uid) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path", path.length - 1, "uid"],
+      message:
+        `the frozen chain must END at the organization it names: path.at(-1).uid must equal uid (${doc.uid}), got ${leaf?.uid}`,
+    });
+  }
+}
+
+/**
  * The customer-organization snapshot embedded on an order, an invoice and a
  * credit note.
  *
@@ -1605,7 +1687,10 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
   .strictObject({
     uid: FirestoreId.nullable(),
     // No `label` — the heading is the "Organization" carried by the key above.
-    name: z.string().min(1).max(100).meta({ pii: "mask", column: true }),
+    // `.optional()` is the migrate third of the removal; see the field's
+    // docstring on {@link DocumentOrganizationSnapshotType} for why both
+    // single-step orderings break a live write path.
+    name: z.string().min(1).max(100).optional().meta({ pii: "mask", column: true }),
     path: z.array(OrgPathNode).min(1).max(3),
     crms_id: z.int().nullable().optional(),
     // REQUIRED as of api-cloudrun#489 — the contract third of
@@ -1642,6 +1727,7 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
     xero_id: z.uuid().nullable(),
     billing_address: Address.optional(),
   })
+  .superRefine(checkDocumentOrganizationSnapshot)
   .meta({ label: "Organization" });
 
 // `DEFAULT_TAX_PROFILE` was DELETED here (api-cloudrun#596 item 3). It was the

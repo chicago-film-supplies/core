@@ -79,10 +79,14 @@ Deno.test("buildOrganizationSnapshot FREEZES the chain, not just its composed te
   const snapshot = buildOrganizationSnapshot(ORG);
   assertEquals(snapshot.path, ORG.path);
   assertEquals(snapshot.path?.at(-1)?.uid, ORG_ID);
-  // And the pair stays coherent: the composed name is this same chain
-  // flattened, so a writer that emitted one without the other would be storing
-  // two facts that can disagree.
-  assertEquals(snapshot.name, composeOrgName(ORG.path));
+  // ⭐ **And the composed scalar is NOT emitted — asserted positively, on the
+  // KEY rather than the value.** This assertion used to read
+  // `snapshot.name === composeOrgName(ORG.path)`; deleting it outright would
+  // have rested the new behaviour on nothing, and a writer that "helpfully"
+  // restored the line would pass. `in` rather than `=== undefined` because
+  // Firestore treats an absent key and a present-but-undefined one differently
+  // — and `validateBeforeWrite`'s `scanForUndefined` rejects the latter.
+  assertEquals("name" in snapshot, false);
 });
 
 Deno.test("buildOrganizationSnapshot produces a snapshot the shared schema accepts", () => {
@@ -118,9 +122,10 @@ Deno.test("buildOrganizationSnapshot: overrides win, for the CRMS member_id case
   // rather than a reason to keep a fourth hand-written literal.
   const snapshot = buildOrganizationSnapshot(ORG, { crms_id: 9999 });
   assertEquals(snapshot.crms_id, 9999);
-  // The COMPOSED name — a depth-1 node composes to its own segment, which is
-  // what makes this assertion identical in value and different in meaning.
-  assertEquals(snapshot.name, ORG_OWN_NAME);
+  // A depth-1 node composes to its own segment — which is the name the
+  // OVERRIDES could still put back, so the assertion is that they did not.
+  assertEquals(composeOrgName(snapshot.path), ORG_OWN_NAME);
+  assertEquals("name" in snapshot, false);
   assertEquals(snapshot.jurisdiction_claim, "frankfort");
 });
 
@@ -157,11 +162,68 @@ Deno.test("the shared snapshot still rejects an out-of-bounds name", () => {
   // Order's `[1, 100]` bounds are kept. Not a tightening in practice —
   // `Organization.name` carries the same bounds and every snapshot is copied
   // from it — but the assertion is what says the merge took the bounded side.
+  //
+  // ⚠️ The bounds survive the field going `.optional()` deliberately: loosening
+  // them in the same step would quietly re-admit the empty string on the
+  // fossils still carrying one.
   const { name: _dropped, ...base } = MINIMAL_SNAPSHOT;
   assertEquals(DocumentOrganizationSnapshot.safeParse({ ...base, name: "" }).success, false);
   assertEquals(
     DocumentOrganizationSnapshot.safeParse({ ...base, name: "x".repeat(101) }).success,
     false,
+  );
+});
+
+Deno.test("the shared snapshot admits an ABSENT name — the migrate third of its removal", () => {
+  // 🔴 **Both single-step orderings break a live write path, which is why this
+  // parses rather than being deleted outright.** Every order/invoice write
+  // validates the FULL document and this is a `z.strictObject`, so `name`
+  // required and `name` deleted have DISJOINT accepted sets: delete-then-purge
+  // makes the 2,050 stored documents unwritable, purge-then-delete makes the
+  // purged ones unwritable by the build still deployed. Optional → empty
+  // storage → delete, the same three steps `tax_profile` and `path` each ran.
+  //
+  // ⭐ Paired with the arm above rather than replacing it: absent must parse
+  // AND a present one must still be bounded, for as long as fossils exist.
+  const { name: _dropped, ...withoutName } = MINIMAL_SNAPSHOT;
+  assertEquals(DocumentOrganizationSnapshot.safeParse(withoutName).success, true);
+  assertEquals(DocumentOrganizationSnapshot.safeParse(MINIMAL_SNAPSHOT).success, true);
+});
+
+Deno.test("the shared snapshot REFUSES a chain that ends somewhere else — api-cloudrun#775", () => {
+  // The #1010 shape: `uid` names one organization, the frozen chain describes
+  // another's tree. It parsed, wrote and audited clean for four days because
+  // the two were independent fields and nothing compared them.
+  //
+  // ⭐ Direct, not a fixed point — the assertion consults `uid`, which
+  // `composeOrgName(path)` cannot produce. Every other guard in this campaign
+  // compares a stored value against something derived from `path` alone.
+  const otherOrg = "cccccccccccccccccccc";
+  assertEquals(
+    DocumentOrganizationSnapshot.safeParse({
+      ...MINIMAL_SNAPSHOT,
+      path: [{ uid: otherOrg, name: "Someone Else", derived: false }],
+    }).success,
+    false,
+  );
+  // …and a DEEPER chain is judged on its leaf, not on membership: an ancestor
+  // carrying the uid is not the same fact as the chain ending there.
+  assertEquals(
+    DocumentOrganizationSnapshot.safeParse({
+      ...MINIMAL_SNAPSHOT,
+      path: [
+        { uid: ORG_ID, name: "A", derived: false },
+        { uid: otherOrg, name: "Someone Else", derived: false },
+      ],
+    }).success,
+    false,
+  );
+  // A snapshot naming NO organization is exempt — `uid` is `.nullable()`, so
+  // there is no id for the leaf to equal. Dev holds 155 of these
+  // (api-cloudrun#774); prod holds none.
+  assertEquals(
+    DocumentOrganizationSnapshot.safeParse({ ...MINIMAL_SNAPSHOT, uid: null }).success,
+    true,
   );
 });
 

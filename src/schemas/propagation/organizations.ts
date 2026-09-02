@@ -64,7 +64,7 @@ const ORG_NAME_TO_ORDERS_TEST: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to active orders",
   clause:
-    "the rename reaching an ACTIVE order's `organization.name`, on THAT write. The corpus half is beside it.",
+    "the rename reaching an ACTIVE order's `organization.path`, on THAT write — the CHAIN, since api-cloudrun `d06095a3`; the label is composed from it. The corpus half is beside it.",
   gates: true,
 };
 
@@ -73,7 +73,7 @@ const ORG_NAME_TO_ORDERS_CORPUS: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
   clause:
-    "row `update-org:name-to-orders` — `orders.organization.name` against the re-derived composed label, scoped to NON-TERMINAL orders by the cascade's own predicate (`ORG_CASCADE_FROZEN_ORDER_STATUSES`, imported rather than restated). Drift on a terminal order is counted separately and never fails: prod carries 469 of those and they are the design.",
+    "row `update-org:name-to-orders` — `orders.organization.path` against the organization's own chain, scoped to NON-TERMINAL orders by the cascade's own predicate (`ORG_CASCADE_FROZEN_ORDER_STATUSES`, imported rather than restated). ⚠️ It compared `{name, path}` for one commit and was NARROWED in the same commit that stopped the writer: a freshness check on a field nothing keeps fresh is noise by construction, and it would bury the `path` signal beside it. Drift on a terminal order is counted separately and never fails: prod carries 469 of those and they are the design.",
   gates: true,
 };
 
@@ -104,7 +104,7 @@ const ORG_NAME_TO_INVOICES_TEST: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - propagates name change to active invoices",
   clause:
-    "the rename reaching an active invoice's `organization.name`, on THAT write. The corpus half is beside it.",
+    "the rename reaching an active invoice's `organization.path`, on THAT write. The corpus half is beside it.",
   gates: true,
 };
 
@@ -285,13 +285,19 @@ const updateOrganizationRules: CollectionRule[] = [
     source: "organizations",
     target: "orders",
     mode: "fan-out",
+    // ⭐ **The CHAIN, not the composed label** — api-cloudrun `201773b2` +
+    // `d06095a3`. The cascade used to move `organization.name` and leave
+    // `organization.path` behind, which is what api-cloudrun#772 was: one block
+    // carrying two policies. It now moves the chain alone, and every reader
+    // composes `composeOrgName(path)` from it. The rule id keeps its name
+    // because a propagation id is a stable key, not a description.
     invariant:
-      "Active orders carry a denormalized org name that must stay current",
+      "Active orders carry the customer's frozen org CHAIN, and every label is composed from it — so the chain must stay current",
     enforced_by: ORG_NAME_TO_ORDERS,
     transaction: "update-organization",
-    trigger: "name change — targets active orders (not complete/canceled)",
+    trigger: "name or re-parent change — targets active orders (not complete/canceled)",
     fields: [
-      { source: ["path"], target: ["organization", "name"] },
+      { source: ["path"], target: ["organization", "path"] },
     ],
   },
   {
@@ -316,12 +322,13 @@ const updateOrganizationRules: CollectionRule[] = [
     source: "organizations",
     target: "invoices",
     mode: "fan-out",
-    invariant: "Active invoices display the org name",
+    // Same move as `update-org:name-to-orders` above, same commits.
+    invariant: "Active invoices carry the customer's frozen org CHAIN, and display a label composed from it",
     enforced_by: ORG_NAME_TO_INVOICES,
     transaction: "update-organization",
-    trigger: "name change — targets active invoices (not paid/void)",
+    trigger: "name or re-parent change — targets active invoices (not paid/void)",
     fields: [
-      { source: ["path"], target: ["organization", "name"] },
+      { source: ["path"], target: ["organization", "path"] },
     ],
   },
   {

@@ -311,23 +311,28 @@ export function buildOrganizationSnapshot(
 ): DocumentOrganizationSnapshotType {
   return {
     uid: org.uid,
-    // ⭐ **The snapshot's `name` is the COMPOSED name, and this is the one place
-    // that decides it** — which is what makes the legacy scalar removable. The
-    // snapshot type's own docstring says so ("the composed `name` beside it"),
-    // and every writer that reaches this builder inherits it: fixing it here
-    // fixed roughly eight api-cloudrun call sites at once.
+    // ⭐ **`name` is NOT emitted any more, and this line's absence is the
+    // migrate third of its removal** (`org-name-is-derived.md` step 3's last
+    // writer). It was the composed name, decided here — which is exactly what
+    // made the scalar removable, and it is also why storage cannot be emptied
+    // while this builder keeps refilling it. The cascade stopped a publish
+    // earlier (api-cloudrun `d06095a3`); this is the create/update half, and it
+    // is the sole author on every order, invoice and CRMS webhook write path.
     //
-    // ⭐ **No fallback any more, and its removal is the point.** It existed only
-    // while `Organization.name` did; `path` is required as of this publish, so
-    // there is exactly one way to name an organization and it is this one. The
-    // compile error the removal produced here is what the fallback was left in
-    // place to raise (api-cloudrun#709).
-    name: composeOrgName(org.path),
-    // ⭐ **The FROZEN chain, and the reason it is stored beside the name it
-    // composes.** `name` above is this same fact flattened to text, which
-    // cannot be grouped on, joined on, or parsed back — see
-    // {@link DocumentOrganizationSnapshotType.path}. Writing it here is what
-    // makes every one of this builder's call sites freeze the chain for free.
+    // ⚠️ **Stopping the writer BEFORE the corpus purge is forced, not tidy.**
+    // Purge first and every subsequent write mints the field straight back —
+    // then the contract step's `z.strictObject` refuses the document it just
+    // wrote. It is the pause lesson below, read from the other side.
+    //
+    // Readers compose `composeOrgName(path)` from the chain below — api,
+    // manager, `letterhead.eta` and `translateForTypesense` all do, so nothing
+    // downstream lost a name when this line went.
+    // ⭐ **The FROZEN chain, and it is now the ONLY thing this builder writes
+    // about who the customer is.** The composed label was this same fact
+    // flattened to text, which cannot be grouped on, joined on, or parsed back
+    // — see {@link DocumentOrganizationSnapshotType.path}. Writing the chain
+    // here is what makes every one of this builder's call sites freeze it for
+    // free.
     //
     // 🔴 **The field was declared, argued for at length, and emitted by NOTHING
     // until this line.** Its backfill was written, applied and deleted in one

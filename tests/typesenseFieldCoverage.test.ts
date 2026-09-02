@@ -953,26 +953,55 @@ Deno.test("document-map companion: the parser finds real keys, and reports a mis
 
 /**
  * Declarations that are non-optional over an optional leaf and MUST stay that
- * way, with the reason. Both are `default_sorting_field`s, and Typesense
- * requires that field to be non-optional — so making them honest is not
- * available; the collection would fail to create.
+ * way, with the reason.
  *
- * ⚠️ Each is therefore a live hazard, not a blessed pattern: the first tag
- * written without a `count` fails to index. The fix is to make `count` REQUIRED
- * on the storage schema (it is maintained by an incremental `± 1` in the
- * products writer and is present on every row today), not to widen this list.
+ * ⚠️ **TWO different reasons live here now, and they discharge differently.**
+ *
+ * The `count` pair are `default_sorting_field`s, and Typesense requires that
+ * field to be non-optional — so making them honest is not available; the
+ * collection would fail to create. Each is therefore a live hazard, not a
+ * blessed pattern: the first tag written without a `count` fails to index. The
+ * fix is to make `count` REQUIRED on the storage schema (it is maintained by an
+ * incremental `± 1` in the products writer and is present on every row today),
+ * not to widen this list.
+ *
+ * The three `organization.name` entries are the opposite — **not a hazard at
+ * all**, because the indexed value is not read from the leaf. They are
+ * TEMPORARY, and the arm below is what deletes them.
  */
 const NON_OPTIONAL_OVER_OPTIONAL_LEAF: Record<string, string> = {
   "tags:count": "`count` is this collection's default_sorting_field, which Typesense requires to be non-optional",
   "tracking-categories:count": "declared int32 for sorting alongside tags; same shape, same constraint",
+
+  // ── The migrate window of `org-name-is-derived.md`, all three discharged by
+  //    the next publish. `translateForTypesense` has COMPOSED this field from
+  //    the document's own frozen `path` since api-cloudrun `af52c9f1`, so the
+  //    indexed value is present unconditionally and no `null` can reach
+  //    Typesense — `path` is required and `composeOrgName` cannot return "".
+  //
+  // 🔴 **The arm's `!leaf` skip is a PROXY for "produced at index time", and
+  // this is the window where the proxy is wrong.** A field that is both derived
+  // AND still resolves against a storage leaf has no home: `DERIVED_FIELDS`
+  // cannot hold it, because its own stale arm fails on an entry whose field
+  // still resolves. The leaf here is a fossil — `.optional()` and written by
+  // nothing — and when it is deleted these three become unresolvable, move into
+  // `DERIVED_FIELDS`, and the stale arm below turns their absence from this map
+  // into a requirement rather than a hope.
+  "orders:organization.name": "composed at index time by translateForTypesense from the frozen path; the storage leaf is a fossil being removed",
+  "invoices:organization.name": "same — composed from organization.path, never read from the leaf",
+  "credit-notes:organization.name": "same — composed from organization.path, never read from the leaf",
 };
 
-Deno.test("typesense coverage: a non-optional declaration is backed by a non-nullable leaf", async () => {
+/**
+ * Every `<alias>:<field>` that IS non-optional over a nullable/optional leaf,
+ * before any exemption is applied — the raw finding both arms below read.
+ */
+async function nonOptionalOverOptionalLeaf(): Promise<{ keys: Map<string, string>; checked: number }> {
   const { typesenseSchemas } = await import("../src/schemas/typesense/mod.ts");
   const { schemas } = await import("../src/schemas/mod.ts");
   const { resolveZodField } = await import("../src/schemas/zod-walk.ts");
 
-  const offenders: string[] = [];
+  const keys = new Map<string, string>();
   let checked = 0;
   for (const [alias, cfg] of Object.entries(typesenseSchemas)) {
     const doc = (schemas as Record<string, unknown>)[cfg.firestoreCollection];
@@ -990,11 +1019,17 @@ Deno.test("typesense coverage: a non-optional declaration is backed by a non-nul
         n = n._zod.def.innerType;
       }
       if (!wrappers.some((w) => w === "nullable" || w === "optional")) continue;
-      const key = `${alias}:${f.name}`;
-      if (key in NON_OPTIONAL_OVER_OPTIONAL_LEAF) continue;
-      offenders.push(`${key}  (leaf is ${wrappers.join(" > ")})`);
+      keys.set(`${alias}:${f.name}`, wrappers.join(" > "));
     }
   }
+  return { keys, checked };
+}
+
+Deno.test("typesense coverage: a non-optional declaration is backed by a non-nullable leaf", async () => {
+  const { keys, checked } = await nonOptionalOverOptionalLeaf();
+  const offenders = [...keys]
+    .filter(([key]) => !(key in NON_OPTIONAL_OVER_OPTIONAL_LEAF))
+    .map(([key, wrappers]) => `${key}  (leaf is ${wrappers})`);
 
   // Non-vacuity: the walk must actually reach a meaningful number of
   // declarations, or a resolver change would make this pass over nothing.
@@ -1008,6 +1043,33 @@ Deno.test("typesense coverage: a non-optional declaration is backed by a non-nul
       "its sync fails permanently — invisibly, until the first document without the " +
       "value arrives.\n\nFix by adding `optional: true` to the declaration, or by making " +
       "the storage field required.\n\n" + offenders.join("\n"),
+  );
+});
+
+Deno.test("typesense coverage: no stale NON_OPTIONAL_OVER_OPTIONAL_LEAF entry", async () => {
+  // ⭐ **The exemption list had no stale arm, and three TEMPORARY entries are
+  // what made that a problem worth fixing rather than noting.** An exemption
+  // whose reason has expired reads as a decision when it is a leftover — the
+  // same rule `STORED_ORG_NAME_ALLOWED` (api-cloudrun) states by pairing every
+  // entry with the condition that discharges it. Here the discharge is
+  // mechanical: the moment `DocumentOrganizationSnapshot.name` is deleted, the
+  // three `organization.name` keys stop resolving, stop being offenders, and
+  // this arm goes red until they are removed from the map above.
+  //
+  // ⚠️ It is deliberately NOT "the entry names a field that still exists" — a
+  // declaration turning `optional: true`, or a leaf becoming required, expires
+  // the exemption just as completely, and neither is visible to a name check.
+  const { keys, checked } = await nonOptionalOverOptionalLeaf();
+  assert(checked > 100, `only ${checked} non-optional declarations resolved — the walk stopped reaching the configs`);
+
+  const stale = Object.keys(NON_OPTIONAL_OVER_OPTIONAL_LEAF).filter((k) => !keys.has(k)).sort();
+  assertEquals(
+    stale,
+    [],
+    "These NON_OPTIONAL_OVER_OPTIONAL_LEAF entries no longer describe a field that " +
+      "needs one — the declaration is optional now, or the storage leaf is required, " +
+      "or the field no longer resolves at all (in which case it belongs in " +
+      "DERIVED_FIELDS). Delete them.\n" + stale.join("\n"),
   );
 });
 
