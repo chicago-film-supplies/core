@@ -194,6 +194,47 @@ Deno.test("tree invariant 3 — derived_from and the leaf's own `derived` are ON
   );
 });
 
+Deno.test("tree invariant 10 — a DERIVED placeholder states no billing address", () => {
+  // api-cloudrun#777: organization states, project overrides, department
+  // inherits. A `(default)` node is CFS-native structure nobody authored, so an
+  // address on it is an answer no operator chose.
+  const derivedProject = { uid: SELF_ID, name: "(default)", derived: true };
+  const placeholder = (overrides: Record<string, unknown> = {}) =>
+    validOrganization({
+      path: [treeRoot, derivedProject],
+      query_by_path: [ROOT_ID, SELF_ID],
+      derived_from: { source_uid: ROOT_ID, reason: "minted-project" },
+      uid_department_type: null,
+      ...overrides,
+    });
+
+  // The positive: this is exactly what `createOrganization` mints today, and it
+  // must keep parsing — a guard that also rejects the live writer is a rollback.
+  assertEquals(
+    OrganizationSchema.safeParse(placeholder()).success,
+    true,
+    JSON.stringify(OrganizationSchema.safeParse(placeholder()).error?.issues),
+  );
+
+  // The negative, which is what `updateOrganization` would otherwise accept.
+  assertEquals(
+    OrganizationSchema.safeParse(placeholder({
+      billing_address: { full: "5808 W Sunset Blvd, Los Angeles, CA, 90028, United States" },
+    })).success,
+    false,
+  );
+
+  // ⚠️ The control that stops this over-reaching. Only a DERIVED node is
+  // constrained — every operator-named level may still state an address, which
+  // is the other half of #777's rule and the state 285 of 315 prod nodes are in.
+  assertEquals(
+    OrganizationSchema.safeParse(validTreeOrganization({
+      billing_address: { full: "2558 W 16th St, Chicago, IL, 60608, United States" },
+    })).success,
+    true,
+  );
+});
+
 Deno.test("tree invariant 4 — query_by_path IS path.map(n => n.uid), order included", () => {
   assertEquals(
     OrganizationSchema.safeParse(validTreeOrganization({ query_by_path: [ROOT_ID, PROJECT_ID] })).success,

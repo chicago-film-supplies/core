@@ -325,6 +325,33 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
       });
     }
   }
+
+  // 10. a derived placeholder states no billing address.
+  //
+  //     🔴 **The one-document half of api-cloudrun#777's rule** — organization
+  //     states, project overrides, department inherits. A `(default)` node is
+  //     CFS-native structure that no operator created, so an address on it is an
+  //     answer nobody chose, and the resolver that rule calls for is meant to
+  //     walk straight past it to the root.
+  //
+  //     ⚠️ **`createOrganization` already writes `billing_address: null` on every
+  //     node it mints, and that is NOT the same statement.** The mint is not the
+  //     only writer: `updateOrganization` accepts a `billing_address` for any
+  //     uid, and manager's `OrganizationDetail` renders its Billing section with
+  //     no level and no `derived` gate — only `OrgTree`'s list filter keeps an
+  //     operator off a placeholder, which makes it authorable by URL. A writer
+  //     that happens not to do the wrong thing is not an invariant.
+  //
+  //     ⚠️ Numbered 10 because 9 is the corpus-only shared-`xero_id` arm in
+  //     `api-cloudrun/scripts/audit-organization-tree.ts` — a different
+  //     namespace, but the same table in the `organization-tree` skill.
+  if (doc.billing_address != null && path.length > 0 && path[path.length - 1].derived) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["billing_address"],
+      message: "a derived placeholder states no business fact — billing_address must be null when path.at(-1).derived is true",
+    });
+  }
 }
 
 /** Zod schema for a full organization Firestore document. */
