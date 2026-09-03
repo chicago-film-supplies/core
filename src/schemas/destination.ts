@@ -22,7 +22,7 @@ import {
  * cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
  * `product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
  * campaign; removing `name` from it would have changed all four at once.
- * Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md` — see
+ * Population A2 of api-cloudrun#782 — see
  * {@link ContactOrganizationType} for why the edge composes rather than stores,
  * and for the four-step removal this is the last step of.
  *

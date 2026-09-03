@@ -43,7 +43,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // `10.0.0-beta.303`; the second is this change, adding `organizations` to
   // `ALWAYS_ON_UTIL_NAMESPACES` (`src/schemas/template-context.ts`). It is the
   // only way to render a customer name from a frozen chain, which is the
-  // prerequisite for `api-cloudrun/.claude/plans/org-name-is-derived.md`.
+  // prerequisite for api-cloudrun#782.
   //
   // Everything else stays denied, and the namespace being injected is what makes
   // that a real choice rather than a formality — each of these would now work if

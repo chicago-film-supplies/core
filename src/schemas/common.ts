@@ -1698,7 +1698,7 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
   .strictObject({
     uid: FirestoreId.nullable(),
     // `name` was DELETED here — the contract third of its removal
-    // (`api-cloudrun/.claude/plans/org-name-is-derived.md`, api-cloudrun#780).
+    // (api-cloudrun#782, api-cloudrun#780).
     // It was the composed label stored beside the `path` it composes from, so
     // the two could disagree and a rename cascade existed to stop them; every
     // reader in all four repos now calls `composeOrgName(path)`.

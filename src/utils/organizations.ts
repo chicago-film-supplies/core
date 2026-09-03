@@ -312,8 +312,8 @@ export function buildOrganizationSnapshot(
   return {
     uid: org.uid,
     // ⭐ **`name` is NOT emitted any more, and this line's absence is the
-    // migrate third of its removal** (`org-name-is-derived.md` step 3's last
-    // writer). It was the composed name, decided here — which is exactly what
+    // migrate third of its removal** (api-cloudrun#782, the last
+    // writer to stop). It was the composed name, decided here — which is exactly what
     // made the scalar removable, and it is also why storage cannot be emptied
     // while this builder keeps refilling it. The cascade stopped a publish
     // earlier (api-cloudrun `d06095a3`); this is the create/update half, and it

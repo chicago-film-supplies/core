@@ -21,7 +21,7 @@ import {
  * Organization reference embedded in a contact document — **the uid alone**.
  *
  * 🔴 **`name` is OPTIONAL only for the length of the removal, and nothing may
- * read it.** Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md`:
+ * read it.** Population A2 of api-cloudrun#782:
  * a contact's employer is a LIVE fact, not a frozen one, so unlike an order's
  * snapshot this edge stores no `path` either — the label is composed from the
  * organization the uid addresses, every time it is produced. That is what makes

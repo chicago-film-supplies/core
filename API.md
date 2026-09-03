@@ -54,7 +54,7 @@ Keying it to a collection would mean listing it under all of them.
 the point** — see `scripts/template-helper-denylist.ts`, which still denies the
 other seven. `composeOrgName(path)` is the only way to render a customer name
 from a frozen `DocumentOrganizationSnapshot.path`, which is what
-`api-cloudrun/.claude/plans/org-name-is-derived.md` needs before the stored
+api-cloudrun#782 needs before the stored
 `name` beside it can be dropped. The rest of the namespace is write-path
 machinery or returns document IDs.
 
@@ -1516,7 +1516,7 @@ const ContactOrganization: z.ZodType<ContactOrganizationType>;
 Organization reference embedded in a contact document — **the uid alone**.
 
 🔴 **`name` is OPTIONAL only for the length of the removal, and nothing may
-read it.** Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md`:
+read it.** Population A2 of api-cloudrun#782:
 a contact's employer is a LIVE fact, not a frozen one, so unlike an order's
 snapshot this edge stores no `path` either — the label is composed from the
 organization the uid addresses, every time it is produced. That is what makes
@@ -2519,7 +2519,7 @@ Organization reference embedded in a destination document — **the uid alone**.
 cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
 `product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
 campaign; removing `name` from it would have changed all four at once.
-Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md` — see
+Population A2 of api-cloudrun#782 — see
 {@link ContactOrganizationType} for why the edge composes rather than stores,
 and for the four-step removal this is the last step of.
 
@@ -12883,7 +12883,7 @@ const ContactOrganization: z.ZodType<ContactOrganizationType>;
 Organization reference embedded in a contact document — **the uid alone**.
 
 🔴 **`name` is OPTIONAL only for the length of the removal, and nothing may
-read it.** Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md`:
+read it.** Population A2 of api-cloudrun#782:
 a contact's employer is a LIVE fact, not a frozen one, so unlike an order's
 snapshot this edge stores no `path` either — the label is composed from the
 organization the uid addresses, every time it is produced. That is what makes
@@ -13025,7 +13025,7 @@ Organization reference embedded in a destination document — **the uid alone**.
 cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
 `product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
 campaign; removing `name` from it would have changed all four at once.
-Population A2 of `api-cloudrun/.claude/plans/org-name-is-derived.md` — see
+Population A2 of api-cloudrun#782 — see
 {@link ContactOrganizationType} for why the edge composes rather than stores,
 and for the four-step removal this is the last step of.
 
@@ -19278,7 +19278,7 @@ Keying it to a collection would mean listing it under all of them.
 the point** — see `scripts/template-helper-denylist.ts`, which still denies the
 other seven. `composeOrgName(path)` is the only way to render a customer name
 from a frozen `DocumentOrganizationSnapshot.path`, which is what
-`api-cloudrun/.claude/plans/org-name-is-derived.md` needs before the stored
+api-cloudrun#782 needs before the stored
 `name` beside it can be dropped. The rest of the namespace is write-path
 machinery or returns document IDs.
 
