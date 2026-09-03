@@ -12,6 +12,7 @@ import {
   orgOwnName,
   orgParentUid,
   orgRootUid,
+  resolveBillingAddress,
   validateOrganizationTree,
 } from "../src/utils/organizations.ts";
 import { DocumentOrganizationSnapshot, type Organization } from "../src/schemas/mod.ts";
@@ -450,4 +451,100 @@ Deno.test("validateOrganizationTree — invariant 6b: department-type uniqueness
 
 Deno.test("validateOrganizationTree returns [] for an un-backfilled node rather than inventing findings", () => {
   assertEquals(validateOrganizationTree({ uid: ROOT_ID, path: undefined, uid_department_type: null } as unknown as Parameters<typeof validateOrganizationTree>[0], null, []), []);
+});
+
+// ── resolveBillingAddress — api-cloudrun#777 ────────────────────────────────
+//
+// Organization states, project overrides, department inherits. `null` on a node
+// means "ask my parent".
+
+const CHICAGO = { full: "2558 W 16th St, Chicago, IL, 60608, United States" } as NonNullable<
+  Organization["billing_address"]
+>;
+const BURBANK = { full: "500 S Buena Vista St, Burbank, CA, 91521, United States" } as NonNullable<
+  Organization["billing_address"]
+>;
+
+/** A department node; `ancestors` is what the caller would have point-got. */
+const dept = (billing: Organization["billing_address"]) => ({
+  uid: DEPT_ID,
+  path: [rootNode, projectNode, deptNode],
+  billing_address: billing,
+});
+
+Deno.test("resolveBillingAddress: a node that states one answers itself", () => {
+  assertEquals(resolveBillingAddress(dept(CHICAGO)), { address: CHICAGO, uid_source: DEPT_ID });
+});
+
+Deno.test("resolveBillingAddress: a department with none inherits its PROJECT's", () => {
+  const ancestors = new Map([
+    [ROOT_ID, { billing_address: BURBANK }],
+    [PROJECT_ID, { billing_address: CHICAGO }],
+  ]);
+  assertEquals(resolveBillingAddress(dept(null), ancestors), {
+    address: CHICAGO,
+    uid_source: PROJECT_ID,
+  });
+});
+
+Deno.test("resolveBillingAddress: NEAREST-first — a project overrides its organization", () => {
+  // 🔴 Root-first would invert the rule. This is the `20th Television` case:
+  // the root states its Burbank corporate address while the production bills at
+  // Cinespace Chicago, so a root-first walk returns the wrong address for every
+  // document under it.
+  const ancestors = new Map([
+    [ROOT_ID, { billing_address: BURBANK }],
+    [PROJECT_ID, { billing_address: CHICAGO }],
+  ]);
+  const { address, uid_source } = resolveBillingAddress(dept(null), ancestors);
+  assertEquals(address, CHICAGO);
+  assertEquals(uid_source, PROJECT_ID);
+  assertEquals(address === BURBANK, false);
+});
+
+Deno.test("resolveBillingAddress: the walk passes THROUGH a null project to the root", () => {
+  // The derived `(default)` case. Invariant 10 makes a placeholder's address
+  // unstorable, so it always presents as `null` here and needs no special case —
+  // the walk reaches the root by construction.
+  const ancestors = new Map([
+    [ROOT_ID, { billing_address: BURBANK }],
+    [PROJECT_ID, { billing_address: null }],
+  ]);
+  assertEquals(resolveBillingAddress(dept(null), ancestors), {
+    address: BURBANK,
+    uid_source: ROOT_ID,
+  });
+});
+
+Deno.test("resolveBillingAddress: nothing in the chain states one → null, and it SAYS so", () => {
+  const ancestors = new Map([
+    [ROOT_ID, { billing_address: null }],
+    [PROJECT_ID, { billing_address: null }],
+  ]);
+  // ⚠️ `uid_source: null` is the signal a caller needs to distinguish "inherited
+  // from nobody" from "inherited from the root" — audit arm 10 is exactly this
+  // condition, and a bare `null` address could not be told from an unresolved read.
+  assertEquals(resolveBillingAddress(dept(null), ancestors), { address: null, uid_source: null });
+});
+
+Deno.test("resolveBillingAddress: a MISSING ancestor states nothing rather than throwing", () => {
+  // A dangling chain is `repair-dangling-organization-refs.ts`'s finding. Throwing
+  // here would take down every order write for the subtree instead of one report.
+  const ancestors = new Map([[ROOT_ID, { billing_address: BURBANK }]]);
+  assertEquals(resolveBillingAddress(dept(null), ancestors), {
+    address: BURBANK,
+    uid_source: ROOT_ID,
+  });
+  assertEquals(resolveBillingAddress(dept(null), new Map()), { address: null, uid_source: null });
+});
+
+Deno.test("resolveBillingAddress: the LEAF is read from the node, never from the map", () => {
+  // A caller holds the node it is writing; making it also put that node in
+  // `ancestors` would mean a caller who forgot silently inherits past a node
+  // that states its own address — a wrong bill-to, not an error.
+  const ancestors = new Map([[ROOT_ID, { billing_address: BURBANK }]]);
+  assertEquals(resolveBillingAddress(dept(CHICAGO), ancestors), {
+    address: CHICAGO,
+    uid_source: DEPT_ID,
+  });
 });

@@ -12545,6 +12545,12 @@
           "doc": "The default separator between composed name segments.\n\n⚠️ **This is the ONLY place a delimiter exists, and it is never stored.** The\nv1 corpus proves a parse is hopeless — four conventions in live use, unstable\nsegment ORDER, a double space before one slash (`Leading Edge Media  / Queen`),\ncommas inside segments (`Twentieth Television: Insight, UKOP`), and production\ntitles that will contain colons. **Nothing anywhere splits a string to recover\nthe hierarchy**; `path` is the structure and this is a rendering choice."
         },
         {
+          "kind": "interface",
+          "name": "ResolvedBillingAddress",
+          "declaration": "interface ResolvedBillingAddress {\n  address: AddressType | null;\n  uid_source: string | null;\n}",
+          "doc": "What {@link resolveBillingAddress} answers."
+        },
+        {
           "kind": "function",
           "name": "buildOrganizationSnapshot",
           "signature": "buildOrganizationSnapshot(org: Pick<Organization, \"uid\" | \"path\" | \"crms_id\" | \"jurisdiction_claim\" | \"tax_exempt\" | \"xero_id\" | \"billing_address\">, _: unknown): DocumentOrganizationSnapshotType",
@@ -12597,6 +12603,14 @@
           "name": "orgRootUid",
           "signature": "orgRootUid(node: Pick<Organization, \"path\">): string | null",
           "doc": "The root of this node's tree — `path[0].uid`. `null` before the backfill.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "resolveBillingAddress",
+          "signature": "resolveBillingAddress(node: Pick<Organization, \"uid\" | \"path\" | \"billing_address\">, _: unknown): ResolvedBillingAddress",
+          "doc": "The billing address a document addressed to `node` should freeze.\n\n**The rule (api-cloudrun#777): an organization states a billing address, a\nproject may override it, a department inherits.** `null` on a node means\n*\"not set — ask my parent\"*, so this walks the chain LEAF-FIRST and returns\nthe nearest node that states one.\n\n🔴 **Nearest-first is what makes an override an override.** Root-first would\nmake the organization's address win over the project's, which inverts the\nrule — and the corpus proves it matters: `20th Television` states its\nBurbank corporate address while its production bills at Cinespace Chicago.\n\n⭐ **A derived `(default)` placeholder needs no special case here.** Invariant\n10 in `OrganizationSchema` makes its `billing_address` unstorable, so the walk\npasses through it to the root by construction rather than by a filter that\ncould drift from the schema. That is the whole return on stating the\ninvariant rather than policing it.\n\n⚠️ **`ancestors` may be incomplete, and a missing one states nothing rather\nthan throwing.** A chain naming a node that no longer exists is a dangling\nreference — `api-cloudrun/scripts/repair-dangling-organization-refs.ts`'s\nfinding, not this function's — and turning it into an exception here would\ntake down every order write for the whole subtree instead of one report.\n\n⚠️ **Reads `node.path`, never a re-fetched chain.** `path` is self-inclusive\nand is the authority on ancestry (invariants 1 and 5), so the caller only has\nto supply the ANCESTOR documents — at most two point-gets, and usually one,\nbecause a department that inherits stops at its project.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -61,6 +61,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   //   - `orgLevel` / `orgOwnName` answer questions about a node's POSITION.
   //     A document names its customer; it does not report where that customer
   //     sits in CFS's internal tree.
+  //   - `resolveBillingAddress` walks the tree for the address a document
+  //     should FREEZE (api-cloudrun#777: org states, project overrides,
+  //     department inherits). Write-path for the same reason as
+  //     `buildOrganizationSnapshot`, and doubly unreachable from a template: it
+  //     takes an ANCESTORS map, which a render context cannot build because it
+  //     holds one frozen snapshot and no way to read Firestore. A template that
+  //     wants the billing address reads `it.doc.organization.billing_address` —
+  //     already this function's output, resolved at write time.
   organizations: [
     "buildOrganizationSnapshot",
     "computeOrganizationNode",
@@ -68,6 +76,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "orgOwnName",
     "orgParentUid",
     "orgRootUid",
+    "resolveBillingAddress",
     "validateOrganizationTree",
   ],
   // Stock primitives — the interval rules and the two consumption definitions.

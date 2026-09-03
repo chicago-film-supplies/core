@@ -26443,6 +26443,17 @@ the hierarchy**; `path` is the structure and this is a rendering choice.
 const ORG_NAME_DELIMITER: " / ";
 ```
 
+### `ResolvedBillingAddress`
+
+What {@link resolveBillingAddress} answers.
+
+```ts
+interface ResolvedBillingAddress {
+  address: AddressType | null;
+  uid_source: string | null;
+}
+```
+
 ### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "path" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
 
 Build the denormalized organization snapshot an order, invoice or credit note
@@ -26565,6 +26576,37 @@ first when the difference matters.
 ### `orgRootUid(node: Pick<Organization, "path">): string | null`
 
 The root of this node's tree — `path[0].uid`. `null` before the backfill.
+
+### `resolveBillingAddress(node: Pick<Organization, "uid" | "path" | "billing_address">, _: unknown): ResolvedBillingAddress`
+
+The billing address a document addressed to `node` should freeze.
+
+**The rule (api-cloudrun#777): an organization states a billing address, a
+project may override it, a department inherits.** `null` on a node means
+*"not set — ask my parent"*, so this walks the chain LEAF-FIRST and returns
+the nearest node that states one.
+
+🔴 **Nearest-first is what makes an override an override.** Root-first would
+make the organization's address win over the project's, which inverts the
+rule — and the corpus proves it matters: `20th Television` states its
+Burbank corporate address while its production bills at Cinespace Chicago.
+
+⭐ **A derived `(default)` placeholder needs no special case here.** Invariant
+10 in `OrganizationSchema` makes its `billing_address` unstorable, so the walk
+passes through it to the root by construction rather than by a filter that
+could drift from the schema. That is the whole return on stating the
+invariant rather than policing it.
+
+⚠️ **`ancestors` may be incomplete, and a missing one states nothing rather
+than throwing.** A chain naming a node that no longer exists is a dangling
+reference — `api-cloudrun/scripts/repair-dangling-organization-refs.ts`'s
+finding, not this function's — and turning it into an exception here would
+take down every order write for the whole subtree instead of one report.
+
+⚠️ **Reads `node.path`, never a re-fetched chain.** `path` is self-inclusive
+and is the authority on ancestry (invariants 1 and 5), so the caller only has
+to supply the ANCESTOR documents — at most two point-gets, and usually one,
+because a department that inherits stops at its project.
 
 ### `validateOrganizationTree(node: Pick<Organization, "uid" | "path" | "uid_department_type">, parent: Pick<Organization, "uid" | "path"> | null, siblings: readonly Pick<Organization, "uid" | "path" | "uid_department_type">[]): string[]`
 

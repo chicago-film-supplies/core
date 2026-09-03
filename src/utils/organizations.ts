@@ -5,6 +5,7 @@
  */
 
 import {
+  type AddressType,
   type DocumentOrganizationSnapshotType,
   ORG_LEVELS,
   type OrgLevel,
@@ -349,4 +350,67 @@ export function buildOrganizationSnapshot(
     billing_address: org.billing_address || null,
     ...overrides,
   };
+}
+
+/** What {@link resolveBillingAddress} answers. */
+export interface ResolvedBillingAddress {
+  /** The address to bill to — `null` when no node in the chain states one. */
+  address: AddressType | null;
+  /**
+   * The uid of the node that STATED it, `null` when nothing did.
+   *
+   * ⭐ Returned so a caller can say WHERE the answer came from. The manager
+   * renders it as *"Inherited from &lt;name&gt;"*, and the order page's
+   * billing editor targets this node rather than the one the document names —
+   * without it, an operator editing an inherited address would silently create
+   * an override at the wrong level, which is the mistake the whole rule exists
+   * to prevent.
+   */
+  uid_source: string | null;
+}
+
+/**
+ * The billing address a document addressed to `node` should freeze.
+ *
+ * **The rule (api-cloudrun#777): an organization states a billing address, a
+ * project may override it, a department inherits.** `null` on a node means
+ * *"not set — ask my parent"*, so this walks the chain LEAF-FIRST and returns
+ * the nearest node that states one.
+ *
+ * 🔴 **Nearest-first is what makes an override an override.** Root-first would
+ * make the organization's address win over the project's, which inverts the
+ * rule — and the corpus proves it matters: `20th Television` states its
+ * Burbank corporate address while its production bills at Cinespace Chicago.
+ *
+ * ⭐ **A derived `(default)` placeholder needs no special case here.** Invariant
+ * 10 in `OrganizationSchema` makes its `billing_address` unstorable, so the walk
+ * passes through it to the root by construction rather than by a filter that
+ * could drift from the schema. That is the whole return on stating the
+ * invariant rather than policing it.
+ *
+ * ⚠️ **`ancestors` may be incomplete, and a missing one states nothing rather
+ * than throwing.** A chain naming a node that no longer exists is a dangling
+ * reference — `api-cloudrun/scripts/repair-dangling-organization-refs.ts`'s
+ * finding, not this function's — and turning it into an exception here would
+ * take down every order write for the whole subtree instead of one report.
+ *
+ * ⚠️ **Reads `node.path`, never a re-fetched chain.** `path` is self-inclusive
+ * and is the authority on ancestry (invariants 1 and 5), so the caller only has
+ * to supply the ANCESTOR documents — at most two point-gets, and usually one,
+ * because a department that inherits stops at its project.
+ */
+export function resolveBillingAddress(
+  node: Pick<Organization, "uid" | "path" | "billing_address">,
+  ancestors: ReadonlyMap<string, Pick<Organization, "billing_address">> = new Map(),
+): ResolvedBillingAddress {
+  const path = node.path ?? [];
+  for (let i = path.length - 1; i >= 0; i--) {
+    const uid = path[i].uid;
+    // The leaf is the node itself — reading it from `ancestors` would make the
+    // caller supply the document it already holds, and a caller that forgot
+    // would silently inherit past a node that states its own address.
+    const stated = uid === node.uid ? node.billing_address : ancestors.get(uid)?.billing_address;
+    if (stated != null) return { address: stated, uid_source: uid };
+  }
+  return { address: null, uid_source: null };
 }
