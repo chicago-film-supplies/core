@@ -209,6 +209,7 @@ export type RuleId =
   // organizations.ts
   | "create-org:org-to-contacts"
   | "create-org:node-to-tree"
+  | "create-org:mint-derived-project"
   | "update-department-type:name-to-departments"
   | "update-org:name-to-orders"
   | "update-org:billing-to-orders"

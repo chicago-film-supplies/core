@@ -160,6 +160,15 @@ const ORG_NODE_TO_TREE: EnforcementRef = {
   gates: true,
 };
 
+const ORG_MINT_DERIVED_PROJECT: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizations.test.ts::POST - a department naming an ORGANIZATION mints the derived (default) project between them",
+  clause:
+    "the mint on the first department, the REUSE on the second (asserted as a count of the parent's derived children, which is the only thing that separates reuse from a silent duplicate — invariant 6 would refuse neither), and that a department created under a PROJECT mints nothing. The minted node's `crms_id`/`xero_id` are asserted null against the mocked CRMS/Xero, which is what proves it did not recurse through the create path. ⚠️ No corpus detector: `scripts/audit-organization-tree.ts` arm 0 would catch a MALFORMED mint but cannot see a missing one, since a department that was never created leaves nothing behind. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
 const ORG_NAME_TO_DESCENDANTS_TEST: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
@@ -227,13 +236,35 @@ const createOrganizationRules: CollectionRule[] = [
     target: "organizations",
     mode: "co-write",
     invariant:
-      "A node's `path` is `[...its RESOLVED parent's path, itself]` — derived from the parent that EXISTS, never from a chain the client sent, so a chain that skips, misnames or over-claims an intermediate cannot survive a write. A create with no `uid_parent` is a root. ⚠️ **The API never MINTS an ancestor**, which is why this rule is not called `mint-ancestors`: a create names a parent that already exists or it is a root, and the only writer that invents a node is api-cloudrun's one-shot tree migration script (`scripts/migrate-organization-tree.ts` — not yet written), which logs no propagation and makes no CRMS or Xero call. A rule id no writer fires is a claim the coverage ratchet correctly refuses.",
+      "A node's `path` is `[...its RESOLVED parent's path, itself]` — derived from the parent that EXISTS, never from a chain the client sent, so a chain that skips, misnames or over-claims an intermediate cannot survive a write. A create with no `uid_parent` is a root. ⚠️ **This rule covers THE NODE BEING CREATED and nothing else.** It once carried a second claim — that the API never mints an ancestor, the only inventor being a one-shot migration script — and both halves of that expired: the script was written, run and deleted, and the live create path now mints a derived `(default)` project when a department names a depth-1 parent. That mint is `create-org:mint-derived-project`, deliberately its OWN id rather than folded in here, because it writes a DIFFERENT document — an ancestor, which is neither this node nor a descendant — and because `path → path` below would otherwise mean two documents at once.",
     enforced_by: [ORG_NODE_TO_TREE],
     transaction: "create-organization",
     fields: [
       { source: ["path"], target: ["path"] },
       { source: ["path"], target: ["query_by_path"] },
+      // ⚠️ **This mapping describes a MINTED node, and it is the one field here
+      // that this rule does not author on an ordinary create.** It is left in
+      // place because `create-org:mint-derived-project` writes the node whose
+      // `derived_from.source_uid` this is, and the two rules co-write one tree
+      // in one transaction — see that rule for who sets it.
       { source: ["uid"], target: ["derived_from", "source_uid"] },
+    ],
+  },
+  {
+    id: "create-org:mint-derived-project",
+    source: "organizations",
+    target: "organizations",
+    mode: "co-write",
+    invariant:
+      "A DEPARTMENT may name an ORGANIZATION as its parent, and the server supplies the project level in between. Invariant 8 is a biconditional — a non-derived depth-3 node must name a `department-types` entry and nothing shallower may — so a department needs a project above it; requiring the operator to invent one first is two documents and two round trips through a blank form. So when `uid_department_type` is set and the resolved parent is at depth 1, this REUSES the parent's existing derived project or MINTS one: `name: \"(default)\"`, `derived: true`, `derived_from: { source_uid: <the new department>, reason: \"minted-project\" }`. `composeOrgName` drops a derived segment, so the label reads `Waterloo West Productions LLC / Grip` and no `(default)` reaches an invoice, a Xero contact or a picker. ⚠️ **REUSE-FIRST is load-bearing, not an optimisation**: invariant 6 scopes sibling-name uniqueness to NON-derived siblings, so a second `(default)` would not be refused — it would silently coexist. 🔴 **The mint must NOT recurse through the create path**: that POSTs a live CRMS member and creates a live Xero contact, and a derived ancestor carries `crms_id: null` / `xero_id: null` by construction. It is written as a plain document in the same transaction, the way the retired migration did, with its own co-written thread.",
+    enforced_by: [ORG_MINT_DERIVED_PROJECT],
+    transaction: "create-organization",
+    trigger: "a create carrying `uid_department_type` whose resolved parent is at depth 1",
+    fields: [
+      { source: ["path"], target: ["path"] },
+      { source: ["path"], target: ["query_by_path"] },
+      { source: ["uid"], target: ["derived_from", "source_uid"] },
+      { source: ["uid"], target: ["derived_from", "reason"] },
     ],
   },
 ];
@@ -245,6 +276,11 @@ const createOrganizationTransaction: TransactionDefinition = {
   steps: [
     "create-org:org-to-contacts",
     "create-org:node-to-tree",
+    // ⚠️ Conditional — it fires only for a department naming a depth-1 parent.
+    // `propagationCoverage` resolves a step from the `rules_fired` binding at the
+    // call site and follows a `push`, so a conditional arm satisfies it exactly
+    // as `create-org:org-to-contacts` already does.
+    "create-org:mint-derived-project",
     "cowrite-thread:organizations-to-thread",
     "cowrite-thread:thread-to-organizations",
   ],
@@ -415,7 +451,13 @@ const updateOrganizationRules: CollectionRule[] = [
       {
         source: [],
         target: ["organizations"],
-        transform: "contacts added → add org ref {uid, name}",
+        // ⭐ **`{uid}`, not `{uid, name}`** (api-cloudrun#782, core `72a7820`).
+        // The edge's `name` was DELETED from `ContactSchema`, which is a
+        // `z.strictObject` — so this line did not merely describe a field that
+        // had stopped being maintained, it described a write the schema now
+        // REFUSES. The label is composed from the organization wherever it is
+        // produced; the edge carries the addressed uid alone.
+        transform: "contacts added → add org ref {uid}",
       },
       {
         source: [],
@@ -457,7 +499,7 @@ const reparentRules: CollectionRule[] = [
     target: "organizations",
     mode: "fan-out",
     invariant:
-      "Re-parenting a node rewrites `path` and `query_by_path` on the node and its whole subtree, recomputed through `computeOrganizationNode` rather than patched. ⚠️ Stored copies of the tree on OTHER collections are NOT rewritten: an edge stores the addressed node's uid only, and a document snapshot's `path` is frozen at write time deliberately — a re-parent must not rewrite history on an issued document.",
+      "Re-parenting a node rewrites `path` and `query_by_path` on the node and its whole subtree, recomputed through `computeOrganizationNode` rather than patched. ⚠️ **An EDGE is still not rewritten — but a document SNAPSHOT now is** (api-cloudrun#767). `contacts.organizations[]` and `destinations.organizations[]` store the addressed node's uid alone, so a move has nothing to push at them. An order and an invoice store the CHAIN, and a move is precisely what replaces every ancestor above the node's own segment — so this transaction also fires `update-org:name-to-orders` / `-to-invoices` down the whole moved subtree. 🔴 **\"Frozen at write time\" survives and is what bounds it**: the freeze is a property of the DOCUMENT'S LIFECYCLE, not of the field, so the cascade is scoped to non-terminal orders and unsettled invoices and an ISSUED document is still never rewritten by a move.",
     enforced_by: [ORG_REPARENT_TO_DESCENDANTS],
     transaction: "reparent-organization",
     fields: [
@@ -476,6 +518,15 @@ const reparentOrganizationTransaction: TransactionDefinition = {
     "update-org:name-to-descendants",
     "update-org:name-to-orders",
     "update-org:name-to-invoices",
+    // ⚠️ **Added because they now FIRE, not to widen the declaration**
+    // (api-cloudrun#789). A booking and a fulfillment copy their order's chain,
+    // and `syncOrderDerivedOrganization`'s invariant is that a child holding its
+    // order's chain cannot disagree with it — so once a move rewrites an order's
+    // chain, it must run. They shipped firing under this transaction while
+    // declared only on `update-organization`; nothing checks fired-⊄-declared, so
+    // this is the declaration catching up.
+    "update-org:name-to-bookings",
+    "update-org:name-to-fulfillments",
   ],
 };
 
