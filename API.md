@@ -7894,8 +7894,21 @@ a STORED change across every `templates` document, every
 `templates/<git_path>.meta.json` sidecar and the manager, which buys nothing
 this docstring does not.
 
+🔴 **`pick-sheets` is the SECOND source with no Firestore collection**, and it
+is the first whose document spans MANY stored documents rather than folding
+one. A multi-order packing list renders every open line at one destination or
+with one organization, across orders (`schemas/pick-sheet.ts`), built by
+api-cloudrun's `services/pickSheets.ts`. Same test as `movement-sessions`
+above: a source needs a *schema*, not a path.
+
+⚠️ **A `PickSheet` is PAGED and a printed document must not be.** `orders` is
+one page; `order_count` and `quantity` describe the whole scope. The caller
+that assembles the `doc` must walk every page before rendering — a short
+document is indistinguishable from a small one once a template is running.
+See `utils/pick-sheets.ts`.
+
 ```ts
-const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions"[];
+const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions" | "pick-sheets"[];
 ```
 
 ### `TEMPLATE_SURFACES`
@@ -19086,8 +19099,21 @@ a STORED change across every `templates` document, every
 `templates/<git_path>.meta.json` sidecar and the manager, which buys nothing
 this docstring does not.
 
+🔴 **`pick-sheets` is the SECOND source with no Firestore collection**, and it
+is the first whose document spans MANY stored documents rather than folding
+one. A multi-order packing list renders every open line at one destination or
+with one organization, across orders (`schemas/pick-sheet.ts`), built by
+api-cloudrun's `services/pickSheets.ts`. Same test as `movement-sessions`
+above: a source needs a *schema*, not a path.
+
+⚠️ **A `PickSheet` is PAGED and a printed document must not be.** `orders` is
+one page; `order_count` and `quantity` describe the whole scope. The caller
+that assembles the `doc` must walk every page before rendering — a short
+document is indistinguishable from a small one once a template is running.
+See `utils/pick-sheets.ts`.
+
 ```ts
-const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions"[];
+const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions" | "pick-sheets"[];
 ```
 
 ### `TEMPLATE_SURFACES`
@@ -26772,6 +26798,286 @@ Total units across a set of rows.
 Sums `quantity`, the movement's own count, and **not** the absolute value of
 its lines: a row that moves units between two places carries one quantity and
 two line sides, so summing lines would double it.
+
+## `@cfs/core/utils/pickSheets`
+
+Pure helpers over a PICK SHEET — the document a multi-order packing list
+renders.
+
+```ts
+import { buildPackingList } from "@cfs/core/utils/pickSheets";
+```
+
+A pick sheet is every open line at one destination, or with one organization,
+**across orders** (`schemas/pick-sheet.ts`). This namespace is what
+`it.pickSheets` resolves to for a `pick-sheets`-sourced template.
+
+⚠️ **This entrypoint is camelCase where every sibling is kebab, and it is
+forced rather than a style choice.** The generated helper catalogue keys on
+the entrypoint BASENAME, while injection keys on the
+{@link TEMPLATE_COLLECTION_UTILS} value, which must be a valid `it.<ns>`
+identifier. Those two coincide for every existing namespace only because none
+was ever multi-word — `movement-sessions` maps to the single word `sessions`.
+`pick-sheets` is the first that is, and `it.pick-sheets` does not parse, so a
+kebab entrypoint would satisfy one guard and fail the other. Renaming the
+FILE is what keeps both true with no third mapping to drift.
+
+## Why this namespace exists
+
+A template's `it.*` namespaces are resolved from its collections
+(`availableUtilNamespaces`), so a pick-sheets-sourced family gets
+`it.pickSheets` and **no `it.orders`**. Without this module it would get no
+document helpers at all.
+
+⚠️ **Re-exports, never reimplementations** — the same rule
+`utils/fulfillments.ts` states. Mapping `pick-sheets` to the string
+`"orders"` in `TEMPLATE_COLLECTION_UTILS` would put `it.orders` on a document
+that is not an order, and a hand-written copy would drift;
+`tests/template-helpers.test.ts` asserts these are the SAME function objects
+as the orders bindings, so a copy fails rather than diverges.
+
+## What is deliberately NOT here
+
+⭐ **No quantity helper, because the fold already answered it.** The obvious
+candidate was one resolving a line to its booking's units, since
+{@link PickSheetItem.uid_booking} legitimately repeats across lines — a
+booking is aggregate per `(order, product, destination)`, so a priced
+principal beside its zero-priced accessories, a `splitItem`, or a product
+appearing both standalone and as a kit component all name the same booking.
+Summing it per line is N× wrong.
+
+But a template never needs to: {@link PickSheetDestination.quantity} is that
+leg's total and {@link PickSheetDestination.breakdown} its seven buckets, both
+computed once in the fold over the whole membership slice. **Shipping a helper
+for a question the document already answers is the dead helper-panel surface
+`TEMPLATE_HELPER_DENYLIST` exists to prevent** — and worse here, it would
+offer a template the one arithmetic that has a wrong obvious form. Read the
+section total; do not re-derive it.
+
+## 🔴 The hazard a caller must handle — this document is PAGED
+
+{@link PickSheet.orders} is *the orders on THIS PAGE*; `order_count`,
+`destination_count`, `quantity` and `organizations` describe the whole SCOPE.
+That split is right for a screen and is a trap for a printed document: a
+packing list rendered from a default page is **silently short**, showing a
+page of orders under a scope-wide total that disagrees with them.
+
+⚠️ **So a render caller must assemble every page before it renders, and must
+not paper over it by rendering the counts alone.** Nothing in this namespace
+can enforce that — by the time a template runs, a short document is
+indistinguishable from a small one. It belongs to whatever builds the `doc`,
+which is the same place `PickSheet.missing_order_uids` has to be surfaced
+rather than dropped.
+
+### `ConsolidatedItem`
+
+```ts
+type ConsolidatedItem = ConsolidatedItemType;
+```
+
+### `DestinationGroup`
+
+A destination section with its delivery/collection UIDs and child items.
+
+```ts
+interface DestinationGroup {
+  uid: string | null;
+  uid_delivery: string;
+  uid_collection: string;
+  items: LineItem[];
+  packing_list_delivery: LineItem[];
+  packing_list_collection: LineItem[];
+}
+```
+
+### `GroupPath`
+
+```ts
+type GroupPath = GroupPathType;
+```
+
+### `LineItem`
+
+A single item in an order/invoice/fulfillment array — product, divider,
+surcharge or fee.
+
+A structural supertype, not a shadow of the real unions. Every member of
+`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is
+assignable to it, so a caller holding real doc items passes them straight in
+and the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand
+back the caller's own type. It exists because the manager also calls these
+helpers on STAGED, mid-edit items that are not yet valid doc items — narrowing
+the helpers to the doc unions would force those callers back into casts.
+
+`type` is `ItemTypeType`, NOT `string`. That is the difference between a
+supertype and a hole: the pricing and billability predicates all resolve
+through `ITEM_CONTRACTS`, and a `string` here made "a type with no contract" a
+reachable state for every one of them. The runtime guards still handle it —
+these items come off Firestore documents — but no caller can construct it.
+
+Member-specific fields are still reached through the type guards
+(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`).
+
+```ts
+interface LineItem {
+  uid: string;
+  name: string;
+  type: ItemTypeType;
+  quantity?: number;
+  price?: PriceObject;
+  stock_method?: string;
+  path: string[];
+  zero_priced?: boolean | null;
+  description?: string;
+  order_number?: number;
+  uid_order?: string | null;
+  coa_revenue?: COARevenueType | null;
+  taxed_as?: TaxedAsType | null;
+}
+```
+
+### `PackingListItem`
+
+An expanded packing list entry preserving group context.
+
+```ts
+interface PackingListItem {
+  uid: string;
+  name: string;
+  type: string;
+  quantity: number;
+  stock_method: string;
+  group_name: string | null;
+}
+```
+
+### `StructuralItem`
+
+The item surface the structural/path helpers read: identity, type, and path.
+
+Narrower than {@link LineItem} deliberately — these helpers never look at
+`name`, `price` or `quantity`, and callers legitimately hold items that have
+none of them yet (api-cloudrun's CRMS `ItemLike` is exactly this shape). Typing
+them at `LineItem` is what forced `as unknown as LineItem[]` at those sites.
+
+```ts
+interface StructuralItem {
+  uid: string;
+  type: ItemTypeType;
+  path?: string[];
+}
+```
+
+### `buildPackingList(items: LineItem[], consolidated?: boolean, destinationDividerUid?: string): PackingListItem[] | ConsolidatedItem[]`
+
+Build a packing list from order line items.
+
+When `consolidated` is true, deduplicates by product UID and sums quantities
+(delegates to {@link consolidateItems}). When false (default), returns
+expanded entries with `group_name` preserved.
+
+Pass `destinationDividerUid` to scope to a single destination section; omit
+for the full order.
+
+⚠️ **That parameter is the DIVIDER's uid, and it used to be a
+`destinations/{uid}` endpoint id** — matched against the divider's
+`uid_delivery` *or* its `uid_collection`, so a document whose delivery and
+collection legs differ was reachable under two different values and two
+sections delivering to one address were **both** returned as one list. The
+divider's uid is the section's identity and matches exactly one section.
+(No caller passed the old argument: the parameter is reached only through the
+`it.orders.buildPackingList` template helper, and no template calls it —
+measured across the `templates` repo, 2026-08-25.)
+
+Excludes structural rows, surcharges, transaction fees, and services.
+
+### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
+
+Deduplicate line items by product UID and sum quantities.
+
+## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`
+
+`total_price` is the authoritative figure — it is a sum of line totals, and
+summing money is exact. `unit_price` is derived from it by a division that
+usually has a remainder, so the two are related by *rounding*, not by
+multiplication: 3 units totalling $100 give `unit_price` $33.33, and
+`33.33 × 3` is $99.99.
+
+**That is correct, and it is written down here because it does not look
+correct.** The field exists so `bookings` can be queried as a flat per-line
+fact table — sortable, filterable, "show me every line over $500/unit" — and
+for that a single representative per-unit figure is exactly right. It is
+never summed and never reconciled against; anything that multiplies it back
+to recover a total should read `total_price_cents` instead. The four money÷quantity
+sites in CFS have four different residual contracts, and this is the
+stored-denorm one: **the residual is discarded on purpose.**
+
+(Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero
+recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
+
+### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
+
+Pair-derived legend strings for the order's start/end dates.
+
+Each pair contributes a label based on its `customer_collecting` /
+`customer_returning` flags. Labels are deduped and joined with " / ", so
+a mixed-mode order (one pair we deliver, one pair the customer picks up)
+renders as "In Store Pickup / Delivery".
+
+Mapping:
+  start: customer_collecting === true → "In Store Pickup", else → "Delivery"
+  end:   customer_returning  === true → "In Store Return", else → "Pickup"
+
+Empty input returns empty strings.
+
+### `groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]`
+
+Slice the flat items array into destination sections, each carrying the
+endpoints its PAIR names.
+
+⚠️ **`destinations` is a required parameter and used to be absent, because
+the endpoints used to be read off the divider itself** — the second copy that
+api-cloudrun#662/#663/#664 are all instances of. The divider now carries only
+its `uid`; the endpoints live on the pair that uid addresses, and the contract
+step deleted `uid_delivery`/`uid_collection` from the divider outright
+(api-cloudrun#662/#663/#664). Reading them here
+again would re-open the class.
+
+✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is
+a `destinations/{uid}` document id and it is the third segment of every
+booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
+moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
+the same string. There is no `bookings` migration in this change, and there
+must not be: `webhooks/opportunity.ts` records 552 duplicate prod bookings
+from a destination uid moving under that id.
+
+The fallbacks answer for a section whose pair is missing or names no
+endpoint — a divider-less items array, and a genuinely destinationless CRMS
+order (where the caller passes `""` and skips the group downstream).
+
+**Parameters**
+
+- `items` — The document's flat items array
+- `destinations` — The document's destination pairs, joined by `uid`
+- `fallbackDeliveryUid` — Endpoint for a section whose pair supplies none
+- `fallbackCollectionUid` — Defaults to `fallbackDeliveryUid`
+
+### `isSameAsDeliveryDates(dates: OrderDatesType): boolean`
+
+Whether charge dates match the delivery/collection dates
+(i.e. no custom charge period has been set).
+
+### `orderHasDiscount(items: LineItem[]): boolean`
+
+Check whether any pre-tax line item has a discount.
+
+### `orderHasRentals(items: LineItem[]): boolean`
+
+Check whether any line item is a rental.
+
+### `orderHasTax(items: LineItem[]): boolean`
+
+Check whether any pre-tax line item has taxes applied.
 
 ## `@cfs/core/utils/taxes`
 

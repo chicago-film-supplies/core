@@ -45,12 +45,26 @@ import {
  * a STORED change across every `templates` document, every
  * `templates/<git_path>.meta.json` sidecar and the manager, which buys nothing
  * this docstring does not.
+ *
+ * 🔴 **`pick-sheets` is the SECOND source with no Firestore collection**, and it
+ * is the first whose document spans MANY stored documents rather than folding
+ * one. A multi-order packing list renders every open line at one destination or
+ * with one organization, across orders (`schemas/pick-sheet.ts`), built by
+ * api-cloudrun's `services/pickSheets.ts`. Same test as `movement-sessions`
+ * above: a source needs a *schema*, not a path.
+ *
+ * ⚠️ **A `PickSheet` is PAGED and a printed document must not be.** `orders` is
+ * one page; `order_count` and `quantity` describe the whole scope. The caller
+ * that assembles the `doc` must walk every page before rendering — a short
+ * document is indistinguishable from a small one once a template is running.
+ * See `utils/pick-sheets.ts`.
  */
 export const TEMPLATE_SOURCE_COLLECTIONS = [
   "orders",
   "invoices",
   "fulfillments",
   "movement-sessions",
+  "pick-sheets",
 ] as const;
 /** Firestore collection that provides data to a template. */
 export type TemplateSourceCollectionType = typeof TEMPLATE_SOURCE_COLLECTIONS[number];

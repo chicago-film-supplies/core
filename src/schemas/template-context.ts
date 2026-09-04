@@ -50,6 +50,14 @@ export const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, s
   // what a person handed over, not an accounting operation. Same test as
   // `fulfillments` above — the document's own subject decides.
   "movement-sessions": "sessions",
+  // A multi-order packing list renders one SCOPE's open work — every line at a
+  // destination, or with an organization, across orders. `it.pickSheets` is a
+  // re-export namespace over `utils/orders` (the items and destinations are the
+  // same structural shapes) rather than a mapping to the string "orders", which
+  // would put `it.orders` on a document that is not an order. Same test as
+  // `fulfillments` and `movement-sessions` above — the document's own subject
+  // decides.
+  "pick-sheets": "pickSheets",
 };
 
 /**

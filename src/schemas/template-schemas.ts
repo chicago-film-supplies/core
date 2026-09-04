@@ -63,6 +63,7 @@ import { FulfillmentSchema } from "./fulfillment.ts";
 import { InvoiceSchema } from "./invoice.ts";
 import { MovementSessionSchema } from "./movement-session.ts";
 import { OrderSchema } from "./order.ts";
+import { PickSheetSchema } from "./pick-sheet.ts";
 import { QuoteSchema } from "./quote.ts";
 import type { TemplateCollectionType } from "./template-context.ts";
 
@@ -81,8 +82,9 @@ export const TEMPLATE_COLLECTION_SCHEMAS: Partial<
   invoices: InvoiceSchema,
   fulfillments: FulfillmentSchema,
   quotes: QuoteSchema,
-  // The one entry with no Firestore collection behind it. See the module doc.
+  // The two entries with no Firestore collection behind them. See the module doc.
   "movement-sessions": MovementSessionSchema,
+  "pick-sheets": PickSheetSchema,
 };
 
 /**

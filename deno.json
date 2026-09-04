@@ -77,6 +77,7 @@
     "./utils/organizations": "./src/utils/organizations.ts",
     "./utils/products": "./src/utils/products.ts",
     "./utils/sessions": "./src/utils/sessions.ts",
+    "./utils/pickSheets": "./src/utils/pickSheets.ts",
     "./utils/taxes": "./src/utils/taxes.ts",
     "./utils/templates": "./src/utils/templates.ts",
     "./utils/citations": "./src/utils/citations.ts"

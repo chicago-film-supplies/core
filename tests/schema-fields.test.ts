@@ -124,8 +124,20 @@ Deno.test("nested paths appear, and the customer name is reachable in each sourc
     // ⭐ Asserting "one of the two" rather than dropping the arm keeps it a real
     // check: a template author must be able to reach the customer's name from
     // EVERY source collection, whichever shape that source carries.
+    // ⚠️ **A THIRD population, and it is not a light-shape variant of the other
+    // two — it is a document with NO document-level customer at all.** A
+    // `pick-sheets` sheet is scoped to a destination or an organization subtree
+    // and may legitimately span two customers; `schemas/pick-sheet.ts` says so
+    // outright, and the per-order headers exist precisely because a worker at a
+    // shared stage must not hand one production's gear to another. So the
+    // customer lives at `orders[].organization.name`, once per order.
+    //
+    // ⭐ Widening the arm rather than exempting the collection keeps the check
+    // doing its job: the requirement was always REACHABILITY, never a fixed
+    // path, and a template author can still reach a customer name here.
     const reachable = fields.some((f) =>
-      f.path === "organization.path[].name" || f.path === "organization.name"
+      f.path === "organization.path[].name" || f.path === "organization.name" ||
+      f.path === "orders[].organization.name"
     );
     assertEquals(reachable, true, `no reachable customer name in ${collection}`);
   }
