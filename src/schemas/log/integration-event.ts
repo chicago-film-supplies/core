@@ -157,6 +157,29 @@ export const INTEGRATION_EVENT_MSGS = [
   // three, so a new detector needs no new rule.
   "order_projection_check",
   "order_projection_check_failed",
+  // The org-tree invariant watch (api-cloudrun#803). `auditTree`'s arms over
+  // the whole `organizations` corpus, on a schedule instead of when a person
+  // happens to type the script — arm 9 (`shared xero_id`) went red twice and
+  // was found by hand both times, the second standing FOUR DAYS while every
+  // CFS-side Xero rename push for that department was silently refused.
+  //
+  // Two emissions per run, and both are needed:
+  //   - one record per finding, carrying `invariant` (the ARM NAME) + `doc_id`
+  //     + `detail`, so the alert says WHICH invariant broke and on which node.
+  //     A bare count cannot distinguish `9 — shared xero_id` from a schema
+  //     refusal, and those want completely different remediation.
+  //   - one summary per run carrying `checked`, emitted on EVERY run including
+  //     clean ones — because `checked: 0` and a clean corpus read identically
+  //     otherwise, and because an absence rule needs a heartbeat to miss.
+  //
+  // Reuses `invariant` / `doc_id` / `detail` and the scheduled-watch counters
+  // rather than minting organization-shaped fields, for the reason the
+  // order-projection block above gives: the alert groups on exactly those, so
+  // a new detector needs no new rule. ⚠️ In particular there is deliberately
+  // no `organization_uid` — #803's own text asks for one, and a rule grouping
+  // on a field its arm does not declare fails `alertRuleContract`.
+  "organization_tree_check",
+  "organization_tree_check_failed",
   // The backstop under the DEFERRED stock rebuild (api-cloudrun#358). The
   // rebuild's enqueue is post-commit and therefore not transactional with Firestore,
   // so a crash or an exhausted retry budget leaves a summary stale with nothing
@@ -308,7 +331,8 @@ export interface IntegrationEventLogRecord {
   lag_ms?: number;
   // ── Scheduled-watch counters ─────────────────────────────────────
   // `il_tax_rate_check`, `tax_expiry_check`, `settlement_totals_sweep`,
-  // `stock_summary_sweep`. Each emits on EVERY run including clean ones, so
+  // `stock_summary_sweep`, `organization_tree_check`. Each emits on EVERY run
+  // including clean ones, so
   // these are the state an alert reads — not an event count.
   /** Cells / rows / ledgers examined this run. A `checked: 0` run is a finding. */
   checked?: number;
