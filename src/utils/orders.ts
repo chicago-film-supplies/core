@@ -1176,15 +1176,10 @@ export function isFromTotalItemType(type: string): boolean {
  * rounds, so nothing here can round differently from the pre-tax path.
  *
  * @param item the line being priced — input shape or stored shape, either works.
- * @throws Error on a non-fee item, or on a `percent_of_total` price. The second
- *   is deliberate: such a line's amount is only knowable in the totals pass
- *   ({@link costTransactionFees}), so pricing one here would store a **zero**,
- *   and a zero fee is dropped from the rollup entirely
- *   ({@link getTransactionFeeTotals} skips `amount_cents === 0`) and pushes
- *   `UnitAmount: 0` to Xero. Failing loudly is the only safe answer; teaching
- *   this path to store a percent fee is the CRMS-cutover issue's work
- *   (api-cloudrun#571), not a gap. CRMS cannot author one, so it is unreachable
- *   from the webhook paths.
+ * @throws Error on a non-fee item. A `percent_of_total` price is NO LONGER a
+ *   throw — see the percent arm in the body for the contract it stores instead,
+ *   and why the "a stored zero is dropped from the rollup" half of the old
+ *   reasoning was never true.
  */
 export function priceTransactionFeeLine(item: PricingItem): LinePriceMoney {
   if (!isTransactionFeePricingItem(item)) {
@@ -1192,12 +1187,38 @@ export function priceTransactionFeeLine(item: PricingItem): LinePriceMoney {
       "Item is not a transaction fee: wrong type, or missing price/quantity",
     );
   }
+  // ── The percent arm stores NO money, and that is the contract ──────
+  //
+  // A `percent_of_total` fee's amount is a property of the DOCUMENT, not of
+  // the line: it is not knowable until every pre-tax line has been summed, and
+  // {@link costTransactionFees} is where it is computed, once, in the totals
+  // pass. So the stored line carries the RATE (`base_percent`) and nothing
+  // else, and every reader takes the amount from `totals.transaction_fees`.
+  //
+  // This used to throw, on the reasoning that storing a zero would be dropped
+  // from the rollup and would push `UnitAmount: 0` to Xero. The first half was
+  // never true — {@link getTransactionFeeTotals} runs on the COPIES
+  // `costTransactionFees` returns, never on the stored line, so a stored zero
+  // is invisible to it. The second half was true and is now the Xero seam's
+  // job: it reads the rollup for a percent fee and the stored pre-discount
+  // `subtotal_cents` for a flat one. Reading the rollup for BOTH would hand
+  // Xero a discounted `UnitAmount` beside a `DiscountRate` — the discount
+  // taken twice, on a live ledger with no dev tenant.
+  //
+  // ⚠️ **A discount is dropped rather than carried**, deliberately.
+  // {@link calculateTransactionFeeAmountCents}'s percent arm never reads
+  // `price.discount`, so a stored discount would describe a reduction nothing
+  // applies. Storing `null` makes the line agree with the only function that
+  // prices it; carrying it would make the document assert a charge it did not
+  // make.
   if (item.price.formula === "percent_of_total") {
-    throw new Error(
-      "A percent_of_total fee is priced from the document total in the totals " +
-        "pass (costTransactionFees), not at line-build time — storing one here " +
-        "would write a zero amount",
-    );
+    return {
+      subtotal_cents: 0,
+      subtotal_discounted_cents: 0,
+      discount: null,
+      taxes: [],
+      total_cents: 0,
+    };
   }
 
   const subtotal_discounted_cents = calculateTransactionFeeAmountCents(item, 0);

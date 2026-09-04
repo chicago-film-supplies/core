@@ -3616,22 +3616,79 @@ Deno.test("priceTransactionFeeLine — a NEGATIVE discount is carried, not clamp
   assertEquals(money.total_cents, -500, "no tax term on a fee, so total IS the discounted amount");
 });
 
-Deno.test("priceTransactionFeeLine — a percent_of_total fee is REFUSED, never zeroed", () => {
-  // Its amount is only knowable in the totals pass. Pricing one here would store
-  // a zero, and `getTransactionFeeTotals` DROPS a zero from the rollup entirely
-  // while `xeroLineMoney` would push `UnitAmount: 0`. Failing loudly is the only
-  // safe answer; teaching this path to store a percent fee is the CRMS-cutover
-  // issue's work (api-cloudrun#571).
-  assertThrows(
-    () =>
-      priceTransactionFeeLine({
-        type: "transaction_fee",
-        quantity: 1,
-        price: { base_cents: 0, base_percent: 4, formula: "percent_of_total", discount: null, taxes: [] },
-      }),
-    Error,
-    "percent_of_total",
+Deno.test("priceTransactionFeeLine — a percent_of_total fee stores the RATE and no money", () => {
+  // This replaces an assertion that the same call THREW (api-cloudrun#571). The
+  // change is deliberate: a percent fee's amount is a property of the document,
+  // computed once by `costTransactionFees` in the totals pass, so the stored
+  // line carries `base_percent` and nothing else.
+  //
+  // ⚠️ Half the old reasoning was never true, and it is worth keeping the
+  // correction attached to the test that asserted it: "a zero is dropped from
+  // the rollup" is a claim about `getTransactionFeeTotals`, which runs on the
+  // COPIES `costTransactionFees` returns — never on the stored line. The arm
+  // below proves the money still arrives.
+  assertEquals(
+    priceTransactionFeeLine({
+      type: "transaction_fee",
+      quantity: 1,
+      price: { base_cents: 0, base_percent: 4, formula: "percent_of_total", discount: null, taxes: [] },
+    }),
+    { subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0 },
   );
+});
+
+Deno.test("priceTransactionFeeLine — a percent fee's stored ZERO does not reach the rollup", () => {
+  // The fail-closed companion to the test above: a stored zero is only safe
+  // because the rollup never reads it. If `getTransactionFeeTotals` were ever
+  // pointed at stored lines instead of costed copies, this goes to 0 and the
+  // fee silently vanishes from the document total.
+  const feeLine: LineItem = {
+    uid: "cc-fee",
+    name: "Card Fee",
+    path: ["cc-fee"],
+    type: "transaction_fee",
+    quantity: 1,
+    price: {
+      base_cents: 0,
+      base_percent: 4,
+      replacement_cents: null,
+      formula: "percent_of_total",
+      chargeable_days: null,
+      discount: null,
+      subtotal_cents: 0,
+      subtotal_discounted_cents: 0,
+      taxes: [],
+      taxes_base: [],
+      total_cents: 0,
+    },
+  };
+  // 4% of $250.00 = $10.00.
+  const rollup = getTransactionFeeTotals(costTransactionFees([feeLine], 25_000));
+  assertEquals(rollup.length, 1);
+  assertEquals(rollup[0].amount_cents, 1_000);
+  assertEquals(rollup[0].rate, 4);
+  assertEquals(rollup[0].type, "percent");
+});
+
+Deno.test("priceTransactionFeeLine — a discount on a percent fee is DROPPED, not carried", () => {
+  // `calculateTransactionFeeAmountCents`'s percent arm never reads
+  // `price.discount`, so carrying one would make the stored line assert a
+  // reduction that nothing applies. Dropping it makes the line agree with the
+  // only function that prices it.
+  const money = priceTransactionFeeLine({
+    type: "transaction_fee",
+    quantity: 1,
+    price: {
+      base_cents: 0,
+      base_percent: 4,
+      formula: "percent_of_total",
+      discount: { rate: 10, type: "percent" },
+      taxes: [],
+    },
+  });
+  assertEquals(money.discount, null);
+  // And the rollup is unmoved by it — 4% of $250.00 either way.
+  assertEquals(money.total_cents, 0);
 });
 
 Deno.test("priceTransactionFeeLine — refuses a line that is not a fee", () => {
