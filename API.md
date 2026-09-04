@@ -8783,6 +8783,27 @@ const UpdateCardInput: z.ZodType<UpdateCardInputType>;
 
 Input for PATCH /cards/:uid — all fields optional except version.
 
+🔴 **`locked` is deliberately ABSENT here while `CreateCardInputType` has it.
+A card's lock set is settable at birth and never afterwards, and the
+asymmetry is the point.** `locked[]` is a server-authored ACL, not user
+content: `buildEventCards` stamps `ORDER_CARD_LOCKED` on every order-derived
+card so an operator cannot edit the subject, re-point the destination or
+delete a card while its order still exists. Accepting `locked` on PATCH would
+let anyone holding `cards.update` unlock their own card and then edit the very
+field the lock protects — a one-request escalation past every one of those
+guards, including `"card"`, the sentinel that blocks DELETE and which
+`eventCardReconcile` treats as a load-bearing invariant.
+
+Keeping it on CREATE is not the same hole. A client can only create a
+hand-authored card, and choosing its own new card's locks harms nobody —
+the worst case is an undeletable to-do of its own making. Order-derived cards
+are minted server-side at a derived id and never come through this input at
+all.
+
+So: **to change a lock set, change the writer that stamps it.** There is no
+API path, by design. Decided 2026-09-04 (core#79), which was filed because
+the asymmetry was silent rather than wrong.
+
 ```ts
 interface UpdateCardInputType {
   uid_list?: string;
@@ -12820,6 +12841,27 @@ const UpdateCardInput: z.ZodType<UpdateCardInputType>;
 ### `UpdateCardInputType`
 
 Input for PATCH /cards/:uid — all fields optional except version.
+
+🔴 **`locked` is deliberately ABSENT here while `CreateCardInputType` has it.
+A card's lock set is settable at birth and never afterwards, and the
+asymmetry is the point.** `locked[]` is a server-authored ACL, not user
+content: `buildEventCards` stamps `ORDER_CARD_LOCKED` on every order-derived
+card so an operator cannot edit the subject, re-point the destination or
+delete a card while its order still exists. Accepting `locked` on PATCH would
+let anyone holding `cards.update` unlock their own card and then edit the very
+field the lock protects — a one-request escalation past every one of those
+guards, including `"card"`, the sentinel that blocks DELETE and which
+`eventCardReconcile` treats as a load-bearing invariant.
+
+Keeping it on CREATE is not the same hole. A client can only create a
+hand-authored card, and choosing its own new card's locks harms nobody —
+the worst case is an undeletable to-do of its own making. Order-derived cards
+are minted server-side at a derived id and never come through this input at
+all.
+
+So: **to change a lock set, change the writer that stamps it.** There is no
+API path, by design. Decided 2026-09-04 (core#79), which was filed because
+the asymmetry was silent rather than wrong.
 
 ```ts
 interface UpdateCardInputType {
