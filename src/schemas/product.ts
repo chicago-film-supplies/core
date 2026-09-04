@@ -64,6 +64,13 @@ export interface ProductComponent {
   zero_priced?: boolean;
   price: {
     base_cents: number;
+    /**
+     * Carried so a product price can be COPIED into a component without the
+     * strictObject refusing the key — see the Zod arm for the incident.
+     * Always `null` in practice: `ComponentTypeEnum` excludes
+     * `transaction_fee`, so a component is never itself a percent fee.
+     */
+    base_percent?: number | null;
     replacement_cents?: number | null;
     coa_revenue?: COARevenueType;
     taxes: TaxRefType[];
@@ -316,6 +323,26 @@ const ComponentObject = z.strictObject({
   zero_priced: z.boolean().optional(),
   price: z.strictObject({
     base_cents: z.int(),
+    // 🔴 **Declared here because a component price is a COPY of a product
+    // price, not because a component can be a percent fee — it cannot.**
+    //
+    // `ComponentTypeEnum` excludes `transaction_fee`, which makes it tempting
+    // to leave this arm alone when adding the field to the product. That
+    // reasoning answers the wrong question. `createProduct` copies a product
+    // price into `components[]` and `component_of[]` by SPREAD, so the key
+    // travels regardless of the type that may hold it, and a `z.strictObject`
+    // refuses a key it does not declare: `POST /products` returned 400 with
+    // `Unrecognized key: "base_percent"` at `components.0.price` the moment
+    // `getInitialValues` started seeding it.
+    //
+    // ⚠️ The value is therefore always `null` here. That is not a reason to
+    // omit it — under a strictObject, *absent* and *present-and-null* are
+    // different accepted sets, and only one of them survives a spread.
+    //
+    // No refinement: the component is a copy, so its formula and its rate move
+    // together and consistency is the SOURCE's to enforce. A second gate here
+    // would fail the copy rather than the authoring.
+    base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum.optional(),
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
