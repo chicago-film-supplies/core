@@ -527,6 +527,24 @@ const reparentOrganizationTransaction: TransactionDefinition = {
     // this is the declaration catching up.
     "update-org:name-to-bookings",
     "update-org:name-to-fulfillments",
+    // ⚠️ **Added for the same reason, one tier later** (api-cloudrun#801). A move
+    // changes which ancestors a node has, so a node that INHERITS its billing
+    // address resolves to a different one afterwards — and its live orders and
+    // invoices froze the old answer. `updateOrganization` now re-resolves the
+    // moved subtree whenever the moved node states no address of its own, which
+    // fires both billing rules under this transaction.
+    //
+    // 🔴 **`rules_expected` is `steps.length` — a COUNT — and the standing drift
+    // query is `rules_fired_count:<rules_expected`.** So an omission here does
+    // not merely understate the docs, it LOWERS THE THRESHOLD the detector
+    // compares against: six declared while eight fire means a later regression
+    // where the billing arm stops firing reports 6 of 6 and reads healthy. This
+    // declaration is the oracle for that failure.
+    //
+    // ⚠️ Nothing checks fired-⊄-declared — `deno task gate` is green with these
+    // firing undeclared — so the omission is silent in both directions.
+    "update-org:billing-to-orders",
+    "update-org:billing-to-invoices",
   ],
 };
 
