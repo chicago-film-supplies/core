@@ -135,6 +135,87 @@ export function pickSheetGateAdmits(
   return !pair.customer_collecting;
 }
 
+// ── The leg's direction ─────────────────────────────────────────────
+
+/**
+ * Which way one leg's work is going.
+ *
+ * ⭐ **Derived from CUSTODY, never stated** — the same rule that already decides
+ * which date `PickSheetDestination.due_at` carries. A leg whose units are all in
+ * flight is waiting on its collection; everything earlier is waiting on its
+ * delivery.
+ *
+ * ⚠️ **Exactly two members, and deliberately no `all`** — unlike
+ * {@link PICK_SHEET_GATES}, which has one. A gate is only ever *chosen*, so an
+ * `all` member costs nothing there; a direction is *computed*, and giving the
+ * enum a third value would widen {@link pickSheetLegDirection}'s return type to
+ * include one it can never produce. "Both directions" is the ABSENCE of a
+ * filter, which is why {@link PickSheet.leg} is nullable rather than `"all"`.
+ */
+export const PICK_SHEET_LEGS = ["delivery", "collection"] as const;
+
+/** One member of {@link PICK_SHEET_LEGS}. */
+export type PickSheetLegType = typeof PICK_SHEET_LEGS[number];
+
+/** Zod enum over {@link PICK_SHEET_LEGS}. */
+export const PickSheetLegEnum: z.ZodType<PickSheetLegType> = z.enum(PICK_SHEET_LEGS);
+
+/**
+ * The structural minimum the direction reads off a leg's bookings.
+ *
+ * Deliberately not the whole {@link PickSheetBooking} — the same reasoning as
+ * {@link PickSheetGatePair}. Narrow enough that api-cloudrun's own `Booking`
+ * satisfies it structurally, which is what lets the fold call this rather than
+ * keep a second copy.
+ */
+export type PickSheetLegCustody = Pick<PickSheetBooking, "type" | "breakdown">;
+
+/**
+ * Which way this leg's work is going, from its bookings' custody.
+ *
+ * ⚠️ **The predicate is `getStageForBookings(…) === "return"`, spelled out.**
+ * That ladder is reserved → prepped → rental `out`, so "in flight" means no
+ * `reserved` and no `prepped` anywhere on the leg plus at least one RENTAL
+ * holding `out`. `quoted` is checked after `out` there and so does not enter
+ * here either. **A non-rental `out` is terminal — checkout IS delivery for a
+ * sale** — so it must not pull a leg onto a collection that will never happen.
+ *
+ * 🔴 **ONE owner, and it lives in a schema module rather than a util** — the
+ * same two reasons as {@link pickSheetGateAdmits}. The rule is this vocabulary's
+ * own semantics, so a second copy beside the enum is how the copies drift; and
+ * `src/utils/*` entrypoints are walked by the template-helper generator, which
+ * would advertise a custody predicate to PDF authors.
+ *
+ * ⚠️ **This answers what a leg is doing NOW, which is not what a printed
+ * document IS.** Custody moves, so a delivery packing list re-rendered after its
+ * goods went out would derive `collection` and change identity. Use this to
+ * RESOLVE {@link PickSheet.leg} once, at build time; then read the stamped
+ * field. Derivation supplies the default; the stamped value is the fact.
+ */
+export function pickSheetLegDirection(
+  bookings: readonly PickSheetLegCustody[],
+): PickSheetLegType {
+  const pendingBefore = bookings.some(
+    (b) => b.breakdown.reserved > 0 || b.breakdown.prepped > 0,
+  );
+  const inFlight = bookings.some((b) => b.type === "rental" && b.breakdown.out > 0);
+  return !pendingBefore && inFlight ? "collection" : "delivery";
+}
+
+/**
+ * Does this leg belong on a sheet drawn for `leg`? Mirrors
+ * {@link pickSheetGateAdmits}.
+ *
+ * `null` admits everything — it is the pick-sheet screen's own behaviour, where
+ * a worker wants both directions at a place.
+ */
+export function pickSheetLegAdmits(
+  bookings: readonly PickSheetLegCustody[],
+  leg: PickSheetLegType | null,
+): boolean {
+  return leg === null || pickSheetLegDirection(bookings) === leg;
+}
+
 // ── The scope ───────────────────────────────────────────────────────
 
 /**
@@ -342,6 +423,20 @@ export interface PickSheet {
   scope: PickSheetScope;
   gate: PickSheetGateType;
   /**
+   * The direction this sheet was drawn for, or `null` for both.
+   *
+   * ⭐ **Stamped, not re-derived — the same contract as `scope` and `gate`.** A
+   * sheet says what question it is an answer to, so a stored or forwarded one
+   * still means what it meant. That is what makes a packing list a record: it
+   * accompanies ONE movement, and re-rendering it weeks later must not silently
+   * turn a delivery note into a collection note because custody moved
+   * underneath it (templates#150).
+   *
+   * `pickSheetLegDirection` computes the default; a caller may override it. The
+   * pick-sheet SCREEN passes `null` — a worker at a place wants both.
+   */
+  leg: PickSheetLegType | null;
+  /**
    * The orders on THIS PAGE. `orders.length` is the page size; every count
    * below is the whole scope.
    */
@@ -405,6 +500,7 @@ export interface PickSheet {
 export const PickSheetSchema: z.ZodType<PickSheet> = z.strictObject({
   scope: PickSheetScopeSchema,
   gate: PickSheetGateEnum,
+  leg: PickSheetLegEnum.nullable(),
   orders: z.array(PickSheetOrderSchema).default([]),
   order_count: z.int(),
   destination_count: z.int(),

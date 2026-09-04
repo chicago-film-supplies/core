@@ -57,7 +57,7 @@ import {
  * one page; `order_count` and `quantity` describe the whole scope. The caller
  * that assembles the `doc` must walk every page before rendering — a short
  * document is indistinguishable from a small one once a template is running.
- * See `utils/pick-sheets.ts`.
+ * See `core/src/utils/pickSheets.ts`.
  */
 export const TEMPLATE_SOURCE_COLLECTIONS = [
   "orders",

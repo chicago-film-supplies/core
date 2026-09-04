@@ -2726,6 +2726,12 @@
         },
         {
           "kind": "variable",
+          "name": "PICK_SHEET_LEGS",
+          "declaration": "const PICK_SHEET_LEGS: \"delivery\" | \"collection\"[];",
+          "doc": "Which way one leg's work is going.\n\n⭐ **Derived from CUSTODY, never stated** — the same rule that already decides\nwhich date `PickSheetDestination.due_at` carries. A leg whose units are all in\nflight is waiting on its collection; everything earlier is waiting on its\ndelivery.\n\n⚠️ **Exactly two members, and deliberately no `all`** — unlike\n{@link PICK_SHEET_GATES}, which has one. A gate is only ever *chosen*, so an\n`all` member costs nothing there; a direction is *computed*, and giving the\nenum a third value would widen {@link pickSheetLegDirection}'s return type to\ninclude one it can never produce. \"Both directions\" is the ABSENCE of a\nfilter, which is why {@link PickSheet.leg} is nullable rather than `\"all\"`."
+        },
+        {
+          "kind": "variable",
           "name": "PLACE_KINDS",
           "declaration": "const PLACE_KINDS: \"locations\" | \"bookings\" | \"out-of-service\" | \"outside\"[];",
           "doc": "The kinds of place a unit can be in. `\"outside\"` is the absence of a place —\na `null` side of `location`, meaning outside CFS ownership entirely."
@@ -2769,7 +2775,7 @@
         {
           "kind": "interface",
           "name": "PickSheet",
-          "declaration": "interface PickSheet {\n  scope: PickSheetScope;\n  gate: PickSheetGateType;\n  orders: PickSheetOrder[];\n  order_count: number;\n  destination_count: number;\n  quantity: number;\n  organizations: Array<typeLiteral>;\n  missing_order_uids: string[];\n  next_cursor: string | null;\n  notice: string | null;\n}",
+          "declaration": "interface PickSheet {\n  scope: PickSheetScope;\n  gate: PickSheetGateType;\n  leg: PickSheetLegType | null;\n  orders: PickSheetOrder[];\n  order_count: number;\n  destination_count: number;\n  quantity: number;\n  organizations: Array<typeLiteral>;\n  missing_order_uids: string[];\n  next_cursor: string | null;\n  notice: string | null;\n}",
           "doc": "The aggregated pick sheet — one scope, one gate, N orders.\n\nOrders are in due order (each order's earliest leg, ties on uid) and each\norder's legs are in due order within it, so the first thing on the page is the\nfirst thing to do."
         },
         {
@@ -2825,6 +2831,24 @@
           "name": "PickSheetItemSchema",
           "declaration": "const PickSheetItemSchema: z.ZodType<PickSheetItem>;",
           "doc": "Zod schema for {@link PickSheetItem}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PickSheetLegCustody",
+          "declaration": "type PickSheetLegCustody = Pick<PickSheetBooking, \"type\" | \"breakdown\">;",
+          "doc": "The structural minimum the direction reads off a leg's bookings.\n\nDeliberately not the whole {@link PickSheetBooking} — the same reasoning as\n{@link PickSheetGatePair}. Narrow enough that api-cloudrun's own `Booking`\nsatisfies it structurally, which is what lets the fold call this rather than\nkeep a second copy."
+        },
+        {
+          "kind": "variable",
+          "name": "PickSheetLegEnum",
+          "declaration": "const PickSheetLegEnum: z.ZodType<PickSheetLegType>;",
+          "doc": "Zod enum over {@link PICK_SHEET_LEGS}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PickSheetLegType",
+          "declaration": "type PickSheetLegType = indexedAccess;",
+          "doc": "One member of {@link PICK_SHEET_LEGS}."
         },
         {
           "kind": "interface",
@@ -3592,7 +3616,7 @@
           "kind": "variable",
           "name": "TEMPLATE_SOURCE_COLLECTIONS",
           "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\" | \"fulfillments\" | \"movement-sessions\" | \"pick-sheets\"[];",
-          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set.\n\n🔴 **`movement-sessions` is NOT a Firestore collection, and the field is\nstill called `collection_source`.** A receipt renders the fold of\n`transactions where uuid_session == …` — one operator action — and nothing is\nstored at that path (`schemas/movement-session.ts`, api-cloudrun#700). A\ntemplate source needs a *schema*, which it has\n({@link TEMPLATE_COLLECTION_SCHEMAS}); only fixture CAPTURE needs a document,\nand that path branches. The field keeps its name deliberately: renaming it is\na STORED change across every `templates` document, every\n`templates/<git_path>.meta.json` sidecar and the manager, which buys nothing\nthis docstring does not.\n\n🔴 **`pick-sheets` is the SECOND source with no Firestore collection**, and it\nis the first whose document spans MANY stored documents rather than folding\none. A multi-order packing list renders every open line at one destination or\nwith one organization, across orders (`schemas/pick-sheet.ts`), built by\napi-cloudrun's `services/pickSheets.ts`. Same test as `movement-sessions`\nabove: a source needs a *schema*, not a path.\n\n⚠️ **A `PickSheet` is PAGED and a printed document must not be.** `orders` is\none page; `order_count` and `quantity` describe the whole scope. The caller\nthat assembles the `doc` must walk every page before rendering — a short\ndocument is indistinguishable from a small one once a template is running.\nSee `utils/pick-sheets.ts`."
+          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set.\n\n🔴 **`movement-sessions` is NOT a Firestore collection, and the field is\nstill called `collection_source`.** A receipt renders the fold of\n`transactions where uuid_session == …` — one operator action — and nothing is\nstored at that path (`schemas/movement-session.ts`, api-cloudrun#700). A\ntemplate source needs a *schema*, which it has\n({@link TEMPLATE_COLLECTION_SCHEMAS}); only fixture CAPTURE needs a document,\nand that path branches. The field keeps its name deliberately: renaming it is\na STORED change across every `templates` document, every\n`templates/<git_path>.meta.json` sidecar and the manager, which buys nothing\nthis docstring does not.\n\n🔴 **`pick-sheets` is the SECOND source with no Firestore collection**, and it\nis the first whose document spans MANY stored documents rather than folding\none. A multi-order packing list renders every open line at one destination or\nwith one organization, across orders (`schemas/pick-sheet.ts`), built by\napi-cloudrun's `services/pickSheets.ts`. Same test as `movement-sessions`\nabove: a source needs a *schema*, not a path.\n\n⚠️ **A `PickSheet` is PAGED and a printed document must not be.** `orders` is\none page; `order_count` and `quantity` describe the whole scope. The caller\nthat assembles the `doc` must walk every page before rendering — a short\ndocument is indistinguishable from a small one once a template is running.\nSee `core/src/utils/pickSheets.ts`."
         },
         {
           "kind": "variable",
@@ -4750,6 +4774,22 @@
           "name": "pickSheetGateAdmits",
           "signature": "pickSheetGateAdmits(pair: PickSheetGatePair, gate: PickSheetGateType): boolean",
           "doc": "Does this leg have work on a sheet gated this way? See {@link PICK_SHEET_GATES}.\n\n⚠️ **One owner, deliberately, and it lives in a schema module rather than a\nutil.** The rule is the closed vocabulary's own semantics — a second copy\nbeside the enum is exactly how the `||` defect above survived as long as it\ndid — and `src/utils/*` entrypoints are walked by the template-helper\ngenerator, which would advertise a warehouse predicate to PDF authors.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "pickSheetLegAdmits",
+          "signature": "pickSheetLegAdmits(bookings: readonly PickSheetLegCustody[], leg: PickSheetLegType | null): boolean",
+          "doc": "Does this leg belong on a sheet drawn for `leg`? Mirrors\n{@link pickSheetGateAdmits}.\n\n`null` admits everything — it is the pick-sheet screen's own behaviour, where\na worker wants both directions at a place.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "pickSheetLegDirection",
+          "signature": "pickSheetLegDirection(bookings: readonly PickSheetLegCustody[]): PickSheetLegType",
+          "doc": "Which way this leg's work is going, from its bookings' custody.\n\n⚠️ **The predicate is `getStageForBookings(…) === \"return\"`, spelled out.**\nThat ladder is reserved → prepped → rental `out`, so \"in flight\" means no\n`reserved` and no `prepped` anywhere on the leg plus at least one RENTAL\nholding `out`. `quoted` is checked after `out` there and so does not enter\nhere either. **A non-rental `out` is terminal — checkout IS delivery for a\nsale** — so it must not pull a leg onto a collection that will never happen.\n\n🔴 **ONE owner, and it lives in a schema module rather than a util** — the\nsame two reasons as {@link pickSheetGateAdmits}. The rule is this vocabulary's\nown semantics, so a second copy beside the enum is how the copies drift; and\n`src/utils/*` entrypoints are walked by the template-helper generator, which\nwould advertise a custody predicate to PDF authors.\n\n⚠️ **This answers what a leg is doing NOW, which is not what a printed\ndocument IS.** Custody moves, so a delivery packing list re-rendered after its\ngoods went out would derive `collection` and change identity. Use this to\nRESOLVE {@link PickSheet.leg} once, at build time; then read the stamped\nfield. Derivation supplies the default; the stamped value is the fact.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8883,7 +8923,7 @@
           "kind": "variable",
           "name": "TEMPLATE_SOURCE_COLLECTIONS",
           "declaration": "const TEMPLATE_SOURCE_COLLECTIONS: \"orders\" | \"invoices\" | \"fulfillments\" | \"movement-sessions\" | \"pick-sheets\"[];",
-          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set.\n\n🔴 **`movement-sessions` is NOT a Firestore collection, and the field is\nstill called `collection_source`.** A receipt renders the fold of\n`transactions where uuid_session == …` — one operator action — and nothing is\nstored at that path (`schemas/movement-session.ts`, api-cloudrun#700). A\ntemplate source needs a *schema*, which it has\n({@link TEMPLATE_COLLECTION_SCHEMAS}); only fixture CAPTURE needs a document,\nand that path branches. The field keeps its name deliberately: renaming it is\na STORED change across every `templates` document, every\n`templates/<git_path>.meta.json` sidecar and the manager, which buys nothing\nthis docstring does not.\n\n🔴 **`pick-sheets` is the SECOND source with no Firestore collection**, and it\nis the first whose document spans MANY stored documents rather than folding\none. A multi-order packing list renders every open line at one destination or\nwith one organization, across orders (`schemas/pick-sheet.ts`), built by\napi-cloudrun's `services/pickSheets.ts`. Same test as `movement-sessions`\nabove: a source needs a *schema*, not a path.\n\n⚠️ **A `PickSheet` is PAGED and a printed document must not be.** `orders` is\none page; `order_count` and `quantity` describe the whole scope. The caller\nthat assembles the `doc` must walk every page before rendering — a short\ndocument is indistinguishable from a small one once a template is running.\nSee `utils/pick-sheets.ts`."
+          "doc": "⚠️ **`fulfillments` is a source but NOT a target.** A packing list is rendered\nFROM a fulfillment and produced INTO `packing_lists`; nothing produces a\nfulfillment document from a template. The two lists are deliberately not the\nsame set.\n\n🔴 **`movement-sessions` is NOT a Firestore collection, and the field is\nstill called `collection_source`.** A receipt renders the fold of\n`transactions where uuid_session == …` — one operator action — and nothing is\nstored at that path (`schemas/movement-session.ts`, api-cloudrun#700). A\ntemplate source needs a *schema*, which it has\n({@link TEMPLATE_COLLECTION_SCHEMAS}); only fixture CAPTURE needs a document,\nand that path branches. The field keeps its name deliberately: renaming it is\na STORED change across every `templates` document, every\n`templates/<git_path>.meta.json` sidecar and the manager, which buys nothing\nthis docstring does not.\n\n🔴 **`pick-sheets` is the SECOND source with no Firestore collection**, and it\nis the first whose document spans MANY stored documents rather than folding\none. A multi-order packing list renders every open line at one destination or\nwith one organization, across orders (`schemas/pick-sheet.ts`), built by\napi-cloudrun's `services/pickSheets.ts`. Same test as `movement-sessions`\nabove: a source needs a *schema*, not a path.\n\n⚠️ **A `PickSheet` is PAGED and a printed document must not be.** `orders` is\none page; `order_count` and `quantity` describe the whole scope. The caller\nthat assembles the `doc` must walk every page before rendering — a short\ndocument is indistinguishable from a small one once a template is running.\nSee `core/src/utils/pickSheets.ts`."
         },
         {
           "kind": "variable",

@@ -5952,6 +5952,26 @@ job. A partition would have to pick one and be wrong for the other.
 const PICK_SHEET_GATES: "all" | "crew" | "counter"[];
 ```
 
+### `PICK_SHEET_LEGS`
+
+Which way one leg's work is going.
+
+⭐ **Derived from CUSTODY, never stated** — the same rule that already decides
+which date `PickSheetDestination.due_at` carries. A leg whose units are all in
+flight is waiting on its collection; everything earlier is waiting on its
+delivery.
+
+⚠️ **Exactly two members, and deliberately no `all`** — unlike
+{@link PICK_SHEET_GATES}, which has one. A gate is only ever *chosen*, so an
+`all` member costs nothing there; a direction is *computed*, and giving the
+enum a third value would widen {@link pickSheetLegDirection}'s return type to
+include one it can never produce. "Both directions" is the ABSENCE of a
+filter, which is why {@link PickSheet.leg} is nullable rather than `"all"`.
+
+```ts
+const PICK_SHEET_LEGS: "delivery" | "collection"[];
+```
+
 ### `PLACE_KINDS`
 
 The kinds of place a unit can be in. `"outside"` is the absence of a place —
@@ -6053,6 +6073,7 @@ first thing to do.
 interface PickSheet {
   scope: PickSheetScope;
   gate: PickSheetGateType;
+  leg: PickSheetLegType | null;
   orders: PickSheetOrder[];
   order_count: number;
   destination_count: number;
@@ -6177,6 +6198,35 @@ Zod schema for {@link PickSheetItem}.
 
 ```ts
 const PickSheetItemSchema: z.ZodType<PickSheetItem>;
+```
+
+### `PickSheetLegCustody`
+
+The structural minimum the direction reads off a leg's bookings.
+
+Deliberately not the whole {@link PickSheetBooking} — the same reasoning as
+{@link PickSheetGatePair}. Narrow enough that api-cloudrun's own `Booking`
+satisfies it structurally, which is what lets the fold call this rather than
+keep a second copy.
+
+```ts
+type PickSheetLegCustody = Pick<PickSheetBooking, "type" | "breakdown">;
+```
+
+### `PickSheetLegEnum`
+
+Zod enum over {@link PICK_SHEET_LEGS}.
+
+```ts
+const PickSheetLegEnum: z.ZodType<PickSheetLegType>;
+```
+
+### `PickSheetLegType`
+
+One member of {@link PICK_SHEET_LEGS}.
+
+```ts
+type PickSheetLegType = indexedAccess;
 ```
 
 ### `PickSheetOrder`
@@ -7905,7 +7955,7 @@ above: a source needs a *schema*, not a path.
 one page; `order_count` and `quantity` describe the whole scope. The caller
 that assembles the `doc` must walk every page before rendering — a short
 document is indistinguishable from a small one once a template is running.
-See `utils/pick-sheets.ts`.
+See `core/src/utils/pickSheets.ts`.
 
 ```ts
 const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions" | "pick-sheets"[];
@@ -10269,6 +10319,37 @@ util.** The rule is the closed vocabulary's own semantics — a second copy
 beside the enum is exactly how the `||` defect above survived as long as it
 did — and `src/utils/*` entrypoints are walked by the template-helper
 generator, which would advertise a warehouse predicate to PDF authors.
+
+### `pickSheetLegAdmits(bookings: readonly PickSheetLegCustody[], leg: PickSheetLegType | null): boolean`
+
+Does this leg belong on a sheet drawn for `leg`? Mirrors
+{@link pickSheetGateAdmits}.
+
+`null` admits everything — it is the pick-sheet screen's own behaviour, where
+a worker wants both directions at a place.
+
+### `pickSheetLegDirection(bookings: readonly PickSheetLegCustody[]): PickSheetLegType`
+
+Which way this leg's work is going, from its bookings' custody.
+
+⚠️ **The predicate is `getStageForBookings(…) === "return"`, spelled out.**
+That ladder is reserved → prepped → rental `out`, so "in flight" means no
+`reserved` and no `prepped` anywhere on the leg plus at least one RENTAL
+holding `out`. `quoted` is checked after `out` there and so does not enter
+here either. **A non-rental `out` is terminal — checkout IS delivery for a
+sale** — so it must not pull a leg onto a collection that will never happen.
+
+🔴 **ONE owner, and it lives in a schema module rather than a util** — the
+same two reasons as {@link pickSheetGateAdmits}. The rule is this vocabulary's
+own semantics, so a second copy beside the enum is how the copies drift; and
+`src/utils/*` entrypoints are walked by the template-helper generator, which
+would advertise a custody predicate to PDF authors.
+
+⚠️ **This answers what a leg is doing NOW, which is not what a printed
+document IS.** Custody moves, so a delivery packing list re-rendered after its
+goods went out would derive `collection` and change identity. Use this to
+RESOLVE {@link PickSheet.leg} once, at build time; then read the stamped
+field. Derivation supplies the default; the stamped value is the fact.
 
 ### `resolveFieldMeta(schema: z.ZodType, fieldPath: string): Record<string, unknown> | null`
 
@@ -19110,7 +19191,7 @@ above: a source needs a *schema*, not a path.
 one page; `order_count` and `quantity` describe the whole scope. The caller
 that assembles the `doc` must walk every page before rendering — a short
 document is indistinguishable from a small one once a template is running.
-See `utils/pick-sheets.ts`.
+See `core/src/utils/pickSheets.ts`.
 
 ```ts
 const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions" | "pick-sheets"[];

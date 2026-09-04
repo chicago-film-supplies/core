@@ -845,11 +845,15 @@ export {
 
 export {
   PICK_SHEET_GATES,
+  PICK_SHEET_LEGS,
   PickSheetBookingSchema,
   PickSheetDestinationSchema,
   PickSheetGateEnum,
   pickSheetGateAdmits,
   PickSheetItemSchema,
+  PickSheetLegEnum,
+  pickSheetLegAdmits,
+  pickSheetLegDirection,
   PickSheetOrderSchema,
   PickSheetSchema,
   PickSheetScopeSchema,
@@ -859,6 +863,8 @@ export {
   type PickSheetGatePair,
   type PickSheetGateType,
   type PickSheetItem,
+  type PickSheetLegCustody,
+  type PickSheetLegType,
   type PickSheetOrder,
   type PickSheetScope,
 } from "./pick-sheet.ts";

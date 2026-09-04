@@ -535,6 +535,7 @@ export const templateSchemaFields: Partial<
     { path: "scope.name", type: "string" },
     { path: "scope.uids", type: "string[]" },
     { path: "gate", type: "all | crew | counter" },
+    { path: "leg", type: "delivery | collection | null" },
     { path: "orders", type: "object[]" },
     { path: "orders[].uid", type: "string" },
     { path: "orders[].number", type: "number" },

@@ -10,12 +10,31 @@
 import { assert, assertEquals } from "@std/assert";
 import {
   PICK_SHEET_GATES,
+  PICK_SHEET_LEGS,
   type PickSheet,
   type PickSheetGatePair,
   type PickSheetGateType,
   pickSheetGateAdmits,
+  type PickSheetLegCustody,
+  pickSheetLegAdmits,
+  pickSheetLegDirection,
+  type PickSheetLegType,
   PickSheetSchema,
 } from "../src/schemas/pick-sheet.ts";
+
+/** A leg's custody, spelled as the seven buckets so a zero is stated. */
+function custody(
+  type: "rental" | "sale",
+  over: Partial<Record<"damaged" | "lost" | "out" | "prepped" | "quoted" | "reserved" | "returned", number>>,
+): PickSheetLegCustody {
+  return {
+    type,
+    breakdown: {
+      damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0,
+      ...over,
+    },
+  };
+}
 
 function pair(collecting: boolean, returning: boolean): PickSheetGatePair {
   return { customer_collecting: collecting, customer_returning: returning };
@@ -95,6 +114,7 @@ function emptySheet(): unknown {
   return {
     scope: { kind: "destination", uid: "aaaaaaaaaaaaaaaaaaaa", name: "Stage 4", uids: ["aaaaaaaaaaaaaaaaaaaa"] },
     gate: "crew",
+    leg: null,
     orders: [],
     order_count: 0,
     destination_count: 0,
@@ -105,6 +125,84 @@ function emptySheet(): unknown {
     notice: null,
   };
 }
+
+Deno.test("leg: nothing open reads as a DELIVERY, not an empty answer", () => {
+  // The sheet only carries legs with open bookings, but the predicate must be
+  // total — and "not yet in flight" is the delivery side by construction.
+  assertEquals(pickSheetLegDirection([]), "delivery");
+});
+
+Deno.test("leg: a rental holding `out` with nothing earlier is a COLLECTION", () => {
+  assertEquals(pickSheetLegDirection([custody("rental", { out: 3 })]), "collection");
+});
+
+Deno.test("leg: anything `reserved` or `prepped` pulls it back to DELIVERY", () => {
+  // "In flight" is the whole leg's state, not any one line's: a part-shipped leg
+  // still has outbound work, so the earlier stage wins.
+  assertEquals(
+    pickSheetLegDirection([custody("rental", { out: 3 }), custody("rental", { reserved: 1 })]),
+    "delivery",
+  );
+  assertEquals(
+    pickSheetLegDirection([custody("rental", { out: 3 }), custody("rental", { prepped: 1 })]),
+    "delivery",
+  );
+});
+
+Deno.test("leg: a NON-rental `out` is terminal — checkout IS delivery for a sale", () => {
+  // 🔴 The subtle one. A sold unit never comes back, so a sale sitting `out`
+  // must not pull the leg onto a collection that will never happen. This is the
+  // case a naive `breakdown.out > 0` gets wrong.
+  assertEquals(pickSheetLegDirection([custody("sale", { out: 5 })]), "delivery");
+  // …and it must not mask a real collection alongside it.
+  assertEquals(
+    pickSheetLegDirection([custody("sale", { out: 5 }), custody("rental", { out: 2 })]),
+    "collection",
+  );
+});
+
+Deno.test("leg: `quoted` and the terminal buckets do not make a leg in-flight", () => {
+  for (const bucket of ["quoted", "returned", "damaged", "lost"] as const) {
+    assertEquals(
+      pickSheetLegDirection([custody("rental", { [bucket]: 4 })]),
+      "delivery",
+      `${bucket} must not read as in flight`,
+    );
+  }
+});
+
+Deno.test("leg: a null filter admits both directions", () => {
+  const outbound = [custody("rental", { reserved: 2 })];
+  const inbound = [custody("rental", { out: 2 })];
+  assert(pickSheetLegAdmits(outbound, null));
+  assert(pickSheetLegAdmits(inbound, null));
+  assert(pickSheetLegAdmits(outbound, "delivery"));
+  assert(!pickSheetLegAdmits(outbound, "collection"));
+  assert(pickSheetLegAdmits(inbound, "collection"));
+  assert(!pickSheetLegAdmits(inbound, "delivery"));
+});
+
+Deno.test("leg: the vocabulary is closed, two-valued, and every member is decidable", () => {
+  // ⚠️ Exactly two — no `all`. A direction is COMPUTED, so a third member would
+  // be one `pickSheetLegDirection` can never return; "both" is `null`, the
+  // absence of a filter. This is the deliberate asymmetry with PICK_SHEET_GATES.
+  assertEquals([...PICK_SHEET_LEGS], ["delivery", "collection"]);
+  const produced = new Set<PickSheetLegType>([
+    pickSheetLegDirection([custody("rental", { reserved: 1 })]),
+    pickSheetLegDirection([custody("rental", { out: 1 })]),
+  ]);
+  assertEquals(produced.size, PICK_SHEET_LEGS.length, "every member must be reachable");
+});
+
+Deno.test("schema: `leg` is a required key, so `null` is a STATED both-directions", () => {
+  const withoutLeg = emptySheet() as Record<string, unknown>;
+  delete withoutLeg.leg;
+  assertEquals(
+    PickSheetSchema.safeParse(withoutLeg).success,
+    false,
+    "an absent leg must not silently mean both",
+  );
+});
 
 Deno.test("schema: an empty sheet is a valid answer, not an error", () => {
   const parsed = PickSheetSchema.parse(emptySheet()) as PickSheet;
