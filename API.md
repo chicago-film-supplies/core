@@ -6484,6 +6484,7 @@ Pricing details for a product.
 ```ts
 interface ProductPrice {
   base_cents: number;
+  base_percent?: number | null;
   replacement_cents?: number | null;
   coa_revenue: COARevenueType;
   taxes: TaxRefType[];
@@ -15749,6 +15750,7 @@ Pricing details for a product.
 ```ts
 interface ProductPrice {
   base_cents: number;
+  base_percent?: number | null;
   replacement_cents?: number | null;
   coa_revenue: COARevenueType;
   taxes: TaxRefType[];

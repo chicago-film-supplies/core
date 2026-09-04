@@ -15,6 +15,7 @@ import {
   type ComponentTypeType,
   type FirestoreTimestampType,
   checkItemContract,
+  checkPriceBaseUnit,
   InclusionTypeEnum,
   type InclusionTypeType,
   PriceFormulaEnum,
@@ -99,6 +100,21 @@ export interface AuthoredProductComponent extends ProductComponent {
 /** Pricing details for a product. */
 export interface ProductPrice {
   base_cents: number;
+  /**
+   * The `percent_of_total` percentage, at 4dp — present on exactly the fee
+   * products where `base_cents` is meaningless, and absent everywhere else.
+   * Enforced by {@link checkPriceBaseUnit}, the same biconditional the line
+   * price family carries.
+   *
+   * ⚠️ **The catalog arm satisfies that refinement through a different premise
+   * than the line arm, so do not carry the line docstring's reasoning across.**
+   * On a line `base_cents` is `.default(0)`, so the parse materializes it and
+   * the refinement can never observe it absent — which is why it asserts the
+   * value is *zero* on the fee arm rather than asserting absence. Here
+   * `base_cents` is a bare required `z.int()`, so a `percent_of_total` product
+   * must state `base_cents: 0` outright. Same guarantee, reached differently.
+   */
+  base_percent?: number | null;
   replacement_cents?: number | null;
   /**
    * Where this product's revenue posts in Xero. **Required as of Wave 5b.**
@@ -374,12 +390,23 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   eligible_shipping_air: z.boolean().meta({ column: true, label: "Air Eligible" }),
   price: z.strictObject({
     base_cents: z.int().meta({ column: true, label: "Price" }),
+    // 🔴 **No `.meta({ column: true })`, deliberately** — and this is the one
+    // field here where the reflex to add it is wrong. Every sibling in this
+    // object is a column, so annotating looks like consistency. But a display
+    // column has to render a UNIT, and `unit: "percent"` has no precedent in
+    // this package: the only value `unitOfField` knows is `"usd"`, and
+    // `"percent"` appears solely as a `unitMap` VALUE on the discriminated
+    // `rate` family. An annotated `base_percent` would print a bare `4` beside
+    // a `$X.XX` "Price" column — and `display-columns.ts`'s T14 enumerates only
+    // `unitVia` columns, so nothing would catch it. The five line-family
+    // declarations carry no meta either; this mirrors them exactly.
+    base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement Price" }),
     coa_revenue: COARevenueEnum,
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum.meta({ column: true, label: "Price Formula" }),
     discountable: z.boolean().default(true).meta({ column: true, label: "Discountable" }),
-  }),
+  }).superRefine(checkPriceBaseUnit),
   // The four dimensions are NULLABLE because `0` means two different things —
   // "weighs nothing" and "nobody has weighed it" — and the corpus is entirely
   // the second: 0 of 549 prod products carried a value > 0 when this was
@@ -582,12 +609,14 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   eligible_shipping_air: z.boolean(),
   price: z.object({
     base_cents: z.int(),
+    // See `ProductSchema.price` for why this carries no `.meta()`.
+    base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum,
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
-  }),
+  }).superRefine(checkPriceBaseUnit),
   // Nullable to match storage — see `ProductSchema`. A client that has not
   // measured a dimension sends `null`, which is what makes "unmeasured"
   // enterable rather than collapsing to `0` (core#51).
@@ -713,12 +742,14 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
   eligible_shipping_air: z.boolean().optional(),
   price: z.object({
     base_cents: z.int(),
+    // See `ProductSchema.price` for why this carries no `.meta()`.
+    base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum,
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
-  }).optional(),
+  }).superRefine(checkPriceBaseUnit).optional(),
   shipping: z.object({
     weight: z.number().nullable(),
     height: z.number().nullable(),
