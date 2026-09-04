@@ -158,6 +158,28 @@ const validTreeOrganization = (overrides: Record<string, unknown> = {}) =>
     ...overrides,
   });
 
+// The two levels that MAY state a billing address, so invariants 10 and 11 have
+// controls at the levels they must not reach. ⚠️ Each leaf carries SELF_ID
+// rather than its own constant — `path` is self-inclusive (invariant 1), so a
+// borrowed leaf uid fails on 1 and the control would pass for the wrong reason.
+const namedProject = (overrides: Record<string, unknown> = {}) =>
+  validOrganization({
+    path: [treeRoot, { ...treeProject, uid: SELF_ID }],
+    query_by_path: [ROOT_ID, SELF_ID],
+    derived_from: null,
+    uid_department_type: null,
+    ...overrides,
+  });
+
+const namedRoot = (overrides: Record<string, unknown> = {}) =>
+  validOrganization({
+    path: [{ ...treeRoot, uid: SELF_ID }],
+    query_by_path: [SELF_ID],
+    derived_from: null,
+    uid_department_type: null,
+    ...overrides,
+  });
+
 Deno.test("OrganizationSchema accepts a complete department node", () => {
   const result = OrganizationSchema.safeParse(validTreeOrganization());
   assertEquals(result.success, true, JSON.stringify(result.error?.issues));
@@ -224,13 +246,83 @@ Deno.test("tree invariant 10 — a DERIVED placeholder states no billing address
     false,
   );
 
-  // ⚠️ The control that stops this over-reaching. Only a DERIVED node is
-  // constrained — every operator-named level may still state an address, which
-  // is the other half of #777's rule and the state 285 of 315 prod nodes are in.
+  // ⚠️ The control that stops this over-reaching, and it MOVED with invariant 11
+  // (api-cloudrun#799 Tier 3b). It used to be a DEPARTMENT — `validTreeOrganization`
+  // — which is now refused at depth 3 regardless of `derived`. A PROJECT is the
+  // right control: it is the level that may still override, so this is the case
+  // that proves 10 and 11 together have not swallowed the rule they enforce.
   assertEquals(
-    OrganizationSchema.safeParse(validTreeOrganization({
+    OrganizationSchema.safeParse(namedProject({
       billing_address: { full: "2558 W 16th St, Chicago, IL, 60608, United States" },
     })).success,
+    true,
+  );
+});
+
+/**
+ * The document is refused, AND the reason is `billing_address`.
+ *
+ * 🔴 A bare `success === false` is satisfied by any failure at all, so it cannot
+ * tell an arm that fired from an arm whose fixture drifted onto a different
+ * invariant. Naming the issue path is what makes each negative here reachable
+ * only through the arm it is written for.
+ */
+function assertBillingIssue(doc: Record<string, unknown>) {
+  const result = OrganizationSchema.safeParse(doc);
+  assertEquals(result.success, false, "expected the document to be refused");
+  const paths = result.error?.issues.map((i) => i.path.join(".")) ?? [];
+  assertEquals(
+    paths.includes("billing_address"),
+    true,
+    `expected a billing_address issue, got [${paths.join(", ")}]`,
+  );
+}
+
+Deno.test("tree invariant 11 — a DEPARTMENT inherits its billing address, it never states one", () => {
+  // 🔴 The CONTRACT half of api-cloudrun#777, landing after the corpus half
+  // (29 prod departments cleared 2026-09-04) and after manager stopped offering
+  // the editor. Until it existed the corpus was clean and nothing kept it clean:
+  // the manager gate read `derived`, and depth is not in `derived`.
+  const stated = { full: "5808 W Sunset Blvd, Los Angeles, CA, 90028, United States" };
+
+  // The positive: a department stating nothing is what all 29 prod departments
+  // are now, and it must keep parsing.
+  assertEquals(
+    OrganizationSchema.safeParse(validTreeOrganization()).success,
+    true,
+    JSON.stringify(OrganizationSchema.safeParse(validTreeOrganization()).error?.issues),
+  );
+
+  // The negative — the shape `updateOrganization` accepted until this landed.
+  //
+  // ⭐ **Asserted on the ISSUE PATH, not on `success`.** A document differing
+  // from the valid one by a single field can only fail for one reason, but
+  // `success === false` cannot say which — and every negative in this file is
+  // one edit away from failing on invariant 1 instead and passing for it.
+  assertBillingIssue(validTreeOrganization({ billing_address: stated }));
+
+  // ⚠️ **Depth, NOT the department type.** A derived department carries no
+  // `uid_department_type` (invariant 8), so an arm keyed on the catalog
+  // reference would let a minted one hold an address — the exact gap that made
+  // `derived` alone the wrong gate in the manager.
+  assertBillingIssue(
+    validOrganization({
+      path: [treeRoot, treeProject, { ...treeSelf, name: "(default)", derived: true }],
+      query_by_path: [ROOT_ID, PROJECT_ID, SELF_ID],
+      derived_from: { source_uid: ROOT_ID, reason: "minted-department" },
+      uid_department_type: null,
+      billing_address: stated,
+    }));
+
+  // ⚠️ And the ROOT keeps its own — the level that always states one. An arm
+  // that fired here would take every customer's bill-to block with it.
+  assertEquals(
+    OrganizationSchema.safeParse(namedRoot({ billing_address: stated })).success,
+    true,
+    JSON.stringify(OrganizationSchema.safeParse(namedRoot({ billing_address: stated })).error?.issues),
+  );
+  assertEquals(
+    OrganizationSchema.safeParse(namedProject({ billing_address: stated })).success,
     true,
   );
 });

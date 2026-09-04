@@ -352,6 +352,46 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
       message: "a derived placeholder states no business fact — billing_address must be null when path.at(-1).derived is true",
     });
   }
+
+  // 11. a DEPARTMENT inherits its billing address — it never states one.
+  //
+  //     🔴 **The other one-document half of api-cloudrun#777's rule, and the
+  //     half with a measured corpus behind it.** Organization states, project
+  //     overrides, department inherits: `null` means *"not set — ask my
+  //     parent"*, and `resolveBillingAddress` walks the chain rather than
+  //     copying anything down. A stored address on a depth-3 node is not an
+  //     override, it is a COPY that outranks the thing it copied — and a copy
+  //     and an override are byte-identical once written, which is the whole
+  //     reason the rule is stated as an absence.
+  //
+  //     ⭐ **Four families' departments disagreed** (api-cloudrun#799, 29
+  //     departments cleared 2026-09-04) — Netflix's `Locations` on a different
+  //     LA street, `Pursuit / Production` carrying an Evanston postcode on a
+  //     Denver street. Measured alone that reads as *"departments own distinct
+  //     billing facts"*, which takes the OPPOSITE decision; the operator's
+  //     account is what settled it: *"in the past i've made the change for one
+  //     dept and failed to make it for the others."*
+  //
+  //     ⚠️ **This is the CONTRACT half, and it lands AFTER the corpus half and
+  //     after manager stops offering the editor.** The workspace's mandated
+  //     sequence is optional → stop the writer → empty storage → refine; this
+  //     campaign emptied storage first, deliberately, because the clears were
+  //     what made the resolver observable. That left the window open until here.
+  //
+  //     ⚠️ Subsumes invariant 10 for a MINTED department (derived and depth 3)
+  //     and is independent of it at depth 2, where a `(default)` project lives.
+  //     Numbered in the schema's namespace, not the detector's — the corpus-only
+  //     arms in `api-cloudrun/scripts/audit-organization-tree.ts` count 0, 9 and
+  //     their own 10 separately. Same table in the `organization-tree` skill.
+  if (doc.billing_address != null && path.length === ORG_LEVELS.length) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["billing_address"],
+      message:
+        "a department inherits its billing address and never states one — billing_address must be null at depth " +
+        `${ORG_LEVELS.length} (${ORG_LEVELS[ORG_LEVELS.length - 1]}); state it on the project or organization above`,
+    });
+  }
 }
 
 /** Zod schema for a full organization Firestore document. */
