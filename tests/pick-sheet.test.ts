@@ -276,7 +276,7 @@ Deno.test("schema: the gate is the closed vocabulary, not a free string", () => 
  *
  * The grammar that parses a member (`api-cloudrun/src/lib/pickSheetAddress.ts`,
  * `<kind>:<uid>:<gate>:<leg>`) and the resolver that answers it
- * (`src/services/pickSheets.ts`) both live in a different repo, and the
+ * (`api-cloudrun/src/services/pickSheets.ts`) both live in a different repo, and
  * **running** service is what validates a caller — not `main`, and not any
  * repo's pin. So a member added here and named by a caller before the API
  * carrying it is DEPLOYED fails in production while every check is green. That
