@@ -380,15 +380,21 @@ A component product within a parent product — the entry in `components`.
 
 Identical to {@link ProductComponent} except that `inclusion_type` is
 **required**, and that difference is the point. Both expanders
-(`buildOrderComponentLines` in manager, and the staged-add path) filter
+(`buildOrderComponentLines`, and the staged-add path) filter
 `=== "mandatory" || === "default"`, so an `undefined` here is a silent fourth
 bucket whose component is dropped from every order it should have joined.
+
+⚠️ This said *"`buildOrderComponentLines` in manager"* until 2026-09-05, and
+it is in **core** — `src/utils/order-lines.ts`. Instruction-grade text
+pointing at the wrong repo: it sends a reader looking for the expander in a
+consumer, which is exactly the place a second implementation would be added.
 
 The optionality it replaces existed to accommodate `component_of`, where the
 field genuinely is not authored — and it leaked onto the authored side, where
 it is a bug. Splitting the two is what lets this side be required. Prod
-carries 0 undefined rows across 165 `components` entries on 63 products, so
-this is hardening with a zero-row backfill; writers with no answer pass
+carries 0 undefined rows across 174 `components` entries on 68 products
+(re-measured 2026-09-05; 165 on 63 when this was written), so this is
+hardening with a zero-row backfill; writers with no answer pass
 `"default"`, the reading manager's new-component form already takes. (The
 other reader was `crmsProduct.ts`, DELETED 2026-09-05 when the outbound CRMS
 half closed — it took the same default, so its removal narrows the evidence
@@ -6735,9 +6741,12 @@ parent this product is a component of.
 Deliberately the reduced shape: the relationship attributes
 (`inclusion_type`, `zero_priced`, `active`, `description`) describe how the
 PARENT includes this product and are authored on the parent's own
-`components` entry, which is the authoritative side. Prod agrees — across 141
-`component_of` rows on 91 products, exactly one carries any of them
-(measured 2026-07-29), against 165/165 on `components`.
+`components` entry, which is the authoritative side. Prod agrees, and the
+agreement is now total — across 149 `component_of` rows on 96 products,
+**zero** carry any of the four, against 174/174 on `components`
+(re-measured 2026-09-05). It was *"exactly one"* of 141 rows on 2026-07-29;
+that outlier is gone, so this is a rule the corpus satisfies outright rather
+than one it nearly satisfies.
 
 ```ts
 interface ProductComponent {
@@ -15995,15 +16004,21 @@ A component product within a parent product — the entry in `components`.
 
 Identical to {@link ProductComponent} except that `inclusion_type` is
 **required**, and that difference is the point. Both expanders
-(`buildOrderComponentLines` in manager, and the staged-add path) filter
+(`buildOrderComponentLines`, and the staged-add path) filter
 `=== "mandatory" || === "default"`, so an `undefined` here is a silent fourth
 bucket whose component is dropped from every order it should have joined.
+
+⚠️ This said *"`buildOrderComponentLines` in manager"* until 2026-09-05, and
+it is in **core** — `src/utils/order-lines.ts`. Instruction-grade text
+pointing at the wrong repo: it sends a reader looking for the expander in a
+consumer, which is exactly the place a second implementation would be added.
 
 The optionality it replaces existed to accommodate `component_of`, where the
 field genuinely is not authored — and it leaked onto the authored side, where
 it is a bug. Splitting the two is what lets this side be required. Prod
-carries 0 undefined rows across 165 `components` entries on 63 products, so
-this is hardening with a zero-row backfill; writers with no answer pass
+carries 0 undefined rows across 174 `components` entries on 68 products
+(re-measured 2026-09-05; 165 on 63 when this was written), so this is
+hardening with a zero-row backfill; writers with no answer pass
 `"default"`, the reading manager's new-component form already takes. (The
 other reader was `crmsProduct.ts`, DELETED 2026-09-05 when the outbound CRMS
 half closed — it took the same default, so its removal narrows the evidence
@@ -16144,9 +16159,12 @@ parent this product is a component of.
 Deliberately the reduced shape: the relationship attributes
 (`inclusion_type`, `zero_priced`, `active`, `description`) describe how the
 PARENT includes this product and are authored on the parent's own
-`components` entry, which is the authoritative side. Prod agrees — across 141
-`component_of` rows on 91 products, exactly one carries any of them
-(measured 2026-07-29), against 165/165 on `components`.
+`components` entry, which is the authoritative side. Prod agrees, and the
+agreement is now total — across 149 `component_of` rows on 96 products,
+**zero** carry any of the four, against 174/174 on `components`
+(re-measured 2026-09-05). It was *"exactly one"* of 141 rows on 2026-07-29;
+that outlier is gone, so this is a rule the corpus satisfies outright rather
+than one it nearly satisfies.
 
 ```ts
 interface ProductComponent {
