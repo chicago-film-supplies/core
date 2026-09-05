@@ -419,7 +419,30 @@ export const PickSheetOrderSchema: z.ZodType<PickSheetOrder> = z.strictObject({
   uid: FirestoreId,
   number: z.int(),
   status: z.enum(ORDER_STATUSES),
-  subject: z.string().default(""),
+  // 🔴 **`mask`, and the reason is the CORPUS rather than the schema — this one
+  // is not findable by reading code.** `scope.name` above is denormalized by a
+  // function you can grep (`resolveDestinationScope`); `subject` is a free-text
+  // box with no semantic constraint, and operators use it to record **where a
+  // shoot is**. The schema says `z.string()` and the field is called "subject",
+  // so neither the pii dictionary's name heuristic nor a code audit can reach
+  // it. Only reading the data can.
+  //
+  // Measured 2026-09-05 over 100 consecutive prod orders (#928–#1027). The
+  // median is an equipment description — `6 Walkies`, `4' Tables`, `Tents`,
+  // `Trash Pickups` — which is exactly what makes masking look unnecessary.
+  // **8 of 100 carry a literal street address**, including origin/destination
+  // shoot pairs:
+  //
+  //     2401 S Michigan > 141 W Jackson      9th St > Monroe St
+  //     141 Jackson Mats                     172 Madison Cones, Signs
+  //     Madison / Monroe    Cottage / 63rd   9th St
+  //
+  // …plus venues (`Hyatt Ohare`, `Cinespace Event`) and clients (`WNBA X LILLY`,
+  // `CAA`). ⚠️ **A field is masked on its worst case, not its median.** The cost
+  // is real and was weighed: a golden reviewer sees `Southfield` where the
+  // fixture said `Tents`. The 8% that would otherwise be a filming address in a
+  // permanent git commit decides it (owner's call, 2026-09-05).
+  subject: z.string().default("").meta({ pii: "mask" }),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
     name: NameField,
