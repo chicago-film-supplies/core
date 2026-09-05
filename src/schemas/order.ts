@@ -1282,6 +1282,38 @@ export interface Order {
    * for a nullable ActorRef.
    */
   created_by?: ActorRefType | null;
+  /**
+   * Who last changed this order — **optional and nullable for exactly the same
+   * reasons as `created_by` above, and added 2026-09-04 because the reason it
+   * was absent expired.**
+   *
+   * The original ruling (api-cloudrun#407) was that a field reading
+   * "Cloud Task Worker" on almost every order is worse than no field, and it
+   * was right while CRMS authored the corpus. **CRMS is switched off**: the
+   * last order-rebuilding `opportunity` webhook reached prod on
+   * 2026-09-03 20:00 UTC and the last CRMS webhook of any kind on
+   * 2026-09-04 15:00 UTC, against ~48 opportunity/day before that. Orders are
+   * operator-authored from here, and the ~47 human `PUT /orders/{uid}` a week
+   * that were already happening had nowhere to record who made them.
+   *
+   * ⚠️ **Not backfilled, and it must not be.** Every historical order is
+   * CRMS-authored, so a backfill could only write `crms-bot` — the field would
+   * ship saying "we don't know" on the whole corpus, which is the exact defect
+   * `created_by` avoids. Absent means absent.
+   *
+   * ⚠️ **The `null` arm is load-bearing** — same trap as `created_by`:
+   * `getInitialValues` recurses INTO an `optional`, so a bare
+   * `ActorRef.optional()` seeds `{uid: "", name: ""}` and strict `ActorRef`
+   * (`min(1)` on both) then rejects it.
+   *
+   * ⚠️ **Adding the KEY is not the free half of expand/migrate/contract.**
+   * `OrderSchema` is a `z.strictObject`, so a build that does not declare this
+   * field REFUSES any document carrying it. Nothing writes it yet, which is
+   * what makes this schema change safe on its own — **the first writer may only
+   * land once the manager is deployed on a core that declares it**
+   * (api-cloudrun#782 is the same class, measured at 9,214 documents).
+   */
+  updated_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -1350,15 +1382,16 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   xero_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId,
   version: z.int().min(0).default(0),
-  // `created_by` only — see the interface for why there is no `updated_by`, and
-  // why this is optional rather than backfilled. Adding it puts `orders` into
-  // the user-rename cascade, which is safe only because api-cloudrun's
-  // `ORDER_FANOUT_EXCLUDED_FIELDS` already refuses both actor names.
-  // 0 of 995 prod orders carry the KEY (2026-08-23) — declared ahead of use and
-  // already wired: `api-cloudrun/src/lib/orderFanoutGuard.ts` lists it, and
-  // `api-cloudrun/tests/unit/actorRefPaths.test.ts` asserts every order ActorRef
-  // path appears there.
+  // Both actor fields — see the interface for why each is optional rather than
+  // backfilled, and why `updated_by` arrived only once CRMS was switched off.
+  // They put `orders` into the user-rename cascade, which is safe ONLY because
+  // api-cloudrun's `ORDER_FANOUT_EXCLUDED_FIELDS` already refuses both names —
+  // and it listed `updated_by` before this field existed, precisely so adding it
+  // would be a schema change rather than a schema change plus a guard nobody
+  // remembers to write. `api-cloudrun/tests/unit/actorRefPaths.test.ts` asserts
+  // every order ActorRef path appears in that set, so the two cannot drift.
   created_by: ActorRef.nullable().optional().meta({ column: true, label: "Created By" }),
+  updated_by: ActorRef.nullable().optional().meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).meta({
   title: "Order",

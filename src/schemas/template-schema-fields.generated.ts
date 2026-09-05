@@ -196,6 +196,9 @@ export const templateSchemaFields: Partial<
     { path: "created_by", type: "object? | null" },
     { path: "created_by.uid", type: "string" },
     { path: "created_by.name", type: "string" },
+    { path: "updated_by", type: "object? | null" },
+    { path: "updated_by.uid", type: "string" },
+    { path: "updated_by.name", type: "string" },
   ],
   "invoices": [
     { path: "uid", type: "string" },
