@@ -407,6 +407,7 @@ still be written absent.
 ```ts
 interface AuthoredProductComponent {
   inclusion_type: InclusionTypeType;
+  price_overridden?: ComponentPriceKeyType[];
 }
 ```
 
@@ -16049,7 +16050,37 @@ still be written absent.
 ```ts
 interface AuthoredProductComponent {
   inclusion_type: InclusionTypeType;
+  price_overridden?: ComponentPriceKeyType[];
 }
+```
+
+### `COMPONENT_PRICE_KEYS`
+
+The price keys a parent may deliberately author on its own `components` entry,
+overriding the component product's catalog price.
+
+⚠️ **Plain literals, no spread** — core#43 is the standing case where JSR's
+npm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate
+could see it.
+
+```ts
+const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "taxes" | "formula" | "discountable"[];
+```
+
+### `ComponentPriceKeyEnum`
+
+Zod form of {@link COMPONENT_PRICE_KEYS}.
+
+```ts
+const ComponentPriceKeyEnum: z.ZodType<ComponentPriceKeyType>;
+```
+
+### `ComponentPriceKeyType`
+
+One key of a component entry's price.
+
+```ts
+type ComponentPriceKeyType = indexedAccess;
 ```
 
 ### `ComponentSchema`

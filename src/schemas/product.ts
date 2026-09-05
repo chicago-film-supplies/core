@@ -114,7 +114,32 @@ export interface ProductComponent {
  */
 export interface AuthoredProductComponent extends ProductComponent {
   inclusion_type: InclusionTypeType;
+  price_overridden?: ComponentPriceKeyType[];
 }
+
+/**
+ * The price keys a parent may deliberately author on its own `components` entry,
+ * overriding the component product's catalog price.
+ *
+ * ⚠️ **Plain literals, no spread** — core#43 is the standing case where JSR's
+ * npm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate
+ * could see it.
+ */
+export const COMPONENT_PRICE_KEYS = [
+  "base_cents",
+  "base_percent",
+  "replacement_cents",
+  "coa_revenue",
+  "taxes",
+  "formula",
+  "discountable",
+] as const;
+
+/** One key of a component entry's price. */
+export type ComponentPriceKeyType = typeof COMPONENT_PRICE_KEYS[number];
+
+/** Zod form of {@link COMPONENT_PRICE_KEYS}. */
+export const ComponentPriceKeyEnum: z.ZodType<ComponentPriceKeyType> = z.enum(COMPONENT_PRICE_KEYS);
 
 /** Pricing details for a product. */
 export interface ProductPrice {
@@ -418,7 +443,37 @@ export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = exte
   // `extendChecked` rather than a bare `.extend` so the (base, derived) pair is
   // captured and `tests/meta-preservation.test.ts` can prove the restatement is
   // complete — the same channel carries `pii`, where a silent drop is a leak.
-  { inclusion_type: InclusionTypeEnum.meta({ label: "Inclusion" }) },
+  {
+    inclusion_type: InclusionTypeEnum.meta({ label: "Inclusion" }),
+    /**
+     * The price keys this parent deliberately authored, overriding the
+     * component product's own catalog price.
+     *
+     * 🔴 **Authored side ONLY, and that is the whole design.** A `component_of`
+     * back-reference is a lookup aid carrying a pure COPY of the source
+     * product's price — nobody prices a parent from a child — so it takes
+     * neither this field nor any other relationship attribute (149 of 149 prod
+     * rows agree). That asymmetry is what makes a `component_of` price
+     * divergence unambiguously a MISSED CASCADE, and therefore auditable, while
+     * a `components` divergence needs this field to be decidable at all.
+     *
+     * ⚠️ **DERIVED by the writer, never sent by a client.** `CreateProductInput`
+     * / `UpdateProductInput` keep the unauthored `ComponentSchema`, so this
+     * cannot arrive on the wire. The API computes it at parent-write time — the
+     * one instant both the submitted entry and the component's catalog price are
+     * in hand — as the set of keys where they differ.
+     *
+     * ⚠️ **Absent ≠ empty, and both mean "nothing overridden".** Absent is the
+     * pre-migration corpus; `[]` is a writer that looked and found no
+     * divergence. Readers must normalize, and no reader may treat absence as
+     * "unknown" — that would re-open the undecidability this field closes.
+     *
+     * The invariant it buys: for a key NOT listed here, the entry's value must
+     * equal the component product's, and a difference is a DEFECT rather than an
+     * override (api-cloudrun#862).
+     */
+    price_overridden: z.array(ComponentPriceKeyEnum).optional(),
+  },
 ).superRefine(checkItemContract);
 
 /** Zod schema for a Product document. */
