@@ -128,3 +128,66 @@ Deno.test("keyed on path, not uid — a repeated uid keeps both rows distinct", 
   assertEquals(inA.quantity, 1);
   assertEquals(inB.quantity, 7);
 });
+
+// ── Ported from api-cloudrun's `fulfillmentReassembly` tests ──────────────
+// These pinned the two shapes that trigger `computeItemPaths`' positional
+// re-parenting. They move here with the function: the API now calls this, so
+// the properties belong beside the implementation rather than beside a caller.
+
+Deno.test("two destinations keep their own items", () => {
+  const DA = "dest-a", DB = "dest-b", IX = "item-x", IY = "item-y";
+  const stored: FulfillmentItemType[] = [
+    dest(DA),
+    line(IX, [DA, IX]),
+    dest(DB),
+    line(IY, [DB, IY]),
+  ];
+  const out = rebuildFulfillmentItems(stored, lines(stored));
+  // The buggy concat gave BOTH items [DB, ...].
+  assertEquals(pathOf(out, IX), [DA, IX]);
+  assertEquals(pathOf(out, IY), [DB, IY]);
+  // Depth-first contiguity: each destination is followed by its own item.
+  assertEquals(out.map((i) => i.uid), [DA, IX, DB, IY]);
+
+  // Path-stable across a second pass — a later PUT echoes these paths back, so
+  // an unstable rebuild would fail counterpart validation with a terminal 400
+  // that the recovery retry can never clear.
+  const second = rebuildFulfillmentItems(out, lines(out));
+  assertEquals(
+    second.map((i) => ({ uid: i.uid, path: i.path })),
+    out.map((i) => ({ uid: i.uid, path: i.path })),
+  );
+});
+
+Deno.test("a dest-root line stays before the group divider", () => {
+  const DA = "dest-a", G = "group-g", IX = "item-x", IY = "item-y";
+  const stored: FulfillmentItemType[] = [
+    dest(DA),
+    line(IX, [DA, IX]), // dest-root, before the group divider
+    group(G, DA),
+    line(IY, [DA, G, IY]), // inside the group
+  ];
+  const out = rebuildFulfillmentItems(stored, lines(stored));
+  assertEquals(pathOf(out, IX), [DA, IX]);
+  assertEquals(pathOf(out, IY), [DA, G, IY]);
+  assertEquals(out.map((i) => i.uid), [DA, IX, G, IY]);
+
+  const second = rebuildFulfillmentItems(out, lines(out));
+  assertEquals(
+    second.map((i) => ({ uid: i.uid, path: i.path })),
+    out.map((i) => ({ uid: i.uid, path: i.path })),
+  );
+});
+
+Deno.test("a line whose ancestry no longer resolves goes to the ROOT, not the tail", () => {
+  // A carried path naming a divider that no longer exists — a fan-out between
+  // projection and PUT can remove one. It must not inherit whichever divider
+  // happens to sit last; that is the re-parenting defect itself. Root states
+  // "unknown" rather than asserting somewhere wrong.
+  const DA = "dest-a", IX = "item-x", GHOST = "ghost-dest";
+  const stored: FulfillmentItemType[] = [dest(DA)];
+  const submitted = [line(IX, [GHOST, IX])];
+  const out = rebuildFulfillmentItems(stored, submitted);
+  assertEquals(out.map((i) => i.uid), [IX, DA]);
+  assertEquals(pathOf(out, IX), [IX]);
+});

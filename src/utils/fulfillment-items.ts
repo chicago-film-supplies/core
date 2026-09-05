@@ -105,6 +105,12 @@ export function rebuildFulfillmentItems(
   // Pass 2 — anything left is new, and a new line is a substitution. Place it
   // after its anchor, because that is the only statement of its parentage.
   const placedPerAnchor = new Map<string, number>();
+  // Lines whose parentage resolved to nothing at all. They go to the ROOT, not
+  // to the tail: appending would hand them whichever divider happens to come
+  // last, which is precisely the re-parenting defect this function exists to
+  // remove. A root-level path states "we do not know where this belongs"
+  // instead of asserting somewhere wrong.
+  const rootless: FulfillmentLineItemType[] = [];
   for (const li of submittedLines) {
     const key = pathKey(li.path);
     if (consumed.has(key)) continue;
@@ -126,7 +132,7 @@ export function rebuildFulfillmentItems(
     }
 
     if (at === -1) {
-      out.push(li);
+      rootless.push(li);
     } else {
       // Offset past substitutions already placed against this same anchor, so
       // a second one does not jump ahead of the first. Counted rather than
@@ -142,6 +148,8 @@ export function rebuildFulfillmentItems(
       placedPerAnchor.set(seat, nth + 1);
     }
   }
+
+  out.unshift(...rootless);
 
   return computeItemPaths(out as never) as FulfillmentItemType[];
 }
