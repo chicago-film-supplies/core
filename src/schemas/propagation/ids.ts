@@ -205,6 +205,8 @@ export type RuleId =
   | "update-product:tracking-category-change"
   | "update-product:stock-method-change"
   | "update-product:type-change"
+  | "update-product:price-to-components"
+  | "update-product:price-to-webshop-components"
   | "update-product:product-to-draft-orders"
   // organizations.ts
   | "create-org:org-to-contacts"

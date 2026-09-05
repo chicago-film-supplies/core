@@ -39,8 +39,12 @@ const COMPONENT_CATALOG_CASCADE: EnforcementRef = {
  * from a snapshot, and the audit says so rather than guessing. A parent that
  * deliberately prices its bundled component differently is indistinguishable, in
  * stored data, from one whose cascade was missed — both read as "parent value ≠
- * component's own value". Separating them needs the pre-update value, which
- * nothing retains. So the audit reports those divergences as INFORMATIONAL and
+ * component's own value". Separating them needs the pre-update value, which no
+ * SNAPSHOT retains — but the WRITE PATH does. That is the whole basis of
+ * `update-product:price-to-components`: `afterProductWrite` is handed both the
+ * old and the new document, so it can ask "does this entry still carry the value
+ * the product is moving AWAY from?" — a question no later reader of stored data
+ * can reconstruct. So the audit reports those divergences as INFORMATIONAL and
  * never fails on them, and this pointer claims only the catalog clause.
  */
 const COMPONENT_ENTRY_CATALOG_ONLY: EnforcementRef = {
@@ -49,6 +53,39 @@ const COMPONENT_ENTRY_CATALOG_ONLY: EnforcementRef = {
   clause:
     "the CATALOG clause only. The override-aware business fields (`price`, `quantity`, `inclusion_type`, `zero_priced`, `description`) are reported INFORMATIONAL and never fail the run — no snapshot property separates a deliberate override from a missed cascade, and asserting equality would report every legitimate override as a defect (`audit-booking-prices.ts` is the cautionary case, measuring its own claim violated ~38% of the time).",
   gates: true,
+};
+
+/**
+ * The price cascade is verified on the WRITER path, because it cannot be
+ * verified on the corpus — see {@link COMPONENT_ENTRY_CATALOG_ONLY}. The test
+ * carries all three verdicts, and the third is the one that decides whether the
+ * normalization works: an entry that OMITS `replacement_cents` while the product
+ * holds `null` must read as "still carries the old value" and be refreshed. A
+ * fixture whose entry has the key present passes either way.
+ */
+const COMPONENT_PRICE_CASCADE_TESTED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/eventarc/afterProductWrite.test.ts::price change refreshes a non-overridden component entry and leaves an override alone",
+  clause:
+    "the writer path — a product price change refreshes entries still carrying the pre-update value, leaves a diverging (overridden) entry alone, and treats an ABSENT nullable key as equal to a stored `null`. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+/**
+ * ⚠️ **The audit cannot verify this rule, and adding the cascade does NOT make
+ * it able to.** The snapshot property is the same one
+ * {@link COMPONENT_ENTRY_CATALOG_ONLY} records as undecidable: a diverging entry
+ * is either a deliberate override or a missed cascade. So the price stance stays
+ * INFORMATIONAL, and this pointer exists to say that the audit is NOT a check on
+ * this rule — not to claim it as one.
+ */
+const COMPONENT_PRICE_CASCADE_UNAUDITABLE: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-component-graph.ts",
+  clause:
+    "NOTHING of this rule. `price` is a BUSINESS field there, reported under `business_field_divergence` and never failing the run, because no snapshot separates an override from a missed cascade. Recorded so the next reader does not mistake the audit's coverage of the CATALOG fields for coverage of this one.",
+  gates: false,
 };
 
 const COMPONENT_RECIPROCITY_TESTED: EnforcementRef = {
@@ -427,7 +464,7 @@ const updateProductRules: CollectionRule[] = [
     target: "products",
     mode: "co-write",
     invariant:
-      "Product catalog field changes (name, active, type, stock_method, crms_id) cascade unconditionally to matching entries in other products' components/component_of arrays, looked up via query_by_components array-contains",
+      "Product catalog field changes (name, active, type, stock_method, crms_id) cascade unconditionally to matching entries in other products' components/component_of arrays, looked up via BOTH reverse indexes (query_by_components and query_by_component_of) with array-contains",
     enforced_by: [COMPONENT_CATALOG_CASCADE],
     transaction: "update-product",
     fields: [
@@ -790,6 +827,90 @@ const updateProductRules: CollectionRule[] = [
   },
 ];
 
+// ── update-product post-commit price cascade ─────────────────────
+
+/**
+ * ⚠️ **`mode: "fan-out"`, no `transaction`, and NOT a step of `update-product` —
+ * all three deliberate.** `PROPAGATION_MODES` defines `co-write` as "written
+ * atomically in same transaction", and this cascade is not: it runs post-commit
+ * in `afterProductWrite`, off the Eventarc trigger, exactly like
+ * `update-product:product-to-draft-orders`. Declaring it a step would add one to
+ * `rules_expected` on EVERY `update-product` record — including the large
+ * majority of PUTs that move no price at all — for work that transaction never
+ * performs.
+ *
+ * `update-product:catalog-to-components` looks like the precedent for the other
+ * choice and is not: it genuinely HAS an in-transaction half (the `name`
+ * cascade), so being a step is honest for it. Its post-commit half emitting a
+ * SECOND record under the same id is already why an `active`-only PUT
+ * over-claims. Do not copy that shape here.
+ */
+const updateProductPriceRules: CollectionRule[] = [
+  {
+    id: "update-product:price-to-components",
+    source: "products",
+    target: "products",
+    mode: "fan-out",
+    invariant:
+      "A product's OWN price change refreshes the denormalized copies of that price in other products' components/component_of entries — but ONLY where the entry still carries the pre-update value. An entry a parent deliberately re-priced is left alone, and so is one that cannot be decided: 'overridden' and 'cannot tell' collapse to the same branch, because a stale denorm is cheaper than an overwritten operator edit. ⚠️ The source is the product's OWN top-level price, NOT an entry it authored — `update-product:component-entry-to-parents` is the opposite direction and a different rule. ⚠️ Detection is DELTA-based and converges forward only: an entry stranded by an earlier missed edit never matches the pre-update value again and reads as an override permanently.",
+    enforced_by: [
+      COMPONENT_PRICE_CASCADE_TESTED,
+      COMPONENT_PRICE_CASCADE_UNAUDITABLE,
+    ],
+    trigger:
+      "onUpdate:products — post-commit CAS fan-out over the TARGETS' reverse indexes (query_by_components / query_by_component_of), never the source's forward arrays",
+    fields: [
+      {
+        source: ["price", "base_cents"],
+        target: ["components", "price", "base_cents"],
+        transform:
+          "written only where the entry still carries the product's PRE-update value; absent and null are normalized equal before the compare",
+      },
+      { source: ["price", "base_percent"], target: ["components", "price", "base_percent"] },
+      { source: ["price", "replacement_cents"], target: ["components", "price", "replacement_cents"] },
+      { source: ["price", "coa_revenue"], target: ["components", "price", "coa_revenue"] },
+      { source: ["price", "taxes"], target: ["components", "price", "taxes"] },
+      { source: ["price", "formula"], target: ["components", "price", "formula"] },
+      { source: ["price", "discountable"], target: ["components", "price", "discountable"] },
+      { source: ["price", "base_cents"], target: ["component_of", "price", "base_cents"] },
+      { source: ["price", "base_percent"], target: ["component_of", "price", "base_percent"] },
+      { source: ["price", "replacement_cents"], target: ["component_of", "price", "replacement_cents"] },
+      { source: ["price", "coa_revenue"], target: ["component_of", "price", "coa_revenue"] },
+      { source: ["price", "taxes"], target: ["component_of", "price", "taxes"] },
+      { source: ["price", "formula"], target: ["component_of", "price", "formula"] },
+      { source: ["price", "discountable"], target: ["component_of", "price", "discountable"] },
+    ],
+  },
+  {
+    id: "update-product:price-to-webshop-components",
+    source: "products",
+    target: "webshop-products",
+    mode: "fan-out",
+    invariant:
+      "The webshop mirror of a refreshed component entry follows it, under a SECOND compare-and-set on a different document. Declared separately because a rule has exactly one target and the mirror is a different collection — the catalog cascade writes this same mirror under a rule declaring target products only, which is a declaration gap this rule deliberately does not copy. coa_revenue and base_percent are absent by CONSTRUCTION: the mirror is built by a key-by-key whitelist, not by deletion of unwanted keys.",
+    enforced_by: [COMPONENT_PRICE_CASCADE_TESTED],
+    trigger:
+      "onUpdate:products — post-commit, follows update-product:price-to-components on those products carrying a webshop mirror",
+    fields: [
+      {
+        source: ["price", "base_cents"],
+        target: ["components", "price", "base_cents"],
+        transform:
+          "mirrors the refreshed entry price; internal keys never reach the webshop shape",
+      },
+      { source: ["price", "replacement_cents"], target: ["components", "price", "replacement_cents"] },
+      { source: ["price", "taxes"], target: ["components", "price", "taxes"] },
+      { source: ["price", "formula"], target: ["components", "price", "formula"] },
+      { source: ["price", "discountable"], target: ["components", "price", "discountable"] },
+      { source: ["price", "base_cents"], target: ["component_of", "price", "base_cents"] },
+      { source: ["price", "replacement_cents"], target: ["component_of", "price", "replacement_cents"] },
+      { source: ["price", "taxes"], target: ["component_of", "price", "taxes"] },
+      { source: ["price", "formula"], target: ["component_of", "price", "formula"] },
+      { source: ["price", "discountable"], target: ["component_of", "price", "discountable"] },
+    ],
+  },
+];
+
 // ── update-product fan-out to orders ─────────────────────────────
 
 const updateProductOrderRules: CollectionRule[] = [
@@ -853,6 +974,7 @@ export const products: PropagationModule = {
     ...createProductRules,
     createProductMovementRule,
     ...updateProductRules,
+    ...updateProductPriceRules,
     ...updateProductOrderRules,
   ],
   transactions: [

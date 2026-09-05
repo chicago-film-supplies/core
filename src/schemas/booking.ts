@@ -105,7 +105,18 @@ export interface BookingStore {
   locations: BookingStoreLocation[];
 }
 
-/** Full Firestore document for a booking (a single product line within an order). */
+/**
+ * Full Firestore document for a booking — an AGGREGATE per
+ * `(order, product, destination)`, **not a line**. The same product may repeat
+ * within one destination (a priced principal plus zero-priced accessories,
+ * `splitItem`, a standalone unit plus a kit component) and every occurrence
+ * resolves to this ONE row.
+ *
+ * ⚠️ Reading it as a line is what renders one booking's quantities N times —
+ * every unit total N× wrong. Stated the same way in
+ * `api-cloudrun/src/lib/orderProjection.ts`, `manager/src/utils/orderBookingJoin.ts`,
+ * `core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`.
+ */
 export interface Booking {
   uid: string;
   uid_order: string;
