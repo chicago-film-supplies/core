@@ -34,6 +34,7 @@ import * as dateUtils from "../src/utils/dates.ts";
 import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as fulfillmentUtils from "../src/utils/fulfillments.ts";
+import * as fulfillmentItemUtils from "../src/utils/fulfillment-items.ts";
 import * as locationUtils from "../src/utils/locations.ts";
 import * as moneyUtils from "../src/utils/money.ts";
 import * as movementUtils from "../src/utils/movements.ts";
@@ -75,6 +76,13 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   dates: dateUtils,
   icons: iconUtils,
   fulfillments: fulfillmentUtils,
+  // Same exception as `citations` and `template-lint`: `utils/fulfillment-items.ts`
+  // is the shared WRITE-PATH rebuild used by the API's picker PUT and the
+  // manager's optimistic substitution. No template can reach it — a template
+  // renders a document already written, and has no submission to rebuild from.
+  // Listed so the drift guard sees its exports rather than the generator
+  // emitting them into the editor's helper panel.
+  "fulfillment-items": fulfillmentItemUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,

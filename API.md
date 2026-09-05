@@ -24370,6 +24370,65 @@ Check whether any line item is a rental.
 
 Check whether any pre-tax line item has taxes applied.
 
+## `@cfs/core/utils/fulfillment-items`
+
+Rebuilding a fulfillment's `items[]` from a picker submission.
+
+ONE function, called by both writers — `api-cloudrun`'s
+`PUT /fulfillments/{uid}/items` and the manager's optimistic
+`applySubstitution`. It lives here because a copy drifted: the manager
+normalized with a bare `computeItemPaths` while the API bucketed by carried
+path, and the manager's comment asserted they used the same function while
+they did not. That divergence shipped a real defect — a substitution appended
+at the array tail was re-parented to the LAST divider in the document and
+lost its line-item parent, so substituting into any order with more than one
+group failed at the API's in-place check.
+
+## Sequence is NOT the picker's to author
+
+🔴 **The order of `items[]` comes from the STORED document, never from the
+submission.** A picker authors which lines exist, their quantities, and
+substitutions — nothing else. The fulfillment surface has no drag-reorder
+(dnd-kit is wired on orders, invoices and products; not here), so a
+submission's sequence carries no operator intent to preserve.
+
+Taking sequence from the stored document is also the only way the
+zero-priced-first invariant survives: `zero_priced` is one of the six fields
+stripped from a fulfillment line, so a fulfillment **cannot evaluate that
+invariant about itself**. It can only inherit the sequence its order
+projection already satisfies. A rebuild that honoured submission order would
+be free to break it, silently and unverifiably.
+
+## Why keyed on `path`, never `uid`
+
+⚠️ `item.uid` is not a row identity — it repeats within one document, in 18%
+of prod orders (a priced principal beside zero-priced accessory copies, a
+`splitItem`, or a product appearing standalone and as a kit component). Only
+`path` identifies a row within a document, which is why the submission is
+matched on it.
+
+### `rebuildFulfillmentItems(storedItems: readonly FulfillmentItemType[], submitted: readonly FulfillmentLineItemType[]): FulfillmentItemType[]`
+
+Rebuild the items array from the stored document and a picker submission.
+
+Structure and sequence come from `storedItems`; membership, quantities and
+substitutions come from `submitted`. The result is a function of
+*(stored order, submitted set)* — **the order lines arrive in does not affect
+it**, which is the property the two previous implementations both lacked.
+
+- A stored line whose path the submission still carries is kept, in place,
+  carrying the submitted line's values.
+- A stored line the submission drops is removed.
+- A submitted line with no stored counterpart is a substitution: it is placed
+  immediately after the line named by its `path_substituted_for`, which is
+  where its parentage comes from. Several substitutions against one anchor
+  keep their submitted order relative to each other.
+- Structural items are never taken from the submission — the picker does not
+  own them, and the API strips them from the request body.
+
+`computeItemPaths` runs last and remains the ONE author of `path`; this
+function only decides the sequence it reads.
+
 ## `@cfs/core/utils/locations`
 
 Location helpers — pure, dependency-free canonicalization shared by every

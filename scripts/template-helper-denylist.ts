@@ -361,6 +361,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // neither consumer is a template.
     "aggregateGoldenVerdict",
   ],
+  // `utils/fulfillment-items.ts` is a WRITE-PATH function shared by the API and
+  // the manager — it rebuilds a fulfillment's items array from a picker
+  // submission. A template renders a document that has already been written, so
+  // it has no submission to rebuild from and nothing to call this with. It is
+  // listed in UTIL_MODULES only so the drift guard sees its exports, exactly as
+  // `citations` and `template-lint` are.
+  "fulfillment-items": [
+    "rebuildFulfillmentItems",
+  ],
   // No `it.dates.*` exports are hidden today.
   dates: [],
 };

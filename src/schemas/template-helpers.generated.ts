@@ -58,6 +58,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "toChicagoStartOfDay", expr: "it.dates.toChicagoStartOfDay(input)", desc: "Canonicalize to Chicago local midnight for the calendar date containing the input instant. Use for fields that semantically represent a date (invoice.date, invoice.due_date, payments[].date). Idempotent.", returns: "string" },
     { name: "toChicagoYmd", expr: "it.dates.toChicagoYmd(input)", desc: "Format an ISO datetime as the Chicago calendar date in `YYYY-MM-DD` form. The inverse of {@link toChicagoStartOfDay} — use to populate `<input type=\"date\">` from a canonical Chicago-offset value.", returns: "string" },
   ],
+  "fulfillment-items": [
+
+  ],
   "fulfillments": [
     { name: "buildPackingList", expr: "it.fulfillments.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
     { name: "consolidateItems", expr: "it.fulfillments.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities.", returns: "ConsolidatedItem[]" },
