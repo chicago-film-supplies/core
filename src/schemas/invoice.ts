@@ -575,7 +575,21 @@ export interface Invoice {
     * (measured 2026-08-23, `orderBy` key-presence).
     */
   subject: string | null;
-  reference?: string | null;
+  /**
+   * ⚠️ **`.nullable()`, deliberately NOT `.optional()`** — present-and-null, never
+   * absent. Under `z.strictObject` those are different accepted sets, and the
+   * absent one is the state that yields `undefined`: an invoice missing this key
+   * made `stageOrderInvoiceSync` hand `patch.reference = undefined` to the write
+   * boundary, which 400s the whole ORDER update (api-cloudrun#850's test found
+   * it). Tightened 2026-09-05 on evidence: all four invoice writers already do
+   * `reference: input.reference ?? null`, all 1,037 prod invoices carry the key
+   * (857 of them `null`), and its sibling `subject` above was already bare
+   * `.nullable()` — so this field was the outlier, not the convention.
+   *
+   * `CreateInvoiceInputType.reference` stays optional: a CLIENT may omit it and
+   * the writer supplies `null`. Normalize at the writer, require at storage.
+   */
+  reference: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
   organization: DocumentOrganizationSnapshotType;
@@ -656,7 +670,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   due_date_fs: FirestoreTimestamp.optional(),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
   subject: z.string().nullable().meta({ pii: "mask", column: true, label: "Subject", linkTo: "invoiceDetail" }),
-  reference: z.string().nullable().optional().meta({ column: true, label: "Reference", linkTo: "invoiceDetail" }),
+  reference: z.string().nullable().meta({ column: true, label: "Reference", linkTo: "invoiceDetail" }),
   external_notes: z.string().meta({ pii: "mask", column: true, label: "External Notes" }).nullable().optional(),
   internal_notes: z.string().meta({ pii: "mask", column: true, label: "Internal Notes" }).nullable().optional(),
   organization: DocumentOrganizationSnapshot,

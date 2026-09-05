@@ -210,7 +210,7 @@ export const templateSchemaFields: Partial<
     { path: "date", type: "string" },
     { path: "due_date", type: "string?" },
     { path: "subject", type: "string | null" },
-    { path: "reference", type: "string? | null" },
+    { path: "reference", type: "string | null" },
     { path: "external_notes", type: "string? | null" },
     { path: "internal_notes", type: "string? | null" },
     { path: "organization", type: "object" },

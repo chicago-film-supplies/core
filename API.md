@@ -3937,7 +3937,7 @@ interface Invoice {
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
   subject: string | null;
-  reference?: string | null;
+  reference: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
   organization: DocumentOrganizationSnapshotType;
@@ -13866,7 +13866,7 @@ interface Invoice {
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
   subject: string | null;
-  reference?: string | null;
+  reference: string | null;
   external_notes?: string | null;
   internal_notes?: string | null;
   organization: DocumentOrganizationSnapshotType;
