@@ -998,3 +998,68 @@ Deno.test("one reader: readPiiTag, collectLeafPaths and applyPii agree on every 
     `The two tag readers and the runtime must agree:\n  ${disagreements.join("\n  ")}`,
   );
 });
+
+// ── A copied field must not be classified independently of its source ────
+
+/**
+ * 🔴 **`PickSheetDestination.name` IS `DestinationDividerArm.name`** — assigned
+ * verbatim at `api-cloudrun/src/lib/pickSheetFold.ts:256`, inside the branch
+ * that has just matched `divider.type === "destination"`. One operator-typed
+ * value, two schemas.
+ *
+ * ⭐ **The assertion is that the two AGREE, not that either holds a particular
+ * tag**, because the failure this exists for is a divergence: `652b1ba` reversed
+ * the arm from `none` to `mask` on a corpus measurement and left the copy
+ * behind, so for four published versions the same value masked in an order and
+ * passed through verbatim in a pick sheet. A value assertion alone would have
+ * gone green on either half; only the comparison names the defect.
+ *
+ * ⚠️ Pinning `"mask"` as well is deliberate and is the second half — an
+ * equality check is satisfied by both sides regressing together, which is
+ * exactly what a future "these labels are just venues" ruling would do.
+ */
+Deno.test("walker: the pick sheet's copy of the destination divider name carries its source's tag", async () => {
+  const { DestinationDividerArm } = await import("../src/schemas/_dividers.ts");
+  const { PickSheetDestinationSchema } = await import("../src/schemas/pick-sheet.ts");
+
+  const tagOf = (schema: z.ZodType, label: string): unknown => {
+    const { leaves, unhandled } = collectLeafPaths(schema, { inherit: ["pii"] });
+    assertEquals(unhandled, [], `collectLeafPaths could not interpret ${label}`);
+    const leaf = leaves.find((l) => l.path === "name");
+    assert(leaf !== undefined, `${label} has no \`name\` leaf — the copy moved, so this guard is stale`);
+    return leaf.meta.pii;
+  };
+
+  const source = tagOf(DestinationDividerArm, "DestinationDividerArm");
+  const copy = tagOf(PickSheetDestinationSchema, "PickSheetDestinationSchema");
+
+  assertEquals(
+    copy,
+    source,
+    "PickSheetDestination.name is DestinationDividerArm.name copied byte-for-byte " +
+      "(api-cloudrun/src/lib/pickSheetFold.ts:256). One fact must not carry two " +
+      "classifications — that is the cross-schema drift core `749aac6` refused for `subject`.",
+  );
+  assertEquals(source, "mask", "the destination divider name is masked as of core `652b1ba`");
+
+  // The tag has to REACH the value: `applyPii` descends by a different path than
+  // either tag reader, and a decorative tag is the failure `652b1ba`'s own guard
+  // was written to catch one level up.
+  const doc = {
+    uid: "00000000-0000-0000-0000-000000000001",
+    name: "2401 S Michigan Ave",
+    destination: null,
+    due_at: null,
+    quantity: 0,
+    breakdown: {},
+    bookings: [],
+    items: [],
+  };
+  // deno-lint-ignore no-explicit-any
+  const out = applyPii(doc as any, PickSheetDestinationSchema as any, createLoggerStrategy(undefined)) as any;
+  assertNotEquals(
+    out.name,
+    "2401 S Michigan Ave",
+    "an address an operator typed as a destination label reached a pick sheet verbatim",
+  );
+});

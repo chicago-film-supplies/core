@@ -367,7 +367,14 @@ export interface PickSheetDestination {
    * api-cloudrun#663.
    */
   uid: string;
-  /** The divider's own name — the address is on `destination.delivery`. */
+  /**
+   * The divider's own name — the address is on `destination.delivery`.
+   *
+   * 🔴 **PII-masked, because this is `DestinationDividerArm.name` COPIED
+   * byte-for-byte** (`api-cloudrun/src/lib/pickSheetFold.ts:256`, under
+   * `divider.type === "destination"`). The mask on the original is the whole
+   * reason; see the schema below.
+   */
   name: string;
   /** The stored pair, verbatim: both endpoints, the dates and the two flags. */
   destination: DocDestinationType;
@@ -392,7 +399,32 @@ export interface PickSheetDestination {
 /** Zod schema for {@link PickSheetDestination}. */
 export const PickSheetDestinationSchema: z.ZodType<PickSheetDestination> = z.strictObject({
   uid: ItemUid,
-  name: z.string().default(""),
+  // 🔴 **`mask`, and it is not a fresh ruling — it is the SAME VALUE as
+  // `DestinationDividerArm.name`, which was reversed from `none` to `mask` on a
+  // measurement (core `652b1ba`, `beta.327`).** `pickSheetFold` assigns
+  // `name: divider.name` verbatim from the arm it just matched on
+  // `type === "destination"`, so a pick sheet is a second projection of one
+  // field. Measured at `beta.327`, before this line: a value in this `name`
+  // survived `applyPii` UNCHANGED while `destination.delivery.address.full`
+  // beside it masked.
+  //
+  // ⚠️ **The withdrawal recorded against core#81 — "a `Stage 4`-shaped section
+  // label, not PII" — rested on the premise `652b1ba` then overturned**: that
+  // an operator-typed destination label names a venue rather than a customer.
+  // Measured over the `templates` repo's committed fixtures, 3 of 9 distinct
+  // destination-divider names are customer data (templates#203).
+  //
+  // ⭐ **A copy must not be classified independently of its source.** Masking one
+  // projection and passing the other manufactures exactly the cross-schema drift
+  // `749aac6` refused for `subject`; here it would also mean the first
+  // `templates_capture_fixture` on the packing-list family writes into git the
+  // values templates#203 is purging out of it.
+  //
+  // ⚠️ Same accepted give-back as the arm: `fakeForMask` shape-detects 2-3
+  // alphabetic tokens as a person, so a venue label masks to a person's name —
+  // a LEGIBILITY defect on the packing list's section headings, not a leak
+  // (api-cloudrun#837).
+  name: z.string().meta({ pii: "mask" }).default(""),
   destination: DocDestination,
   due_at: z.string().nullable(),
   quantity: z.int(),
