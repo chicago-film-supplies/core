@@ -1,0 +1,26 @@
+#!/bin/sh
+# Refresh the index entries `pre-commit` staged into a TEMPORARY index.
+#
+# 🔴 **For a PATHSPEC commit — `git commit -- <paths>`, the workspace's normal
+# shape — git hands `pre-commit` a temporary index and says so:**
+#
+#     pathspec commit : GIT_INDEX_FILE=.git/next-index-64981.lock
+#     bare commit     : GIT_INDEX_FILE=.git/index
+#
+# So `pre-commit`'s `git add API.md API.json` reaches THIS COMMIT and never
+# reaches `.git/index`. The commit then moves HEAD while the main index still
+# holds the pre-commit content, and `git status` reports `MM API.md` carrying a
+# diff that DELETES the docs just committed.
+#
+# ⚠️ **The danger is the DIRECTION, not the dirt.** A later bare `git commit`
+# commits the index and silently reverts API.md/API.json — and in a checkout
+# several sessions share, whoever pays is not whoever caused it. It also blocks
+# every other session, because `docs:check` then compares against a tree the
+# stale entry makes look wrong. Measured twice on 2026-09-05, in two sessions.
+#
+# ⚠️ **This cannot live in `pre-commit`: git holds `.git/index.lock` for the
+# duration of the commit**, so a second `git add` against the real index there
+# dies with *"Unable to create '.git/index.lock': File exists"*. Verified.
+#
+# A no-op after a bare commit, where the index was the real one all along.
+git reset -q HEAD -- API.md API.json 2>/dev/null || true
