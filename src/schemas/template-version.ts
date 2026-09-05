@@ -144,6 +144,48 @@ export const GoldenDiffSchema: z.ZodType<GoldenDiff> = z.strictObject({
   checked_at: FirestoreTimestamp,
 });
 
+/**
+ * The last golden-diff RUN, whether or not it produced any result.
+ *
+ * ⚠️ **`golden_results` cannot express "ran, produced nothing", and that gap is
+ * not cosmetic.** `goldenDiff` skips `persistGoldenResults` entirely when the
+ * aggregate is `renderer-unavailable`, so a single Gotenberg cold start
+ * discards every fixture's result while the PRIOR array survives untouched —
+ * carrying its old sha and its old timestamp. The manager then renders a
+ * verdict from a commit that is no longer the head as though it were current,
+ * and nothing anywhere says the newest run failed.
+ *
+ * This is the field that can say so. It is written on EVERY attempt, including
+ * the ones that persist no per-fixture rows, so a reader comparing it against
+ * `golden_results` can tell a stale verdict from a fresh one.
+ *
+ * ⭐ **Read the pair, not either half.** `golden_results` answers "what did the
+ * last SUCCESSFUL run find"; this answers "when did a run last HAPPEN, and did
+ * it get anywhere". A verdict is current only when both name the same sha.
+ */
+export interface GoldenLastAttempt {
+  /** Head sha the attempt ran against. */
+  sha: string;
+  /** The family-level aggregate, which may be `renderer-unavailable`. */
+  verdict: GoldenDiffVerdict;
+  /**
+   * How many per-fixture rows the attempt persisted.
+   *
+   * Zero with a `renderer-unavailable` verdict is the case this whole block
+   * exists for. Zero with `no-fixtures` is an ordinary family mid-build.
+   */
+  fixtures_persisted: number;
+  attempted_at: FirestoreTimestampType;
+}
+
+/** Zod schema for a GoldenLastAttempt. */
+export const GoldenLastAttemptSchema: z.ZodType<GoldenLastAttempt> = z.strictObject({
+  sha: z.string().min(1),
+  verdict: z.enum(GOLDEN_DIFF_VERDICTS),
+  fixtures_persisted: z.int().min(0),
+  attempted_at: FirestoreTimestamp,
+});
+
 /** A status-discriminated template version (draft | published | archived). */
 export interface TemplateVersion {
   uid: string;
@@ -221,6 +263,15 @@ export interface TemplateVersion {
    * the whole array each run so stale entries for deleted fixtures evict
    * naturally. Empty / undefined until the first golden-diff run on the branch. */
   golden_results?: GoldenDiff[];
+  /**
+   * The last golden-diff attempt, successful or not (see {@link GoldenLastAttempt}).
+   *
+   * Optional and additive, which is the benign direction for a `z.strictObject`:
+   * a declared key absent from storage parses fine, where an undeclared key
+   * present in storage does not. So every stored version predating this stays
+   * valid and no backfill is owed.
+   */
+  golden_last_attempt?: GoldenLastAttempt;
   /** Whether the projection has been reconciled against git (rebuild engine). */
   reconciled?: boolean;
   written_by: ActorRefType;
@@ -255,6 +306,7 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
 
   pr_number: z.int().nullable().optional(),
   golden_results: z.array(GoldenDiffSchema).optional(),
+  golden_last_attempt: GoldenLastAttemptSchema.optional(),
   reconciled: z.boolean().optional(),
   written_by: ActorRef,
   version: z.int().min(0).default(0),

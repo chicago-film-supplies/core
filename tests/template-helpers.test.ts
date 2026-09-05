@@ -46,6 +46,7 @@ import * as sessionUtils from "../src/utils/sessions.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
 import * as templateUtils from "../src/utils/templates.ts";
 import * as citationUtils from "../src/utils/citations.ts";
+import * as templateLintUtils from "../src/utils/template-lint.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -95,6 +96,13 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // in it; without the entry, its five exports were emitted straight into the
   // editor's helper panel with nothing objecting.
   citations: citationUtils,
+  // Same exception as `citations`, and the denylist comment predicted this
+  // exact arrival: "the next tooling-only util will leak the same way".
+  // `utils/template-lint.ts` is the fixture lint's rule set — CI and API
+  // tooling, reachable by no template — and it is listed here only so the drift
+  // guard sees its exports rather than the generator emitting them into the
+  // editor's helper panel.
+  "template-lint": templateLintUtils,
 };
 
 /**

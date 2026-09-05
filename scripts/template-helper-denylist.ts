@@ -325,6 +325,20 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // isn't one.** The next tooling-only util will leak the same way; what
   // catches it is `tests/template-helpers.test.ts` failing on an export that is
   // neither emitted nor denylisted, which is what caught this one.
+  // `utils/template-lint.ts` is the same case as `citations` one namespace over
+  // — the fixture lint's rule set, run by CI and the API, reachable by no
+  // template. Offering a document author `it.template-lint.lintFixtureSet`
+  // would hand them a function whose argument is a repo checkout.
+  //
+  // ⚠️ This is the THIRD tooling-only util to need a hand-written entry here
+  // (`citations`, `templates`' build half, now this), which is the point at
+  // which the namespace-shaped rule the note below wishes for stops being
+  // hypothetical. Tracked rather than built here.
+  "template-lint": [
+    "lintFixture",
+    "lintFixtureSet",
+    "stringLeaves",
+  ],
   citations: [
     "classifyCitation",
     "describesDeletion",

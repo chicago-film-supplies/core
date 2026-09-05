@@ -1568,6 +1568,18 @@
         },
         {
           "kind": "interface",
+          "name": "GoldenLastAttempt",
+          "declaration": "interface GoldenLastAttempt {\n  sha: string;\n  verdict: GoldenDiffVerdict;\n  fixtures_persisted: number;\n  attempted_at: FirestoreTimestampType;\n}",
+          "doc": "The last golden-diff RUN, whether or not it produced any result.\n\n⚠️ **`golden_results` cannot express \"ran, produced nothing\", and that gap is\nnot cosmetic.** `goldenDiff` skips `persistGoldenResults` entirely when the\naggregate is `renderer-unavailable`, so a single Gotenberg cold start\ndiscards every fixture's result while the PRIOR array survives untouched —\ncarrying its old sha and its old timestamp. The manager then renders a\nverdict from a commit that is no longer the head as though it were current,\nand nothing anywhere says the newest run failed.\n\nThis is the field that can say so. It is written on EVERY attempt, including\nthe ones that persist no per-fixture rows, so a reader comparing it against\n`golden_results` can tell a stale verdict from a fresh one.\n\n⭐ **Read the pair, not either half.** `golden_results` answers \"what did the\nlast SUCCESSFUL run find\"; this answers \"when did a run last HAPPEN, and did\nit get anywhere\". A verdict is current only when both name the same sha."
+        },
+        {
+          "kind": "variable",
+          "name": "GoldenLastAttemptSchema",
+          "declaration": "const GoldenLastAttemptSchema: z.ZodType<GoldenLastAttempt>;",
+          "doc": "Zod schema for a GoldenLastAttempt."
+        },
+        {
+          "kind": "interface",
           "name": "GroupByAxis",
           "declaration": "interface GroupByAxis {\n  field: string | null;\n  label: string;\n  kind?: \"enum\" | \"collectionFeed\" | \"dateBucket\";\n  collection?: string;\n}",
           "doc": "Describes how a client should enumerate the keys a groupBy axis produces.\n\n- `enum` — keys come from the Zod enum at `field` (e.g. card status).\n- `collectionFeed` — keys come from a live Firestore collection (e.g. one\n  section per list); `collection` names the source.\n- `dateBucket` — keys are computed client-side from the row's date value;\n  no separate per-key query.\n\nA single \"None\" / ungrouped axis is represented with `field: null` and no\n`kind` — the axis lists which *groupings are available*, and \"no grouping\"\nis always one of them."
@@ -3831,7 +3843,7 @@
         {
           "kind": "interface",
           "name": "TemplateVersion",
-          "declaration": "interface TemplateVersion {\n  uid: string;\n  uid_template: string;\n  status: TemplateVersionStatusType;\n  content: Record<string, string>;\n  params: TemplateParam[];\n  consumed_components: string[];\n  git_branch?: string;\n  base_sha?: string;\n  base_seq?: number;\n  display_name?: string;\n  uid_thread?: string;\n  committed_content_hash?: string;\n  staging_sha?: string | null;\n  sha?: string;\n  semver?: string;\n  seq?: number;\n  commit_meta?: CommitMeta;\n  blob_refs?: BlobRef[];\n  pr_number?: number | null;\n  golden_results?: GoldenDiff[];\n  reconciled?: boolean;\n  written_by: ActorRefType;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface TemplateVersion {\n  uid: string;\n  uid_template: string;\n  status: TemplateVersionStatusType;\n  content: Record<string, string>;\n  params: TemplateParam[];\n  consumed_components: string[];\n  git_branch?: string;\n  base_sha?: string;\n  base_seq?: number;\n  display_name?: string;\n  uid_thread?: string;\n  committed_content_hash?: string;\n  staging_sha?: string | null;\n  sha?: string;\n  semver?: string;\n  seq?: number;\n  commit_meta?: CommitMeta;\n  blob_refs?: BlobRef[];\n  pr_number?: number | null;\n  golden_results?: GoldenDiff[];\n  golden_last_attempt?: GoldenLastAttempt;\n  reconciled?: boolean;\n  written_by: ActorRefType;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A status-discriminated template version (draft | published | archived)."
         },
         {
@@ -13237,6 +13249,84 @@
           "name": "slugify",
           "signature": "slugify(name: string): string",
           "doc": "Derive a URL/git-safe slug from a display name. Lowercases, replaces every\nrun of non-alphanumeric characters with a single hyphen, and trims leading/\ntrailing hyphens. Two distinct display names can collapse to the same slug\n(e.g. \"Quote!\" and \"quote\") — callers enforce slug uniqueness at create.\n\n```ts\nslugify(\"Packing List (v2)\"); // \"packing-list-v2\"\n```",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/template-lint",
+      "moduleDoc": "The fixture lint, as a pure fold.\n\n## Why this is one implementation and not three\n\n`templates/scripts/lint-fixtures.ts` was the ONLY implementation of these\nrules, and it ran only in CI. So the first time an author heard about a\nschema break, a PII leak, a missing coverage argument, an orphaned golden or\nan undeclared param key was on a pull request — after the work was committed,\nreleased and pushed. The API's `gateDraftContent` does `validateEtaSources` +\n`validateIncludeTargets` and nothing else, and the manager warned about none\nof it. templates#195.\n\nTwo of those gaps were defects rather than mere lateness: an undeclared param\nkey was accepted at save and only threw later inside `resolveRenderParams`,\ntaking the family's whole `visual-diff` run with it; and `PUT /fixtures/{slug}`\nneither sanitizes nor scans PII while being the manager's own JSON textarea —\nan unsanitized write path into git, against a dev database that mirrors\nproduction.\n\nThe alternative to extracting it is two implementations of one rule drifting,\nwhich is the thing this module exists to make impossible.\n\n## ⚠️ Why this is NOT in `utils/templates.ts`, where the plan put it\n\nThat module documents a hard invariant in its own docblock — **no runtime\ndependency on `@cfs/core/schemas`** — because its path helpers (`fixturePath`,\n`slugify`, `goldenPath`) are pulled by consumers that must not drag the schema\nbarrel and all of zod along with them. Check 1 resolves `templateSchemaFor`,\nwhich is exactly such a runtime value.\n\nSo the lint lives in its own module and its own subpath. That is a real cost —\na new `@cfs/core/utils/template-lint` line in every consumer's pin list, and a\nstranded subpath at the next bump is a documented recurrence — and it buys\nkeeping a zod-free module zod-free. ⚠️ **Do not \"tidy\" this back into\n`utils/templates.ts`.**\n\n⭐ **The schema resolver is imported, never injected.** Passing it in would let\na caller supply the Firestore collection registry instead, which is precisely\nthe bug the script's own header warns about: a template source names a\ndocument SHAPE and need not be a collection at all, so `isCollectionName`\nfails CLOSED on `movement-sessions` — the receipt's source, which the API's\nwrite path validates fine (api-cloudrun#700). An injected resolver makes that\nmistake reachable again from every call site.\n\n## The two entry points, and why the split is structural\n\n`lintFixture` — the checks that need ONE fixture and its family's sidecar.\n`lintFixtureSet` — the whole fold, which requires the COMPLETE family.\n\n⭐ **This split is what stops a partial caller reporting phantom findings.**\nThe API's fixture verbs hold a single fixture; the set-wide checks (sidecar\ndrift, golden parity, param coverage) would each read \"every other fixture is\nmissing\" from that input. Rather than police it with a `complete: boolean` a\ncaller can get wrong, a caller holding one fixture literally cannot reach the\nset-wide checks — they are not on the function it can call.\n\n## ⚠️ The check set is NOT fixed, and nothing here may assume it is\n\nIt ran six checks until templates#187 retired the org-derivation one. So\n`check` is a plain `string`, deliberately **not** a closed union a seventh\nwould have to widen, and no count appears anywhere in this module.\n\n⭐ **The EXAMINED tallies are load-bearing, not decoration.** Check 6 was\nretired *cleanly* only because it printed `0 org chain(s) compose to their own\nname` on the run after the fixtures were stripped — turning \"should this be\nremoved?\" into an observation rather than a judgement call. **A check that\ncannot fail is not coverage**, and a counter is what makes a vacuous check\nannounce itself. Every check here reports what it examined.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "LintFamily",
+          "declaration": "interface LintFamily {\n  gitPath: string;\n  sidecar: LintSidecar | null;\n  fixtures: LintFixture[];\n  goldens: LintGoldenTree[];\n}",
+          "doc": "One family, completely described.\n\n⚠️ **`fixtures` and the family's existence are SEPARATE inputs, and that is\nthe point.** Deriving the family list from \"whatever has a fixture directory\"\n— which the disk script did — means a registered family with no fixtures is\nnot merely un-checked but *inexpressible*: the fold cannot even say it is\nungated. `packing-list` registered on 2026-09-05 with zero fixtures and zero\ngoldens while the lint's success line read \"23 fixture(s) across 2\nfamily(ies)\", four families existing and one of them rendering in production\nungated.\n\nA family mid-build is deliberately **not a finding** — that behaviour is\npreserved verbatim — but it is now *reported*, as `ungatedFamilies`."
+        },
+        {
+          "kind": "interface",
+          "name": "LintFinding",
+          "declaration": "interface LintFinding {\n  gitPath: string;\n  file: string;\n  check: string;\n  message: string;\n}",
+          "doc": ""
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LintFixture",
+          "declaration": "type LintFixture = typeLiteral | typeLiteral;",
+          "doc": "One fixture, already read. Parse failures are a finding, not an exception."
+        },
+        {
+          "kind": "interface",
+          "name": "LintGoldenTree",
+          "declaration": "interface LintGoldenTree {\n  branch: string;\n  slugs: string[];\n}",
+          "doc": "The baselines present for one family on one branch."
+        },
+        {
+          "kind": "interface",
+          "name": "LintReport",
+          "declaration": "interface LintReport {\n  findings: LintFinding[];\n  tally: LintTally;\n  ungatedFamilies: string[];\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "LintSidecar",
+          "declaration": "interface LintSidecar {\n  collection_source?: unknown;\n  params?: unknown;\n  fixtures?: unknown;\n}",
+          "doc": "The sidecar, structurally.\n\nDeclared here rather than imported from `Template` because a caller reads it\nout of a JSON file or a draft content map at runtime, where it is `unknown`\nand every field may be absent or wrong-typed. Typing it as the parsed\n`Template` would assert a validity the lint's whole job is to check."
+        },
+        {
+          "kind": "interface",
+          "name": "LintTally",
+          "declaration": "interface LintTally {\n  families: number;\n  fixtures: number;\n  descriptions: number;\n  goldenTrees: string[];\n  paramStates: number;\n}",
+          "doc": "What this run actually examined.\n\n⭐ Report these, always. A zero here is the shape that let check 6 be retired\non evidence instead of judgement, and it is the only thing that distinguishes\n\"everything passed\" from \"nothing was looked at\"."
+        },
+        {
+          "kind": "variable",
+          "name": "MIN_DESCRIPTION",
+          "declaration": "const MIN_DESCRIPTION: 40;",
+          "doc": "Minimum length for a fixture's coverage argument.\n\n`FixtureMeta` requires a non-empty string, which stops the field being absent\nbut not `\"x\"`. This is the policy on top of that: a coverage argument is a\nsentence. Deliberately a small round number rather than a tuned one — it\nexists to catch a placeholder, not to grade prose."
+        },
+        {
+          "kind": "function",
+          "name": "lintFixture",
+          "signature": "lintFixture(args: typeLiteral): LintFinding[]",
+          "doc": "The checks answerable from ONE fixture plus its family's sidecar.\n\nThis is what the API's fixture verbs call: schema (1), PII (2) and the\nper-entry param-key check (5a). None of them consults another fixture, so a\ncaller holding one cannot produce a finding that is an artifact of the rest\nbeing absent.\n\n⚠️ **The PII scan runs whether or not the schema check passed**, and on the\nraw document rather than a parsed one. A schema failure and a PII leak are\nindependent, and returning early on the first hides the second behind it —\nwhich matters most in exactly the case where it is most likely, a hand-pasted\ndocument that satisfies neither.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lintFixtureSet",
+          "signature": "lintFixtureSet(args: typeLiteral): LintReport",
+          "doc": "Every check, over completely-described families.\n\n⚠️ **Pass EVERY registered family, including ones with no fixtures.** The\ncaller decides what \"every family\" means; this fold reports what it was given\nand cannot detect an omission. A family left out is silently unchecked, which\nis the failure the `ungatedFamilies` output exists to make visible for the\nfamilies that ARE passed.\n\nFails CLOSED on: a fixtures directory with no sidecar, a sidecar with no\n`collection_source`, an unmapped collection, sidecar↔file drift in either\ndirection, a missing or placeholder coverage argument, and an undeclared\nparam key. Checks 4 and 5b fail OPEN by design — both are scoped to families\nthat have GRADUATED, because a family with no baseline has not chosen its\nfixture set yet and saying so on every PR would be noise rather than a\nfinding.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "stringLeaves",
+          "signature": "stringLeaves(value: unknown, _: unknown): Generator<[string, string]>",
+          "doc": "Walk the parsed JSON's STRING leaves, not the raw file text.\n\n⚠️ **Not an optimisation — a correctness requirement.** A fixture is full of\nnumbers that look like phone numbers to a `\\b\\d{10}\\b` regex: every Firestore\n`_seconds` epoch is exactly ten digits. Scanning values sidesteps the whole\nclass instead of allowlisting each false positive one at a time.",
           "paramTags": [],
           "returnsTag": null
         }

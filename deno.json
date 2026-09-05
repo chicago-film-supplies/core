@@ -80,6 +80,7 @@
     "./utils/pickSheets": "./src/utils/pickSheets.ts",
     "./utils/taxes": "./src/utils/taxes.ts",
     "./utils/templates": "./src/utils/templates.ts",
+    "./utils/template-lint": "./src/utils/template-lint.ts",
     "./utils/citations": "./src/utils/citations.ts"
   },
   "tasks": {

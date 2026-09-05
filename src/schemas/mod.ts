@@ -895,6 +895,7 @@ export {
   CommitMetaSchema,
   BlobRefSchema,
   GoldenDiffSchema,
+  GoldenLastAttemptSchema,
   UpdateTemplateVersionInput,
   type TemplateVersion,
   type TemplateVersionStatusType,
@@ -904,6 +905,7 @@ export {
   type BlobRef,
   type GoldenDiff,
   type GoldenDiffVerdict,
+  type GoldenLastAttempt,
   type UpdateTemplateVersionInputType,
 } from "./template-version.ts";
 

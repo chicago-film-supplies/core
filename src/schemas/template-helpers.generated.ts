@@ -188,6 +188,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "resolveLineTax", expr: "it.taxes.resolveLineTax(item, destination, ctx)", desc: "**The pricing rule, for one line.** Tax liability is `(item type × jurisdiction)`, resolved per line through its own destination.", returns: "LineTaxResolution" },
     { name: "taxCellState", expr: "it.taxes.taxCellState(taxes, jurisdiction, itemType, asOf)", desc: "**The third state.** Is this cell taxed, genuinely untaxed, or EXPIRED?", returns: "TaxCellState" },
   ],
+  "template-lint": [
+
+  ],
   "templates": [
     { name: "bumpSemver", expr: "it.templates.bumpSemver(current, bump)", desc: "Apply a bump level to a `MAJOR.MINOR.PATCH` semver string. A missing/invalid `current` is treated as `0.0.0` (so the first publish off `deriveBump` yields `1.0.0` for a major, `0.1.0` for a minor, `0.0.1` for a patch).", returns: "string" },
     { name: "deriveBump", expr: "it.templates.deriveBump(type, breaking)", desc: "Map a conventional-commit type + breaking flag to a semver bump level. Breaking always wins (`major`). `feat` → `minor`. Everything else (`fix`, `refactor`, `chore`, `docs`, …) → `patch`.", returns: "BumpLevel" },
