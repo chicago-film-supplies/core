@@ -8304,7 +8304,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentDocument",
-          "declaration": "interface FulfillmentDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  deliveries?: boolean;\n  pickups?: boolean;\n  subject?: string;\n  reference?: string;\n  organization: typeLiteral;\n  dates: typeLiteral;\n  destinations: Array<typeLiteral>;\n  items?: Array<typeLiteral>;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface FulfillmentDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  deliveries?: boolean;\n  pickups?: boolean;\n  has_conflicts?: boolean;\n  subject?: string;\n  reference?: string;\n  organization: typeLiteral;\n  dates: typeLiteral;\n  destinations: Array<typeLiteral>;\n  items?: Array<typeLiteral>;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for the sanitized fulfillment order view.\n\nMirrors `OrderDocument` but strips pricing, totals, tax profile,\ninvoice refs, CRM/Xero ids, and financial line-item fields."
         },
         {
@@ -8322,7 +8322,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocument",
-          "declaration": "interface InvoiceDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  status: string;\n  number_orders?: number[];\n  number_orders_str?: string[];\n  subject?: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  crms_opportunity_ids?: number[];\n  xero_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface InvoiceDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  status: string;\n  number_orders?: number[];\n  number_orders_str?: string[];\n  subject?: string;\n  reference?: string;\n  external_notes?: string;\n  internal_notes?: string;\n  organization: typeLiteral;\n  items?: Array<typeLiteral>;\n  destinations?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  crms_opportunity_ids?: number[];\n  xero_id?: string;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "Typesense document type for invoices."
         },
         {
@@ -8340,7 +8340,7 @@
         {
           "kind": "interface",
           "name": "OrganizationDocument",
-          "declaration": "interface OrganizationDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  level?: string;\n  xero_id?: string;\n  jurisdiction_claim?: string;\n  tax_exempt?: boolean;\n  emails?: string[];\n  phones?: string[];\n  billing_address: TypesenseAddressFields;\n  contacts: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  last_order?: number;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface OrganizationDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  level?: string;\n  derived?: boolean;\n  xero_id?: string;\n  jurisdiction_claim?: string;\n  tax_exempt?: boolean;\n  emails?: string[];\n  phones?: string[];\n  billing_address: TypesenseAddressFields;\n  contacts: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  last_order?: number;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for organizations."
         },
         {
@@ -8364,7 +8364,7 @@
         {
           "kind": "interface",
           "name": "ProductDocument",
-          "declaration": "interface ProductDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  tracking_category_name?: string;\n  type: string;\n  stock_method: string;\n  active: boolean;\n  component_only: boolean;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  webshop?: typeLiteral;\n  alternates?: Array<typeLiteral>;\n  crms_id?: number;\n  crms_id_str?: string;\n  uid_tracking_category?: string;\n  uid_linked_replacement?: string;\n  uid_linked_rental?: string;\n  xero_id?: string;\n  xero_tracking_option_id?: string;\n  crms_rate_id?: number;\n  crms_linked_rental_id?: number;\n  crms_linked_replacement_id?: number;\n  crms_linked_replacement_rate_id?: number;\n  shipping?: typeLiteral;\n  tags?: Array<typeLiteral>;\n  components?: ProductDocumentComponent[];\n  component_of?: ProductDocumentComponent[];\n  crms_stock_level_ids?: number[];\n  images?: string[];\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  updated_at: number;\n  created_at?: number;\n}",
+          "declaration": "interface ProductDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  tracking_category_name?: string;\n  type: string;\n  stock_method: string;\n  active: boolean;\n  component_only: boolean;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  webshop?: typeLiteral;\n  alternates?: Array<typeLiteral>;\n  crms_id?: number;\n  crms_id_str?: string;\n  uid_tracking_category?: string;\n  uid_linked_replacement?: string;\n  uid_linked_rental?: string;\n  xero_id?: string;\n  xero_tracking_option_id?: string;\n  crms_rate_id?: number;\n  crms_linked_rental_id?: number;\n  crms_linked_replacement_id?: number;\n  crms_linked_replacement_rate_id?: number;\n  shipping?: typeLiteral;\n  tags?: Array<typeLiteral>;\n  components?: ProductDocumentComponent[];\n  component_of?: ProductDocumentComponent[];\n  crms_stock_level_ids?: number[];\n  images?: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  updated_at: number;\n  created_at?: number;\n}",
           "doc": "Typesense document type for products."
         },
         {

@@ -204,6 +204,14 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   },
   organizations: {
     level: { label: "Level", cell: "plain" },
+    // 🔴 **Required, and not for cosmetics** (api-cloudrun#791). `getFilters()`'s
+    // bool branch keys on the COVERING COLUMN, not on `facet: true` — so without
+    // this entry a `derived` filter is one the manager's generic filter surface
+    // refuses, and the org pickers would have to hand-roll a raw `filter_by`
+    // string instead. Same reason `level` is here: index-derived from
+    // `path.at(-1).derived`, so there is no storage leaf to hang a
+    // `.meta({ column: true })` on.
+    derived: { label: "Derived", cell: "bool" },
     // 🔴 **`name` is a ROLLUP now, not a Firestore column** (api-cloudrun#709).
     // The stored scalar is gone; the index's `name` is
     // `composeOrgName(path)`, produced at write time by api-cloudrun's

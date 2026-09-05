@@ -217,6 +217,26 @@ export interface InvoiceDocument {
     quantity?: number;
     type?: string;
   }>;
+  /**
+   * The charge windows of the destinations this invoice bills, carried so a
+   * search hit can be filtered and sorted by date without a join.
+   *
+   * 🔴 **Declared in `schemas/typesense/invoices.ts` since the date-envelope
+   * work and absent here until core#73's config→document arm found it** — all
+   * eight fields, so nothing typed could reach the whole block. Unlike
+   * `fulfillments` there is no flat top-level roll-up on this collection, which
+   * is what made the omission total rather than partial.
+   */
+  destinations?: Array<{
+    dates?: {
+      delivery_start_fs?: number;
+      delivery_end_fs?: number;
+      collection_start_fs?: number;
+      collection_end_fs?: number;
+      charge_start_fs?: number;
+      charge_end_fs?: number;
+    };
+  }>;
   totals?: {
     total_cents?: number;
     total_cents_str?: string;
@@ -427,6 +447,8 @@ export interface FulfillmentDocument {
   status: string;
   deliveries?: boolean;
   pickups?: boolean;
+  /** A faceted conflict flag the config has always declared and this type did not (core#73). */
+  has_conflicts?: boolean;
   subject?: string;
   reference?: string;
   organization: {
@@ -468,6 +490,24 @@ export interface FulfillmentDocument {
         pronunciation?: string;
       };
     };
+    /**
+     * The PER-DESTINATION envelope, distinct from the flat top-level `dates`
+     * above — which is `deriveOrderDateEnvelope`'s roll-up across destinations,
+     * synthesized because Typesense cannot sort on a value inside an array.
+     * Both are declared in the config; only the flat one was declared here (core#73).
+     */
+    dates?: {
+      delivery_start_fs?: number;
+      delivery_end_fs?: number;
+      collection_start_fs?: number;
+      collection_end_fs?: number;
+      charge_start_fs?: number;
+      charge_end_fs?: number;
+      days_active?: number;
+      days_charged?: number;
+    };
+    /** Derived at index time — see `DERIVED_FIELDS["fulfillments:destinations.pick_bucket"]`. */
+    pick_bucket?: string;
   }>;
   items?: Array<{
     uid?: string;
@@ -558,6 +598,26 @@ export interface OrganizationDocument {
    * surface rather than an undeclared one its rules refuse.
    */
   level?: string;
+  /**
+   * `path.at(-1).derived` — whether this node is an AUTO-MINTED placeholder
+   * rather than something an operator named, DERIVED at index time.
+   *
+   * 🔴 **The one question a search hit could not answer before.** `name` is
+   * `composeOrgName(path)`, which drops derived segments, so a minted
+   * `(default)` project's label is character-for-character its root's; the two
+   * are indistinguishable in every picker (api-cloudrun#791). Re-deriving it
+   * client-side is not available — the config declares no `path.derived`, and
+   * splitting the composed name on the delimiter is the detector
+   * `core/src/utils/organizations.ts` explicitly forbids.
+   *
+   * ⚠️ **`undefined` means NOT INDEXED, never "not derived".** Absent on a
+   * document written before `organizations_v15`, and `!undefined` is `true` —
+   * so test presence, not truthiness, when the answer gates a write surface.
+   * With `level` this makes both halves of `inheritsBillingAddress`
+   * (`manager/src/utils/orgTree.ts`) answerable from a hit rather than only
+   * from a Firestore row.
+   */
+  derived?: boolean;
   xero_id?: string;
   jurisdiction_claim?: string;
   tax_exempt?: boolean;
@@ -662,7 +722,26 @@ export interface ProductDocument {
   components?: ProductDocumentComponent[];
   component_of?: ProductDocumentComponent[];
   crms_stock_level_ids?: number[];
-  images?: string[];
+  /**
+   * 🔴 **This was `string[]` while the config declared `object[]` — core#57's
+   * exact drift, found by the config→document arm in
+   * `tests/typesenseFieldCoverage.test.ts` (core#73).** The config was retyped
+   * from a flat uuid list to a nested object array (`schemas/typesense/products.ts`)
+   * and this hand-written type did not move, so every consumer was typed one
+   * level off. It survived because its population of readers is **zero** — the
+   * same reason core#57 survived, recorded in that test's own docblock.
+   *
+   * Typesense flattens these to `images.uuid = [...]` etc.; `width`/`height` are
+   * declared for the size ladder `manager/src/components/products/ProductImages.tsx`
+   * documents (manager#263), which reads a Firestore row and not a hit.
+   */
+  images?: Array<{
+    uuid?: string;
+    uuid_cutout?: string;
+    alt?: string;
+    width?: number;
+    height?: number;
+  }>;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
   updated_at: number;

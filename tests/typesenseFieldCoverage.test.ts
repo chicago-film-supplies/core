@@ -96,6 +96,22 @@ const DERIVED_FIELDS: Record<string, string> = {
   // the label. Populated by `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts`,
   // which plants a derived segment precisely to catch that.
   "organizations:name": "composeOrgName(path) — the stored scalar was removed (api-cloudrun#709)",
+  // ── `path.at(-1).derived`, hoisted to a top-level facet by the SAME producer
+  //    arm and for the SAME placement reason (api-cloudrun#791). There is no
+  //    top-level `derived` on `Organization`, which is why it needs an entry
+  //    here rather than resolving natively.
+  //
+  // 🔴 **It is the flag `organizations:name` above THROWS AWAY.** `composeOrgName`
+  // drops derived segments, so a minted `(default)` project's composed label is
+  // its root's exactly — and once the label is composed, nothing on the hit can
+  // recover the distinction. The two entries are one derivation read twice.
+  //
+  // ⚠️ Same silent-failure geometry, and worse: a `postProcess` placement reads
+  // the stripped path, `!undefined` is TRUE, and the index gets `derived: false`
+  // corpus-wide with every arm green. Populated by
+  // `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts`, which asserts BOTH
+  // polarities — a constant-false producer passes any single-polarity check.
+  "organizations:derived": "path.at(-1).derived — hoisted to a top-level facet at index time (api-cloudrun#791)",
   // ── The SAME derivation, one level out: the frozen snapshot on a document.
   //    `translateForTypesense` composes these from `doc.organization.path` on
   //    the SOURCE document (api-cloudrun `af52c9f1`), keyed on the CHAIN rather
@@ -831,6 +847,26 @@ Deno.test("typesense integer parity: the census, so an inert walker cannot repor
  */
 const TYPESENSE_DOC_ID = "id";
 
+/**
+ * Drop comments before scraping property names out of an interface body.
+ *
+ * 🔴 **Both parity arms read SOURCE TEXT, so a docblock is indistinguishable
+ * from a declaration to `/(\w+)\??:/`** — and this was not hypothetical. Adding
+ * the sentence ``see `DERIVED_FIELDS["fulfillments:destinations.pick_bucket"]``` to
+ * `FulfillmentDocument` took the forward arm RED on a property called
+ * `fulfillments` that does not exist, because `fulfillments:` matched.
+ *
+ * ⚠️ **The two arms fail in OPPOSITE directions on this, which is why it is
+ * fixed at the source rather than by wording around it.** A phantom property
+ * makes the forward arm report a field nothing declares — loud, and merely
+ * annoying. It makes the REVERSE arm report that a config field is reachable
+ * when nothing declares it — silent, and exactly the class that arm exists to
+ * catch. A guard that a comment can satisfy is not a guard.
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
+
 /** `OutOfServiceDocument` → `out-of-service`, `UserDocument` → `users`, … */
 function aliasCandidatesFor(interfaceName: string): string[] {
   const base = interfaceName
@@ -872,7 +908,9 @@ Deno.test("typesense document parity: every hand-written document field is a dec
     // Property names anywhere in the interface, INCLUDING inside inline nested
     // object and array literals — `taxes?: Array<{ amount_cents?: number }>` has
     // to yield `amount_cents`, because that is where core#57's drift lived.
-    for (const prop of new Set([...body.matchAll(/([A-Za-z_]\w*)\??:/g)].map((m) => m[1]))) {
+    // Comments first — see {@link stripComments}; a docblock naming `alias:field`
+    // otherwise reads as a property declaration.
+    for (const prop of new Set([...stripComments(body).matchAll(/([A-Za-z_]\w*)\??:/g)].map((m) => m[1]))) {
       if (prop === TYPESENSE_DOC_ID) continue;
       checkedProps++;
       if (!legalLeaves.has(prop)) offenders.push(`${interfaceName}.${prop} (config: ${alias})`);
@@ -909,6 +947,215 @@ Deno.test("typesense document parity companion: the arm reports a field the conf
     false,
     "orders must NOT declare a bare `amount` — if it does, core#57's drift is undetectable",
   );
+});
+
+// ── document parity, THE OTHER WAY: config → documents (core#73) ────
+//
+// ⭐ **The arm above runs one way only, and the reverse is where `organizations`
+// v12 actually drifted.** It asks *"is every hand-written field declared?"*, so
+// a field the config declares that NO document type carries is invisible to it
+// by construction. Two landed together in `beta.283` (`a6e5825`) and neither was
+// caught: `level` — the field the whole `filter_by: level:=…` surface exists for
+// — was declared in the config and absent from `OrganizationDocument`, so it was
+// unreachable from any typed consumer without a cast at the call site.
+//
+// ⚠️ **A naive reverse check is noise, which is presumably why it was not
+// written.** Measured while building this: comparing config names against the
+// interface BODY alone reports **146** offenders, almost all of them false —
+// `billing_address.full` looks missing because `billing_address` is typed as
+// `TypesenseAddressFields` and the properties live in that alias, not inline.
+// {@link documentPropsOf} resolving referenced interfaces transitively is what
+// takes it to a real residue.
+//
+// 🔴 **Checking EVERY segment, not just the leaf, is what makes it more than a
+// restatement.** The forward arm flattens both sides to bare segments — which is
+// lossy in a way that bites harder in this direction, because a leaf name can be
+// satisfied by a completely unrelated top-level property. `organizations` declares
+// `path.uid` and `path.name`; against a leaf-only check both PASS, on the strength
+// of `OrganizationDocument.uid` and `.name`, while `path` itself is undeclared.
+// Requiring every segment found all three.
+//
+// What it found on its first run, all of it live and none of it introduced here:
+// `ProductDocument.images` typed `string[]` against a config declaring
+// `object[]` (core#57's exact drift, one level off for every consumer);
+// `FulfillmentDocument` missing `has_conflicts`, its per-destination `dates`
+// envelope and `pick_bucket`; and `InvoiceDocument` missing its whole
+// `destinations` block. All repaired in the same commit — a guard whose first
+// act is to bless the drift it found is not a guard.
+//
+// ⚠️ **This is the SECOND of three arms, not the last.** api-cloudrun holds the
+// third — a config field declared non-optional over a nullable storage leaf,
+// which is what made all 30 minted ancestors fail to index on `billing_address`.
+// config↔storage, documents→config and config→documents close the class between
+// them; none subsumes another.
+
+/**
+ * Config fields deliberately absent from their document type, with the reason.
+ *
+ * ⚠️ **Keyed on the EXACT dotted field name, never on a prefix.** A prefix entry
+ * would exempt a subtree nobody has looked at, which is the failure mode of an
+ * exemption list — it is supposed to shrink coverage by exactly what was argued
+ * for and no more. The vacuity guard below refuses an entry naming no real
+ * config field, so a stale one is loud rather than a silent hole.
+ */
+const DOCUMENT_PARITY_EXEMPT: Record<string, string> = {
+  // 🔴 **The index carries the tree; the document type deliberately does NOT
+  // expose it**, and `OrganizationDocument.name`'s docblock is where that line is
+  // written down: `name` is `composeOrgName(path)`, so *"a consumer never needs
+  // `path`"*. The config declares `path`, `path.uid` and `path.name` for
+  // `filter_by: path.uid:=<rootUid>` — "every descendant of X" — which is a
+  // FILTER surface, not a read surface.
+  //
+  // ⚠️ Exempting it is not the same as saying the chain is reachable: the config
+  // declares no `path.derived`, so a hit could never re-compose the label anyway.
+  // `api-cloudrun/.claude/skills/organization-tree/SKILL.md` records that as a
+  // deliberate line reached after four independent consumers hit it. ⭐ The
+  // top-level `derived` facet added in v15 (api-cloudrun#791) is what makes this
+  // exemption stay correct rather than merely stand: the one question a consumer
+  // needed the chain for is now answerable without it.
+  "organizations:path": "the tree is a FILTER surface — a consumer reads the composed `name` (api-cloudrun#709)",
+  "organizations:path.uid": "filter-only: `path.uid:=<rootUid>` answers 'every descendant of X'",
+  "organizations:path.name": "filter-only, and never a label — `composeOrgName` owns that",
+};
+
+/**
+ * Every property name reachable from a document interface, following references
+ * to other interfaces declared in the same file.
+ *
+ * ⚠️ **The transitive step is what makes this arm usable rather than noise.**
+ * `billing_address?: TypesenseAddressFields` puts `full`, `city`, `postcode` and
+ * the rest one alias away; without following it, every address, actor-ref and
+ * shared sub-shape in the file reads as undeclared.
+ */
+function documentPropsOf(
+  name: string,
+  all: Map<string, { body: string; props: Set<string> }>,
+  seen: Set<string> = new Set(),
+): Set<string> {
+  if (seen.has(name)) return new Set();
+  seen.add(name);
+  const entry = all.get(name);
+  if (!entry) return new Set();
+  const out = new Set(entry.props);
+  for (const other of all.keys()) {
+    if (other === name) continue;
+    if (new RegExp(`\\b${other}\\b`).test(entry.body)) {
+      for (const p of documentPropsOf(other, all, seen)) out.add(p);
+    }
+  }
+  return out;
+}
+
+Deno.test("typesense document parity, reverse: every declared config field is reachable from a document type", async () => {
+  const source = await Deno.readTextFile(
+    new URL("../src/schemas/typesense/documents.ts", import.meta.url),
+  );
+
+  // EVERY exported interface, not just `*Document` — the shared aliases
+  // (`TypesenseAddressFields`, `TypesenseActorRef`) are the resolution targets.
+  const all = new Map<string, { body: string; props: Set<string> }>();
+  for (const [, name, rawBody] of source.matchAll(/export interface (\w+)\b([\s\S]*?)\n}\n/g)) {
+    // Comments stripped BEFORE the property scrape. In this direction a phantom
+    // property is silent — it makes a config field look reachable when no type
+    // declares it, which is precisely what this arm exists to find.
+    const body = stripComments(rawBody);
+    all.set(name, {
+      body,
+      props: new Set([...body.matchAll(/([A-Za-z_]\w*)\??:/g)].map((m) => m[1])),
+    });
+  }
+
+  // Vacuity guards FIRST, for the reason the forward arm states: if either regex
+  // stops matching, every assertion below passes over an empty set.
+  assertEquals(
+    all.size >= 22,
+    true,
+    `only ${all.size} exported interfaces matched — the block regex stopped reaching them`,
+  );
+
+  const offenders: string[] = [];
+  const unmapped: string[] = [];
+  let checkedFields = 0;
+  const exemptionsUsed = new Set<string>();
+
+  for (const interfaceName of all.keys()) {
+    if (!interfaceName.endsWith("Document")) continue;
+    const alias = aliasCandidatesFor(interfaceName).find((a) => a in typesenseSchemas);
+    if (!alias) {
+      unmapped.push(`${interfaceName} → tried ${aliasCandidatesFor(interfaceName).join(", ")}`);
+      continue;
+    }
+    const props = documentPropsOf(interfaceName, all);
+    const config = typesenseSchemas[alias as keyof typeof typesenseSchemas];
+    const declared = new Map(config.schema.fields.map((f) => [f.name, f]));
+
+    for (const field of config.schema.fields) {
+      // `_str` mirrors are covered by a RULE, exactly as in `DERIVED_FIELDS`:
+      // `addStringMirrors` produces one for every numeric field mechanically, so
+      // requiring each in a hand-written type would be an entry per numeric field.
+      if (isStringMirrorOf(field.name, declared)) continue;
+      // `query_by_*` never reaches Typesense at all — `deleteQueryByFields`
+      // strips it. It is a Firestore-only reverse index.
+      if (isStrippedAtIndexTime(field.name)) continue;
+      // ⚠️ **No `_fs` carve-out, deliberately.** They looked exempt-shaped, but
+      // document types DO carry them (`FulfillmentDocument.dates.delivery_start_fs`),
+      // so a blanket rule would have hidden six real `invoices` gaps behind two.
+      const key = `${alias}:${field.name}`;
+      if (key in DOCUMENT_PARITY_EXEMPT) {
+        exemptionsUsed.add(key);
+        continue;
+      }
+      checkedFields++;
+      const missing = field.name.split(".").filter((segment) => !props.has(segment));
+      if (missing.length > 0) {
+        offenders.push(`${alias}:${field.name} → ${interfaceName} declares no ${missing.join(", ")}`);
+      }
+    }
+  }
+
+  assertEquals(unmapped, [], `document interfaces with no matching config:\n  ${unmapped.join("\n  ")}`);
+  assertEquals(
+    checkedFields > 400,
+    true,
+    `only ${checkedFields} config fields checked — the walk stopped reaching them`,
+  );
+  // An exemption naming no real config field is a hole that reads as a decision.
+  const stale = Object.keys(DOCUMENT_PARITY_EXEMPT).filter((k) => !exemptionsUsed.has(k));
+  assertEquals(
+    stale,
+    [],
+    `DOCUMENT_PARITY_EXEMPT names config fields that no longer exist — delete them:\n  ${stale.join("\n  ")}`,
+  );
+  assertEquals(
+    offenders,
+    [],
+    `Config fields no document type declares — a typed consumer cannot reach these at all:\n  ` +
+      offenders.join("\n  "),
+  );
+});
+
+Deno.test("typesense document parity, reverse: the companion — the arm can actually fire", () => {
+  // Proves both halves of the mechanism on a fixture, because the arm above is
+  // green by construction once the repairs land and a green check that cannot
+  // fail is the thing this file exists to distrust.
+  const all = new Map<string, { body: string; props: Set<string> }>([
+    ["Shared", { body: "\n  full?: string;\n", props: new Set(["full"]) }],
+    [
+      "ThingDocument",
+      { body: "\n  uid: string;\n  address?: Shared;\n", props: new Set(["uid", "address"]) },
+    ],
+  ]);
+  const props = documentPropsOf("ThingDocument", all);
+
+  // 1. the transitive step resolves a referenced alias …
+  assertEquals(props.has("full"), true, "`Shared.full` must resolve through `address?: Shared`");
+  // 2. … and does not invent anything
+  assertEquals(props.has("city"), false);
+  // 3. every-segment checking catches a parent that is absent even when the leaf
+  //    name is satisfied by an unrelated property — `organizations:path.uid`'s
+  //    exact shape, and the case a leaf-only check waves through.
+  assertEquals("path.uid".split(".").filter((s) => !props.has(s)), ["path"]);
+  assertEquals("address.full".split(".").filter((s) => !props.has(s)), []);
 });
 
 /**

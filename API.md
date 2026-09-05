@@ -17833,6 +17833,7 @@ interface FulfillmentDocument {
   status: string;
   deliveries?: boolean;
   pickups?: boolean;
+  has_conflicts?: boolean;
   subject?: string;
   reference?: string;
   organization: typeLiteral;
@@ -17896,6 +17897,7 @@ interface InvoiceDocument {
   internal_notes?: string;
   organization: typeLiteral;
   items?: Array<typeLiteral>;
+  destinations?: Array<typeLiteral>;
   totals?: typeLiteral;
   crms_opportunity_ids?: number[];
   xero_id?: string;
@@ -17970,6 +17972,7 @@ interface OrganizationDocument {
   crms_id?: number;
   crms_id_str?: string;
   level?: string;
+  derived?: boolean;
   xero_id?: string;
   jurisdiction_claim?: string;
   tax_exempt?: boolean;
@@ -18073,7 +18076,7 @@ interface ProductDocument {
   components?: ProductDocumentComponent[];
   component_of?: ProductDocumentComponent[];
   crms_stock_level_ids?: number[];
-  images?: string[];
+  images?: Array<typeLiteral>;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
   updated_at: number;

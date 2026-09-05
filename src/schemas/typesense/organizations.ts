@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for organizations. */
 export const organizations: TypesenseCollectionConfig = {
   alias: "organizations",
-  version: 14,
+  version: 15,
   firestoreCollection: "organizations",
-  collectionName: "organizations_v14",
+  collectionName: "organizations_v15",
   schema: {
-    name: "organizations_v14",
+    name: "organizations_v15",
     enable_nested_fields: true,
     // `/` joins the composed name's segments (`ORG_NAME_DELIMITER`), so without
     // it a search for "Locations" cannot match
@@ -61,6 +61,35 @@ export const organizations: TypesenseCollectionConfig = {
       // legal on the org picker through the generic filter surface rather than
       // an undeclared filter the manager's surface rules refuse.
       { name: "level", type: "string", facet: true, optional: true },
+      // 🔴 **DERIVED at index time for the SAME reason `level` is, and from the
+      // one segment `level` cannot see: `path.at(-1).derived`.** A minted
+      // `(default)` project indexes with `name = composeOrgName(path)`, and that
+      // compose DROPS the derived segment — so the placeholder's label is
+      // character-for-character its root's, and every org picker shows two rows
+      // an operator cannot tell apart (api-cloudrun#791).
+      //
+      // 🔴 **The producer must run on the SOURCE, before `stripUndeclaredFields`.**
+      // This config declares `path`, `path.uid` and `path.name` and never
+      // `path.derived` — deliberately, and that line is not being crossed here
+      // (see `api-cloudrun/.claude/skills/organization-tree/SKILL.md`). So by
+      // `postProcess` the flag is already gone, and since `!undefined` is TRUE a
+      // producer placed there would index `derived: false` CORPUS-WIDE with
+      // nothing red. That is the `deliveries`/`pickups` shape, which indexed a
+      // constant-true facet on 644 of 1,000 prod orders before anyone noticed.
+      // `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts` carries the
+      // population assertion that makes the placement checkable rather than
+      // merely documented.
+      //
+      // ⚠️ **`optional: true` matches `level`, and it has a SHARPER failure than
+      // `level` does.** In Typesense a `filter_by` on an optional field excludes
+      // documents that do not carry it — so a client filtering `derived:=false`
+      // against an index that has not been reindexed yet gets an EMPTY picker,
+      // where an absent `level` merely makes one filter return nothing. The
+      // ordering that avoids it (core → api → reindex → verify the alias flip →
+      // only then the client filter) is owned by
+      // `api-cloudrun/.claude/plans/post-cutover-issue-roadmap.md`, because it
+      // cannot be enforced from inside this file.
+      { name: "derived", type: "bool", facet: true, optional: true },
       // 🔴 **These two replace `tax_profile`, and adding them is what makes the
       // removal safe rather than merely tidy.** `OrderOrg.tsx` attaches a
       // customer from SEARCH and seeds the order's organization snapshot from
