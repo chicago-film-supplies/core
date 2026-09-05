@@ -12,6 +12,65 @@ Statuses that still admit a further payment. Excludes `paid` deliberately.
 const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[];
 ```
 
+### `ACTIVITY_FEED_PERMISSIONS`
+
+The DISTINCT permissions a feed row can carry — the universe a client
+intersects against.
+
+⚠️ **22, not 23** — `templates` and `template-components` both map to
+`templates.read`. Derived rather than listed so it cannot disagree with the
+map above; the COUNT is asserted in `tests/activity.test.ts`, because the
+number is the thing that has to stay under Firestore's `in` cap of 30 and a
+comment cannot notice when it stops being true.
+
+🔴 **The cap binds on the ADMIN first**, which is the counter-intuitive half:
+the feed breaks for the most privileged user, because they are the only one
+holding enough permissions to exceed it. `manager/firestore.rules` already
+gates 32 collections, so "one permission per readable collection" is *already*
+over the cap — only the feed's narrower scope keeps it under, and every new
+actor-carrying collection spends one of the 8 spare.
+
+```ts
+const ACTIVITY_FEED_PERMISSIONS: readonly Permission[];
+```
+
+### `ACTIVITY_READ_PERMISSION_BY_COLLECTION`
+
+The permission gating each feed collection's SOURCE document.
+
+🔴 **This map has to live here because BOTH halves of the feed read it, and a
+second copy is a silent data-loss bug rather than a tidiness problem.** The
+writer stamps `read_permission` from it; the client must send
+`where("read_permission", "in", …)` over the permissions it holds, and rules
+are not filters — a row stamped with a permission no reader ever asks for is
+invisible **forever**, with the row sitting right there in Firestore. Nothing
+errors, nothing is empty, and the feed is simply missing those collections.
+
+⭐ **It is NOT derivable from the collection name.** A kebab→camel rule agrees
+on 21 of 23 and is wrong on exactly two, in the direction that costs rows:
+`holiday-definitions` → `holidays.read` (not `holidayDefinitions.read`) and
+`template-components` → `templates.read` (not `templateComponents.read`). A
+client deriving the list that way asks for two permissions that do not exist,
+the intersection drops them, and those two collections never appear.
+
+⚠️ **The oracle is `manager/firestore.rules`, not any catalog** — this is the
+permission a CLIENT needs to read the subject document, so it must agree with
+the rule that gates it. Verified against all 23 rules on 2026-09-05. The
+api-cloudrun side pairs a ratchet with this map asserting it still agrees with
+that repo's own `READABLE_COLLECTIONS` catalog, which covers 21 of the 23;
+`credit-notes` and `settlements` are Firestore-rule-only reads with no `/db/*`
+route, so that catalog has no entry for them and never could.
+
+⚠️ **`holiday-definitions` is the one rule that is a DISJUNCTION** —
+`hasPermission("holidays.read") || hasPermission("dateHelpers.read")` — so a
+holder of only `dateHelpers.read` can read the document and will not see its
+feed rows. That is a NARROWING, not a leak, and it is the safe direction: the
+row can only ever be gated at least as tightly as its source.
+
+```ts
+const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<Record<ActivitySubjectCollection, Permission>>;
+```
+
 ### `ALWAYS_ON_UTIL_NAMESPACES`
 
 Utils namespaces injected for every template regardless of collection.
@@ -9958,6 +10017,19 @@ the gate fail open a minute later.
 ```ts
 type XeroThrottleResetsAtSource = XeroResetsAtSource | "assumed_minute";
 ```
+
+### `activityFeedPermissionsFor(held: Iterable<Permission>): Permission[]`
+
+The exact `in` array a client must send: feed permissions ∩ permissions held.
+
+🔴 **Over-asking by a single unheld value denies the WHOLE page**, because
+Firestore rules are not filters — so this is an intersection, never
+{@link ACTIVITY_FEED_PERMISSIONS} itself. And a holder of NONE of them must
+not issue the query at all: the SDK refuses an empty `in`, so an empty result
+here means *"render the empty state"*, not *"query for nothing"*.
+
+Lives beside the map rather than in the manager so the rule and the vocabulary
+it constrains cannot drift apart.
 
 ### `availableUtilNamespaces(sources: readonly TemplateCollectionType[], targets: readonly TemplateCollectionType[]): string[]`
 

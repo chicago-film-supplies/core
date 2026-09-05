@@ -5,6 +5,9 @@
  * Each schema exports: Zod schema, interface type, and input schemas.
  */
 export {
+  ACTIVITY_FEED_PERMISSIONS,
+  ACTIVITY_READ_PERMISSION_BY_COLLECTION,
+  activityFeedPermissionsFor,
   ActivitySchema,
   ActivitySubject,
   ActivityChange,
