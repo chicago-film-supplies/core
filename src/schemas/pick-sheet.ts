@@ -249,7 +249,24 @@ export interface PickSheetScope {
 export const PickSheetScopeSchema: z.ZodType<PickSheetScope> = z.strictObject({
   kind: z.enum(["destination", "organization"]),
   uid: FirestoreId,
-  name: z.string().default(""),
+  // 🔴 **`mask`, and it is the ONE name on a pick sheet that is not a label.**
+  // For `kind: "destination"` this field is assigned `destination.address.full`
+  // verbatim (`api-cloudrun/src/services/pickSheets.ts`, `resolveDestinationScope`)
+  // — a customer delivery address under a field CALLED `name`. The pii walker
+  // routes by field name, and `name` is treated as a label outside the
+  // contact/org/user schemas, so it passed through `applyPii` untouched.
+  //
+  // Measured 2026-09-05 by running `applyPii` over a populated `PickSheet`: 20
+  // leaves sanitized through the composed `DocDestination` and `Address` — whose
+  // `full` correctly masks — and this denormalized COPY of the same value did
+  // not. That is the shape to watch for generally: the composed types are
+  // handled, the flattened label copies of them are not.
+  //
+  // ⚠️ Consequence had this shipped untagged: the first
+  // `templates_capture_fixture` on the `packing-list` family writes a real
+  // address into the `templates` git repo, which is the one store fixtures are
+  // committed to and the thing `scan:fixture-history` exists to discharge.
+  name: z.string().default("").meta({ pii: "mask" }),
   uids: z.array(FirestoreId).default([]),
 });
 
