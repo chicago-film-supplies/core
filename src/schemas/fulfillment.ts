@@ -80,6 +80,25 @@ export interface FulfillmentLineItemType {
   quantity: number;
   stock_method?: StockMethodType;
   path: string[];
+  /**
+   * The line's own order attribution — a DENORMALISED COPY of the document's
+   * identity, not an independent fact.
+   *
+   * A fulfillment doc has no order FK: its `uid` IS the order's uid and its
+   * `number` IS the order's number. So these can only ever disagree with the
+   * document by mistake, and both writers are structurally incapable of
+   * emitting a foreign order — the projection copies from the one order being
+   * written, and the picker path re-derives from `orders/{same uid}`.
+   *
+   * Optional because DIVIDERS omit both: measured 2026-09-05 across both envs,
+   * 3,907 of 13,863 prod items carry neither, and 0 items disagree.
+   *
+   * ⚠️ Nothing READS them, so a divergence has no natural detector, and it
+   * would not fail loudly: a pick sheet builds its booking key from the
+   * DOCUMENT and skips a miss, so a mis-attributed line renders booking-less
+   * and the section's unit total is silently short. `validateBeforeWrite`
+   * asserts the agreement at write time for that reason (manager#357).
+   */
   order_number?: number;
   uid_order?: string;
   /**
