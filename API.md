@@ -28894,6 +28894,42 @@ or an exemption per line. Deliberately NOT generalised to all plan docs: an
 ordinary plan is refactored freely, is read as current intent, and is exactly
 where a dead citation misleads.
 
+### `mainRepoFromGitFile(contents: string): string | null`
+
+The MAIN checkout's root, given a linked checkout's pointer-file contents —
+or `null` when the contents are not one.
+
+A linked checkout's marker is a FILE holding `gitdir: <main>/…/worktrees/<name>`,
+where an ordinary clone has a directory. That line is the only way to recover
+the main repo from inside a linked checkout without shelling out.
+
+🔴 **Every runner derives its workspace root from POSITION, and position is
+exactly what a linked checkout moves.** The harness puts one at
+`<repo>/.claude/worktrees/<name>`, so "the directory above the checkout" —
+whether spelled `dirname(cwd())` or `new URL("../../", import.meta.url)` —
+becomes `<repo>/.claude/worktrees`: every sibling-repo lookup misses, the
+relative-path presentation strips the wrong prefix, and a citation that
+resolves perfectly in an ordinary clone reports BROKEN. `core` and
+`templates` gate on that audit, so a worktree there could not commit or push
+at all — in the one situation the `cfs-worktrees` rules say to take one.
+
+⭐ **It lives here because it has now been independently wrong in three
+runners.** The same walk had to be closed three times when a linked checkout
+was scanned from OUTSIDE (2026-09-04), and this is the same bug seen from
+INSIDE — neither half is visible from the other side. A fourth copy is how it
+would happen again, which is exactly the rule this module exists to serve:
+anything that could be wrong identically in two places moves here.
+
+Pure and total, so the resolution is testable without a linked checkout on
+disk. That matters more than usual: the bug it fixes is invisible from an
+ordinary clone — and every CI run is one — which is how it survived in three
+repos at once.
+
+⚠️ **A caller that gets `null` must fall back to its own root, not invent
+one.** `null` means "this is not a linked checkout, or not one I can read",
+and the parent-of-checkout answer is then correct (an ordinary clone) or at
+worst unchanged from what was already shipping.
+
 ### `narrowingSuspects(discardedRepos: readonly string[], paragraph: string): string[]`
 
 Repos that {@link preferOwnRepo} DISCARDED, which the surrounding paragraph

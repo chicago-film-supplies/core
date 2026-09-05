@@ -343,6 +343,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "classifyCitation",
     "describesDeletion",
     "isHistoryDoc",
+    "mainRepoFromGitFile",
     "narrowingSuspects",
     "paragraphAround",
     "preferOwnRepo",

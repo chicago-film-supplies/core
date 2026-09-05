@@ -40,6 +40,7 @@ import {
   classifyCitation,
   describesDeletion,
   isHistoryDoc,
+  mainRepoFromGitFile,
   narrowingSuspects,
   paragraphAround,
   preferOwnRepo,
@@ -530,4 +531,70 @@ Deno.test("paragraphAround stops at a blank line on BOTH sides", () => {
   assertEquals(got, "beta <x>.ts gamma");
   assert(!got.includes("alpha"));
   assert(!got.includes("delta"));
+});
+
+// ── mainRepoFromGitFile ─────────────────────────────────────────────
+//
+// 🔴 **Tested from STRINGS rather than from the filesystem, deliberately.** The
+// bug this closes is invisible from an ordinary clone, and every CI run is one
+// — so a test that needed a real linked checkout on disk would not run in the
+// place that most needs it. The parse is pure precisely to make that possible.
+//
+// The paths below are interpolated or `.git`-internal rather than backticked,
+// so this file — which sits inside the scanned roots — does not cite them.
+
+Deno.test("mainRepoFromGitFile recovers the main repo from a linked checkout pointer", () => {
+  assertEquals(
+    mainRepoFromGitFile("gitdir: /Users/alex/cfs/core/.git/worktrees/citations-probe\n"),
+    "/Users/alex/cfs/core",
+  );
+});
+
+Deno.test("mainRepoFromGitFile tolerates a trailing slash and surrounding whitespace", () => {
+  // Written by hand or by a different tool version; the parse must not care.
+  assertEquals(mainRepoFromGitFile("gitdir:   /a/b/repo/.git/worktrees/wt/  \n"), "/a/b/repo");
+});
+
+Deno.test("mainRepoFromGitFile keeps only the LAST segment of a worktree name", () => {
+  // `EnterWorktree` allows `/` in a name, so the pointer can carry one. Only
+  // the final segment is the worktree; the rest is still under worktrees/.
+  assertEquals(mainRepoFromGitFile("gitdir: /a/b/repo/.git/worktrees/feature-x\n"), "/a/b/repo");
+});
+
+Deno.test("mainRepoFromGitFile returns null for an ORDINARY clone's contents", () => {
+  // An ordinary clone has a DIRECTORY there, so this is never reached — but if
+  // it ever is, falling back beats inventing a root.
+  assertEquals(mainRepoFromGitFile(""), null);
+  assertEquals(mainRepoFromGitFile("ref: refs/heads/main\n"), null);
+});
+
+Deno.test("mainRepoFromGitFile refuses a RELATIVE pointer rather than guessing a base", () => {
+  // Resolving this needs a base the function deliberately does not take. The
+  // caller then falls back to parent-of-checkout — wrong in a linked checkout,
+  // but wrong in the direction that was already shipping rather than a new
+  // invented root.
+  assertEquals(mainRepoFromGitFile("gitdir: ../../.git/worktrees/wt\n"), null);
+});
+
+Deno.test("mainRepoFromGitFile yields null for a pointer that is not under worktrees/", () => {
+  // A submodule's marker has this shape, and an absolute one must not be
+  // mistaken for a linked checkout: its parent is not a sibling-repo workspace.
+  assertEquals(mainRepoFromGitFile("gitdir: /a/b/repo/.git/modules/vendor\n"), null);
+});
+
+/**
+ * 🔴 **The fail-closed companion.** Every assertion above would still pass if
+ * the function simply returned `null` for everything — and `null` is the
+ * FALLBACK, so a broken parse degrades to exactly the behaviour this replaced,
+ * silently, in the one environment where nothing can observe it. This is the
+ * single arm that fails if the parse stops parsing.
+ */
+Deno.test("mainRepoFromGitFile — the happy path is not vacuous", () => {
+  const got = mainRepoFromGitFile("gitdir: /w/core/.git/worktrees/x\n");
+  assertEquals(typeof got, "string");
+  assertEquals(got?.endsWith("/core"), true);
+  // And the workspace derived from it is the SIBLING-REPO directory — the whole
+  // point of the resolution. `/w` is where api-cloudrun, manager and the rest
+  // live.
+  assertEquals(got?.replace(/\/[^/]+$/, ""), "/w");
 });

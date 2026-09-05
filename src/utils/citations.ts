@@ -15,9 +15,10 @@
  * Each repo keeps its own runner, because `SCAN_ROOTS`, `OWN_TOP_LEVEL`,
  * `REPOS` and the exemption list are repo-specific facts. What moves is
  * everything that can be wrong **identically in two places**: the regex, the
- * deletion vocabulary, the JSR prefix table, and — the part that matters most
- * — {@link classifyCitation}, the branch that decides `broken` from
- * `unverifiable`.
+ * deletion vocabulary, the JSR prefix table, {@link mainRepoFromGitFile} (which
+ * every runner needs before it can index anything, and which three of them got
+ * wrong the same way), and — the part that matters most — {@link
+ * classifyCitation}, the branch that decides `broken` from `unverifiable`.
  *
  * ⚠️ **The DECISION moved, not just the regex, and that was the point.** That
  * branch encodes a local-vs-CI asymmetry (below) and has been subtly wrong
@@ -48,6 +49,53 @@
  * is what makes a docstring readable to someone holding one repo — including
  * every cloud agent.
  */
+
+/**
+ * The MAIN checkout's root, given a linked checkout's pointer-file contents —
+ * or `null` when the contents are not one.
+ *
+ * A linked checkout's marker is a FILE holding `gitdir: <main>/…/worktrees/<name>`,
+ * where an ordinary clone has a directory. That line is the only way to recover
+ * the main repo from inside a linked checkout without shelling out.
+ *
+ * 🔴 **Every runner derives its workspace root from POSITION, and position is
+ * exactly what a linked checkout moves.** The harness puts one at
+ * `<repo>/.claude/worktrees/<name>`, so "the directory above the checkout" —
+ * whether spelled `dirname(cwd())` or `new URL("../../", import.meta.url)` —
+ * becomes `<repo>/.claude/worktrees`: every sibling-repo lookup misses, the
+ * relative-path presentation strips the wrong prefix, and a citation that
+ * resolves perfectly in an ordinary clone reports BROKEN. `core` and
+ * `templates` gate on that audit, so a worktree there could not commit or push
+ * at all — in the one situation the `cfs-worktrees` rules say to take one.
+ *
+ * ⭐ **It lives here because it has now been independently wrong in three
+ * runners.** The same walk had to be closed three times when a linked checkout
+ * was scanned from OUTSIDE (2026-09-04), and this is the same bug seen from
+ * INSIDE — neither half is visible from the other side. A fourth copy is how it
+ * would happen again, which is exactly the rule this module exists to serve:
+ * anything that could be wrong identically in two places moves here.
+ *
+ * Pure and total, so the resolution is testable without a linked checkout on
+ * disk. That matters more than usual: the bug it fixes is invisible from an
+ * ordinary clone — and every CI run is one — which is how it survived in three
+ * repos at once.
+ *
+ * ⚠️ **A caller that gets `null` must fall back to its own root, not invent
+ * one.** `null` means "this is not a linked checkout, or not one I can read",
+ * and the parent-of-checkout answer is then correct (an ordinary clone) or at
+ * worst unchanged from what was already shipping.
+ */
+export function mainRepoFromGitFile(contents: string): string | null {
+  const m = contents.match(/^gitdir:\s*(.+?)\s*$/m);
+  if (!m) return null;
+  const pointer = m[1];
+  // Only an ABSOLUTE pointer is usable. The tool writes one; a relative pointer
+  // would need resolving against a base this function deliberately does not
+  // take, and returning null is safer than guessing a base.
+  if (!pointer.startsWith("/")) return null;
+  const main = pointer.replace(/\/[^/]+\/worktrees\/[^/]+\/?$/, "");
+  return main === pointer ? null : main;
+}
 
 /**
  * A backticked path with an optional `:N` or `:N-M` suffix.
