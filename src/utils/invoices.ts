@@ -1934,7 +1934,8 @@ const PAIR_MATCH_EXCLUDED: ReadonlySet<string> = new Set(["uid", "uid_order", "d
  * `.d.ts` emit TRUNCATED a spread inside an `as const`.
  *
  * ⚠️ **Exported for a consumer that cannot use the carry beside it.** The CRMS
- * invoice rebuild (`api-cloudrun/src/services/webhooks/invoice.ts`) rebuilds
+ * invoice rebuild (`api-cloudrun/src/services/webhooks/invoice.ts`, deleted with
+ * the CRMS ingest) rebuilt
  * `destinations` wholesale from the source order and therefore has **no `prev`
  * to compare against** — the third row of api-cloudrun's carry-forward table,
  * where *"the operator edited it"* collapses to *"a non-null value is stored"*.

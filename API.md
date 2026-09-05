@@ -4026,7 +4026,7 @@ by hand does not:
    edited pair as unedited, and **overwrites the operator's edit** on the
    next sync. That is why it destructures `{ uid_order, dates, ...rest }`
    and compares `rest`: every future field is included by construction.
-4. api-cloudrun's `services/webhooks/invoice.ts` destination map — another
+4. api-cloudrun's `services/webhooks/invoice.ts` destination map, since deleted — another
    projection, from the CRMS-rebuilt order.
 
 ```ts
@@ -6187,7 +6187,7 @@ Which legs a sheet admits.
 🔴 **`customer_collecting` and `customer_returning` are DIRECTIONAL and
 independent, and treating them as one boolean is a measured defect rather
 than a simplification.** Verified against the writer
-(`api-cloudrun/src/services/webhooks/opportunity.ts`): `customer_collecting`
+(`api-cloudrun/src/services/webhooks/opportunity.ts`, now deleted): `customer_collecting`
 repoints the **delivery** endpoint at our own store, `customer_returning`
 repoints the **collection** endpoint. Nothing makes them move together, so
 `customer_collecting || customer_returning` over-suppresses — a leg we deliver
@@ -13994,7 +13994,7 @@ by hand does not:
    edited pair as unedited, and **overwrites the operator's edit** on the
    next sync. That is why it destructures `{ uid_order, dates, ...rest }`
    and compares `rest`: every future field is included by construction.
-4. api-cloudrun's `services/webhooks/invoice.ts` destination map — another
+4. api-cloudrun's `services/webhooks/invoice.ts` destination map, since deleted — another
    projection, from the CRMS-rebuilt order.
 
 ```ts
@@ -22746,7 +22746,8 @@ order's as the default — so the carry here is an override *detection*
 `.d.ts` emit TRUNCATED a spread inside an `as const`.
 
 ⚠️ **Exported for a consumer that cannot use the carry beside it.** The CRMS
-invoice rebuild (`api-cloudrun/src/services/webhooks/invoice.ts`) rebuilds
+invoice rebuild (`api-cloudrun/src/services/webhooks/invoice.ts`, deleted with
+the CRMS ingest) rebuilt
 `destinations` wholesale from the source order and therefore has **no `prev`
 to compare against** — the third row of api-cloudrun's carry-forward table,
 where *"the operator edited it"* collapses to *"a non-null value is stored"*.
@@ -24365,7 +24366,7 @@ a `destinations/{uid}` document id and it is the third segment of every
 booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
 moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
 the same string. There is no `bookings` migration in this change, and there
-must not be: `webhooks/opportunity.ts` records 552 duplicate prod bookings
+must not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings
 from a destination uid moving under that id.
 
 The fallbacks answer for a section whose pair is missing or names no
@@ -26350,7 +26351,8 @@ was.
 
 ⚠️ **Deliberately NOT fixed by making the `packing_list_*` arrays keep their
 dividers**, which is the tempting one-line version. Those arrays feed the
-BOOKING builders (`services/orders.ts`, `webhooks/opportunity.ts`), the
+BOOKING builders (`services/orders.ts`, and `webhooks/opportunity.ts` until it
+was deleted), the
 calendar and the event cards. Most of those go through `consolidateItems`,
 which skips `NON_PRODUCT_TYPES` and would be unharmed — but
 `lib/eventCards.ts` tests `packing_list_delivery.length > 0` directly, so a
@@ -26740,7 +26742,7 @@ a `destinations/{uid}` document id and it is the third segment of every
 booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
 moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
 the same string. There is no `bookings` migration in this change, and there
-must not be: `webhooks/opportunity.ts` records 552 duplicate prod bookings
+must not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings
 from a destination uid moving under that id.
 
 The fallbacks answer for a section whose pair is missing or names no
@@ -27653,7 +27655,7 @@ a `destinations/{uid}` document id and it is the third segment of every
 booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
 moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
 the same string. There is no `bookings` migration in this change, and there
-must not be: `webhooks/opportunity.ts` records 552 duplicate prod bookings
+must not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings
 from a destination uid moving under that id.
 
 The fallbacks answer for a section whose pair is missing or names no

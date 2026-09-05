@@ -77,7 +77,7 @@ import { FulfillmentItem, type FulfillmentItemType } from "./fulfillment.ts";
  * 🔴 **`customer_collecting` and `customer_returning` are DIRECTIONAL and
  * independent, and treating them as one boolean is a measured defect rather
  * than a simplification.** Verified against the writer
- * (`api-cloudrun/src/services/webhooks/opportunity.ts`): `customer_collecting`
+ * (`api-cloudrun/src/services/webhooks/opportunity.ts`, now deleted): `customer_collecting`
  * repoints the **delivery** endpoint at our own store, `customer_returning`
  * repoints the **collection** endpoint. Nothing makes them move together, so
  * `customer_collecting || customer_returning` over-suppresses — a leg we deliver

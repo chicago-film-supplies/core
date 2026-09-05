@@ -499,7 +499,7 @@ const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
  *    edited pair as unedited, and **overwrites the operator's edit** on the
  *    next sync. That is why it destructures `{ uid_order, dates, ...rest }`
  *    and compares `rest`: every future field is included by construction.
- * 4. api-cloudrun's `services/webhooks/invoice.ts` destination map — another
+ * 4. api-cloudrun's `services/webhooks/invoice.ts` destination map, since deleted — another
  *    projection, from the CRMS-rebuilt order.
  */
 export interface InvoiceDocDestinationType extends DocDestinationType {

@@ -284,7 +284,8 @@ export const INTEGRATION_EVENT_MSGS = [
   //    ⚠️ Postcodes are deliberately absent: `CacheGeocodesSchema` tags
   //    city/region/country `pii: "none"` and leaves postcode under the
   //    object-level `mask`, and this record mirrors that.
-  //  - the callers (`services/orders.ts`, `services/webhooks/opportunity.ts`):
+  //  - the callers (`services/orders.ts`; `services/webhooks/opportunity.ts` was
+  //    the other, and is deleted):
   //    `{ error_message, crms_id? }` and NO `reason` — the full address is in
   //    `error_message`. Each then writes `address_coordinates = null`, which is
   //    the whole reason a refusal can end at the same throw as a miss without

@@ -2739,7 +2739,7 @@ export interface DestinationGroup {
    *
    * ⚠️ **Do not "fix" this by keeping the dividers here.** Seven consumers read
    * these two arrays — the booking builders in `api-cloudrun/src/services/orders.ts`
-   * and `api-cloudrun/src/services/webhooks/opportunity.ts`, the calendar, the
+   * and the deleted `api-cloudrun/src/services/webhooks/opportunity.ts`, the calendar, the
    * event cards, and an audit script. Most funnel through `consolidateItems`,
    * which skips `NON_PRODUCT_TYPES` and would be unharmed; but
    * `api-cloudrun/src/lib/eventCards.ts` tests `.length > 0` directly, so a
@@ -2768,7 +2768,7 @@ export interface DestinationGroup {
  * booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
  * moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
  * the same string. There is no `bookings` migration in this change, and there
- * must not be: `webhooks/opportunity.ts` records 552 duplicate prod bookings
+ * must not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings
  * from a destination uid moving under that id.
  *
  * The fallbacks answer for a section whose pair is missing or names no
@@ -3029,7 +3029,8 @@ export function buildPackingList(
  *
  * ⚠️ **Deliberately NOT fixed by making the `packing_list_*` arrays keep their
  * dividers**, which is the tempting one-line version. Those arrays feed the
- * BOOKING builders (`services/orders.ts`, `webhooks/opportunity.ts`), the
+ * BOOKING builders (`services/orders.ts`, and `webhooks/opportunity.ts` until it
+ * was deleted), the
  * calendar and the event cards. Most of those go through `consolidateItems`,
  * which skips `NON_PRODUCT_TYPES` and would be unharmed — but
  * `lib/eventCards.ts` tests `packing_list_delivery.length > 0` directly, so a

@@ -166,7 +166,7 @@ export interface ProductPrice {
    * **568 of 568 products in prod and dev carry the key** (measured 2026-08-23,
    * `orderBy` key-presence), and both writers supply it unconditionally:
    * `createProduct` passes the input through, and
-   * `api-cloudrun/scripts/reconcile-crms-product-catalog.ts` derives one via
+   * the deleted `api-cloudrun/scripts/reconcile-crms-product-catalog.ts` derived one via
    * `getCoaRevenueFromCrmsId`, whose return type is non-nullable.
    *
    * 🔴 **The optionality was an erasure path, not just a loose type.**

@@ -1235,7 +1235,7 @@ export interface Order {
    * ⚠️ **995 of 995 in both environments, and it must stay optional.** That
    * number is a fact about the GENERATOR, not about the document: the only
    * writer in the repo is the CRMS opportunity webhook
-   * (`api-cloudrun/src/services/webhooks/opportunity.ts`), and `createOrder`
+   * (`api-cloudrun/src/services/webhooks/opportunity.ts`, since deleted), and `createOrder`
    * sets it nowhere. Every stored order carries it because every stored order
    * came from CRMS — a natively created one has no key at all, so requiring it
    * would 400 the native create path the first time it ran.
