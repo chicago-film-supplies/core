@@ -1001,10 +1001,23 @@ const CardActionSchema: z.ZodType<CardAction>;
 Zod schema for a card attachment.
 
 One node, seven consumers — `CardSchema`, `RecurrenceSchema`'s prototype, and
-the create/update inputs of both all reference this same instance (no
-`.extend()` / `.omit()` / `.pick()` anywhere in `src/schemas/`), and
+the create/update inputs of both all reference this same instance, and
 `z.globalRegistry` is a WeakMap keyed on the instance. So the single
 `uploadcareRef()` below annotates `uid` for every one of them.
+
+⚠️ **This used to justify itself with "no `.extend()` / `.omit()` / `.pick()`
+anywhere in `src/schemas/`", and that was FALSE for five weeks** —
+`product.ts` gained one in `91ea625` (2026-07-29) and nothing noticed
+(core#82). The conclusion held the whole time, but by accident of *which*
+object was extended rather than by the global absence it claimed. A comment
+asserting an unchecked premise is worse than no comment: it reads as verified.
+
+⭐ **What holds it up now is a test, not a sentence.** Composition goes through
+`extendChecked` (`_extend.ts`), which captures the (base, derived) pair at
+construction, and `tests/meta-preservation.test.ts` both forbids a bare
+`.extend()`/`.merge()` in `src/` and diffs every re-declared field's
+annotations against its base. So the reachability argument above is only ever
+one part of the guarantee — the other part reddens.
 
 ```ts
 const CardAttachment: z.ZodType<CardAttachmentType>;
@@ -12898,10 +12911,23 @@ const CardActionSchema: z.ZodType<CardAction>;
 Zod schema for a card attachment.
 
 One node, seven consumers — `CardSchema`, `RecurrenceSchema`'s prototype, and
-the create/update inputs of both all reference this same instance (no
-`.extend()` / `.omit()` / `.pick()` anywhere in `src/schemas/`), and
+the create/update inputs of both all reference this same instance, and
 `z.globalRegistry` is a WeakMap keyed on the instance. So the single
 `uploadcareRef()` below annotates `uid` for every one of them.
+
+⚠️ **This used to justify itself with "no `.extend()` / `.omit()` / `.pick()`
+anywhere in `src/schemas/`", and that was FALSE for five weeks** —
+`product.ts` gained one in `91ea625` (2026-07-29) and nothing noticed
+(core#82). The conclusion held the whole time, but by accident of *which*
+object was extended rather than by the global absence it claimed. A comment
+asserting an unchecked premise is worse than no comment: it reads as verified.
+
+⭐ **What holds it up now is a test, not a sentence.** Composition goes through
+`extendChecked` (`_extend.ts`), which captures the (base, derived) pair at
+construction, and `tests/meta-preservation.test.ts` both forbids a bare
+`.extend()`/`.merge()` in `src/` and diffs every re-declared field's
+annotations against its base. So the reachability argument above is only ever
+one part of the guarantee — the other part reddens.
 
 ```ts
 const CardAttachment: z.ZodType<CardAttachmentType>;

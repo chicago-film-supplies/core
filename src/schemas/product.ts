@@ -2,6 +2,7 @@
  * Product document schema — Firestore collection: products
  */
 import { z } from "zod";
+import { extendChecked } from "./_extend.ts";
 import { FirestoreId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
@@ -394,14 +395,19 @@ export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
  *
  * @see {@link AuthoredProductComponent}
  */
-export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = ComponentObject
+export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = extendChecked(
+  ComponentObject,
   // ⚠️ The label is restated because `.extend` REPLACES the node, taking its
   // `.meta()` with it — `ComponentObject`'s `inclusion_type` label does not
   // survive into the authored variant, and the omission is silent: the field
   // simply stops being a labelled leaf and drops out of the activity feed's
   // change list with nothing red.
-  .extend({ inclusion_type: InclusionTypeEnum.meta({ label: "Inclusion" }) })
-  .superRefine(checkItemContract);
+  //
+  // `extendChecked` rather than a bare `.extend` so the (base, derived) pair is
+  // captured and `tests/meta-preservation.test.ts` can prove the restatement is
+  // complete — the same channel carries `pii`, where a silent drop is a leak.
+  { inclusion_type: InclusionTypeEnum.meta({ label: "Inclusion" }) },
+).superRefine(checkItemContract);
 
 /** Zod schema for a Product document. */
 export const ProductSchema: z.ZodType<Product> = z.strictObject({
