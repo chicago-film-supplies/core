@@ -1257,14 +1257,23 @@ export interface Order {
   uid_thread: string;
   version: number;
   /**
-   * Who created this order — **optional, and there is no `updated_by` twin**
-   * (api-cloudrun#407).
+   * Who created this order — optional, and paired with an `updated_by` twin
+   * declared below.
    *
-   * `updated_by` is deliberately absent rather than pending: `orders` is the
-   * most machine-written collection in the system (holiday recompute, the draft
-   * fan-out, calendar, Trello, the Xero and CRMS sweeps), and corpus-wide
-   * **15,885 of 16,046 prod ActorRefs already name a bot**. A second field that
-   * reads "Cloud Task Worker" on almost every order is worse than no field.
+   * ⚠️ **This docstring used to say the twin was "deliberately absent", citing
+   * api-cloudrun#407, and it stayed saying so after the field shipped on
+   * 2026-09-04.** It is the paragraph a reader hits FIRST, ~130 lines above the
+   * field it denied the existence of, so it read as current intent while being
+   * flatly contradicted by the schema — the "a stale plan reads as current
+   * intent" failure, one level down in a docstring.
+   *
+   * The original ruling was sound while it held: `orders` was the most
+   * machine-written collection in the system (holiday recompute, the draft
+   * fan-out, calendar, Trello, the Xero and CRMS sweeps), corpus-wide
+   * **15,885 of 16,046 prod ActorRefs already named a bot**, and a second field
+   * reading "Cloud Task Worker" on almost every order is worse than no field.
+   * **CRMS being switched off expired that reasoning** — see `updated_by`'s own
+   * docstring below for the measurement that retired it.
    *
    * Optional because it is **not backfilled**. Every historical order is
    * CRMS-authored, so a backfill could only write `crms-bot`, i.e. the field

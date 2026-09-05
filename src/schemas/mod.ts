@@ -5,6 +5,21 @@
  * Each schema exports: Zod schema, interface type, and input schemas.
  */
 export {
+  ActivitySchema,
+  ActivitySubject,
+  ActivityChange,
+  ActivitySubjectCollectionEnum,
+  ActivityOperationEnum,
+  ActorKindEnum,
+  type Activity,
+  type ActivitySubjectType,
+  type ActivityChangeType,
+  type ActivitySubjectCollection,
+  type ActivityOperation,
+  type ActorKind,
+} from "./activity.ts";
+
+export {
   ContactSchema,
   ContactOrganization,
   CreateContactInput,
@@ -1074,6 +1089,7 @@ import type { TrackingCategory } from "./tracking-category.ts";
 import type { Movement } from "./transaction.ts";
 import type { TypesenseConfig } from "./typesense-config.ts";
 import type { UploadcareSweepRun } from "./uploadcare-sweep.ts";
+import type { Activity } from "./activity.ts";
 import type { UploadcareWorkListEntry } from "./uploadcare-worklist.ts";
 import type { User } from "./user.ts";
 import type { Destination } from "./destination.ts";
@@ -1178,6 +1194,7 @@ import { MovementSchema } from "./transaction.ts";
 import { UserSchema } from "./user.ts";
 import { TypesenseConfigSchema } from "./typesense-config.ts";
 import { UploadcareSweepRunSchema } from "./uploadcare-sweep.ts";
+import { ActivitySchema } from "./activity.ts";
 import { UploadcareWorkListEntrySchema } from "./uploadcare-worklist.ts";
 import { WebhookEventSchema as WebhookEventSchema_ } from "./webhook-event.ts";
 import { WebshopProductSchema } from "./webshop-product.ts";
@@ -1234,6 +1251,8 @@ import {
  * wants the dynamic callers' domain established first. Not folded in here.
  */
 export interface CollectionDocs {
+  activity: Activity;
+  activities: Activity;
   booking: Booking;
   bookings: Booking;
   card: Card;
@@ -1350,6 +1369,7 @@ export type DocFor<C extends CollectionName> = CollectionDocs[C];
 
 /** All document schemas keyed by singular and plural collection names. */
 const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
+  "activity": ActivitySchema, "activities": ActivitySchema,
   "booking": BookingSchema, "bookings": BookingSchema,
   "card": CardSchema, "cards": CardSchema,
   "counter": CounterSchema_, "counters": CounterSchema_,

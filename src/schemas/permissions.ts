@@ -198,6 +198,14 @@ export const PERMISSIONS = [
 
   "uploads.sign",
 
+  // The activity feed. ONE permission, and it gates the PAGE, not the rows:
+  // each row carries its source document's own `read_permission`, so a user
+  // holding `orders.read` but not `invoices.read` sees order activity and no
+  // invoice activity. A single flat grant would leak invoice contents through
+  // the feed, because a Firestore rules read grant is whole-document — rules
+  // cannot project (api-cloudrun#698).
+  "activities.read",
+
   "admin.reindex",
   "admin.validate",
   "admin.sync",
