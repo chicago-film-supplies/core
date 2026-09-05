@@ -5273,9 +5273,9 @@ has filled one in. See `core/CLAUDE.md` § "Is a field dead?".
 ```ts
 interface NameParts {
   first_name: string;
-  middle_name?: string;
-  last_name?: string;
-  pronunciation?: string;
+  middle_name?: string | null;
+  last_name?: string | null;
+  pronunciation?: string | null;
 }
 ```
 
@@ -10270,7 +10270,7 @@ posting depends on what is being corrected. Callers must supply it.
 
 **Returns** — the account code, or `null` when the rule has no opinion.
 
-### `deriveName(parts: PartialNameParts): string`
+### `deriveName(parts: NamePartsLike): string`
 
 Canonical join rule for deriving a single display string from name parts.
 Joins `[first_name, middle_name, last_name]` with single spaces (missing
@@ -11778,9 +11778,9 @@ has filled one in. See `core/CLAUDE.md` § "Is a field dead?".
 ```ts
 interface NameParts {
   first_name: string;
-  middle_name?: string;
-  last_name?: string;
-  pronunciation?: string;
+  middle_name?: string | null;
+  last_name?: string | null;
+  pronunciation?: string | null;
 }
 ```
 
@@ -11800,6 +11800,26 @@ update input schemas (PUT endpoints) where callers may omit `first_name`.
 
 ```ts
 const NamePartsFieldsPartial: typeLiteral;
+```
+
+### `NamePartsLike`
+
+The widest name-part shape {@link deriveName} accepts.
+
+Deliberately NOT {@link PartialNameParts}, and deliberately not a widening of
+it. `deriveName` is called with both STORED objects (whose parts are heading
+for `string | null`) and INPUT objects (whose parts stay `string | undefined`),
+so its parameter has to admit both — but widening `PartialNameParts` itself
+would change the published INPUT contract, and whether that contract gains a
+`null` "unset" verb is core#70's open decision, not this one's to pre-empt.
+
+```ts
+interface NamePartsLike {
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  pronunciation?: string | null;
+}
 ```
 
 ### `OOSReasonEnum`
@@ -12370,7 +12390,7 @@ parse before any object-level refinement runs and can never be observed
 against the same failure, and it is the half that can actually fail. The
 `base_percent` half is asserted in both directions.
 
-### `deriveName(parts: PartialNameParts): string`
+### `deriveName(parts: NamePartsLike): string`
 
 Canonical join rule for deriving a single display string from name parts.
 Joins `[first_name, middle_name, last_name]` with single spaces (missing
@@ -22298,7 +22318,7 @@ denormalized `name` field populated by the server via this helper. Use
 `deriveName` for in-flight objects whose `name` hasn't been server-derived
 yet (e.g. manager-side optimistic state before the API responds).
 
-### `deriveName(parts: PartialNameParts): string`
+### `deriveName(parts: NamePartsLike): string`
 
 Canonical join rule for deriving a single display string from name parts.
 Joins `[first_name, middle_name, last_name]` with single spaces (missing

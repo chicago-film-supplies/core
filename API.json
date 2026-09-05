@@ -2391,7 +2391,7 @@
         {
           "kind": "interface",
           "name": "NameParts",
-          "declaration": "interface NameParts {\n  first_name: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
+          "declaration": "interface NameParts {\n  first_name: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
           "doc": "Split name fields shared across Contact, User, Invite, and any schema\nembedding a contact reference. `first_name` is required; the rest are optional.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule.\n\n⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts\ncarry it (2026-08-23) — and is not. It is an optional field a human types,\nwith live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`\nhandles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on\nit, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody\nhas filled one in. See `core/CLAUDE.md` § \"Is a field dead?\"."
         },
         {
@@ -4654,7 +4654,7 @@
         {
           "kind": "function",
           "name": "deriveName",
-          "signature": "deriveName(parts: PartialNameParts): string",
+          "signature": "deriveName(parts: NamePartsLike): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
           "paramTags": [],
           "returnsTag": null
@@ -5454,7 +5454,7 @@
         {
           "kind": "interface",
           "name": "NameParts",
-          "declaration": "interface NameParts {\n  first_name: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
+          "declaration": "interface NameParts {\n  first_name: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
           "doc": "Split name fields shared across Contact, User, Invite, and any schema\nembedding a contact reference. `first_name` is required; the rest are optional.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule.\n\n⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts\ncarry it (2026-08-23) — and is not. It is an optional field a human types,\nwith live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`\nhandles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on\nit, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody\nhas filled one in. See `core/CLAUDE.md` § \"Is a field dead?\"."
         },
         {
@@ -5468,6 +5468,12 @@
           "name": "NamePartsFieldsPartial",
           "declaration": "const NamePartsFieldsPartial: typeLiteral;",
           "doc": "Variant of `NamePartsFields` where every field is optional — use for partial\nupdate input schemas (PUT endpoints) where callers may omit `first_name`."
+        },
+        {
+          "kind": "interface",
+          "name": "NamePartsLike",
+          "declaration": "interface NamePartsLike {\n  first_name?: string | null;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
+          "doc": "The widest name-part shape {@link deriveName} accepts.\n\nDeliberately NOT {@link PartialNameParts}, and deliberately not a widening of\nit. `deriveName` is called with both STORED objects (whose parts are heading\nfor `string | null`) and INPUT objects (whose parts stay `string | undefined`),\nso its parameter has to admit both — but widening `PartialNameParts` itself\nwould change the published INPUT contract, and whether that contract gains a\n`null` \"unset\" verb is core#70's open decision, not this one's to pre-empt."
         },
         {
           "kind": "variable",
@@ -5730,7 +5736,7 @@
         {
           "kind": "function",
           "name": "deriveName",
-          "signature": "deriveName(parts: PartialNameParts): string",
+          "signature": "deriveName(parts: NamePartsLike): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
           "paramTags": [],
           "returnsTag": null
@@ -10301,7 +10307,7 @@
         {
           "kind": "function",
           "name": "deriveName",
-          "signature": "deriveName(parts: PartialNameParts): string",
+          "signature": "deriveName(parts: NamePartsLike): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
           "paramTags": [],
           "returnsTag": null

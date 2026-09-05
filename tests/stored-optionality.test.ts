@@ -195,6 +195,53 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // ── refused — a written refusal sits beside the declaration, with its corpus
   //    count. See `src/schemas/supplier.ts`.
   ["transactions.supplier", "refused:no-writer-yet"],
+  // ── mid-expand: `NamePartsFields` (`src/schemas/common.ts`), widened 2026-09-05 ──────
+  //
+  // 🔴 These 30 are a DELIBERATE transit state, not new debt. The three optional
+  //    name parts are going to bare `.nullable()` (core#83, the owner's ruling),
+  //    and they cannot go there directly: `.optional()` accepts
+  //    `string | undefined` and NOT `null`, so no writer could stamp one until
+  //    this widening shipped. Order: widen → writers stamp `?? null` → backfill
+  //    → contract.
+  //
+  //    30 resolved paths from THREE declarations — one shared block reaching ten
+  //    stored surfaces, which is exactly why it is the highest-leverage
+  //    conversion available and why the count looks larger than the edit.
+  //
+  // ⚠️ The contract step must SPLIT the block: `NamePartsFields` feeds 6 STORED
+  //    (`z.strictObject`) and 6 INPUT (`z.object`) sites, and requiring the key
+  //    on an input would 400 every create client that omits a middle name.
+  //    Normalize at the writer, require at storage.
+  ["cards.destination.contact.last_name", "mid-expand"],
+  ["cards.destination.contact.middle_name", "mid-expand"],
+  ["cards.destination.contact.pronunciation", "mid-expand"],
+  ["contacts.last_name", "mid-expand"],
+  ["contacts.middle_name", "mid-expand"],
+  ["contacts.pronunciation", "mid-expand"],
+  ["destinations.contacts[].last_name", "mid-expand"],
+  ["destinations.contacts[].middle_name", "mid-expand"],
+  ["destinations.contacts[].pronunciation", "mid-expand"],
+  ["fulfillments.destinations[].delivery.contact.last_name", "mid-expand"],
+  ["fulfillments.destinations[].delivery.contact.middle_name", "mid-expand"],
+  ["fulfillments.destinations[].delivery.contact.pronunciation", "mid-expand"],
+  ["invites.last_name", "mid-expand"],
+  ["invites.middle_name", "mid-expand"],
+  ["invites.pronunciation", "mid-expand"],
+  ["invoices.destinations[].delivery.contact.last_name", "mid-expand"],
+  ["invoices.destinations[].delivery.contact.middle_name", "mid-expand"],
+  ["invoices.destinations[].delivery.contact.pronunciation", "mid-expand"],
+  ["orders.destinations[].delivery.contact.last_name", "mid-expand"],
+  ["orders.destinations[].delivery.contact.middle_name", "mid-expand"],
+  ["orders.destinations[].delivery.contact.pronunciation", "mid-expand"],
+  ["organizations.contacts[].last_name", "mid-expand"],
+  ["organizations.contacts[].middle_name", "mid-expand"],
+  ["organizations.contacts[].pronunciation", "mid-expand"],
+  ["recurrences.prototype.destination.contact.last_name", "mid-expand"],
+  ["recurrences.prototype.destination.contact.middle_name", "mid-expand"],
+  ["recurrences.prototype.destination.contact.pronunciation", "mid-expand"],
+  ["users.last_name", "mid-expand"],
+  ["users.middle_name", "mid-expand"],
+  ["users.pronunciation", "mid-expand"],
 ]);
 
 // ── The walk ─────────────────────────────────────────────────────────
