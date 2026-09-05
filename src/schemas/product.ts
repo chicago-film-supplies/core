@@ -463,14 +463,29 @@ export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = exte
      * one instant both the submitted entry and the component's catalog price are
      * in hand — as the set of keys where they differ.
      *
-     * ⚠️ **Absent ≠ empty, and both mean "nothing overridden".** Absent is the
-     * pre-migration corpus; `[]` is a writer that looked and found no
-     * divergence. Readers must normalize, and no reader may treat absence as
-     * "unknown" — that would re-open the undecidability this field closes.
+     * 🔴 **`.optional()` here is a MIGRATION STATE with a deadline, not the
+     * intended shape — contract it to REQUIRED once the backfill lands
+     * (api-cloudrun#862).** A strict schema is the cheapest defect detector we
+     * have, and an optional field spends that: while absence is legal, "no
+     * override" and "no writer has looked yet" are the same stored value, so the
+     * audit arm this field exists to make GATING cannot gate on an entry that
+     * simply predates it.
      *
-     * The invariant it buys: for a key NOT listed here, the entry's value must
-     * equal the component product's, and a difference is a DEFECT rather than an
-     * override (api-cloudrun#862).
+     * ⚠️ It cannot ship required. `ProductSchema` is a `z.strictObject`, so a
+     * required member of `components[]` fails the parse of every stored product
+     * that has one — ~174 prod entries, an immediate full-API outage, the #443
+     * class. Expand → backfill → contract is forced; only the CONTRACT step is
+     * optional, and skipping it is how core#83's 77 `.nullable().optional()`
+     * fields accumulated.
+     *
+     * ⚠️ **`.default([])` is NOT the shortcut.** `validateBeforeWrite` writes the
+     * RAW document and discards `result.data`, so a schema default never
+     * materializes into storage — the two encodings would survive while looking
+     * repaired, which is strictly worse than an honest `.optional()`.
+     *
+     * The invariant it buys, once required: for a key NOT listed here, the
+     * entry's value must equal the component product's, and a difference is a
+     * DEFECT rather than an override.
      */
     price_overridden: z.array(ComponentPriceKeyEnum).optional(),
   },
