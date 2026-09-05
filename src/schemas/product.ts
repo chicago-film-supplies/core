@@ -476,7 +476,7 @@ export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = exte
      * immediate full-API outage, the #443 class. Expand → backfill → contract,
      * and only the contract step is a choice; skipping it is how core#83's 77
      * `.nullable().optional()` fields accumulated. Completed 2026-09-05:
-     * `scripts/backfill-component-price-overridden.ts` wrote 68 prod products,
+     * `api-cloudrun/scripts/backfill-component-price-overridden.ts` wrote 68 prod products,
      * and both envs measured 174 of 174 entries carrying the key before this
      * landed.
      *
