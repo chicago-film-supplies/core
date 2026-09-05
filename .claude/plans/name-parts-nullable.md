@@ -1,24 +1,65 @@
 # `NamePartsFields` → bare `.nullable()` — expand/migrate/contract
 
 > Owning repo `core`; the work also lands in `api-cloudrun` and `manager`.
-> **Steps 1–3 are DONE. Steps 4–6 remain — core#84.** Tracks the owner's ruling in core#83.
+> **Steps 1–4 are DONE. Steps 5–6 remain — core#84.** Tracks the owner's ruling in core#83.
 >
-> ## ⚠️ STATUS 2026-09-05 (2nd update, compacted) — steps 1–3 done, TWO deploys owed
+> ## ⚠️ STATUS 2026-09-05 (3rd update, compacted) — steps 1–4 DONE, prod backfilled
 >
 > | step | state |
 > |---|---|
 > | 1 — core WIDEN | ✅ `@cfs/core@10.0.0-beta.337` (`fa41c5f`); latest is now `beta.341` |
-> | 2 — api-cloudrun writers | ✅ pushed (`cfa294da`, `5342a1ac`) — ⛔ **PROD DEPLOY OWED** |
-> | 3 — manager pin + writers | ✅ committed `eedaced`, pinned `beta.341` — ⛔ **UNPUSHED, deploy owed** |
-> | 4 — prod backfill | ⛔ blocked on step 2's deploy |
-> | 5 — core CONTRACT | ⛔ not started |
-> | 6 — pins, deploys, fixture sweep | ⛔ **newly blocked** — see api-cloudrun#865 |
+> | 2 — api-cloudrun writers | ✅ pushed AND **DEPLOYED** — prod `v0.228.0`, revision `api-cloudrun-00342-8zk` |
+> | 3 — manager pin + writers | ✅ pushed `eedaced`, pinned `beta.341`; preview deploy follows `main` |
+> | 4 — prod backfill | ✅ **DONE 2026-09-05** — 354 prod docs, 18 dev residue, both post-audit 0 |
+> | 5 — core CONTRACT | ⛔ ← NEXT |
+> | 6 — pins, deploys, fixture sweep | ⛔ **blocked** — see api-cloudrun#865 |
 >
-> 🔴 **Step 2 is pushed but NOT DEPLOYED, and this is the gate on step 4.** Prod Cloud Run
-> runs `v0.227.0` (revision `api-cloudrun-00341-hvg`, verified against the live service);
-> `cfa294da` and `5342a1ac` sit in release-please PR **#864 (`chore(main): release 0.228.0`),
-> still OPEN**. Until that merges and deploys, **nothing may write a null and the backfill
-> cannot run** — the deployed build is the validator (api-cloudrun#782).
+> ### Step 4 — done, and it CORRECTED this plan's central sizing claim
+>
+> 🔴 **The population was 354 documents, not the ~4,835 sized below.** The surface table's
+> per-collection counts are DOCUMENT counts, and this plan read them as documents needing
+> repair. They are not — the destination-embedded contacts are almost entirely **null legs**:
+> 1,151 of 1,153 cards, 2,032 of 2,032 order legs, 2,012 of 2,012 invoice legs. So the
+> **"3,711 whole-document array rewrites" flagged as the risky bulk were 2 documents**, and
+> the real work was `contacts` 170 and `organizations` 179 — both flat shapes.
+> ⭐ **The instrument is `api-cloudrun/scripts/backfill-name-parts-null.ts`**, which reports
+> `contact objects entered` and `null legs left alone` per collection precisely so this
+> distinction cannot be lost again.
+>
+> | | prod `cfs-3100` | dev residue |
+> |---|---|---|
+> | written | **354** | **18** |
+> | post-audit re-run | **0** | **0** |
+> | unexpected shapes | 0 | 0 |
+>
+> **Verified by a SECOND, independent instrument**, because the backfill's own re-read
+> agrees with itself by construction. `api-cloudrun/scripts/audit-field-presence.ts` asks
+> key-presence through `orderBy` instead, and its deltas match the writer's own tallies
+> exactly: `contacts.middle_name` 8/170 present → 170/170 with **162 null** (+162),
+> `last_name` 165 → 170 with 5 null (+5), `pronunciation` 0 → 170 with 170 null (+170).
+>
+> **Typesense parity re-checked per collection against a PRE-write baseline** — a post-hoc
+> reading alone only says "is it clean now". Identical both sides: contacts 170, orgs 318,
+> orders 1,017, invoices 1,037, fulfillments 1,017.
+>
+> ⚠️ **The deploy really was the gate, and it is now proven rather than assumed.** Prod ran
+> `v0.227.0`, which pins `@cfs/core@10.0.0-beta.336` — whose `NamePartsFields` is
+> `z.ZodType<string | undefined>`, i.e. **null-rejecting**. Backfilling before the rollout
+> would have made all 354 documents fail `validateBeforeWrite` on their next write through
+> the live API. `v0.228.0` pins `beta.338`. ⚠️ **Check the deployed TAG's pin, not `main`'s.**
+>
+> ⚠️ **A Cloud Run deploy is not done when the image spec changes.**
+> `spec.template.spec.containers[0].image` is the DESIRED state and flips immediately; a
+> watcher on it reported "deployed" while revision `00342-8zk` was still provisioning and
+> 100% of traffic sat on the old one. **The predicate is `status.latestReadyRevisionName`
+> plus the traffic split.**
+>
+> ⭐ **The fan-out was assessed before writing, and the activity feed's own filters carried
+> it** — ~3 rows, not ~352. `contacts`' name parts carry `pii: "mask"` but **no `label`**, so
+> capture filter 2 drops them; `organizations` is `NO_ARRAYS` in `DIFFED_ARRAYS`, so its
+> `contacts` path is dropped as an undiffed array. Only the 1 order (`destinations` IS
+> diffed) and the 2 cards (`destination.contact` is labelled) produce rows. **Ask this
+> before any bulk write — the answer was not obvious from the collection list.**
 >
 > 🔴 **Step 6 has a NEW blocker that has nothing to do with this work: api-cloudrun cannot
 > pin past `beta.338`.** `beta.339` deleted the CRMS transaction/rule definitions, and
@@ -195,7 +236,9 @@ no writer could stamp a null and no backfill could run. Hence expand/migrate/con
    three narrow local interfaces receiving stored data were widened to `string | null` —
    invisible to the type checker today, a compile error the moment step 5 lands.
    ⛔ **Deploy still owed** (manager deploys continuously from `main`; push carries it).
-4. ⛔ **Backfill — PROD only.** ← NEXT, once #864 is merged and deployed. `devReplica` mirrors prod→dev, so a dev-first pass **doubles
+4. ✅ **Backfill — PROD only. DONE 2026-09-05** (354 prod / 18 dev residue, both
+   post-audit 0). Instrument: `api-cloudrun/scripts/backfill-name-parts-null.ts` — a
+   one-shot, so DELETE it once step 6 lands. Details in the status block above. `devReplica` mirrors prod→dev, so a dev-first pass **doubles
    every row**: run prod, let the mirror carry it, then a dev-only residue pass (dev has
    documents prod does not — contacts 178/170, users 2/1, invites 3/0).
    - baseline audit → repair → post audit → **diff the pair**; a post-hoc audit answers
