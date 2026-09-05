@@ -290,7 +290,32 @@ For the full Zod 4 API reference, read `.claude/zod-llms.txt` (auto-fetched from
   composed display name are all READ OFF `path` in `src/utils/organizations.ts` — none is stored, so
   none can drift from it. Deep reference:
   `api-cloudrun/.claude/skills/organization-tree/SKILL.md`.
-- `src/schemas/mod.ts` — re-exports everything (the `@cfs/core/schemas` barrel)
+- `src/schemas/mod.ts` — the `@cfs/core/schemas` barrel. ⚠️ **It lists its exports
+  EXPLICITLY**, so a new symbol in `schemas/common.ts` (or any other schema file) is NOT reachable as
+  `@cfs/core/schemas` until you add it there by hand. This line used to read *"re-exports
+  everything"*, which is the reading that ships the defect.
+  🔴 **No gate in this repo catches the omission, and three of them go green on it.**
+  `deno task check` passes (the module compiles), `check:declarations` passes (the symbol has a
+  type), and the suite passes (no core test imports through the barrel — they import the schema
+  file directly). It surfaces only at the first consumer import, one publish later.
+  `10.0.0-beta.342` shipped exactly that: the field landed and the enum to populate it did not.
+  🔴 **The cheap check has to REFERENCE the symbol, and the obvious form of it fails OPEN.**
+  `deno eval 'import { X } from "./src/schemas/mod.ts"; console.log("ok")'` prints `ok` for a
+  symbol that does not exist — the import is unused, so it is elided before the module ever links.
+  Measured both ways, 2026-09-05: a real symbol and `NotARealSymbol` both exit 0. Use a form that
+  forces the binding, and check the two halves differently because a TYPE is erased at runtime:
+
+  ```sh
+  # a VALUE — exits 1 with "does not provide an export named" when it is missing
+  deno eval 'import { NewValue } from "./src/schemas/mod.ts"; console.log(typeof NewValue)'
+  # a TYPE — deno eval cannot see it at all; check a scratch file instead
+  echo 'import type { NewType } from "./src/schemas/mod.ts"; const _x: NewType = {} as NewType' > /tmp/t.ts && deno check /tmp/t.ts
+  ```
+
+  Both verified to exit 1 on an absent symbol and 0 on a present one. Re-run the value form against
+  the **published** version once it is up, since the tarball is what a consumer actually resolves.
+  ⚠️ This is the same class the propagation section below records at 60 exports; the difference is
+  that `propagation/mod.ts` got the list DELETED and this one still has one.
 - `src/schemas/propagation/` — the propagation catalog; **one module object per file**, see below
 - `src/utils/` — pure helper modules (`@cfs/core/utils/*`)
 
