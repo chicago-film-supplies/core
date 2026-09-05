@@ -156,7 +156,6 @@ export const XERO_EVENT_MSGS = [
   // invoice's balance — `credit_created_out_of_band` is that signal.
   "xero_manual_intervention_required",
   "xero_payment_already_synced",
-  "xero_payment_appended",
   "xero_payment_backfilled",
   "xero_payment_processing_failed",
   "xero_payment_sync",

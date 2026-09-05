@@ -25,7 +25,6 @@ export const OAUTH_EVENT_MSGS = [
   "oauth_refresh_scheduled",
   "oauth_refresh_stale_task",
   "oauth_token_exchanged",
-  "oauth_token_expired",
   "oauth_token_expired_refreshing",
   "oauth_token_refresh_skipped",
   "oauth_token_refreshed",
@@ -40,7 +39,6 @@ export const OAUTH_EVENT_MSGS = [
   "mcp_oauth_token_minted",
   "mcp_oauth_user_missing",
   "token_refresh_failed",
-  "crms_token_exchange_failed",
   "xero_token_exchange_failed",
 ] as const;
 

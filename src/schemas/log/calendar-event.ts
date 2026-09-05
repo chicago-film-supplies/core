@@ -18,7 +18,6 @@ export const CALENDAR_EVENT_MSGS = [
   "calendar_not_configured",
   "calendar_not_found",
   "calendar_search_failed",
-  "calendar_stale_event_cleared",
   "calendar_update_superseded",
 ] as const;
 

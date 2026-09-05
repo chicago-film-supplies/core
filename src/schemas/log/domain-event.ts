@@ -39,14 +39,10 @@ export const DOMAIN_EVENT_MSGS = [
   "order_docs_skipped",
   "order_invoice_count_high",
   "invoice_created",
-  "invoice_org_bootstrapped_from_crms",
   "invoice_pdf_not_found",
   "invoice_pdf_skip",
   "invoice_updated",
-  "payment_added",
-  "payment_updated",
   "organization_check_failed",
-  "organization_no_crms_id",
   "organization_no_xero_id",
   // A rename's Xero contact push was REFUSED because the ContactID is held by
   // more than one organization (api-cloudrun#702 — six prod pairs share one).
@@ -58,10 +54,6 @@ export const DOMAIN_EVENT_MSGS = [
   // `{ organization_uid, xero_id, holder_uids }`. Emitted from
   // `api-cloudrun/src/services/organizations.ts` in api-cloudrun.
   "organization_xero_id_shared",
-  "receive_invoice_hook_failed",
-  "receive_member_update_failed",
-  "receive_opportunity_hook_failed",
-  "receive_quarantine_hook_failed",
   "item_path_invariant_failed",
   // An `order.invoices[]` entry disagreed with the invoice document and was
   // converged. `source:"writer"` = a CFS service write repaired a ref a
