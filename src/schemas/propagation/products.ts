@@ -35,7 +35,14 @@ const COMPONENT_CATALOG_CASCADE: EnforcementRef = {
 };
 
 /**
- * ⚠️ The BUSINESS-field half of `component-entry-to-parents` is undecidable
+ * ⚠️ **This describes `update-product:price-to-components`, NOT
+ * `component-entry-to-parents`.** That rule's business half turned out to have
+ * no override to detect at all — its nested rows are DERIVED — so it replaces
+ * unconditionally and the undecidability below never applies to it
+ * (api-cloudrun#861). The clause is retained because the audit's authored-side
+ * arm and the `price-to-components` cascade both still turn on it.
+ *
+ * ⚠️ The BUSINESS-field half of the AUTHORED direction is undecidable
  * from a snapshot, and the audit says so rather than guessing. A parent that
  * deliberately prices its bundled component differently is indistinguishable, in
  * stored data, from one whose cascade was missed — both read as "parent value ≠
@@ -529,11 +536,12 @@ const updateProductRules: CollectionRule[] = [
     id: "update-product:component-entry-to-parents",
     source: "products",
     target: "products",
-    mode: "co-write",
+    mode: "fan-out",
     invariant:
-      "When a product modifies a component entry, parent products (from component_of) have their matching entries updated — catalog fields always; business fields (price, qty, inclusion_type, zero_priced, description) only if parent value matches source's pre-update value (override detection via field-level diff)",
+      "When a product's OWN components array changes, every parent that flattens it re-derives that subtree. 🔴 The rows are DERIVED, not authored — a parent cannot author a nested entry, because `updateProduct` builds everything below depth 1 from the child's stored array and DISCARDS whatever nested entries the client sent (api-cloudrun#863) — so the replace is UNCONDITIONAL and no override detection applies. ⚠️ This is the opposite direction from `update-product:price-to-components`, whose source is the product's own top-level price.",
     enforced_by: [COMPONENT_ENTRY_CATALOG_ONLY],
-    transaction: "update-product",
+    trigger:
+      "onUpdate:products — post-commit fan-out over the TARGETS' query_by_components reverse index, never this product's own forward array",
     fields: [
       {
         source: ["components", "name"],
@@ -564,31 +572,31 @@ const updateProductRules: CollectionRule[] = [
         source: ["components", "price"],
         target: ["components", "price"],
         transform:
-          "business field — update only if parent value matches old value",
+          "re-derived with the subtree — a nested row is DERIVED, so there is no override to preserve",
       },
       {
         source: ["components", "quantity"],
         target: ["components", "quantity"],
         transform:
-          "business field — update only if parent value matches old value",
+          "re-derived with the subtree — a nested row is DERIVED, so there is no override to preserve",
       },
       {
         source: ["components", "inclusion_type"],
         target: ["components", "inclusion_type"],
         transform:
-          "business field — update only if parent value matches old value",
+          "re-derived with the subtree — a nested row is DERIVED, so there is no override to preserve",
       },
       {
         source: ["components", "zero_priced"],
         target: ["components", "zero_priced"],
         transform:
-          "business field — update only if parent value matches old value",
+          "re-derived with the subtree — a nested row is DERIVED, so there is no override to preserve",
       },
       {
         source: ["components", "description"],
         target: ["components", "description"],
         transform:
-          "business field — update only if parent value matches old value",
+          "re-derived with the subtree — a nested row is DERIVED, so there is no override to preserve",
       },
     ],
   },
@@ -955,7 +963,6 @@ const updateProductTransaction: TransactionDefinition = {
   steps: [
     "update-product:catalog-to-components",
     "update-product:components-to-components",
-    "update-product:component-entry-to-parents",
     "update-product:name-to-locations",
     "update-product:name-to-tags",
     "update-product:name-to-tracking-categories",
