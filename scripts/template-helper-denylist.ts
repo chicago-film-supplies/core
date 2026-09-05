@@ -370,6 +370,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "fulfillment-items": [
     "rebuildFulfillmentItems",
   ],
+  // `deriveName` stays visible — joining name parts into a display string is
+  // exactly what a rendered document does with a contact. Its inverse does not:
+  // `splitFullName` PARSES free text into parts, which is a write-path concern
+  // (the manager's three contact-create sites seed a draft with it, and the API
+  // once did the same from a CRMS webhook payload). A render context already
+  // holds the parts — `it.doc.destinations[].contact.first_name` and its
+  // siblings — so a template calling this would be re-deriving, from a string
+  // `deriveName` produced, the very fields it was produced from. Same trap as
+  // `sumDocumentTotals` under `orders`: a document disagreeing with itself.
+  "contact-name": [
+    "splitFullName",
+  ],
   // No `it.dates.*` exports are hidden today.
   dates: [],
 };

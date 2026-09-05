@@ -2428,7 +2428,13 @@
           "kind": "variable",
           "name": "NamePartsFieldsPartial",
           "declaration": "const NamePartsFieldsPartial: typeLiteral;",
-          "doc": "Variant of `NamePartsFields` where every field is optional — use for partial\nupdate input schemas (PUT endpoints) where callers may omit `first_name`."
+          "doc": "Variant of `NamePartsFields` where every field is optional — use for partial\nupdate input schemas (PUT endpoints) where callers may omit `first_name`\n**and cannot clear one.**\n\n⚠️ For a PUT body whose client can unset a part, spread\n{@link NamePartsFieldsPatch} instead; {@link PatchNameParts} carries the\nfour-contract table and the reason the two are separate."
+        },
+        {
+          "kind": "variable",
+          "name": "NamePartsFieldsPatch",
+          "declaration": "const NamePartsFieldsPatch: typeLiteral;",
+          "doc": "Variant of `NamePartsFields` for a PATCH body **with a clear verb** — every\nfield optional, and the three optional parts additionally `.nullable()`.\n\nSee {@link PatchNameParts} for the four-contract table and for why this is a\nnew block rather than a widening of {@link NamePartsFieldsPartial}.\n\n⚠️ **Spelled `.nullable().optional()`, not `.optional().nullable()`** — the\norder is load-bearing for fixtures, not style. `getTestDoc`\n(`src/schemas/testing.ts`) omits the key for the first and emits `null` for\nthe second, so the reversed order would put a `null` into every\n`getTestDoc(UpdateContactInput)` fixture. And deliberately not\n`z.union([z.string(), z.null()])`: `tests/pii.test.ts` skips `type === \"null\"`\nleaves and calls that \"a landmine, not a bug\" — `.nullable()` produces no\nsuch leaf."
         },
         {
           "kind": "interface",
@@ -2872,7 +2878,7 @@
           "kind": "interface",
           "name": "PartialNameParts",
           "declaration": "interface PartialNameParts {\n  first_name?: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
-          "doc": "All-optional variant of `NameParts` — use for partial update input types\n(PUT endpoints) where callers may omit `first_name`."
+          "doc": "All-optional variant of `NameParts` — use for partial update input types\n(PUT endpoints) where callers may omit `first_name`, **and where there is no\nway to CLEAR a part.**\n\n⚠️ That last half is the whole difference from {@link PatchNameParts}, and it\nis deliberate rather than an oversight — see that block's table."
         },
         {
           "kind": "interface",
@@ -2885,6 +2891,12 @@
           "name": "PasswordResetSchema",
           "declaration": "const PasswordResetSchema: z.ZodType<PasswordReset>;",
           "doc": "Zod schema for PasswordReset."
+        },
+        {
+          "kind": "interface",
+          "name": "PatchNameParts",
+          "declaration": "interface PatchNameParts {\n  first_name?: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
+          "doc": "All-optional variant of `NameParts` **with a clear verb** — use for a PUT\nbody whose client can unset a name part.\n\n## Four contracts, four names\n\nA fourth near-identical block is only defensible if each one's reason is\nwritten down beside it, so:\n\n| block | shape | who spreads it, and why |\n|---|---|---|\n| {@link NameParts} / `NamePartsFields` | **STORED** — key required, `string \\| null` | every stored surface. Absence is the state that yields `undefined` and breaks unrelated writers (core#83) |\n| {@link NamePartsInput} / `NamePartsFieldsInput` | **CREATE INPUT** — `?: string \\| null` | `CreateContactInput`, `CreateUserInput`, `CreateInviteInput`, `NewContactInput`, `DestinationContact`, `RegisterInput`. A client with no middle name has no reason to send the key; the writer normalizes `?? null` |\n| {@link PartialNameParts} / `NamePartsFieldsPartial` | **PATCH, no clear verb** — `?: string` | `UpdateUserInput`, `AcceptInviteInput` |\n| **this** / `NamePartsFieldsPatch` | **PATCH with a clear verb** — `?: string \\| null` | `UpdateContactInput` |\n\n🔴 **`first_name` gets no null arm in any of the four.** It is `min(1)` and\nrequired on every document spreading `NamePartsFields`, so a `null` there\nwould type-check its way to a write that cannot validate.\n\n🔴 **Why this is a new block rather than a widening of\n{@link PartialNameParts}** — the widening was measured (core#70) and does\nclear three `TS2322`s, but `AcceptInviteInput` also spreads that block, and\n`api-cloudrun/src/routes/invites.ts` merges the accept body with\n`body.middle_name ?? invite.middle_name`. `null ?? x` yields `x`, so an\ninvitee who cleared their middle name would silently inherit **the\ninviter's** — and it type-checks. Accept-invite is create-shaped, not\npatch-shaped. A separate block means that hazard never opens, and\n`UpdateUserInput` — which has no client that clears a part — is not moved for\nnothing."
         },
         {
           "kind": "typeAlias",
@@ -4186,7 +4198,7 @@
           "kind": "interface",
           "name": "UpdateContactInputType",
           "declaration": "interface UpdateContactInputType {\n  uid?: string;\n  emails?: string[];\n  phones?: string[];\n  organizations?: ContactOrganizationType[];\n  version: number;\n}",
-          "doc": "Input schema for PUT /contacts/:uid — partial update."
+          "doc": "Input schema for PUT /contacts/:uid — partial update.\n\nSpreads {@link NamePartsFieldsPatch}, **not** `NamePartsFieldsPartial`: this\nis the one PUT body with a client that clears a name part (manager's\nsplit-name editor, manager#338), so `null` is legal on the three optional\nparts and means *clear it*. That is the same spelling storage uses, so the\nvalue crosses the write unchanged. `UpdateUserInput` and `AcceptInviteInput`\ndeliberately stay on the no-clear block — {@link PatchNameParts} carries the\ntable and the `??`-inversion hazard that keeps them there."
         },
         {
           "kind": "variable",
@@ -5503,7 +5515,13 @@
           "kind": "variable",
           "name": "NamePartsFieldsPartial",
           "declaration": "const NamePartsFieldsPartial: typeLiteral;",
-          "doc": "Variant of `NamePartsFields` where every field is optional — use for partial\nupdate input schemas (PUT endpoints) where callers may omit `first_name`."
+          "doc": "Variant of `NamePartsFields` where every field is optional — use for partial\nupdate input schemas (PUT endpoints) where callers may omit `first_name`\n**and cannot clear one.**\n\n⚠️ For a PUT body whose client can unset a part, spread\n{@link NamePartsFieldsPatch} instead; {@link PatchNameParts} carries the\nfour-contract table and the reason the two are separate."
+        },
+        {
+          "kind": "variable",
+          "name": "NamePartsFieldsPatch",
+          "declaration": "const NamePartsFieldsPatch: typeLiteral;",
+          "doc": "Variant of `NamePartsFields` for a PATCH body **with a clear verb** — every\nfield optional, and the three optional parts additionally `.nullable()`.\n\nSee {@link PatchNameParts} for the four-contract table and for why this is a\nnew block rather than a widening of {@link NamePartsFieldsPartial}.\n\n⚠️ **Spelled `.nullable().optional()`, not `.optional().nullable()`** — the\norder is load-bearing for fixtures, not style. `getTestDoc`\n(`src/schemas/testing.ts`) omits the key for the first and emits `null` for\nthe second, so the reversed order would put a `null` into every\n`getTestDoc(UpdateContactInput)` fixture. And deliberately not\n`z.union([z.string(), z.null()])`: `tests/pii.test.ts` skips `type === \"null\"`\nleaves and calls that \"a landmine, not a bug\" — `.nullable()` produces no\nsuch leaf."
         },
         {
           "kind": "interface",
@@ -5557,7 +5575,13 @@
           "kind": "interface",
           "name": "PartialNameParts",
           "declaration": "interface PartialNameParts {\n  first_name?: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
-          "doc": "All-optional variant of `NameParts` — use for partial update input types\n(PUT endpoints) where callers may omit `first_name`."
+          "doc": "All-optional variant of `NameParts` — use for partial update input types\n(PUT endpoints) where callers may omit `first_name`, **and where there is no\nway to CLEAR a part.**\n\n⚠️ That last half is the whole difference from {@link PatchNameParts}, and it\nis deliberate rather than an oversight — see that block's table."
+        },
+        {
+          "kind": "interface",
+          "name": "PatchNameParts",
+          "declaration": "interface PatchNameParts {\n  first_name?: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
+          "doc": "All-optional variant of `NameParts` **with a clear verb** — use for a PUT\nbody whose client can unset a name part.\n\n## Four contracts, four names\n\nA fourth near-identical block is only defensible if each one's reason is\nwritten down beside it, so:\n\n| block | shape | who spreads it, and why |\n|---|---|---|\n| {@link NameParts} / `NamePartsFields` | **STORED** — key required, `string \\| null` | every stored surface. Absence is the state that yields `undefined` and breaks unrelated writers (core#83) |\n| {@link NamePartsInput} / `NamePartsFieldsInput` | **CREATE INPUT** — `?: string \\| null` | `CreateContactInput`, `CreateUserInput`, `CreateInviteInput`, `NewContactInput`, `DestinationContact`, `RegisterInput`. A client with no middle name has no reason to send the key; the writer normalizes `?? null` |\n| {@link PartialNameParts} / `NamePartsFieldsPartial` | **PATCH, no clear verb** — `?: string` | `UpdateUserInput`, `AcceptInviteInput` |\n| **this** / `NamePartsFieldsPatch` | **PATCH with a clear verb** — `?: string \\| null` | `UpdateContactInput` |\n\n🔴 **`first_name` gets no null arm in any of the four.** It is `min(1)` and\nrequired on every document spreading `NamePartsFields`, so a `null` there\nwould type-check its way to a write that cannot validate.\n\n🔴 **Why this is a new block rather than a widening of\n{@link PartialNameParts}** — the widening was measured (core#70) and does\nclear three `TS2322`s, but `AcceptInviteInput` also spreads that block, and\n`api-cloudrun/src/routes/invites.ts` merges the accept body with\n`body.middle_name ?? invite.middle_name`. `null ?? x` yields `x`, so an\ninvitee who cleared their middle name would silently inherit **the\ninviter's** — and it type-checks. Accept-invite is create-shaped, not\npatch-shaped. A separate block means that hazard never opens, and\n`UpdateUserInput` — which has no client that clears a part — is not moved for\nnothing."
         },
         {
           "kind": "variable",
@@ -6293,7 +6317,7 @@
           "kind": "interface",
           "name": "UpdateContactInputType",
           "declaration": "interface UpdateContactInputType {\n  uid?: string;\n  emails?: string[];\n  phones?: string[];\n  organizations?: ContactOrganizationType[];\n  version: number;\n}",
-          "doc": "Input schema for PUT /contacts/:uid — partial update."
+          "doc": "Input schema for PUT /contacts/:uid — partial update.\n\nSpreads {@link NamePartsFieldsPatch}, **not** `NamePartsFieldsPartial`: this\nis the one PUT body with a client that clears a name part (manager's\nsplit-name editor, manager#338), so `null` is legal on the three optional\nparts and means *clear it*. That is the same spelling storage uses, so the\nvalue crosses the write unchanged. `UpdateUserInput` and `AcceptInviteInput`\ndeliberately stay on the no-clear block — {@link PatchNameParts} carries the\ntable and the `??`-inversion hazard that keeps them there."
         }
       ]
     },
@@ -10362,13 +10386,27 @@
     },
     {
       "entrypoint": "@cfs/core/utils/contact-name",
-      "moduleDoc": "Contact name helpers — re-exports the canonical `deriveName` from\n`@cfs/core/schemas` so manager and other utilities consumers can import it\nfrom a single, stable runtime location.\n\n```ts\nimport { deriveName } from \"@cfs/core/utils/contact-name\";\n\nderiveName({ first_name: \"Alex\", last_name: \"Hughes\" }); // \"Alex Hughes\"\nderiveName({ first_name: \"Alex\", pronunciation: \"al-ix\" }); // \"Alex (al-ix)\"\n```\n\nStored documents (Contact, User, Invite, embedded contact refs) carry a\ndenormalized `name` field populated by the server via this helper. Use\n`entity.name` directly when the doc has been read back; only call\n`deriveName` for in-flight objects whose `name` hasn't been server-derived\nyet (e.g. manager-side optimistic state before the API responds).",
+      "moduleDoc": "Contact name helpers — the split rule and its inverse, in one module.\n\n```ts\nimport { deriveName, splitFullName } from \"@cfs/core/utils/contact-name\";\n\nderiveName({ first_name: \"Alex\", last_name: \"Hughes\" }); // \"Alex Hughes\"\nderiveName({ first_name: \"Alex\", pronunciation: \"al-ix\" }); // \"Alex (al-ix)\"\n\nsplitFullName(\"Jane Smith\"); // { first_name: \"Jane\", last_name: \"Smith\" }\n```\n\n`deriveName` is re-exported from `@cfs/core/schemas`, where it lives beside\nthe name-part field definitions it joins. `splitFullName` is implemented\nhere: it parses free text, which is not a schema concern.\n\nStored documents (Contact, User, Invite, embedded contact refs) carry a\ndenormalized `name` field populated by the server via `deriveName`. Use\n`entity.name` directly when the doc has been read back; only call\n`deriveName` for in-flight objects whose `name` hasn't been server-derived\nyet (e.g. manager-side optimistic state before the API responds).",
       "symbols": [
+        {
+          "kind": "interface",
+          "name": "SplitName",
+          "declaration": "interface SplitName {\n  first_name: string;\n  middle_name?: string;\n  last_name?: string;\n}",
+          "doc": "The parts {@link splitFullName} recovers from a free-text name.\n\n`pronunciation` is deliberately absent: it is never recoverable from a\ndisplay string, so a caller seeding a create input leaves it unset (or\n`null`, which is what {@link https://jsr.io/@cfs/core | NamePartsFieldsInput}\nstores)."
+        },
         {
           "kind": "function",
           "name": "deriveName",
           "signature": "deriveName(parts: NamePartsLike): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "splitFullName",
+          "signature": "splitFullName(name: string | null | undefined): SplitName",
+          "doc": "Parse a free-text \"full name\" into `first_name` / `middle_name` /\n`last_name`.\n\nThe canonical arity rule — this function is the ONE author of it, and its\ninverse is `deriveName`:\n\n| tokens | result |\n|---|---|\n| 0 (empty / whitespace / nullish) | `{ first_name: \"\" }` |\n| 1 | `{ first_name }` |\n| 2 | `{ first_name, last_name }` |\n| 3 | `{ first_name, middle_name, last_name }` |\n| 4+ | `{ first_name: <the whole trimmed string> }` |\n\n⚠️ **4+ is deliberately NOT a round-trip.** A two-word surname (\"Ana Maria\nde la Cruz\") is likelier than a three-name-plus-suffix parse, so the whole\nstring goes to `first_name` and the operator corrects it in the split-name\neditor. `deriveName(splitFullName(s)) === s` holds for the 1-, 2- and\n3-token cases and is asserted NOT to hold here — see\n`tests/contact-name.test.ts`, which exists to stop someone \"repairing\" this\nbranch into a guess.\n\n⚠️ **Empty input returns `{ first_name: \"\" }`, which no create input\naccepts** — `NamePartsFieldsInput.first_name` is `min(1)`. That is\ndeliberate: the caller's schema should reject an empty name rather than have\nthis function invent a placeholder. (The api-cloudrun copy this was promoted\nfrom returned `{ first_name: \"-\" }`, a CRMS-webhook artefact — that webhook\nhad to mint a contact from whatever it was sent, and it is being deleted\nwith api-cloudrun#556.)",
           "paramTags": [],
           "returnsTag": null
         }

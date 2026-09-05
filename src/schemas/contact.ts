@@ -13,8 +13,8 @@ import {
   NamePartsFields,
   NamePartsFieldsInput,
   type NamePartsInput,
-  NamePartsFieldsPartial,
-  type PartialNameParts,
+  NamePartsFieldsPatch,
+  type PatchNameParts,
   Phone,
   TimestampFields,
 } from "./common.ts";
@@ -155,8 +155,16 @@ export const CreateContactInput: z.ZodType<CreateContactInputType> = z.object({
 
 /**
  * Input schema for PUT /contacts/:uid — partial update.
+ *
+ * Spreads {@link NamePartsFieldsPatch}, **not** `NamePartsFieldsPartial`: this
+ * is the one PUT body with a client that clears a name part (manager's
+ * split-name editor, manager#338), so `null` is legal on the three optional
+ * parts and means *clear it*. That is the same spelling storage uses, so the
+ * value crosses the write unchanged. `UpdateUserInput` and `AcceptInviteInput`
+ * deliberately stay on the no-clear block — {@link PatchNameParts} carries the
+ * table and the `??`-inversion hazard that keeps them there.
  */
-export interface UpdateContactInputType extends PartialNameParts {
+export interface UpdateContactInputType extends PatchNameParts {
   uid?: string;
   emails?: string[];
   phones?: string[];
@@ -167,7 +175,7 @@ export interface UpdateContactInputType extends PartialNameParts {
 /** Input schema for updating a contact. */
 export const UpdateContactInput: z.ZodType<UpdateContactInputType> = z.object({
   uid: FirestoreId.optional(),
-  ...NamePartsFieldsPartial,
+  ...NamePartsFieldsPatch,
   emails: z.array(Email).optional(),
   phones: z.array(Phone).optional(),
   organizations: z.array(ContactOrganization).optional(),

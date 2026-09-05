@@ -194,13 +194,62 @@ export interface NamePartsInput {
 
 /**
  * All-optional variant of `NameParts` — use for partial update input types
- * (PUT endpoints) where callers may omit `first_name`.
+ * (PUT endpoints) where callers may omit `first_name`, **and where there is no
+ * way to CLEAR a part.**
+ *
+ * ⚠️ That last half is the whole difference from {@link PatchNameParts}, and it
+ * is deliberate rather than an oversight — see that block's table.
  */
 export interface PartialNameParts {
   first_name?: string;
   middle_name?: string;
   last_name?: string;
   pronunciation?: string;
+}
+
+/**
+ * All-optional variant of `NameParts` **with a clear verb** — use for a PUT
+ * body whose client can unset a name part.
+ *
+ * ## Four contracts, four names
+ *
+ * A fourth near-identical block is only defensible if each one's reason is
+ * written down beside it, so:
+ *
+ * | block | shape | who spreads it, and why |
+ * |---|---|---|
+ * | {@link NameParts} / `NamePartsFields` | **STORED** — key required, `string \| null` | every stored surface. Absence is the state that yields `undefined` and breaks unrelated writers (core#83) |
+ * | {@link NamePartsInput} / `NamePartsFieldsInput` | **CREATE INPUT** — `?: string \| null` | `CreateContactInput`, `CreateUserInput`, `CreateInviteInput`, `NewContactInput`, `DestinationContact`, `RegisterInput`. A client with no middle name has no reason to send the key; the writer normalizes `?? null` |
+ * | {@link PartialNameParts} / `NamePartsFieldsPartial` | **PATCH, no clear verb** — `?: string` | `UpdateUserInput`, `AcceptInviteInput` |
+ * | **this** / `NamePartsFieldsPatch` | **PATCH with a clear verb** — `?: string \| null` | `UpdateContactInput` |
+ *
+ * 🔴 **`first_name` gets no null arm in any of the four.** It is `min(1)` and
+ * required on every document spreading `NamePartsFields`, so a `null` there
+ * would type-check its way to a write that cannot validate.
+ *
+ * 🔴 **Why this is a new block rather than a widening of
+ * {@link PartialNameParts}** — the widening was measured (core#70) and does
+ * clear three `TS2322`s, but `AcceptInviteInput` also spreads that block, and
+ * `api-cloudrun/src/routes/invites.ts` merges the accept body with
+ * `body.middle_name ?? invite.middle_name`. `null ?? x` yields `x`, so an
+ * invitee who cleared their middle name would silently inherit **the
+ * inviter's** — and it type-checks. Accept-invite is create-shaped, not
+ * patch-shaped. A separate block means that hazard never opens, and
+ * `UpdateUserInput` — which has no client that clears a part — is not moved for
+ * nothing.
+ */
+export interface PatchNameParts {
+  first_name?: string;
+  /**
+   * `null` is the wire verb for **clear this part**, and it is also the stored
+   * spelling (see {@link NameParts.middle_name}) — one value, one meaning, on
+   * both sides of the write.
+   */
+  middle_name?: string | null;
+  /** See {@link PatchNameParts.middle_name} — same verb. */
+  last_name?: string | null;
+  /** See {@link PatchNameParts.middle_name} — same verb. */
+  pronunciation?: string | null;
 }
 
 /**
@@ -265,7 +314,12 @@ export const NamePartsFieldsInput: {
 
 /**
  * Variant of `NamePartsFields` where every field is optional — use for partial
- * update input schemas (PUT endpoints) where callers may omit `first_name`.
+ * update input schemas (PUT endpoints) where callers may omit `first_name`
+ * **and cannot clear one.**
+ *
+ * ⚠️ For a PUT body whose client can unset a part, spread
+ * {@link NamePartsFieldsPatch} instead; {@link PatchNameParts} carries the
+ * four-contract table and the reason the two are separate.
  */
 export const NamePartsFieldsPartial: {
   first_name: z.ZodType<string | undefined>;
@@ -277,6 +331,34 @@ export const NamePartsFieldsPartial: {
   middle_name: z.string().min(1).max(50).meta({ pii: "mask" }).optional(),
   last_name: z.string().min(1).max(50).meta({ pii: "mask" }).optional(),
   pronunciation: z.string().min(1).max(100).meta({ pii: "mask" }).optional(),
+};
+
+/**
+ * Variant of `NamePartsFields` for a PATCH body **with a clear verb** — every
+ * field optional, and the three optional parts additionally `.nullable()`.
+ *
+ * See {@link PatchNameParts} for the four-contract table and for why this is a
+ * new block rather than a widening of {@link NamePartsFieldsPartial}.
+ *
+ * ⚠️ **Spelled `.nullable().optional()`, not `.optional().nullable()`** — the
+ * order is load-bearing for fixtures, not style. `getTestDoc`
+ * (`src/schemas/testing.ts`) omits the key for the first and emits `null` for
+ * the second, so the reversed order would put a `null` into every
+ * `getTestDoc(UpdateContactInput)` fixture. And deliberately not
+ * `z.union([z.string(), z.null()])`: `tests/pii.test.ts` skips `type === "null"`
+ * leaves and calls that "a landmine, not a bug" — `.nullable()` produces no
+ * such leaf.
+ */
+export const NamePartsFieldsPatch: {
+  first_name: z.ZodType<string | undefined>;
+  middle_name: z.ZodType<string | null | undefined>;
+  last_name: z.ZodType<string | null | undefined>;
+  pronunciation: z.ZodType<string | null | undefined>;
+} = {
+  first_name: z.string().min(1, "First name is required").max(50).meta({ pii: "mask" }).optional(),
+  middle_name: z.string().min(1).max(50).meta({ pii: "mask" }).nullable().optional(),
+  last_name: z.string().min(1).max(50).meta({ pii: "mask" }).nullable().optional(),
+  pronunciation: z.string().min(1).max(100).meta({ pii: "mask" }).nullable().optional(),
 };
 
 /**
