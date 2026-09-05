@@ -8,14 +8,18 @@
 > | step | state |
 > |---|---|
 > | 1 — core WIDEN | ✅ published `@cfs/core@10.0.0-beta.337` (`fa41c5f`) |
-> | 2 — api-cloudrun writers | ✅ committed, **NOT PUSHED** (`cfa294da`, `5342a1ac`) |
+> | 2 — api-cloudrun writers | ✅ **PUSHED** — `cfa294da`, `5342a1ac` on `origin/main` |
 > | 3 — manager pin + deploy | ⛔ not started |
 > | 4 — prod backfill | ⛔ not started |
 > | 5 — core CONTRACT | ⛔ not started |
 > | 6 — pins, deploys, fixture sweep | ⛔ not started |
 >
-> 🔴 **Five commits sit unpushed on `api-cloudrun/main` across THREE sessions, and a
-> push carries all five.** Oldest first: `18da711c` (docs, peer) · `cfa294da` (mine) ·
+> ✅ **Step 2 landed 2026-09-05** in an 11-commit push across six sessions (`origin/main`
+> = `2be67cda`). The first attempt FAILED the gate on an unrelated peer's fixture defect —
+> fulfillment seeds copying a live order's `items[]` without restamping `uid_order` — which
+> is worth knowing as evidence the ~9min gate earns its cost. History, kept because it
+> explains the shas: five commits had sat unpushed across three sessions, and a
+> push carried all of them. Oldest first: `18da711c` (docs, peer) · `cfa294da` (mine) ·
 > `009fe58d` (docs, peer) · `07b20755` (`fix(rbac)`, peer) · `5342a1ac` (mine). The
 > owner placed a hold on pushing; a peer session sought to carry the stack on a
 > relayed approval and was declined — **a relayed grant is not authorization; the
@@ -135,6 +139,14 @@ no writer could stamp a null and no backfill could run. Hence expand/migrate/con
    - re-check Typesense parity per collection afterwards (`found` vs the Firestore count).
 5. ⛔ **`core` — CONTRACT.** Bare `.nullable()`, interfaces `: string | null`. Breaking,
    cheap on `beta`.
+   🔴 **Before cutting the beta, grep the `enforced_by` anchors against the CONSUMER tree.**
+   `@cfs/core` ships *claims about its consumer* — `enforced_by` refs, citation paths —
+   alongside its types, and those resolve at the **consumer's** gate, invisibly to the type
+   checker. `core`'s own `propagation.test.ts` validates ref SHAPE but only resolves refs
+   into `core/`, so an `api-cloudrun/...` anchor is unchecked until a consumer's pin moves.
+   Measured 2026-09-05 by a peer: `beta.338` declared two `enforced_by` refs naming an
+   api-cloudrun test anchor that did not exist yet, and the bump alone reddened a hermetic
+   ratchet for the whole checkout. Anchor first, then publish.
    🔴 **This step must SPLIT the block.** `NamePartsFields` is spread into **6 STORED
    (`z.strictObject`) and 6 INPUT (`z.object`)** sites, and requiring the key on an input
    would 400 every create client that omits a middle name. Normalize at the writer, require
