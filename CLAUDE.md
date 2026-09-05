@@ -302,8 +302,16 @@ For the full Zod 4 API reference, read `.claude/zod-llms.txt` (auto-fetched from
   🔴 **The cheap check has to REFERENCE the symbol, and the obvious form of it fails OPEN.**
   `deno eval 'import { X } from "./src/schemas/mod.ts"; console.log("ok")'` prints `ok` for a
   symbol that does not exist — the import is unused, so it is elided before the module ever links.
-  Measured both ways, 2026-09-05: a real symbol and `NotARealSymbol` both exit 0. Use a form that
-  forces the binding, and check the two halves differently because a TYPE is erased at runtime:
+  Measured both ways, 2026-09-05: a real symbol and `NotARealSymbol` both exit 0.
+  ⭐ **And note HOW that form came to be recommended, because it is the transferable half**: the
+  session that suggested it had actually run
+  `console.log("resolved:", SomeEnum.options ?? "ok")` — which touches the binding and does bite —
+  then **generalised it into `console.log("ok")` while writing it down for someone else**, dropping
+  the one part that was load-bearing. The instrument was sound; the *explanation* of it was not,
+  and the explanation is the version that propagates. **Run the version you wrote down, not the
+  version you ran.**
+  Use a form that forces the binding, and check the two halves differently because a TYPE is
+  erased at runtime:
 
   ```sh
   # a VALUE — exits 1 with "does not provide an export named" when it is missing
