@@ -407,7 +407,7 @@ still be written absent.
 ```ts
 interface AuthoredProductComponent {
   inclusion_type: InclusionTypeType;
-  price_overridden?: ComponentPriceKeyType[];
+  price_overridden: ComponentPriceKeyType[];
 }
 ```
 
@@ -16333,7 +16333,7 @@ still be written absent.
 ```ts
 interface AuthoredProductComponent {
   inclusion_type: InclusionTypeType;
-  price_overridden?: ComponentPriceKeyType[];
+  price_overridden: ComponentPriceKeyType[];
 }
 ```
 

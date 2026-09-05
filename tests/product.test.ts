@@ -85,6 +85,7 @@ Deno.test("ProductSchema validates with components", () => {
         name: "Battery",
         type: "rental",
         inclusion_type: "default",
+        price_overridden: [],
         stock_method: "bulk",
         crms_id: 200,
         quantity: 2,
@@ -128,6 +129,7 @@ Deno.test("ProductSchema rejects rental component without price.replacement_cent
         name: "Battery",
         type: "rental",
         inclusion_type: "default",
+        price_overridden: [],
         stock_method: "bulk",
         crms_id: 200,
         quantity: 2,
@@ -148,6 +150,7 @@ Deno.test("ProductSchema accepts rental component with stock_method none and no 
         name: "Service Fee",
         type: "rental",
         inclusion_type: "default",
+        price_overridden: [],
         stock_method: "none",
         crms_id: 200,
         quantity: 1,
@@ -448,13 +451,22 @@ Deno.test("price.coa_revenue is REQUIRED on the document and on BOTH inputs", ()
   assertEquals(ComponentSchema.safeParse(component).success, true);
 });
 
-Deno.test("components require inclusion_type; component_of does not", () => {
-  // The asymmetry is the point. `components` is the AUTHORED side — an
-  // `undefined` inclusion_type there is a silent fourth bucket both expanders
-  // drop, so the component never reaches an order. `component_of` is the
-  // reciprocal back-reference: the parent authors the relationship attributes,
-  // and 140 of 141 prod rows carry none of them, so requiring it there would
-  // make 90 live products unwritable.
+Deno.test("components require inclusion_type and price_overridden; component_of requires neither", () => {
+  // The asymmetry is the point, and there are now TWO fields on the authored
+  // side rather than one.
+  //
+  // `inclusion_type`: an `undefined` there is a silent fourth bucket both
+  // expanders drop, so the component never reaches an order.
+  //
+  // `price_overridden` (api-cloudrun#862): only a parent authors an override,
+  // so only the authored side can record one. On a back-reference the field
+  // would be meaningless — nobody prices a parent from a child — and its
+  // absence there is what makes a `component_of` price divergence
+  // unambiguously a missed cascade, and therefore auditable.
+  //
+  // `component_of` is the reciprocal back-reference: the parent authors the
+  // relationship attributes, and 140 of 141 prod rows carry none of them, so
+  // requiring either there would make 90 live products unwritable.
   const backRef = {
     uid: "testcomp100000000000",
     path: ["testproduct100000000"],
@@ -468,8 +480,17 @@ Deno.test("components require inclusion_type; component_of does not", () => {
 
   assertEquals(ComponentSchema.safeParse(backRef).success, true);
   assertEquals(AuthoredComponentSchema.safeParse(backRef).success, false);
+  // Still false with only ONE of the two — the fixture must supply both.
   assertEquals(
     AuthoredComponentSchema.safeParse({ ...backRef, inclusion_type: "default" }).success,
+    false,
+  );
+  assertEquals(
+    AuthoredComponentSchema.safeParse({ ...backRef, price_overridden: [] }).success,
+    false,
+  );
+  assertEquals(
+    AuthoredComponentSchema.safeParse({ ...backRef, inclusion_type: "default", price_overridden: [] }).success,
     true,
   );
 
