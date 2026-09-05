@@ -129,6 +129,30 @@ export const INTEGRATION_EVENT_MSGS = [
   "dmarc_report_processor_run",
   "eventarc_duplicate_event",
   "eventarc_processed",
+  // The activity feed's capture branch (manager's `/activity`,
+  // `.claude/plans/activity-feed.md`). A PAIR, and both halves are needed for
+  // the same reason the org-tree watch above emits two: the feed is silent when
+  // it decides not to write, so "captured nothing today" and "the branch never
+  // ran" are indistinguishable from `activity_captured` alone.
+  //
+  // `activity_captured` carries `activity_id` (the deterministic row id) beside
+  // `collection` + `doc_id`, so a row in the manager can be traced back to the
+  // Eventarc delivery that minted it. `activity_skipped` carries `reason` — the
+  // short token `captureActivity` returns (`no_actor_on_document`,
+  // `no_meaningful_change`, `no_correlation_key`, `event_asserts_no_state`),
+  // which is what makes the two capture filters countable instead of inferred.
+  //
+  // ⚠️ **`collection_not_in_feed` is deliberately NOT emitted** — the route
+  // gates on `isFeedCollection` before calling capture at all, and that skip is
+  // already countable off `eventarc_processed`'s own `collection` field. An arm
+  // for it would add ~1,300 records/day that say only "bookings is not in the
+  // feed", which has been true since the filter was written.
+  //
+  // Both emit at `debug`, so prod (`LOG_LEVEL=info`) drops them: the pair is a
+  // dev-and-incident instrument, and unconditional `info` here would undo
+  // exactly the volume decision `eventarc_processed`'s threshold above made.
+  "activity_captured",
+  "activity_skipped",
   "trello_locked",
   "trello_newer_update_detected",
   "trello_no_new_updates",
@@ -410,6 +434,21 @@ export interface IntegrationEventLogRecord {
   collection?: string;
   /** Why a best-effort step gave up — a short enum-ish token, not a message. */
   reason?: string;
+  /**
+   * `activity_captured` — the `activities` row id the capture wrote.
+   *
+   * Declared rather than left to the index signature below, per the `lag_ms`
+   * argument: a caller-supplied field earns a declaration. ⚠️ Note what that
+   * does and does not buy — `activity_id: 5` is a compile error, but
+   * `activity_uid: "…"` still compiles, because `[key: string]: unknown`
+   * admits any name. Discoverability and type-safety on the right name; no
+   * protection against a misspelling.
+   *
+   * It is the DETERMINISTIC id (`hash48(collection|doc|actor|correlation)`), so
+   * repeat deliveries of one Eventarc event log the same value — which is how a
+   * redelivery is told from a second genuine edit.
+   */
+  activity_id?: string;
   /** `dmarc_report_ingest_failed` — the Gmail message the report arrived on. */
   message_id?: string;
   [key: string]: unknown;
@@ -454,5 +493,6 @@ export const IntegrationEventLogRecordSchema: z.ZodType<IntegrationEventLogRecor
   displacement_group_names: z.array(z.string()).optional(),
   collection: z.string().optional(),
   reason: z.string().optional(),
+  activity_id: z.string().optional(),
   message_id: z.string().optional(),
 }).passthrough().meta({ title: "IntegrationEventLogRecord" });
