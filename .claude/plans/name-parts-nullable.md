@@ -1,177 +1,106 @@
 # `NamePartsFields` → bare `.nullable()` — expand/migrate/contract
 
-> Owning repo `core`; the work also lands in `api-cloudrun` and `manager`.
-> **Steps 1–4 are DONE. Steps 5–6 remain — core#84.** Tracks the owner's ruling in core#83.
+> Owning repo `core`; the work also landed in `api-cloudrun`, `manager` and `templates`.
+> **Steps 1–6 are DONE except one merge. Tracks core#84 / the owner's ruling in core#83.**
 >
-> ## ⚠️ STATUS 2026-09-05 (3rd update, compacted) — steps 1–4 DONE, prod backfilled, step 6 unblocked
+> ## ⚠️ STATUS 2026-09-05 (4th update, compacted) — the contract is SHIPPED; one PR left
 >
 > | step | state |
 > |---|---|
-> | 1 — core WIDEN | ✅ `@cfs/core@10.0.0-beta.337` (`fa41c5f`); latest published is now `beta.342` |
-> | 2 — api-cloudrun writers | ✅ pushed AND **DEPLOYED** — prod `v0.228.0`, revision `api-cloudrun-00342-8zk` |
-> | 3 — manager pin + writers | ✅ pushed `eedaced`, pinned `beta.341`; preview deploy follows `main` |
-> | 4 — prod backfill | ✅ **DONE 2026-09-05** — 354 prod docs, 18 dev residue, both post-audit 0 |
-> | 5 — core CONTRACT | ⛔ ← **NEXT, and now unblocked downstream** |
-> | 6 — pins, deploys, fixture sweep | ⛔ not started — **blocker CLEARED 2026-09-05** |
+> | 1 — core WIDEN | ✅ `@cfs/core@10.0.0-beta.337` |
+> | 2 — api-cloudrun writers | ✅ deployed, prod `v0.228.0` |
+> | 3 — manager pin + writers | ✅ `eedaced` |
+> | 4 — prod backfill | ✅ 354 prod docs, 18 dev residue, both post-audit 0 |
+> | 5 — core CONTRACT | ✅ **`39e7c45`, published `10.0.0-beta.343`** |
+> | 6 — pins, deploys, fixture sweep | ✅ `api-cloudrun` `14c70c61` · `manager` `48ffa36` · ⛔ **`templates` PR #219 awaits a human merge** |
 >
-> ### Step 4 — done, and it CORRECTED this plan's central sizing claim
+> ### What is actually left
 >
-> 🔴 **The population was 354 documents, not the ~4,835 sized below.** The surface table's
-> per-collection counts are DOCUMENT counts, and this plan read them as documents needing
-> repair. They are not — the destination-embedded contacts are almost entirely **null legs**:
-> 1,151 of 1,153 cards, 2,032 of 2,032 order legs, 2,012 of 2,012 invoice legs. So the
-> **"3,711 whole-document array rewrites" flagged as the risky bulk were 2 documents**, and
-> the real work was `contacts` 170 and `organizations` 179 — both flat shapes.
-> ⭐ **The instrument is `api-cloudrun/scripts/backfill-name-parts-null.ts`**, which reports
-> `contact objects entered` and `null legs left alone` per collection precisely so this
-> distinction cannot be lost again.
+> 1. **Merge `chicago-film-supplies/templates#219`** (pin + one fixture repair). It is
+>    deliberately NOT auto-mergeable: `templates/CLAUDE.md` limits that row to
+>    `deno.json`/`deno.lock`-only PRs, and a pin bump that also repairs a fixture is the
+>    combination § *"Adding a dependency"* says to expect and to land as one PR.
+> 2. **Delete `api-cloudrun/scripts/backfill-name-parts-null.ts`** — a one-shot, applied in
+>    both environments. ⚠️ **Delete THIS DOC in the same sitting and FIRST**: those two files
+>    are the only things in the workspace naming that script (grepped 2026-09-05), so
+>    removing the script while this doc still cites it turns `core`'s citation gate BROKEN
+>    and makes `core` unpushable for every session sharing the checkout.
 >
-> | | prod `cfs-3100` | dev residue |
-> |---|---|---|
-> | written | **354** | **18** |
-> | post-audit re-run | **0** | **0** |
-> | unexpected shapes | 0 | 0 |
+> ### Step 5 — what shipped, and the one thing it corrected
 >
-> **Verified by a SECOND, independent instrument**, because the backfill's own re-read
-> agrees with itself by construction. `api-cloudrun/scripts/audit-field-presence.ts` asks
-> key-presence through `orderBy` instead, and its deltas match the writer's own tallies
-> exactly: `contacts.middle_name` 8/170 present → 170/170 with **162 null** (+162),
-> `last_name` 165 → 170 with 5 null (+5), `pronunciation` 0 → 170 with 170 null (+170).
+> The block **SPLIT**, as planned, 6 STORED / 6 INPUT. What the plan got wrong is that the
+> split is not a property of the TYPE:
 >
-> **Typesense parity re-checked per collection against a PRE-write baseline** — a post-hoc
-> reading alone only says "is it clean now". Identical both sides: contacts 170, orgs 318,
-> orders 1,017, invoices 1,037, fulfillments 1,017.
+> 🔴 **An INPUT schema can embed a STORED strict object, and one does.**
+> `CreateOrganizationInput.contacts` and `UpdateOrganizationInput.contacts` are
+> `z.array(OrganizationContact)` — the stored `z.strictObject` — so those HTTP request
+> bodies inherited the tightening and now need all three keys. Six api-cloudrun test
+> payloads were repaired for exactly that reason. ⭐ **The split is a property of each
+> SITE, not of the type**; the next tightening should look for embedded stored objects
+> before trusting a 6/6 table.
 >
-> ⚠️ **The deploy really was the gate, and it is now proven rather than assumed.** Prod ran
-> `v0.227.0`, which pins `@cfs/core@10.0.0-beta.336` — whose `NamePartsFields` is
-> `z.ZodType<string | undefined>`, i.e. **null-rejecting**. Backfilling before the rollout
-> would have made all 354 documents fail `validateBeforeWrite` on their next write through
-> the live API. `v0.228.0` pins `beta.338`. ⚠️ **Check the deployed TAG's pin, not `main`'s.**
+> **Naming, and why the tightened half kept the established name.** `NameParts` /
+> `NamePartsFields` are now the STORED pair (`: string | null`, key required); the new
+> `NamePartsInput` / `NamePartsFieldsInput` are the INPUT pair. Had it gone the other way —
+> `NameParts` left loose with a `StoredNameParts` beside it — every consumer holding stored
+> data would have compiled unchanged and stayed silently over-loose. A compile error is the
+> cheaper failure, and it is what named manager's two form models
+> (`AcceptInvite.tsx`, `ContactName.tsx`, both now `NamePartsInput`).
+> `NamePartsFieldsPartial` / `PartialNameParts` are a THIRD block and untouched — core#70's
+> call, so **manager#338 is still not resolved.**
 >
-> ⚠️ **A Cloud Run deploy is not done when the image spec changes.**
-> `spec.template.spec.containers[0].image` is the DESIRED state and flips immediately; a
-> watcher on it reported "deployed" while revision `00342-8zk` was still provisioning and
-> 100% of traffic sat on the old one. **The predicate is `status.latestReadyRevisionName`
-> plus the traffic split.**
+> ### Step 6 — the fixture sweep, and the two census defects
 >
-> ⭐ **The fan-out was assessed before writing, and the activity feed's own filters carried
-> it** — ~3 rows, not ~352. `contacts`' name parts carry `pii: "mask"` but **no `label`**, so
-> capture filter 2 drops them; `organizations` is `NO_ARRAYS` in `DIFFED_ARRAYS`, so its
-> `contacts` path is dropped as an undiffed array. Only the 1 order (`destinations` IS
-> diffed) and the 2 cards (`destination.contact` is labelled) produce rows. **Ask this
-> before any bulk write — the answer was not obvious from the collection list.**
+> `getTestDoc` emits `null` for all three (verified against the published build), so core's
+> own fixtures moved for free. The hand-spelled ones did not: **4 caught by the compiler,
+> 41 invisible to it.** A raw `ref.set()` seed never reaches a typed receiver, so it
+> compiles today and becomes a `ValidationError` from inside a transaction the first time
+> the code under test writes that document back.
 >
-> ### ✅ Step 6's blocker is CLEARED — do not re-derive it from an older reading
+> 🔴 **`\bfirst_name\s*:` does not match a SHORTHAND property.** `seedUser` in
+> `api-cloudrun/tests/integration/users/users.test.ts` is written `{ first_name, name: first_name }`,
+> and it stands behind several tests. Matching property POSITION (`first_name` followed by
+> `:`, `,` or `}`) took the candidate count 114 → 116 and caught it. ⭐ **A source-text scan
+> measures its own pattern, not the corpus** — and a 2-in-116 gap reads as complete.
 >
-> For part of 2026-09-05 api-cloudrun could not pin past `beta.338`: `beta.339` deleted the
-> CRMS transaction/rule definitions while api-cloudrun still named `crms-opportunity-order`
-> as a live `RebuildOrigin`, so `api-cloudrun/tests/unit/propagationCoverage.test.ts` redded
-> on any bump. **That is now history.** `dccc075e` (`feat(crms)!: delete the CRMS ingest
-> surface`) removed the live references — every surviving occurrence in
-> `api-cloudrun/src/` is a COMMENT — and api-cloudrun's pin moved to `beta.339` and shipped
-> in `v0.229.0`.
+> 🔴 **The inserter put the new keys in the enclosing ARRAY** on 6 of 9 sites, because those
+> objects are written on ONE line and it appended after that line. Caught by a verifier that
+> re-derives each inserted key's enclosing block and asserts a `first_name` beside it — a
+> check that cannot pass vacuously. ⭐ **The finder and the writer need separate
+> verification**; a correct census does not imply a correct repair.
 >
-> ⚠️ **api-cloudrun#865 is still open and is NOT this blocker.** Its title names the pin
-> ceiling, which is what makes it easy to misread: the ISSUE is a peer's fulfillment work
-> (*"Point fulfillmentEdits at the shared core rebuild"*) that was *waiting on* the ceiling.
-> The ceiling is gone; the fulfillment work is someone else's and is **not** on core#84's
-> critical path. An earlier revision of this plan said it was — that was wrong in two ways
-> at once, and both are the same mistake: **reading an issue's blocking CLAUSE as its
-> subject.**
+> ⚠️ **Two deliberate NON-repairs, commented in place** so a later census does not
+> re-propose them: `api-cloudrun/tests/integration/contacts/contacts.test.ts`'s
+> `userRef.update({ first_name, name })` is a partial MERGE onto a copied dev user that
+> carries the keys; and `api-cloudrun/scripts/audit-denorm-freshness.ts`'s fixture stays
+> absent-on-both-sides because `sameValue` (`api-cloudrun/scripts/_denormEquality.ts`) folds
+> `null` in WITH `undefined` on one branch.
 >
-> **Pin spread as of 2026-09-05** (three consumers on three different pins is the steady
-> state, not a fault — but step 6 has to close it):
+> ### Ordering: nothing is owed a deploy in a particular order
 >
-> | repo | pin | note |
-> |---|---|---|
-> | `api-cloudrun` | `beta.339` | past the old ceiling |
-> | `manager` | `beta.341` | step 3 put it here |
-> | `templates` | `beta.335` | **furthest behind — step 6 must not forget it** |
-> | latest published | `beta.342` | a peer's `ComponentObject.price_overridden` |
+> ⚠️ **Storage was already at the destination before step 5**, so the contract could not
+> break the corpus — only a client that omits a key. And every writer had already been
+> converted: api-cloudrun's `?? null` shipped in `v0.228.0`, manager's nine spreads in
+> `eedaced`. So prod on `beta.339` and a future prod on `beta.343` both accept what the
+> other writes, and **the three consumers could move in any order.** Templates' fixture
+> carrying `middle_name: null` renders identically under either.
 >
-> ### Step 3 — what actually landed, and the finding that changes step 4's ordering
+> ### Kept, because a resumed session will re-derive them otherwise
 >
-> The plan said "readers are unaffected; audit the 8 files naming a part for form writers."
-> The measured surface was **12 files**, and it split three ways, not one.
->
-> 🔴 **manager constructs 2 of the 6 STORED `z.strictObject` types CLIENT-SIDE** —
-> `DocDestinationContact` and `OrganizationContact` — through **9 conditional spreads**
-> (`manager/src/components/organizations/OrgContacts.tsx` ×3,
-> `manager/src/components/orders/OrderDestination.tsx` ×6) plus one construction that omitted all
-> three parts outright. That makes manager a *stored* writer, not merely an input client,
-> and gives it two ordering consequences the plan did not name:
-> 1. **after step 4 the spreads would silently RE-OMIT keys the backfill had just written**,
->    decaying `orders/invoices/fulfillments.destinations[]` and `organizations.contacts[]`
->    row by row on every contact re-selection;
-> 2. **after step 5 they would 400**, the key being required.
->
-> ⭐ **So manager's writers had to ship BEFORE the backfill, not after it** — step 3 is not
-> the "pin + deploy" the plan described. All 9 converted with `|| null`; input-side writers
-> (`dropBlankNameParts`, `InviteUser`, `AcceptInvite`'s overrides) deliberately left
-> omitting, because their schemas are `z.object` INPUT sites that keep
-> `.nullable().optional()`. **Normalize at the writer, require at storage** — verified, not
-> assumed: the 6/6 STORED/INPUT split was re-derived independently and matches (table below).
->
-> ⭐ **The completeness grep earned its cost again, and in a new way.** The site it caught —
-> `manager/src/components/threads/buildThreadLabel.ts` — is invisible to a
-> `middle_name|pronunciation` grep because it names only `first_name`/`last_name`.
-> **The miss was in the PATTERN, not in the walk.** Widen the pattern to all four parts, and
-> re-run it after every batch.
->
-> ⚠️ **`getInitialValues` now seeds `null`, and `draftSeed` deletes it** —
-> `manager/src/primitives/createEntityCache.ts:57-61` strips every null from the seed, so a
-> draft carries absent keys where storage wants null. Harmless today (masked by
-> normalization at every stored-write site) and **filed rather than changed**, since the
-> blast radius is cross-store: **manager#388**. ⭐ Expect this shape at every core#83
-> conversion — a seed and a schema that disagree about what `null` means, both individually
-> correct.
->
-> ⚠️ **A stale test oracle, not a code defect.**
-> `manager/src/stores/__tests__/contacts-create.test.ts` asserted a raw
-> draft is REJECTED on all three parts — true only while the seed was `""`. It now seeds
-> `null`, `draftSeed` strips it, and the draft is accepted. Replaced with the chain asserted
-> end to end plus a guard that `""` is still rejected. **A green suite would have hidden the
-> widen working; the red one is what surfaced the seed change.**
->
-> ⚠️ **manager#338 is NOT unblocked by this campaign.** Clearing a part on a SAVED contact
-> goes through `NamePartsFieldsPartial`, which was deliberately left un-widened —
-> **core#70**, not core#83/84. Commented on the issue so a triage pass does not read step 5
-> landing as this becoming ready.
->
-> ⭐ **The Typesense hazard is DISPROVEN** and needs no work at any step — see below.
->
-> ### Kept, because it explains the shas
->
-> Step 2 landed in an 11-commit push across six sessions (`origin/main` = `2be67cda`). The
-> first attempt failed the gate on an unrelated peer's fixture defect — fulfillment seeds
-> copying a live order's `items[]` without restamping `uid_order` — which is worth knowing
-> as evidence the ~9min gate earns its cost. Five commits had sat unpushed across three
-> sessions; a push carried all of them. Oldest first: `18da711c` (docs, peer) · `cfa294da`
-> (mine) · `009fe58d` (docs, peer) · `07b20755` (`fix(rbac)`, peer) · `5342a1ac` (mine).
-> ⚠️ Only `18da711c:main` excludes both of mine — `07b20755:main` carries `cfa294da`,
-> because a push range is decided by ANCESTRY, not by the order a log was read in.
->
-> **Step 2 verified**: `check` 0, `lint` 0, `test:units` 1816/0, and integration
-> contacts 2/30 · invites 1/8 · organizations 4/67 · crms webhooks 2/65 — the last
-> being the one the pre-push gate `--ignore`s, so it needs running by hand.
-> **Step 3 verified**: `tsc` 0, `lint` 0 (372 citations, 0 broken), `vitest` 1502/1502.
->
-> ### 🔴 Two findings from step 2 that still change steps 5–6
->
-> 1. **There is a second writer family: MUTATIONS and COMPARISONS, not just
->    constructions.** Nine `delete target.<part>` clears beyond `applyNameParts`, and —
->    the sharp one — **three change-detection comparisons that fire a FALSE RENAME
->    CASCADE once storage holds `null`.** `splitFullName` yields `undefined` for an
->    absent part; `undefined !== null`; so every CRMS member webhook for a contact with
->    no middle name would report a rename and fan out. **The writers are what make the
->    readers wrong**, so the two cannot be split across commits. ⭐ Expect the same
->    shape at every other `.nullable().optional()` conversion in core#83 — any reader
->    comparing a fresh value against a stored one. ✅ manager's equivalent comparisons
->    (`manager/src/routes/AcceptInvite.tsx`) were checked and are already null-safe: both sides
->    normalize through `?? ""`.
-> 2. **`|| null`, not `?? null`.** The conditional being replaced tested TRUTHINESS, so
->    `""` produced an absent key. `?? null` passes `""` through to fail `min(1)`;
->    `|| null` is exactly equivalent to what was there. ✅ Applied throughout step 3.
+> - 🔴 **The population was 354 documents, not the ~4,835 sized below.** The surface table's
+>   per-collection counts are DOCUMENT counts; the destination-embedded contacts are almost
+>   entirely null legs (1,151 of 1,153 cards, 2,032 of 2,032 order legs, 2,012 of 2,012
+>   invoice legs), so the "3,711 whole-document array rewrites" were **2 documents**. The
+>   real work was `contacts` 170 and `organizations` 179, both flat.
+> - ⚠️ **api-cloudrun#865's `beta.338` pin ceiling is long gone** and was never on this
+>   plan's critical path — its title names the ceiling, but the ISSUE is a peer's
+>   fulfillment work that was waiting on it. Reading an issue's blocking CLAUSE as its
+>   subject cost this plan a wrong dependency once already.
+> - ⭐ **The Typesense hazard is DISPROVEN** — measured against the prod index, not reasoned.
+>   No translate change, no config change.
+> - ⚠️ **`manager#388` still stands**: `getInitialValues` seeds `null` and `draftSeed` strips
+>   every null from a seed, so a draft carries absent keys where storage wants null.
+>   Harmless today because every stored-write site normalizes.
 
 ## Context
 
@@ -265,7 +194,7 @@ no writer could stamp a null and no backfill could run. Hence expand/migrate/con
    - **verify array members by paged re-read** — `orderBy` cannot see one. That instrument
      also serves core#83's 29 `array-member-uncensusable` paths.
    - re-check Typesense parity per collection afterwards (`found` vs the Firestore count).
-5. ⛔ **`core` — CONTRACT.** Bare `.nullable()`, interfaces `: string | null`. Breaking,
+5. ✅ **`core` — CONTRACT.** Landed `39e7c45`, published `10.0.0-beta.343`. Bare `.nullable()`, interfaces `: string | null`. Breaking,
    cheap on `beta`.
    🔴 **Before cutting the beta, grep the `enforced_by` anchors against the CONSUMER tree.**
    `@cfs/core` ships *claims about its consumer* — `enforced_by` refs, citation paths —
@@ -293,50 +222,43 @@ no writer could stamp a null and no backfill could run. Hence expand/migrate/con
    `z.ZodType<string | undefined>`, deliberately not widened, because whether the partial
    INPUT contract gains a `null` unset verb is **core#70**'s call. That is also why
    manager#338 is not resolved by this campaign.
-6. ⛔ **Pins, deploys, fixture sweep.** `getTestDoc` flips OMIT → `null` automatically
-   (`src/schemas/testing.ts`), so core's own fixtures move for free; api-cloudrun's
-   hand-spelled seeds do not. Census **by document shape**, classify **by receiver bound to
-   its declaration**, skip any body containing `...`. Expect the 7-red-files class.
+6. ✅ **Pins, deploys, fixture sweep** — except the `templates` merge.
+   `api-cloudrun` `14c70c61` (`beta.342 → .343`, 45 seeds), `manager` `48ffa36`
+   (`beta.341 → .343`, two form models), `templates` PR #219 (`beta.335 → .343`, one
+   fixture) **open, awaiting a human**. `getTestDoc` flipped OMIT → `null` for free as
+   predicted; the hand-spelled seeds did not, and only 4 of 45 were visible to the
+   compiler.
 
-## Picking up step 5 cold — the whole checklist
+## Finishing it — the two remaining actions, in order
 
-**Nothing blocks it.** Step 4 is verified in both environments, prod runs a build that
-accepts `null`, and step 6's old pin ceiling is gone. In order:
+1. **Merge `chicago-film-supplies/templates#219`.** A human, not an agent: `templates/CLAUDE.md`
+   scopes the auto-merge row to `deno.json`/`deno.lock`-only PRs, and this one also repairs
+   `templates/fixtures/quote/multi-dest.json`. ⚠️ Read the CI verdict as **passed on the head
+   sha, on the newest run** — `cancel-in-progress` means a conclusion on a superseded sha
+   says nothing, and a not-reported arm is not a passing one.
+2. **Delete `api-cloudrun/scripts/backfill-name-parts-null.ts` and this doc, together.**
+   The script is a one-shot, applied in both environments with a post-audit of 0, and the
+   repo's convention is to delete rather than keep it green.
+   🔴 **This doc must go FIRST or in the same sitting.** It and the script are the only two
+   files in the workspace naming that path (grepped 2026-09-05), so deleting the script
+   while this doc still cites it turns `core`'s citation gate BROKEN and makes `core`
+   unpushable for **every session sharing the checkout** — a repo that never saw the
+   deletion, which is the whole shape of that hazard.
 
-1. **Anchor first, then publish.** Grep every `enforced_by` ref the change will add or move
-   against the CONSUMER tree — see step 5's 🔴 above. This is the one that bit a peer.
-2. **Split the block** per the 6/6 table in step 5. Storage requires the key; input keeps
-   `.nullable().optional()`.
-3. **Drop the `?` on the interfaces too** — `z.ZodType<T>` is checked in ONE direction, so a
-   required schema member under an optional interface member compiles silently.
-   `core/tests/interface-optionality.test.ts` is what catches it.
-4. **Empty the `mid-expand` block in `core/tests/stored-optionality.test.ts`** — it
-   catalogues the 30 transit paths and the contract step is what retires them.
-5. **Publish, then sweep all three consumers** — `api-cloudrun` `beta.339`, `manager`
-   `beta.341`, `templates` `beta.335`. ⚠️ **`templates` is furthest behind and is the one a
-   core-and-manager session forgets.**
-6. **Then step 6's fixture sweep.** `getTestDoc` flips OMIT → `null` for free; api-cloudrun's
-   hand-spelled seeds do not. Census by document SHAPE, classify by RECEIVER bound to its
-   declaration, skip any body containing `...`.
-7. **Delete `api-cloudrun/scripts/backfill-name-parts-null.ts`** in the commit that lands the
-   last piece — it is a one-shot and the repo's convention is to delete, not to keep green.
-   **And delete this plan doc in that same commit.**
-
-⚠️ **Storage is already at the destination, so step 5 cannot break the corpus — only the
-CLIENTS.** Every stored document now carries all three keys; what the contract changes is
-whether a *writer* may omit one. That is why the split matters more than the timing.
+⚠️ **Neither is blocked on the other's environment.** Nothing further is owed a deploy:
+prod on `beta.339` and a prod on `beta.343` accept exactly the same writes, because every
+writer was converted before the contract landed.
 
 ## Context recommendation
 
-**Clear before step 5.** Steps 1–4 are done and independently verified, so nothing from
-this session's context is load-bearing for what remains — everything step 5 needs is
-written down above, including the 6/6 split table and the anchor check. Step 5 is a
-schema edit plus a publish plus a three-consumer sweep, and it starts cleanest from a fresh
-read of `core/src/schemas/common.ts`.
+**Clear.** The contract is published and both code consumers have swept and landed; what
+remains is one PR merge and a two-file deletion, and each is fully specified above. Nothing
+from the session that did the work is load-bearing for either.
 
-⚠️ The one thing NOT to carry forward from memory: this plan's original sizing (~4,835
-documents, 3,711 array rewrites) was **wrong**, and the corrected figure is 354. Anyone
-resuming from a summary written before 2026-09-05 has the wrong number.
+⚠️ Two things NOT to carry forward from memory. This plan's original sizing (~4,835
+documents, 3,711 array rewrites) was **wrong** — the figure is 354. And the pin table it
+carried went stale twice while the work was in flight; **read the pins from the repos**, not
+from any doc.
 
 ## Related
 
