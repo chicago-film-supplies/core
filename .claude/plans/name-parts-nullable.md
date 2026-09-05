@@ -3,16 +3,16 @@
 > Owning repo `core`; the work also lands in `api-cloudrun` and `manager`.
 > **Steps 1–4 are DONE. Steps 5–6 remain — core#84.** Tracks the owner's ruling in core#83.
 >
-> ## ⚠️ STATUS 2026-09-05 (3rd update, compacted) — steps 1–4 DONE, prod backfilled
+> ## ⚠️ STATUS 2026-09-05 (3rd update, compacted) — steps 1–4 DONE, prod backfilled, step 6 unblocked
 >
 > | step | state |
 > |---|---|
-> | 1 — core WIDEN | ✅ `@cfs/core@10.0.0-beta.337` (`fa41c5f`); latest is now `beta.341` |
+> | 1 — core WIDEN | ✅ `@cfs/core@10.0.0-beta.337` (`fa41c5f`); latest published is now `beta.342` |
 > | 2 — api-cloudrun writers | ✅ pushed AND **DEPLOYED** — prod `v0.228.0`, revision `api-cloudrun-00342-8zk` |
 > | 3 — manager pin + writers | ✅ pushed `eedaced`, pinned `beta.341`; preview deploy follows `main` |
 > | 4 — prod backfill | ✅ **DONE 2026-09-05** — 354 prod docs, 18 dev residue, both post-audit 0 |
-> | 5 — core CONTRACT | ⛔ ← NEXT |
-> | 6 — pins, deploys, fixture sweep | ⛔ **blocked** — see api-cloudrun#865 |
+> | 5 — core CONTRACT | ⛔ ← **NEXT, and now unblocked downstream** |
+> | 6 — pins, deploys, fixture sweep | ⛔ not started — **blocker CLEARED 2026-09-05** |
 >
 > ### Step 4 — done, and it CORRECTED this plan's central sizing claim
 >
@@ -61,15 +61,33 @@
 > diffed) and the 2 cards (`destination.contact` is labelled) produce rows. **Ask this
 > before any bulk write — the answer was not obvious from the collection list.**
 >
-> 🔴 **Step 6 has a NEW blocker that has nothing to do with this work: api-cloudrun cannot
-> pin past `beta.338`.** `beta.339` deleted the CRMS transaction/rule definitions, and
-> api-cloudrun still names `crms-opportunity-order` as a live `RebuildOrigin` in
-> `api-cloudrun/src/lib/taskQueues.ts` and `api-cloudrun/src/services/bookingAllocationRecompute.ts`, so
-> `api-cloudrun/tests/unit/propagationCoverage.test.ts` reds on any bump. Removal belongs to
-> api-cloudrun#556 and carries its own ordering question (a queued stock-summary rebuild
-> already in flight carries that origin and would fail on dequeue). Tracked as
-> **api-cloudrun#865**. ⚠️ Step 5 publishes a beta that api-cloudrun must then pin — so
-> **#865 is on step 6's critical path**, and it is not this campaign's to decide.
+> ### ✅ Step 6's blocker is CLEARED — do not re-derive it from an older reading
+>
+> For part of 2026-09-05 api-cloudrun could not pin past `beta.338`: `beta.339` deleted the
+> CRMS transaction/rule definitions while api-cloudrun still named `crms-opportunity-order`
+> as a live `RebuildOrigin`, so `api-cloudrun/tests/unit/propagationCoverage.test.ts` redded
+> on any bump. **That is now history.** `dccc075e` (`feat(crms)!: delete the CRMS ingest
+> surface`) removed the live references — every surviving occurrence in
+> `api-cloudrun/src/` is a COMMENT — and api-cloudrun's pin moved to `beta.339` and shipped
+> in `v0.229.0`.
+>
+> ⚠️ **api-cloudrun#865 is still open and is NOT this blocker.** Its title names the pin
+> ceiling, which is what makes it easy to misread: the ISSUE is a peer's fulfillment work
+> (*"Point fulfillmentEdits at the shared core rebuild"*) that was *waiting on* the ceiling.
+> The ceiling is gone; the fulfillment work is someone else's and is **not** on core#84's
+> critical path. An earlier revision of this plan said it was — that was wrong in two ways
+> at once, and both are the same mistake: **reading an issue's blocking CLAUSE as its
+> subject.**
+>
+> **Pin spread as of 2026-09-05** (three consumers on three different pins is the steady
+> state, not a fault — but step 6 has to close it):
+>
+> | repo | pin | note |
+> |---|---|---|
+> | `api-cloudrun` | `beta.339` | past the old ceiling |
+> | `manager` | `beta.341` | step 3 put it here |
+> | `templates` | `beta.335` | **furthest behind — step 6 must not forget it** |
+> | latest published | `beta.342` | a peer's `ComponentObject.price_overridden` |
 >
 > ### Step 3 — what actually landed, and the finding that changes step 4's ordering
 >
@@ -260,30 +278,65 @@ no writer could stamp a null and no backfill could run. Hence expand/migrate/con
    🔴 **This step must SPLIT the block.** `NamePartsFields` is spread into **6 STORED
    (`z.strictObject`) and 6 INPUT (`z.object`)** sites, and requiring the key on an input
    would 400 every create client that omits a middle name. Normalize at the writer, require
-   at storage.
+   at storage. **Re-derived independently 2026-09-05 and it matches — the 12 sites are:**
+
+   | STORED → key becomes REQUIRED | INPUT → stays `.nullable().optional()` |
+   |---|---|
+   | `user.ts` `UserSchema` | `user.ts` `CreateUserInput` |
+   | `contact.ts` `ContactSchema` | `contact.ts` `CreateContactInput` |
+   | `invite.ts` `InviteSchema` | `invite.ts` `CreateInviteInput` |
+   | `organization.ts` `OrganizationContact` | `organization.ts` `NewContactInput` |
+   | `order.ts` `DocDestinationContact` | `order.ts` `DestinationContact` |
+   | `destination.ts` `DestinationContactRef` | `auth.ts` `RegisterInput` |
+
+   ⚠️ **`NamePartsFieldsPartial` is a THIRD block and stays untouched** — it is
+   `z.ZodType<string | undefined>`, deliberately not widened, because whether the partial
+   INPUT contract gains a `null` unset verb is **core#70**'s call. That is also why
+   manager#338 is not resolved by this campaign.
 6. ⛔ **Pins, deploys, fixture sweep.** `getTestDoc` flips OMIT → `null` automatically
    (`src/schemas/testing.ts`), so core's own fixtures move for free; api-cloudrun's
    hand-spelled seeds do not. Census **by document shape**, classify **by receiver bound to
    its declaration**, skip any body containing `...`. Expect the 7-red-files class.
 
-## ⚠️ Blocker as of 2026-09-05
+## Picking up step 5 cold — the whole checklist
 
-`api-cloudrun`'s working tree is held by another session — 9 uncommitted files
-(five `api-cloudrun/src/lib/` and `api-cloudrun/src/services/` modules + 4 tests), unrelated to this work. That
-repo's pre-commit and pre-push gates scan the **whole working tree**, so their unfinished
-work would gate any commit here, and editing `deno.json` risks their next `git add .`
-sweeping the pin bump in. **Resume step 2 when their tree is clean, or take a worktree.**
+**Nothing blocks it.** Step 4 is verified in both environments, prod runs a build that
+accepts `null`, and step 6's old pin ceiling is gone. In order:
 
-⚠️ Renovate auto-bumps `api-cloudrun` and `manager` "before 5am", so `beta.337` may arrive
-as a routine dependency PR before step 2 is done. That is safe — the widen only ever
-ACCEPTS more — but if that PR goes red, the typecheck in step 2 is the reason.
+1. **Anchor first, then publish.** Grep every `enforced_by` ref the change will add or move
+   against the CONSUMER tree — see step 5's 🔴 above. This is the one that bit a peer.
+2. **Split the block** per the 6/6 table in step 5. Storage requires the key; input keeps
+   `.nullable().optional()`.
+3. **Drop the `?` on the interfaces too** — `z.ZodType<T>` is checked in ONE direction, so a
+   required schema member under an optional interface member compiles silently.
+   `core/tests/interface-optionality.test.ts` is what catches it.
+4. **Empty the `mid-expand` block in `core/tests/stored-optionality.test.ts`** — it
+   catalogues the 30 transit paths and the contract step is what retires them.
+5. **Publish, then sweep all three consumers** — `api-cloudrun` `beta.339`, `manager`
+   `beta.341`, `templates` `beta.335`. ⚠️ **`templates` is furthest behind and is the one a
+   core-and-manager session forgets.**
+6. **Then step 6's fixture sweep.** `getTestDoc` flips OMIT → `null` for free; api-cloudrun's
+   hand-spelled seeds do not. Census by document SHAPE, classify by RECEIVER bound to its
+   declaration, skip any body containing `...`.
+7. **Delete `api-cloudrun/scripts/backfill-name-parts-null.ts`** in the commit that lands the
+   last piece — it is a one-shot and the repo's convention is to delete, not to keep green.
+   **And delete this plan doc in that same commit.**
+
+⚠️ **Storage is already at the destination, so step 5 cannot break the corpus — only the
+CLIENTS.** Every stored document now carries all three keys; what the contract changes is
+whether a *writer* may omit one. That is why the split matters more than the timing.
 
 ## Context recommendation
 
-**Clear between steps**, which the ordering forces rather than merely suggests: step 4
-cannot start until step 2's build is live in prod, and step 5 cannot start until step 4 is
-verified. Step 4 deserves its own session — it is an irreversible bulk write across five
-collections with a baseline/verify discipline that should not share attention.
+**Clear before step 5.** Steps 1–4 are done and independently verified, so nothing from
+this session's context is load-bearing for what remains — everything step 5 needs is
+written down above, including the 6/6 split table and the anchor check. Step 5 is a
+schema edit plus a publish plus a three-consumer sweep, and it starts cleanest from a fresh
+read of `core/src/schemas/common.ts`.
+
+⚠️ The one thing NOT to carry forward from memory: this plan's original sizing (~4,835
+documents, 3,711 array rewrites) was **wrong**, and the corrected figure is 354. Anyone
+resuming from a summary written before 2026-09-05 has the wrong number.
 
 ## Related
 
