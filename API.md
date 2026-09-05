@@ -25,10 +25,11 @@ comment cannot notice when it stops being true.
 
 🔴 **The cap binds on the ADMIN first**, which is the counter-intuitive half:
 the feed breaks for the most privileged user, because they are the only one
-holding enough permissions to exceed it. `manager/firestore.rules` already
-gates 32 collections, so "one permission per readable collection" is *already*
-over the cap — only the feed's narrower scope keeps it under, and every new
-actor-carrying collection spends one of the 8 spare.
+holding enough permissions to exceed it. `manager/firestore.rules` gates **34
+distinct permissions** across 42 collection rules (measured 2026-09-05), so
+"one permission per readable collection" is *already* over the cap by four —
+only the feed's narrower scope keeps it under, and every new actor-carrying
+collection spends one of the 8 spare.
 
 ```ts
 const ACTIVITY_FEED_PERMISSIONS: readonly Permission[];

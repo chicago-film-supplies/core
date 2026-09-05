@@ -106,9 +106,15 @@ Deno.test("the derivation is NOT the kebab→camel rule — two collections prov
 Deno.test("the feed stamps 22 DISTINCT permissions, 8 under Firestore's `in` cap of 30", () => {
   // 🔴 The number is asserted, not commented, because it is what has to stay
   // under the cap — and the cap binds on the ADMIN first, so the feed breaks for
-  // the most privileged user. `manager/firestore.rules` already gates 32
-  // collections; only the feed's narrower scope keeps this under 30, and every
-  // new actor-carrying collection spends one of the 8 spare.
+  // the most privileged user. `manager/firestore.rules` gates **34 distinct
+  // permissions** across 42 collection rules (measured 2026-09-05, not 32 as
+  // this comment previously said); only the feed's narrower scope keeps this
+  // under 30, and every new actor-carrying collection spends one of the 8 spare.
+  //
+  // ⚠️ That 34 is NOT asserted here, deliberately — it lives in another repo, so
+  // a ratchet on it from `core` would go red on a `manager` edit with no way to
+  // fix it from this side. It is a measured aside; the ASSERTED number is the
+  // feed's own 22 below.
   //
   // 23 collections, 22 permissions: `templates` and `template-components` both
   // map to `templates.read`.
