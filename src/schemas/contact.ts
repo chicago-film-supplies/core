@@ -11,6 +11,8 @@ import {
   NameField,
   type NameParts,
   NamePartsFields,
+  NamePartsFieldsInput,
+  type NamePartsInput,
   NamePartsFieldsPartial,
   type PartialNameParts,
   Phone,
@@ -135,7 +137,7 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
 /**
  * Input schema for POST /contacts — what the endpoint accepts.
  */
-export interface CreateContactInputType extends NameParts {
+export interface CreateContactInputType extends NamePartsInput {
   uid: string;
   emails?: string[];
   phones?: string[];
@@ -145,7 +147,7 @@ export interface CreateContactInputType extends NameParts {
 /** Input schema for creating a contact. */
 export const CreateContactInput: z.ZodType<CreateContactInputType> = z.object({
   uid: FirestoreId,
-  ...NamePartsFields,
+  ...NamePartsFieldsInput,
   emails: z.array(Email).optional(),
   phones: z.array(Phone).optional(),
   organizations: z.array(ContactOrganization).optional(),

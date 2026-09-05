@@ -781,7 +781,10 @@ Deno.test("OrderSchema validates destination with contact", () => {
         contact: {
           uid: "testcontact100000000",
           first_name: "John",
+          // Present-and-null, never absent — required and nullable as of core#84.
+          middle_name: null,
           last_name: "Doe",
+          pronunciation: null,
           name: "John Doe",
           phones: ["1234567890"],
         },

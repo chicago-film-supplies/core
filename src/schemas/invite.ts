@@ -14,6 +14,8 @@ import {
   NameField,
   type NameParts,
   NamePartsFields,
+  NamePartsFieldsInput,
+  type NamePartsInput,
   NamePartsFieldsPartial,
   type PartialNameParts,
   TimestampFields,
@@ -57,7 +59,7 @@ export const InviteSchema: z.ZodType<Invite> = z.strictObject({
 });
 
 /** Input to POST /admin/users/invite. */
-export interface CreateInviteInputType extends NameParts {
+export interface CreateInviteInputType extends NamePartsInput {
   email: string;
   roles: string[];
 }
@@ -65,7 +67,7 @@ export interface CreateInviteInputType extends NameParts {
 /** Input schema for POST /admin/users/invite. */
 export const CreateInviteInput: z.ZodType<CreateInviteInputType> = z.object({
   email: Email,
-  ...NamePartsFields,
+  ...NamePartsFieldsInput,
   roles: z.array(z.string()).min(1),
 });
 

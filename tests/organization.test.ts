@@ -64,7 +64,16 @@ Deno.test("OrganizationSchema validates a complete document", () => {
     emails: ["info@acme.com"],
     phones: ["1234567890"],
     billing_address: validAddress,
-    contacts: [{ uid: "testc100000000000000", first_name: "John", name: "John", roles: ["admin"] }],
+    contacts: [{
+      uid: "testc100000000000000",
+      first_name: "John",
+      // Present-and-null, never absent — required and nullable as of core#84.
+      middle_name: null,
+      last_name: null,
+      pronunciation: null,
+      name: "John",
+      roles: ["admin"],
+    }],
     query_by_contacts: ["testc100000000000000"],
   });
   assertEquals(OrganizationSchema.safeParse(doc).success, true);

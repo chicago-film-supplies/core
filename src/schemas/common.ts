@@ -132,15 +132,22 @@ export const Phone: z.ZodType<string> = z
   .meta({ pii: "mask", cell: "phone" });
 
 /**
- * Split name fields shared across Contact, User, Invite, and any schema
- * embedding a contact reference. `first_name` is required; the rest are optional.
+ * Split name fields for a STORED document — spread into a `z.strictObject()`.
+ * `first_name` is required and non-empty; the other three are **required and
+ * nullable**: present-and-null, never absent.
  *
  * Stored documents also carry a denormalized `name: string` (use `NameField`
  * + `deriveName()` below). Inputs do not — clients send parts; the server
  * derives `name` at write time. See `deriveName` for the canonical join rule.
  *
+ * ⚠️ **A create input takes {@link NamePartsInput}, not this.** Requiring the
+ * key on an input would 400 every client that omits a middle name, so the block
+ * is split: normalize at the writer, require at storage. `min(1)` stays on all
+ * four, so `""` is unrepresentable and `null` is the single spelling of "no
+ * middle name".
+ *
  * ⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts
- * carry it (2026-08-23) — and is not. It is an optional field a human types,
+ * carried one (2026-08-23) — and is not. It is an optional field a human types,
  * with live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`
  * handles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on
  * it, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody
@@ -149,25 +156,39 @@ export const Phone: z.ZodType<string> = z
 export interface NameParts {
   first_name: string;
   /**
-   * ⚠️ **Mid-expand, 2026-09-05 (core#83).** `?: string | null` is the transit
-   * state of an expand/migrate/contract whose destination is `: string | null` —
-   * present-and-null, never absent, per the owner's ruling that absence is the
-   * state which yields `undefined` and breaks writers.
+   * **Required and nullable, 2026-09-05 (core#84)** — the destination of an
+   * expand/migrate/contract, per the owner's ruling that absence is the state
+   * which yields `undefined` and breaks writers: an invoice legally missing
+   * `reference` made a patch carry `undefined` and 400'd an unrelated ORDER
+   * update.
    *
-   * The three optional parts cannot go straight to required: `.optional()`
-   * accepts `string | undefined` and **not** `null`, so no writer could stamp one
-   * until this widening ships. Order: widen → writers stamp `?? null` → backfill
-   * → contract.
-   *
-   * ⚠️ **The contract step must SPLIT this block.** `NamePartsFields` is spread
-   * into 6 STORED (`z.strictObject`) and 6 INPUT (`z.object`) sites, and
-   * requiring the key on an input would 400 every create client that omits a
-   * middle name. Normalize at the writer, require at storage.
+   * `null` is a real answer — *this person has no middle name* — rather than
+   * "unknown", and every stored writer produces one. The 354 prod documents
+   * that predated the rule were backfilled 2026-09-05 across ten stored
+   * surfaces, post-audit 0.
    */
+  middle_name: string | null;
+  /** See {@link NameParts.middle_name} — same rule, same backfill. */
+  last_name: string | null;
+  /** See {@link NameParts.middle_name} — same rule, same backfill. */
+  pronunciation: string | null;
+}
+
+/**
+ * Split name fields for a CREATE INPUT — spread into a `z.object()`.
+ *
+ * Identical to {@link NameParts} except that the three parts may be **omitted**
+ * as well as null: a client with no middle name has no reason to send the key.
+ * The server normalizes `?? null` before the write, which is what lets storage
+ * require it.
+ *
+ * Deliberately NOT {@link PartialNameParts} — `first_name` is still required
+ * here. That one is for PUT bodies, where every part may be omitted.
+ */
+export interface NamePartsInput {
+  first_name: string;
   middle_name?: string | null;
-  /** See {@link NameParts.middle_name} — same expand, same destination. */
   last_name?: string | null;
-  /** See {@link NameParts.middle_name} — same expand, same destination. */
   pronunciation?: string | null;
 }
 
@@ -186,9 +207,9 @@ export interface PartialNameParts {
  * The widest name-part shape {@link deriveName} accepts.
  *
  * Deliberately NOT {@link PartialNameParts}, and deliberately not a widening of
- * it. `deriveName` is called with both STORED objects (whose parts are heading
- * for `string | null`) and INPUT objects (whose parts stay `string | undefined`),
- * so its parameter has to admit both — but widening `PartialNameParts` itself
+ * it. `deriveName` is called with both STORED objects (whose parts are
+ * `string | null`) and INPUT objects (whose parts are `string | undefined`), so
+ * its parameter has to admit both — but widening `PartialNameParts` itself
  * would change the published INPUT contract, and whether that contract gains a
  * `null` "unset" verb is core#70's open decision, not this one's to pre-empt.
  */
@@ -200,19 +221,43 @@ export interface NamePartsLike {
 }
 
 /**
- * Fields object — spread into a parent `z.strictObject()` (documents) or
- * `z.object()` (inputs) to attach the standard split-name fields.
+ * Fields object for a STORED document — spread into a parent `z.strictObject()`.
+ *
+ * The three parts are `.nullable()` and **not** `.optional()`: under
+ * `z.strictObject` those are different accepted sets, and only the absent one
+ * yields `undefined`.
+ *
+ * ⚠️ **A create input takes {@link NamePartsFieldsInput}**, a PUT body
+ * {@link NamePartsFieldsPartial}. Spreading this one into a `z.object()` input
+ * would reject every client that omits a middle name.
  */
 export const NamePartsFields: {
+  first_name: z.ZodType<string>;
+  middle_name: z.ZodType<string | null>;
+  last_name: z.ZodType<string | null>;
+  pronunciation: z.ZodType<string | null>;
+} = {
+  first_name: z.string().min(1, "First name is required").max(50).meta({ pii: "mask" }),
+  middle_name: z.string().min(1).max(50).meta({ pii: "mask" }).nullable(),
+  last_name: z.string().min(1).max(50).meta({ pii: "mask" }).nullable(),
+  pronunciation: z.string().min(1).max(100).meta({ pii: "mask" }).nullable(),
+};
+
+/**
+ * Fields object for a CREATE INPUT — spread into a parent `z.object()`.
+ *
+ * The three parts keep `.nullable().optional()` so a caller may omit the key
+ * entirely; the writer normalizes `?? null` before storage, which requires it.
+ * `first_name` stays required — for a PUT body where it is not, use
+ * {@link NamePartsFieldsPartial}.
+ */
+export const NamePartsFieldsInput: {
   first_name: z.ZodType<string>;
   middle_name: z.ZodType<string | null | undefined>;
   last_name: z.ZodType<string | null | undefined>;
   pronunciation: z.ZodType<string | null | undefined>;
 } = {
   first_name: z.string().min(1, "First name is required").max(50).meta({ pii: "mask" }),
-  // ⚠️ `.nullable().optional()` is the TRANSIT state — see {@link NameParts}.
-  // `min(1)` stays, so `""` remains unrepresentable and `null` is the single
-  // spelling of "no middle name".
   middle_name: z.string().min(1).max(50).meta({ pii: "mask" }).nullable().optional(),
   last_name: z.string().min(1).max(50).meta({ pii: "mask" }).nullable().optional(),
   pronunciation: z.string().min(1).max(100).meta({ pii: "mask" }).nullable().optional(),

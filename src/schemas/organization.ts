@@ -17,6 +17,8 @@ import {
   NameField,
   type NameParts,
   NamePartsFields,
+  NamePartsFieldsInput,
+  type NamePartsInput,
   OrgPathNode,
   type OrgPathNodeType,
   Phone,
@@ -459,7 +461,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
 /**
  * New contact data submitted inline when creating/updating an organization.
  */
-export interface NewContactInputType extends NameParts {
+export interface NewContactInputType extends NamePartsInput {
   uid: string;
   emails?: string[];
   phones?: string[];
@@ -468,7 +470,7 @@ export interface NewContactInputType extends NameParts {
 /** Zod schema for new contact data submitted inline with an organization. */
 export const NewContactInput: z.ZodType<NewContactInputType> = z.object({
   uid: FirestoreId,
-  ...NamePartsFields,
+  ...NamePartsFieldsInput,
   emails: z.array(Email).optional(),
   phones: z.array(Phone).optional(),
 });

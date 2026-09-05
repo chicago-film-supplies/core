@@ -10,6 +10,8 @@ import {
   NameField,
   type NameParts,
   NamePartsFields,
+  NamePartsFieldsInput,
+  type NamePartsInput,
   NamePartsFieldsPartial,
   type PartialNameParts,
   TimestampFields,
@@ -118,7 +120,7 @@ export const UserSchema: z.ZodType<User> = z.strictObject({
 // ── Input schemas ───────────────────────────────────────────────────
 
 /** Payload for creating a user — used internally by the accept-invite flow. */
-export interface CreateUserInputType extends NameParts {
+export interface CreateUserInputType extends NamePartsInput {
   email: string;
   password: string;
   roles?: string[];
@@ -128,7 +130,7 @@ export interface CreateUserInputType extends NameParts {
 /** Input schema for creating a user (internal — not exposed as a public route). */
 export const CreateUserInput: z.ZodType<CreateUserInputType> = z.object({
   email: Email,
-  ...NamePartsFields,
+  ...NamePartsFieldsInput,
   password: z.string().min(8).max(128).meta({ pii: "redact" }),
   roles: z.array(z.string()).optional(),
   uid_contact: FirestoreId.nullable().optional(),

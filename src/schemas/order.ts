@@ -25,6 +25,8 @@ import {
   type JurisdictionType,
   type NameParts,
   NamePartsFields,
+  NamePartsFieldsInput,
+  type NamePartsInput,
   Phone,
   PriceFormulaEnum,
   type PriceFormulaType,
@@ -170,7 +172,7 @@ export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
  * server-derived display string (see `deriveName` in common.ts) — populated
  * by api-cloudrun on every write so consumers don't re-derive client-side.
  */
-export interface DestinationContactType extends NameParts {
+export interface DestinationContactType extends NamePartsInput {
   uid: string;
   name: string;
   phones?: string[];
@@ -179,7 +181,7 @@ export interface DestinationContactType extends NameParts {
 /** Zod schema for destination contact reference. */
 export const DestinationContact: z.ZodType<DestinationContactType> = z.object({
   uid: FirestoreId,
-  ...NamePartsFields,
+  ...NamePartsFieldsInput,
   name: NameField,
   phones: z.array(Phone).optional(),
 });

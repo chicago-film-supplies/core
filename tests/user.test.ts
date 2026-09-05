@@ -6,6 +6,10 @@ const base = {
   uid: "testuser100000000000",
   email: "test@example.com",
   first_name: "Alex",
+  // Present-and-null, never absent — required and nullable as of core#84.
+  middle_name: null,
+  last_name: null,
+  pronunciation: null,
   name: "Alex",
   password_hash: "$argon2id$v=19$m=19456,t=2,p=1$abc$def",
   email_verified: false,
@@ -24,9 +28,12 @@ Deno.test("UserSchema validates a complete user document", () => {
   assertEquals(result.success, true);
 });
 
-Deno.test("UserSchema accepts user without last_name", () => {
-  const result = UserSchema.safeParse(base);
-  assertEquals(result.success, true);
+Deno.test("UserSchema requires last_name PRESENT — `null` is how a user has none", () => {
+  // core#84: present-and-null, never absent. Both halves, so this asserts the
+  // rule rather than "parses for some reason".
+  assertEquals(UserSchema.safeParse(base).success, true);
+  const { last_name: _omitted, ...withoutLast } = base;
+  assertEquals(UserSchema.safeParse(withoutLast).success, false);
 });
 
 Deno.test("UserSchema rejects missing required fields", () => {

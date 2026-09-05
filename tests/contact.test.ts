@@ -25,6 +25,11 @@ const ts = { created_at: mockTimestamp, updated_at: mockTimestamp };
 const validContact = (overrides: Record<string, unknown> = {}) => ({
   uid: "testabc1230000000000",
   first_name: "John",
+  // Present-and-null, never absent — the three parts are required and nullable
+  // as of core#84. `null` is how a contact has no middle name.
+  middle_name: null,
+  last_name: null,
+  pronunciation: null,
   name: "John",
   emails: [] as string[],
   phones: [] as string[],
@@ -49,10 +54,14 @@ Deno.test("ContactSchema validates a complete contact document", () => {
   assertEquals(ContactSchema.safeParse(doc).success, true);
 });
 
-Deno.test("ContactSchema accepts contact without last_name", () => {
-  const doc = validContact();
-  assertEquals("last_name" in doc, false);
-  assertEquals(ContactSchema.safeParse(doc).success, true);
+Deno.test("ContactSchema requires last_name PRESENT — `null` is how a contact has none", () => {
+  // core#84 contracted the three optional name parts to bare `.nullable()`:
+  // present-and-null, never absent, because absence is the state that yields
+  // `undefined` and breaks writers. Both halves are asserted — a null parses,
+  // and dropping exactly one key from an otherwise valid document does not.
+  assertEquals(ContactSchema.safeParse(validContact()).success, true);
+  const { last_name: _omitted, ...withoutLast } = validContact();
+  assertEquals(ContactSchema.safeParse(withoutLast).success, false);
 });
 
 Deno.test("ContactSchema rejects missing required fields", () => {

@@ -2,7 +2,7 @@
  * Auth endpoint input schemas — used by /auth routes.
  */
 import { z } from "zod";
-import { Email, NamePartsFields, type NameParts } from "./common.ts";
+import { Email, NamePartsFieldsInput, type NamePartsInput } from "./common.ts";
 
 /**
  * Input schema for POST /auth/login.
@@ -24,14 +24,14 @@ export const LoginInput: z.ZodType<LoginInputType> = z.object({
  * register route derives the denormalized `name` from via `deriveName()`. No
  * `name` field — inputs send parts; the server derives `name` at write time.
  */
-export interface RegisterInputType extends NameParts {
+export interface RegisterInputType extends NamePartsInput {
   email: string;
   password: string;
 }
 
 export const RegisterInput: z.ZodType<RegisterInputType> = z.object({
   email: Email,
-  ...NamePartsFields,
+  ...NamePartsFieldsInput,
   password: z.string().min(8, "Password must be at least 8 characters").meta({ pii: "redact" }),
 });
 

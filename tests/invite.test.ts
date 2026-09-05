@@ -6,35 +6,53 @@ import {
 } from "../src/schemas/invite.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
+/**
+ * A MINIMAL VALID invite document, so every negative case below fails for
+ * exactly the reason it names.
+ *
+ * ⚠️ **The two negative tests here were passing for the wrong reason.** Both
+ * spelled their fields inline and both omitted `name`, `created_at` and
+ * `updated_at` — required long before this — so "rejects additional
+ * properties" was really asserting "rejects SOMETHING", and the strictness it
+ * names could have been deleted with the test still green. core#84 requiring
+ * the three name parts would have hidden that permanently rather than
+ * surfacing it. Same lesson, same shape, as `tests/contact.test.ts`.
+ */
+const validInvite = (overrides: Record<string, unknown> = {}) => ({
+  uid: "token-hex-abc",
+  email: "invited@example.com",
+  first_name: "Invited",
+  // Present-and-null, never absent — required and nullable as of core#84.
+  middle_name: null,
+  last_name: null,
+  pronunciation: null,
+  name: "Invited",
+  roles: ["admin"],
+  invited_by: "user1000000000000000",
+  used: false,
+  expires_at: mockTimestamp,
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
+  ...overrides,
+});
+
 Deno.test("InviteSchema validates a complete invite", () => {
-  const doc = {
-    uid: "token-hex-abc",
-    email: "invited@example.com",
-    first_name: "Invited",
-    last_name: "User",
-    name: "Invited User",
-    roles: ["admin"],
-    invited_by: "user1000000000000000",
-    used: false,
-    expires_at: mockTimestamp,
-    created_at: mockTimestamp,
-    updated_at: mockTimestamp,
-  };
+  const doc = validInvite({ last_name: "User", name: "Invited User" });
   assertEquals(InviteSchema.safeParse(doc).success, true);
 });
 
+Deno.test("InviteSchema requires last_name PRESENT — `null` is how an invite has none", () => {
+  // core#84: present-and-null, never absent, because absence is the state that
+  // yields `undefined` and breaks writers. Both halves, so this asserts the
+  // rule rather than "parses for some reason".
+  assertEquals(InviteSchema.safeParse(validInvite()).success, true);
+  const { last_name: _omitted, ...withoutLast } = validInvite();
+  assertEquals(InviteSchema.safeParse(withoutLast).success, false);
+});
+
 Deno.test("InviteSchema defaults used to false", () => {
-  const result = InviteSchema.safeParse({
-    uid: "token-hex-abc",
-    email: "invited@example.com",
-    first_name: "Invited",
-    name: "Invited",
-    roles: ["admin"],
-    invited_by: "user1000000000000000",
-    expires_at: mockTimestamp,
-    created_at: mockTimestamp,
-    updated_at: mockTimestamp,
-  });
+  const { used: _omitted, ...withoutUsed } = validInvite();
+  const result = InviteSchema.safeParse(withoutUsed);
   assertEquals(result.success, true);
   if (result.success) {
     assertEquals(result.data.used, false);
@@ -42,16 +60,8 @@ Deno.test("InviteSchema defaults used to false", () => {
 });
 
 Deno.test("InviteSchema rejects additional properties", () => {
-  const result = InviteSchema.safeParse({
-    uid: "token",
-    email: "a@b.com",
-    first_name: "A",
-    roles: [],
-    invited_by: "u",
-    expires_at: mockTimestamp,
-    bogus: 1,
-  });
-  assertEquals(result.success, false);
+  // Exactly one field added to an otherwise valid document.
+  assertEquals(InviteSchema.safeParse(validInvite({ bogus: 1 })).success, false);
 });
 
 Deno.test("CreateInviteInput requires at least one role", () => {
@@ -73,6 +83,25 @@ Deno.test("CreateInviteInput accepts valid payload", () => {
   assertEquals(result.success, true);
 });
 
+Deno.test("CreateInviteInput still accepts an OMITTED name part", () => {
+  // The input half of the core#84 split: storage requires the key, a create
+  // client may omit it, and the writer normalizes `?? null` in between.
+  // Requiring it here would 400 every client with no middle name.
+  const result = CreateInviteInput.safeParse({
+    email: "a@b.com",
+    first_name: "A",
+    roles: ["admin"],
+  });
+  assertEquals(result.success, true);
+  const withNull = CreateInviteInput.safeParse({
+    email: "a@b.com",
+    first_name: "A",
+    middle_name: null,
+    roles: ["admin"],
+  });
+  assertEquals(withNull.success, true);
+});
+
 Deno.test("AcceptInviteInput rejects short password", () => {
   const result = AcceptInviteInput.safeParse({
     token: "abc",
@@ -90,21 +119,13 @@ Deno.test("AcceptInviteInput accepts valid payload", () => {
 });
 
 Deno.test("InviteSchema accepts middle_name and pronunciation", () => {
-  const result = InviteSchema.safeParse({
-    uid: "token-hex-abc",
-    email: "invited@example.com",
-    first_name: "Invited",
+  const doc = validInvite({
     middle_name: "Quincy",
     last_name: "User",
     pronunciation: "in-VITE-ed",
     name: "Invited Quincy User (in-VITE-ed)",
-    roles: ["admin"],
-    invited_by: "user1000000000000000",
-    expires_at: mockTimestamp,
-    created_at: mockTimestamp,
-    updated_at: mockTimestamp,
   });
-  assertEquals(result.success, true);
+  assertEquals(InviteSchema.safeParse(doc).success, true);
 });
 
 Deno.test("CreateInviteInput accepts middle_name and pronunciation", () => {
