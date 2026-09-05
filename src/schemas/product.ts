@@ -306,23 +306,39 @@ export interface Product {
   updated_at: FirestoreTimestampType;
 }
 
+/**
+ * ⚠️ **The `label` annotations below are DISPLAY-ONLY and were added for the
+ * activity feed (api-cloudrun#851), which renders a component change as
+ * "Six Bank Charger — Quantity 2 → 3".**
+ *
+ * None of them carries `column: true`, and that is deliberate: a `label` with no
+ * `column` is a pure prefix in `collectDisplayColumns`, so this adds no column
+ * to any manager table and changes no existing heading. `name` is left
+ * unannotated for the same reason — it already carries `column: true`, and
+ * labelling it would change its composed heading from "Components" to
+ * "Components Name".
+ *
+ * Before this, the ONLY labelled leaf under a component was
+ * `price.taxes[].rate`, so a component diff could say nothing but "Rate".
+ * Measured 2026-09-05: 68 of 568 dev products carry a non-empty `components`.
+ */
 const ComponentObject = z.strictObject({
   uid: FirestoreId,
   path: z.array(z.string()),
   // Links to the component's OWN product page, not the row's — `TableCell`
   // reads the uid off the entry the value came from.
   name: z.string().meta({ column: true, linkTo: "productDetail" }),
-  active: z.boolean().optional(),
-  type: ComponentTypeEnum,
-  stock_method: StockMethodEnum,
+  active: z.boolean().optional().meta({ label: "Active" }),
+  type: ComponentTypeEnum.meta({ label: "Type" }),
+  stock_method: StockMethodEnum.meta({ label: "Stock Method" }),
   crms_id: z.int().nullable(),
   crms_accessory_id: z.int().nullable().optional(),
-  description: z.string().optional(),
-  inclusion_type: InclusionTypeEnum.optional(),
-  quantity: z.number(),
-  zero_priced: z.boolean().optional(),
+  description: z.string().optional().meta({ label: "Description" }),
+  inclusion_type: InclusionTypeEnum.optional().meta({ label: "Inclusion" }),
+  quantity: z.number().meta({ label: "Quantity" }),
+  zero_priced: z.boolean().optional().meta({ label: "Zero Priced" }),
   price: z.strictObject({
-    base_cents: z.int(),
+    base_cents: z.int().meta({ label: "Base Price" }),
     // 🔴 **Declared here because a component price is a COPY of a product
     // price, not because a component can be a percent fee — it cannot.**
     //
@@ -343,7 +359,7 @@ const ComponentObject = z.strictObject({
     // together and consistency is the SOURCE's to enforce. A second gate here
     // would fail the copy rather than the authoring.
     base_percent: z.number().nullable().optional(),
-    replacement_cents: z.int().nullable().optional(),
+    replacement_cents: z.int().nullable().optional().meta({ label: "Replacement" }),
     coa_revenue: COARevenueEnum.optional(),
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
@@ -379,7 +395,12 @@ export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
  * @see {@link AuthoredProductComponent}
  */
 export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = ComponentObject
-  .extend({ inclusion_type: InclusionTypeEnum })
+  // ⚠️ The label is restated because `.extend` REPLACES the node, taking its
+  // `.meta()` with it — `ComponentObject`'s `inclusion_type` label does not
+  // survive into the authored variant, and the omission is silent: the field
+  // simply stops being a labelled leaf and drops out of the activity feed's
+  // change list with nothing red.
+  .extend({ inclusion_type: InclusionTypeEnum.meta({ label: "Inclusion" }) })
   .superRefine(checkItemContract);
 
 /** Zod schema for a Product document. */
