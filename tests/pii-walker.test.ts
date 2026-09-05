@@ -337,7 +337,7 @@ Deno.test("walker: masks destination instructions on OrderSchema", async () => {
   assertNotEquals(out.organization.name, "Acme Inc");
 });
 
-Deno.test("walker: passes every item name and description through on OrderSchema", async () => {
+Deno.test("walker: masks the DESTINATION divider name, passes group names and every description", async () => {
   const { OrderSchema } = await import("../src/schemas/order.ts");
   const strategy = createLoggerStrategy(undefined);
   const doc = {
@@ -376,15 +376,27 @@ Deno.test("walker: passes every item name and description through on OrderSchema
   };
   // deno-lint-ignore no-explicit-any
   const out = applyPii(doc as any, OrderSchema as any, strategy) as any;
-  // Divider NAMES pass through too, as of #40. Measured against the dev replica,
-  // a destination name is a venue (`Fillmore`, `Cinespace`) and a group name is
-  // a catalog section header (`Delivery`, `Hair & Makeup`) — 0 of 1,220 matched
-  // a contacts-doc name. These two samples are deliberately the worst case for
-  // that call: they are what a divider name looks like when an operator DOES
-  // type a customer into it, and they now reach logs and newly captured fixtures
-  // verbatim. Kept in the fixture so the consequence stays visible rather than
-  // theoretical — the same discipline as the description sample below.
-  assertEquals(out.items[0].name, "John Smith — primary studio");
+  // 🔴 **The DESTINATION divider name is masked as of 2026-09-05, and this
+  // sample is why.** #40 passed both divider names through on the measurement
+  // that 0 of 1,220 matched a contacts-doc name — an oracle that asks "is this a
+  // PERSON". Measured over the 23 committed `templates` fixtures: 3 of the 9
+  // distinct destination-divider names are customer data (one ORGANIZATION name,
+  // two street addresses), already in git. An LLC is not a person, so the
+  // original measurement was satisfied and the case was missed.
+  //
+  // ⭐ This sample was ALREADY in the fixture, deliberately, as "what a divider
+  // name looks like when an operator DOES type a customer into it" — kept so the
+  // consequence stayed visible rather than theoretical. It stopped being
+  // theoretical, and the assertion is inverted rather than the sample removed.
+  assertNotEquals(out.items[0].name, "John Smith — primary studio");
+
+  // ⭐ **The GROUP divider still passes through, and that asymmetry is the
+  // finding rather than an inconsistency.** The same measurement over group
+  // names returns 19 distinct values and ZERO PII — catalog section headers
+  // (`Delivery`, `Hair & Makeup`, `Grip & Electric`). An operator types a PLACE
+  // into a destination divider and a CATEGORY into a group one, so a blanket
+  // sweep of operator-typed labels would be wrong in the direction of destroying
+  // the catalog text a fixture is drawn for.
   assertEquals(out.items[1].name, "Smith family shoot");
 
   // Every `description` likewise passes through verbatim: line-item text is

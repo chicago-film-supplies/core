@@ -24,19 +24,33 @@ import { ItemUid } from "./_uid.ts";
 export const DestinationDividerArm = z.strictObject({
   uid: z.uuid(),
   type: z.literal("destination"),
-  // Operator-typed divider label — a VENUE, not a person: `Fillmore` (CFS's own
-  // counter, 117/203 orders in the dev replica), `Cinespace`, `Museum of Science
-  // & Industry`. 0 of 1,220 destination-divider names across orders and
-  // fulfillments match a contacts-doc name. A label, so `none` — see
-  // `OrderDocLineItem.name`.
+  // 🔴 **`mask`, reversing the `none` ruling that stood here — on a MEASUREMENT.**
+  // The previous ruling was defensible and its evidence was real: operator-typed
+  // divider labels are usually venues (`Fillmore` — CFS's own counter, 117/203
+  // orders in the dev replica — `Cinespace`, `Museum of Science & Industry`), and
+  // **0 of 1,220 matched a contacts-doc name**.
   //
-  // GIVE-BACK, stated plainly: ~10-13% of these are a street address an operator
-  // typed as the label, and those now reach logs and newly captured fixtures
-  // verbatim. The delivery address proper lives in `destinations[].address`,
-  // which stays `mask`. The mask being removed here was also producing wrong
-  // output — `fixturePiiStrategy.fakeForMask` shape-detects 2-3 alphabetic
-  // tokens as a person, so `Oak Brook Mall` was captured as `Jordan B Holloway`.
-  name: z.string().max(200).meta({ pii: "none" }).default(""),
+  // ⚠️ **But that oracle asked "is this a PERSON", and the hazard is broader.**
+  // Measured 2026-09-05 over the 23 committed fixtures in the `templates` repo:
+  // **3 of the 9 distinct destination-divider names are customer data** — one
+  // ORGANIZATION name and two street addresses, sitting in git. An LLC is not a
+  // person, so the original measurement was satisfied and the case was missed.
+  // The owner confirmed the organization fall-through was not considered.
+  //
+  // ⭐ **The contrast is what scopes this to the DESTINATION divider alone.** The
+  // same measurement over `GroupDividerArm.name` below returns **19 distinct
+  // values and zero PII** — catalog section text. So this is a fact about where
+  // an operator types a place, not about operator-typed labels in general, and a
+  // blanket sweep would be wrong.
+  //
+  // ⚠️ Known give-back, accepted deliberately: a venue label is 2-3 alphabetic
+  // tokens, which is exactly `fixturePiiStrategy.fakeForMask`'s person branch, so
+  // `Oak Brook Mall` masks to `Jordan B Holloway`. That is a LEGIBILITY defect,
+  // not a leak — the real value is removed either way — and it is tracked at
+  // api-cloudrun#837. ⭐ It is NOT the "street address becomes a person" case that
+  // was claimed while this was being decided: `fakeForMask` tests for a leading
+  // digit FIRST, so an address masks to an address. Measured, not reasoned.
+  name: z.string().max(200).meta({ pii: "mask" }).default(""),
   path: z.array(ItemUid).default([]),
   // 🔴 **There is no `uid_delivery`/`uid_collection` here, and re-adding either
   // re-opens api-cloudrun#662/#663/#664.** They were a SECOND copy of the pair's
