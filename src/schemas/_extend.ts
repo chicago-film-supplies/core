@@ -43,7 +43,7 @@
  * the act of writing the code cannot be satisfied that way.
  *
  * This module is deliberately **not** on `deno.json`'s `exports` and **not**
- * re-exported from `mod.ts` — it is internal, so it never reaches the published
+ * re-exported from `src/schemas/mod.ts` — it is internal, so it never reaches the published
  * API surface (`API.json` is keyed by entrypoint).
  *
  * @see `tests/meta-preservation.test.ts` — the arms that read {@link EXTENSION_SITES}

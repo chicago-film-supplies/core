@@ -33,10 +33,17 @@ export interface TrackingCategory {
    * This field was a Wave 5b "accidental optionality" candidate on the grounds
    * that {@link CreateTrackingCategoryInputType} requires it. The corpus refutes
    * that reading: `Transport` and `Trash & Cleanup` are **service** groups, and
-   * `getCrmsProductGroupId` (`api-cloudrun/src/lib/crmsProduct.ts`) reads
-   * `crms_service_group_id` for every `type === "service"` product it syncs. A
-   * required `crms_product_group_id` would make both of those documents
-   * unparseable and break that path.
+   * `getCrmsProductGroupId` read `crms_service_group_id` for every
+   * `type === "service"` product it synced. A required `crms_product_group_id`
+   * would make both of those documents unparseable.
+   *
+   * ⚠️ **That reader is GONE** — it lived in `api-cloudrun`'s `crmsProduct.ts`,
+   * deleted 2026-09-05 when the outbound CRMS half closed. So the refusal now
+   * rests on the two CORPUS ROWS alone, which is the weaker half of the original
+   * argument and is still sufficient: a required field that two stored documents
+   * cannot satisfy is unparseable whether or not anything reads it. Left
+   * optional, and the reason restated rather than the citation repointed —
+   * repointing it at a deleted file is how a dead argument keeps reading as live.
    *
    * 🔴 **The real defect is on the INPUT, not here** — `createTrackingCategory`
    * accepts no `crms_service_group_id` and writes none, so a service-group

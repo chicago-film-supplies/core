@@ -94,8 +94,10 @@ export interface ProductComponent {
  * it is a bug. Splitting the two is what lets this side be required. Prod
  * carries 0 undefined rows across 165 `components` entries on 63 products, so
  * this is hardening with a zero-row backfill; writers with no answer pass
- * `"default"`, the reading `crmsProduct.ts` and manager's new-component form
- * already take.
+ * `"default"`, the reading manager's new-component form already takes. (The
+ * other reader was `crmsProduct.ts`, DELETED 2026-09-05 when the outbound CRMS
+ * half closed — it took the same default, so its removal narrows the evidence
+ * for this sentence rather than contradicting it.)
  *
  * NOT expressed as `.default("default")`: `validateBeforeWrite` validates but
  * writes the RAW doc, so a schema default never materializes and the field would
@@ -387,8 +389,9 @@ export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
  *
  * **Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep
  * `ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills
- * `"default"` — the reading `crmsProduct.ts` and manager's new-component form
- * already take. Requiring it at the boundary instead would 400 any client that
+ * `"default"` — the reading manager's new-component form already takes, as did
+ * `crmsProduct.ts` before it was deleted on 2026-09-05 with the outbound CRMS
+ * half. Requiring it at the boundary instead would 400 any client that
  * has not been rebuilt, and manager is pinned several betas back on purpose
  * (manager#265). Normalize at the writer, guard at storage: no undefined can
  * reach a stored document either way, which is what the expanders need.

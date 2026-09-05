@@ -194,7 +194,7 @@ Deno.test("meta preservation — the walk sees the source, and nothing bypasses 
       `${calls.length} \`extendChecked(\` call site(s) in src/, but ` +
         `${SITES_AT_LOAD.length} recorded at import. Either a site is behind a ` +
         `branch that module evaluation does not reach, or a module is not on the ` +
-        `\`mod.ts\` barrel this test imports:\n` + show(calls),
+        `\`src/schemas/mod.ts\` barrel this test imports:\n` + show(calls),
     );
   });
 });

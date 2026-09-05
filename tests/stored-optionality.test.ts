@@ -35,7 +35,7 @@
  * input, where `null` is the "unset" verb and the value is never stored. A
  * spelling-scoped sweep would return 185 after it lands and would happily "fix"
  * the three arms that ARE the feature. Walking `schemas` — the Firestore registry
- * from `mod.ts` — excludes every input schema **by construction**, rather than by
+ * from `src/schemas/mod.ts` — excludes every input schema **by construction**, rather than by
  * a filter someone has to remember to keep applying.
  *
  * ## What the paths mean
