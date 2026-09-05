@@ -305,10 +305,10 @@ const createCommentTransaction: TransactionDefinition = {
  * **No `last_message_*` refresh, deliberately.** Deleting the newest comment
  * leaves the thread's preview naming a comment that is now soft-deleted. That
  * is pre-existing behaviour and is NOT declared here — declaring a field this
- * transaction does not write would report drift on every run, the encoding
- * `crms-ingest.ts` refuses for api-cloudrun#501. Recovering the preview needs a
- * query for the newest live comment, which is a range read this transaction
- * does not take.
+ * transaction does not write would report drift on every run — the encoding the
+ * now-deleted CRMS ingest module refused for api-cloudrun#501. Recovering the
+ * preview needs a query for the newest live comment, which is a range read this
+ * transaction does not take.
  */
 const deleteCommentRules: CollectionRule[] = [
   {

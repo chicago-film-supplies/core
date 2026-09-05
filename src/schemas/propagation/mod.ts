@@ -51,7 +51,6 @@ import { cards } from "./cards.ts";
 import { templates } from "./templates.ts";
 import { recurrences } from "./recurrences.ts";
 import { uploadcare } from "./uploadcare.ts";
-import { crmsIngest } from "./crms-ingest.ts";
 import { stock } from "./stock.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -111,7 +110,6 @@ const MODULES: readonly PropagationModule[] = [
   templates,
   recurrences,
   uploadcare,
-  crmsIngest,
   stock,
 ];
 

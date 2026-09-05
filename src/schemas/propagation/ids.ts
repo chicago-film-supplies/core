@@ -100,7 +100,6 @@ export type TransactionId =
   | "reverse-settlement"
   | "sync-xero-settlement"
   | "void-invoice"
-  | "void-invoice-from-crms"
   | "void-invoice-from-xero"
   // credit-notes.ts
   | "create-credit-note"
@@ -136,12 +135,7 @@ export type TransactionId =
   | "update-card-scope-all"
   | "delete-card-scope-this"
   | "delete-card-scope-following"
-  | "delete-card-scope-all"
-  // crms-ingest.ts
-  | "crms-invoice-upsert"
-  | "crms-opportunity-order"
-  | "crms-member-organization"
-  | "crms-member-contact";
+  | "delete-card-scope-all";
 
 /**
  * Every `CollectionRule.id` in the catalog.
@@ -249,8 +243,6 @@ export type RuleId =
   | "sync-xero-settlement:settlements-to-invoice"
   | "void-invoice:reap-settlements"
   | "void-invoice:append-void-settlement"
-  | "void-invoice-from-crms:reap-settlements"
-  | "void-invoice-from-crms:append-void-settlement"
   | "void-invoice-from-xero:reap-settlements"
   | "void-invoice-from-xero:append-void-settlement"
   // credit-notes.ts

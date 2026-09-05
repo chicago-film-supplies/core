@@ -311,17 +311,21 @@ const syncXeroSettlementTransaction: TransactionDefinition = {
 
 // ── Voiding an invoice ──────────────────────────────────────────────
 //
-// **Three transactions for one fact, deliberately.** A void reaches CFS from
-// three directions — an operator through `updateInvoice`, the CRMS webhook's
-// status 40, and the Xero invoice webhook — and until api-cloudrun#436 the first
-// two logged under `update-invoice`, which declares exactly ONE step. A borrowed
-// transaction id turns `logTransactionPropagation`'s only drift check
-// (`rules_fired.length === 0 && rules_expected > 0`) off silently, so a void
-// path that stopped reaping or stopped appending was unreportable by
+// **One transaction per ORIGIN, deliberately.** A void reaches CFS from an
+// operator through `updateInvoice` and from the Xero invoice webhook, and until
+// api-cloudrun#436 both logged under `update-invoice`, which declares exactly
+// ONE step. A borrowed transaction id turns `logTransactionPropagation`'s only
+// drift check (`rules_fired.length === 0 && rules_expected > 0`) off silently,
+// so a void path that stopped reaping or stopped appending was unreportable by
 // construction. Declaring one transaction per origin is what gives that check
 // something to compare against.
 //
-// The MONEY half is identical across all three and lives in one helper
+// ⚠️ There were THREE origins until the CRMS retirement (api-cloudrun#556):
+// `void-invoice-from-crms` covered the CRMS invoice webhook's status 40 and is
+// deleted with that handler. The rule is about origins, not about the number —
+// a fourth origin gets its own transaction rather than borrowing one of these.
+//
+// The MONEY half is identical across both and lives in one helper
 // (`api-cloudrun/src/lib/invoiceVoid.ts`); what actually differs is the Xero
 // direction, which each transaction's description states.
 
@@ -430,49 +434,6 @@ const voidInvoiceTransaction: TransactionDefinition = {
   ],
 };
 
-// ── void-invoice-from-crms ──────────────────────────────────────────
-
-const voidInvoiceFromCrmsRules: CollectionRule[] = [
-  {
-    id: "void-invoice-from-crms:reap-settlements",
-    source: "invoices",
-    target: "settlements",
-    mode: "co-write",
-    invariant: REAP_INVARIANT,
-    enforced_by: [SETTLEMENT_TOTALS_FOLD],
-    transaction: "void-invoice-from-crms",
-    fields: [
-      {
-        source: ["uid"],
-        target: ["reverses"],
-        transform:
-          "one reverser per unreversed settlement, sharing one uuid_session",
-      },
-    ],
-  },
-  {
-    id: "void-invoice-from-crms:append-void-settlement",
-    source: "invoices",
-    target: "settlements",
-    mode: "co-write",
-    invariant: VOID_ROW_INVARIANT,
-    enforced_by: [SETTLEMENT_TOTALS_FOLD],
-    transaction: "void-invoice-from-crms",
-    fields: VOID_ROW_FIELDS,
-  },
-];
-
-const voidInvoiceFromCrmsTransaction: TransactionDefinition = {
-  id: "void-invoice-from-crms",
-  description:
-    "The CRMS invoice webhook reports status 40: same money as `void-invoice`, then the void is pushed on to Xero BY GUID (never by number — a CRMS renumber leaves the Xero record under its old number, and prod holds that trap at number 1859). Ingest from CRMS, egress to Xero.",
-  steps: [
-    "void-invoice-from-crms:reap-settlements",
-    "void-invoice-from-crms:append-void-settlement",
-    "update-invoice:status-to-orders",
-  ],
-};
-
 // ── void-invoice-from-xero ──────────────────────────────────────────
 
 const voidInvoiceFromXeroRules: CollectionRule[] = [
@@ -524,7 +485,6 @@ export const settlements: PropagationModule = {
     ...reverseSettlementRules,
     ...syncXeroSettlementRules,
     ...voidInvoiceRules,
-    ...voidInvoiceFromCrmsRules,
     ...voidInvoiceFromXeroRules,
   ],
   transactions: [
@@ -532,7 +492,6 @@ export const settlements: PropagationModule = {
     reverseSettlementTransaction,
     syncXeroSettlementTransaction,
     voidInvoiceTransaction,
-    voidInvoiceFromCrmsTransaction,
     voidInvoiceFromXeroTransaction,
   ],
 };
