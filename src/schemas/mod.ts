@@ -243,6 +243,7 @@ export {
   type OrgPathNodeType,
   ActorRef,
   NamePartsFields,
+  NamePartsFieldsInput,
   NamePartsFieldsPartial,
   NameField,
   deriveName,
@@ -296,6 +297,7 @@ export {
   type UidNameRefType,
   type ActorRefType,
   type NameParts,
+  type NamePartsInput,
   type PartialNameParts,
   type ProductTypeType,
   type StockMethodType,
@@ -617,6 +619,14 @@ export {
   type AuthoredProductComponent,
   ComponentSchema,
   type ProductComponent,
+  // The `price_overridden` vocabulary. ⚠️ Shipped in `10.0.0-beta.342` reachable
+  // only from `./product.ts` — the field existed and the enum to populate it did
+  // not, because this barrel lists exports EXPLICITLY and nothing checks that a
+  // new one was added. A consumer importing from `@cfs/core/schemas` got
+  // "does not provide an export named ComponentPriceKeyEnum".
+  COMPONENT_PRICE_KEYS,
+  ComponentPriceKeyEnum,
+  type ComponentPriceKeyType,
   type ProductPrice,
   type ProductShipping,
   type ProductWebshop,

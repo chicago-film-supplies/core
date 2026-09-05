@@ -874,6 +874,19 @@ Xero's Bad Debt account. The one posting account a `reason` determines.
 const COA_BAD_DEBT: 6900;
 ```
 
+### `COMPONENT_PRICE_KEYS`
+
+The price keys a parent may deliberately author on its own `components` entry,
+overriding the component product's catalog price.
+
+⚠️ **Plain literals, no spread** — core#43 is the standing case where JSR's
+npm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate
+could see it.
+
+```ts
+const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "taxes" | "formula" | "discountable"[];
+```
+
 ### `CREDIT_NOTE_REASONS`
 
 Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
@@ -1645,6 +1658,22 @@ Zod schema for CommitMeta. `author` reuses the pii-annotated ActorRef.
 
 ```ts
 const CommitMetaSchema: z.ZodType<CommitMeta>;
+```
+
+### `ComponentPriceKeyEnum`
+
+Zod form of {@link COMPONENT_PRICE_KEYS}.
+
+```ts
+const ComponentPriceKeyEnum: z.ZodType<ComponentPriceKeyType>;
+```
+
+### `ComponentPriceKeyType`
+
+One key of a component entry's price.
+
+```ts
+type ComponentPriceKeyType = indexedAccess;
 ```
 
 ### `ComponentSchema`
@@ -5272,15 +5301,22 @@ const NameField: z.ZodType<string>;
 
 ### `NameParts`
 
-Split name fields shared across Contact, User, Invite, and any schema
-embedding a contact reference. `first_name` is required; the rest are optional.
+Split name fields for a STORED document — spread into a `z.strictObject()`.
+`first_name` is required and non-empty; the other three are **required and
+nullable**: present-and-null, never absent.
 
 Stored documents also carry a denormalized `name: string` (use `NameField`
 + `deriveName()` below). Inputs do not — clients send parts; the server
 derives `name` at write time. See `deriveName` for the canonical join rule.
 
+⚠️ **A create input takes {@link NamePartsInput}, not this.** Requiring the
+key on an input would 400 every client that omits a middle name, so the block
+is split: normalize at the writer, require at storage. `min(1)` stays on all
+four, so `""` is unrepresentable and `null` is the single spelling of "no
+middle name".
+
 ⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts
-carry it (2026-08-23) — and is not. It is an optional field a human types,
+carried one (2026-08-23) — and is not. It is an optional field a human types,
 with live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`
 handles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on
 it, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody
@@ -5289,19 +5325,39 @@ has filled one in. See `core/CLAUDE.md` § "Is a field dead?".
 ```ts
 interface NameParts {
   first_name: string;
-  middle_name?: string | null;
-  last_name?: string | null;
-  pronunciation?: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  pronunciation: string | null;
 }
 ```
 
 ### `NamePartsFields`
 
-Fields object — spread into a parent `z.strictObject()` (documents) or
-`z.object()` (inputs) to attach the standard split-name fields.
+Fields object for a STORED document — spread into a parent `z.strictObject()`.
+
+The three parts are `.nullable()` and **not** `.optional()`: under
+`z.strictObject` those are different accepted sets, and only the absent one
+yields `undefined`.
+
+⚠️ **A create input takes {@link NamePartsFieldsInput}**, a PUT body
+{@link NamePartsFieldsPartial}. Spreading this one into a `z.object()` input
+would reject every client that omits a middle name.
 
 ```ts
 const NamePartsFields: typeLiteral;
+```
+
+### `NamePartsFieldsInput`
+
+Fields object for a CREATE INPUT — spread into a parent `z.object()`.
+
+The three parts keep `.nullable().optional()` so a caller may omit the key
+entirely; the writer normalizes `?? null` before storage, which requires it.
+`first_name` stays required — for a PUT body where it is not, use
+{@link NamePartsFieldsPartial}.
+
+```ts
+const NamePartsFieldsInput: typeLiteral;
 ```
 
 ### `NamePartsFieldsPartial`
@@ -5311,6 +5367,27 @@ update input schemas (PUT endpoints) where callers may omit `first_name`.
 
 ```ts
 const NamePartsFieldsPartial: typeLiteral;
+```
+
+### `NamePartsInput`
+
+Split name fields for a CREATE INPUT — spread into a `z.object()`.
+
+Identical to {@link NameParts} except that the three parts may be **omitted**
+as well as null: a client with no middle name has no reason to send the key.
+The server normalizes `?? null` before the write, which is what lets storage
+require it.
+
+Deliberately NOT {@link PartialNameParts} — `first_name` is still required
+here. That one is for PUT bodies, where every part may be omitted.
+
+```ts
+interface NamePartsInput {
+  first_name: string;
+  middle_name?: string | null;
+  last_name?: string | null;
+  pronunciation?: string | null;
+}
 ```
 
 ### `NewContactInput`
@@ -11780,15 +11857,22 @@ const NameField: z.ZodType<string>;
 
 ### `NameParts`
 
-Split name fields shared across Contact, User, Invite, and any schema
-embedding a contact reference. `first_name` is required; the rest are optional.
+Split name fields for a STORED document — spread into a `z.strictObject()`.
+`first_name` is required and non-empty; the other three are **required and
+nullable**: present-and-null, never absent.
 
 Stored documents also carry a denormalized `name: string` (use `NameField`
 + `deriveName()` below). Inputs do not — clients send parts; the server
 derives `name` at write time. See `deriveName` for the canonical join rule.
 
+⚠️ **A create input takes {@link NamePartsInput}, not this.** Requiring the
+key on an input would 400 every client that omits a middle name, so the block
+is split: normalize at the writer, require at storage. `min(1)` stays on all
+four, so `""` is unrepresentable and `null` is the single spelling of "no
+middle name".
+
 ⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts
-carry it (2026-08-23) — and is not. It is an optional field a human types,
+carried one (2026-08-23) — and is not. It is an optional field a human types,
 with live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`
 handles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on
 it, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody
@@ -11797,19 +11881,39 @@ has filled one in. See `core/CLAUDE.md` § "Is a field dead?".
 ```ts
 interface NameParts {
   first_name: string;
-  middle_name?: string | null;
-  last_name?: string | null;
-  pronunciation?: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  pronunciation: string | null;
 }
 ```
 
 ### `NamePartsFields`
 
-Fields object — spread into a parent `z.strictObject()` (documents) or
-`z.object()` (inputs) to attach the standard split-name fields.
+Fields object for a STORED document — spread into a parent `z.strictObject()`.
+
+The three parts are `.nullable()` and **not** `.optional()`: under
+`z.strictObject` those are different accepted sets, and only the absent one
+yields `undefined`.
+
+⚠️ **A create input takes {@link NamePartsFieldsInput}**, a PUT body
+{@link NamePartsFieldsPartial}. Spreading this one into a `z.object()` input
+would reject every client that omits a middle name.
 
 ```ts
 const NamePartsFields: typeLiteral;
+```
+
+### `NamePartsFieldsInput`
+
+Fields object for a CREATE INPUT — spread into a parent `z.object()`.
+
+The three parts keep `.nullable().optional()` so a caller may omit the key
+entirely; the writer normalizes `?? null` before storage, which requires it.
+`first_name` stays required — for a PUT body where it is not, use
+{@link NamePartsFieldsPartial}.
+
+```ts
+const NamePartsFieldsInput: typeLiteral;
 ```
 
 ### `NamePartsFieldsPartial`
@@ -11821,14 +11925,35 @@ update input schemas (PUT endpoints) where callers may omit `first_name`.
 const NamePartsFieldsPartial: typeLiteral;
 ```
 
+### `NamePartsInput`
+
+Split name fields for a CREATE INPUT — spread into a `z.object()`.
+
+Identical to {@link NameParts} except that the three parts may be **omitted**
+as well as null: a client with no middle name has no reason to send the key.
+The server normalizes `?? null` before the write, which is what lets storage
+require it.
+
+Deliberately NOT {@link PartialNameParts} — `first_name` is still required
+here. That one is for PUT bodies, where every part may be omitted.
+
+```ts
+interface NamePartsInput {
+  first_name: string;
+  middle_name?: string | null;
+  last_name?: string | null;
+  pronunciation?: string | null;
+}
+```
+
 ### `NamePartsLike`
 
 The widest name-part shape {@link deriveName} accepts.
 
 Deliberately NOT {@link PartialNameParts}, and deliberately not a widening of
-it. `deriveName` is called with both STORED objects (whose parts are heading
-for `string | null`) and INPUT objects (whose parts stay `string | undefined`),
-so its parameter has to admit both — but widening `PartialNameParts` itself
+it. `deriveName` is called with both STORED objects (whose parts are
+`string | null`) and INPUT objects (whose parts are `string | undefined`), so
+its parameter has to admit both — but widening `PartialNameParts` itself
 would change the published INPUT contract, and whether that contract gains a
 `null` "unset" verb is core#70's open decision, not this one's to pre-empt.
 

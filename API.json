@@ -398,6 +398,12 @@
         },
         {
           "kind": "variable",
+          "name": "COMPONENT_PRICE_KEYS",
+          "declaration": "const COMPONENT_PRICE_KEYS: \"base_cents\" | \"base_percent\" | \"replacement_cents\" | \"coa_revenue\" | \"taxes\" | \"formula\" | \"discountable\"[];",
+          "doc": "The price keys a parent may deliberately author on its own `components` entry,\noverriding the component product's catalog price.\n\n⚠️ **Plain literals, no spread** — core#43 is the standing case where JSR's\nnpm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate\ncould see it."
+        },
+        {
+          "kind": "variable",
           "name": "CREDIT_NOTE_REASONS",
           "declaration": "const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];",
           "doc": "Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},\n**derived rather than re-listed**, so the document and the settlements it\nspawns can never offer different reasons.\n\nThe reason lives on the *document* and is denormalized onto each settlement:\none credit note allocated across three invoices has one reason, and authoring\nit three times invites three answers."
@@ -719,6 +725,18 @@
           "name": "CommitMetaSchema",
           "declaration": "const CommitMetaSchema: z.ZodType<CommitMeta>;",
           "doc": "Zod schema for CommitMeta. `author` reuses the pii-annotated ActorRef."
+        },
+        {
+          "kind": "variable",
+          "name": "ComponentPriceKeyEnum",
+          "declaration": "const ComponentPriceKeyEnum: z.ZodType<ComponentPriceKeyType>;",
+          "doc": "Zod form of {@link COMPONENT_PRICE_KEYS}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ComponentPriceKeyType",
+          "declaration": "type ComponentPriceKeyType = indexedAccess;",
+          "doc": "One key of a component entry's price."
         },
         {
           "kind": "variable",
@@ -2391,20 +2409,32 @@
         {
           "kind": "interface",
           "name": "NameParts",
-          "declaration": "interface NameParts {\n  first_name: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
-          "doc": "Split name fields shared across Contact, User, Invite, and any schema\nembedding a contact reference. `first_name` is required; the rest are optional.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule.\n\n⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts\ncarry it (2026-08-23) — and is not. It is an optional field a human types,\nwith live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`\nhandles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on\nit, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody\nhas filled one in. See `core/CLAUDE.md` § \"Is a field dead?\"."
+          "declaration": "interface NameParts {\n  first_name: string;\n  middle_name: string | null;\n  last_name: string | null;\n  pronunciation: string | null;\n}",
+          "doc": "Split name fields for a STORED document — spread into a `z.strictObject()`.\n`first_name` is required and non-empty; the other three are **required and\nnullable**: present-and-null, never absent.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule.\n\n⚠️ **A create input takes {@link NamePartsInput}, not this.** Requiring the\nkey on an input would 400 every client that omits a middle name, so the block\nis split: normalize at the writer, require at storage. `min(1)` stays on all\nfour, so `\"\"` is unrepresentable and `null` is the single spelling of \"no\nmiddle name\".\n\n⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts\ncarried one (2026-08-23) — and is not. It is an optional field a human types,\nwith live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`\nhandles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on\nit, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody\nhas filled one in. See `core/CLAUDE.md` § \"Is a field dead?\"."
         },
         {
           "kind": "variable",
           "name": "NamePartsFields",
           "declaration": "const NamePartsFields: typeLiteral;",
-          "doc": "Fields object — spread into a parent `z.strictObject()` (documents) or\n`z.object()` (inputs) to attach the standard split-name fields."
+          "doc": "Fields object for a STORED document — spread into a parent `z.strictObject()`.\n\nThe three parts are `.nullable()` and **not** `.optional()`: under\n`z.strictObject` those are different accepted sets, and only the absent one\nyields `undefined`.\n\n⚠️ **A create input takes {@link NamePartsFieldsInput}**, a PUT body\n{@link NamePartsFieldsPartial}. Spreading this one into a `z.object()` input\nwould reject every client that omits a middle name."
+        },
+        {
+          "kind": "variable",
+          "name": "NamePartsFieldsInput",
+          "declaration": "const NamePartsFieldsInput: typeLiteral;",
+          "doc": "Fields object for a CREATE INPUT — spread into a parent `z.object()`.\n\nThe three parts keep `.nullable().optional()` so a caller may omit the key\nentirely; the writer normalizes `?? null` before storage, which requires it.\n`first_name` stays required — for a PUT body where it is not, use\n{@link NamePartsFieldsPartial}."
         },
         {
           "kind": "variable",
           "name": "NamePartsFieldsPartial",
           "declaration": "const NamePartsFieldsPartial: typeLiteral;",
           "doc": "Variant of `NamePartsFields` where every field is optional — use for partial\nupdate input schemas (PUT endpoints) where callers may omit `first_name`."
+        },
+        {
+          "kind": "interface",
+          "name": "NamePartsInput",
+          "declaration": "interface NamePartsInput {\n  first_name: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
+          "doc": "Split name fields for a CREATE INPUT — spread into a `z.object()`.\n\nIdentical to {@link NameParts} except that the three parts may be **omitted**\nas well as null: a client with no middle name has no reason to send the key.\nThe server normalizes `?? null` before the write, which is what lets storage\nrequire it.\n\nDeliberately NOT {@link PartialNameParts} — `first_name` is still required\nhere. That one is for PUT bodies, where every part may be omitted."
         },
         {
           "kind": "variable",
@@ -5454,14 +5484,20 @@
         {
           "kind": "interface",
           "name": "NameParts",
-          "declaration": "interface NameParts {\n  first_name: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
-          "doc": "Split name fields shared across Contact, User, Invite, and any schema\nembedding a contact reference. `first_name` is required; the rest are optional.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule.\n\n⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts\ncarry it (2026-08-23) — and is not. It is an optional field a human types,\nwith live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`\nhandles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on\nit, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody\nhas filled one in. See `core/CLAUDE.md` § \"Is a field dead?\"."
+          "declaration": "interface NameParts {\n  first_name: string;\n  middle_name: string | null;\n  last_name: string | null;\n  pronunciation: string | null;\n}",
+          "doc": "Split name fields for a STORED document — spread into a `z.strictObject()`.\n`first_name` is required and non-empty; the other three are **required and\nnullable**: present-and-null, never absent.\n\nStored documents also carry a denormalized `name: string` (use `NameField`\n+ `deriveName()` below). Inputs do not — clients send parts; the server\nderives `name` at write time. See `deriveName` for the canonical join rule.\n\n⚠️ **A create input takes {@link NamePartsInput}, not this.** Requiring the\nkey on an input would 400 every client that omits a middle name, so the block\nis split: normalize at the writer, require at storage. `min(1)` stays on all\nfour, so `\"\"` is unrepresentable and `null` is the single spelling of \"no\nmiddle name\".\n\n⚠️ `pronunciation` reads as dead to a value census — 0 of 166 prod contacts\ncarried one (2026-08-23) — and is not. It is an optional field a human types,\nwith live machinery behind it (`api-cloudrun/src/lib/contactDenorms.ts`\nhandles it as its own concern, `api-cloudrun/src/lib/cascadeGating.ts` gates on\nit, `api-cloudrun/src/lib/actorRef.ts` carries it). Nobody\nhas filled one in. See `core/CLAUDE.md` § \"Is a field dead?\"."
         },
         {
           "kind": "variable",
           "name": "NamePartsFields",
           "declaration": "const NamePartsFields: typeLiteral;",
-          "doc": "Fields object — spread into a parent `z.strictObject()` (documents) or\n`z.object()` (inputs) to attach the standard split-name fields."
+          "doc": "Fields object for a STORED document — spread into a parent `z.strictObject()`.\n\nThe three parts are `.nullable()` and **not** `.optional()`: under\n`z.strictObject` those are different accepted sets, and only the absent one\nyields `undefined`.\n\n⚠️ **A create input takes {@link NamePartsFieldsInput}**, a PUT body\n{@link NamePartsFieldsPartial}. Spreading this one into a `z.object()` input\nwould reject every client that omits a middle name."
+        },
+        {
+          "kind": "variable",
+          "name": "NamePartsFieldsInput",
+          "declaration": "const NamePartsFieldsInput: typeLiteral;",
+          "doc": "Fields object for a CREATE INPUT — spread into a parent `z.object()`.\n\nThe three parts keep `.nullable().optional()` so a caller may omit the key\nentirely; the writer normalizes `?? null` before storage, which requires it.\n`first_name` stays required — for a PUT body where it is not, use\n{@link NamePartsFieldsPartial}."
         },
         {
           "kind": "variable",
@@ -5471,9 +5507,15 @@
         },
         {
           "kind": "interface",
+          "name": "NamePartsInput",
+          "declaration": "interface NamePartsInput {\n  first_name: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
+          "doc": "Split name fields for a CREATE INPUT — spread into a `z.object()`.\n\nIdentical to {@link NameParts} except that the three parts may be **omitted**\nas well as null: a client with no middle name has no reason to send the key.\nThe server normalizes `?? null` before the write, which is what lets storage\nrequire it.\n\nDeliberately NOT {@link PartialNameParts} — `first_name` is still required\nhere. That one is for PUT bodies, where every part may be omitted."
+        },
+        {
+          "kind": "interface",
           "name": "NamePartsLike",
           "declaration": "interface NamePartsLike {\n  first_name?: string | null;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
-          "doc": "The widest name-part shape {@link deriveName} accepts.\n\nDeliberately NOT {@link PartialNameParts}, and deliberately not a widening of\nit. `deriveName` is called with both STORED objects (whose parts are heading\nfor `string | null`) and INPUT objects (whose parts stay `string | undefined`),\nso its parameter has to admit both — but widening `PartialNameParts` itself\nwould change the published INPUT contract, and whether that contract gains a\n`null` \"unset\" verb is core#70's open decision, not this one's to pre-empt."
+          "doc": "The widest name-part shape {@link deriveName} accepts.\n\nDeliberately NOT {@link PartialNameParts}, and deliberately not a widening of\nit. `deriveName` is called with both STORED objects (whose parts are\n`string | null`) and INPUT objects (whose parts are `string | undefined`), so\nits parameter has to admit both — but widening `PartialNameParts` itself\nwould change the published INPUT contract, and whether that contract gains a\n`null` \"unset\" verb is core#70's open decision, not this one's to pre-empt."
         },
         {
           "kind": "variable",
