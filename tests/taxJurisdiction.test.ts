@@ -3,7 +3,9 @@
  * and the `applied_*` window (api-cloudrun#409).
  */
 import { assertEquals, assertThrows } from "@std/assert";
+import { JURISDICTIONS } from "../src/schemas/common.ts";
 import {
+  COLLECTING_JURISDICTIONS,
   deriveJurisdiction,
   findTaxAt,
   findTaxFor,
@@ -512,4 +514,41 @@ Deno.test("taxCellState: the explicit-only class is `untaxed` at every instant",
   );
   assertEquals(taxCellState(expiredBottle, "chicago", "rental", NOW), "taxed");
   assertEquals(taxCellState(expiredBottle, "chicago", "sale", NOW), "taxed");
+});
+
+// ── COLLECTING_JURISDICTIONS — the exported registration set (api-cloudrun#845) ──
+//
+// It is derived from the city table, so the two cannot drift by construction.
+// What these pin is the SEMANTIC every consumer relies on: membership means
+// "an address in this town destination-sources to it", and non-membership means
+// "origin-sources to the store". api-cloudrun's IL rate watch reads exactly that.
+
+Deno.test("COLLECTING_JURISDICTIONS: each member destination-sources to itself", () => {
+  for (const j of COLLECTING_JURISDICTIONS) {
+    // `no_nexus` as the origin is the one member that is never a collecting
+    // city, so a town falling through to origin sourcing cannot answer with
+    // the jurisdiction under test.
+    assertEquals(deriveJurisdiction({ city: j.toUpperCase(), region: "IL" }, "no_nexus"), j);
+  }
+});
+
+Deno.test("COLLECTING_JURISDICTIONS: a NON-member origin-sources instead", () => {
+  const closed = JURISDICTIONS.filter((j) => j !== "no_nexus" && !COLLECTING_JURISDICTIONS.includes(j));
+  assertEquals(closed, ["paxton"], "registration closed 2026-08-24; see api-cloudrun 2abb0025");
+  for (const j of closed) {
+    assertEquals(deriveJurisdiction({ city: j.toUpperCase(), region: "IL" }, "chicago"), "chicago");
+  }
+});
+
+Deno.test("COLLECTING_JURISDICTIONS: no_nexus is NOT a registration", () => {
+  // It is a selectable ANSWER (manager's picker offers it) and never a place
+  // CFS collects in. Including it here would make an out-of-state delivery
+  // read as a registration.
+  assertEquals(COLLECTING_JURISDICTIONS.includes("no_nexus"), false);
+});
+
+Deno.test("COLLECTING_JURISDICTIONS: it is a SUBSET of the storage vocabulary", () => {
+  // JURISDICTIONS is what a stored document may name — closed registrations
+  // included, because `calculateItemTax` throws on a tax uid it cannot resolve.
+  for (const j of COLLECTING_JURISDICTIONS) assertEquals(JURISDICTIONS.includes(j), true);
 });

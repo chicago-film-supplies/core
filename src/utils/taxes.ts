@@ -462,6 +462,40 @@ const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>
 };
 
 /**
+ * **The jurisdictions CFS is registered to collect in** — the set, derived from
+ * {@link COLLECTING_JURISDICTION_BY_CITY} so there is exactly one place a
+ * registration opens or closes.
+ *
+ * Every consumer wants this set and each decorates it differently, which is why
+ * the SET is shared and the decoration is not:
+ *
+ * | consumer | what it adds |
+ * |---|---|
+ * | `deriveJurisdiction` (here) | the city key, to resolve an address |
+ * | `api-cloudrun` `WATCHED` | IDOR's `(code, municipality, county)` row, to diff a published rate |
+ * | `manager` `JURISDICTION_OPTIONS` | `no_nexus`, which is a selectable ANSWER and not a registration |
+ *
+ * 🔴 **It is NOT the same list as `JURISDICTION_OPTIONS`, and must not be
+ * "unified" with it.** `no_nexus` belongs in a picker and never here: it is the
+ * answer for an address in no state CFS collects in, decided by the region.
+ * Adding it would make an out-of-state delivery look like a registration.
+ *
+ * ⚠️ **A closed registration leaves this list and STAYS a
+ * {@link JurisdictionType} member** — stored documents keep naming it, and
+ * `calculateItemTax` throws `Unknown tax uid` on a tax it cannot resolve. So
+ * `JURISDICTIONS` is the storage vocabulary and this is the live registration
+ * set; they are different questions and the first is a superset of the second.
+ *
+ * Exported for api-cloudrun#845: the IL rate watch's ratchet could not
+ * enumerate this and probed each `JURISDICTIONS` member under its own
+ * uppercased name, which reads a jurisdiction whose IDOR municipality differs
+ * from its enum key as non-collecting — silently, in the direction that passes.
+ */
+export const COLLECTING_JURISDICTIONS: readonly JurisdictionType[] = Object.freeze(
+  [...new Set(Object.values(COLLECTING_JURISDICTION_BY_CITY))],
+);
+
+/**
  * **Where a delivery address sources to** — the bottom of the three-level
  * jurisdiction precedence ({@link resolveJurisdiction}), below the document's
  * own destination entry and the organization's `jurisdiction_claim`.
