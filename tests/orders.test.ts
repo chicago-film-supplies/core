@@ -34,6 +34,7 @@ import {
   computeLineMoney,
   costTransactionFees,
   buildPackingList,
+  buildPackingListForLeg,
   buildQueryByDates,
   deriveOrderDateEnvelope,
   computeItemPaths,
@@ -78,6 +79,7 @@ import {
   orderHasTax,
 } from "../src/utils/orders.ts";
 import type { OrderDatesType, DestinationType, OrderDocDatesType, FirestoreTimestampType } from "../src/schemas/mod.ts";
+import type { PackingListItem } from "../src/utils/orders.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 const priceBase = lineItemBase.price as Record<string, unknown>;
@@ -1483,6 +1485,87 @@ Deno.test("buildPackingList excludes surcharges, fees, and structural items", ()
   const result = buildPackingList(items);
   assertEquals(result.length, 1);
   assertEquals(result[0].uid, "p1");
+});
+
+// ── buildPackingListForLeg — the composition core#80 broke ──────
+
+Deno.test("🔴 the non-composition core#80 names: dividers are STRIPPED, so group_name is null", () => {
+  // The regression this whole function exists to prevent, asserted directly so
+  // it cannot come back by a different route. `groupByDestination`'s
+  // `packing_list_*` arrays are filtered to {rental,sale} / {rental} and `group`
+  // is in NEITHER, so they arrive with no dividers — while `buildPackingList`
+  // derives `group_name` by WALKING for the last `group` row it passed.
+  //
+  // ⚠️ This asserts the CURRENT behaviour of the un-composed call on purpose.
+  // It is not an endorsement: it is the tripwire. If someone "fixes" it by
+  // making the arrays keep their dividers, this goes red and they are forced to
+  // read why that is the wrong repair (seven consumers, one of them
+  // `lib/eventCards.ts` counting rather than filtering).
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    { type: "group", uid: "g1", name: "Tables", path: ["d1", "g1"] },
+    makeItem({ uid: "p1", type: "rental", name: "Round Table", path: ["d1", "g1", "p1"] }),
+  ];
+  const [group] = groupByDestination(items, [], "fallback");
+  assertEquals(group.packing_list_delivery.length, 1, "the divider is stripped");
+
+  const composed = buildPackingList(group.packing_list_delivery) as PackingListItem[];
+  assertEquals(composed.length, 1, "the row survives — which is what makes it silent");
+  assertEquals(composed[0].group_name, null, "…and its heading does not");
+});
+
+Deno.test("buildPackingListForLeg preserves group_name where the composed call loses it", () => {
+  // Same document, the supported call. Pass the array that still HAS its
+  // dividers — `group.items` — and the heading survives.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    { type: "group", uid: "g1", name: "Tables", path: ["d1", "g1"] },
+    makeItem({ uid: "p1", type: "rental", name: "Round Table", path: ["d1", "g1", "p1"] }),
+  ];
+  const [group] = groupByDestination(items, [], "fallback");
+  const result = buildPackingListForLeg(group.items, "delivery") as PackingListItem[];
+  assertEquals(result.length, 1);
+  assertEquals(result[0].group_name, "Tables");
+  assertEquals(result[0].uid, "p1");
+});
+
+Deno.test("🔴 the two legs admit DIFFERENT line sets — a sale does not come back", () => {
+  // The reason a leg-blind builder cannot be right: delivery is rental + sale,
+  // collection is rental only. A sheet rendered for "both" double-counts every
+  // rental, which is why `PickSheet.leg` has no "both" spelling.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    { type: "group", uid: "g1", name: "Tables", path: ["d1", "g1"] },
+    makeItem({ uid: "p1", type: "rental", name: "Round Table", path: ["d1", "g1", "p1"] }),
+    makeItem({ uid: "p2", type: "sale", name: "Tablecloth", path: ["d1", "g1", "p2"] }),
+  ];
+  const delivery = buildPackingListForLeg(items, "delivery") as PackingListItem[];
+  const collection = buildPackingListForLeg(items, "collection") as PackingListItem[];
+
+  assertEquals(delivery.map((i) => i.uid), ["p1", "p2"], "delivery takes rental + sale");
+  assertEquals(collection.map((i) => i.uid), ["p1"], "collection takes rental only");
+  // Both legs keep the heading — the filter and the walk are at one depth now.
+  assertEquals(delivery.every((i) => i.group_name === "Tables"), true);
+  assertEquals(collection.every((i) => i.group_name === "Tables"), true);
+});
+
+Deno.test("buildPackingListForLeg keeps the scoping and consolidation arms", () => {
+  // The leg filter must not have quietly dropped the other two parameters.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    makeItem({ uid: "p1", type: "rental", path: ["d1", "p1"] }),
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
+    { type: "group", uid: "g2", name: "Chairs", path: ["d2", "g2"] },
+    makeItem({ uid: "p2", type: "rental", quantity: 2, path: ["d2", "g2", "p2"] }),
+    makeItem({ uid: "p2", type: "rental", quantity: 3, path: ["d2", "g2", "p2b"] }),
+  ];
+  const scoped = buildPackingListForLeg(items, "delivery", false, "d2") as PackingListItem[];
+  assertEquals(scoped.length, 2, "scoped to d2 only");
+  assertEquals(scoped.every((i) => i.group_name === "Chairs"), true);
+
+  const consolidated = buildPackingListForLeg(items, "delivery", true, "d2");
+  assertEquals(consolidated.length, 1, "same uid folds to one row");
+  assertEquals((consolidated[0] as { quantity: number }).quantity, 5);
 });
 
 Deno.test("buildPackingList scoped to destination", () => {

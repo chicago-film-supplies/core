@@ -26059,6 +26059,47 @@ measured across the `templates` repo, 2026-08-25.)
 
 Excludes structural rows, surcharges, transaction fees, and services.
 
+### `buildPackingListForLeg(items: LineItem[], leg: "delivery" | "collection", consolidated?: boolean, destinationDividerUid?: string): PackingListItem[] | ConsolidatedItem[]`
+
+Build a packing list for ONE leg — the composable form (core#80).
+
+🔴 **This exists because {@link groupByDestination} and
+{@link buildPackingList} read as a pipeline and are not one.** The
+`packing_list_delivery` / `packing_list_collection` arrays are filtered to
+`{rental, sale}` / `{rental}`, and `group` is in neither — so they arrive
+**stripped of dividers**, while `buildPackingList` derives `group_name` by
+WALKING for the last `group` row it passed. Feed one to the other and every
+`group_name` is null: the grid renders, the lengths and quantities are right,
+nothing throws, and the section headings a picker navigates by are simply
+absent, on a document that goes in a truck.
+
+⭐ **Pass the array that still HAS its dividers** — `group.items`, or the
+document's own `items`. The leg filter happens here, at the same depth as the
+`group_name` walk, so the two cannot disagree. That is the whole fix: the
+ordering dependency was never the defect, *splitting the filter from the walk*
+was.
+
+⚠️ **Deliberately NOT fixed by making the `packing_list_*` arrays keep their
+dividers**, which is the tempting one-line version. Those arrays feed the
+BOOKING builders (`services/orders.ts`, `webhooks/opportunity.ts`), the
+calendar and the event cards. Most of those go through `consolidateItems`,
+which skips `NON_PRODUCT_TYPES` and would be unharmed — but
+`lib/eventCards.ts` tests `packing_list_delivery.length > 0` directly, so a
+section holding a divider and no deliverable product would start minting a
+card for an empty leg. Seven consumers, one of them counting rather than
+filtering: not a shape to widen for a rendering convenience.
+
+⚠️ **`delivery` is rental + sale; `collection` is rental only** — a sold unit
+does not come back. So the two legs' line sets genuinely differ and a sheet
+rendered for "both" double-counts every rental.
+
+**Parameters**
+
+- `items` — Items **including** their `group` dividers
+- `leg` — Which leg's line set to admit
+- `consolidated` — Dedupe by product uid and sum quantities
+- `destinationDividerUid` — Scope to one destination section
+
 ### `buildQueryByDates(destinations: ReadonlyArray<QueryByDatesDestination>): string[]`
 
 Deduped, ascending list of Chicago `YYYY-MM-DD` boundary days across every

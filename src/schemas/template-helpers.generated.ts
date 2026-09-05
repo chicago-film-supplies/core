@@ -120,6 +120,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "orders": [
     { name: "buildPackingList", expr: "it.orders.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
+    { name: "buildPackingListForLeg", expr: "it.orders.buildPackingListForLeg(items, leg, consolidated, destinationDividerUid)", desc: "Build a packing list for ONE leg — the composable form (core#80).", returns: "PackingListItem[] | ConsolidatedItem[]" },
     { name: "calculateItemDiscountCents", expr: "it.orders.calculateItemDiscountCents(item)", desc: "Calculate the discount amount, in cents, for a single line item.", returns: "number" },
     { name: "calculateItemPrice", expr: "it.orders.calculateItemPrice(item, taxes)", desc: "Calculate the complete price for a single line item. Runs the full pipeline: subtotal → discount → taxes → total.", returns: "typeLiteral" },
     { name: "calculateItemSubtotal", expr: "it.orders.calculateItemSubtotal(item)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },

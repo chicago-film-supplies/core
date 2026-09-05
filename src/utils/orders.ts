@@ -2721,8 +2721,33 @@ export interface DestinationGroup {
   uid: string | null;
   uid_delivery: string;
   uid_collection: string;
+  /** Every non-destination row of this section, **dividers included**. */
   items: LineItem[];
+  /**
+   * This section's deliverable lines — `{rental, sale}`.
+   *
+   * 🔴 **STRIPPED OF DIVIDERS, so this does NOT compose with
+   * {@link buildPackingList}** (core#80). `group` is in neither leg's type set,
+   * and `buildPackingList` derives `group_name` by walking for the last `group`
+   * row it passed — so feeding this to it returns `group_name: null` on every
+   * row, with the right length, the right names, no error and no type
+   * complaint. On a packing list that means the section headings a picker
+   * navigates by are simply absent, on a document that goes in a truck.
+   *
+   * ⭐ **Use {@link buildPackingListForLeg} with `items` instead**, which keeps
+   * the leg filter and the divider walk at one depth so they cannot disagree.
+   *
+   * ⚠️ **Do not "fix" this by keeping the dividers here.** Seven consumers read
+   * these two arrays — the booking builders in `api-cloudrun/src/services/orders.ts`
+   * and `api-cloudrun/src/services/webhooks/opportunity.ts`, the calendar, the
+   * event cards, and an audit script. Most funnel through `consolidateItems`,
+   * which skips `NON_PRODUCT_TYPES` and would be unharmed; but
+   * `api-cloudrun/src/lib/eventCards.ts` tests `.length > 0` directly, so a
+   * section holding a divider and no deliverable product would begin minting a
+   * card for an empty leg.
+   */
   packing_list_delivery: LineItem[];
+  /** This section's returnable lines — `{rental}` only; a sold unit does not come back. See {@link DestinationGroup.packing_list_delivery} for the divider caveat. */
   packing_list_collection: LineItem[];
 }
 
@@ -2975,6 +3000,73 @@ export function buildPackingList(
   consolidated?: boolean,
   destinationDividerUid?: string,
 ): PackingListItem[] | ConsolidatedItem[] {
+  return buildPackingListFiltered(
+    items,
+    PACKING_LIST_ITEM_TYPES,
+    consolidated,
+    destinationDividerUid,
+  );
+}
+
+/**
+ * Build a packing list for ONE leg — the composable form (core#80).
+ *
+ * 🔴 **This exists because {@link groupByDestination} and
+ * {@link buildPackingList} read as a pipeline and are not one.** The
+ * `packing_list_delivery` / `packing_list_collection` arrays are filtered to
+ * `{rental, sale}` / `{rental}`, and `group` is in neither — so they arrive
+ * **stripped of dividers**, while `buildPackingList` derives `group_name` by
+ * WALKING for the last `group` row it passed. Feed one to the other and every
+ * `group_name` is null: the grid renders, the lengths and quantities are right,
+ * nothing throws, and the section headings a picker navigates by are simply
+ * absent, on a document that goes in a truck.
+ *
+ * ⭐ **Pass the array that still HAS its dividers** — `group.items`, or the
+ * document's own `items`. The leg filter happens here, at the same depth as the
+ * `group_name` walk, so the two cannot disagree. That is the whole fix: the
+ * ordering dependency was never the defect, *splitting the filter from the walk*
+ * was.
+ *
+ * ⚠️ **Deliberately NOT fixed by making the `packing_list_*` arrays keep their
+ * dividers**, which is the tempting one-line version. Those arrays feed the
+ * BOOKING builders (`services/orders.ts`, `webhooks/opportunity.ts`), the
+ * calendar and the event cards. Most of those go through `consolidateItems`,
+ * which skips `NON_PRODUCT_TYPES` and would be unharmed — but
+ * `lib/eventCards.ts` tests `packing_list_delivery.length > 0` directly, so a
+ * section holding a divider and no deliverable product would start minting a
+ * card for an empty leg. Seven consumers, one of them counting rather than
+ * filtering: not a shape to widen for a rendering convenience.
+ *
+ * ⚠️ **`delivery` is rental + sale; `collection` is rental only** — a sold unit
+ * does not come back. So the two legs' line sets genuinely differ and a sheet
+ * rendered for "both" double-counts every rental.
+ *
+ * @param items - Items **including** their `group` dividers
+ * @param leg - Which leg's line set to admit
+ * @param consolidated - Dedupe by product uid and sum quantities
+ * @param destinationDividerUid - Scope to one destination section
+ */
+export function buildPackingListForLeg(
+  items: LineItem[],
+  leg: "delivery" | "collection",
+  consolidated?: boolean,
+  destinationDividerUid?: string,
+): PackingListItem[] | ConsolidatedItem[] {
+  return buildPackingListFiltered(
+    items,
+    leg === "collection" ? COLLECTION_TYPES : DELIVERY_TYPES,
+    consolidated,
+    destinationDividerUid,
+  );
+}
+
+/** The shared implementation of {@link buildPackingList} and {@link buildPackingListForLeg}. */
+function buildPackingListFiltered(
+  items: LineItem[],
+  admitted: ReadonlySet<string>,
+  consolidated?: boolean,
+  destinationDividerUid?: string,
+): PackingListItem[] | ConsolidatedItem[] {
   if (!Array.isArray(items)) {
     throw new Error("items must be an array");
   }
@@ -2995,9 +3087,9 @@ export function buildPackingList(
     scoped = items;
   }
 
-  // Filter to packing-list-eligible items
+  // Filter to the leg's eligible items
   const filtered = scoped.filter(
-    (item) => item.uid && PACKING_LIST_ITEM_TYPES.has(item.type),
+    (item) => item.uid && admitted.has(item.type),
   );
 
   if (consolidated) {
@@ -3017,7 +3109,7 @@ export function buildPackingList(
       currentGroup = null;
       continue;
     }
-    if (!item.uid || !PACKING_LIST_ITEM_TYPES.has(item.type)) continue;
+    if (!item.uid || !admitted.has(item.type)) continue;
 
     result.push({
       uid: item.uid,
