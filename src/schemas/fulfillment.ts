@@ -202,7 +202,8 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   organization: FulfillmentOrganization.meta({ label: "Organization" }),
   destinations: z.array(DocDestination).min(1),
   items: z.array(FulfillmentItem).default([]).meta({ label: "Item" }),
-  subject: z.string().default("").meta({ column: true, label: "Subject", linkTo: "fulfillmentDetail" }),
+  // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
+  subject: z.string().default("").meta({ pii: "mask", column: true, label: "Subject", linkTo: "fulfillmentDetail" }),
   reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference", linkTo: "fulfillmentDetail" }),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),

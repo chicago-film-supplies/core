@@ -1386,7 +1386,26 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // NOT tightened — see the interface. 995/995 is a fact about the CRMS
   // webhook, the only writer; `createOrder` stamps no `crms_status` at all.
   crms_status: z.string().optional(),
-  subject: z.string().default("").meta({ column: true, label: "Subject", linkTo: "orderDetail" }),
+  // 🔴 **`mask`, reversing core#35 — on a MEASUREMENT, not a re-reading.** That
+  // issue weighed `subject` as a dictionary candidate and ruled the order /
+  // invoice / booking / fulfillment ones business labels, which they mostly are.
+  // Measured 2026-09-05 against prod: **8 of 100 consecutive orders carry a
+  // literal street address here** (an origin-to-destination pair typed by an
+  // operator). Both things are true at once — it IS a label and operators DO
+  // type shoot addresses into it — so this is a judgement about acceptable
+  // exposure rather than a defect with a correct answer, and the owner made it.
+  //
+  // ⚠️ Same shape as `DestinationDividerArm.name` one file over: a field whose
+  // NAME is innocuous and whose CONTENTS sometimes are not. The dictionary asks
+  // what a field is called; the hazard is what it holds.
+  //
+  // ⚠️ Known give-back, deliberately accepted: `fixturePiiStrategy.fakeForMask`
+  // shape-detects 2-3 alphabetic tokens as a person, so a subject like
+  // `3100 W Fillmore St` will be faked as a person's name until that detection
+  // is fixed (api-cloudrun#778 is open on exactly that machinery). A
+  // plausible-but-wrong fake reads as sanitized, which is why this is written
+  // down rather than left to be rediscovered.
+  subject: z.string().default("").meta({ pii: "mask", column: true, label: "Subject", linkTo: "orderDetail" }),
   reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference", linkTo: "orderDetail" }),
   xero_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId,

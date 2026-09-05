@@ -373,7 +373,8 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   status: BookingStatus.meta({ column: true, label: "Status" }),
   quantity: z.int().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   shortage: z.int().meta({ column: true, label: "Shortage" }),
-  subject: z.string().meta({ column: true, label: "Subject" }),
+  // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject" }),
   unit_price_cents: z.int().meta({ column: true, label: "Unit Price" }),
   total_price_cents: z.int().meta({ column: true, label: "Total" }),
   // crms_id and crms_product_id are written back post-transaction by CRMS sync
