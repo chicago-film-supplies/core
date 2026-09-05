@@ -1,8 +1,53 @@
 # `NamePartsFields` → bare `.nullable()` — expand/migrate/contract
 
 > Owning repo `core`; the work also lands in `api-cloudrun` and `manager`.
-> **Step 1 of 3 is published (`10.0.0-beta.337`, `fa41c5f`). Steps 2–6 remain — core#84.**
-> Tracks the owner's ruling in core#83.
+> **Steps 1–2 are DONE. Steps 3–6 remain — core#84.** Tracks the owner's ruling in core#83.
+>
+> ## ⚠️ STATUS 2026-09-05 — steps 1–2 complete, api-cloudrun commits UNPUSHED
+>
+> | step | state |
+> |---|---|
+> | 1 — core WIDEN | ✅ published `@cfs/core@10.0.0-beta.337` (`fa41c5f`) |
+> | 2 — api-cloudrun writers | ✅ committed, **NOT PUSHED** (`cfa294da`, `5342a1ac`) |
+> | 3 — manager pin + deploy | ⛔ not started |
+> | 4 — prod backfill | ⛔ not started |
+> | 5 — core CONTRACT | ⛔ not started |
+> | 6 — pins, deploys, fixture sweep | ⛔ not started |
+>
+> 🔴 **Five commits sit unpushed on `api-cloudrun/main` across THREE sessions, and a
+> push carries all five.** Oldest first: `18da711c` (docs, peer) · `cfa294da` (mine) ·
+> `009fe58d` (docs, peer) · `07b20755` (`fix(rbac)`, peer) · `5342a1ac` (mine). The
+> owner placed a hold on pushing; a peer session sought to carry the stack on a
+> relayed approval and was declined — **a relayed grant is not authorization; the
+> release has to arrive from the owner directly.** Confirm the hold before pushing.
+> ⚠️ Only `18da711c:main` excludes both of mine — `07b20755:main` carries `cfa294da`,
+> because a push range is decided by ANCESTRY, not by the order a log was read in.
+>
+> **Step 2 verified**: `check` 0, `lint` 0, `test:units` 1816/0, and integration
+> contacts 2/30 · invites 1/8 · organizations 4/67 · crms webhooks 2/65 — the last
+> being the one the pre-push gate `--ignore`s, so it needs running by hand.
+>
+> ### 🔴 Two findings from step 2 that change steps 5–6
+>
+> 1. **There is a second writer family: MUTATIONS and COMPARISONS, not just
+>    constructions.** Nine `delete target.<part>` clears beyond `applyNameParts`, and —
+>    the sharp one — **three change-detection comparisons that fire a FALSE RENAME
+>    CASCADE once storage holds `null`.** `splitFullName` yields `undefined` for an
+>    absent part; `undefined !== null`; so every CRMS member webhook for a contact with
+>    no middle name would report a rename and fan out. **The writers are what make the
+>    readers wrong**, so the two cannot be split across commits. ⭐ Expect the same
+>    shape at every other `.nullable().optional()` conversion in core#83 — any reader
+>    comparing a fresh value against a stored one.
+> 2. **`|| null`, not `?? null`.** The conditional being replaced tested TRUTHINESS, so
+>    `""` produced an absent key. `?? null` passes `""` through to fail `min(1)`;
+>    `|| null` is exactly equivalent to what was there.
+>
+> ⚠️ **And the inventory method matters more than the inventory.** A survey that walks
+> back from each site for context is doing *comprehension*, not *enumeration*, and
+> comprehension skips things — it missed 3 of 18 sites. What caught them was re-running
+> the grep AFTER converting. Do the completeness grep after every batch of steps 5–6.
+>
+> ⭐ **The Typesense hazard is DISPROVEN** and needs no work at any step — see below.
 
 ## Context
 
@@ -62,7 +107,7 @@ no writer could stamp a null and no backfill could run. Hence expand/migrate/con
 1. ✅ **`core` — WIDEN.** `.nullable().optional()`, interfaces `?: string | null`.
    Published `10.0.0-beta.337`. The 30 transit paths are catalogued `mid-expand` in
    `tests/stored-optionality.test.ts`; the contract step empties that block.
-2. ⛔ **`api-cloudrun` — one PROD deploy.**
+2. ✅ **`api-cloudrun` — committed, not pushed; the PROD deploy is still owed.**
    - pin to `10.0.0-beta.337` **by pattern** (`grep -c 'jsr:@cfs/core@' deno.json` says how
      many — 33 today), then `deno task check`. ⚠️ This is what reveals whether the widened
      `string | null | undefined` breaks a consumer; `ContactDenormPatch`
@@ -77,7 +122,7 @@ no writer could stamp a null and no backfill could run. Hence expand/migrate/con
      `api-cloudrun/src/services/contacts.ts:414-416` already can.
    - 🔴 **merge the release-please PR.** Dev is not enough — the backfill needs the
      *deployed* build (api-cloudrun#782), and until this ships nothing may write a null.
-3. ⛔ **`manager` — pin + deploy.** Readers are unaffected (`filter(Boolean)`); audit the 8
+3. ⛔ **`manager` — pin + deploy.** ← NEXT Readers are unaffected (`filter(Boolean)`); audit the 8
    files naming a part for form writers needing `?? null`.
 4. ⛔ **Backfill — PROD only.** `devReplica` mirrors prod→dev, so a dev-first pass **doubles
    every row**: run prod, let the mirror carry it, then a dev-only residue pass (dev has
