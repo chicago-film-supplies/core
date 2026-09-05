@@ -227,9 +227,26 @@ export function pickSheetLegAdmits(
  * cross-order sheet finds anything at all. It is NOT a destination divider's
  * uid, which is per-document and joins nothing outside it. api-cloudrun#663 is
  * that pair confused the other way round.
+ *
+ * 🔴 **`order` is the DEGENERATE scope, and it exists because the widest one is
+ * unsafe for a document that leaves the building.** The order-triggered packing
+ * list travels in the box with the goods (`GET /packing-list?number=` is public
+ * — the signed URL is the capability), so its contents reach a customer. A
+ * `destination` scope spans organizations: measured on prod at
+ * `3100 W Fillmore St`, **17 orders across 12 organizations**. Scoping that
+ * document to the place would put eleven other customers' goods on it.
+ *
+ * ⭐ **It is not expressible as a filter, which is why it is a KIND.** The
+ * `packing-list` template asserts `orders.length === order_count` and refuses a
+ * short document; narrowing a destination-scoped fold to one order afterwards
+ * breaks exactly the completeness check that assertion exists for. The scope has
+ * to be narrow when the fold runs, not after.
+ *
+ * For `kind: "order"`, `uid` is the `orders/{uid}` document id and `uids` is
+ * `[uid]`. Owner's decision, api-cloudrun#821.
  */
 export interface PickSheetScope {
-  kind: "destination" | "organization";
+  kind: "destination" | "organization" | "order";
   /** The uid the caller asked about. */
   uid: string;
   /** Its display name, resolved at fold time; `""` when it could not be read. */
@@ -237,17 +254,21 @@ export interface PickSheetScope {
   /**
    * Every uid the membership query actually ran on.
    *
-   * For a destination that is `[uid]`. For an organization subtree it is the
-   * resolved node set (`query_by_path array-contains uid`, self-inclusive), so
-   * the response states the tree it was answered against rather than leaving the
-   * caller to guess whether `subtree` did anything.
+   * For a destination or an order that is `[uid]`. For an organization subtree it
+   * is the resolved node set (`query_by_path array-contains uid`,
+   * self-inclusive), so the response states the tree it was answered against
+   * rather than leaving the caller to guess whether `subtree` did anything.
    */
   uids: string[];
 }
 
 /** Zod schema for {@link PickSheetScope}. */
 export const PickSheetScopeSchema: z.ZodType<PickSheetScope> = z.strictObject({
-  kind: z.enum(["destination", "organization"]),
+  // ⚠️ Adding a member here is DEPLOY-ORDERED: `pickSheetAddress`'s grammar and
+  // `resolveOrderScope` live in `api-cloudrun`, and the running service is what
+  // validates a caller — not `main`, and not any repo's pin. Same class as
+  // templates#156 / api-cloudrun#823.
+  kind: z.enum(["destination", "organization", "order"]),
   uid: FirestoreId,
   // 🔴 **`mask`, and it is the ONE name on a pick sheet that is not a label.**
   // For `kind: "destination"` this field is assigned `destination.address.full`

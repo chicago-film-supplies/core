@@ -18,6 +18,7 @@ import {
   type PickSheetLegCustody,
   pickSheetLegAdmits,
   pickSheetLegDirection,
+  PickSheetScopeSchema,
   type PickSheetLegType,
   PickSheetSchema,
 } from "../src/schemas/pick-sheet.ts";
@@ -265,4 +266,73 @@ Deno.test("schema: the gate is the closed vocabulary, not a free string", () => 
   const sheet = emptySheet() as Record<string, unknown>;
   sheet.gate = "outbound";
   assertEquals(PickSheetSchema.safeParse(sheet).success, false);
+});
+
+// ── The scope vocabulary ────────────────────────────────────────────
+
+/**
+ * 🔴 **`PickSheetScope.kind` is a CLOSED vocabulary whose members are
+ * DEPLOY-ORDERED, and this test exists to make a fourth one deliberate.**
+ *
+ * The grammar that parses a member (`api-cloudrun/src/lib/pickSheetAddress.ts`,
+ * `<kind>:<uid>:<gate>:<leg>`) and the resolver that answers it
+ * (`src/services/pickSheets.ts`) both live in a different repo, and the
+ * **running** service is what validates a caller — not `main`, and not any
+ * repo's pin. So a member added here and named by a caller before the API
+ * carrying it is DEPLOYED fails in production while every check is green. That
+ * is the templates#156 / api-cloudrun#823 class, which has fired twice.
+ *
+ * ⭐ **Asserting the exact SET rather than `includes(…)` is the point.** A
+ * membership check passes for any superset, so it cannot notice the case this
+ * guard is for — a member arriving without its api-side half. Failing here is
+ * the reminder to ship the grammar, the resolver and the deploy with it.
+ */
+Deno.test("scope: the kind vocabulary is closed, and a fourth member is deploy-ordered", () => {
+  const shape = PickSheetScopeSchema as unknown as {
+    def: { shape: { kind: { def: { entries?: Record<string, string>; values?: string[] } } } };
+  };
+  const kindDef = shape.def.shape.kind.def;
+  const members = kindDef.entries ? Object.values(kindDef.entries) : (kindDef.values ?? []);
+
+  assertEquals(
+    [...members].sort(),
+    ["destination", "order", "organization"],
+    "PickSheetScope.kind changed. Its parser and resolver live in api-cloudrun " +
+      "(pickSheetAddress.ts, pickSheets.ts) and the DEPLOYED service validates callers — " +
+      "ship the grammar, the resolver and a prod deploy before any caller names a new member.",
+  );
+
+  // Each member must round-trip a real scope, so the enum is not merely a list
+  // of strings nothing constructs.
+  for (const kind of members) {
+    const parsed = PickSheetScopeSchema.parse({
+      kind,
+      uid: "abcdefghij0123456789",
+      name: "x",
+      uids: ["abcdefghij0123456789"],
+    });
+    assertEquals(parsed.kind, kind);
+  }
+});
+
+/**
+ * ⭐ **`order` is the degenerate scope and it exists for a SAFETY reason, not a
+ * convenience one** — so the reason is pinned where a future reader will find it
+ * rather than left in a commit message.
+ *
+ * The order-triggered packing list travels in the box with the goods and is
+ * served from a public route, while a `destination` scope spans organizations —
+ * 17 orders across 12 of them at `3100 W Fillmore St`, measured on prod. And it
+ * cannot be a filter: the template asserts `orders.length === order_count`, so
+ * narrowing a destination fold afterwards breaks the completeness check that
+ * assertion is for. api-cloudrun#821.
+ */
+Deno.test("scope: `order` carries exactly its own uid", () => {
+  const scope = PickSheetScopeSchema.parse({
+    kind: "order",
+    uid: "order000000000000000",
+    name: "",
+    uids: ["order000000000000000"],
+  });
+  assertEquals(scope.uids, [scope.uid], "an order scope answers on one order and says so");
 });

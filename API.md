@@ -6497,9 +6497,26 @@ cross-order sheet finds anything at all. It is NOT a destination divider's
 uid, which is per-document and joins nothing outside it. api-cloudrun#663 is
 that pair confused the other way round.
 
+🔴 **`order` is the DEGENERATE scope, and it exists because the widest one is
+unsafe for a document that leaves the building.** The order-triggered packing
+list travels in the box with the goods (`GET /packing-list?number=` is public
+— the signed URL is the capability), so its contents reach a customer. A
+`destination` scope spans organizations: measured on prod at
+`3100 W Fillmore St`, **17 orders across 12 organizations**. Scoping that
+document to the place would put eleven other customers' goods on it.
+
+⭐ **It is not expressible as a filter, which is why it is a KIND.** The
+`packing-list` template asserts `orders.length === order_count` and refuses a
+short document; narrowing a destination-scoped fold to one order afterwards
+breaks exactly the completeness check that assertion exists for. The scope has
+to be narrow when the fold runs, not after.
+
+For `kind: "order"`, `uid` is the `orders/{uid}` document id and `uids` is
+`[uid]`. Owner's decision, api-cloudrun#821.
+
 ```ts
 interface PickSheetScope {
-  kind: "destination" | "organization";
+  kind: "destination" | "organization" | "order";
   uid: string;
   name: string;
   uids: string[];

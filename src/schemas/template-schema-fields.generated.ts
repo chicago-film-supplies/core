@@ -533,7 +533,7 @@ export const templateSchemaFields: Partial<
   ],
   "pick-sheets": [
     { path: "scope", type: "object" },
-    { path: "scope.kind", type: "destination | organization" },
+    { path: "scope.kind", type: "destination | organization | order" },
     { path: "scope.uid", type: "string" },
     { path: "scope.name", type: "string" },
     { path: "scope.uids", type: "string[]" },
