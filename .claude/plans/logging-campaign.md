@@ -651,8 +651,12 @@ Each phase is one GitHub issue hanging off this doc.
   for conditions that have not yet occurred (`il_tax_rate_check`, `settlement_totals_sweep`,
   `store_destination_no_default`, `typesense_sync_state`, `recurrence_horizon_failed`), and
   the four role-lifecycle msgs from Wave 2c whose only UI caller is **manager#321, still
-  open**. The `SCHEMA_PENDING_EMISSION` allowlist (11 entries, dated) already tracks part of
-  this. Expect 289 → ~180, not → 149.
+  open**. The `SCHEMA_PENDING_EMISSION` allowlist tracked part of this; as of
+  api-cloudrun#811 it holds **one** entry (`oauth_refresh`), not the 11 this line was
+  written against — 27 dated arms were dropped in `10.0.0-beta.347` rather than waiting
+  out four retention windows. ⚠️ **The allowlist is now a `Map` carrying a machine-read
+  `droppableAfter`**, because a date in a prose comment discharged nothing: one entry sat
+  two weeks past its stated date with every assertion green. Expect 289 → ~180, not → 149.
 - ⚠️ **Re-census; do not inherit.** The census on core#65 is a **floor**, not a
   measurement — defect 8 shows the campaign minted ten more undeclared fields after the
   census was taken, and Waves 4/5 will mint more. Take the census after the prerequisite
