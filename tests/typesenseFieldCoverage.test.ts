@@ -1381,3 +1381,144 @@ Deno.test("non-optional-over-nullable companion: the arm catches a real over-cla
   }
   assertEquals(plain.some((w) => w === "nullable" || w === "optional"), false);
 });
+
+// ── `money: true` on an array type — the flag that decides nothing ────
+
+/**
+ * `TypesenseField.money` decides ONE thing: whether the `_str` search mirror is
+ * rendered as currency or stringified raw. api-cloudrun's `addStringMirrors`
+ * builds its candidate set from **scalar** numeric types only — deliberately,
+ * because mirroring an array would join it into `"1,2"` and index a string no
+ * operator will ever type.
+ *
+ * So on an array-typed field the flag is **inert**: no `_str` twin is ever
+ * produced, and nothing the flag could decide gets decided. Nothing is broken.
+ * What is missing is the repo's own rule that **a declaration needs a population
+ * assertion beside it** — 17 fields currently read as carefully curated and are
+ * decorative (core#72).
+ *
+ * ⚠️ **This is a catalogue, not a licence.** The alternative fix — refusing
+ * `money: true` on an array type outright, so the class is unrepresentable — is
+ * strictly better and is deliberately NOT taken here: it edits 17 declarations
+ * and narrows a published type, which is a `@cfs/core` publish. Cataloguing
+ * first turns a standing 17-instance fact into an assertion at zero release
+ * cost; the narrowing can then land in a wave that is already publishing.
+ *
+ * ⚠️ **The one thing that must NOT be done is widening `addStringMirrors`.**
+ * See the `money` docstring in `typesense/types.ts` for why a joined array
+ * mirror is worse than no mirror.
+ */
+const INERT_MONEY_FLAGS: ReadonlyArray<[string, string, string]> = [
+  ["orders", "totals.taxes.amount_cents", "per-tax rollup across the document's tax lines"],
+  ["orders", "totals.transaction_fees.amount_cents", "per-fee rollup"],
+  ["orders", "items.price.base_cents", "per-line rollup"],
+  ["orders", "items.price.subtotal_cents", "per-line rollup"],
+  ["orders", "items.price.subtotal_discounted_cents", "per-line rollup"],
+  ["orders", "items.price.total_cents", "per-line rollup"],
+  ["orders", "items.price.discount.amount_cents", "per-line rollup"],
+  ["orders", "items.price.taxes.amount_cents", "per-line-per-tax rollup"],
+  ["orders", "items.price.replacement_cents", "per-line rollup"],
+  ["products", "components.price.base_cents", "per-component rollup"],
+  ["products", "components.price.replacement_cents", "per-component rollup"],
+  ["products", "component_of.price.base_cents", "per-parent rollup"],
+  ["products", "component_of.price.replacement_cents", "per-parent rollup"],
+  ["webshop-products", "components.price.base_cents", "per-component rollup"],
+  ["webshop-products", "components.price.replacement_cents", "per-component rollup"],
+  ["webshop-products", "component_of.price.base_cents", "per-parent rollup"],
+  ["webshop-products", "component_of.price.replacement_cents", "per-parent rollup"],
+];
+
+/** Every `money: true` declaration in the package, with its alias and type. */
+function moneyFlaggedFields(): Array<{ alias: string; name: string; type: string }> {
+  const out: Array<{ alias: string; name: string; type: string }> = [];
+  for (const [alias, config] of Object.entries(typesenseSchemas)) {
+    for (const f of config.schema.fields as TypesenseField[]) {
+      if (f.money === true) out.push({ alias, name: f.name, type: f.type });
+    }
+  }
+  return out;
+}
+
+const isArrayType = (t: string) => t.endsWith("[]");
+
+Deno.test("money flag — every array-typed `money: true` is catalogued as inert", () => {
+  const flagged = moneyFlaggedFields();
+
+  // Non-vacuity FIRST: a config walk that found nothing would make every arm
+  // below pass over an empty set.
+  assert(
+    flagged.length >= 30,
+    `only ${flagged.length} \`money: true\` declarations found — the config walk is inert`,
+  );
+  const scalars = flagged.filter((f) => !isArrayType(f.type));
+  assert(scalars.length > 0, "no scalar `money: true` field found — the partition is degenerate");
+
+  const catalogued = new Set(INERT_MONEY_FLAGS.map(([a, n]) => `${a}:${n}`));
+  const arrays = flagged.filter((f) => isArrayType(f.type));
+
+  const uncatalogued = arrays
+    .filter((f) => !catalogued.has(`${f.alias}:${f.name}`))
+    .map((f) => `  + ${f.alias}:${f.name} (${f.type})`)
+    .sort();
+  assertEquals(
+    uncatalogued.join("\n"),
+    "",
+    "A new array-typed field declares `money: true`, where the flag decides " +
+      "NOTHING — `addStringMirrors` only mirrors scalars, so no `_str` twin is " +
+      "produced. Either drop the flag, or catalogue it in `INERT_MONEY_FLAGS` " +
+      "with a reason. Do NOT widen `addStringMirrors` (see `money` in " +
+      "`typesense/types.ts`):\n" + uncatalogued.join("\n"),
+  );
+
+  const declaredArrays = new Set(arrays.map((f) => `${f.alias}:${f.name}`));
+  const stale = INERT_MONEY_FLAGS
+    .map(([a, n]) => `${a}:${n}`)
+    .filter((k) => !declaredArrays.has(k))
+    .map((k) => `  + ${k}`)
+    .sort();
+  assertEquals(
+    stale.join("\n"),
+    "",
+    "Catalogued as an inert array money flag, but the field is no longer " +
+      "array-typed or no longer carries `money: true`. Delete the entry — a " +
+      "stale exemption suppresses nothing and reads as a live decision:\n" + stale.join("\n"),
+  );
+});
+
+Deno.test("money flag — the inert ones really have no `_str` twin, and the live ones do", () => {
+  const strNames = new Map<string, Set<string>>();
+  for (const [alias, config] of Object.entries(typesenseSchemas)) {
+    strNames.set(alias, new Set((config.schema.fields as TypesenseField[]).map((f) => f.name)));
+  }
+
+  // 🔴 THE value assertion. Without it this is a location ratchet that proves
+  // only that someone counted. `_str` mirrors ARE declared in core (65 of them),
+  // so "the flag decided nothing" is checkable right here rather than being a
+  // claim about a file in another repo.
+  const unexpectedTwin = INERT_MONEY_FLAGS
+    .filter(([alias, name]) => strNames.get(alias)?.has(`${name}_str`))
+    .map(([alias, name]) => `  + ${alias}:${name}_str`)
+    .sort();
+  assertEquals(
+    unexpectedTwin.join("\n"),
+    "",
+    "An `_str` twin now exists for a field catalogued as INERT, so the flag is " +
+      "no longer decorative and the catalogue is wrong. Re-adjudicate it — and " +
+      "check the mirror is not a joined array, which is the failure this " +
+      "catalogue exists to make visible:\n" + unexpectedTwin.join("\n"),
+  );
+
+  // Fail-closed companion: if NO money field anywhere had an `_str` twin, the
+  // arm above would pass for the wrong reason — the mirror convention having
+  // been abandoned rather than the flag being inert.
+  const scalarsWithTwin = moneyFlaggedFields()
+    .filter((f) => !isArrayType(f.type))
+    .filter((f) => strNames.get(f.alias)?.has(`${f.name}_str`));
+  assert(
+    scalarsWithTwin.length > 0,
+    "No scalar `money: true` field has an `_str` twin declared. Either the " +
+      "mirror convention was dropped — in which case the flag is inert " +
+      "EVERYWHERE and this whole catalogue is understated — or the twin naming " +
+      "changed and the arm above is now vacuous.",
+  );
+});
