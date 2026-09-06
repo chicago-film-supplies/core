@@ -117,8 +117,7 @@ Deno.test("InvoiceSchema accepts optional fields", () => {
     ...validInvoice,
     subject: "March rental",
     reference: "PO-123",
-    external_notes: "Thanks!",
-    internal_notes: null,
+    notes: "Thanks!",
     due_date: "2026-04-01T00:00:00.000-05:00",
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
@@ -263,29 +262,33 @@ Deno.test("InvoiceSchema accepts transaction_fees in totals", () => {
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
 });
 
-Deno.test("BOTH invoice input arms accept the notes as `null` — the seed's own shape", () => {
+Deno.test("BOTH invoice input arms accept `notes` as `null` — the seed's own shape", () => {
   // 🔴 The round-trip, not a hand-built payload: `getInitialValues` reads the
-  // STORED schema, where both fields are `.nullable().optional()`, so it seeds
-  // them as `null`. The manager drafts an invoice by projecting that seed
-  // straight through these input arms. While they were `.optional()` alone, the
-  // system refused a payload it had produced itself — `expected string, received
-  // null` — and invoice drafting was unreachable from the manager's own flow.
+  // STORED schema, where `notes` is bare `.nullable()`, so it seeds it as
+  // `null`. The manager drafts an invoice by projecting that seed straight
+  // through these input arms. While they were `.optional()` alone, the system
+  // refused a payload it had produced itself — `expected string, received null`
+  // — and invoice drafting was unreachable from the manager's own flow.
   //
   // ⚠️ Asserting on the SEED is what makes this test honest. Writing
-  // `{ external_notes: null }` by hand would pass the moment someone re-tightened
-  // the arm and changed the seed to match, which is the fixed-point trap: a check
-  // that can only ever agree with the thing it is checking.
+  // `{ notes: null }` by hand would pass the moment someone re-tightened the arm
+  // and changed the seed to match, which is the fixed-point trap: a check that
+  // can only ever agree with the thing it is checking.
+  //
+  // ⭐ SURVIVED the `external_notes`/`internal_notes` → `notes` consolidation
+  // (2026-09-06) rather than dying with its field. The property it guards is
+  // about the SEED reaching the input arms, not about which field carries it,
+  // and the stored arm going from `.nullable().optional()` to bare `.nullable()`
+  // does not change what `getInitialValues` produces for it.
   const seed = getInitialValues(InvoiceSchema) as Record<string, unknown>;
-  assertEquals(seed.external_notes, null, "the stored seed really is null");
-  assertEquals(seed.internal_notes, null, "the stored seed really is null");
+  assertEquals(seed.notes, null, "the stored seed really is null");
 
   const base = {
     uid: "testinvoice000000001",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
     query_by_orders: ["testorder10000000001"],
-    external_notes: seed.external_notes,
-    internal_notes: seed.internal_notes,
+    notes: seed.notes,
   };
   const created = CreateInvoiceInput.safeParse(base);
   assertEquals(
@@ -298,8 +301,7 @@ Deno.test("BOTH invoice input arms accept the notes as `null` — the seed's own
   // create side — an operator clearing a note sends `null` here.
   const updated = UpdateInvoiceInput.safeParse({
     version: 0,
-    external_notes: null,
-    internal_notes: null,
+    notes: null,
   });
   assertEquals(
     updated.success,

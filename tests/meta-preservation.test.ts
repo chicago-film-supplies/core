@@ -19,7 +19,7 @@
  * indistinguishable from one that never had one.
  *
  * `pii.test.ts` does enforce `pii` **by field name** (`pii/dictionary.ts`), which
- * covers `email` / `filename` / `external_notes`. The residual hole is a
+ * covers `email` / `filename` / `notes`. The residual hole is a
  * hand-tagged field whose name is deliberately NOT in that dictionary —
  * `subject`, `reference`, `description`, `label` are listed there as explicit
  * exclusions, and `Invoice.subject` carries `pii: "mask"` today. `label` and

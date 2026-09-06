@@ -58,8 +58,7 @@ export const creditNotes: TypesenseCollectionConfig = {
       // free text the way it is in Odoo.
       { name: "reason", type: "string", facet: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
-      { name: "external_notes", type: "string", stem: true, optional: true },
-      { name: "internal_notes", type: "string", stem: true, optional: true },
+      { name: "notes", type: "string", stem: true, optional: true },
       { name: "organization", type: "object" },
       { name: "organization.uid", type: "string", facet: false, optional: true },
       { name: "organization.name", type: "string", sort: true, stem: true, facet: false },

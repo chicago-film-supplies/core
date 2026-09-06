@@ -62,13 +62,18 @@
  *   `active == true` and so silently frees a name on deactivation. A supplier
  *   catalogue has the worse version of that — "B&H" and "B&H Photo" resolving to
  *   one Xero contact.
- * - **No `notes` of any kind.** It would escape the PII ratchet:
- *   `core/src/schemas/pii/dictionary.ts` holds `external_notes` / `internal_notes` in
- *   `SENSITIVE_EXACT` and NOT bare `notes`, so the field would ship untagged and
- *   unmasked while the test stayed green. Threads and comments are where an
- *   internal note belongs, which is why `"suppliers"` is added to
+ * - **No `notes` of any kind.** Threads and comments are where an internal note
+ *   belongs, which is why `"suppliers"` is added to
  *   `CFS_SOURCE_COLLECTIONS` in the same change — without that enum member a
  *   thread cannot attach to a supplier and the replacement does not exist.
+ *   ⚠️ **The ORIGINAL reasoning here has expired and is kept only as history.**
+ *   It was that a `notes` field would escape the PII ratchet, because
+ *   `pii/dictionary.ts` held `external_notes` / `internal_notes` and NOT bare
+ *   `notes`, so the field would ship untagged and unmasked while the test stayed
+ *   green. `SENSITIVE_EXACT` holds `"notes"` as of 2026-09-06 — the invoice /
+ *   credit-note consolidation put it there — so a supplier `notes` field would
+ *   now be CAUGHT. **The conclusion is unchanged and the argument for it is the
+ *   first sentence above, not this one**: threads are the right home regardless.
  * - **No `count` of movements.** The same argument `department-type.ts` makes:
  *   an incremental counter maintained by a writer and re-derived by nothing
  *   drifts, and against this many rows the number is derivable on demand.

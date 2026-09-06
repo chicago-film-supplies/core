@@ -36,8 +36,12 @@ export const SENSITIVE_EXACT: ReadonlySet<string> = new Set([
   "phones",
   "billing_address",
   "address",
-  "external_notes",
-  "internal_notes",
+  // The invoice/credit-note notes field. Named here so the ratchet forces a
+  // DECISION on any future `notes` leaf, exactly as it did for the
+  // `external_notes` / `internal_notes` pair this replaced — see the standing
+  // warning in `schemas/supplier.ts`. Prod values include named individuals
+  // and street addresses, so the call here is `mask`, not `none`.
+  "notes",
   // Below: names the codebase ALREADY hand-tags but the dictionary could not
   // enforce, so the tags were decorative. Each was measured to cost zero new
   // annotations before being added — except `filename`, which cost exactly one

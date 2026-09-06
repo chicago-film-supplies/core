@@ -315,8 +315,14 @@ export interface CreditNote {
   date: string;
   date_fs: FirestoreTimestampType;
   reference: string | null;
-  external_notes?: string | null;
-  internal_notes?: string | null;
+  /**
+   * The only notes field, and customer-facing — it replaced the
+   * `external_notes` / `internal_notes` pair, on the same terms as
+   * {@link Invoice.notes}. REQUIRED and bare `.nullable()` because
+   * `createCreditNote` writes `notes: input.notes ?? null`; `null` means *no
+   * notes recorded*.
+   */
+  notes: string | null;
   organization: DocumentOrganizationSnapshotType;
   items: CreditNoteDocLineItem[];
   totals: CreditNoteDocTotals;
@@ -413,8 +419,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
   reference: z.string().nullable().default(null).meta({ column: true, label: "Reference", linkTo: "creditNoteDetail" }),
-  external_notes: z.string().meta({ pii: "mask", column: true, label: "External Notes" }).nullable().optional(),
-  internal_notes: z.string().meta({ pii: "mask", column: true, label: "Internal Notes" }).nullable().optional(),
+  notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   organization: DocumentOrganizationSnapshot,
   // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
   // applied to prod (2,317 documents) and dev on 2026-08-22. The three steps

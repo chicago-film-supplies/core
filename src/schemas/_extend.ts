@@ -29,7 +29,7 @@
  * indistinguishable from one that lost it.
  *
  * `tests/pii.test.ts` does enforce `pii` **by field name** against
- * `pii/dictionary.ts`, which covers `email` / `filename` / `external_notes` and
+ * `pii/dictionary.ts`, which covers `email` / `filename` / `notes` and
  * friends. The residual hole is a **hand-tagged field whose name is
  * deliberately NOT in that dictionary** — `subject`, `reference`, `description`
  * and `label` are listed there as explicit exclusions, and `Invoice.subject`

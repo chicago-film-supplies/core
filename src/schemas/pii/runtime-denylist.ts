@@ -40,6 +40,13 @@ export const RUNTIME_DENYLIST: ReadonlySet<string> = new Set([
   "token",
   "phones",
   "billing_address",
+  "notes",
+  // 🔴 RETAINED after `notes` replaced them in the schema dictionary
+  // (2026-09-06). Retained LOGS still carry these keys, and this list is what
+  // redacts a payload at emit time — it is not required to track the schema.
+  // `tests/pii.test.ts` asserts denylist ⊇ (dictionary \ AMBIGUOUS), which a
+  // superset satisfies, so keeping them costs nothing and dropping them would
+  // un-redact history.
   "external_notes",
   "internal_notes",
   // Person-name parts. Unambiguous: a log key literally called `first_name`
