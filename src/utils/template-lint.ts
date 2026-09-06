@@ -462,15 +462,14 @@ export function lintFixture(args: {
       // surface than the repo it is linting. The author opens the file.
       const shown = unrouted.slice(0, 8);
       const more = unrouted.length - shown.length;
+      // ⚠️ **One LINE, not a paragraph.** This fires on most fixtures in the
+      // corpus today, and a five-line rationale repeated 24 times buries the
+      // one thing that differs between them — which leaves. The explanation
+      // belongs to the presenter, printed once; the finding states the fact.
       note(
         "pii-mask",
-        `${unrouted.length} \`pii: "mask"\` leaf/leaves hold a value the fixture masker ` +
-          `could not have produced, so they were never masked — or were masked by an ` +
-          `older build whose router sent them to a different category. Either way the ` +
-          `fix is to re-capture this fixture through \`templates_capture_fixture\` rather ` +
-          `than to hand-edit it. Leaves (path → the category its field routes to):\n` +
-          shown.map((u) => `  ${u}`).join("\n") +
-          (more > 0 ? `\n  … and ${more} more` : ""),
+        `${unrouted.length} masked leaf/leaves hold a value the masker could not have ` +
+          `produced: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`,
         // 🔴 ADVISORY UNTIL THE CORPUS IS RE-CAPTURED, and the measurement is
         // why: 157 leaves across ALL 24 committed fixtures read `not-masked` on
         // 2026-09-06, not the two hand-built fixtures this was expected to

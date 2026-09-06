@@ -319,3 +319,47 @@ Deno.test("collectMaskedLeaves reports only string leaves", () => {
   const leaves = collectMaskedLeaves({ coords: { latitude: 41.9, longitude: -87.6 }, label: "x" }, Doc);
   assertEquals(leaves.map((l) => l.fieldPath), ["label"]);
 });
+
+// ── The lint arm survives a document that fails the SCHEMA check ────
+
+Deno.test("a malformed fixture does not crash the mask arm", async () => {
+  // ⚠️ Check 2 runs whether or not check 1 passed, deliberately — a schema
+  // failure and a PII leak are independent, and returning early on the first
+  // hides the second in exactly the case where both are likeliest (a
+  // hand-pasted document). So the mask arm is fed garbage by design, and a
+  // guard that THROWS there takes the whole lint down and is worse than none.
+  const { lintFixture } = await import("../src/utils/template-lint.ts");
+  const sidecar = { collection_source: "orders", params: [], fixtures: [] };
+  const malformed: unknown[] = [
+    {},
+    { organization: null, destinations: null, items: null },
+    { organization: "a string", destinations: 42, items: "nope" },
+    { organization: [1, 2, 3] },
+    { items: [{ type: "nonexistent", name: "X" }] },
+    { items: [{ name: "X" }] },
+    { destinations: [{ delivery: null }, null] },
+    { subject: 12345 },
+    { items: ["a", "b"] },
+  ];
+  for (const doc of malformed) {
+    const findings = lintFixture({
+      gitPath: "quote",
+      sidecar,
+      fixture: { slug: "t", ok: true, doc },
+    });
+    // It must not throw, and it must not invent a mask finding out of garbage.
+    assertEquals(
+      findings.filter((f) => f.check === "pii-mask").length,
+      0,
+      `malformed doc produced a mask finding: ${JSON.stringify(doc)}`,
+    );
+  }
+  // …and the arm is NOT simply inert on a well-formed-enough document.
+  const real = lintFixture({
+    gitPath: "quote",
+    sidecar,
+    fixture: { slug: "t", ok: true, doc: { subject: "Riverwalk Summer Series" } },
+  });
+  assertEquals(real.filter((f) => f.check === "pii-mask").length, 1);
+  assertEquals(real.find((f) => f.check === "pii-mask")?.severity, "advisory");
+});
