@@ -273,6 +273,23 @@ export interface IntegrationEventLogRecord {
   unreproduced?: number;
   /** `settlement_totals_sweep` — carried #575 pins that no longer reproduce. */
   pins_stale?: number;
+  /**
+   * `settlement_totals_sweep` — retractions whose `amount_cents` no longer
+   * equals the CURRENT amount of the row in `reverses`, i.e. a settlement was
+   * REWRITTEN under its reverser (api-cloudrun#834). An oracle independent of
+   * `drifted`, which compares the projection against the journal and is
+   * therefore blind whenever both are wrong the same way. Carried scars are
+   * pinned by exact figures, so the steady state is 0.
+   */
+  journal_scars?: number;
+  /**
+   * `settlement_totals_sweep` — invoices whose fold puts `amount_paid_cents`,
+   * `amount_credited_cents` or `amount_void_cents` below zero. Each is a sum of
+   * non-negative rows less its own retractions, so a negative one means a
+   * retraction without a matching target. ⚠️ `amount_due_cents` is deliberately
+   * NOT in this count: an over-credited invoice must stay negative.
+   */
+  negative_buckets?: number;
   /** `stock_summary_sweep` — projections repaired / that failed to repair. */
   repaired?: number;
   failed?: number;
@@ -371,6 +388,8 @@ export const IntegrationEventLogRecordSchema: z.ZodType<IntegrationEventLogRecor
   drifted: z.int().optional(),
   unreproduced: z.int().optional(),
   pins_stale: z.int().optional(),
+  journal_scars: z.int().optional(),
+  negative_buckets: z.int().optional(),
   repaired: z.int().optional(),
   failed: z.int().optional(),
   record: z.string().optional(),

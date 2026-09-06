@@ -20797,6 +20797,8 @@ interface IntegrationEventLogRecord {
   drifted?: number;
   unreproduced?: number;
   pins_stale?: number;
+  journal_scars?: number;
+  negative_buckets?: number;
   repaired?: number;
   failed?: number;
   record?: string;
