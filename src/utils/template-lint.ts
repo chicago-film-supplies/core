@@ -71,7 +71,9 @@
  * @module
  */
 
+import type { z } from "zod";
 import { templateSchemaFor } from "../schemas/template-schemas.ts";
+import { categoryForField, collectMaskedLeaves, maskVerdict } from "./fixture-pii.ts";
 
 // ── What a caller hands in ──────────────────────────────────────────
 
@@ -137,6 +139,18 @@ export interface LintFinding {
    */
   check: string;
   message: string;
+  /**
+   * `"advisory"` means REPORT, do not block. Absent means block — so a check
+   * added without thinking about it fails in the safe direction.
+   *
+   * ⚠️ **This is a ROLLOUT seam, not a severity scale.** A rule whose corpus is
+   * not clean yet cannot land blocking: it would redden a sibling repo's CI on
+   * files that no one in that PR touched. So it ships advisory, the corpus is
+   * repaired, and the flip is deleting one field. Do not use it to park a rule
+   * nobody intends to enforce — an advisory with no plan to flip is a comment
+   * that costs a CI run.
+   */
+  severity?: "advisory";
 }
 
 /**
@@ -146,6 +160,19 @@ export interface LintFinding {
  * on evidence instead of judgement, and it is the only thing that distinguishes
  * "everything passed" from "nothing was looked at".
  */
+/**
+ * Check 2b's per-leaf verdict counts, accumulated across a run.
+ *
+ * @see {@link LintTally.maskLeaves} for why `unverifiable` is reported rather
+ * than folded into `masked`.
+ */
+export interface MaskTally {
+  examined: number;
+  masked: number;
+  notMasked: number;
+  unverifiable: number;
+}
+
 export interface LintTally {
   families: number;
   fixtures: number;
@@ -155,10 +182,35 @@ export interface LintTally {
   goldenTrees: string[];
   /** Declared boolean param states asked about (check 5b). */
   paramStates: number;
+  /**
+   * What check 2's mask oracle actually decided, per `pii: "mask"` string leaf.
+   *
+   * 🔴 **`unverifiable` must be REPORTED, never folded into `masked`.** Two
+   * categories — `postcode` and `opaque` — are masked shape-preservingly on
+   * purpose (api-cloudrun#627), so a real value and a fake one are
+   * indistinguishable and no oracle can settle them. A run that examined 69
+   * leaves of which 69 were postcodes has checked nothing, and without this
+   * number it reads exactly like one that checked 500.
+   *
+   * ⚠️ `examined` is also the tell for a fixture that fails the SCHEMA check:
+   * the walker only descends what the schema resolves, so a badly-shaped
+   * document yields a small `examined` and a clean PII verdict it has not
+   * earned.
+   */
+  maskLeaves: { examined: number; masked: number; notMasked: number; unverifiable: number };
 }
 
 export interface LintReport {
+  /** Findings that BLOCK. A caller fails its run when this is non-empty. */
   findings: LintFinding[];
+  /**
+   * Findings that REPORT and do not block — `severity: "advisory"`.
+   *
+   * ⚠️ **Print these.** They are partitioned out so a caller cannot fail a run
+   * on them by accident, not so a caller can ignore them: an advisory nobody
+   * ever sees is a check that does not exist.
+   */
+  advisories: LintFinding[];
   tally: LintTally;
   /**
    * Registered families carrying no fixture at all.
@@ -294,12 +346,21 @@ export function lintFixture(args: {
   gitPath: string;
   sidecar: LintSidecar;
   fixture: LintFixture;
+  /**
+   * Optional accumulator for check 2's mask-oracle counts, ADDED INTO.
+   *
+   * It is a parameter rather than a second return value because the API's
+   * fixture verbs call this function and only want findings — widening the
+   * return type would break every one of them for a number they do not read.
+   * `lintFixtureSet` passes one so `LintTally.maskLeaves` can be reported.
+   */
+  maskTally?: MaskTally;
 }): LintFinding[] {
   const { gitPath, sidecar, fixture } = args;
   const findings: LintFinding[] = [];
   const file = fixtureFile(gitPath, fixture.slug);
-  const note = (check: string, message: string) =>
-    findings.push({ gitPath, file, check, message });
+  const note = (check: string, message: string, severity?: "advisory") =>
+    findings.push({ gitPath, file, check, message, ...(severity ? { severity } : {}) });
 
   if (!fixture.ok) {
     note("json", `not valid JSON: ${fixture.parseError}`);
@@ -318,6 +379,11 @@ export function lintFixture(args: {
   // AGREE with the write path, so it must resolve a source the way the write
   // path does.
   const collection = sidecar.collection_source;
+  // Hoisted out of the branch below because check 2's mask oracle needs it too:
+  // the oracle's SCOPE is whatever the real pii walker visits, and the walker
+  // takes a schema. `null` therefore means the oracle cannot run at all, which
+  // is a reported state rather than a silent pass.
+  let resolved: z.ZodType | null = null;
   if (typeof collection !== "string" || collection === "") {
     note(
       "schema",
@@ -329,6 +395,7 @@ export function lintFixture(args: {
     // Checked BEFORE use — the original shape read the map directly and would
     // have thrown a bare TypeError on `.safeParse`.
     const schema = templateSchemaFor(collection);
+    resolved = schema ?? null;
     if (!schema) {
       note(
         "schema",
@@ -360,6 +427,60 @@ export function lintFixture(args: {
       note(
         "pii",
         `${path}: phone number in a fixture — ${match[0]}. Use the 555-01xx fiction block.`,
+      );
+    }
+  }
+
+  // ── 2b. The mask oracle ───────────────────────────────────────────
+  //
+  // ⭐ **A DIFFERENT question from 2a above, and the reason both exist.** 2a
+  // asks "does any string in this file look like an email or a phone number?" —
+  // schema-independent, and blind to the other eleven categories, which is how
+  // it missed an organization name, a street address in a divider `name`, a
+  // street address in `items[].description` and `internal_notes`. 2b asks the
+  // schema instead: for every leaf the pii walker WOULD mask, does the committed
+  // value look like something the masker could have produced?
+  //
+  // 🔴 Three verdicts, not two. Block only on `not-masked`; `unverifiable` is
+  // counted and reported, because `postcode` and `opaque` are masked
+  // shape-preservingly on purpose and no oracle can settle them.
+  if (resolved && fixture.doc !== null && typeof fixture.doc === "object") {
+    const unrouted: string[] = [];
+    for (const { fieldPath, value } of collectMaskedLeaves(fixture.doc, resolved)) {
+      const verdict = maskVerdict(value, fieldPath);
+      if (args.maskTally) {
+        args.maskTally.examined++;
+        if (verdict === "masked") args.maskTally.masked++;
+        else if (verdict === "not-masked") args.maskTally.notMasked++;
+        else args.maskTally.unverifiable++;
+      }
+      if (verdict === "not-masked") unrouted.push(`${fieldPath} (${categoryForField(fieldPath)})`);
+    }
+    if (unrouted.length > 0) {
+      // ⚠️ **Paths and categories, never the VALUES.** The whole finding is that
+      // these leaves may hold real customer data, and a CI log is a wider
+      // surface than the repo it is linting. The author opens the file.
+      const shown = unrouted.slice(0, 8);
+      const more = unrouted.length - shown.length;
+      note(
+        "pii-mask",
+        `${unrouted.length} \`pii: "mask"\` leaf/leaves hold a value the fixture masker ` +
+          `could not have produced, so they were never masked — or were masked by an ` +
+          `older build whose router sent them to a different category. Either way the ` +
+          `fix is to re-capture this fixture through \`templates_capture_fixture\` rather ` +
+          `than to hand-edit it. Leaves (path → the category its field routes to):\n` +
+          shown.map((u) => `  ${u}`).join("\n") +
+          (more > 0 ? `\n  … and ${more} more` : ""),
+        // 🔴 ADVISORY UNTIL THE CORPUS IS RE-CAPTURED, and the measurement is
+        // why: 157 leaves across ALL 24 committed fixtures read `not-masked` on
+        // 2026-09-06, not the two hand-built fixtures this was expected to
+        // catch. Most are not leaks — they are values masked by the pre-#837
+        // router, which chose a category from the value's shape. Landing this
+        // blocking today reddens `templates` CI for every session in that
+        // checkout, on files nobody in the PR touched. The corpus is repaired by
+        // re-capture (templates#203, api-cloudrun#627); THEN delete this
+        // argument, which is the entire flip.
+        "advisory",
       );
     }
   }
@@ -412,6 +533,7 @@ export function lintFixture(args: {
  */
 export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
   const findings: LintFinding[] = [];
+  const maskLeaves: MaskTally = { examined: 0, masked: 0, notMasked: 0, unverifiable: 0 };
   const goldenTrees: string[] = [];
   const ungatedFamilies: string[] = [];
   let fixtures = 0;
@@ -442,7 +564,7 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
     // ── 1, 2, 5a — per fixture ──────────────────────────────────────
     for (const fixture of [...family.fixtures].sort((a, b) => a.slug.localeCompare(b.slug))) {
       fixtures++;
-      findings.push(...lintFixture({ gitPath, sidecar, fixture }));
+      findings.push(...lintFixture({ gitPath, sidecar, fixture, maskTally: maskLeaves }));
     }
 
     const entries = sidecarFixtures(sidecar);
@@ -590,13 +712,15 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
   }
 
   return {
-    findings,
+    findings: findings.filter((f) => f.severity !== "advisory"),
+    advisories: findings.filter((f) => f.severity === "advisory"),
     tally: {
       families: args.families.length,
       fixtures,
       descriptions,
       goldenTrees,
       paramStates,
+      maskLeaves,
     },
     ungatedFamilies,
   };

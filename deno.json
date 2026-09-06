@@ -84,6 +84,7 @@
     "./utils/taxes": "./src/utils/taxes.ts",
     "./utils/templates": "./src/utils/templates.ts",
     "./utils/template-lint": "./src/utils/template-lint.ts",
+    "./utils/fixture-pii": "./src/utils/fixture-pii.ts",
     "./utils/citations": "./src/utils/citations.ts"
   },
   "tasks": {

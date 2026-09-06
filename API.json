@@ -13845,7 +13845,7 @@
         {
           "kind": "interface",
           "name": "LintFinding",
-          "declaration": "interface LintFinding {\n  gitPath: string;\n  file: string;\n  check: string;\n  message: string;\n}",
+          "declaration": "interface LintFinding {\n  gitPath: string;\n  file: string;\n  check: string;\n  message: string;\n  severity?: \"advisory\";\n}",
           "doc": ""
         },
         {
@@ -13863,7 +13863,7 @@
         {
           "kind": "interface",
           "name": "LintReport",
-          "declaration": "interface LintReport {\n  findings: LintFinding[];\n  tally: LintTally;\n  ungatedFamilies: string[];\n}",
+          "declaration": "interface LintReport {\n  findings: LintFinding[];\n  advisories: LintFinding[];\n  tally: LintTally;\n  ungatedFamilies: string[];\n}",
           "doc": ""
         },
         {
@@ -13875,14 +13875,20 @@
         {
           "kind": "interface",
           "name": "LintTally",
-          "declaration": "interface LintTally {\n  families: number;\n  fixtures: number;\n  descriptions: number;\n  goldenTrees: string[];\n  paramStates: number;\n}",
-          "doc": "What this run actually examined.\n\n⭐ Report these, always. A zero here is the shape that let check 6 be retired\non evidence instead of judgement, and it is the only thing that distinguishes\n\"everything passed\" from \"nothing was looked at\"."
+          "declaration": "interface LintTally {\n  families: number;\n  fixtures: number;\n  descriptions: number;\n  goldenTrees: string[];\n  paramStates: number;\n  maskLeaves: typeLiteral;\n}",
+          "doc": ""
         },
         {
           "kind": "variable",
           "name": "MIN_DESCRIPTION",
           "declaration": "const MIN_DESCRIPTION: 40;",
           "doc": "Minimum length for a fixture's coverage argument.\n\n`FixtureMeta` requires a non-empty string, which stops the field being absent\nbut not `\"x\"`. This is the policy on top of that: a coverage argument is a\nsentence. Deliberately a small round number rather than a tuned one — it\nexists to catch a placeholder, not to grade prose."
+        },
+        {
+          "kind": "interface",
+          "name": "MaskTally",
+          "declaration": "interface MaskTally {\n  examined: number;\n  masked: number;\n  notMasked: number;\n  unverifiable: number;\n}",
+          "doc": "Check 2b's per-leaf verdict counts, accumulated across a run."
         },
         {
           "kind": "function",
@@ -13905,6 +13911,118 @@
           "name": "stringLeaves",
           "signature": "stringLeaves(value: unknown, _: unknown): Generator<[string, string]>",
           "doc": "Walk the parsed JSON's STRING leaves, not the raw file text.\n\n⚠️ **Not an optimisation — a correctness requirement.** A fixture is full of\nnumbers that look like phone numbers to a `\\b\\d{10}\\b` regex: every Firestore\n`_seconds` epoch is exactly ten digits. Scanning values sidesteps the whole\nclass instead of allowlisting each false positive one at a time.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/fixture-pii",
+      "moduleDoc": "Fixture PII — the routing table, the fake vocabularies, the fakes themselves,\nand the ORACLE that decides whether a committed value came out of them.\n\n## Why this is in `core` and not in the service that captures fixtures\n\n🔴 **There are THREE write paths into a committed fixture and only two of them\npass through `api-cloudrun`.** `templates_set_fixture` and\n`PUT /templates/{uid}/fixtures/{slug}` go through the service; a hand-authored\n`git commit` into the `templates` repo reaches the file directly. A guard that\nlives in the service cannot see the third, so it lives here, where\n`templates/scripts/lint-fixtures.ts` reaches it in CI.\n\n⭐ **One owner for the output shapes.** The oracle asks \"could\n{@link fakeForMask} have produced this value?\", so it can only be right while\nit and `fakeForMask` agree. Putting them in one module makes that agreement\nstructural rather than a thing to maintain — and retires\n`templates/scripts/scan-fixture-history.ts`'s hand-copy of the same seven\nshapes, which was a second implementation of one rule with no mechanism to\nkeep the copies together.\n\n## What is NOT here, and why\n\nThe salt, the HMAC and the `PiiStrategy` adapter stay in\n`api-cloudrun/src/services/templates/fixturePiiStrategy.ts`. `FIXTURE_PII_SALT`\nis a deployment secret, and a fixture's seeding must not become derivable from\na published package. So {@link fakeForMask} takes the seed it needs as an\nargument, plus a {@link SeedFor} callback for the one case that has to seed a\nsecond path ({@link fakeAddressFull}'s street segment) — the salt never\ncrosses into core, and core needs no crypto.\n\n## The oracle is three-valued, and that is the whole design\n\n🔴 **`masked` · `not-masked` · `unverifiable`.** After a fake is drawn from\nits field's category, the categories split in two: some draw from a closed\nvocabulary this repo owns, so \"could the masker have produced this?\" has an\nanswer; the shape-preserving ones (`postcode`, `opaque`) are\nindistinguishable from a real value **by construction** — that is precisely\nwhat api-cloudrun#627 asked for — so no oracle can settle them.\n\n⭐ **The split falls the right way, and that is the argument for building this\nat all: every IDENTIFYING category is decidable.** A name, a street line, a\nvenue, an organization, an email and a phone all come from a vocabulary\nenumerated below. What cannot be decided is a postcode and a Mapbox id.\n\n⚠️ **So a caller must report the `unverifiable` count, never just \"no\nfindings\".** A clean run over a document whose only masked leaves were\npostcodes has checked nothing, and reads identically to one that checked 40\nleaves. Same rule as `lintFixtureAtBranch`'s `{ran: false}` arm: *could not\nrun* is never *passed*.\n\n## The vocabularies are a PUBLIC contract now\n\n⚠️ **Editing an entry invalidates every fixture masked under the old one.** A\nvalue drawn from the previous list reads `not-masked` to the oracle, so a\nvocabulary edit is a corpus-wide re-capture, not a cosmetic change. Add\nentries freely; change and remove them only with the re-capture in the same\nPR.",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "FAKE_FIRST_NAMES",
+          "declaration": "const FAKE_FIRST_NAMES: readonly string[];",
+          "doc": ""
+        },
+        {
+          "kind": "variable",
+          "name": "FAKE_LAST_NAMES",
+          "declaration": "const FAKE_LAST_NAMES: readonly string[];",
+          "doc": ""
+        },
+        {
+          "kind": "variable",
+          "name": "FAKE_ORGANIZATIONS",
+          "declaration": "const FAKE_ORGANIZATIONS: readonly string[];",
+          "doc": "Production-company-shaped names — an organization is a business, not a\n person. Same three-token floor, for the same reason."
+        },
+        {
+          "kind": "variable",
+          "name": "FAKE_PLACES",
+          "declaration": "const FAKE_PLACES: readonly string[];",
+          "doc": "Venue / facility labels — what `address.name` and the destination divider\nhold, and what they were being masked into a person's name from.\n\n🔴 **Every entry is THREE tokens or more, and that is load-bearing, not\nstyle.** A two-word compound (`Northgate Hall`) is shaped exactly like\n`First Last`, so a golden reviewer looking at a section heading cannot tell a\nmasked venue from a masked person — which is the confusion this whole change\nremoves. A three-token label matches neither person form (`First Last`,\n`First M Last`). The suite asserts it rather than trusting the list."
+        },
+        {
+          "kind": "variable",
+          "name": "FAKE_STREETS",
+          "declaration": "const FAKE_STREETS: readonly string[];",
+          "doc": "The tail of a faked street line; the number in front is seeded."
+        },
+        {
+          "kind": "variable",
+          "name": "FAKE_UNIT_PREFIXES",
+          "declaration": "const FAKE_UNIT_PREFIXES: readonly string[];",
+          "doc": "Secondary address lines — \"Suite 1900\", \"2nd Floor\", \"Stage 25\" in prod."
+        },
+        {
+          "kind": "variable",
+          "name": "MASKED_EMAIL_DOMAIN",
+          "declaration": "const MASKED_EMAIL_DOMAIN: \"chicagofilmsupplies.com\";",
+          "doc": "The domain a masked email is minted at.\n\nOUR OWN domain, not `@example.com`. The RFC-reserved documentation domain is\nthe standards-correct choice and `template-lint`'s check 2 rejects it,\ncorrectly: an address at our own domain cannot be a customer's, so allowing\nonly that one keeps \"every foreign domain is PII\" true with no exceptions."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "MaskCategory",
+          "declaration": "type MaskCategory = \"email\" | \"phone\" | \"postcode\" | \"street\" | \"street2\" | \"address_full\" | \"person\" | \"given_name\" | \"family_name\" | \"place\" | \"organization\" | \"opaque\" | \"text\";",
+          "doc": "What a masked value is faked AS.\n\n`text` is the fallback and the only member that claims nothing — it renders\nthe self-announcing filler. Every other member asserts a category, so routing\na field to one is a claim about that field that must be true."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "MaskVerdict",
+          "declaration": "type MaskVerdict = \"masked\" | \"not-masked\" | \"unverifiable\";",
+          "doc": "Whether a committed value could have come out of {@link fakeForMask}.\n\n- `masked` — it is drawn from a vocabulary or shape only the masker produces.\n- `not-masked` — the masker CANNOT produce this value, so it was never masked.\n- `unverifiable` — the category's fake is shape-preserving, so a real value\n  and a fake one are indistinguishable. **Count these; never report them as\n  passes.**"
+        },
+        {
+          "kind": "interface",
+          "name": "MaskedLeaf",
+          "declaration": "interface MaskedLeaf {\n  fieldPath: string;\n  value: string;\n}",
+          "doc": "One `pii: \"mask\"` string leaf, as the real walker offered it."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SeedFor",
+          "declaration": "type SeedFor = fnOrConstructor;",
+          "doc": "Seed a second field path — the one thing {@link fakeForMask} cannot do\nitself, because the salt stays in the service."
+        },
+        {
+          "kind": "function",
+          "name": "categoryForField",
+          "signature": "categoryForField(fieldPath: string): MaskCategory",
+          "doc": "The category to fake a `mask`-tagged value as, from its field path alone.\n\n🔴 **The value is never consulted.** That is the whole of api-cloudrun#837:\nthe pii walker routes by schema tag and this strategy used to route by\npunctuation and token count, so `6 Walkies` in a `subject` masked to\n`5365 Aspen Dr`. A field knows what it is; the string in it does not.\n\nUnrouted → `text`. Being incomplete is safe by construction here — the filler\nannounces itself as a placeholder, so a field nobody has classified reads as\nobviously fake rather than as a confidently wrong address.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "collectMaskedLeaves",
+          "signature": "collectMaskedLeaves(doc: object, schema: z.ZodType): MaskedLeaf[]",
+          "doc": "Every `pii: \"mask\"` STRING leaf in one document, discovered by running the\nREAL walker over it.\n\n⭐ **The scope comes from `applyPii` itself, not from a static walk of the\nschema, and that is a correctness requirement rather than a convenience.**\nThe oracle asks \"would the masker have masked this leaf, and if so did it?\",\nso its scope has to be exactly the masker's — and only the masker can compute\nthat, because it depends on the VALUE.\n\n🔴 **The case that forces it is a discriminated union, and it is not\nhypothetical — it was measured at 292 false findings.** `FulfillmentItemType`\nis a union whose destination-divider arm tags `name` as `pii: \"mask\"`\n(templates#203) while its product arm tags the same `name` as `pii: \"none\"`.\nA static `collectLeafPaths` walk emits every member at the SAME path, so\n`…items[].item.name` reads as masked and every PRODUCT name on a packing list\n(`Driving Sign Kit`, `Metro Rack (18\" x 36\")`) gets scoped in and judged\nagainst the venue vocabulary. `applyPii` resolves the union against the row\nin hand (`resolveUnionMember`), so a divider is checked and a product is not.\n\n⚠️ **A schema-INVALID document is walked incompletely** — the walker only\ndescends keys the resolved shape declares, and an unresolvable union member\nstops the descent. That is not a reason to prefer the static walk (which is\nwrong in a way no count reveals); it is a reason to REPORT how many leaves\nwere examined, so a fixture that also fails the schema check does not read as\na clean PII pass. The caller owns that report.\n\n⚠️ Non-string tagged leaves are excluded deliberately: the capture strategy\nfails closed on a tagged non-string scalar (it throws), so one can never reach\na committed fixture, and the oracle has no fake shape to compare against.\n\nThe walk is read-only — the strategy returns every value unchanged, which is\nalso how `applyPii` is told to keep descending into a container.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "fakeForMask",
+          "signature": "fakeForMask(value: string, fieldPath: string, seed: string, seedFor: SeedFor): string",
+          "doc": "Mask transform — dispatched on the FIELD's category, never on the value.\n\n`seed` is the caller's HMAC of (salt, fieldPath, value) as lowercase hex;\n`seedFor` computes the same for another path. Both stay outside core so the\nsalt does. @see the module header.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "maskVerdict",
+          "signature": "maskVerdict(value: string, fieldPath: string): MaskVerdict",
+          "doc": "The verdict for one `pii: \"mask\"` string leaf.\n\n⚠️ **`fieldPath` decides the category, exactly as it does for the mask\nitself** — pass the leaf's real path, not a guess. A path this module does\nnot route falls to `text`, whose fake is the self-announcing filler, so an\nunrouted field holding a real value reads `not-masked`, which is right.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "normalizeFieldPath",
+          "signature": "normalizeFieldPath(fieldPath: string): string[]",
+          "doc": "Field path → segments, with array markers and indices dropped.\n\nThe runtime walker reports an array's elements at the array's OWN path (see\n`pii/walker.ts` — a reordered array must not reseed every element), so\n`phones[]` arrives as `…contact.phones`. Tests and callers that write an\nindex anyway (`contact.phones.0`, `destinations[0].delivery.instructions`)\nare normalized to the same thing, and so is `collectLeafPaths`'s static\n`destinations[].delivery.address.postcode` — which is what lets a census\ncompare a static schema walk and a runtime walk directly.",
           "paramTags": [],
           "returnsTag": null
         }

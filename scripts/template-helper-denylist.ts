@@ -334,6 +334,19 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // (`citations`, `templates`' build half, now this), which is the point at
   // which the namespace-shaped rule the note below wishes for stops being
   // hypothetical. Tracked rather than built here.
+  // ⚠️ **The FOURTH tooling-only util, and the count is the argument.** The note
+  // above said the namespace-shaped rule "stops being hypothetical" at three;
+  // `utils/fixture-pii.ts` is four, and each one has been caught only by a test
+  // failing after the fact. It is the fixture masker's vocabularies and the
+  // oracle that judges them — capture-time and CI tooling. Offering a document
+  // author `it.fixture-pii.fakeForMask` would hand them a seeded PII generator.
+  "fixture-pii": [
+    "categoryForField",
+    "collectMaskedLeaves",
+    "fakeForMask",
+    "maskVerdict",
+    "normalizeFieldPath",
+  ],
   "template-lint": [
     "lintFixture",
     "lintFixtureSet",

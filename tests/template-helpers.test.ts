@@ -48,6 +48,7 @@ import * as sessionUtils from "../src/utils/sessions.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
 import * as templateUtils from "../src/utils/templates.ts";
 import * as citationUtils from "../src/utils/citations.ts";
+import * as fixturePiiUtils from "../src/utils/fixture-pii.ts";
 import * as templateLintUtils from "../src/utils/template-lint.ts";
 import * as substitutionUtils from "../src/utils/substitutions.ts";
 
@@ -118,6 +119,13 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // in it; without the entry, its five exports were emitted straight into the
   // editor's helper panel with nothing objecting.
   citations: citationUtils,
+  // Same exception again, and the FOURTH — `utils/fixture-pii.ts` is the
+  // fixture masker's routing table, vocabularies and mask ORACLE. It is CI and
+  // capture-time tooling; a template renders a fixture that has already been
+  // masked and has no seed to mask with. Listed so the drift guard sees its
+  // exports rather than the generator offering a document author
+  // `it.fixture-pii.fakeForMask`.
+  "fixture-pii": fixturePiiUtils,
   // Same exception as `citations`, and the denylist comment predicted this
   // exact arrival: "the next tooling-only util will leak the same way".
   // `utils/template-lint.ts` is the fixture lint's rule set — CI and API
