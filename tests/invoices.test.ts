@@ -847,6 +847,44 @@ Deno.test("substitution: an unchanged order does not undo it", () => {
   );
 });
 
+// ⏸️ IGNORED pending api-cloudrun#897 — this arm IS the reproduction and was
+// seen to fail against HEAD, returning ["Light X", "Light Y"].
+// Flip `ignore` off in the commit that fixes it; do not weaken the assertions.
+Deno.test({
+  name: "substitution: an order-side REPARENT must not resurrect X",
+  ignore: true,
+  fn: () => {
+    // The INVOICE half of the interleave manager#411 asks for on fulfillments.
+    // Reparenting is a dnd-kit drag the browser tier cannot drive, but "does the
+    // substitution survive an order-side reparent" is a MERGE question and drives
+    // as an order PUT: `prev` and `new` differ only in the group X sits under.
+    //
+    // The dangling-anchor branch below (`isSubstitutionRow` in the removed-items
+    // pass) already knows this case and keeps Y, saying "only its position is
+    // lost". What it does not cover is X: at its NEW path X is no longer at-or-
+    // below the anchor, so `isRemovedBySubstitution` is false, the invoice has
+    // nothing at that path, and X is re-projected as a brand-new line.
+    const before = orderShapedLine({ uid: ITEM_1, name: "Light X", path: [DEST_1, GROUP_1, ITEM_1] });
+    const after = orderShapedLine({ uid: ITEM_1, name: "Light X", path: [DEST_1, GROUP_2, ITEM_1] });
+
+    const invoiceY = {
+      ...buildOrderScopedItems(
+        [orderShapedLine({ uid: ITEM_Y, name: "Light Y", path: [DEST_1, GROUP_1, ITEM_Y] })],
+        ORDER_DIV_1,
+      )[0],
+      path_substituted_for: [DEST_1, GROUP_1, ITEM_1],
+    } as unknown as InvoiceDocItemType;
+
+    const result = syncOrderToInvoiceSelective([before], [after], [invoiceY], ORDER_DIV_1);
+
+    assertEquals(
+      lineNames(result),
+      ["Light Y"],
+      "the replaced product came back beside its own substitute",
+    );
+  },
+});
+
 Deno.test("substitution: Y's subtree lands in X's POSITION, not at the tail", () => {
   // An items array's order is meaning, so a substitution that appends Y after
   // every other line is wrong even though the set of lines is right. This is
