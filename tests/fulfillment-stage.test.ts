@@ -8,11 +8,11 @@ import {
   canPrepCheckout,
   checkoutableQuantity,
   checkoutUnits,
+  custodyMovedQuantity,
   FULFILLMENT_STAGE_LABELS,
   FULFILLMENT_STAGES,
   getStageForBookings,
   naturalNextActionForBooking,
-  partitionByStage,
   qtyOnStageSide,
   regressionAlternatesForBooking,
   returnableQuantity,
@@ -104,33 +104,96 @@ Deno.test("getStageForBookings: an empty list is complete, not quoted", () => {
   assertEquals(getStageForBookings([]), "complete");
 });
 
-// ── partitionByStage ─────────────────────────────────────────────────────────
+// ── custodyMovedQuantity ─────────────────────────────────────────────────────
+//
+// Replaced `partitionByStage` in beta.349. The first arm below is the one that
+// retired it: `partitionByStage(bookings, "prep")` puts a purely-`quoted`
+// booking on the TARGET side, because it partitions on the source bucket
+// (`reserved`) and `quoted` is not it — so the server freeze predicate
+// api-cloudrun#880 needed would have frozen an order that had not been reserved.
 
-Deno.test("partitionByStage splits on the source bucket for 'prep'", () => {
-  const fullyReserved = bk({ reserved: 3 });
-  const partiallyPrepped = bk({ reserved: 1, prepped: 2 });
-  const fullyPrepped = bk({ prepped: 3 });
-  const { source, target } = partitionByStage(
-    [fullyReserved, partiallyPrepped, fullyPrepped],
-    "prep",
+Deno.test("custodyMovedQuantity: allocation buckets are NOT custody", () => {
+  // The `partitionByStage` trap, asserted directly: `quoted` is pre-reserve.
+  assertEquals(custodyMovedQuantity(bk({ quoted: 5 })), 0);
+  assertEquals(custodyMovedQuantity(bk({ reserved: 5 })), 0);
+  assertEquals(custodyMovedQuantity(bk({ quoted: 2, reserved: 3 })), 0);
+  assertEquals(custodyMovedQuantity(bk({})), 0);
+});
+
+Deno.test("custodyMovedQuantity: a PARTIAL prep counts only the prepped units", () => {
+  // `part-prepped` is a status, not a bucket — partial prep is `prepped > 0`
+  // co-existing with `reserved > 0`, and it is the case that decides whether
+  // the freeze is per-row-wholesale or per-quantity.
+  assertEquals(custodyMovedQuantity(bk({ reserved: 1, prepped: 2 })), 2);
+  assertEquals(custodyMovedQuantity(bk({ quoted: 4, reserved: 1, prepped: 1 })), 1);
+});
+
+Deno.test("custodyMovedQuantity: `out` counts for a SALE as well as a rental", () => {
+  // Type-independent on purpose, unlike `returnableQuantity`. A sold unit that
+  // has left the building has moved custody every bit as much as a rented one,
+  // and is less recoverable — the type only decides whether it needs returning.
+  assertEquals(custodyMovedQuantity(bk({ out: 3 }, "rental")), 3);
+  assertEquals(custodyMovedQuantity(bk({ out: 3 }, "sale")), 3);
+  assertEquals(returnableQuantity(bk({ out: 3 }, "rental")), 3);
+  assertEquals(returnableQuantity(bk({ out: 3 }, "sale")), 0);
+});
+
+Deno.test("custodyMovedQuantity: terminal buckets are custody, and it sums", () => {
+  assertEquals(custodyMovedQuantity(bk({ returned: 3 })), 3);
+  assertEquals(custodyMovedQuantity(bk({ lost: 2 })), 2);
+  assertEquals(custodyMovedQuantity(bk({ damaged: 1 })), 1);
+  assertEquals(
+    custodyMovedQuantity(bk({ quoted: 9, reserved: 9, prepped: 1, out: 2, returned: 3, lost: 4, damaged: 5 })),
+    15,
   );
-  assertEquals(source, [fullyReserved, partiallyPrepped]);
-  assertEquals(target, [fullyPrepped]);
 });
 
-Deno.test("partitionByStage splits on the source bucket for 'checkout'", () => {
-  const partiallyOut = bk({ prepped: 1, out: 2 });
-  const fullyOut = bk({ out: 3 });
-  const { source, target } = partitionByStage([partiallyOut, fullyOut], "checkout");
-  assertEquals(source, [partiallyOut]);
-  assertEquals(target, [fullyOut]);
+/**
+ * The corpus for the nesting property below — one booking per interesting
+ * position in the lifecycle, both types.
+ */
+const CUSTODY_CORPUS = (["rental", "sale"] as const).flatMap((t) => [
+  bk({}, t),
+  bk({ quoted: 3 }, t),
+  bk({ reserved: 3 }, t),
+  bk({ quoted: 1, reserved: 2 }, t),
+  bk({ reserved: 1, prepped: 2 }, t),
+  bk({ prepped: 3 }, t),
+  bk({ prepped: 1, out: 2 }, t),
+  bk({ out: 3 }, t),
+  bk({ out: 1, returned: 2 }, t),
+  bk({ returned: 1, lost: 1, damaged: 1 }, t),
+]);
+
+Deno.test("custodyMovedQuantity is the WIDEST target side — the freeze can never be narrower than a rendering predicate", () => {
+  // 🔴 The relationship to the picker's `qtyOnStageSide(b, stage, "target") > 0`,
+  // which is a DIFFERENT question (its boundary moves with the section's stage)
+  // but must never exceed this one. `TARGET_BUCKETS.prep` is the widest set, so
+  // a row the picker draws as already-actioned at ANY stage is always a row this
+  // predicate refuses to let an order edit rewrite. An edit to the bucket tables
+  // that inverted this would silently un-freeze picked rows.
+  for (const b of CUSTODY_CORPUS) {
+    const custody = custodyMovedQuantity(b);
+    for (const stage of FULFILLMENT_STAGES) {
+      const onTarget = qtyOnStageSide(b, stage, "target");
+      if (onTarget > custody) {
+        throw new Error(
+          `qtyOnStageSide(_, "${stage}", "target") = ${onTarget} exceeds ` +
+            `custodyMovedQuantity = ${custody} for ${JSON.stringify(b.breakdown)} (${b.type})`,
+        );
+      }
+    }
+  }
 });
 
-Deno.test("partitionByStage puts everything on the target side for 'complete'", () => {
-  const bookings = [bk({ returned: 3 })];
-  const { source, target } = partitionByStage(bookings, "complete");
-  assertEquals(source, []);
-  assertEquals(target, bookings);
+Deno.test("...and the implication is STRICTLY one-directional", () => {
+  // Pairs with the arm above: without this, that loop would pass just as well
+  // if the two were the same function. A fully-prepped booking has moved
+  // custody and sits on NO stage-`return` target bucket.
+  const prepped = bk({ prepped: 3 });
+  assertEquals(custodyMovedQuantity(prepped), 3);
+  assertEquals(qtyOnStageSide(prepped, "return", "target"), 0);
+  assertEquals(qtyOnStageSide(prepped, "checkout", "target"), 0);
 });
 
 // ── naturalNextActionForBooking ──────────────────────────────────────────────

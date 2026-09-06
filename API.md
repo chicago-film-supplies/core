@@ -25159,6 +25159,75 @@ accepts no quantity, so this is a row-level yes/no and the cart has no
 quantity input. Peeling units off a line is the per-order path's job
 (`applyBookingActions`), which takes a qty per action.
 
+### `custodyMovedQuantity(b: Pick<Booking, "type" | "breakdown">): number`
+
+Units of this booking whose custody has left ALLOCATION — everything in
+`prepped`, `out` or a terminal bucket. `> 0` means a warehouse worker has
+physically acted on this booking's stock.
+
+🔴 **This is the freeze predicate for the order → fulfillment cascade
+(api-cloudrun#880), and the boundary it draws is `reserved | prepped`.**
+Quantity still sitting in `quoted` or `reserved` is a *plan* — the order says
+so, and an order edit is entitled to restate it. Quantity that has reached
+`prepped` or beyond is a *physical fact* about where the goods are, and an
+order edit must not rewrite it. So a row with `custodyMovedQuantity > 0`
+keeps its stored `quantity` and cannot be removed by an order-side change,
+while a row at zero keeps tracking its order.
+
+⭐ **It is spelled as the TARGET side of `prep` because that is exactly where
+the boundary lives** — {@link SOURCE_BUCKETS}`.prep` is `[quoted, reserved]`
+and {@link TARGET_BUCKETS}`.prep` is everything past it. Naming it here
+rather than leaving `qtyOnStageSide(b, "prep", "target")` at the call site is
+the whole point: at a server freeze site that expression reads like someone
+asked the wrong stage, and a reader who "fixed" it to the stage the booking is
+actually in would silently change which rows freeze.
+
+⚠️ **Type-independent, unlike its neighbours, and that is deliberate rather
+than an oversight.** {@link returnableQuantity} and
+{@link bucketsForBookingSide} branch on `outIsInFlight` because they ask
+whether `out` still needs WORK — which a sale's `out` does not. Custody is a
+different question: a sold unit that has gone out the door has moved custody
+every bit as much as a rented one, and it is *less* recoverable. `out` is on
+the target side of `prep` for both types, so the branch is a no-op here and
+the function is honest about not needing it.
+
+⚠️ **The grain is the BOOKING, which is coarser than the items row.** One
+booking covers `(order, product, destination)`, so two occurrences of the same
+product under one destination share it and therefore freeze together. A
+per-row mental model of this predicate is wrong, and would look right in every
+single-occurrence test.
+
+⚠️ Replaced `partitionByStage`, which beta.348 kept for precisely this caller
+and which turned out to be the wrong instrument: it partitions on the source
+bucket, so a booking holding only `quoted` lands on the `target` side of
+`prep` without any custody having moved.
+
+## 🔴 NOT the same question as the picker's per-stage target test
+
+The manager spells `qtyOnStageSide(b, stage, "target") > 0` in three places
+(`manager/src/utils/fulfillmentClassify.ts`,
+`manager/src/components/orders/FulfillmentDestinationSection.tsx`,
+`manager/src/components/orders/FulfillmentItemRow.tsx` — the last reads it as
+a quantity rather than a predicate), and it looks like this predicate written
+out. It is
+not, and the difference is the `stage` argument: the picker passes the
+SECTION'S CURRENT stage, so its boundary MOVES as the section advances — at
+`checkout` a `prepped` booking is on the source side, at `return` an `out` one
+is. That is a column-rendering question. This one fixes the boundary at
+`reserved | prepped` forever, because that is where a plan becomes a physical
+fact. **The manager is therefore not re-deriving this rule, and must not be
+"unified" with it.**
+
+⭐ **They are related in exactly one direction, and it is asserted.** The
+target sets are nested — {@link TARGET_BUCKETS} gives
+`prep ⊇ checkout ⊇ return = quoted` — so `prep`'s is the WIDEST, and
+therefore `qtyOnStageSide(b, anyStage, "target") > 0` implies
+`custodyMovedQuantity(b) > 0` while the converse fails. The freeze can never
+be narrower than any rendering predicate, which is the safe direction: a row
+the picker draws as already-actioned is always one this refuses to rewrite.
+`tests/fulfillment-stage.test.ts` pins it over every stage so an edit to the
+bucket tables cannot quietly invert it.
+
 ### `getStageForBookings(bookings: ReadonlyArray<Pick<Booking, "type" | "breakdown">>): FulfillmentStage`
 
 Determine the current workflow stage for a set of bookings. The stage is the
@@ -25175,18 +25244,6 @@ Destination-agnostic — pass any subset of bookings.
 The natural next action for a given booking based on its own breakdown. Used
 to label the per-row action button. A non-rental sitting in `out` has no
 *required* next action (delivery is terminal) → `complete`.
-
-### `partitionByStage(bookings: readonly T[], stage: FulfillmentStage): typeLiteral`
-
-Partition bookings by whether they still hold quantity in the stage's source
-bucket. `complete` and `quoted` have no source bucket, so everything lands on
-the target side.
-
-⚠️ **No caller yet.** It had none in `manager` either when it moved here — the
-picker classifies per ROW (`fulfillmentClassify.ts`) rather than per booking.
-It is kept because the row-scoped freeze predicate the server needs next
-(api-cloudrun#880) is exactly this question asked of one document's bookings;
-if that increment does not reach for it, delete it rather than leaving it.
 
 ### `qtyOnStageSide(b: Pick<Booking, "type" | "breakdown">, stage: FulfillmentStage, side: StageSide): number`
 
