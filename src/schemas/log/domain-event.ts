@@ -120,6 +120,37 @@ export const DOMAIN_EVENT_MSGS = [
   // the override is lossy — this is the explicit warning trail. Emitted
   // from `api-cloudrun/src/services/fulfillmentEdits.ts` in api-cloudrun.
   "fulfillment_custom_item_qty_override",
+  // 🔴 The order → fulfillment sync REFUSED to compute an items patch because it
+  // was not handed the order's full booking set, and the freeze predicate is
+  // fed from those bookings. Fail-closed: the stored `items` are left exactly as
+  // they are rather than rewritten unfrozen.
+  //
+  // ⚠️ **The two failure directions are not symmetric, which is why this is a
+  // `warn` and not an error.** Leaving the projection stale is recoverable — the
+  // divergence audit finds it and
+  // `api-cloudrun/scripts/repair-fulfillment-projection.ts` re-derives it.
+  // Rewriting a picked row destroys a warehouse worker's count, which nothing
+  // recovers. So the sync declines and says so. See api-cloudrun#880.
+  //
+  // `{ order_uid }`. Emitted from `api-cloudrun/src/lib/orderFulfillmentSync.ts`
+  // in api-cloudrun. A caller that legitimately has no bookings — a `draft` or
+  // `canceled` order — passes `bookingsComplete: true` with an empty map and
+  // does NOT reach this.
+  "fulfillment_sync_items_skipped_no_bookings",
+  // An order edit was refused on one or more fulfillment rows because custody
+  // had moved — `custodyMovedQuantity` from `@cfs/core/utils/fulfillment-stage`
+  // is non-zero, so the quantity is a physical fact about where the goods are
+  // rather than a plan the order may restate.
+  //
+  // ⭐ **This is the answer to "why didn't my order change reach the picker",
+  // and without it that question has no trail at all.** The refusal is correct
+  // and silent by construction: the patch simply omits those rows, so nothing
+  // else in the record distinguishes "custody held it" from "nothing changed".
+  //
+  // `{ order_uid, frozen_row_count }`, at `info` — a routine, expected outcome
+  // on any order a warehouse has started, not a degradation. Emitted from
+  // `api-cloudrun/src/services/orders.ts` in api-cloudrun.
+  "fulfillment_sync_frozen_rows",
   // One recurrence threw while the nightly sweep advanced its horizon
   // (api-cloudrun#549 D6-B). `materializeHorizonAll` absorbs the throw and
   // carries on — correct, because `recurrence-horizon-nightly` retries the
