@@ -123,7 +123,7 @@ const exemptUsed = new Set<string>();
  * ⚠️ Its EXEMPT list necessarily CONTAINS the citation-shaped strings it exempts,
  * so without this every copy reports its own allowlist as broken — and the copies
  * report each OTHER, which is how this surfaced. Same reason
- * `tests/utils/typeEscapes.test.ts` excludes itself: a scanner that quotes what
+ * `manager/tests/utils/typeEscapes.test.ts` excludes itself: a scanner that quotes what
  * it looks for will always find itself.
  *
  * Both spellings, because `manager` runs the Node copy and the Deno repos run
