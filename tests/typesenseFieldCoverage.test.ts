@@ -53,9 +53,17 @@
  * ## Where it lives, and what runs it
  *
  * In `core`, because core owns both sides it compares — the Typesense configs
- * and the Zod document schemas. Run by **`deno task test`**; core has no
- * `gate.sh`, so api-cloudrun's "check it is in `gate.sh`, not merely in
- * `tests/unit/`" rule does not transfer here.
+ * and the Zod document schemas. Run by **`deno task test`**; core has no gate
+ * script, so api-cloudrun's "check it is in `api-cloudrun/scripts/gate.sh`, not
+ * merely in `tests/unit/`" rule does not transfer here.
+ *
+ * ⚠️ The mention above is repo-qualified deliberately, and the unqualified form
+ * is now a gate FAILURE rather than a style point: `manager/scripts/gate.sh` was
+ * created on 2026-09-06, so the bare basename matches two files and the citation
+ * audit reports AMBIGUOUS, which `--strict` fails. It resolved uniquely for as
+ * long as api-cloudrun was the only repo with one — which is why this comment
+ * names neither basename on its own. A scanner that quotes what it looks for
+ * finds its own warning.
  */
 import { assert, assertEquals } from "@std/assert";
 import { z } from "zod";

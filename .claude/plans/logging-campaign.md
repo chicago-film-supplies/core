@@ -106,7 +106,7 @@ core issues** (the other is #69, Typesense projection, unrelated).
 >   defect committed by the guard against it.
 >
 > ⭐ **The hermetic boundary is where the plan's "pair it with an independent property"
-> actually lands.** `gate.sh` is hermetic by construction, so the corpus half *cannot* live
+> actually lands.** `api-cloudrun/scripts/gate.sh` is hermetic by construction, so the corpus half *cannot* live
 > in the test — it stays in the script. That is not a compromise; it is the reason the two
 > halves are two artifacts.
 >
