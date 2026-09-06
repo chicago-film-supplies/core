@@ -9,5 +9,20 @@ deno task test
 echo "pre-push: citations"
 deno task audit:citations
 
+# 🔴 The OTHER direction. The audit above checks the citations THIS repo owns,
+# pointing outward; nothing checked citations pointing IN. So a rename here leaves
+# this gate green while sibling repos that cite the old path go red — and the repo
+# whose gate breaks is never the repo whose commit broke it.
+#
+# Measured 2026-09-05: manager relocating `src/**/__tests__/` to `tests/` left 2
+# broken citations in THIS repo and 11 in api-cloudrun, both gates red, found
+# hours apart by two sessions arriving at a blocked commit.
+#
+# ⚠️ Exits 0 with a SKIPPED notice when fewer than two siblings are checked out —
+# a lone checkout is legitimate and must not fail, but it never reports "0 broken"
+# either. CI can never run this: it checks out one repo.
+echo "pre-push: inbound citations"
+deno task audit:citations:inbound
+
 echo "pre-push: publish dry-run"
 deno publish --dry-run --allow-dirty
