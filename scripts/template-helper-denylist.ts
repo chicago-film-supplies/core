@@ -370,6 +370,31 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "fulfillment-items": [
     "rebuildFulfillmentItems",
   ],
+  // The whole CUSTODY model, denylisted wholesale. A template renders a
+  // document that has already been written; none of these answers a question
+  // about the page. Two of them would be actively misleading in a helper panel
+  // — `actionAlternatesForBooking` and `regressionAlternatesForBooking` state
+  // which transitions are LEGAL, which is a warehouse decision and not a
+  // rendering one — and a `fulfillments`-sourced family has no bookings to ask
+  // about in the first place: `it.fulfillments` is a namespace over the
+  // document's items and destinations.
+  "fulfillment-stage": [
+    "actionAlternatesForBooking",
+    "actionableQtyTowardTarget",
+    "bookingsComplete",
+    "bucketsForBookingSide",
+    "bucketsForStageSide",
+    "canPrepCheckout",
+    "checkoutUnits",
+    "checkoutableQuantity",
+    "getStageForBookings",
+    "naturalNextActionForBooking",
+    "partitionByStage",
+    "qtyOnStageSide",
+    "regressionAlternatesForBooking",
+    "returnableQuantity",
+    "sourceBucketSizeForBooking",
+  ],
   // `deriveName` stays visible — joining name parts into a display string is
   // exactly what a rendered document does with a contact. Its inverse does not:
   // `splitFullName` PARSES free text into parts, which is a write-path concern

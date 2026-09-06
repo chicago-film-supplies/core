@@ -166,7 +166,13 @@
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports all three, so existing importers are unaffected."
+          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
+        },
+        {
+          "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_LABELS",
+          "declaration": "const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;",
+          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly\nthe drift the repo's *\"columns are declared, not generated\"* rule exists to\nstop, and the two had already diverged on `out` (\"Out\" here, \"Checked Out\"\nthere). The picker's wording won: it is the operator-facing surface and it\nmatches `FULFILLMENT_STAGE_LABELS.checkout` (\"Check Out\"). Nothing asserted\neither string.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
         },
         {
           "kind": "variable",
@@ -5897,7 +5903,13 @@
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports all three, so existing importers are unaffected."
+          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
+        },
+        {
+          "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_LABELS",
+          "declaration": "const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;",
+          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly\nthe drift the repo's *\"columns are declared, not generated\"* rule exists to\nstop, and the two had already diverged on `out` (\"Out\" here, \"Checked Out\"\nthere). The picker's wording won: it is the operator-facing surface and it\nmatches `FULFILLMENT_STAGE_LABELS.checkout` (\"Check Out\"). Nothing asserted\neither string.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
         },
         {
           "kind": "variable",
@@ -10238,7 +10250,13 @@
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
           "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports all three, so existing importers are unaffected."
+          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
+        },
+        {
+          "kind": "variable",
+          "name": "BOOKING_BREAKDOWN_LABELS",
+          "declaration": "const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;",
+          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly\nthe drift the repo's *\"columns are declared, not generated\"* rule exists to\nstop, and the two had already diverged on `out` (\"Out\" here, \"Checked Out\"\nthere). The picker's wording won: it is the operator-facing surface and it\nmatches `FULFILLMENT_STAGE_LABELS.checkout` (\"Check Out\"). Nothing asserted\neither string.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
         },
         {
           "kind": "variable",
@@ -11556,6 +11574,192 @@
           "name": "rebuildFulfillmentItems",
           "signature": "rebuildFulfillmentItems(storedItems: readonly FulfillmentItemType[], submitted: readonly FulfillmentLineItemType[]): FulfillmentItemType[]",
           "doc": "Rebuild the items array from the stored document and a picker submission.\n\nStructure and sequence come from `storedItems`; membership, quantities and\nsubstitutions come from `submitted`. The result is a function of\n*(stored order, submitted set)* — **the order lines arrive in does not affect\nit**, which is the property the two previous implementations both lacked.\n\n- A stored line whose path the submission still carries is kept, in place,\n  carrying the submitted line's values.\n- A stored line the submission drops is removed.\n- A submitted line with no stored counterpart is a substitution: it is placed\n  immediately after the line named by its `path_substituted_for`, which is\n  where its parentage comes from. Several substitutions against one anchor\n  keep their submitted order relative to each other.\n- Structural items are never taken from the submission — the picker does not\n  own them, and the API strips them from the request body.\n\n`computeItemPaths` runs last and remains the ONE author of `path`; this\nfunction only decides the sequence it reads.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/fulfillment-stage",
+      "moduleDoc": "The **custody model** — where a booking's units are right now, what may move\nthem next, and which transitions are legal.\n\n```ts\nimport {\n  checkoutableQuantity,\n  getStageForBookings,\n  qtyOnStageSide,\n} from \"@cfs/core/utils/fulfillment-stage\";\n```\n\n## Why this is in core rather than in the picker\n\nMoved here from `manager/src/utils/fulfillmentStage.ts`, now deleted — ~430\nlines of pure domain logic over `Booking`/`Fulfillment` with no Firestore and\nno Solid in it, which used to live in `manager` only because it was first\nwritten for the picker's two-column surface. Meanwhile the **terminal** end of\nthe same model was already shared (`isBookingClosed` / `isOrderBookingsClosed`\nin `./bookings.ts`, imported by `api-cloudrun/src/services/orderFinalize.ts`)\nand the **in-flight** end was stated twice, in two vocabularies: the API said\nit in *status* terms (`isCheckoutable`), the picker in *bucket* terms\n(`checkoutableQuantity`). {@link checkoutableQuantity} is now the one author\nand both sides call it.\n\n⚠️ **This area already has the scar.** `rebuildFulfillmentItems`\n(`./fulfillment-items.ts`) lives in core *because a copy drifted*, and\n`isFulfillmentLineItem` was a character-for-character twin\n(api-cloudrun#674). The next consumer is the server's freeze predicate — a\ncustody question — and a server-authored copy of it would drift from the one\nthe picker uses to decide what is editable.\n\n## `source` / `target`, not `col1` / `col2`\n\nThe vocabulary this module was written in named a LAYOUT (\"column 1\", \"column\n2\"), which is why the model read as UI code. The concept is\n**current-state vs target-state for a stage** — exactly {@link STAGE_SOURCE}\nand {@link STAGE_TARGET} restated — so it is spelled that way here. Deciding\nhow many columns to draw, and which of them to hide, stays in `manager`\n(`visibleBucketsForColumn`, `rollUpColumn`).",
+      "symbols": [
+        {
+          "kind": "typeAlias",
+          "name": "ActionableStage",
+          "declaration": "type ActionableStage = Exclude<FulfillmentStage, \"quoted\" | \"complete\">;",
+          "doc": "The three stages that actually move quantity. `quoted` is pre-reserve and\n`complete` is terminal, so neither has a source or target bucket — which is\nwhy {@link STAGE_SOURCE} and {@link STAGE_TARGET} are keyed on this subset\nrather than on {@link FulfillmentStage}, and why every consumer has to\ndispatch on the two ends explicitly rather than reading a missing key."
+        },
+        {
+          "kind": "variable",
+          "name": "FULFILLMENT_STAGES",
+          "declaration": "const FULFILLMENT_STAGES: \"quoted\" | \"prep\" | \"checkout\" | \"return\" | \"complete\"[];",
+          "doc": "Workflow stages for the fulfillment route, in lifecycle order. Each\nnon-terminal stage moves quantity from a source breakdown bucket to a target\nbucket:\n\n  prep      reserved   →  prepped\n  checkout  prepped    →  out\n  return    out        →  returned (with split to lost / damaged)\n  complete  —          —  (terminal — nothing pending)\n  quoted    —          —  (pre-reserve — order not yet reserved)\n\n`quoted` is the pre-reservation bucket: it surfaces a booking whose qty is\nstill quoted (order status < reserved). Reserving the order moves that qty\ninto `reserved` and the booking enters the prep→checkout→return flow.\n`part-prepped` is a booking *status*, not a bucket — partial prep is encoded\nby `prepped > 0` co-existing with `reserved > 0` on the same booking.\n\nType-awareness (matches {@link isBookingClosed} in `./bookings.ts`): `out` is\nin-flight (needs return) only for `rental` bookings. For any other type\n(`sale`, defensively `service`/`surcharge`) `out` is terminal — checkout is\ndelivery and the units don't come back, so a non-rental `out` does not hold\nthe destination open and renders on the done side. The Return/Lost/Damaged\nactions stay *available* on it (a sold item can be returned for credit / lost\nin transit), just not required for closure."
+        },
+        {
+          "kind": "variable",
+          "name": "FULFILLMENT_STAGE_LABELS",
+          "declaration": "const FULFILLMENT_STAGE_LABELS: Record<FulfillmentStage, string>;",
+          "doc": "Display label per stage.\n\nDeclared beside the stage enum for the same reason\n`BOOKING_BREAKDOWN_LABELS` is declared beside `BookingBreakdownSchema`: the\nmodel and its display names get one home, so a fifth stage cannot be added\nwithout naming it."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "FulfillmentActionAlternate",
+          "declaration": "type FulfillmentActionAlternate = FulfillmentForwardAlternate | FulfillmentRegressionAlternate;",
+          "doc": "Either direction of override a picker may pick for a row."
+        },
+        {
+          "kind": "interface",
+          "name": "FulfillmentForwardAlternate",
+          "declaration": "interface FulfillmentForwardAlternate {\n  kind: \"forward\";\n  stage: FulfillmentStage;\n  label: string;\n  returnTo?: \"returned\" | \"lost\" | \"damaged\";\n}",
+          "doc": "Forward action alternate — moves qty from the booking's natural source\nbucket to a later bucket. From any non-terminal source the user can skip\nahead (e.g. reserved → out, or out → lost / damaged)."
+        },
+        {
+          "kind": "interface",
+          "name": "FulfillmentRegressionAlternate",
+          "declaration": "interface FulfillmentRegressionAlternate {\n  kind: \"regression\";\n  fromBucket: \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\";\n  toBucket: \"reserved\" | \"prepped\" | \"out\";\n  label: string;\n}",
+          "doc": "Regression alternate — moves qty one step back from a later bucket.\nUsed by target-side \"current state\" rows to undo over-eager transitions\n(e.g. accidentally checked out, or marked returned in error).\n\nBucket flow (one step back, terminals reversible):\n  returned/lost/damaged → out\n  out                   → prepped\n  prepped               → reserved"
+        },
+        {
+          "kind": "typeAlias",
+          "name": "FulfillmentStage",
+          "declaration": "type FulfillmentStage = indexedAccess;",
+          "doc": "One workflow stage of the fulfillment route."
+        },
+        {
+          "kind": "variable",
+          "name": "STAGE_SOURCE",
+          "declaration": "const STAGE_SOURCE: Record<ActionableStage, BookingBreakdownKeyType>;",
+          "doc": "The bucket a stage's action pulls FROM."
+        },
+        {
+          "kind": "variable",
+          "name": "STAGE_TARGET",
+          "declaration": "const STAGE_TARGET: Record<ActionableStage, BookingBreakdownKeyType>;",
+          "doc": "The bucket a stage's action pushes INTO."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "StageSide",
+          "declaration": "type StageSide = \"source\" | \"target\";",
+          "doc": "Which end of a stage a question is about — the units as they stand now\n(`source`) or the units already past it (`target`).\n\nThe picker renders these as two columns, and that is where the old `\"col1\"` /\n`\"col2\"` spelling came from; the concept is not a layout."
+        },
+        {
+          "kind": "function",
+          "name": "actionAlternatesForBooking",
+          "signature": "actionAlternatesForBooking(b: Pick<Booking, \"type\" | \"breakdown\">): FulfillmentForwardAlternate[]",
+          "doc": "The full list of forward override alternates for a row, in the popover's\ndisplay order. The natural next action is always first.\n\n🔴 **Which transitions are LEGAL is a domain question, not a menu.** No\nserver-side transition validation exists today, so this list is currently the\nonly statement of the rule anywhere; it is in core so the server has one\nanswer to check a submitted movement against rather than inventing a second.\n\nA non-rental booking that has reached `out` is *closed* (no required next\naction) but still exposes Return/Lost/Damaged — a sold item can be returned\nfor credit and lost/damaged-in-transit is real (see `isBookingClosed` in\n`./bookings.ts`). So we still offer the terminal alternates whenever the\nbooking has `out > 0`, regardless of type; they're just no longer the default.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "actionableQtyTowardTarget",
+          "signature": "actionableQtyTowardTarget(b: Pick<Booking, \"type\" | \"breakdown\">, target: FulfillmentStage): number",
+          "doc": "The qty a forward action toward `target` moves for this booking — the picker\ndefault + max, the per-row action qty, and the bulk \"Action All\" amount.\n\nprep / checkout — SKIP-AHEAD: qty comes from the booking's natural (earliest\n  non-empty non-terminal) source bucket — exactly what `computeBookingTransition`\n  moves — provided the booking exposes a forward alternate reaching `target`.\n  So \"Check Out All\" sweeps reserved units straight to `out`, while an already\n  prepped-only booking is excluded from \"Prep All\" (no `prep` alternate),\n  keeping today's Auto behavior.\n\nreturn — NOT skip-ahead: `computeBookingTransition` pulls from the earliest\n  non-empty bucket, so `out` can only be returned once `reserved`/`prepped` are\n  clear. We therefore act only when the booking's natural next action IS\n  `return` (rental, `out` is the current bucket). This preserves the invariant\n  that bulk Return never sweeps a non-rental's terminal `out` (its natural next\n  is `complete`) nor still-prepped/reserved qty — those stay deliberate\n  per-item menu choices.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "bookingsComplete",
+          "signature": "bookingsComplete(bookings: ReadonlyArray<Pick<Booking, \"type\" | \"breakdown\">>): boolean",
+          "doc": "Whether every booking in the set has reached a terminal/closed state.\n\nA named alias for {@link isOrderBookingsClosed}, kept because the picker asks\nthe question of an arbitrary SUBSET (one destination's bookings) rather than\nof an order.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "bucketsForBookingSide",
+          "signature": "bucketsForBookingSide(b: Pick<Booking, \"type\">, stage: FulfillmentStage, side: StageSide): BookingBreakdownKeyType[]",
+          "doc": "Per-booking side membership — the type-aware variant. Non-rental `out` is\nterminal, so it moves from the pending side to the done side (matching\n`isBookingClosed`'s rental-only `out` gate in `./bookings.ts`).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "bucketsForStageSide",
+          "signature": "bucketsForStageSide(stage: FulfillmentStage, side: StageSide): BookingBreakdownKeyType[]",
+          "doc": "The type-agnostic buckets belonging to one side of a stage, in display order.\nUsed for the section-level fallback label and as the base for the per-booking\noverride.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "canPrepCheckout",
+          "signature": "canPrepCheckout(status: indexedAccess | undefined): boolean",
+          "doc": "Whether the prep/checkout actions are available for a fulfillment's status.\nThose advance reserved→prepped→out, so they require the order to be reserved\n(or already in-flight/active). Draft/quoted orders aren't reservable from the\nfulfillment route — reserve the order first. (Return/Lost/Damaged actions are\nNOT gated by this — a checked-out rental always needs returning.)\n\n`canceled` follows `complete` in the status enum, so this is an explicit\nmembership test, not an ordinal `>= reserved` comparison.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkoutUnits",
+          "signature": "checkoutUnits(b: Pick<Booking, \"breakdown\">): number",
+          "doc": "Units one check-out moves for this booking — everything reserved or staged,\nignoring status.\n\n⚠️ **Not a substitute for {@link checkoutableQuantity}, which is the\nquestion a caller asking \"may I?\" wants.** This is the *arithmetic* half,\nsplit out because three api-cloudrun sites need the quantity on a booking\nthey have already decided about: `checkoutRow` builds the patch that applies\nit, and the cross-order pre-flight sums it per product to size the ledger\ndraw-down. Each of those open-coded `reserved + prepped` before this existed.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkoutableQuantity",
+          "signature": "checkoutableQuantity(b: Pick<Booking, \"status\" | \"breakdown\">): number",
+          "doc": "Units of this booking a worker can actually take OUT — everything reserved or\nstaged, which is exactly what one check-out moves, and zero when the\nbooking's status says it may not move at all.\n\n🔴 **ONE author, and the two consumers behave OPPOSITELY on a failure.**\napi-cloudrun's `checkoutOrder` **filters** on this — it called\n`readOrderBookings` to DISCOVER its work, so a row that fails the predicate\nis simply not part of the job. The cross-order form (`POST /checkouts`) was\nTOLD its rows and must **refuse** instead: silently dropping one would report\nsuccess for units still sitting on the shelf, and it fails the whole request\nrather than part of it. A client that offers a row the server would refuse\ntherefore turns one bad tick into a failed cart, with the picker standing at\na shelf with no idea which line did it. That is why the picker asks this same\nfunction — two behaviours, one predicate, the thing that must not fork.\n\n⚠️ **The STATUS half is the part that is easy to drop, and it is load-bearing\non its own.** A per-row partial checkout leaves a booking `active` with\n`reserved > 0` — units present, and the server will not take them. Testing\nthe breakdown alone would offer exactly that row. `part-prepped` is admitted\nalongside `prepped` because a partial prep is an ordinary state: some units\nstaged, the rest still reserved, and both move.\n\n🔴 **Never a partial.** `checkoutRow` moves `reserved + prepped` wholesale and\naccepts no quantity, so this is a row-level yes/no and the cart has no\nquantity input. Peeling units off a line is the per-order path's job\n(`applyBookingActions`), which takes a qty per action.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getStageForBookings",
+          "signature": "getStageForBookings(bookings: ReadonlyArray<Pick<Booking, \"type\" | \"breakdown\">>): FulfillmentStage",
+          "doc": "Determine the current workflow stage for a set of bookings. The stage is the\nearliest non-empty actionable source bucket across all bookings — if anything\nis still reserved we're prepping; if everyone is past reserved but anything is\nprepped we're checking out; if any *rental* is out we're returning. With no\nactionable work left, a still-`quoted` booking surfaces the pre-reserve state,\notherwise the section is complete.\n\nDestination-agnostic — pass any subset of bookings.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "naturalNextActionForBooking",
+          "signature": "naturalNextActionForBooking(b: Pick<Booking, \"type\" | \"breakdown\">): FulfillmentStage",
+          "doc": "The natural next action for a given booking based on its own breakdown. Used\nto label the per-row action button. A non-rental sitting in `out` has no\n*required* next action (delivery is terminal) → `complete`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "partitionByStage",
+          "signature": "partitionByStage(bookings: readonly T[], stage: FulfillmentStage): typeLiteral",
+          "doc": "Partition bookings by whether they still hold quantity in the stage's source\nbucket. `complete` and `quoted` have no source bucket, so everything lands on\nthe target side.\n\n⚠️ **No caller yet.** It had none in `manager` either when it moved here — the\npicker classifies per ROW (`fulfillmentClassify.ts`) rather than per booking.\nIt is kept because the row-scoped freeze predicate the server needs next\n(api-cloudrun#880) is exactly this question asked of one document's bookings;\nif that increment does not reach for it, delete it rather than leaving it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "qtyOnStageSide",
+          "signature": "qtyOnStageSide(b: Pick<Booking, \"type\" | \"breakdown\">, stage: FulfillmentStage, side: StageSide): number",
+          "doc": "Sum of a booking's qty in the buckets belonging to one side of a stage\n(type-aware). `> 0` means the row appears on that side.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "regressionAlternatesForBooking",
+          "signature": "regressionAlternatesForBooking(b: Pick<Booking, \"breakdown\">): FulfillmentRegressionAlternate[]",
+          "doc": "Regression alternates — one entry per non-empty target-side bucket on the\nbooking. Order mirrors the natural undo priority (terminals first, then out,\nthen prepped). The popover's \"default\" entry is the first; the rest live in\nthe menu.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "returnableQuantity",
+          "signature": "returnableQuantity(b: Pick<Booking, \"type\" | \"breakdown\">): number",
+          "doc": "Units of this booking a worker can actually check IN — its `out` quantity,\nbut only when `out` is in-flight.\n\n🔴 **A non-rental `out` is TERMINAL and must never be offered for return.**\nFor a `sale`, checkout IS delivery: the units do not come back, and `out` is\nwhere they permanently rest. Offering a sale row on a check-in surface lets a\nworker \"return\" sold goods, which writes stock back into inventory that was\nnever coming — and it is invisible afterwards, because the booking looks\nexactly like a returned rental.\n\nThis is not hypothetical. The fulfillments campaign planned a repair that\nwould have moved `out → returned` on every terminal booking; measured, **all\n380 prod bookings with a terminal `out > 0` were sales**, and complete\nrentals with `out > 0` numbered 0. That one-shot would have asserted 23,440\nunits of sold goods back into stock. The plan's own audit could not have\ncaught it — 379 of the 380 carry no custody event at all, so it classifies\nthem `no_events` and skips them by design.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "sourceBucketSizeForBooking",
+          "signature": "sourceBucketSizeForBooking(b: Pick<Booking, \"type\" | \"breakdown\">): number",
+          "doc": "The size of the \"source\" bucket for a row's natural next action — also the\ndefault qty for the action's input. Reducing it creates a partial transition\n(e.g. 3-of-5 prepped, or 2 returned + 1 lost).",
           "paramTags": [],
           "returnsTag": null
         }

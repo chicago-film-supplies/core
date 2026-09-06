@@ -45,15 +45,46 @@ export interface BookingBreakdown {
   returned: number;
 }
 
+/**
+ * Display label per breakdown bucket — the ONE declaration, read both by the
+ * `.meta({ column: true, label })` annotations below (which drive every
+ * collection-table heading) and by the warehouse picker's column headers.
+ *
+ * ⚠️ **It is declared as a table rather than inline on each `.meta()` because
+ * the picker had its own copy.** The now-deleted
+ * `manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`
+ * restating all seven — which is exactly
+ * the drift the repo's *"columns are declared, not generated"* rule exists to
+ * stop, and the two had already diverged on `out` ("Out" here, "Checked Out"
+ * there). The picker's wording won: it is the operator-facing surface and it
+ * matches `FULFILLMENT_STAGE_LABELS.checkout` ("Check Out"). Nothing asserted
+ * either string.
+ *
+ * ⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could
+ * read these back off the schema, but `BookingBreakdownSchema` is annotated
+ * `z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the
+ * result is typed `unknown`. A shared literal in the one file that owns the
+ * declaration is the same guarantee with none of that.
+ */
+export const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string> = {
+  quoted: "Quoted",
+  reserved: "Reserved",
+  prepped: "Prepped",
+  out: "Checked Out",
+  returned: "Returned",
+  lost: "Lost",
+  damaged: "Damaged",
+};
+
 /** Zod schema for BookingBreakdown. */
 export const BookingBreakdownSchema: z.ZodType<BookingBreakdown> = z.strictObject({
-  damaged: z.int().meta({ column: true, label: "Damaged" }),
-  lost: z.int().meta({ column: true, label: "Lost" }),
-  out: z.int().meta({ column: true, label: "Out" }),
-  prepped: z.int().meta({ column: true, label: "Prepped" }),
-  quoted: z.int().meta({ column: true, label: "Quoted" }),
-  reserved: z.int().meta({ column: true, label: "Reserved" }),
-  returned: z.int().meta({ column: true, label: "Returned" }),
+  damaged: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.damaged }),
+  lost: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.lost }),
+  out: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.out }),
+  prepped: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.prepped }),
+  quoted: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.quoted }),
+  reserved: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.reserved }),
+  returned: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.returned }),
 });
 
 /**
@@ -63,7 +94,7 @@ export const BookingBreakdownSchema: z.ZodType<BookingBreakdown> = z.strictObjec
  * These live beside the schema rather than in `utils/bookings.ts` because
  * schema modules cannot import utils (the dependency runs strictly one way) and
  * the movement journal needs the key union to type a custody transition.
- * `utils/bookings.ts` re-exports all three, so existing importers are unaffected.
+ * `utils/bookings.ts` re-exports them, so existing importers are unaffected.
  */
 export const BOOKING_BREAKDOWN_KEYS = [
   "quoted", "reserved", "prepped", "out", "returned", "lost", "damaged",

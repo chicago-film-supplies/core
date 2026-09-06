@@ -61,6 +61,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "fulfillment-items": [
 
   ],
+  "fulfillment-stage": [
+
+  ],
   "fulfillments": [
     { name: "buildPackingList", expr: "it.fulfillments.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
     { name: "consolidateItems", expr: "it.fulfillments.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities.", returns: "ConsolidatedItem[]" },

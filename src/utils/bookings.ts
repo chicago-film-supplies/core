@@ -17,7 +17,8 @@
 import type { Booking, ComponentTypeType, Order, OrderStatusType } from "../schemas/mod.ts";
 
 /**
- * The breakdown key constants now live beside `BookingBreakdownSchema` in
+ * The breakdown key constants and their display labels live beside
+ * `BookingBreakdownSchema` in
  * `schemas/booking.ts`, because the movement journal's custody axis is typed on
  * them and schema modules cannot import utils (the dependency runs strictly one
  * way). Re-exported here so `@cfs/core/utils/bookings` stays their address for
@@ -25,6 +26,7 @@ import type { Booking, ComponentTypeType, Order, OrderStatusType } from "../sche
  */
 export {
   BOOKING_BREAKDOWN_KEYS,
+  BOOKING_BREAKDOWN_LABELS,
   BOOKING_BREAKDOWN_TERMINAL_KEYS,
   BookingBreakdownKeyEnum,
   type BookingBreakdownKeyType,

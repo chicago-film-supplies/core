@@ -35,6 +35,7 @@ import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as fulfillmentUtils from "../src/utils/fulfillments.ts";
 import * as fulfillmentItemUtils from "../src/utils/fulfillment-items.ts";
+import * as fulfillmentStageUtils from "../src/utils/fulfillment-stage.ts";
 import * as locationUtils from "../src/utils/locations.ts";
 import * as moneyUtils from "../src/utils/money.ts";
 import * as movementUtils from "../src/utils/movements.ts";
@@ -83,6 +84,12 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // Listed so the drift guard sees its exports rather than the generator
   // emitting them into the editor's helper panel.
   "fulfillment-items": fulfillmentItemUtils,
+  // Same exception again: `utils/fulfillment-stage.ts` is the CUSTODY model —
+  // where a booking's units are, what may move them, which transitions are
+  // legal. A template renders a document, not a warehouse decision, and a
+  // fulfillment template has no bookings to ask about in the first place.
+  // Listed so the drift guard sees its exports.
+  "fulfillment-stage": fulfillmentStageUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,
