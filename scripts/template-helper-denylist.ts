@@ -407,6 +407,22 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "contact-name": [
     "splitFullName",
   ],
+  // The substitution predicates, denylisted wholesale. They answer *"is this
+  // row's absence or presence explained by a substitution?"* — a question about
+  // reconciling two documents at WRITE time. A template renders one document
+  // that has already been written and reconciled, so there is no second side to
+  // compare against and nothing to call these with. Same reasoning as
+  // `fulfillment-items` above: the module is walked so the drift guard sees its
+  // exports, not because a template can use them.
+  substitutions: [
+    "collectSubstitutionAnchors",
+    "findSubtreeAnchor",
+    "isAtOrBelow",
+    "isInSubstitutedSubtree",
+    "isRemovedBySubstitution",
+    "isStrictlyBelow",
+    "isSubstitutionRow",
+  ],
   // No `it.dates.*` exports are hidden today.
   dates: [],
 };

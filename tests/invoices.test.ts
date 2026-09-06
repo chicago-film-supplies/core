@@ -788,6 +788,239 @@ Deno.test("projection: `coa_revenue` inherits but changes NO sync verdict", () =
   );
 });
 
+// ── Substitution on an invoice (manager#399) ────────────────────
+//
+// 🔴 **8 of these 9 arms FAILED against `HEAD`** — measured by copying this file
+// over a `git archive HEAD` checkout of `src/` and running it there
+// (`--no-check`, since two arms do not even COMPILE at HEAD: `InvoiceItem` had
+// no `path_substituted_for`). An arm that passes both ways tests nothing, so
+// the exception is named rather than left to be noticed:
+//
+// ⚠️ **"the WHOLE resync still snaps back to the order" passes at HEAD ON
+// PURPOSE.** It is the complement — a regression guard on behaviour that must
+// NOT change, because the operator's hard snap-to-order is the escape hatch out
+// of a substitution. Its value is that it would go red if a later, broader
+// "substitutions always survive" fix took the hatch away.
+//
+// The one that matters is the first, and it is the whole reason this section
+// exists — with the order UNCHANGED (`prev === new`):
+//
+// ```
+// BEFORE  invoice lines: [ "Light Y" ]
+// AFTER   invoice lines: [ "Light X" ]
+// ```
+//
+// An invoice substitution lasted exactly until the next save of its order.
+
+/** Y — the replacement product, at X's position under the same destination. */
+const ITEM_Y = ITEM_2;
+/** A component of Y, so a KIT substitution is covered and not just a bare line. */
+const ITEM_Y_COMPONENT = "Item0000000000000003";
+/** A sibling line that is not part of the substitution at all. */
+const ITEM_SIBLING = "Item0000000000000009";
+
+/** The invoice's Y row: a projected line plus the divergence record. */
+function substitutedLine(): InvoiceDocItemType {
+  return {
+    ...buildOrderScopedItems(
+      [orderShapedLine({ uid: ITEM_Y, name: "Light Y", path: [DEST_1, ITEM_Y] })],
+      ORDER_DIV_1,
+    )[0],
+    path_substituted_for: [DEST_1, ITEM_1],
+  } as unknown as InvoiceDocItemType;
+}
+
+const lineNames = (items: readonly { name: string }[]) => items.map((i) => i.name);
+
+Deno.test("substitution: an unchanged order does not undo it", () => {
+  // The whole defect in one arm — `prev === new`, so nothing about the order
+  // moved, and the naive form still restored X and dropped Y. Both halves of
+  // the path match miss, and each misses toward reverting the operator.
+  const orderX = orderShapedLine();
+  const result = syncOrderToInvoiceSelective([orderX], [orderX], [substitutedLine()], ORDER_DIV_1);
+
+  assertEquals(lineNames(result), ["Light Y"]);
+  assertEquals(
+    (result[0] as InvoiceItem).path_substituted_for,
+    [DEST_1, ITEM_1],
+    "the divergence record survives the sync — it is what makes the next one work too",
+  );
+});
+
+Deno.test("substitution: Y's subtree lands in X's POSITION, not at the tail", () => {
+  // An items array's order is meaning, so a substitution that appends Y after
+  // every other line is wrong even though the set of lines is right. This is
+  // also the kit case: Y's component exists on no order line at all.
+  const sibling = orderShapedLine({
+    uid: ITEM_SIBLING,
+    name: "Before",
+    path: [DEST_1, ITEM_SIBLING],
+  });
+  const orderItems = [sibling, orderShapedLine()];
+  const invoiceItems = [
+    buildOrderScopedItems([sibling], ORDER_DIV_1)[0],
+    substitutedLine(),
+    buildOrderScopedItems(
+      [orderShapedLine({
+        uid: ITEM_Y_COMPONENT,
+        name: "Y bulb",
+        path: [DEST_1, ITEM_Y, ITEM_Y_COMPONENT],
+      })],
+      ORDER_DIV_1,
+    )[0],
+  ];
+
+  assertEquals(
+    lineNames(syncOrderToInvoiceSelective(orderItems, orderItems, invoiceItems, ORDER_DIV_1)),
+    ["Before", "Light Y", "Y bulb"],
+  );
+});
+
+Deno.test("substitution: an unrelated order edit still propagates around it", () => {
+  // ⚠️ The failure mode this rules out is the OPPOSITE one — a substitution arm
+  // that protects Y by freezing the whole scope. The sibling's quantity has to
+  // reach the invoice while Y stays put.
+  const sibling = orderShapedLine({
+    uid: ITEM_SIBLING,
+    name: "Before",
+    path: [DEST_1, ITEM_SIBLING],
+  });
+  const prev = [sibling, orderShapedLine()];
+  const next = [{ ...sibling, quantity: 7 }, orderShapedLine()];
+  const result = syncOrderToInvoiceSelective(
+    prev,
+    next,
+    [buildOrderScopedItems([sibling], ORDER_DIV_1)[0], substitutedLine()],
+    ORDER_DIV_1,
+  );
+
+  assertEquals(lineNames(result), ["Before", "Light Y"]);
+  assertEquals((result[0] as InvoiceItem).quantity, 7, "the sibling must still sync");
+});
+
+Deno.test("substitution: graduation REMOVES the key, it does not null it", () => {
+  // The admin makes the same swap on the order, so there is no divergence left
+  // to record and the line goes back to syncing normally.
+  //
+  // ⚠️ Asserted as key ABSENCE. An earlier form of this arm compared against
+  // `undefined` through `JSON.stringify`, which renders `undefined` and `null`
+  // identically inside an array — so a null-valued key would have passed, and
+  // `null` is exactly what `z.array(ItemUid).optional()` refuses.
+  const orderY = orderShapedLine({ uid: ITEM_Y, name: "Light Y", path: [DEST_1, ITEM_Y] });
+  const result = syncOrderToInvoiceSelective(
+    [orderShapedLine()],
+    [orderY],
+    [substitutedLine()],
+    ORDER_DIV_1,
+  );
+
+  assertEquals(lineNames(result), ["Light Y"]);
+  assertEquals("path_substituted_for" in (result[0] as object), false);
+  const parsed = InvoiceDocLineItemSchema.safeParse(result[0]);
+  assertEquals(
+    parsed.success,
+    true,
+    JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2),
+  );
+});
+
+Deno.test("substitution: a DANGLING anchor still bills Y", () => {
+  // The admin deletes X from the order outright rather than substituting. Now
+  // nothing resolves `path_substituted_for` — but Y is still the line the
+  // operator chose to bill, and the record of why is still the only explanation
+  // for it being there. It is locked at substitution time and never re-derived.
+  assertEquals(
+    lineNames(syncOrderToInvoiceSelective([orderShapedLine()], [], [substitutedLine()], ORDER_DIV_1)),
+    ["Light Y"],
+  );
+});
+
+Deno.test("substitution: the WHOLE resync still snaps back to the order", () => {
+  // ⚠️ The complement of every arm above, and it must stay red-adjacent: the
+  // operator's hard snap-to-order is documented to discard overrides and drop
+  // lines the order no longer has. A substitution is an override, so discarding
+  // it is the requested behaviour — only the AUTOMATIC per-save sync has to be
+  // non-destructive. An arm asserting "Y always survives" would have quietly
+  // taken the escape hatch away.
+  const invoiceItems = [
+    { uid: ORDER_DIV_1, type: "order", name: "Order #1", path: [], description: "" },
+    substitutedLine(),
+  ] as InvoiceDocItemType[];
+
+  assertEquals(
+    lineNames(
+      syncOrderItems(invoiceItems, [orderShapedLine()], ORDER_DIV_1).filter((i) => i.type !== "order"),
+    ),
+    ["Light"],
+  );
+});
+
+Deno.test("substitution: the sync badge reads the pair as tracked, not as drift", () => {
+  // 🔴 One deliberate operator edit produced TWO permanent `out_of_sync` rows
+  // before this: X is missing from the invoice and Y matches no order line. No
+  // resync could ever clear them — the per-line one would undo the
+  // substitution.
+  const status = computeInvoiceSyncStatus(
+    [substitutedLine() as InvoiceItem],
+    [orderShapedLine()],
+    ORDER_DIV_1,
+    { taxNameByUid: new Map(), orderFrozen: false },
+  );
+
+  assertEquals([...status.values()], ["in_sync"]);
+  assertEquals(
+    status.size,
+    1,
+    "X gets no entry at all — there is no invoice row to badge, and a phantom one invites a resync that would revert the substitution",
+  );
+});
+
+Deno.test("substitution: order↔invoice coverage reports neither half as an anomaly", () => {
+  // The order-first view has the same two false alarms from the other side: X
+  // reads `uninvoiced` and Y reads `unmatched`, and no operator action clears
+  // either.
+  const coverage = computeOrderInvoiceCoverage(
+    ORDER_DIV_1,
+    [orderShapedLine()],
+    [{
+      uid: "inv1",
+      status: "draft",
+      items: [
+        { uid: ORDER_DIV_1, type: "order", name: "Order #1", path: [], description: "" } as unknown as InvoiceItem,
+        substitutedLine() as InvoiceItem,
+      ],
+    }],
+  );
+
+  assertEquals(
+    [coverage.uninvoiced.length, coverage.unmatched.length, coverage.unaligned.length],
+    [0, 0, 0],
+  );
+});
+
+Deno.test("substitution: the divergence record is invoice-owned, so it is not drift", () => {
+  // `path_substituted_for` is in INVOICE_ONLY_ITEM_FIELDS, which is what stops
+  // the field that EXPLAINS the divergence from itself being reported as one.
+  // The `crms_id` incident is the standing case: a comparable field present on
+  // one side only reported the whole corpus `out_of_sync`, with nothing thrown.
+  const orderY = orderShapedLine({ uid: ITEM_Y, name: "Light Y", path: [DEST_1, ITEM_Y] });
+  assertEquals(
+    invoiceItemDifferences(
+      projectOrderItemToInvoiceItem(orderY, ORDER_DIV_1) as InvoiceItem,
+      substitutedLine() as InvoiceItem,
+    ),
+    [],
+  );
+  // …and it is carried across a rebuild rather than dropped.
+  assertEquals(
+    (carryForwardOverrides(
+      buildOrderScopedItems([orderY], ORDER_DIV_1),
+      [substitutedLine() as InvoiceItem],
+    )[0] as InvoiceItem).path_substituted_for,
+    [DEST_1, ITEM_1],
+  );
+});
+
 // ── calculateInvoiceTotals ─────────────────────────────────────
 
 const TAXES: Tax[] = [

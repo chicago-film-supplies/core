@@ -1875,7 +1875,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItem",
-          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n}",
+          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -1941,7 +1941,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItemSchema`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -6640,7 +6640,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItem",
-          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n}",
+          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -6700,7 +6700,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItemSchema`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -10666,7 +10666,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  path_substituted_for?: string[];\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPrice from schemas to avoid type drift."
         },
         {
@@ -10925,7 +10925,7 @@
           "kind": "function",
           "name": "computeInvoiceSyncStatus",
           "signature": "computeInvoiceSyncStatus(currentInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string, context: InvoiceSyncContext): Map<string, \"in_sync\" | \"out_of_sync\">",
-          "doc": "Derive each order-scoped invoice line's sync status against the CURRENT order\nprojection — no stored flag (minimal-state, derived). A line is `out_of_sync`\nwhen it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same\n`path`, ignoring the invoice-only override fields\n({@link INVOICE_ONLY_ITEM_FIELDS}) **and ignoring any difference that is\nEXPLAINED** ({@link unexplainedInvoiceItemDifferences}); otherwise `in_sync`.\nSurfaced by `GET /invoices/{uid}/sync-status`, to badge lines and offer\nper-line/whole resync (see {@link resyncInvoiceLines}).\n\n⚠️ **A line goes green because its difference is EXPLAINED, never because a\nfield was skipped** (api-cloudrun#481). The distinction is the whole design: an\nexcluded field is blind forever, while an explained one goes red the moment\nits explanation stops holding — so a frozen invoice whose tax differs only by\nrate version reads clean, and prod order #765 ↔ invoice #2162, whose line money\ngenuinely diverges, stays red. The naive form reported 8,792 prod lines of\nwhich the audit called **0** real, which is a badge no operator can use.\n\n⚠️ **Meaningful only where the invoice is hung on the SAME divider skeleton as\nits order** — it is keyed on `path`, so if the two trees disagree structurally\nno pair is ever compared and every line reports both \"missing\" and \"removed\"\nwith `differs` at exactly 0. Check {@link invoiceScopeDividersMatch} first; a\n`differs` of 0 beside two large counts is the tell.\n\nKeyed by the full, divider-scoped `path` (`join(\"/\")`), matching what the\ninvoice stores. Scoped to one order divider; a multi-order invoice merges the\nper-divider maps. Reports as `out_of_sync`:\n- an order line the invoice is missing (keyed by its projected path), and\n- an order-scoped invoice line with no matching order line (removed upstream).",
+          "doc": "Derive each order-scoped invoice line's sync status against the CURRENT order\nprojection — no stored flag (minimal-state, derived). A line is `out_of_sync`\nwhen it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same\n`path`, ignoring the invoice-only override fields\n({@link INVOICE_ONLY_ITEM_FIELDS}) **and ignoring any difference that is\nEXPLAINED** ({@link unexplainedInvoiceItemDifferences}); otherwise `in_sync`.\nSurfaced by `GET /invoices/{uid}/sync-status`, to badge lines and offer\nper-line/whole resync (see {@link resyncInvoiceLines}).\n\n⚠️ **A line goes green because its difference is EXPLAINED, never because a\nfield was skipped** (api-cloudrun#481). The distinction is the whole design: an\nexcluded field is blind forever, while an explained one goes red the moment\nits explanation stops holding — so a frozen invoice whose tax differs only by\nrate version reads clean, and prod order #765 ↔ invoice #2162, whose line money\ngenuinely diverges, stays red. The naive form reported 8,792 prod lines of\nwhich the audit called **0** real, which is a badge no operator can use.\n\n⚠️ **Meaningful only where the invoice is hung on the SAME divider skeleton as\nits order** — it is keyed on `path`, so if the two trees disagree structurally\nno pair is ever compared and every line reports both \"missing\" and \"removed\"\nwith `differs` at exactly 0. Check {@link invoiceScopeDividersMatch} first; a\n`differs` of 0 beside two large counts is the tell.\n\nKeyed by the full, divider-scoped `path` (`join(\"/\")`), matching what the\ninvoice stores. Scoped to one order divider; a multi-order invoice merges the\nper-divider maps. Reports as `out_of_sync`:\n- an order line the invoice is missing (keyed by its projected path), and\n- an order-scoped invoice line with no matching order line (removed upstream).\n\n🔴 **A SUBSTITUTED pair is neither of those, and reporting it as both is how\na tracked divergence becomes permanent noise.** X is missing from the invoice\nand Y matches no order line, so the naive form badges two rows `out_of_sync`\nfor one deliberate operator edit, forever, with no resync that could ever\nclear them. {@link liveInvoiceAnchors} is what distinguishes the two cases:\n\n- X (and its components) get **no entry at all** — there is no invoice row to\n  badge, and inventing one at a projected path invites a per-line resync that\n  would undo the substitution.\n- Y (and its components) read **`in_sync`** — the invoice is exactly what the\n  operator asked it to be. It is not \"a difference we chose to ignore\": the\n  moment the anchor is spent or removed, both rows go back to being compared\n  normally, which is the same standard the explained-difference arms are held\n  to.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11303,7 +11303,7 @@
           "kind": "function",
           "name": "syncOrderToInvoiceSelective",
           "signature": "syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceDocItemType[], orderDividerUid: string): InvoiceDocItemType[]",
-          "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden",
+          "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden\n- **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed\n  and Y's is emitted in its place — see below\n\n## 🔴 Why the substitution arm exists: without it a substitution lasts until\nthe next order save\n\nMeasured against this function before the arm was added, with the order\nUNCHANGED (`prev === new`) and the invoice holding Y in X's place:\n\n```\nBEFORE  invoice lines: [ \"Light Y\" ]\nAFTER   invoice lines: [ \"Light X\" ]\n```\n\nBoth halves of the path match fail, and each fails toward undoing the\noperator's edit: X's order path has no invoice line, so the `!invoiceItem`\nbranch re-projects X; Y's path has no PREV ORDER line, so the removed-items\npass drops it as a synced line the order no longer carries. **Neither branch\nis wrong on its own** — the pair is only wrong because nothing told this\nfunction the two rows are the same row, and `path_substituted_for` is what\nsays so.\n\n⭐ That is Increment 2's lesson on a third surface. A projection undoes any\ndownstream override not stored in a form the projection HONOURS, and being\n*stored* is not enough — `path_substituted_for` was already a stored field on\nfulfillments and this function had never heard of it.\n\n⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this\narm.** It is the operator's hard snap-to-order, documented to discard\noverrides and drop lines the order no longer has; a substitution is an\noverride, so discarding it is what the operator asked for. Only the automatic\nper-save sync has to be non-destructive.",
           "paramTags": [
             {
               "name": "prevOrderItems",
@@ -11979,6 +11979,139 @@
           "doc": "Normalize a requested window to the Chicago wall-clock day span it means, as\nepoch millis.\n\n**Availability is always Chicago wall clock, and this function owns that\nrule.** The shop is in Chicago; a requester in California asking for \"June 1 –\nJune 5\" means Chicago `Jun 1 00:00:00.000` → `Jun 5 23:59:59.999`, no matter\nwhere the browser is — so a `-08:00`, a `Z` and a `-06:00` spelling of the same\nday must produce identical numbers. Callers pass offset-carrying ISO strings; a\nbare `YYYY-MM-DD` is rejected upstream by the schema factories.\n\nIt lives here rather than in the `utils/availability.ts` it started in\nbecause both the summary engine and the pre-reduced fold below need it, and\nthis module is the one they can both reach — the reverse edge would have been\na cycle. ⚠️ That module no longer exists: `0205b0f` deleted the legacy pair\nand folded what survived into this file, so there is no availability module\nto look in and this is the only home for the rule.",
           "paramTags": [],
           "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/substitutions",
+      "moduleDoc": "\"Is this row explained by a substitution?\" — the ONE predicate, asked from\nseveral directions by two repos.\n\n## Why this is one module and not a helper per caller\n\nA substitution makes a document diverge from its order deliberately, and\nevery guard over that document has to be relaxed by *exactly* the amount the\nsubstitution licenses — no more, no less. There are six askers today:\n\n| asked by | of what | direction |\n|---|---|---|\n| `api-cloudrun/src/services/fulfillmentEdits.ts` — the omission guard | a STORED row the submission drops | is it at or below some `path_substituted_for`? |\n| `api-cloudrun/src/services/fulfillmentEdits.ts` — the counterpart guard | a SUBMITTED row with no order line | is it strictly below some substitution's own path? |\n| `api-cloudrun/scripts/audit-fulfillment-divergence.ts` | an ORDER line with no fulfillment row | is it at or below some `path_substituted_for`? |\n| {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some `path_substituted_for`? |\n| {@link computeInvoiceSyncStatus} | both sides of a substituted pair | is the divergence tracked rather than drift? |\n| {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some `path_substituted_for`? |\n\nFour of the six are the same question, and the wire boundary, the audit and\nthe projection **must** answer it identically — an audit stricter than the\nguard reports correct data as a finding, and one that is looser certifies\nwhat the guard would have refused. Sharing the predicate is what makes \"the\naudit checks what the server enforces\" a fact rather than an intention.\n\n⚠️ **It lives in `core` because the callers are in two repos.** It was\n`api-cloudrun/src/lib/substitutedSubtree.ts` while all three askers were\nserver-side; the invoice sync (`utils/invoices.ts`) is the caller that made\nthat home wrong. The booking-projection half stayed behind — it reads\n`price.total_cents` and belongs to the order→booking projection, not to the\npredicate.\n\n## 🔴 The asymmetry is the whole design, so do not \"simplify\" it to one call\n\nA substitution row Y carries two paths and they live in **different\ndocuments**:\n\n- **`path_substituted_for`** is X's path in the ORDER — the row Y replaces.\n  Locked at substitution time, never re-derived. It is what licenses the\n  *absence* of X (and of X's whole component subtree) from the downstream\n  document.\n- **`path`** is Y's own path in that downstream document. It is what licenses\n  the *presence* of Y's components, which exist on no order line at all.\n\nSo a removal is explained from the X side and an addition from the Y side,\nand swapping them silently admits the class of write these guards exist to\nrefuse. {@link SubstitutionAnchor} keeps both, named, rather than letting a\ncall site pick the wrong array.\n\n## Paths compare ELEMENT-WISE, never as joined strings\n\n⚠️ A joined key is right for equality and **wrong for prefix**. With any\nseparator, `[\"a\",\"b\"]` joins to a string prefix of `[\"a\",\"bc\"]`'s join, so a\n`startsWith` test reports a kit component as a descendant of an unrelated\nsibling. The segments are uids and the arrays are ≤ a handful deep, so the\nloop below is both cheaper and correct.\n\n⚠️ **Both surfaces must feed this the SAME path space.** A fulfillment row\nand its order counterpart share one path space, so the fulfillment callers\npass stored paths straight in. An invoice line's stored path is prefixed with\nits ORDER DIVIDER's uid and an order line's is not, so the invoice callers\nstrip that prefix first — `path_substituted_for` is an ORDER path on both\nsurfaces, and comparing it against a divider-scoped path matches nothing and\nreports every substitution as unexplained.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "MaybeSubstitution",
+          "declaration": "interface MaybeSubstitution {\n  readonly path: readonly string[];\n  readonly path_substituted_for?: readonly string[] | undefined;\n}",
+          "doc": "The shape every caller already has; deliberately narrower than a line item."
+        },
+        {
+          "kind": "interface",
+          "name": "SubstitutionAnchor",
+          "declaration": "interface SubstitutionAnchor {\n  readonly path: readonly string[];\n  readonly substitutedFor: readonly string[];\n}",
+          "doc": "A substitution row, reduced to the two paths the predicates need."
+        },
+        {
+          "kind": "function",
+          "name": "collectSubstitutionAnchors",
+          "signature": "collectSubstitutionAnchors(rows: readonly MaybeSubstitution[]): SubstitutionAnchor[]",
+          "doc": "Reduce a row set to its substitution anchors.\n\n⚠️ A row with no `path_substituted_for` is not an anchor even if it sits\ninside a substituted subtree — the components of Y explain nothing, they are\nthemselves explained. Only the row that names X licenses anything.\n\n🔴 **An EMPTY path on either side is refused, and it is the sharp case.**\n`[]` is a prefix of every path, so an anchor holding one turns\n{@link isRemovedBySubstitution} and {@link isInSubstitutedSubtree} into\n`true` for the entire document — every guard relaxed at once, every audit\ncertifying its whole corpus as explained. The failure is silent and it is in\nthe permissive direction, which is why this refuses rather than warns.\n\n⚠️ **It is reachable, not theoretical.** The field is `.optional()` on both\nsurfaces with no `.min(1)`, and `getInitialValues` materializes an optional\narray as `[]` — so any line seeded from the schema carries an empty one.\nMeasured: a `getInitialValues(InvoiceDocLineItemSchema)` fixture made a\nsubstitution \"explain\" the removal of a row sharing no path segment with it.\nThe wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to\nreject an empty `path_substituted_for` on submission (it resolves to no order\nitem), but the audits and projections read STORED rows and had no such\nbackstop.\n\n⭐ Refusing here rather than in the schema is deliberate: `.min(1)` would make\na form seed fail to parse, and the defect is not that `[]` can be written —\nit is that `[]` must not LICENSE anything.",
+          "paramTags": [
+            {
+              "name": "rows",
+              "doc": "The rows to scan"
+            }
+          ],
+          "returnsTag": "One anchor per row carrying a non-empty `path_substituted_for`"
+        },
+        {
+          "kind": "function",
+          "name": "findSubtreeAnchor",
+          "signature": "findSubtreeAnchor(path: readonly string[], anchors: readonly SubstitutionAnchor[]): SubstitutionAnchor | undefined",
+          "doc": "The anchor whose subtree `path` falls in, or `undefined`.\n\nThe caller needs the anchor itself and not merely a boolean, because deriving\na component's unauthorable fields means reading the REPLACEMENT product —\nwhich is addressed by the anchor's own `path.at(-1)`.",
+          "paramTags": [
+            {
+              "name": "path",
+              "doc": "The row's path in the downstream document"
+            },
+            {
+              "name": "anchors",
+              "doc": "The downstream document's substitution anchors"
+            }
+          ],
+          "returnsTag": "The nearest enclosing anchor, or `undefined`"
+        },
+        {
+          "kind": "function",
+          "name": "isAtOrBelow",
+          "signature": "isAtOrBelow(path: readonly string[], ancestor: readonly string[]): boolean",
+          "doc": "True when `ancestor` is `path` itself or a proper prefix of it.\n\nElement-wise on purpose — see the module docstring.",
+          "paramTags": [
+            {
+              "name": "path",
+              "doc": "The row's path"
+            },
+            {
+              "name": "ancestor",
+              "doc": "The candidate ancestor path"
+            }
+          ],
+          "returnsTag": "Whether `ancestor` is `path` or a proper prefix of it"
+        },
+        {
+          "kind": "function",
+          "name": "isInSubstitutedSubtree",
+          "signature": "isInSubstitutedSubtree(path: readonly string[], anchors: readonly SubstitutionAnchor[]): boolean",
+          "doc": "Is the PRESENCE of the row at `path` explained as part of a substituted\nsubtree — i.e. is it a component of some Y?\n\n⚠️ **Strictly below, so Y itself is NOT in its own subtree.** Y is validated\nby the substitution branch (in-place path, live `Product.alternates[]`\nmembership); admitting it here as well would let a row license itself.",
+          "paramTags": [
+            {
+              "name": "path",
+              "doc": "The row's path in the downstream document"
+            },
+            {
+              "name": "anchors",
+              "doc": "The downstream document's substitution anchors"
+            }
+          ],
+          "returnsTag": "Whether the row is a component of some substitution"
+        },
+        {
+          "kind": "function",
+          "name": "isRemovedBySubstitution",
+          "signature": "isRemovedBySubstitution(orderPath: readonly string[], anchors: readonly SubstitutionAnchor[]): boolean",
+          "doc": "Is the ABSENCE of the row at `orderPath` explained by one of these anchors?\n\nAnswers for X itself (`substitutedFor` equals the path) and for every one of\nX's components (`substitutedFor` is a proper prefix). That second case is the\none that matters: substituting a kit removes a whole subtree, and only the\nparent is named by any stored field.",
+          "paramTags": [
+            {
+              "name": "orderPath",
+              "doc": "The order line's path"
+            },
+            {
+              "name": "anchors",
+              "doc": "The downstream document's substitution anchors"
+            }
+          ],
+          "returnsTag": "Whether some anchor explains the row's absence"
+        },
+        {
+          "kind": "function",
+          "name": "isStrictlyBelow",
+          "signature": "isStrictlyBelow(path: readonly string[], ancestor: readonly string[]): boolean",
+          "doc": "True when `ancestor` is a PROPER prefix of `path` — the row itself excluded.",
+          "paramTags": [
+            {
+              "name": "path",
+              "doc": "The row's path"
+            },
+            {
+              "name": "ancestor",
+              "doc": "The candidate strict ancestor path"
+            }
+          ],
+          "returnsTag": "Whether `path` sits strictly below `ancestor`"
+        },
+        {
+          "kind": "function",
+          "name": "isSubstitutionRow",
+          "signature": "isSubstitutionRow(path: readonly string[], anchors: readonly SubstitutionAnchor[]): boolean",
+          "doc": "Is the row at `path` part of a substitution's own subtree — Y ITSELF, or one\nof Y's components?\n\n🔴 **The INCLUSIVE twin of {@link isInSubstitutedSubtree}, and the difference\nis not a detail.** The strict form exists so a submitted row cannot license\nitself: `api-cloudrun`'s counterpart guard validates Y on its own merits\n(in-place path, live `Product.alternates[]` membership) and must not let Y\nwave itself through as \"part of a substituted subtree\". A downstream\nPROJECTION is asking the opposite question — *which rows do I keep?* — and\nthe answer there is Y and its components together, because dropping Y is\nprecisely the bug.\n\n⚠️ Reach for this only where the anchor set has already been VALIDATED. On a\nwire boundary, use {@link isInSubstitutedSubtree} and check Y separately.",
+          "paramTags": [
+            {
+              "name": "path",
+              "doc": "The row's path in the downstream document"
+            },
+            {
+              "name": "anchors",
+              "doc": "The downstream document's substitution anchors"
+            }
+          ],
+          "returnsTag": "Whether the row is a substitution's own row or one of its components"
         }
       ]
     },

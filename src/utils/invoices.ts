@@ -76,6 +76,13 @@ export {
   orderHasTax,
 } from "./orders.ts";
 
+import {
+  collectSubstitutionAnchors,
+  isAtOrBelow,
+  isRemovedBySubstitution,
+  isSubstitutionRow,
+  type SubstitutionAnchor,
+} from "./substitutions.ts";
 import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
@@ -134,6 +141,14 @@ export interface InvoiceItem extends LineItem {
   // shadow until 2026-08-10, which is why it was missing from every one of the
   // four hand-maintained copies of {@link INVOICE_ONLY_ITEM_FIELDS}.
   crms_opportunity_id?: number | null;
+  /**
+   * @see `InvoiceDocLineItem.path_substituted_for`. Declared here as well as on
+   * the stored schema because {@link InvoiceOnlyOverrides} is
+   * `Pick<InvoiceItem, …>` — a member of {@link INVOICE_ONLY_ITEM_FIELDS}
+   * missing from this shadow does not compile, which is the guard the
+   * `crms_opportunity_id` line above records the absence of.
+   */
+  path_substituted_for?: string[];
 }
 
 // ── Invoice totals ──────────────────────────────────────────────
@@ -412,9 +427,19 @@ export function getXeroUnitAmountFromCents(subtotalCents: number, quantity: numb
  * before values and reported the ENTIRE CRMS-authored corpus `out_of_sync`,
  * with nothing thrown.
  *
- * ⚠️ Six literals, no spread. core#43 is the standing case where JSR's npm
+ * ⚠️ Seven literals, no spread. core#43 is the standing case where JSR's npm
  * `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate could
  * see it.
+ *
+ * ⭐ **`path_substituted_for` is a member, and it is the only one that is not
+ * merely an override.** The other six are values an invoice may hold instead of
+ * its order's; this one is the record that the invoice deliberately bills a
+ * DIFFERENT product. Being in the list buys the same two things either way —
+ * {@link invoiceItemDifferences} filters it out of both key sets, so a
+ * substituted line is not reported as drift on the field that explains it, and
+ * {@link carryForwardOverrides} preserves it across a rebuild. What it does NOT
+ * buy is survival of the row itself; that is
+ * {@link syncOrderToInvoiceSelective}'s anchor handling.
  */
 const INVOICE_ONLY_ITEM_FIELDS = [
   "coa_revenue",
@@ -423,6 +448,7 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   "xero_tracking_option_id",
   "crms_id",
   "crms_opportunity_id",
+  "path_substituted_for",
 ] as const;
 
 /** Membership form of {@link INVOICE_ONLY_ITEM_FIELDS}, for key filtering. */
@@ -447,7 +473,7 @@ export function getSharedFields(keysA: string[], keysB: string[], excludes: stri
  * Stable key for path-based item matching.
  * Joins path segments with "/" to produce a unique positional identifier.
  */
-function itemPathKey(path: string[]): string {
+function itemPathKey(path: readonly string[]): string {
   return path.join("/");
 }
 
@@ -1013,6 +1039,74 @@ export function isItemSynced(
   );
 }
 
+// ── Substitutions on an invoice ─────────────────────────────────
+
+/**
+ * The substitutions an invoice's order-scoped lines carry, expressed in the
+ * ORDER's path space, with SPENT anchors dropped.
+ *
+ * Two conversions happen here and both are load-bearing:
+ *
+ * 1. 🔴 **The path spaces differ.** An invoice line's stored `path` is prefixed
+ *    with its order divider's uid and an order line's is not, while
+ *    `path_substituted_for` is an ORDER path on every surface that stores it.
+ *    Comparing a divider-scoped path against it matches nothing, and the
+ *    failure is silent: every substitution reads as unexplained drift.
+ * 2. ⭐ **An anchor is SPENT once the order carries a line at the anchor's own
+ *    path** — the admin has made the same substitution upstream, so there is no
+ *    divergence left to record. This is the invoice's half of the fulfillment
+ *    rule *"cleared by the projection on graduation (admin emits at the same
+ *    path)"*, and dropping the anchor here is what lets the line resume syncing
+ *    normally instead of being frozen by its own divergence record.
+ *
+ * ⚠️ A DANGLING anchor is deliberately still live: if the admin deletes X from
+ * the order without substituting, nothing resolves `substitutedFor` any more,
+ * but Y is still on the invoice and the field is still the record of why. It is
+ * locked at substitution time and never re-derived.
+ *
+ * @param scopedInvoiceItems - This order divider's invoice items
+ * @param orderItems - The order's CURRENT items
+ * @param orderDividerUid - The order divider's uid
+ * @returns Live anchors, in order-relative path space
+ */
+function liveInvoiceAnchors(
+  scopedInvoiceItems: readonly InvoiceItem[],
+  orderItems: readonly LineItem[],
+  orderDividerUid: string,
+): SubstitutionAnchor[] {
+  const orderPathKeys = new Set<string>();
+  for (const it of orderItems) orderPathKeys.add(itemPathKey(it.path ?? []));
+  const anchors = collectSubstitutionAnchors(
+    scopedInvoiceItems.map((it) => ({
+      path: stripOrderPrefix(it.path ?? [], orderDividerUid),
+      path_substituted_for: it.path_substituted_for,
+    })),
+  );
+  return anchors.filter((a) => !orderPathKeys.has(itemPathKey(a.path)));
+}
+
+/**
+ * Drop a spent divergence record from a line the order has caught up with.
+ *
+ * Applied only on the PATH-MATCH branches of {@link syncOrderToInvoiceSelective}
+ * — a line emitted there sits at a path the current order carries, which is
+ * exactly graduation. Lines emitted from the substituted-subtree branch or kept
+ * by the survival branch keep the field, because their divergence is still real.
+ *
+ * ⚠️ Deletes the key rather than writing `null`: the field is `.optional()` on
+ * both surfaces that store it, and `validateBeforeWrite` rejects a literal
+ * `undefined` at any depth.
+ *
+ * @param item - The item about to be emitted
+ * @returns The item with no `path_substituted_for`
+ */
+function withoutSubstitutionAnchor<T extends InvoiceDocItemType>(item: T): T {
+  if ((item as InvoiceItem).path_substituted_for === undefined) return item;
+  const copy = { ...item } as T & { path_substituted_for?: string[] };
+  delete copy.path_substituted_for;
+  return copy as T;
+}
+
 /**
  * Selectively sync order items into an invoice, respecting invoice-side overrides.
  *
@@ -1024,6 +1118,38 @@ export function isItemSynced(
  * - **Overridden** (invoice item differs from prev order): left unchanged
  * - **New** (in new order, not in prev): added under the order divider
  * - **Removed** (in prev order, not in new): removed only if synced, kept if overridden
+ * - **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed
+ *   and Y's is emitted in its place — see below
+ *
+ * ## 🔴 Why the substitution arm exists: without it a substitution lasts until
+ * the next order save
+ *
+ * Measured against this function before the arm was added, with the order
+ * UNCHANGED (`prev === new`) and the invoice holding Y in X's place:
+ *
+ * ```
+ * BEFORE  invoice lines: [ "Light Y" ]
+ * AFTER   invoice lines: [ "Light X" ]
+ * ```
+ *
+ * Both halves of the path match fail, and each fails toward undoing the
+ * operator's edit: X's order path has no invoice line, so the `!invoiceItem`
+ * branch re-projects X; Y's path has no PREV ORDER line, so the removed-items
+ * pass drops it as a synced line the order no longer carries. **Neither branch
+ * is wrong on its own** — the pair is only wrong because nothing told this
+ * function the two rows are the same row, and `path_substituted_for` is what
+ * says so.
+ *
+ * ⭐ That is Increment 2's lesson on a third surface. A projection undoes any
+ * downstream override not stored in a form the projection HONOURS, and being
+ * *stored* is not enough — `path_substituted_for` was already a stored field on
+ * fulfillments and this function had never heard of it.
+ *
+ * ⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this
+ * arm.** It is the operator's hard snap-to-order, documented to discard
+ * overrides and drop lines the order no longer has; a substitution is an
+ * override, so discarding it is what the operator asked for. Only the automatic
+ * per-save sync has to be non-destructive.
  *
  * @param prevOrderItems - Items from the previous version of the order
  * @param newOrderItems - Items from the new version of the order
@@ -1050,34 +1176,83 @@ export function syncOrderToInvoiceSelective(
     invoiceByPath.set(itemPathKey(relPath), item);
   }
 
+  // The substitutions this invoice carries, in the ORDER's path space, spent
+  // ones already dropped.
+  const anchors = liveInvoiceAnchors(
+    currentInvoiceItems as InvoiceItem[],
+    newOrderItems,
+    orderDividerUid,
+  );
+  const anchorByXKey = new Map<string, SubstitutionAnchor>();
+  for (const a of anchors) anchorByXKey.set(itemPathKey(a.substitutedFor), a);
+
+  /** Y and its components, in stored order — everything at or below the anchor. */
+  const substitutedSubtreeOf = (anchor: SubstitutionAnchor): InvoiceDocItemType[] =>
+    currentInvoiceItems.filter((it) =>
+      isAtOrBelow(stripOrderPrefix(it.path, orderDividerUid), anchor.path)
+    );
+
   const result: InvoiceDocItemType[] = [];
   const processedInvoicePaths = new Set<string>();
+  /** Order-relative keys already emitted by the substitution arm. */
+  const emittedSubstituted = new Set<string>();
 
   // Process new order items in order
   for (const newItem of newOrderItems) {
     const pathKey = itemPathKey(newItem.path);
+
+    // 🔴 SUBSTITUTED. X — and every component beneath it — is explained away by
+    // an anchor, so it must not be re-projected. Y's subtree is emitted HERE
+    // rather than appended by the removed-items pass below, because an items
+    // array's order is meaning: Y belongs where X stood, not at the tail.
+    //
+    // ⚠️ Keyed on the anchor's `substitutedFor` for the EMIT and on the
+    // at-or-below predicate for the SKIP — X's components are suppressed but
+    // are not themselves anchors, so only X's own row places the subtree.
+    if (isRemovedBySubstitution(newItem.path, anchors)) {
+      const anchor = anchorByXKey.get(pathKey);
+      if (anchor) {
+        for (const row of substitutedSubtreeOf(anchor)) {
+          const relKey = itemPathKey(stripOrderPrefix(row.path, orderDividerUid));
+          if (emittedSubstituted.has(relKey)) continue;
+          emittedSubstituted.add(relKey);
+          result.push(row);
+        }
+      }
+      continue;
+    }
+
     const prevItem = prevByPath.get(pathKey);
     const invoiceItem = invoiceByPath.get(pathKey);
     processedInvoicePaths.add(pathKey);
 
     if (!invoiceItem) {
       // New item — project to invoice shape, scoped under the order divider
-      result.push(projectOrderItemToInvoiceItem(newItem, orderDividerUid));
+      result.push(withoutSubstitutionAnchor(projectOrderItemToInvoiceItem(newItem, orderDividerUid)));
     } else if (prevItem && isItemSynced(prevItem, invoiceItem, orderDividerUid)) {
       // Not overridden — replace with projected order item, carry forward invoice-only fields
-      result.push({
+      result.push(withoutSubstitutionAnchor({
         ...projectOrderItemToInvoiceItem(newItem, orderDividerUid),
         ...pickInvoiceOnlyFields(invoiceItem),
-      });
+      }));
     } else {
       // Overridden or no prev item — keep invoice item unchanged
-      result.push(invoiceItem);
+      result.push(withoutSubstitutionAnchor(invoiceItem));
     }
   }
 
   // Handle removed items (in invoice but not in new order)
   for (const [pathKey, invoiceItem] of invoiceByPath) {
-    if (processedInvoicePaths.has(pathKey)) continue;
+    if (processedInvoicePaths.has(pathKey) || emittedSubstituted.has(pathKey)) continue;
+
+    // A substituted subtree the loop above could not place, because the order
+    // no longer carries X at any path — a DANGLING anchor. Y is still the
+    // operator's billed line and survives; only its position is lost, which is
+    // the most this function can know.
+    if (isSubstitutionRow(stripOrderPrefix(invoiceItem.path, orderDividerUid), anchors)) {
+      result.push(invoiceItem);
+      continue;
+    }
 
     const prevItem = prevByPath.get(pathKey);
     if (prevItem && !isItemSynced(prevItem, invoiceItem, orderDividerUid)) {
@@ -1635,6 +1810,21 @@ export function resyncInvoiceLines(
  * per-divider maps. Reports as `out_of_sync`:
  * - an order line the invoice is missing (keyed by its projected path), and
  * - an order-scoped invoice line with no matching order line (removed upstream).
+ *
+ * 🔴 **A SUBSTITUTED pair is neither of those, and reporting it as both is how
+ * a tracked divergence becomes permanent noise.** X is missing from the invoice
+ * and Y matches no order line, so the naive form badges two rows `out_of_sync`
+ * for one deliberate operator edit, forever, with no resync that could ever
+ * clear them. {@link liveInvoiceAnchors} is what distinguishes the two cases:
+ *
+ * - X (and its components) get **no entry at all** — there is no invoice row to
+ *   badge, and inventing one at a projected path invites a per-line resync that
+ *   would undo the substitution.
+ * - Y (and its components) read **`in_sync`** — the invoice is exactly what the
+ *   operator asked it to be. It is not "a difference we chose to ignore": the
+ *   moment the anchor is spent or removed, both rows go back to being compared
+ *   normally, which is the same standard the explained-difference arms are held
+ *   to.
  */
 export function computeInvoiceSyncStatus(
   currentInvoiceItems: InvoiceItem[],
@@ -1652,6 +1842,9 @@ export function computeInvoiceSyncStatus(
     invoiceByRelPath.set(itemPathKey(stripOrderPrefix(item.path, orderDividerUid)), item);
   }
 
+  // The substitutions this scope carries, in the order's own path space.
+  const anchors = liveInvoiceAnchors(currentInvoiceItems, orderItems, orderDividerUid);
+
   const matchedRelKeys = new Set<string>();
   for (const orderItem of orderItems) {
     const relKey = itemPathKey(orderItem.path ?? []);
@@ -1659,6 +1852,9 @@ export function computeInvoiceSyncStatus(
     const fullKey = itemPathKey([orderDividerUid, ...(orderItem.path ?? [])]);
     const current = invoiceByRelPath.get(relKey);
     if (!current) {
+      // Explained: this line was substituted away. No invoice row exists to
+      // carry a badge, so emit no entry rather than a phantom `out_of_sync`.
+      if (isRemovedBySubstitution(orderItem.path ?? [], anchors)) continue;
       status.set(fullKey, "out_of_sync"); // order has a line the invoice lacks
       continue;
     }
@@ -1675,7 +1871,9 @@ export function computeInvoiceSyncStatus(
   // Invoice-scoped lines the order no longer has.
   for (const [relKey, item] of invoiceByRelPath) {
     if (matchedRelKeys.has(relKey)) continue;
-    status.set(itemPathKey(item.path), "out_of_sync");
+    // Y itself, or one of Y's components — the divergence is tracked, not drift.
+    const substituted = isSubstitutionRow(stripOrderPrefix(item.path, orderDividerUid), anchors);
+    status.set(itemPathKey(item.path), substituted ? "in_sync" : "out_of_sync");
   }
 
   return status;
@@ -1789,6 +1987,9 @@ export function computeOrderInvoiceCoverage(
   const covered = new Set<string>();
   const unmatched: UnmatchedInvoiceLine[] = [];
   const unmatchedSeen = new Set<string>();
+  // Every compared invoice's live substitutions, pooled — an order can be
+  // billed by several, and a line substituted on ANY of them is not uninvoiced.
+  const allAnchors: SubstitutionAnchor[] = [];
 
   for (const invoice of invoices) {
     if (invoice.status === "void") continue;
@@ -1800,12 +2001,20 @@ export function computeOrderInvoiceCoverage(
       continue;
     }
     compared.push(invoice.uid);
+    const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
+    allAnchors.push(...anchors);
     for (const item of scoped) {
       if (!isLineItemType(item.type)) continue;
-      const relKey = itemPathKey(stripOrderPrefix(item.path ?? [], orderUid));
+      const relPath = stripOrderPrefix(item.path ?? [], orderUid);
+      const relKey = itemPathKey(relPath);
       covered.add(relKey);
       if (item.type === "transaction_fee") continue;
       if (orderLineKeys.has(relKey) || unmatchedSeen.has(relKey)) continue;
+      // 🔴 A substituted line legitimately matches no order line — that is what
+      // the substitution IS. Without this the operator's own edit is reported
+      // back as an anomaly on every read, and `path_substituted_for` names the
+      // order line it stands in for, so the join is not actually missing.
+      if (isSubstitutionRow(relPath, anchors)) continue;
       unmatchedSeen.add(relKey);
       unmatched.push({ invoiceUid: invoice.uid, item });
     }
@@ -1816,7 +2025,12 @@ export function computeOrderInvoiceCoverage(
   if (unaligned.length > 0) return { uninvoiced: [], unmatched: [], compared, unaligned };
 
   const uninvoiced = orderItems.filter(
-    (item) => isLineItemType(item.type) && !covered.has(itemPathKey(item.path ?? [])),
+    (item) =>
+      isLineItemType(item.type) &&
+      !covered.has(itemPathKey(item.path ?? [])) &&
+      // Substituted away, and therefore never to be billed AS ITSELF. Y carries
+      // the money instead; reporting X uninvoiced is a nag no action can clear.
+      !isRemovedBySubstitution(item.path ?? [], allAnchors),
   );
 
   return { uninvoiced, unmatched, compared, unaligned };

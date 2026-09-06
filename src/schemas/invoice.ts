@@ -317,6 +317,41 @@ export interface InvoiceDocLineItem {
   crms_opportunity_id?: number | null;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   crms_id?: number | string | null;
+  /**
+   * Operator-set on substitution line items. Carries the path of the
+   * substituted-for ORDER line at the moment of substitution — locked then, and
+   * never re-derived. It is the record that this invoice deliberately diverges
+   * from its order, not a live pointer.
+   *
+   * ⚠️ **The invoice's divergence is a MONEY concern and moves no bookings** —
+   * that is the one place it differs from `FulfillmentLineItemType`'s field of
+   * the same name, whose divergence is a physical fact.
+   *
+   * **Why `.optional()` rather than the repo's preferred bare `.nullable()`**
+   * (`CLAUDE.md` § *Making a field REQUIRED*, and the ruling in
+   * `tests/stored-optionality.test.ts`):
+   *
+   * 1. **No writer can supply it on every line.** It is meaningful only where a
+   *    substitution happened; `null` on the other ~8,900 stored lines would be
+   *    filler to satisfy a requirement, which is the "never reach for
+   *    `.nullable()` as a cushion" clause rather than an exception to it.
+   * 2. 🔴 **The tightening procedure is not even executable here.** Step 1 is a
+   *    both-environment key-presence census, whose only oracle is `orderBy` —
+   *    and this field sits inside an ARRAY OF MAPS, which `orderBy` cannot
+   *    reach. That is `stored-optionality.test.ts`'s own
+   *    `array-member-uncensusable`.
+   * 3. **Its twin is already spelled this way.**
+   *    `FulfillmentLineItemType.path_substituted_for` is plain `.optional()`,
+   *    and this field's entire job is to mean the same thing on a second
+   *    surface. Two spellings of one fact is the defect
+   *    {@link INVOICE_ONLY_ITEM_FIELDS} records under `crms_id`.
+   * 4. **Absence cannot reach the state the ruling protects against.** Every
+   *    consumer is already absence-shaped — `pickInvoiceOnlyFields` skips
+   *    `undefined`, `projectOrderItemToInvoiceItem` spreads conditionally, and
+   *    `invoiceItemDifferences` counts `undefined` as not-present — so no path
+   *    hands a literal `undefined` to a write boundary.
+   */
+  path_substituted_for?: string[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -338,6 +373,9 @@ const InvoiceDocLineItemInner = z.strictObject({
   xero_tracking_option_id: z.uuid().nullable().optional(),
   crms_opportunity_id: z.int().nullable().optional(),
   crms_id: z.union([z.int(), z.string()]).nullable().optional(),
+  // Plain `.optional()`, matching `FulfillmentLineItem.path_substituted_for`
+  // exactly — see the interface docblock for why this one is not `.nullable()`.
+  path_substituted_for: z.array(ItemUid).optional(),
 }).superRefine(checkItemPriceFormula);
 
 export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner;
@@ -811,6 +849,14 @@ export interface InvoiceItemInputLineType {
   /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
   taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
+  /**
+   * @see `InvoiceDocLineItem.path_substituted_for`. Operator-authored, so it
+   * needs an input channel: this schema is a plain `z.object` and STRIPS
+   * unknown keys, and `buildInvoiceItems` rebuilds each stored line from typed
+   * fields — so a field absent here is silently dropped on every PUT rather
+   * than rejected.
+   */
+  path_substituted_for?: string[];
 }
 
 // Un-annotated for `_zod.propValues`, `z.object` so unknown keys are stripped
@@ -828,6 +874,7 @@ const InvoiceItemInputLineInner = z.object({
   coa_revenue: COARevenueEnum.nullable().optional(),
   taxed_as: TaxedAsEnum.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
+  path_substituted_for: z.array(ItemUid).optional(),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable invoice line (input). */

@@ -180,6 +180,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "stock": [
 
   ],
+  "substitutions": [
+
+  ],
   "taxes": [
     { name: "assertCoaTaxMapCoversCore", expr: "it.taxes.assertCoaTaxMapCoversCore()", desc: "Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.", returns: "void" },
     { name: "assignLineTaxes", expr: "it.taxes.assignLineTaxes(items, ctx)", desc: "**Write the rule's answer onto every priceable line** — `price.taxes`, `price.taxes_base` and a refreshed `price.total_cents`. Mutates in place; computes no subtotal.", returns: "UnreviewedTaxWarning[]" },

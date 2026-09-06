@@ -49,6 +49,7 @@ import * as taxUtils from "../src/utils/taxes.ts";
 import * as templateUtils from "../src/utils/templates.ts";
 import * as citationUtils from "../src/utils/citations.ts";
 import * as templateLintUtils from "../src/utils/template-lint.ts";
+import * as substitutionUtils from "../src/utils/substitutions.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -90,6 +91,12 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // fulfillment template has no bookings to ask about in the first place.
   // Listed so the drift guard sees its exports.
   "fulfillment-stage": fulfillmentStageUtils,
+  // Same exception once more: `utils/substitutions.ts` answers *"is this row's
+  // absence or presence explained by a substitution?"* — a WRITE-time question
+  // about reconciling a document against its order. A template renders one
+  // document that has already been reconciled, so there is no second side to
+  // compare against. Listed so the drift guard sees its exports.
+  substitutions: substitutionUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,

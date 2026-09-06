@@ -336,6 +336,7 @@ export const templateSchemaFields: Partial<
     { path: "items[] (type: rental, replacement, ...).xero_tracking_option_id", type: "string? | null" },
     { path: "items[] (type: rental, replacement, ...).crms_opportunity_id", type: "number? | null" },
     { path: "items[] (type: rental, replacement, ...).crms_id", type: "union? | null" },
+    { path: "items[] (type: rental, replacement, ...).path_substituted_for", type: "union[]?" },
     { path: "items[] (type: group).uid", type: "string" },
     { path: "items[] (type: group).type", type: "group" },
     { path: "items[] (type: group).name", type: "string" },

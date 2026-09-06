@@ -970,3 +970,66 @@ Deno.test("InvoiceSchema requires pdf_params", () => {
 Deno.test("InvoiceSchema accepts an empty pdf_params — the 'nothing recorded' state", () => {
   assertEquals(InvoiceSchema.safeParse({ ...validInvoice, pdf_params: {} }).success, true);
 });
+
+// ── path_substituted_for (manager#399) ──────────────────────────
+
+Deno.test("path_substituted_for: absent is the ordinary state, and it parses", () => {
+  // The field is `.optional()` and NOT `.nullable()`, deliberately — see the
+  // declaration's own docblock. The consequence to pin is that the ~8,900 stored
+  // lines that predate it, and every line that is not a substitution, are valid
+  // exactly as they stand. That is what makes this an ADD with no backfill and
+  // no write-refusing window, unlike a removal.
+  const { path_substituted_for: _absent, ...withoutKey } = {
+    ...lineItemBase,
+    uid: "Item0000000000000001",
+    type: "rental",
+    name: "Light",
+    path: ["Item0000000000000001"],
+  } as Record<string, unknown>;
+  assert(!("path_substituted_for" in withoutKey));
+  const parsed = InvoiceDocLineItemSchema.safeParse(withoutKey);
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+});
+
+Deno.test("path_substituted_for: a path is accepted and NULL is refused", () => {
+  // ⚠️ Both halves matter. `null` being refused is what makes "absent" the only
+  // spelling of "not a substitution" — two spellings of one state is what the
+  // repo's nullable-over-optional ruling exists to prevent, and here it is
+  // enforced by choosing ONE of them rather than accepting both.
+  const line = {
+    ...lineItemBase,
+    uid: "Item0000000000000002",
+    type: "rental",
+    name: "Light Y",
+    path: ["Item0000000000000002"],
+    path_substituted_for: ["Destination000000001", "Item0000000000000001"],
+  } as Record<string, unknown>;
+
+  const ok = InvoiceDocLineItemSchema.safeParse(line);
+  assertEquals(ok.success, true, JSON.stringify(ok.success ? {} : ok.error.issues));
+
+  assertEquals(
+    InvoiceDocLineItemSchema.safeParse({ ...line, path_substituted_for: null }).success,
+    false,
+  );
+});
+
+Deno.test("path_substituted_for: the INPUT schema accepts it, or every PUT drops it", () => {
+  // 🔴 `InvoiceItemInputLineInner` is a plain `z.object`, so an unknown key is
+  // STRIPPED rather than rejected — and `buildInvoiceItems` rebuilds each stored
+  // line from typed fields. A field missing from the input channel therefore
+  // fails SILENTLY: the manager writes the substitution, the API accepts the
+  // request, and the divergence record is simply gone from the stored document.
+  const parsed = UpdateInvoiceInput.safeParse({
+    version: 1,
+    items: [{
+      uid: "Item0000000000000002",
+      type: "rental",
+      path: ["Item0000000000000002"],
+      path_substituted_for: ["Destination000000001", "Item0000000000000001"],
+    }],
+  });
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+  const items = (parsed.success ? parsed.data.items : []) as unknown as Array<Record<string, unknown>>;
+  assertEquals(items[0].path_substituted_for, ["Destination000000001", "Item0000000000000001"]);
+});
