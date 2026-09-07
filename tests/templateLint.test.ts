@@ -400,6 +400,47 @@ Deno.test("a fixtures directory with no family sidecar IS a finding", () => {
   assert(checksIn(report.findings).has("sidecar"));
 });
 
+// ── Check 2b's partition — the half a `severity` assertion cannot see ──
+
+Deno.test("check 2b — an unmasked leaf BLOCKS, and never lands in advisories", () => {
+  // 🔴 This is the flip (2026-09-06), asserted where it is actually consumed.
+  // `lintFixture` returning `severity: undefined` is necessary and not
+  // sufficient: what CI and the manager read is the PARTITION `lintFixtureSet`
+  // performs, and a re-added `"advisory"` argument would move a real leak into
+  // an array `api-cloudrun`'s `familyLintOutcome` drops entirely — green
+  // everywhere, reported nowhere. `subject` is `pii: "mask"` and routes to
+  // `text`, whose only fake is the self-announcing filler, so a real sentence
+  // there cannot have been masked.
+  const report = lintFixtureSet({
+    families: [
+      family({
+        sidecar: sidecar({ fixtures: [{ slug: "leaky", description: GOOD_DESCRIPTION }] }),
+        fixtures: [{ slug: "leaky", ok: true, doc: { subject: "Riverwalk Summer Series" } }],
+      }),
+    ],
+  });
+  assert(checksIn(report.findings).has("pii-mask"), "expected a BLOCKING pii-mask finding");
+  assertEquals(report.advisories, [], "nothing produces an advisory since the flip");
+  assertEquals(report.tally.maskLeaves.notMasked, 1);
+});
+
+Deno.test("check 2b — a leaf drawn from the vocabularies clears it", () => {
+  // The other direction, so the test above cannot pass by the check being
+  // unconditional. The filler is what `fakeForMask` mints for the `text`
+  // category, and it is accepted for every category by design.
+  const report = lintFixtureSet({
+    families: [
+      family({
+        sidecar: sidecar({ fixtures: [{ slug: "clean", description: GOOD_DESCRIPTION }] }),
+        fixtures: [{ slug: "clean", ok: true, doc: { subject: "Sample text for subject" } }],
+      }),
+    ],
+  });
+  assert(!checksIn(report.findings).has("pii-mask"), "a filler is a valid mask");
+  assertEquals(report.tally.maskLeaves.notMasked, 0);
+  assertEquals(report.tally.maskLeaves.masked, 1, "and it was actually EXAMINED");
+});
+
 // ── The tallies, which are what make a vacuous run visible ──────────
 
 Deno.test("the report EXAMINES what it claims to examine", () => {

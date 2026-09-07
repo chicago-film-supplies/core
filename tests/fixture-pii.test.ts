@@ -361,5 +361,9 @@ Deno.test("a malformed fixture does not crash the mask arm", async () => {
     fixture: { slug: "t", ok: true, doc: { subject: "Riverwalk Summer Series" } },
   });
   assertEquals(real.filter((f) => f.check === "pii-mask").length, 1);
-  assertEquals(real.find((f) => f.check === "pii-mask")?.severity, "advisory");
+  // 🔴 BLOCKING, not advisory — flipped 2026-09-06 once `templates` reached 0
+  // `not-masked` leaves. Asserted rather than left implicit because `severity`
+  // is what the manager renders on, and an accidental re-add would make a real
+  // leak display as a notice.
+  assertEquals(real.find((f) => f.check === "pii-mask")?.severity, undefined);
 });

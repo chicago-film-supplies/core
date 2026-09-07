@@ -149,6 +149,13 @@ export interface LintFinding {
    * repaired, and the flip is deleting one field. Do not use it to park a rule
    * nobody intends to enforce — an advisory with no plan to flip is a comment
    * that costs a CI run.
+   *
+   * ⭐ **NO CHECK PRODUCES ONE TODAY, and that is the seam working rather than
+   * dead code.** Check 2b was the only producer; its corpus was repaired and it
+   * flipped on 2026-09-06. Kept because the next rule over an existing corpus
+   * needs exactly this, and because {@link LintReport.advisories} is a wire
+   * shape three repos already carry — but a caller reasoning about live
+   * advisories today is reasoning about an empty set.
    */
   severity?: "advisory";
 }
@@ -209,6 +216,13 @@ export interface LintReport {
    * ⚠️ **Print these.** They are partitioned out so a caller cannot fail a run
    * on them by accident, not so a caller can ignore them: an advisory nobody
    * ever sees is a check that does not exist.
+   *
+   * ⚠️ **Empty since 2026-09-06** — see {@link LintFinding.severity}. A caller
+   * that drops this array is not currently losing anything, which is a fact
+   * about today's check set and not a licence: `api-cloudrun`'s
+   * `familyLintOutcome` already drops it, and did so while check 2b was still
+   * advisory — so the family-wide lint the manager renders never showed a mask
+   * finding at all until the flip made it blocking.
    */
   advisories: LintFinding[];
   tally: LintTally;
@@ -466,20 +480,25 @@ export function lintFixture(args: {
       // corpus today, and a five-line rationale repeated 24 times buries the
       // one thing that differs between them — which leaves. The explanation
       // belongs to the presenter, printed once; the finding states the fact.
+      // 🔴 **BLOCKING since 2026-09-06 — the flip is done, and the corpus is
+      // what changed, not the rule.** It shipped advisory because 157 leaves
+      // across ALL 24 committed fixtures read `not-masked`, most of them not
+      // leaks but values masked by the pre-#837 router, which chose a category
+      // from the value's SHAPE. Landing blocking then would have reddened
+      // `templates` CI for every session in that checkout on files nobody in
+      // the PR touched. `templates` #234/#235/#236 re-captured 22 of the 24 and
+      // #238 rewrote the two hand-built ones from this module's own
+      // vocabularies, taking the count 157 → 50 → **0**.
+      //
+      // ⚠️ **Do not re-add a carve-out for a fixture that cannot be captured.**
+      // Both hand-built fixtures are PII-free by construction and were still
+      // repaired rather than exempted: a carve-out is exactly where a genuinely
+      // leaked address would hide, and a fixture is the cheaper thing to change
+      // than the rule. The vocabularies are exported for that purpose.
       note(
         "pii-mask",
         `${unrouted.length} masked leaf/leaves hold a value the masker could not have ` +
           `produced: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`,
-        // 🔴 ADVISORY UNTIL THE CORPUS IS RE-CAPTURED, and the measurement is
-        // why: 157 leaves across ALL 24 committed fixtures read `not-masked` on
-        // 2026-09-06, not the two hand-built fixtures this was expected to
-        // catch. Most are not leaks — they are values masked by the pre-#837
-        // router, which chose a category from the value's shape. Landing this
-        // blocking today reddens `templates` CI for every session in that
-        // checkout, on files nobody in the PR touched. The corpus is repaired by
-        // re-capture (templates#203, api-cloudrun#627); THEN delete this
-        // argument, which is the entire flip.
-        "advisory",
       );
     }
   }
