@@ -41,3 +41,60 @@ Deno.test("WebshopProductSchema rejects additional properties", () => {
   const doc = { ...validWebshopProduct, bogus: true };
   assertEquals(WebshopProductSchema.safeParse(doc).success, false);
 });
+
+// ── core#89: the webshop price formula is the COMPONENT subset ──────────────
+//
+// 🔴 **`percent_of_total` is not merely unreachable here, it is uninhabitable.**
+// Neither webshop price arm declares `base_percent` at all, so the member named
+// a formula whose rate the document is structurally incapable of carrying — and
+// a webshop document mirrors a product confined to `WEBSHOP_PRODUCT_TYPES`,
+// which excludes the one type (`transaction_fee`) that legitimately prices from
+// a document total.
+//
+// ⚠️ Each case mutates EXACTLY ONE field of the valid fixture above, so it
+// cannot degrade into "fails for some reason" — the file's existing
+// `rejects replacement type` arm is the shape being mirrored.
+//
+// Corpus re-measured immediately before this landed (2026-09-07, prod
+// `cfs-3100`): 244 webshop-products, **0** with `price.formula ==
+// percent_of_total`, **0** with a type in `{replacement, transaction_fee}`, and
+// **0** `percent_of_total` across every `components[]`/`component_of[]` entry of
+// all 244 (paged to `next_cursor: null`, not sampled). Dev agrees on the
+// top-level count.
+Deno.test("WebshopProductSchema rejects percent_of_total on the product price", () => {
+  const doc = {
+    ...validWebshopProduct,
+    price: { ...(validWebshopProduct.price as Record<string, unknown>), formula: "percent_of_total" },
+  };
+  assertEquals(WebshopProductSchema.safeParse(doc).success, false);
+});
+
+Deno.test("WebshopProductSchema rejects percent_of_total on a component's price", () => {
+  const component = {
+    uid: "testwpc00000000000000".slice(0, 20),
+    path: [],
+    name: "Battery",
+    type: "rental",
+    quantity: 1,
+    price: { base_cents: 0, taxes: [], formula: "percent_of_total", discountable: false },
+  };
+  const doc = { ...validWebshopProduct, components: [component] };
+  assertEquals(WebshopProductSchema.safeParse(doc).success, false);
+});
+
+// The fail-closed companion: both rejections above would also pass against a
+// schema that rejected EVERY formula, or every component. A member the subset
+// keeps has to still be accepted, or the narrowing is indistinguishable from a
+// ban.
+Deno.test("WebshopProductSchema still accepts a component priced five_day_week", () => {
+  const component = {
+    uid: "testwpc00000000000000".slice(0, 20),
+    path: [],
+    name: "Battery",
+    type: "rental",
+    quantity: 1,
+    price: { base_cents: 0, taxes: [], formula: "five_day_week", discountable: false },
+  };
+  const doc = { ...validWebshopProduct, components: [component] };
+  assertEquals(WebshopProductSchema.safeParse(doc).success, true);
+});

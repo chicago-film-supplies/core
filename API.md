@@ -3836,6 +3836,7 @@ interface FulfillmentLineItemType {
   description: string;
   quantity: number;
   stock_method?: StockMethodType;
+  zero_priced?: boolean | null;
   path: string[];
   order_number?: number;
   uid_order?: string;
@@ -4391,6 +4392,7 @@ interface InvoiceDocLineItem {
   quantity: number;
   price: InvoiceDocItemPrice;
   path: string[];
+  zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
@@ -14822,6 +14824,7 @@ interface InvoiceDocLineItem {
   quantity: number;
   price: InvoiceDocItemPrice;
   path: string[];
+  zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
@@ -16335,6 +16338,7 @@ interface FulfillmentLineItemType {
   description: string;
   quantity: number;
   stock_method?: StockMethodType;
+  zero_priced?: boolean | null;
   path: string[];
   order_number?: number;
   uid_order?: string;
@@ -24709,10 +24713,31 @@ Check whether any pre-tax line item has taxes applied.
 Project an order item to its invoice-item shape, scoped under an order divider.
 
 Order items carry fields (`stock_method`, `order_number`, `uid_order`,
-`inclusion_type`, `zero_priced`, `uid_delivery`/`uid_collection` on line items,
+`inclusion_type`, `uid_delivery`/`uid_collection` on line items,
 `price.replacement`) that `InvoiceDocLineItemSchema` (strict) rejects. Spreading
 `...orderItem` into an invoice item leaks them. Call this helper at every
 order → invoice boundary instead.
+
+🔴 **`zero_priced` is DECLARED on the invoice line now and is deliberately
+still NOT projected — that pairing is the whole of stage one** (`manager#421`).
+The schema accepts the key so a deployed reader can hold a document carrying
+it; nothing emits one yet, so no stored line changes and no verdict moves.
+
+⚠️ **Emitting it is gated on a BACKFILL, not on taste**, and the reason is
+`invoiceItemDifferences` comparing top-level KEY SETS. `buildOrderLine` writes
+`zero_priced: null` explicitly on every order line — see its own comment,
+*"the server writes both as an explicit `null` so the optimistic row matches
+the echo"* — so the key is present on every order line without exception. Add
+it to this projection before the stored invoice lines carry it and EVERY
+paired line reports a key-set difference at once. That is not hypothetical:
+this file already records it happening three times (`base_percent`,
+`crms_id`, `price.discount_percent` — 8,015 of 8,978 paired lines), which is
+why `coa_revenue`, `taxed_as` and `price.taxes_base` below are all spread
+CONDITIONALLY.
+
+**Stage two is therefore: backfill the corpus, then emit here, in that
+order** — and a conditional spread does NOT rescue it, because the condition
+is true for every line.
 
 `destination` and `group` items share their shape with the order doc, so they
 pass through. Line items (and `transaction_fee`, which is stored as a
