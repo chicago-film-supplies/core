@@ -1659,7 +1659,7 @@
         {
           "kind": "interface",
           "name": "GoldenDiff",
-          "declaration": "interface GoldenDiff {\n  fixture: string;\n  verdict: GoldenDiffVerdict;\n  delta: number;\n  image_uuids: typeLiteral;\n  sha: string;\n  checked_at: FirestoreTimestampType;\n}",
+          "declaration": "interface GoldenDiff {\n  fixture: string;\n  verdict: GoldenDiffVerdict;\n  delta: number;\n  image_uuids: typeLiteral;\n  sha: string;\n  checked_at: FirestoreTimestampType;\n  largest_blob?: typeLiteral;\n}",
           "doc": "Per-fixture golden visual-diff result for a draft branch. The CI golden-diff\npath fans out over the family's git-canonical fixtures (`fixtures/<gp>/*.json`)\nand persists one entry per fixture so the manager can render the\napprove-to-merge review row-by-row. `image_uuids` are Uploadcare UUIDs\n(served via ucarecdn.com); `fixture` is the slug join key\n(`fixtures/<gp>/<slug>.json`)."
         },
         {
@@ -13886,6 +13886,23 @@
           "signature": "hashTemplateContent(content: Record<string, string>): string",
           "doc": "Order-independent fingerprint of a template/component content map\n(path → file text). The API stamps a version's `committed_content_hash` with\nthis when it pushes content to git (commit / release); the manager hashes the\nlive draft content the same way to detect \"dirty since last commit\" and warn\nat approve-to-merge.\n\nPure, synchronous, and runtime-agnostic (Deno + browser) so both sides agree\nbyte-for-byte. A non-cryptographic 64-bit FNV-1a digest (two seeded streams):\ncollision resistance is irrelevant here — it only answers \"did the content\nchange since the last push?\".\n\n```ts\nhashTemplateContent({ \"a.eta\": \"x\" }) === hashTemplateContent({ \"a.eta\": \"x\" }); // true\n```",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "injectPartDefaults",
+          "signature": "injectPartDefaults(html: string, opts: typeLiteral): string",
+          "doc": "Wrap a header/footer partial in the document Chromium renders in the PDF's\nprint frame — the page's overlay stylesheet as a start-of-head DEFAULT, then\nthe geometry that must win.\n\n🔴 **THREE surfaces render this frame and they must agree byte for byte.**\nIt lives in core because each of them is in a different repo:\n\n| consumer | what it does with the frame |\n|---|---|\n| `api-cloudrun`'s Gotenberg convert | ships it to the customer as `footer.html` |\n| `api-cloudrun`'s golden gate | screenshots it as `goldens/<branch>/<gp>/_footer.png` |\n| `templates`' `deno task preview` | shows it to the author |\n\nAny one of them assembling the frame its own way produces a picture nobody\nreceives. The gate would agree with its own baseline and disagree with the\nPDF; the preview harness DID exactly that and its `<style>` leaked onto the\nwhole preview, so an author's local check disagreed with both.\n\n🔴 **The injection ORDER is load-bearing and is not expressible as two\ncalls.** Each injection inserts immediately after `<head>`, so a second one\nwould land EARLIEST and lose the cascade. The overlay is a default the\npartial may override; the geometry is not. One `<style>` block, overlay\nfirst — and `api-cloudrun/tests/unit/gotenberg.test.ts` asserts that ordering\nrather than leaving it to this comment.\n\n⚠️ Padding on a full-width body, never `margin`: Chromium's print\nheader/footer frame lets a `width:100%` child escape a margined body.",
+          "paramTags": [
+            {
+              "name": "html",
+              "doc": "The rendered partial — a fragment in every case we generate."
+            },
+            {
+              "name": "opts",
+              "doc": "`styles` is the page's concatenated overlay; `left`/`right` are\nthe page's horizontal margins in INCHES, so the frame aligns with the body."
+            }
+          ],
           "returnsTag": null
         },
         {

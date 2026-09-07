@@ -1,4 +1,4 @@
-import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertNotEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {
   aggregateGoldenVerdict,
   bumpSemver,
@@ -9,6 +9,7 @@ import {
   goldenFrameSlug,
   goldenPath,
   hashTemplateContent,
+  injectPartDefaults,
   NO_FIXTURES_SENTINEL,
   parseFixturePath,
   parseGoldenFrameSlug,
@@ -39,6 +40,68 @@ Deno.test("goldenPath includes branch, git_path, and slug", () => {
     goldenPath("sandbox", "packing-list", "tax-exempt"),
     "goldens/sandbox/packing-list/tax-exempt.png",
   );
+});
+
+// ── injectPartDefaults — the PDF header/footer frame document ───────
+//
+// ⭐ Three repos render this frame and must agree byte for byte, which is why
+// it is here at all. The ordering assertion also lives in
+// `api-cloudrun/tests/unit/gotenberg.test.ts`, driven through the actual
+// convert path; these exercise the function directly, including the cases that
+// convert path cannot reach.
+
+Deno.test("injectPartDefaults — overlay first, geometry last, in ONE style block", () => {
+  // Ordering is load-bearing: the geometry keeps content inside the page and
+  // must win the overlap with the overlay's own `body` rules. ONE block is what
+  // makes that expressible — two injections would each insert straight after
+  // <head>, so the one applied LAST would land EARLIEST and lose.
+  const out = injectPartDefaults("<footer>x</footer>", {
+    styles: "body{margin:40px}",
+    left: 0.5,
+    right: 0.5,
+  });
+  assertEquals(out.split("<style>").length - 1, 1, "exactly one style block");
+  const overlayAt = out.indexOf("body{margin:40px}");
+  const geometryAt = out.indexOf("box-sizing:border-box");
+  assert(overlayAt !== -1 && geometryAt !== -1);
+  assert(overlayAt < geometryAt, "overlay must precede the geometry rules");
+  assertStringIncludes(out, "padding:0 0.5in 0 0.5in");
+});
+
+Deno.test("injectPartDefaults — a fragment MENTIONING the head tag is not a document", () => {
+  // 🔴 The anchored prologue, and the reason for it. A comment in
+  // `partials/shared/footer.eta` naming the tag in prose once took ~26 KB of
+  // overlay CSS into the MIDDLE of that comment, closing the `<style>` early
+  // and rendering the rest of the stylesheet as visible body text in the PDF.
+  const out = injectPartDefaults("<!-- do not write <head> here --><footer>x</footer>", {
+    styles: "p{color:red}",
+    left: 0.5,
+    right: 0.5,
+  });
+  // Wrapped as a fragment: exactly one <html>, and the style is in the head the
+  // wrapper opened, not spliced into the comment.
+  assertEquals(out.split("<html").length - 1, 1);
+  assert(out.indexOf("p{color:red}") < out.indexOf("do not write"));
+});
+
+Deno.test("injectPartDefaults — a real document keeps its own head and is not re-wrapped", () => {
+  const out = injectPartDefaults(
+    "<!DOCTYPE html><html><head><title>t</title></head><body><footer>x</footer></body></html>",
+    { styles: "p{color:red}", left: 0.5, right: 0.5 },
+  );
+  assertStringIncludes(out, "<head><style>p{color:red}");
+  assertEquals(out.split("<html").length - 1, 1, "must not be double-wrapped");
+});
+
+Deno.test("injectPartDefaults — a document with no head gets one, and no styles still emits geometry", () => {
+  const noHead = injectPartDefaults("<html><body><footer>x</footer></body></html>", {
+    left: 0.39,
+    right: 0.39,
+  });
+  assertStringIncludes(noHead, "<head><style>");
+  // Back-compat: the geometry is unconditional, the overlay is not.
+  assertStringIncludes(noHead, "padding:0 0.39in 0 0.39in");
+  assertEquals(noHead.split("<style>").length - 1, 1);
 });
 
 Deno.test("goldenFramePath is a golden in the SAME flat directory", () => {

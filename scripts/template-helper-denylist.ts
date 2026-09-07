@@ -373,6 +373,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // the order. Shared between api-cloudrun and the manager editor (core#68);
     // neither consumer is a template.
     "aggregateGoldenVerdict",
+    // Assembles the isolated Chromium document a PDF's header/footer frame is
+    // rendered in. It is a fact about the RENDER PIPELINE, not about the
+    // document — the three callers are api-cloudrun's Gotenberg convert, its
+    // golden gate, and the templates preview harness. A template body is the
+    // thing being wrapped; offering it the wrapper in the helper panel invites
+    // a partial to inject a second copy of the page's stylesheet into itself,
+    // which is exactly the double-injection the ordering comment on that
+    // function exists to prevent.
+    "injectPartDefaults",
   ],
   // `utils/fulfillment-items.ts` is a WRITE-PATH function shared by the API and
   // the manager — it rebuilds a fulfillment's items array from a picker

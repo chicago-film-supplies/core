@@ -128,6 +128,44 @@ export interface GoldenDiff {
   /** PR head sha the verdict was computed at. */
   sha: string;
   checked_at: FirestoreTimestampType;
+  /**
+   * The largest 8-connected region of mismatched pixels, and where it sits.
+   *
+   * 🔴 **The SHAPE half of the verdict, and without it a sub-threshold `diff`
+   * is unreadable.** Since templates#137 half 1 the gate fails on either
+   * `delta > threshold` OR `largestBlob.pixels > 20`, so a row can read
+   * `verdict: "diff", delta: 0.0004` — which on its own says nothing and looks
+   * like noise. The same row carrying `{pixels: 313, y: 198}` says a band moved
+   * and where, which is the difference between a reviewer looking and a
+   * reviewer shrugging. Four true positives on that issue measured 48–70px
+   * against a ZERO noise floor.
+   *
+   * ⚠️ **Absent is not zero, and absent is the only way to say "no blob".**
+   * `.optional()` and deliberately NOT `.nullable().optional()`: the writer maps
+   * a null comparison to an omitted key, so there are two states rather than
+   * three. The third — present-and-null — would have to mean *"this run
+   * measured and found none"* as distinct from *"no run has written one yet"*,
+   * and **no consumer can act on that difference**: both render nothing, and a
+   * stale row is already identified by its `sha`. `tests/stored-optionality.test.ts`
+   * is the guard that forces this question, and its answer here is the smaller
+   * accepted set rather than a catalogue entry.
+   *
+   * It is absent on every verdict but `match`/`diff`, on a dimension mismatch
+   * (there is no overlay to measure), and on every row written before the field
+   * existed. A reader that renders `0 px` for an absent value states a
+   * measurement that was never taken.
+   *
+   * ⚠️ Read `pixels` WITH the box rather than instead of it: a diagonal
+   * hairline and a solid block can share a bounding box.
+   */
+  largest_blob?: {
+    /** Pixel count of the region — the value the blob rule is calibrated against. */
+    pixels: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
 /** Zod schema for a GoldenDiff. */
@@ -142,6 +180,17 @@ export const GoldenDiffSchema: z.ZodType<GoldenDiff> = z.strictObject({
   }),
   sha: z.string().min(1),
   checked_at: FirestoreTimestamp,
+  // ⚠️ Bare `.optional()`, NOT `.nullable().optional()` — see the interface.
+  // The writer omits the key rather than storing a null, which keeps two states
+  // where three would need an exemption in `tests/stored-optionality.test.ts`
+  // that no consumer could use.
+  largest_blob: z.strictObject({
+    pixels: z.int().nonnegative(),
+    x: z.int(),
+    y: z.int(),
+    width: z.int().nonnegative(),
+    height: z.int().nonnegative(),
+  }).optional(),
 });
 
 /**

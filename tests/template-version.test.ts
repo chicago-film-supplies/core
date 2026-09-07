@@ -47,6 +47,64 @@ Deno.test("GoldenDiffSchema accepts a per-fixture match result", () => {
   assertEquals(res.success, true);
 });
 
+Deno.test("GoldenDiffSchema — largest_blob accepts a measurement or absence — never an explicit null", () => {
+  const base = {
+    fixture: "order-841",
+    verdict: "diff" as const,
+    delta: 0.0004,
+    image_uuids: {},
+    sha: "deadbeef",
+    checked_at: mockTimestamp,
+  };
+  // A measured blob is the shape half of a sub-threshold `diff` — the thing
+  // that makes `verdict: "diff", delta: 0.0004` readable instead of looking
+  // like noise.
+  assertEquals(
+    GoldenDiffSchema.safeParse({
+      ...base,
+      largest_blob: { pixels: 313, x: 40, y: 198, width: 220, height: 9 },
+    }).success,
+    true,
+  );
+  // Absence is the ONLY way to say "no blob" — the writer omits the key rather
+  // than storing a null, so an explicit null is refused. Two states, not three:
+  // "measured and found none" and "no run has written one" render identically
+  // and a stale row is identified by its `sha`, so the third state would be an
+  // exemption in `tests/stored-optionality.test.ts` that no consumer could use.
+  assertEquals(GoldenDiffSchema.safeParse(base).success, true);
+  assertEquals(GoldenDiffSchema.safeParse({ ...base, largest_blob: null }).success, false);
+});
+
+Deno.test("GoldenDiffSchema — largest_blob is strict, and a fractional pixel count is rejected", () => {
+  const base = {
+    fixture: "order-841",
+    verdict: "diff" as const,
+    delta: 0.0004,
+    image_uuids: {},
+    sha: "deadbeef",
+    checked_at: mockTimestamp,
+  };
+  // The fail-closed companion. `pixels` is a COUNT — a float there would be a
+  // measurement nothing produced, and the whole point of the field is that a
+  // reviewer can act on the number.
+  assertEquals(
+    GoldenDiffSchema.safeParse({
+      ...base,
+      largest_blob: { pixels: 12.5, x: 0, y: 0, width: 1, height: 1 },
+    }).success,
+    false,
+  );
+  // Strict, like every other member of this document — an unknown key here
+  // would be a second producer's field arriving unreviewed.
+  assertEquals(
+    GoldenDiffSchema.safeParse({
+      ...base,
+      largest_blob: { pixels: 1, x: 0, y: 0, width: 1, height: 1, area: 1 },
+    }).success,
+    false,
+  );
+});
+
 Deno.test("GoldenDiffSchema requires the fixture slug", () => {
   const res = GoldenDiffSchema.safeParse({
     verdict: "match",

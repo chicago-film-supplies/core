@@ -122,6 +122,76 @@ export function parseGoldenFrameSlug(slug: string): GoldenFrame | null {
 }
 
 /**
+ * Does this string OPEN as a full HTML document?
+ *
+ * ⚠️ Deliberately anchored, because the obvious test is wrong. Matching
+ * `/<head[^>]*>/` anywhere treats ANY occurrence of the text — in a CSS
+ * comment, in prose, in an attribute value — as the document's own head, and
+ * splices the whole injected block there. That is not hypothetical: a comment
+ * in `partials/shared/footer.eta` mentioning the tag by name took ~26 KB of
+ * overlay CSS *into the middle of that comment*, which closed the `<style>`
+ * early and rendered the rest of the stylesheet as visible body text in the
+ * PDF. The blast radius grew with the overlay: the payload used to be one short
+ * rule and is now the document's entire stylesheet.
+ *
+ * A part partial is a FRAGMENT in every case we generate, so the safe reading
+ * is: only trust a `<head>` when the string genuinely opens as a document.
+ */
+const DOCUMENT_PROLOGUE = /^\s*(?:<!--[\s\S]*?-->\s*|<!doctype[^>]*>\s*)*<html[\s>]/i;
+
+/**
+ * Wrap a header/footer partial in the document Chromium renders in the PDF's
+ * print frame — the page's overlay stylesheet as a start-of-head DEFAULT, then
+ * the geometry that must win.
+ *
+ * 🔴 **THREE surfaces render this frame and they must agree byte for byte.**
+ * It lives in core because each of them is in a different repo:
+ *
+ * | consumer | what it does with the frame |
+ * |---|---|
+ * | `api-cloudrun`'s Gotenberg convert | ships it to the customer as `footer.html` |
+ * | `api-cloudrun`'s golden gate | screenshots it as `goldens/<branch>/<gp>/_footer.png` |
+ * | `templates`' `deno task preview` | shows it to the author |
+ *
+ * Any one of them assembling the frame its own way produces a picture nobody
+ * receives. The gate would agree with its own baseline and disagree with the
+ * PDF; the preview harness DID exactly that and its `<style>` leaked onto the
+ * whole preview, so an author's local check disagreed with both.
+ *
+ * 🔴 **The injection ORDER is load-bearing and is not expressible as two
+ * calls.** Each injection inserts immediately after `<head>`, so a second one
+ * would land EARLIEST and lose the cascade. The overlay is a default the
+ * partial may override; the geometry is not. One `<style>` block, overlay
+ * first — and `api-cloudrun/tests/unit/gotenberg.test.ts` asserts that ordering
+ * rather than leaving it to this comment.
+ *
+ * ⚠️ Padding on a full-width body, never `margin`: Chromium's print
+ * header/footer frame lets a `width:100%` child escape a margined body.
+ *
+ * @param html The rendered partial — a fragment in every case we generate.
+ * @param opts `styles` is the page's concatenated overlay; `left`/`right` are
+ *   the page's horizontal margins in INCHES, so the frame aligns with the body.
+ */
+export function injectPartDefaults(
+  html: string,
+  opts: { styles?: string; left: number; right: number },
+): string {
+  const overlay = opts.styles ? `${opts.styles}\n` : "";
+  const geometry =
+    `html,body{margin:0;width:100%;box-sizing:border-box}body{padding:0 ${opts.right}in 0 ${opts.left}in}`;
+  const style = `<style>${overlay}${geometry}</style>`;
+  if (DOCUMENT_PROLOGUE.test(html)) {
+    // A real document. Inject after its own <head>, or open one right after
+    // <html> when it has none (legal HTML — the parser implies the head).
+    if (/<head[^>]*>/i.test(html)) {
+      return html.replace(/<head[^>]*>/i, (m) => `${m}${style}`);
+    }
+    return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${style}</head>`);
+  }
+  return `<!DOCTYPE html><html><head>${style}</head><body>${html}</body></html>`;
+}
+
+/**
  * Parse a fixture path back to `{ gitPath, slug }`. Returns `null` for any
  * path that isn't of the form `fixtures/<gp>/<slug>.json`. The affected-set
  * classifier consumes this to route fixture-only PR changes into the
