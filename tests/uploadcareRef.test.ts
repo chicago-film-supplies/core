@@ -85,8 +85,10 @@ const EXPECTED_REF_PATHS: Record<string, string[]> = {
   "products": ["images[].uuid", "images[].uuid_cutout", "query_by_images[]"],
   "cards": ["attachments[].uid"],
   "recurrences": ["prototype.attachments[].uid"],
+  // `golden_results[].image_uuids.baseline` was here until api-cloudrun#632: the
+  // committed golden is served from git now, so the CDN copy was purged and the
+  // key dropped. This snapshot going down by one is the intended narrowing.
   "templates-versions": [
-    "golden_results[].image_uuids.baseline",
     "golden_results[].image_uuids.candidate",
     "golden_results[].image_uuids.diff",
   ],

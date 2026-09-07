@@ -119,12 +119,18 @@ export interface GoldenDiff {
   verdict: GoldenDiffVerdict;
   delta: number;
   /** Uploadcare UUIDs for the review images. `candidate` is the PR-head render
-   * and `diff` the pixel overlay; **`baseline` is the committed golden the
-   * candidate was compared against**, uploaded so the manager can show a
-   * before/after rather than an overlay the operator has to reverse-engineer
-   * (api-cloudrun#589). `baseline` is absent on `no-golden` (there is nothing to
-   * show) and on `diff` results predating the upload. */
-  image_uuids: { candidate?: string; diff?: string; baseline?: string };
+   * and `diff` the pixel overlay.
+   *
+   * ⚠️ **There is no `baseline` key, and its absence is the point.** It used to
+   * carry the committed golden so the manager could show a before/after rather
+   * than an overlay (api-cloudrun#589) — which meant the golden lived twice,
+   * once in git where it is the artifact of record and once on a CDN that
+   * nothing kept in step with it. Since api-cloudrun#632 the API serves those
+   * bytes from git (`GET /templates/{uid}/goldens/{slug}`) and the manager reads
+   * that route, so the stored copies were purged (30 files across 3 prod
+   * documents, 2026-09-07) before this key was dropped — purge precedes drop,
+   * because a `z.strictObject` rejects an undeclared key that is still stored. */
+  image_uuids: { candidate?: string; diff?: string };
   /** PR head sha the verdict was computed at. */
   sha: string;
   checked_at: FirestoreTimestampType;
@@ -176,7 +182,6 @@ export const GoldenDiffSchema: z.ZodType<GoldenDiff> = z.strictObject({
   image_uuids: z.strictObject({
     candidate: uploadcareRef(z.string().optional()),
     diff: uploadcareRef(z.string().optional()),
-    baseline: uploadcareRef(z.string().optional()),
   }),
   sha: z.string().min(1),
   checked_at: FirestoreTimestamp,
