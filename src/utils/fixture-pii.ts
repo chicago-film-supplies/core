@@ -116,9 +116,15 @@ const LEAF_CATEGORY: Readonly<Record<string, MaskCategory>> = {
  * `<parent>.<leaf>` for the two leaves whose category depends on where they sit.
  *
  * Every entry was measured, not guessed: `collectLeafPaths(schema, {inherit:
- * ["pii"]})` over all six `TEMPLATE_COLLECTION_SCHEMAS` returns 32 distinct
+ * ["pii"]})` over all seven `TEMPLATE_COLLECTION_SCHEMAS` returns 35 distinct
  * `(parent, leaf)` pairs for `pii: "mask"` STRING leaves, and these are the
  * ones whose leaf is `name` or `full`.
+ *
+ * ⚠️ **Re-measure rather than incrementing these numbers.** They were "six" and
+ * "32" until `statements` landed; a count in prose has no guard, and the census
+ * that DOES fail lives in the other repo
+ * (`api-cloudrun/tests/unit/fixturePiiStrategy.test.ts`), so `core`'s own suite
+ * stays green while this sentence goes stale.
  */
 const QUALIFIED_CATEGORY: Readonly<Record<string, MaskCategory>> = {
   // A real person.
@@ -129,6 +135,12 @@ const QUALIFIED_CATEGORY: Readonly<Record<string, MaskCategory>> = {
   "organization.name": "organization",
   "organizations.name": "organization",
   "path.name": "organization",
+  // ⭐ The SAME fact as `path.name`, under a different parent, because an
+  // `OrgStatement` has no `organization` wrapper to nest the chain under — the
+  // document's subject IS the customer, so `organization_path[]` sits at the
+  // root (`schemas/reporting.ts`). The category is identical; only the qualifier
+  // differs, which is exactly what this table is for.
+  "organization_path.name": "organization",
   // A facility / venue / section label. `address.name` is the place the address
   // belongs to ("Cinespace Chicago — Stage 14"); `items.name` and `item.name`
   // are the DESTINATION divider arm, which core `652b1ba` re-tagged to `mask`
