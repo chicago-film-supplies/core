@@ -21,6 +21,8 @@ import {
   type InclusionTypeType,
   PriceFormulaEnum,
   type PriceFormulaType,
+  ComponentPriceFormulaEnum,
+  type ComponentPriceFormulaType,
   ProductTypeEnum,
   type ProductTypeType,
   StockMethodEnum,
@@ -73,12 +75,17 @@ export interface ProductComponent {
      * strictObject refusing the key — see the Zod arm for the incident.
      * Always `null` in practice: `ComponentTypeEnum` excludes
      * `transaction_fee`, so a component is never itself a percent fee.
+     *
+     * ⚠️ **That was a fact about the CORPUS, not a guarantee, until core#78.**
+     * `formula` below is now {@link ComponentPriceFormulaType}, so the state
+     * this field could pair with — `percent_of_total` — is unrepresentable
+     * here rather than merely unreached. A non-null value is now always wrong.
      */
     base_percent?: number | null;
     replacement_cents?: number | null;
     coa_revenue?: COARevenueType;
     taxes: TaxRefType[];
-    formula: PriceFormulaType;
+    formula: ComponentPriceFormulaType;
     discountable: boolean;
   };
 }
@@ -395,13 +402,22 @@ const ComponentObject = z.strictObject({
     // No refinement: the component is a copy, so its formula and its rate move
     // together and consistency is the SOURCE's to enforce. A second gate here
     // would fail the copy rather than the authoring.
+    //
+    // ⚠️ **That reasoning is sound for the COPY path and silent about the
+    // AUTHORING path** — `AuthoredComponentSchema` exists precisely because a
+    // component can be written directly rather than copied, and nothing on that
+    // path enforced the pair. core#78. The formula below is now narrowed to
+    // `ComponentPriceFormulaEnum`, which makes the half that matters
+    // (`percent_of_total` with no rate) unrepresentable rather than merely
+    // unreached. The mirror half — a `base_percent` beside a two-member formula
+    // — is what attaching `checkPriceBaseUnit` here would still close.
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional().meta({ label: "Replacement" }),
     coa_revenue: COARevenueEnum.optional(),
     taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
-    formula: PriceFormulaEnum,
+    formula: ComponentPriceFormulaEnum,
     discountable: z.boolean(),
-  }),
+  }).superRefine(checkPriceBaseUnit),
 });
 
 /**

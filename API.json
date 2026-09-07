@@ -830,6 +830,18 @@
         },
         {
           "kind": "variable",
+          "name": "ComponentPriceFormulaEnum",
+          "declaration": "const ComponentPriceFormulaEnum: z.ZodType<ComponentPriceFormulaType>;",
+          "doc": "Zod schema for ComponentPriceFormulaType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ComponentPriceFormulaType",
+          "declaration": "type ComponentPriceFormulaType = indexedAccess;",
+          "doc": "Allowed pricing formulas for a component — see {@link COMPONENT_PRICE_FORMULAS}."
+        },
+        {
+          "kind": "variable",
           "name": "ComponentPriceKeyEnum",
           "declaration": "const ComponentPriceKeyEnum: z.ZodType<ComponentPriceKeyType>;",
           "doc": "Zod form of {@link COMPONENT_PRICE_KEYS}."
@@ -5410,6 +5422,18 @@
           "name": "CfsSourceCollectionType",
           "declaration": "type CfsSourceCollectionType = indexedAccess;",
           "doc": "A collection name valid in a {@link DocSourceType}."
+        },
+        {
+          "kind": "variable",
+          "name": "ComponentPriceFormulaEnum",
+          "declaration": "const ComponentPriceFormulaEnum: z.ZodType<ComponentPriceFormulaType>;",
+          "doc": "Zod schema for ComponentPriceFormulaType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ComponentPriceFormulaType",
+          "declaration": "type ComponentPriceFormulaType = indexedAccess;",
+          "doc": "Allowed pricing formulas for a component — see {@link COMPONENT_PRICE_FORMULAS}."
         },
         {
           "kind": "variable",

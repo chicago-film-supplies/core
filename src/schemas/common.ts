@@ -690,6 +690,73 @@ export type PriceFormulaType = typeof PRICE_FORMULAS[number];
 /** Zod schema for PriceFormulaType. */
 export const PriceFormulaEnum: z.ZodType<PriceFormulaType> = z.enum(PRICE_FORMULAS);
 
+/**
+ * The formulas a COMPONENT may be priced by — {@link PRICE_FORMULAS} without
+ * `percent_of_total` (core#78).
+ *
+ * **A component can never legitimately price from a document total.** Only a
+ * `transaction_fee` line does that, and {@link ComponentTypeEnum} excludes
+ * `transaction_fee` — so `percent_of_total` on a component names a line that
+ * cannot exist.
+ *
+ * 🔴 **This is a TYPE-level statement of a rule the RUNTIME already enforced,
+ * and core#78 is wrong about that — measured 2026-09-07 against the unmodified
+ * schema.** `ComponentSchema` and `AuthoredComponentSchema` both carry
+ * `.superRefine(checkItemContract)`, which calls {@link checkItemPriceFormula},
+ * which rejects `percent_of_total` for any item whose contract is not
+ * `from_total`. A component parse was refused with *"only valid on a
+ * transaction_fee"* both with and without a `base_percent`. The issue's claim
+ * that the state is *representable*, and that `manager`'s two hand-listed
+ * selects were "the only thing preventing" it, is false in both halves.
+ *
+ * ⭐ **So what was missing was not a guard — it was a VOCABULARY.** The declared
+ * type said a component's formula may be `percent_of_total`, which is not true
+ * of any component that can parse, and a consumer had nothing to derive the
+ * correct option set from. That is the actual gap manager#378 hit: its sweep
+ * replaced two hand-listed selects with the full {@link PriceFormulaEnum}, and
+ * the result was a UI offering an option the API answers with a 400. **A
+ * restriction that lives only in a refinement is invisible to every consumer
+ * that renders a choice.** Exporting the subset states it once, here, in the
+ * package that owns the vocabulary — the same shape as `CREDIT_NOTE_REASONS`
+ * (`SETTLEMENT_CONTRACTS.credit.reasons`).
+ *
+ * ✅ **Safe to narrow, measured before it landed**, not assumed: every
+ * `components[]` and `component_of[]` entry across all 568 products in BOTH
+ * environments carried `five_day_week` or `fixed`, and every `base_percent` was
+ * `null`. The one product priced `percent_of_total` is the "Card Fee"
+ * (`transaction_fee`, `base_percent: 4`), which `ComponentTypeEnum` already
+ * forbids from being a component and which is a component of nothing.
+ *
+ * ⚠️ **The half of core#78 that IS real is the mirror one**, and it is closed by
+ * the `checkPriceBaseUnit` now attached to the component arm rather than by this
+ * enum: a `base_percent` beside a `fixed` formula parsed cleanly (measured, same
+ * run). `base_percent` has to stay declared — `createProduct` copies a product
+ * price in by spread and a `z.strictObject` refuses an undeclared key — so a
+ * refinement is the only thing that can forbid a value in it.
+ */
+// ⚠️ **Plain `as const`, no `satisfies`.** The subset relation is asserted below
+// instead, because `as const satisfies readonly PriceFormulaType[]` is not
+// syntactically derivable — `deno task check:declarations` catches it as TS9010,
+// and without that gate JSR would emit a *different, wrong* type to npm
+// consumers rather than failing. Same family as core#43's truncated spread.
+const COMPONENT_PRICE_FORMULAS = ["five_day_week", "fixed"] as const;
+
+// `COMPONENT_PRICE_FORMULAS` must be a strict SUBSET of `PRICE_FORMULAS` — one
+// direction only, deliberately, because being smaller is the whole point. The
+// second clause is what stops it silently becoming the full set again.
+type _ComponentFormulaSubset = [typeof COMPONENT_PRICE_FORMULAS[number]] extends [PriceFormulaType]
+  ? [PriceFormulaType] extends [typeof COMPONENT_PRICE_FORMULAS[number]] ? never : true
+  : never;
+const _componentFormulaSubset: _ComponentFormulaSubset = true;
+void _componentFormulaSubset;
+
+/** Allowed pricing formulas for a component — see {@link COMPONENT_PRICE_FORMULAS}. */
+export type ComponentPriceFormulaType = typeof COMPONENT_PRICE_FORMULAS[number];
+/** Zod schema for ComponentPriceFormulaType. */
+export const ComponentPriceFormulaEnum: z.ZodType<ComponentPriceFormulaType> = z.enum(
+  COMPONENT_PRICE_FORMULAS,
+);
+
 // `ITEM_TAX_PROFILES` / `ItemTaxProfileType` / `ItemTaxProfileEnum` were removed
 // here (api-cloudrun#435). They were a THIRD tax vocabulary beside
 // `TAX_PROFILES` and the live COA→tax map, exported from `schemas/mod.ts` and used by

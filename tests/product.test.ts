@@ -504,3 +504,111 @@ Deno.test("components require inclusion_type and price_overridden; component_of 
   // purpose. Normalize at the writer, guard at storage.
   assertEquals(CreateProductInput.safeParse({ ...validCreateInput, components: [backRef] }).success, true);
 });
+
+// ── core#78: a component cannot be priced from a document total ─────
+//
+// `ComponentObject.price` declared the full `PriceFormulaEnum` and, unlike the
+// product arm and the two line-price families, carried no `checkPriceBaseUnit`.
+// So `percent_of_total` with a null `base_percent` — a percentage of nothing —
+// PARSED. Only `manager`'s two component price selects prevented it, by
+// hand-listing two of three members, and manager#378's sweep replacing
+// hand-listed vocabularies with derivations from core duly swept that away.
+// The prevention now lives here, in the package that owns the vocabulary.
+
+const componentBase = {
+  uid: "testcomp100000000000",
+  path: ["testproduct100000000"],
+  name: "Battery",
+  type: "rental",
+  stock_method: "bulk",
+  crms_id: 200,
+  quantity: 2,
+  price: { base_cents: 0, replacement_cents: 10000, taxes: [], formula: "fixed", discountable: false },
+};
+
+Deno.test("a component may be priced five_day_week or fixed", () => {
+  for (const formula of ["five_day_week", "fixed"]) {
+    const component = { ...componentBase, price: { ...componentBase.price, formula } };
+    assertEquals(ComponentSchema.safeParse(component).success, true, formula);
+    assertEquals(
+      AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [] }).success,
+      true,
+      formula,
+    );
+  }
+});
+
+Deno.test("a component may NOT be priced percent_of_total — on either side", () => {
+  // Both sides, because `AuthoredComponentSchema` extends `ComponentSchema` and
+  // an extension is exactly where a narrowing can be widened back by accident.
+  const component = { ...componentBase, price: { ...componentBase.price, formula: "percent_of_total" } };
+  assertEquals(ComponentSchema.safeParse(component).success, false);
+  assertEquals(
+    AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [] }).success,
+    false,
+  );
+});
+
+Deno.test("a component priced percent_of_total is rejected even WITH a base_percent", () => {
+  // 🔴 The fail-closed arm. The defect core#78 names is the missing
+  // `checkPriceBaseUnit`, so the obvious repair is to add the rate — and if the
+  // narrowing were expressed as a refinement on the pair rather than on the
+  // vocabulary, supplying `base_percent` would make this pass. A component can
+  // never price from a document total no matter what rate accompanies it,
+  // because `ComponentTypeEnum` excludes `transaction_fee`.
+  const component = {
+    ...componentBase,
+    price: { ...componentBase.price, formula: "percent_of_total", base_percent: 4 },
+  };
+  assertEquals(ComponentSchema.safeParse(component).success, false);
+});
+
+Deno.test("the PRODUCT price keeps all three formulas — the narrowing is not over-applied", () => {
+  // ⚠️ Without this the narrowing could be widened to the product arm and every
+  // arm above would stay green, taking the live "Card Fee" product with it:
+  // `transaction_fee`, `percent_of_total`, `base_percent: 4`, `base_cents: 0`.
+  const feeProduct = {
+    ...validProduct,
+    type: "transaction_fee",
+    price: { ...validProduct.price, base_cents: 0, base_percent: 4, formula: "percent_of_total" },
+  };
+  assertEquals(ProductSchema.safeParse(feeProduct).success, true);
+});
+
+Deno.test("a component may NOT carry a base_percent beside a two-member formula", () => {
+  // 🔴 **This is the half of core#78 that was real, and the ONLY arm here that
+  // fails against the pre-change schema.** Measured 2026-09-07 against the
+  // unmodified package: `{ formula: "fixed", base_percent: 4 }` on a component
+  // parsed cleanly, because `ComponentObject` carried no `checkPriceBaseUnit`
+  // while the product arm and both line-price families did.
+  //
+  // ⚠️ The issue's headline half — `formula: "percent_of_total"` — was NEVER
+  // representable: `checkItemContract` → `checkItemPriceFormula` has always
+  // rejected it for any type whose contract is not `from_total`, and
+  // `ComponentTypeEnum` excludes `transaction_fee`. The arms above therefore
+  // pass with or without the enum narrowing; they pin the vocabulary, not a
+  // hole. This one pins the hole.
+  const component = {
+    ...componentBase,
+    price: { ...componentBase.price, base_cents: 5000, formula: "fixed", base_percent: 4 },
+  };
+  assertEquals(ComponentSchema.safeParse(component).success, false);
+  assertEquals(
+    AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [] }).success,
+    false,
+  );
+});
+
+Deno.test("a component with a NULL base_percent still parses — the copy path", () => {
+  // ⚠️ Fail-closed companion to the arm above. `createProduct` copies a product
+  // price into `components[]` by SPREAD, so the key travels whether or not the
+  // component can use it, and a `z.strictObject` refuses an undeclared key —
+  // which is why `base_percent` is declared here at all. A refinement that
+  // rejected the key's PRESENCE rather than a non-null VALUE would 400 every
+  // product create. Measured: all `base_percent` in both environments are null.
+  const component = {
+    ...componentBase,
+    price: { ...componentBase.price, base_cents: 5000, formula: "fixed", base_percent: null },
+  };
+  assertEquals(ComponentSchema.safeParse(component).success, true);
+});

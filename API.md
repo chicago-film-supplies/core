@@ -1899,6 +1899,22 @@ Zod schema for CommitMeta. `author` reuses the pii-annotated ActorRef.
 const CommitMetaSchema: z.ZodType<CommitMeta>;
 ```
 
+### `ComponentPriceFormulaEnum`
+
+Zod schema for ComponentPriceFormulaType.
+
+```ts
+const ComponentPriceFormulaEnum: z.ZodType<ComponentPriceFormulaType>;
+```
+
+### `ComponentPriceFormulaType`
+
+Allowed pricing formulas for a component — see {@link COMPONENT_PRICE_FORMULAS}.
+
+```ts
+type ComponentPriceFormulaType = indexedAccess;
+```
+
 ### `ComponentPriceKeyEnum`
 
 Zod form of {@link COMPONENT_PRICE_KEYS}.
@@ -11837,6 +11853,22 @@ A collection name valid in a {@link DocSourceType}.
 
 ```ts
 type CfsSourceCollectionType = indexedAccess;
+```
+
+### `ComponentPriceFormulaEnum`
+
+Zod schema for ComponentPriceFormulaType.
+
+```ts
+const ComponentPriceFormulaEnum: z.ZodType<ComponentPriceFormulaType>;
+```
+
+### `ComponentPriceFormulaType`
+
+Allowed pricing formulas for a component — see {@link COMPONENT_PRICE_FORMULAS}.
+
+```ts
+type ComponentPriceFormulaType = indexedAccess;
 ```
 
 ### `ComponentTypeEnum`
