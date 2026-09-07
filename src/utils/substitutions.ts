@@ -35,10 +35,18 @@
  * A substitution row Y carries two paths and they live in **different
  * documents**:
  *
- * - **`path_substituted_for`** is X's path in the ORDER — the row Y replaces.
- *   Locked at substitution time, never re-derived. It is what licenses the
- *   *absence* of X (and of X's whole component subtree) from the downstream
- *   document.
+ * - **`path_substituted_for`** is X's path in the ORDER — the row Y replaces,
+ *   **as the order carries it NOW**. It is what licenses the *absence* of X (and
+ *   of X's whole component subtree) from the downstream document.
+ *   🔴 This read *"locked at substitution time, never re-derived"* until
+ *   api-cloudrun#897, and that was wrong rather than a policy since changed. A
+ *   path is only as stable as the dividers above it, so an admin reparenting X on
+ *   the order left the anchor naming a path nothing resolved — X stopped being
+ *   at-or-below it, {@link isRemovedBySubstitution} went false, and both syncs
+ *   re-projected the product the operator had swapped away. **The two syncs
+ *   re-point it and write the new value back**, because they are the only callers
+ *   holding both revisions of the order; every reader below sees one order and
+ *   could not resolve a locked value at all.
  * - **`path`** is Y's own path in that downstream document. It is what licenses
  *   the *presence* of Y's components, which exist on no order line at all.
  *

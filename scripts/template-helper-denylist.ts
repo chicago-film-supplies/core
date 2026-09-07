@@ -427,6 +427,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // compare against and nothing to call these with. Same reasoning as
   // `fulfillment-items` above: the module is walked so the drift guard sees its
   // exports, not because a template can use them.
+  // `utils/item-pairing.ts` pairs one revision of an items array against another
+  // by `(uid, k-th occurrence)`. Both of its exports need TWO documents; a
+  // template renders one. Walked for drift, unreachable from a template — same
+  // reasoning as `substitutions` below.
+  "item-pairing": [
+    "mapPathsAcrossRebuild",
+    "pairItemsByUidOccurrence",
+  ],
   substitutions: [
     "collectSubstitutionAnchors",
     "findSubtreeAnchor",

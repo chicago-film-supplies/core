@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import { getInitialValues, InvoiceDocLineItemSchema, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
 import { calculateOrderTotals, computeItemPaths, sumDocumentTotals, validateItemPaths } from "../src/utils/orders.ts";
 import {
@@ -847,12 +847,9 @@ Deno.test("substitution: an unchanged order does not undo it", () => {
   );
 });
 
-// ⏸️ IGNORED pending api-cloudrun#897 — this arm IS the reproduction and was
-// seen to fail against HEAD, returning ["Light X", "Light Y"].
-// Flip `ignore` off in the commit that fixes it; do not weaken the assertions.
+// 🔴 Failed against the pre-change code, returning ["Light X", "Light Y"].
 Deno.test({
   name: "substitution: an order-side REPARENT must not resurrect X",
-  ignore: true,
   fn: () => {
     // The INVOICE half of the interleave manager#411 asks for on fulfillments.
     // Reparenting is a dnd-kit drag the browser tier cannot drive, but "does the
@@ -883,6 +880,56 @@ Deno.test({
       "the replaced product came back beside its own substitute",
     );
   },
+});
+
+// 🔴 The arm above passes against a fix that resolves the anchor IN FLIGHT and
+// never writes it back — and that fix is still broken. Nothing here is new
+// behaviour; this is the same reparent, saved twice.
+Deno.test("substitution: the reparent survives a SECOND save", () => {
+  // On the second save the reparented order is the `prev`, so an anchor left
+  // naming the pre-reparent path resolves to nothing at all: X is no longer
+  // at-or-below it, Y falls to the DANGLING branch at the tail, and X is
+  // re-projected — the whole defect, one save later. The first save has to
+  // PERSIST the re-pointed anchor for the second to have anything to work with.
+  //
+  // ⚠️ This is the shape manager#411 recorded on the fulfillment side as "the
+  // SECOND save is load-bearing", and the reason a single-save arm is not a
+  // sufficient test of a merge.
+  const before = orderShapedLine({ uid: ITEM_1, name: "Light X", path: [DEST_1, GROUP_1, ITEM_1] });
+  const after = orderShapedLine({ uid: ITEM_1, name: "Light X", path: [DEST_1, GROUP_2, ITEM_1] });
+
+  const invoiceY = {
+    ...buildOrderScopedItems(
+      [orderShapedLine({ uid: ITEM_Y, name: "Light Y", path: [DEST_1, GROUP_1, ITEM_Y] })],
+      ORDER_DIV_1,
+    )[0],
+    path_substituted_for: [DEST_1, GROUP_1, ITEM_1],
+  } as unknown as InvoiceDocItemType;
+
+  const afterFirst = syncOrderToInvoiceSelective([before], [after], [invoiceY], ORDER_DIV_1);
+
+  // The anchor now names X where the order actually carries it. Asserted
+  // directly rather than only through the second save's outcome: the stored
+  // value is the artifact, and an assertion on it says WHICH of the two saves
+  // is wrong when this goes red.
+  const y = afterFirst.find((it) => it.uid === ITEM_Y);
+  assertExists(y, "Y did not survive the first save");
+  assertEquals(
+    (y as unknown as { path_substituted_for?: string[] }).path_substituted_for,
+    [DEST_1, GROUP_2, ITEM_1],
+    "the anchor was resolved in flight but not written back",
+  );
+
+  // The second save: the order does not change again, so `prev === new`. That
+  // is the arm at the head of this section, run against the invoice the first
+  // save produced.
+  const afterSecond = syncOrderToInvoiceSelective([after], [after], afterFirst, ORDER_DIV_1);
+
+  assertEquals(
+    lineNames(afterSecond),
+    ["Light Y"],
+    "the second save resurrected X",
+  );
 });
 
 Deno.test("substitution: Y's subtree lands in X's POSITION, not at the tail", () => {

@@ -24919,6 +24919,163 @@ it**, which is the property the two previous implementations both lacked.
 `computeItemPaths` runs last and remains the ONE author of `path`; this
 function only decides the sequence it reads.
 
+## `@cfs/core/utils/item-pairing`
+
+"Which row of the NEW array is the same row as this one in the OLD array?" —
+the ONE pairing, asked across two rebuilds by two repos.
+
+## Why the key is `(uid, k-th occurrence)` and not the obvious two
+
+- **Not `uid` alone.** `item.uid` repeats within one items array on 18% of
+  prod orders — a priced principal beside zero-priced accessory copies, a
+  `splitItem`, or a product appearing standalone and as a kit component. A
+  uid-keyed pairing silently applies one row's answer to every row sharing its
+  uid.
+- **Not `path`.** A path is only as stable as the dividers above it, and
+  divider uids are reused BY NAME (`reuseMemberUids`), so a group rename — or
+  an operator dragging a line into another group — churns every descendant
+  path while changing nothing about the lines themselves. That is precisely
+  the api-cloudrun#897 defect this module exists to remove: two syncs asked
+  *"was this row on the previous order?"* with a raw path-string lookup, so a
+  reparented line read as brand new and was projected fresh **beside the
+  substitute that had replaced it**.
+- **`(uid, k-th occurrence in document order)`** is what
+  `api-cloudrun`'s `carryForwardRowField` (`api-cloudrun/src/lib/itemNesting.ts`) and
+  `reuseMemberUids` already use, with `uid` in place of `name`. Position is
+  never the identity — only ever a tie-break among members already identical
+  under one.
+
+⚠️ **It lives here because the callers are in two repos**, exactly as
+`utils/substitutions.ts` does. `adoptOrderDividerStructure`
+(`utils/invoices.ts`) grew the first copy of this loop; `syncItems`
+(`api-cloudrun/src/lib/orderFulfillmentSync.ts`) needed the second. Two copies
+of one pairing rule in one domain is precisely what api-cloudrun#593 was —
+two carry-forwards in one file that had drifted onto different keys with
+nothing making them agree — so there is one implementation and both callers
+take it.
+
+## 🔴 A pairing is a GUESS wherever a uid repeats, and it says so
+
+{@link AmbiguousPairing} is reported, never silently resolved. The pairing
+still happens — refusing would be worse, because the alternative to a k-th
+guess is no answer at all — but a caller that can surface it to an operator
+must, and `api-cloudrun/scripts/repair-invoice-structure.ts` is the worked example.
+
+## Paths never leave this module as strings
+
+{@link RebuildPathMap} hands back **path arrays**, not keys. Its two consumers
+key paths differently (`utils/invoices.ts` joins on `/`,
+`api-cloudrun/src/lib/orderFulfillmentSync.ts` on `\x1f`), and a map handed
+out under one of those spellings is a map half its callers would look up
+wrongly. The joiner below is private for that reason.
+
+### `AmbiguousPairing`
+
+A uid that identifies more than one row on at least one side, so the k-th
+occurrence pairing is a guess rather than a fact. Reported, never silently
+resolved.
+
+```ts
+interface AmbiguousPairing {
+  uid: string;
+  fromOccurrences: number;
+  toOccurrences: number;
+}
+```
+
+### `PairableItem`
+
+The shape a pairing needs; deliberately narrower than a line item.
+
+```ts
+interface PairableItem {
+  readonly uid: string;
+}
+```
+
+### `PathedItem`
+
+{@link PairableItem} that also carries a path.
+
+```ts
+interface PathedItem {
+  readonly path?: readonly string[] | undefined;
+}
+```
+
+### `RebuildPathMap`
+
+```ts
+interface RebuildPathMap {
+  ambiguous: AmbiguousPairing[];
+  toPath(fromPath: readonly string[] | undefined): readonly string[] | undefined;
+  fromPath(toPath: readonly string[] | undefined): readonly string[] | undefined;
+}
+```
+
+### `UidOccurrencePairing`
+
+```ts
+interface UidOccurrencePairing {
+  forward: Map<A, B>;
+  matched: Set<B>;
+  ambiguous: AmbiguousPairing[];
+}
+```
+
+### `mapPathsAcrossRebuild(from: readonly A[], to: readonly B[]): RebuildPathMap`
+
+The prev → next path correspondence across a rebuild, both directions.
+
+This is the instrument for the question *"is this projected row NEW, or is it
+a row that MOVED?"* — which a path-string lookup answers wrongly the moment a
+divider is added, renamed or removed. A lookup that misses reports a moved row
+as new, and every downstream decision keyed on that answer inverts:
+a picker's substitution is undone, an operator's quantity override is
+discarded, a carry-forward reverts a line to its product default.
+
+⭐ **`undefined` means "this path pairs with nothing", and the caller must
+decide what that means.** It is genuinely ambiguous here — a row that is new,
+a row that was deleted, and a row whose uid ran out of occurrences all reach
+it — and only the caller knows which of those its own surrounding state can
+distinguish. Callers fall back to the identity mapping (`?? path`), which
+degrades to the pre-#897 behaviour rather than to something new.
+
+**Parameters**
+
+- `from` — The previous array, already filtered to the paired population
+- `to` — The next array, already filtered the same way
+
+**Returns** — Both lookups plus the ambiguity report
+
+### `pairItemsByUidOccurrence(from: readonly A[], to: readonly B[]): UidOccurrencePairing<A, B>`
+
+Pair two item arrays by **`(uid, k-th occurrence in document order)`**.
+
+Both arrays must already be filtered to the population being paired — this
+function applies no type predicate of its own, because its two callers pair
+different populations (`isLineItemType` for the invoice structure adoption,
+`isFulfillableItem` for the fulfillment sync) and a hidden default would be
+wrong for one of them.
+
+`forward` is keyed on the `from` row's **object identity**, so a caller that
+needs to address the result by uid or path derives that itself — see
+{@link mapPathsAcrossRebuild}.
+
+⚠️ **A `from` row whose uid appears on the `to` side but whose occurrence is
+exhausted still CONSUMES a cursor position.** Three order lines of one uid
+against one invoice line pair the first and leave the second and third
+unpaired, rather than re-pairing the same invoice row three times. That is
+`adoptOrderDividerStructure`'s long-standing behaviour and it is preserved
+deliberately.
+
+**Parameters**
+
+- `from` — The driving array, walked in document order
+- `to` — The pool paired against, bucketed in document order
+
+**Returns** — The pairing, the rows it consumed, and the uids it guessed at
+
 ## `@cfs/core/utils/fulfillment-stage`
 
 The **custody model** — where a booking's units are right now, what may move
@@ -25770,10 +25927,18 @@ predicate.
 A substitution row Y carries two paths and they live in **different
 documents**:
 
-- **`path_substituted_for`** is X's path in the ORDER — the row Y replaces.
-  Locked at substitution time, never re-derived. It is what licenses the
-  *absence* of X (and of X's whole component subtree) from the downstream
-  document.
+- **`path_substituted_for`** is X's path in the ORDER — the row Y replaces,
+  **as the order carries it NOW**. It is what licenses the *absence* of X (and
+  of X's whole component subtree) from the downstream document.
+  🔴 This read *"locked at substitution time, never re-derived"* until
+  api-cloudrun#897, and that was wrong rather than a policy since changed. A
+  path is only as stable as the dividers above it, so an admin reparenting X on
+  the order left the anchor naming a path nothing resolved — X stopped being
+  at-or-below it, {@link isRemovedBySubstitution} went false, and both syncs
+  re-projected the product the operator had swapped away. **The two syncs
+  re-point it and write the new value back**, because they are the only callers
+  holding both revisions of the order; every reader below sees one order and
+  could not resolve a locked value at all.
 - **`path`** is Y's own path in that downstream document. It is what licenses
   the *presence* of Y's components, which exist on no order line at all.
 

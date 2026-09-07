@@ -51,6 +51,7 @@ import * as citationUtils from "../src/utils/citations.ts";
 import * as fixturePiiUtils from "../src/utils/fixture-pii.ts";
 import * as templateLintUtils from "../src/utils/template-lint.ts";
 import * as substitutionUtils from "../src/utils/substitutions.ts";
+import * as itemPairingUtils from "../src/utils/item-pairing.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -98,6 +99,11 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // document that has already been reconciled, so there is no second side to
   // compare against. Listed so the drift guard sees its exports.
   substitutions: substitutionUtils,
+  // And once more: `utils/item-pairing.ts` answers *"which row of the NEW array
+  // is the same row as this one in the OLD array?"* — a question that needs two
+  // revisions of a document. A template is handed one. Listed so the drift guard
+  // sees its exports.
+  "item-pairing": itemPairingUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,

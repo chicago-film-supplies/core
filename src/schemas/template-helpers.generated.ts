@@ -104,6 +104,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "orderHasTax", expr: "it.invoices.orderHasTax(items)", desc: "Check whether any pre-tax line item has taxes applied.", returns: "boolean" },
     { name: "toInvoiceDestinationPair", expr: "it.invoices.toInvoiceDestinationPair(uidOrder, pair)", desc: "**The ONE author of an invoice destination pair.** Project an order's pair into the invoice's, tagged with the order it is scoped to.", returns: "InvoiceDestinationPair" },
   ],
+  "item-pairing": [
+
+  ],
   "locations": [
     { name: "normalizeLocationName", expr: "it.locations.normalizeLocationName(name)", desc: "Canonical uniqueness key for a location name, scoped within its store.", returns: "string" },
   ],

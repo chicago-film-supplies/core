@@ -68,6 +68,7 @@
     "./utils/invoices": "./src/utils/invoices.ts",
     "./utils/fulfillments": "./src/utils/fulfillments.ts",
     "./utils/fulfillment-items": "./src/utils/fulfillment-items.ts",
+    "./utils/item-pairing": "./src/utils/item-pairing.ts",
     "./utils/fulfillment-stage": "./src/utils/fulfillment-stage.ts",
     "./utils/locations": "./src/utils/locations.ts",
     "./utils/allocation": "./src/utils/allocation.ts",

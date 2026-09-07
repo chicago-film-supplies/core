@@ -83,6 +83,7 @@ import {
   isSubstitutionRow,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
+import { mapPathsAcrossRebuild, pairItemsByUidOccurrence } from "./item-pairing.ts";
 import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
@@ -1061,8 +1062,19 @@ export function isItemSynced(
  *
  * ⚠️ A DANGLING anchor is deliberately still live: if the admin deletes X from
  * the order without substituting, nothing resolves `substitutedFor` any more,
- * but Y is still on the invoice and the field is still the record of why. It is
- * locked at substitution time and never re-derived.
+ * but Y is still on the invoice and the field is still the record of why.
+ *
+ * 🔴 **`substitutedFor` IS re-derived, and this paragraph used to deny it.**
+ * {@link syncOrderToInvoiceSelective} re-points every anchor returned here at
+ * wherever X sits on the CURRENT order, and writes that value back. The field
+ * means *"the replaced line's current order path"*, not *"its path at the moment
+ * of the swap"* — the old wording was a description of an implementation, and
+ * following it is what let an order-side reparent resurrect X
+ * (api-cloudrun#897). The sync is the only place that can do this: it is the one
+ * caller holding both revisions of the order. Every downstream reader — the wire
+ * guard, `api-cloudrun/scripts/audit-fulfillment-divergence.ts`, {@link computeInvoiceSyncStatus},
+ * {@link computeOrderInvoiceCoverage} — sees only the current order and would have
+ * no way to resolve a locked value.
  *
  * @param scopedInvoiceItems - This order divider's invoice items
  * @param orderItems - The order's CURRENT items
@@ -1088,10 +1100,15 @@ function liveInvoiceAnchors(
 /**
  * Drop a spent divergence record from a line the order has caught up with.
  *
- * Applied only on the PATH-MATCH branches of {@link syncOrderToInvoiceSelective}
- * — a line emitted there sits at a path the current order carries, which is
- * exactly graduation. Lines emitted from the substituted-subtree branch or kept
- * by the survival branch keep the field, because their divergence is still real.
+ * Applied on ALL THREE path-match branches of {@link syncOrderToInvoiceSelective}
+ * — a line emitted by any of them sits at a path the current order carries, which
+ * is exactly graduation. ⚠️ This said *"lines kept by the survival branch keep the
+ * field"* and the code has never done that: the survival branch (*"overridden, or
+ * no prev item"*) strips it too, and correctly — it is reached only through the
+ * same path match. **The field survives on exactly two paths**, and neither goes
+ * through here: the substituted-subtree arm, which pushes Y's rows with the anchor
+ * re-pointed, and the dangling arm in the removed-items pass, which pushes them
+ * untouched.
  *
  * ⚠️ Deletes the key rather than writing `null`: the field is `.optional()` on
  * both surfaces that store it, and `validateBeforeWrite` rejects a literal
@@ -1176,15 +1193,51 @@ export function syncOrderToInvoiceSelective(
     invoiceByPath.set(itemPathKey(relPath), item);
   }
 
+  // Where each order LINE moved between the two revisions. Dividers are excluded
+  // deliberately: an anchor names a line, and a divider's path moving is
+  // structure rather than a row changing places.
+  const moved = mapPathsAcrossRebuild(
+    prevOrderItems.filter((it) => isLineItemType(it.type)),
+    newOrderItems.filter((it) => isLineItemType(it.type)),
+  );
+
   // The substitutions this invoice carries, in the ORDER's path space, spent
-  // ones already dropped.
+  // ones already dropped — each anchor RE-POINTED at wherever X sits now.
+  //
+  // 🔴 Without the re-point, an order-side REPARENT of X resurrects it
+  // (api-cloudrun#897): the anchor still names X's old path, so at its new path X
+  // is no longer at-or-below any anchor, the invoice has nothing there, and X
+  // falls through to the `!invoiceItem` branch below and is projected fresh —
+  // beside the very substitute that replaced it.
   const anchors = liveInvoiceAnchors(
     currentInvoiceItems as InvoiceItem[],
     newOrderItems,
     orderDividerUid,
-  );
+  ).map((a) => {
+    const now = moved.toPath(a.substitutedFor);
+    return now ? { ...a, substitutedFor: now } : a;
+  });
   const anchorByXKey = new Map<string, SubstitutionAnchor>();
   for (const a of anchors) anchorByXKey.set(itemPathKey(a.substitutedFor), a);
+
+  /**
+   * Y's own row, carrying the anchor's CURRENT value rather than the one stored
+   * when the swap happened.
+   *
+   * ⚠️ **Resolving the anchor in flight is not enough — it has to be written
+   * back.** The next order save arrives with the reparented order as its `prev`,
+   * so a `path_substituted_for` left naming the pre-reparent path resolves to
+   * nothing, Y drops to the dangling branch at the tail, and X resurrects on the
+   * SECOND save. That is the same shape as the defect Increment 4 fixed, and it
+   * is invisible to any single-save test.
+   */
+  const reanchor = (row: InvoiceDocItemType, anchor: SubstitutionAnchor): InvoiceDocItemType => {
+    const stored = (row as InvoiceItem).path_substituted_for;
+    if (stored === undefined || stored.length === 0) return row; // a component of Y
+    const now = [...anchor.substitutedFor];
+    if (itemPathKey(stored) === itemPathKey(now)) return row;
+    return { ...row, path_substituted_for: now } as InvoiceDocItemType;
+  };
 
   /** Y and its components, in stored order — everything at or below the anchor. */
   const substitutedSubtreeOf = (anchor: SubstitutionAnchor): InvoiceDocItemType[] =>
@@ -1216,7 +1269,7 @@ export function syncOrderToInvoiceSelective(
           const relKey = itemPathKey(stripOrderPrefix(row.path, orderDividerUid));
           if (emittedSubstituted.has(relKey)) continue;
           emittedSubstituted.add(relKey);
-          result.push(row);
+          result.push(reanchor(row, anchor));
         }
       }
       continue;
@@ -1246,9 +1299,15 @@ export function syncOrderToInvoiceSelective(
     if (processedInvoicePaths.has(pathKey) || emittedSubstituted.has(pathKey)) continue;
 
     // A substituted subtree the loop above could not place, because the order
-    // no longer carries X at any path — a DANGLING anchor. Y is still the
-    // operator's billed line and survives; only its position is lost, which is
-    // the most this function can know.
+    // carries X at NO path at all — a DANGLING anchor. Y is still the operator's
+    // billed line and survives; only its position is lost.
+    //
+    // ⚠️ **This is now the GONE case only.** It used to absorb the MOVED case as
+    // well — X reparented, its anchor unresolvable — and that was exactly half of
+    // api-cloudrun#897: it kept Y (at the tail) while the forward pass re-projected
+    // X. The anchors are re-pointed above, so a moved X is placed there and stamps
+    // `emittedSubstituted`; what reaches here is X genuinely deleted, and "only its
+    // position is lost" is the most this function can know about that.
     if (isSubstitutionRow(stripOrderPrefix(invoiceItem.path, orderDividerUid), anchors)) {
       result.push(invoiceItem);
       continue;
@@ -1484,41 +1543,24 @@ export function adoptOrderDividerStructure(
   for (const it of rest) if (!isLineItemType(it.type)) invoiceDividerByUid.set(it.uid, it);
 
   // ── pair lines by (uid, k-th occurrence) ──
-  const invoiceByUid = new Map<string, InvoiceDocItemType[]>();
-  for (const it of invoiceLines) {
-    const bucket = invoiceByUid.get(it.uid);
-    if (bucket) bucket.push(it);
-    else invoiceByUid.set(it.uid, [it]);
-  }
-  const orderLineCounts = new Map<string, number>();
-  for (const it of orderItems) {
-    if (!isLineItemType(it.type)) continue;
-    orderLineCounts.set(it.uid, (orderLineCounts.get(it.uid) ?? 0) + 1);
-  }
-
-  const cursor = new Map<string, number>();
-  const pairedFor = new Map<LineItem, InvoiceDocItemType>();
-  const paired = new Set<InvoiceDocItemType>();
-  for (const orderLine of orderItems) {
-    if (!isLineItemType(orderLine.type)) continue;
-    const bucket = invoiceByUid.get(orderLine.uid);
-    if (!bucket) continue;
-    const k = cursor.get(orderLine.uid) ?? 0;
-    cursor.set(orderLine.uid, k + 1);
-    const match = bucket[k];
-    if (!match) continue;
-    pairedFor.set(orderLine, match);
-    paired.add(match);
-  }
-
-  const ambiguous: AmbiguousItemPairing[] = [];
-  for (const [uid, bucket] of invoiceByUid) {
-    const orderOccurrences = orderLineCounts.get(uid) ?? 0;
-    if (orderOccurrences === 0) continue;
-    if (bucket.length > 1 || orderOccurrences > 1) {
-      ambiguous.push({ uid, invoiceOccurrences: bucket.length, orderOccurrences });
-    }
-  }
+  // The pairing itself is `pairItemsByUidOccurrence` (`utils/item-pairing.ts`),
+  // which is where the argument for the key lives. It moved there when
+  // `syncItems` (`api-cloudrun/src/lib/orderFulfillmentSync.ts`) needed the same
+  // question answered across two ORDERS: two copies of one pairing rule in one
+  // domain is what api-cloudrun#593 was.
+  // {@link AmbiguousItemPairing} stays declared here rather than being replaced
+  // by the generic `AmbiguousPairing`, because its field names name the two
+  // SIDES — which a function paired over anything cannot.
+  const orderLines = orderItems.filter((it) => isLineItemType(it.type));
+  const { forward: pairedFor, matched: paired, ambiguous: guessed } = pairItemsByUidOccurrence(
+    orderLines,
+    invoiceLines,
+  );
+  const ambiguous: AmbiguousItemPairing[] = guessed.map((a) => ({
+    uid: a.uid,
+    invoiceOccurrences: a.toOccurrences,
+    orderOccurrences: a.fromOccurrences,
+  }));
 
   // ── where does each unpaired invoice line hang? ──
   const unpaired = invoiceLines.filter((it) => !paired.has(it));
@@ -1531,12 +1573,17 @@ export function adoptOrderDividerStructure(
   const unpairedByParent = new Map<string, InvoiceDocItemType[]>();
   for (const it of unpaired) {
     // The last segment that is not the item's own uid. Deliberately NOT
-    // `path.at(-2)`: that reads a parent only from a SELF-INCLUSIVE path, and
-    // the CRMS invoice webhook calls this while its items still carry the
-    // pre-normalized ancestry chain (`[principalUid]`, or `[]`) that
-    // `computeInvoiceItemPaths` has not yet turned into a full path. This form
-    // answers correctly for both, and for a top-level line under a divider it
-    // returns the divider — which is exactly the parent it hangs from.
+    // `path.at(-2)`: that reads a parent only from a SELF-INCLUSIVE path, and a
+    // caller may hand this items still carrying the pre-normalized ancestry chain
+    // (`[principalUid]`, or `[]`) that `computeInvoiceItemPaths` has not yet
+    // turned into a full path. This form answers correctly for both, and for a
+    // top-level line under a divider it returns the divider — which is exactly
+    // the parent it hangs from.
+    // ⚠️ That caller was the CRMS invoice webhook, which **no longer exists** —
+    // it went with the 2026-09 cutover, and the only live caller of this function
+    // today is `api-cloudrun/scripts/repair-invoice-structure.ts`. So the
+    // pre-normalized case is exercised by `tests/invoices.test.ts` alone. Kept
+    // because a repair script is exactly where an unnormalized tree turns up.
     const rel = stripOrderPrefix(it.path ?? [], orderDividerUid);
     let claimed = "";
     for (let k = rel.length - 1; k >= 0; k--) {
