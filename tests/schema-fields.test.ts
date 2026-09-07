@@ -135,9 +135,27 @@ Deno.test("nested paths appear, and the customer name is reachable in each sourc
     // ⭐ Widening the arm rather than exempting the collection keeps the check
     // doing its job: the requirement was always REACHABILITY, never a fixed
     // path, and a template author can still reach a customer name here.
+    //
+    // ⚠️ **A FOURTH population, and the reason it differs is not shape but
+    // SUBJECT.** In the three above the customer is a PROPERTY of the document —
+    // an order has a customer, a pick sheet's orders each have one — so the name
+    // sits under an `organization` block. A `statements` document IS about the
+    // customer: `schemas/reporting.ts`'s `OrgStatement` is one organization
+    // subtree's receivable position, so the chain sits at the ROOT with no
+    // wrapper to nest under, and a wrapper would be naming the document's own
+    // subject twice.
+    //
+    // ⭐ `organization_path[].name` rather than `scope.name`, which also holds a
+    // name and is the WRONG one to assert on: `scope.kind` is
+    // `organization | all`, so on an `all` scope `scope.name` is a label for the
+    // whole book rather than any customer — and `pick-sheets` already records
+    // the sharper version of that trap, where `scope.name` is a street address
+    // for `kind: "destination"`. **A field that sometimes holds a customer name
+    // does not make one reachable.** `organization_path[]` is also what the
+    // heading actually renders, through `it.organizations.composeOrgName`.
     const reachable = fields.some((f) =>
       f.path === "organization.path[].name" || f.path === "organization.name" ||
-      f.path === "orders[].organization.name"
+      f.path === "orders[].organization.name" || f.path === "organization_path[].name"
     );
     assertEquals(reachable, true, `no reachable customer name in ${collection}`);
   }

@@ -65,6 +65,7 @@ import { MovementSessionSchema } from "./movement-session.ts";
 import { OrderSchema } from "./order.ts";
 import { PickSheetSchema } from "./pick-sheet.ts";
 import { QuoteSchema } from "./quote.ts";
+import { OrgStatementSchema } from "./reporting.ts";
 import type { TemplateCollectionType } from "./template-context.ts";
 
 /**
@@ -82,9 +83,14 @@ export const TEMPLATE_COLLECTION_SCHEMAS: Partial<
   invoices: InvoiceSchema,
   fulfillments: FulfillmentSchema,
   quotes: QuoteSchema,
-  // The two entries with no Firestore collection behind them. See the module doc.
+  // The three entries with no Firestore collection behind them. See the module doc.
   "movement-sessions": MovementSessionSchema,
   "pick-sheets": PickSheetSchema,
+  // `statements` is a SOURCE and a TARGET, and this entry is the source half.
+  // A target may be absent from this map (`packing_lists`, `receipts`); a source
+  // may not, so the entry is forced by the source and says nothing about the
+  // target. See `TEMPLATE_TARGET_COLLECTIONS` in `template.ts`.
+  statements: OrgStatementSchema,
 };
 
 /**

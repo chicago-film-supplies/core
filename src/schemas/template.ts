@@ -58,6 +58,25 @@ import {
  * that assembles the `doc` must walk every page before rendering — a short
  * document is indistinguishable from a small one once a template is running.
  * See `core/src/utils/pickSheets.ts`.
+ *
+ * 🔴 **`statements` is the THIRD source with no Firestore collection**, and the
+ * first that is a FINANCIAL document handed to a customer. An
+ * {@link ./reporting.ts | OrgStatement} is the fold of one organization
+ * subtree's invoices and their settlements (api-cloudrun#712), built by
+ * api-cloudrun's `services/reporting/statement.ts`. Same test as
+ * `movement-sessions` and `pick-sheets` above: a source needs a *schema*, not a
+ * path.
+ *
+ * ⚠️ **Unlike a `PickSheet` it is NOT paged** — the aggregator returns the whole
+ * statement or nothing, because a statement that silently omits lines does not
+ * tie to its own closing balance. {@link ./reporting.ts | OrgStatementSchema}'s
+ * refinement is what makes that unrepresentable rather than merely tested.
+ *
+ * 🔴 **It GROUPS by the live org tree and each line PRINTS the frozen chain its
+ * own document recorded.** A reader who knows the freeze rule will read that as
+ * a bug and it is not: the freeze governs what a *document* records, never how a
+ * *report* groups documents. A statement already handed to a customer must not
+ * silently rewrite its own history when the org is re-parented.
  */
 export const TEMPLATE_SOURCE_COLLECTIONS = [
   "orders",
@@ -65,6 +84,7 @@ export const TEMPLATE_SOURCE_COLLECTIONS = [
   "fulfillments",
   "movement-sessions",
   "pick-sheets",
+  "statements",
 ] as const;
 /** Firestore collection that provides data to a template. */
 export type TemplateSourceCollectionType = typeof TEMPLATE_SOURCE_COLLECTIONS[number];
@@ -75,12 +95,21 @@ export type TemplateSourceCollectionType = typeof TEMPLATE_SOURCE_COLLECTIONS[nu
  * `packing_lists` and `receipts` have no schema and no stored rows — a template
  * produces them, nothing computes over them, so {@link TEMPLATE_COLLECTION_SCHEMAS}
  * omits both and the generated field reference is `Partial` to match.
+ *
+ * ⚠️ **`statements` is the first target that is neither a stored collection nor
+ * schema-less**, so it is not a third instance of either existing pattern. It
+ * has a schema for a reason that has nothing to do with being a target: it is
+ * also a SOURCE, and a source must have one. Read the presence of
+ * `statements` in {@link TEMPLATE_COLLECTION_SCHEMAS} as a fact about the source
+ * half — a target's absence from that map is the claim *"nothing computes over
+ * this"*, and its presence is not the converse.
  */
 export const TEMPLATE_TARGET_COLLECTIONS = [
   "quotes",
   "packing_lists",
   "invoices",
   "receipts",
+  "statements",
 ] as const;
 /** Firestore collection that a template produces documents for. */
 export type TemplateTargetCollectionType = typeof TEMPLATE_TARGET_COLLECTIONS[number];
@@ -90,8 +119,16 @@ export type TemplateTargetCollectionType = typeof TEMPLATE_TARGET_COLLECTIONS[nu
  * strings — clients map a surface to their own route (e.g. manager binds
  * `"order"` → `/orders/:id`). A packing list might surface on both `"order"`
  * and `"fulfillment"`; a quote only on `"order"`.
+ *
+ * ⚠️ **`"organization"` is the first surface whose subject is not a single
+ * transaction**, and that is what it is for: a statement is offered on the
+ * customer, not on any one of their orders or invoices. The distinction is
+ * load-bearing for the client — the other three surfaces address a document by
+ * its own uid, and this one addresses a subtree, so a manager route binding
+ * `"organization"` → `/organizations/:id` is rendering a document that spans
+ * every descendant rather than the node it is standing on.
  */
-export const TEMPLATE_SURFACES = ["order", "fulfillment", "invoice"] as const;
+export const TEMPLATE_SURFACES = ["order", "fulfillment", "invoice", "organization"] as const;
 /** A single client-agnostic surface a template is offered on. */
 export type TemplateSurfaceType = typeof TEMPLATE_SURFACES[number];
 
