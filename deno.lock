@@ -14,6 +14,7 @@
     "npm:@date-fns/tz@^1.4.1": "1.4.1",
     "npm:currency.js@^2.0.4": "2.0.4",
     "npm:date-fns@^4.1.0": "4.1.0",
+    "npm:lodash-es@^4.17.21": "4.18.1",
     "npm:typescript@6.0.3": "6.0.3",
     "npm:zod@^4.5.4": "4.5.4"
   },
@@ -87,6 +88,9 @@
     "date-fns@4.1.0": {
       "integrity": "sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg=="
     },
+    "lodash-es@4.18.1": {
+      "integrity": "sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A=="
+    },
     "typescript@6.0.3": {
       "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
       "bin": true
@@ -122,6 +126,7 @@
       "npm:@date-fns/tz@^1.4.1",
       "npm:currency.js@^2.0.4",
       "npm:date-fns@^4.1.0",
+      "npm:lodash-es@^4.17.21",
       "npm:typescript@6.0.3",
       "npm:zod@^4.5.4"
     ]

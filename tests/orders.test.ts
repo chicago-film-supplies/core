@@ -1693,6 +1693,78 @@ Deno.test("isSameAsDeliveryDestination returns false when instructions differ", 
   assertEquals(isSameAsDeliveryDestination(dest), false);
 });
 
+// ── core#87: the comparison must be by VALUE, not by key order ──────
+//
+// 🔴 **Every test above builds both endpoints from one `baseEndpoint`, so both
+// sides share a key order and pass identically whether the comparison is
+// `isEqual` or `JSON.stringify`.** That is exactly how a defect in 197 of 3,040
+// prod pairs (6.5%) stayed invisible to a green suite. The literals below are
+// written out with their keys in DIFFERENT ORDER on purpose — do not "tidy"
+// them into a spread of a shared object, which silently disarms all three.
+
+/** Same values as `baseEndpoint.address`, keys written in a different order. */
+const REORDERED_ADDRESS = {
+  street: "123 Main St",
+  region: "TX",
+  postcode: "75001",
+  name: "Warehouse",
+  full: "123 Main St",
+  country_name: "US",
+  city: "Dallas",
+};
+
+Deno.test("isSameAsDeliveryDestination is key-order independent (core#87)", () => {
+  // The premise, asserted rather than assumed: a later edit that accidentally
+  // aligned the key orders would make this test pass for the wrong reason.
+  assertEquals(
+    JSON.stringify(baseEndpoint.address) !== JSON.stringify(REORDERED_ADDRESS),
+    true,
+    "premise: the two literals must differ by key ORDER, or this test asserts nothing",
+  );
+
+  const dest: DestinationType = {
+    dates: NO_DATES,
+    delivery: { ...baseEndpoint },
+    collection: { ...baseEndpoint, address: REORDERED_ADDRESS },
+  };
+  assertEquals(isSameAsDeliveryDestination(dest), true);
+});
+
+Deno.test("isSameAsDeliveryDestination compares NESTED objects by value too (core#87)", () => {
+  // The comparison has to be DEEP, not one level of key-order tolerance.
+  const deliveryAddress = {
+    ...baseEndpoint.address,
+    address_coordinates: { latitude: 32.7767, longitude: -96.797 },
+  };
+  const collectionAddress = {
+    ...REORDERED_ADDRESS,
+    address_coordinates: { longitude: -96.797, latitude: 32.7767 },
+  };
+  assertEquals(
+    JSON.stringify(deliveryAddress) !== JSON.stringify(collectionAddress),
+    true,
+    "premise: the nested coordinates must differ by key ORDER",
+  );
+
+  const dest: DestinationType = {
+    dates: NO_DATES,
+    delivery: { ...baseEndpoint, address: deliveryAddress },
+    collection: { ...baseEndpoint, address: collectionAddress },
+  };
+  assertEquals(isSameAsDeliveryDestination(dest), true);
+});
+
+Deno.test("isSameAsDeliveryDestination still says false for a genuinely different address (core#87)", () => {
+  // The guard against over-correcting to "always equal": this one passes both
+  // before and after the swap, which is what makes the two above meaningful.
+  const dest: DestinationType = {
+    dates: NO_DATES,
+    delivery: { ...baseEndpoint },
+    collection: { ...baseEndpoint, address: { ...REORDERED_ADDRESS, city: "Houston" } },
+  };
+  assertEquals(isSameAsDeliveryDestination(dest), false);
+});
+
 Deno.test("isSameAsDeliveryDestination returns true when both null endpoints", () => {
   const dest = { delivery: {}, collection: {} } as unknown as DestinationType;
   assertEquals(isSameAsDeliveryDestination(dest), true);

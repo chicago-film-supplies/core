@@ -53,6 +53,7 @@ import type {
   TaxRefType,
   Tax as SchemaTax,
 } from "../schemas/mod.ts";
+import isEqual from "lodash-es/isEqual";
 import { itemContract } from "../schemas/mod.ts";
 import { getDuration, toChicagoYmd } from "./dates.ts";
 import {
@@ -294,8 +295,23 @@ export function isSameAsDeliveryDestination(destination: DestinationType): boole
   if (!destination.collection) return true;
   if (!destination.delivery) return false;
 
-  return JSON.stringify(destination.delivery.address) === JSON.stringify(destination.collection.address)
-    && JSON.stringify(destination.delivery.contact) === JSON.stringify(destination.collection.contact)
+  // 🔴 **`JSON.stringify` compares KEY ORDER, not value.** Firestore preserves
+  // the order keys were written in, so two addresses with identical values but
+  // different key order compared UNEQUAL — measured across every pair in prod
+  // on 2026-09-07: **197 of 3,040 verdicts wrong (6.5%)**, 29 on `orders` and
+  // 168 on `invoices`. The failure direction suppresses the manager's
+  // auto-select, so the operator sees "Pickup From" with a duplicated address
+  // (`manager/src/primitives/createDestinationPair.ts`). core#87.
+  //
+  // ⚠️ Count VERDICT changes, not field divergences: 341 comparands were
+  // key-order divergent but only 197 flipped the verdict, because in the rest
+  // another comparand already differed for a real reason. The easier query
+  // overstates by 73%.
+  //
+  // `instructions` stays `===` — it is a string, so it has no key order to
+  // disagree about.
+  return isEqual(destination.delivery.address, destination.collection.address)
+    && isEqual(destination.delivery.contact, destination.collection.contact)
     && destination.delivery.instructions === destination.collection.instructions;
 }
 
