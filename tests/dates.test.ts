@@ -1,6 +1,8 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { TZDate } from "@date-fns/tz";
 import {
+  addChicagoDays,
+  chicagoDaysBetween,
   countCfsBusinessDays,
   formatChargeDays,
   getDuration,
@@ -505,4 +507,101 @@ Deno.test("toChicagoYmd interprets Z-form daytime in Chicago TZ (same day)", () 
 Deno.test("toChicagoYmd round-trips with toChicagoStartOfDay", () => {
   const start = toChicagoStartOfDay("2025-02-14");
   assertEquals(toChicagoYmd(start), "2025-02-14");
+});
+
+// ── addChicagoDays / chicagoDaysBetween ──────────────────────────
+//
+// 🔴 **The fall-back case is the one that discriminates.** Both of these are
+// calendar arithmetic precisely because `+ n * 86400000` is wrong across a DST
+// boundary — and it is wrong in only ONE direction. Measured 2026-09-07: the
+// naive form returns `2026-11-03` where the answer is `2026-11-04`, while the
+// spring-forward span happens to come out right because the extra hour is
+// absorbed by the `startOfDay` snap. **A suite that crosses only March is green
+// on a broken implementation**, so the November case is not a duplicate of the
+// March one and must not be dropped as redundant.
+
+Deno.test("addChicagoDays crosses spring-forward (CST -> CDT)", () => {
+  assertEquals(
+    addChicagoDays("2026-02-25T00:00:00.000-06:00", 15),
+    "2026-03-12T00:00:00.000-05:00",
+  );
+});
+
+Deno.test("🔴 addChicagoDays crosses fall-back — naive ms arithmetic returns 11-03 here", () => {
+  assertEquals(
+    addChicagoDays("2026-10-20T00:00:00.000-05:00", 15),
+    "2026-11-04T00:00:00.000-06:00",
+  );
+});
+
+Deno.test("addChicagoDays within one offset", () => {
+  assertEquals(
+    addChicagoDays("2026-06-01T00:00:00.000-05:00", 15),
+    "2026-06-16T00:00:00.000-05:00",
+  );
+});
+
+Deno.test("addChicagoDays takes a negative count", () => {
+  assertEquals(
+    addChicagoDays("2026-06-16T00:00:00.000-05:00", -15),
+    "2026-06-01T00:00:00.000-05:00",
+  );
+});
+
+Deno.test("addChicagoDays(0) is the Chicago start of day, not a no-op", () => {
+  // The contract is a calendar DATE, so a mid-day input snaps to midnight.
+  assertEquals(
+    addChicagoDays("2026-06-01T15:15:00.000-05:00", 0),
+    "2026-06-01T00:00:00.000-05:00",
+  );
+});
+
+Deno.test("addChicagoDays normalizes a non-Chicago input to the Chicago calendar day", () => {
+  // 03:00Z on Jun 2 is still Jun 1 in Chicago — the day the count starts from.
+  assertEquals(
+    addChicagoDays("2026-06-02T03:00:00.000Z", 15),
+    "2026-06-16T00:00:00.000-05:00",
+  );
+});
+
+Deno.test("chicagoDaysBetween counts calendar days across spring-forward", () => {
+  assertEquals(
+    chicagoDaysBetween("2026-03-16T00:00:00.000-05:00", "2026-03-01T00:00:00.000-06:00"),
+    15,
+  );
+});
+
+Deno.test("🔴 chicagoDaysBetween counts calendar days across fall-back", () => {
+  assertEquals(
+    chicagoDaysBetween("2026-11-09T00:00:00.000-06:00", "2026-10-25T00:00:00.000-05:00"),
+    15,
+  );
+});
+
+Deno.test("chicagoDaysBetween is signed and zero on the same date", () => {
+  assertEquals(
+    chicagoDaysBetween("2026-06-01T00:00:00.000-05:00", "2026-06-16T00:00:00.000-05:00"),
+    -15,
+  );
+  assertEquals(
+    chicagoDaysBetween("2026-06-01T23:59:00.000-05:00", "2026-06-01T00:00:00.000-05:00"),
+    0,
+  );
+});
+
+Deno.test("chicagoDaysBetween counts BOUNDARIES, not elapsed time", () => {
+  // Two minutes apart, one calendar boundary — the right answer for a report
+  // that ages by date, and the wrong one for a duration. See getDuration.
+  assertEquals(
+    chicagoDaysBetween("2026-06-02T00:01:00.000-05:00", "2026-06-01T23:59:00.000-05:00"),
+    1,
+  );
+});
+
+Deno.test("addChicagoDays and chicagoDaysBetween round-trip across both boundaries", () => {
+  for (const start of ["2026-02-25T00:00:00.000-06:00", "2026-10-20T00:00:00.000-05:00"]) {
+    for (const n of [1, 15, 30, 90, 365]) {
+      assertEquals(chicagoDaysBetween(addChicagoDays(start, n), start), n);
+    }
+  }
 });

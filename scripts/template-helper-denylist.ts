@@ -217,6 +217,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isTransactionFeePricingItem",
   ],
   invoices: [
+    // Composes the two denylisted `dates` primitives above and inherits their
+    // hazard exactly: the row already carries `days_overdue` and `bucket`,
+    // stamped against the run's as-of date.
+    "agingOf",
     // ── Xero integration ──
     "flattenForXero", // Xero line projection — write-path only
     "getXeroUnitAmountFromCents", // bakes duration into a per-unit price for Xero
@@ -453,6 +457,20 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isStrictlyBelow",
     "isSubstitutionRow",
   ],
-  // No `it.dates.*` exports are hidden today.
-  dates: [],
+  // 🔴 **The two calendar-day primitives, hidden because a template that ages a
+  // document RE-DATES it.** `addChicagoDays` and `chicagoDaysBetween` are what
+  // the aging aggregator computes `days_overdue` and `bucket` FROM, once, against
+  // the run's `as_of_invoice_date`. A template calling them would necessarily
+  // pass the render instant instead — so a statement re-rendered a month later
+  // would silently report different ages than the one that was sent, on a
+  // document whose whole purpose is to be a record of what was sent.
+  //
+  // ⭐ Same contract `pick-sheet.ts` states for `PickSheet.leg`: derivation
+  // supplies the default at BUILD time, the stamped value is the fact. And the
+  // same reason `it.pick_sheets` carries no quantity helper — the row already
+  // holds the number, so a second way to get it can only disagree.
+  dates: [
+    "addChicagoDays",
+    "chicagoDaysBetween",
+  ],
 };

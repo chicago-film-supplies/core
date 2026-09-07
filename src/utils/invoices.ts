@@ -92,6 +92,8 @@ import {
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
+import { chicagoDaysBetween } from "./dates.ts";
+import { agingBucketOf, type InvoiceAging } from "../schemas/mod.ts";
 import {
   computeItemPaths,
   isTaxableCoa,
@@ -2520,3 +2522,36 @@ export function syncScalarWithOverride<T>(
   return prevOrderValue === currentInvoiceValue ? newOrderValue : currentInvoiceValue;
 }
 
+/**
+ * Age one invoice against a report date — how many whole Chicago calendar days
+ * past its anchor the report is drawn, and which bucket that puts it in.
+ *
+ * 🔴 **The pair is computed together so the two halves cannot disagree.** A
+ * caller that counted days itself and then asked `agingBucketOf` for a bucket
+ * would be a second copy of the rule, and the copies drift the first time an
+ * edge moves.
+ *
+ * 🔴 **Calendar days, never elapsed milliseconds.** Both `date` and `due_date`
+ * are `chicagoStartOfDay()` fields, and Chicago days are 23 or 25 hours long
+ * twice a year — so `(asOf - anchor) / 86400000` moves invoices across every
+ * bucket edge, twice a year, silently. Measured counterexample in
+ * `core/src/utils/dates.ts`.
+ *
+ * ⚠️ **The caller owns the population.** This ages whatever it is handed; it
+ * does not decide what belongs on the report. That rule is
+ * `totals.amount_due_cents > 0` and it is stated on `schemas/reporting.ts`,
+ * because a status set is not a balance.
+ *
+ * ```ts
+ * agingOf("2026-08-01T00:00:00.000-05:00", "2026-09-07T00:00:00.000-05:00");
+ * // { days_overdue: 37, bucket: "31-60" }
+ * ```
+ *
+ * @param anchorDate The invoice's stored `date` or `due_date`, per the run's
+ *   anchor — the two members of `AGING_ANCHORS` in `schemas/reporting.ts`.
+ * @param asOf The report's as-of invoice date.
+ */
+export function agingOf(anchorDate: string, asOf: string): InvoiceAging {
+  const days_overdue = chicagoDaysBetween(asOf, anchorDate);
+  return { days_overdue, bucket: agingBucketOf(days_overdue) };
+}

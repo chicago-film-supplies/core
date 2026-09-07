@@ -72,6 +72,59 @@ row can only ever be gated at least as tightly as its source.
 const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<Record<ActivitySubjectCollection, Permission>>;
 ```
 
+### `AGING_ANCHORS`
+
+Which stored date an invoice is aged from.
+
+⭐ **Both members name a REAL STORED FIELD on `invoices`** — `date` and
+`due_date` — rather than a report-local alias. That is what lets the
+aggregator use the member as the projection path and the sort key, so an
+anchor cannot name something the query cannot order by.
+
+`due_date` is the default and matches the live Xero tenant, whose every
+aged-receivables link carries `ageingBy=due` (read 2026-09-07). `date` stays
+available as a request parameter because an invoice-date run is the one an
+auditor asks for.
+
+🔴 **Xero buckets by CALENDAR MONTH and this report buckets by ROLLING 30
+DAYS** — its report links carry `periodCount=4&periodFrequency=1&periodKind=2`,
+four periods of one month. The two tie on the TOTAL and are guaranteed to
+differ per bucket, so a per-bucket comparison against Xero is a false failure
+by construction. See {@link AGING_BUCKETS}.
+
+```ts
+const AGING_ANCHORS: "date" | "due_date"[];
+```
+
+### `AGING_BUCKETS`
+
+The aging buckets, in report order.
+
+Rolling 30 days from the anchor. `current` is *not yet due* — an invoice due
+today is current, not one day overdue.
+
+⚠️ **The names are stable identifiers, not labels.** `90+` reads as
+"over 90", and the label in {@link AGING_BUCKET_EDGES} says so; the edges are
+`61-90 = 61..90` and `90+ = 91..∞`, so nothing is double-counted at 90.
+
+```ts
+const AGING_BUCKETS: "current" | "1-30" | "31-60" | "61-90" | "90+"[];
+```
+
+### `AGING_BUCKET_EDGES`
+
+Each bucket's edges — **the single owner of the bucket boundaries.**
+
+⭐ **A `Record` over {@link AgingBucketType}, so a member added to
+{@link AGING_BUCKETS} without edges is a COMPILE ERROR.** The same idiom as
+`INVOICE_STATUS_CONTRACTS`. {@link agingBucketOf} walks this table rather than
+carrying its own thresholds, so there is no second copy of the rule to drift
+from the names.
+
+```ts
+const AGING_BUCKET_EDGES: Readonly<Record<AgingBucketType, AgingBucketEdge>>;
+```
+
 ### `ALWAYS_ON_UTIL_NAMESPACES`
 
 Utils namespaces injected for every template regardless of collection.
@@ -342,6 +395,166 @@ interface AggregateDefinition {
   members: string[];
   description: string;
 }
+```
+
+### `AgingAnchorEnum`
+
+Zod enum over {@link AGING_ANCHORS}.
+
+```ts
+const AgingAnchorEnum: z.ZodType<AgingAnchorType>;
+```
+
+### `AgingAnchorType`
+
+One member of {@link AGING_ANCHORS}.
+
+```ts
+type AgingAnchorType = indexedAccess;
+```
+
+### `AgingBucketEdge`
+
+One bucket's inclusive edges, in whole days overdue.
+
+```ts
+interface AgingBucketEdge {
+  label: string;
+  from_days: number | null;
+  to_days: number | null;
+}
+```
+
+### `AgingBucketEnum`
+
+Zod enum over {@link AGING_BUCKETS}.
+
+```ts
+const AgingBucketEnum: z.ZodType<AgingBucketType>;
+```
+
+### `AgingBucketType`
+
+One member of {@link AGING_BUCKETS}.
+
+```ts
+type AgingBucketType = indexedAccess;
+```
+
+### `AgingReport`
+
+The AR Aging report.
+
+⭐ **Two as-of dates, not one, and they are free here only because
+`settlements` is already a dated allocation journal.** `as_of_invoice_date`
+says which invoices existed; `as_of_payment_date` says which settlements
+count. An *audit* view sets both to the period end; a *collections* view sets
+invoices to the period end and payments to today. Dynamics 365 ships these
+separately, Xero and NetSuite conflate them, and Oracle warns of "balance
+discrepancies" as a result. **A system without a dated journal cannot add this
+later.**
+
+```ts
+interface AgingReport {
+  scope: AgingScope;
+  anchor: AgingAnchorType;
+  as_of_invoice_date: string;
+  as_of_payment_date: string;
+  rows: AgingRow[];
+  totals: AgingTotals;
+  organizations: Array<typeLiteral>;
+  missing_anchor_uids: string[];
+}
+```
+
+### `AgingReportSchema`
+
+Zod schema for {@link AgingReport}.
+
+```ts
+const AgingReportSchema: z.ZodType<AgingReport>;
+```
+
+### `AgingRow`
+
+One open invoice, as the aging report states it — the receivables fact.
+
+⚠️ **`amount_due_cents` is READ from the invoice, never re-folded from the
+settlements journal.** `recomputeSettlementTotals` already derives it and
+`settlementTotalsSweep` already checks it against the journal hourly; a second
+fold here would be an instrument sharing an ancestor with its subject, and it
+would disagree with the number the customer sees on their invoice.
+
+```ts
+interface AgingRow {
+  uid: string;
+  number: number;
+  organization_path: OrgPathNodeType[];
+  anchor_date: string;
+  days_overdue: number;
+  bucket: AgingBucketType;
+  amount_due_cents: number;
+}
+```
+
+### `AgingRowSchema`
+
+Zod schema for {@link AgingRow}.
+
+```ts
+const AgingRowSchema: z.ZodType<AgingRow>;
+```
+
+### `AgingScope`
+
+What an aging run was drawn for — echoed back, so a stored or forwarded report
+says what question it answers. Same contract as `PickSheetScope`.
+
+```ts
+interface AgingScope {
+  kind: "organization" | "all";
+  uid: string | null;
+  name: string;
+  uids: string[];
+}
+```
+
+### `AgingScopeSchema`
+
+Zod schema for {@link AgingScope}.
+
+```ts
+const AgingScopeSchema: z.ZodType<AgingScope>;
+```
+
+### `AgingTotals`
+
+Money per bucket, plus the credit-note column.
+
+🔴 **Credit notes get their OWN COLUMN and are never bucketed.** Surveyed
+across six systems there is no convention — NetSuite buckets by the credit
+note's own date, QuickBooks puts it inside "Current" as a negative, Open
+Dental excludes it from buckets but keeps it in the total, Dynamics gives it
+its own column and Xero its own row. **A column is the only presentation where
+the reader cannot be misled**, and it is also the only one that survives
+Xero's own warning that a due-date basis *"won't include credit notes as they
+don't have due dates"* — a naive due-date implementation silently drops every
+one of them, the report stops tying to AR, and nothing errors.
+
+```ts
+interface AgingTotals {
+  buckets: Array<typeLiteral>;
+  credit_cents: number;
+  total_cents: number;
+}
+```
+
+### `AgingTotalsSchema`
+
+Zod schema for {@link AgingTotals}.
+
+```ts
+const AgingTotalsSchema: z.ZodType<AgingTotals>;
 ```
 
 ### `AnyUid`
@@ -4043,6 +4256,28 @@ interface Invoice {
   updated_by: ActorRefType;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+```
+
+### `InvoiceAging`
+
+Age one invoice: how many whole Chicago calendar days past its anchor date the
+report is being drawn, and which bucket that puts it in.
+
+🔴 **Calendar days, not elapsed milliseconds.** `anchor` is a
+`chicagoStartOfDay()` field and Chicago days are 23 or 25 hours long twice a
+year, so a millisecond subtraction moves invoices between buckets on every
+bucket edge, twice a year. `chicagoDaysBetween` is the owner of that
+arithmetic; see `core/src/utils/dates.ts` for the measured counterexample.
+
+⚠️ **Kept as a pair, deliberately.** A caller that computed the day count
+itself and then asked for a bucket would be a second copy of the rule, and the
+two would drift the first time an edge moved.
+
+```ts
+interface InvoiceAging {
+  days_overdue: number;
+  bucket: AgingBucketType;
 }
 ```
 
@@ -10264,6 +10499,17 @@ here means *"render the empty state"*, not *"query for nothing"*.
 
 Lives beside the map rather than in the manager so the rule and the vocabulary
 it constrains cannot drift apart.
+
+### `agingBucketOf(daysOverdue: number): AgingBucketType`
+
+Which bucket a given number of days overdue falls in.
+
+`days_overdue` is signed: negative or zero means not yet due. Callers should
+prefer {@link agingOf}, which computes the count DST-correctly and returns
+both halves so they cannot disagree.
+
+⚠️ **Total by construction** — the first and last buckets are unbounded, so
+every integer lands somewhere and there is no fallthrough to explain.
 
 ### `availableUtilNamespaces(sources: readonly TemplateCollectionType[], targets: readonly TemplateCollectionType[]): string[]`
 
@@ -22891,6 +23137,59 @@ interface FormatChargeDaysResult {
 }
 ```
 
+### `addChicagoDays(input: string, days: number): string`
+
+The Chicago start of day `days` calendar days after `input`'s Chicago
+calendar date. DST-aware; `days` may be negative.
+
+🔴 **Calendar arithmetic, NOT `+ days * 86400000`, and the difference is a
+silent off-by-one twice a year.** Chicago days are 23 or 25 hours long across
+a DST boundary, so adding a fixed number of milliseconds lands on the wrong
+calendar date whenever the span crosses one. Measured 2026-09-07, the
+fall-back direction:
+
+```text
+2026-10-20 + 15 days   correct: 2026-11-04    naive ms: 2026-11-03
+```
+
+The spring-forward direction happens to survive the naive form — the extra
+hour is absorbed by the `startOfDay` snap — which is exactly what makes this
+hard to catch by testing one boundary. ⚠️ **A test that only crosses March is
+green on a broken implementation.**
+
+⭐ Returns the START OF DAY, not the input's time of day. Both callers
+(`invoice.due_date`, which is a `chicagoStartOfDay()` field, and aging-bucket
+edges) want a calendar date, and a helper that sometimes preserved a time
+would put the DST question back where it started.
+
+```ts
+addChicagoDays("2026-02-25T00:00:00.000-06:00", 15); // "2026-03-12T00:00:00.000-05:00"
+addChicagoDays("2026-10-20T00:00:00.000-05:00", 15); // "2026-11-04T00:00:00.000-06:00"
+addChicagoDays("2026-06-16T00:00:00.000-05:00", -15); // "2026-06-01T00:00:00.000-05:00"
+```
+
+### `chicagoDaysBetween(later: string, earlier: string): number`
+
+Whole Chicago calendar days from `earlier` to `later` — positive when `later`
+is the later date, negative when it is not, `0` on the same calendar date.
+
+🔴 **The aging report's bucket edges are calendar days, so this cannot be a
+millisecond subtraction** — same DST hazard as {@link addChicagoDays}, and
+here it moves an invoice between buckets rather than merely mis-dating it. It
+counts DATE BOUNDARIES CROSSED, so it is insensitive to the times of day and
+to the two irregular days entirely.
+
+⚠️ **Not a duration.** `chicagoDaysBetween(a, b)` is `1` for 23:59 yesterday →
+00:01 today, which is two minutes. That is the right answer for a report that
+ages by date and the wrong one for anything measuring elapsed time — for that,
+see {@link getDuration}.
+
+```ts
+chicagoDaysBetween("2026-03-16T00:00:00.000-05:00", "2026-03-01T00:00:00.000-06:00"); // 15
+chicagoDaysBetween("2026-11-09T00:00:00.000-06:00", "2026-10-25T00:00:00.000-05:00"); // 15
+chicagoDaysBetween("2026-06-01T00:00:00.000-05:00", "2026-06-16T00:00:00.000-05:00"); // -15
+```
+
 ### `countCfsBusinessDays(start: Date, end: Date, holidays: string[]): BusinessDaysResult`
 
 Count CFS business days between two dates (excludes weekends and CFS holidays).
@@ -23558,6 +23857,38 @@ run it (and {@link validateInvoiceItemUniqueness}) before writing.
 or absent)
 - `orderItems` — The source order's full `items` array
 - `orderDividerUid` — The order divider's uid, i.e. the source order's uid
+
+### `agingOf(anchorDate: string, asOf: string): InvoiceAging`
+
+Age one invoice against a report date — how many whole Chicago calendar days
+past its anchor the report is drawn, and which bucket that puts it in.
+
+🔴 **The pair is computed together so the two halves cannot disagree.** A
+caller that counted days itself and then asked `agingBucketOf` for a bucket
+would be a second copy of the rule, and the copies drift the first time an
+edge moves.
+
+🔴 **Calendar days, never elapsed milliseconds.** Both `date` and `due_date`
+are `chicagoStartOfDay()` fields, and Chicago days are 23 or 25 hours long
+twice a year — so `(asOf - anchor) / 86400000` moves invoices across every
+bucket edge, twice a year, silently. Measured counterexample in
+`core/src/utils/dates.ts`.
+
+⚠️ **The caller owns the population.** This ages whatever it is handed; it
+does not decide what belongs on the report. That rule is
+`totals.amount_due_cents > 0` and it is stated on `schemas/reporting.ts`,
+because a status set is not a balance.
+
+```ts
+agingOf("2026-08-01T00:00:00.000-05:00", "2026-09-07T00:00:00.000-05:00");
+// { days_overdue: 37, bucket: "31-60" }
+```
+
+**Parameters**
+
+- `anchorDate` — The invoice's stored `date` or `due_date`, per the run's
+anchor — the two members of `AGING_ANCHORS` in `schemas/reporting.ts`.
+- `asOf` — The report's as-of invoice date.
 
 ### `buildInvoiceDestinationDivider(source: typeLiteral, _: unknown): OrderDocDestinationItemType`
 

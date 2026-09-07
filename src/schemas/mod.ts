@@ -900,6 +900,31 @@ export {
   type PickSheetScope,
 } from "./pick-sheet.ts";
 
+// ⚠️ **Barrel-only, and there is deliberately no `core/deno.json` subpath** —
+// the `pick-sheet.ts` model. 🔴 **No gate catches a missing barrel export**
+// (`beta.342` shipped exactly that), and the `console.log("ok")` smoke check
+// fails OPEN, so this block is verified by hand against the module's exports.
+export {
+  AGING_ANCHORS,
+  AGING_BUCKET_EDGES,
+  AGING_BUCKETS,
+  AgingAnchorEnum,
+  agingBucketOf,
+  AgingBucketEnum,
+  AgingReportSchema,
+  AgingRowSchema,
+  AgingScopeSchema,
+  AgingTotalsSchema,
+  type AgingAnchorType,
+  type AgingBucketEdge,
+  type AgingBucketType,
+  type AgingReport,
+  type AgingRow,
+  type AgingScope,
+  type AgingTotals,
+  type InvoiceAging,
+} from "./reporting.ts";
+
 export {
   TEMPLATE_SOURCE_COLLECTIONS,
   TEMPLATE_TARGET_COLLECTIONS,

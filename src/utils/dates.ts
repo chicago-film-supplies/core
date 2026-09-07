@@ -24,6 +24,7 @@
 
 import {
   addDays,
+  differenceInCalendarDays,
   endOfDay,
   format,
   getHours,
@@ -99,6 +100,69 @@ export function toChicagoEndOfDay(input: string): string {
  */
 export function toChicagoYmd(input: string): string {
   return format(parseISO(input), "yyyy-MM-dd", { in: tz("America/Chicago") });
+}
+
+/**
+ * The Chicago start of day `days` calendar days after `input`'s Chicago
+ * calendar date. DST-aware; `days` may be negative.
+ *
+ * 🔴 **Calendar arithmetic, NOT `+ days * 86400000`, and the difference is a
+ * silent off-by-one twice a year.** Chicago days are 23 or 25 hours long across
+ * a DST boundary, so adding a fixed number of milliseconds lands on the wrong
+ * calendar date whenever the span crosses one. Measured 2026-09-07, the
+ * fall-back direction:
+ *
+ * ```text
+ * 2026-10-20 + 15 days   correct: 2026-11-04    naive ms: 2026-11-03
+ * ```
+ *
+ * The spring-forward direction happens to survive the naive form — the extra
+ * hour is absorbed by the `startOfDay` snap — which is exactly what makes this
+ * hard to catch by testing one boundary. ⚠️ **A test that only crosses March is
+ * green on a broken implementation.**
+ *
+ * ⭐ Returns the START OF DAY, not the input's time of day. Both callers
+ * (`invoice.due_date`, which is a `chicagoStartOfDay()` field, and aging-bucket
+ * edges) want a calendar date, and a helper that sometimes preserved a time
+ * would put the DST question back where it started.
+ *
+ * ```ts
+ * addChicagoDays("2026-02-25T00:00:00.000-06:00", 15); // "2026-03-12T00:00:00.000-05:00"
+ * addChicagoDays("2026-10-20T00:00:00.000-05:00", 15); // "2026-11-04T00:00:00.000-06:00"
+ * addChicagoDays("2026-06-16T00:00:00.000-05:00", -15); // "2026-06-01T00:00:00.000-05:00"
+ * ```
+ */
+export function addChicagoDays(input: string, days: number): string {
+  return startOfDay(addDays(parseISO(input, { in: tz("America/Chicago") }), days))
+    .toISOString();
+}
+
+/**
+ * Whole Chicago calendar days from `earlier` to `later` — positive when `later`
+ * is the later date, negative when it is not, `0` on the same calendar date.
+ *
+ * 🔴 **The aging report's bucket edges are calendar days, so this cannot be a
+ * millisecond subtraction** — same DST hazard as {@link addChicagoDays}, and
+ * here it moves an invoice between buckets rather than merely mis-dating it. It
+ * counts DATE BOUNDARIES CROSSED, so it is insensitive to the times of day and
+ * to the two irregular days entirely.
+ *
+ * ⚠️ **Not a duration.** `chicagoDaysBetween(a, b)` is `1` for 23:59 yesterday →
+ * 00:01 today, which is two minutes. That is the right answer for a report that
+ * ages by date and the wrong one for anything measuring elapsed time — for that,
+ * see {@link getDuration}.
+ *
+ * ```ts
+ * chicagoDaysBetween("2026-03-16T00:00:00.000-05:00", "2026-03-01T00:00:00.000-06:00"); // 15
+ * chicagoDaysBetween("2026-11-09T00:00:00.000-06:00", "2026-10-25T00:00:00.000-05:00"); // 15
+ * chicagoDaysBetween("2026-06-01T00:00:00.000-05:00", "2026-06-16T00:00:00.000-05:00"); // -15
+ * ```
+ */
+export function chicagoDaysBetween(later: string, earlier: string): number {
+  return differenceInCalendarDays(
+    parseISO(later, { in: tz("America/Chicago") }),
+    parseISO(earlier, { in: tz("America/Chicago") }),
+  );
 }
 
 /** Display values returned by {@link formatChargeDays}. */
