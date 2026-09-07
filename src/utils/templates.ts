@@ -140,6 +140,24 @@ export function parseGoldenFrameSlug(slug: string): GoldenFrame | null {
 const DOCUMENT_PROLOGUE = /^\s*(?:<!--[\s\S]*?-->\s*|<!doctype[^>]*>\s*)*<html[\s>]/i;
 
 /**
+ * Chromium's own default print margin, in inches, applied when no
+ * `marginLeft`/`marginRight` is sent.
+ *
+ * ⭐ **It lives beside {@link injectPartDefaults} and is that function's own
+ * fallback, so no caller restates it.** It is an EXTERNAL constant — a fact
+ * about Chromium, not a CFS policy — and the three callers are in two repos,
+ * which is exactly the shape that gets copied and then drifts. The first
+ * version of the templates preview harness needed this number and could not
+ * import it, which is what surfaced the question.
+ *
+ * ⚠️ A caller that KNOWS the family's declared margins should still pass them:
+ * the default is what to do in their absence, not a substitute for reading
+ * them. All four registered families declare `margin_left`/`margin_right`
+ * today, so this fallback is unreachable for them.
+ */
+export const CHROMIUM_DEFAULT_MARGIN_IN = 0.39;
+
+/**
  * Wrap a header/footer partial in the document Chromium renders in the PDF's
  * print frame — the page's overlay stylesheet as a start-of-head DEFAULT, then
  * the geometry that must win.
@@ -171,14 +189,18 @@ const DOCUMENT_PROLOGUE = /^\s*(?:<!--[\s\S]*?-->\s*|<!doctype[^>]*>\s*)*<html[\
  * @param html The rendered partial — a fragment in every case we generate.
  * @param opts `styles` is the page's concatenated overlay; `left`/`right` are
  *   the page's horizontal margins in INCHES, so the frame aligns with the body.
+ *   Both DEFAULT to {@link CHROMIUM_DEFAULT_MARGIN_IN} — see that constant for
+ *   why the function owns the fallback rather than each caller.
  */
 export function injectPartDefaults(
   html: string,
-  opts: { styles?: string; left: number; right: number },
+  opts: { styles?: string; left?: number; right?: number },
 ): string {
   const overlay = opts.styles ? `${opts.styles}\n` : "";
+  const left = opts.left ?? CHROMIUM_DEFAULT_MARGIN_IN;
+  const right = opts.right ?? CHROMIUM_DEFAULT_MARGIN_IN;
   const geometry =
-    `html,body{margin:0;width:100%;box-sizing:border-box}body{padding:0 ${opts.right}in 0 ${opts.left}in}`;
+    `html,body{margin:0;width:100%;box-sizing:border-box}body{padding:0 ${right}in 0 ${left}in}`;
   const style = `<style>${overlay}${geometry}</style>`;
   if (DOCUMENT_PROLOGUE.test(html)) {
     // A real document. Inject after its own <head>, or open one right after

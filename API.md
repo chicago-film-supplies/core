@@ -29856,6 +29856,27 @@ A semantic-version bump level.
 type BumpLevel = "major" | "minor" | "patch";
 ```
 
+### `CHROMIUM_DEFAULT_MARGIN_IN`
+
+Chromium's own default print margin, in inches, applied when no
+`marginLeft`/`marginRight` is sent.
+
+⭐ **It lives beside {@link injectPartDefaults} and is that function's own
+fallback, so no caller restates it.** It is an EXTERNAL constant — a fact
+about Chromium, not a CFS policy — and the three callers are in two repos,
+which is exactly the shape that gets copied and then drifts. The first
+version of the templates preview harness needed this number and could not
+import it, which is what surfaced the question.
+
+⚠️ A caller that KNOWS the family's declared margins should still pass them:
+the default is what to do in their absence, not a substitute for reading
+them. All four registered families declare `margin_left`/`margin_right`
+today, so this fallback is unreachable for them.
+
+```ts
+const CHROMIUM_DEFAULT_MARGIN_IN: 0.39;
+```
+
 ### `GOLDEN_FRAMES`
 
 The PDF render frames a family may declare in its sidecar's `render` block.
@@ -30062,6 +30083,8 @@ header/footer frame lets a `width:100%` child escape a margined body.
 - `html` — The rendered partial — a fragment in every case we generate.
 - `opts` — `styles` is the page's concatenated overlay; `left`/`right` are
 the page's horizontal margins in INCHES, so the frame aligns with the body.
+Both DEFAULT to {@link CHROMIUM_DEFAULT_MARGIN_IN} — see that constant for
+why the function owns the fallback rather than each caller.
 
 ### `parseFixturePath(path: string): typeLiteral | null`
 

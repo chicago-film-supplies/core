@@ -13788,6 +13788,12 @@
         },
         {
           "kind": "variable",
+          "name": "CHROMIUM_DEFAULT_MARGIN_IN",
+          "declaration": "const CHROMIUM_DEFAULT_MARGIN_IN: 0.39;",
+          "doc": "Chromium's own default print margin, in inches, applied when no\n`marginLeft`/`marginRight` is sent.\n\n⭐ **It lives beside {@link injectPartDefaults} and is that function's own\nfallback, so no caller restates it.** It is an EXTERNAL constant — a fact\nabout Chromium, not a CFS policy — and the three callers are in two repos,\nwhich is exactly the shape that gets copied and then drifts. The first\nversion of the templates preview harness needed this number and could not\nimport it, which is what surfaced the question.\n\n⚠️ A caller that KNOWS the family's declared margins should still pass them:\nthe default is what to do in their absence, not a substitute for reading\nthem. All four registered families declare `margin_left`/`margin_right`\ntoday, so this fallback is unreachable for them."
+        },
+        {
+          "kind": "variable",
           "name": "GOLDEN_FRAMES",
           "declaration": "const GOLDEN_FRAMES: \"footer\" | \"header\"[];",
           "doc": "The PDF render frames a family may declare in its sidecar's `render` block.\n\nA frame is an ISOLATED Chromium document — Gotenberg renders `header.html`\nand `footer.html` in their own frames, loading no external resources at all —\nso it is a second render surface the body's golden says nothing about. The\ncustomer-facing quote footer rendered in Times for as long as it existed and\n`visual-diff` read `match` throughout (templates#137, #139).\n\n⚠️ **Order is the SLUG order the goldens sort in, not a priority.** Nothing\nreads this array positionally."
@@ -13900,7 +13906,7 @@
             },
             {
               "name": "opts",
-              "doc": "`styles` is the page's concatenated overlay; `left`/`right` are\nthe page's horizontal margins in INCHES, so the frame aligns with the body."
+              "doc": "`styles` is the page's concatenated overlay; `left`/`right` are\nthe page's horizontal margins in INCHES, so the frame aligns with the body.\nBoth DEFAULT to {@link CHROMIUM_DEFAULT_MARGIN_IN} — see that constant for\nwhy the function owns the fallback rather than each caller."
             }
           ],
           "returnsTag": null

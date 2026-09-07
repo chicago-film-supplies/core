@@ -2,6 +2,7 @@ import { assert, assertEquals, assertNotEquals, assertStringIncludes, assertThro
 import {
   aggregateGoldenVerdict,
   bumpSemver,
+  CHROMIUM_DEFAULT_MARGIN_IN,
   deriveBump,
   fixtureDir,
   fixturePath,
@@ -91,6 +92,21 @@ Deno.test("injectPartDefaults — a real document keeps its own head and is not 
   );
   assertStringIncludes(out, "<head><style>p{color:red}");
   assertEquals(out.split("<html").length - 1, 1, "must not be double-wrapped");
+});
+
+Deno.test("injectPartDefaults — omitted margins fall back to Chromium's own default", () => {
+  // ⭐ The FUNCTION owns the fallback, so no caller restates it. Three callers
+  // across two repos need this number, and only one of them (the Gotenberg
+  // convert) was ever in a position to know it — the templates preview harness
+  // cannot import from api-cloudrun at all, which is what surfaced the question.
+  const defaulted = injectPartDefaults("<footer>x</footer>", { styles: "p{color:red}" });
+  const pad = `padding:0 ${CHROMIUM_DEFAULT_MARGIN_IN}in 0 ${CHROMIUM_DEFAULT_MARGIN_IN}in`;
+  assertStringIncludes(defaulted, pad);
+  // And a caller that KNOWS the family's margins still wins — the default is
+  // what to do in their absence, never a substitute for reading them.
+  const explicit = injectPartDefaults("<footer>x</footer>", { left: 0.5, right: 0.5 });
+  assertStringIncludes(explicit, "padding:0 0.5in 0 0.5in");
+  assertNotEquals(defaulted, explicit);
 });
 
 Deno.test("injectPartDefaults — a document with no head gets one, and no styles still emits geometry", () => {
