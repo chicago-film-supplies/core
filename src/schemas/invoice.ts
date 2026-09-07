@@ -300,6 +300,23 @@ export interface InvoiceDocLineItem {
   quantity: number;
   price: InvoiceDocItemPrice;
   path: string[];
+  /**
+   * Was this line included at no charge as part of its parent product?
+   *
+   * ⭐ **Mirrored from `OrderDocLineItemType.zero_priced` so the invoice line
+   * carries the same fact as the order line it is projected from**
+   * (`manager#421`). The manager's `isZeroPricedComponent` on this side read it
+   * through a CAST — the schema had no such key, so the predicate could only
+   * ever return `false`, and four guards plus a collapse rule below it were
+   * dead. The cast is what hid it: without one it would have been a compile
+   * error the day this schema was written.
+   *
+   * ⚠️ **Same shape as the order's — `.nullable().optional()`, deliberately.**
+   * Making it required here would make an invoice line STRICTER than the order
+   * line it mirrors, which is the opposite of the alignment this exists for; a
+   * divider row and a plain top-level rental have no meaningful boolean.
+   */
+  zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
   /**
    * @see `OrderDocLineItemType.taxed_as`. Mirrored onto the invoice so an
@@ -366,6 +383,10 @@ const InvoiceDocLineItemInner = z.strictObject({
   quantity: z.int().default(0).meta({ column: true, label: "Quantity" }),
   price: InvoiceDocItemPriceSchema,
   path: z.array(ItemUid).default([]),
+  // See the interface docblock — mirrored from the order line, same shape
+  // (`manager#421`). The display-column metadata matches `OrderDocLineItem`'s so
+  // the two grains render the column identically.
+  zero_priced: z.boolean().nullable().optional().meta({ column: true, label: "Zero Priced" }),
   coa_revenue: COARevenueEnum.nullable().optional(),
   taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
   tracking_category: z.string().nullable().optional(),

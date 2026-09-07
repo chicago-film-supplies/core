@@ -151,6 +151,12 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["orders.items[].price.replacement_cents", "array-member-uncensusable"],
   ["orders.items[].taxed_as", "array-member-uncensusable"],
   ["orders.items[].zero_priced", "array-member-uncensusable"],
+  // Mirrored onto the invoice and fulfillment grains so the three item shapes
+  // agree (`manager#421`). Same reason as the order's, and same SHAPE on
+  // purpose: tightening a mirror past the thing it mirrors is the opposite of
+  // the alignment these exist for.
+  ["invoices.items[].zero_priced", "array-member-uncensusable"],
+  ["fulfillments.items[].zero_priced", "array-member-uncensusable"],
   ["out-of-service.sources[].label", "array-member-uncensusable"],
   ["out-of-service.stores[].locations[].max", "array-member-uncensusable"],
   ["products.components[].price.base_percent", "array-member-uncensusable"],

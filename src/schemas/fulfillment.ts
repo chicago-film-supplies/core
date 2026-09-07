@@ -79,6 +79,19 @@ export interface FulfillmentLineItemType {
   description: string;
   quantity: number;
   stock_method?: StockMethodType;
+  /**
+   * Was this line included at no charge as part of its parent product?
+   *
+   * ⭐ **Mirrored from `OrderDocLineItemType.zero_priced`** so a fulfillment
+   * line carries the same fact as the order line it is projected from
+   * (`manager#421`). A fulfillment has no `price` — money is not a warehouse
+   * concern — so this is NOT a price field: it says the line moves with its
+   * parent, which is a picking fact as much as a billing one.
+   *
+   * ⚠️ Same shape as the order's, `.nullable().optional()` — see the invoice
+   * twin's docblock for why matching rather than tightening is the point.
+   */
+  zero_priced?: boolean | null;
   path: string[];
   /**
    * The line's own order attribution — a DENORMALISED COPY of the document's
@@ -131,6 +144,9 @@ const FulfillmentLineItemInner = z.strictObject({
   description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
   quantity: z.number().int().min(0).default(0).meta({ column: true, label: "Quantity" }),
   stock_method: StockMethodEnum.optional().meta({ column: true, label: "Stock Method" }),
+  // See the interface docblock — mirrored from the order line, same shape and
+  // same display-column metadata (`manager#421`).
+  zero_priced: z.boolean().nullable().optional().meta({ column: true, label: "Zero Priced" }),
   path: z.array(ItemUid).default([]),
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),

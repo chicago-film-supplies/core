@@ -3371,3 +3371,53 @@ Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () =>
   // `undefined`; minting a `null` here would write a decision nobody made.
   assertEquals("jurisdiction" in result[0], false);
 });
+
+// ── manager#421, stage one: the field is DECLARED and deliberately UNPROJECTED ──
+//
+// 🔴 **This pair is the whole of stage one, and asserting only the first half
+// would let stage two ship by accident.** `InvoiceDocLineItem` now declares
+// `zero_priced` so a deployed reader can hold a document carrying it; the
+// projection must NOT emit it until the stored corpus has been backfilled.
+//
+// The reason is `invoiceItemDifferences` comparing top-level KEY SETS.
+// `buildOrderLine` writes `zero_priced: null` explicitly on EVERY order line —
+// see its own comment, *"the server writes both as an explicit `null` so the
+// optimistic row matches the echo"* — so the key is present on every order line
+// without exception. Emit it here before the stored invoice lines carry it and
+// every paired line reports a key-set difference at once. This file already
+// records that happening three times (`base_percent`, `crms_id`,
+// `price.discount_percent`: 8,015 of 8,978 paired lines).
+//
+// ⚠️ **A conditional spread does NOT rescue it** — the condition is true for
+// every line, which is exactly what makes this different from `coa_revenue`,
+// `taxed_as` and `price.taxes_base` above.
+Deno.test("manager#421 stage one: the invoice line SCHEMA accepts zero_priced", () => {
+  const line = { ...(buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0] as InvoiceItem) };
+  const withFlag = { ...line, zero_priced: true } as unknown as Record<string, unknown>;
+  assertEquals(InvoiceDocLineItemSchema.safeParse(withFlag).success, true);
+  // Nullable, matching the order's own shape rather than tightening past it.
+  assertEquals(
+    InvoiceDocLineItemSchema.safeParse({ ...withFlag, zero_priced: null }).success,
+    true,
+  );
+});
+
+Deno.test("manager#421 stage one: the PROJECTION does not emit zero_priced yet", () => {
+  // The order line genuinely carries the key — otherwise this passes vacuously
+  // and would keep passing after stage two lands.
+  const orderLine = orderShapedLine() as unknown as Record<string, unknown>;
+  orderLine.zero_priced = null;
+  const projected = projectOrderItemToInvoiceItem(
+    orderLine as unknown as Parameters<typeof projectOrderItemToInvoiceItem>[0],
+    ORDER_DIV_1,
+  ) as unknown as Record<string, unknown>;
+  assertEquals("zero_priced" in projected, false);
+
+  // 🔴 And the consequence that makes it load-bearing: a stored line with no
+  // key still agrees with its projection, so no sync verdict moves.
+  const stored = buildOrderScopedItems(
+    [orderLine as unknown as Parameters<typeof buildOrderScopedItems>[0][number]],
+    ORDER_DIV_1,
+  )[0] as InvoiceItem;
+  assertEquals(invoiceItemDifferences(projected as unknown as InvoiceItem, stored), []);
+});
