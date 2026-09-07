@@ -36,7 +36,14 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
-import { OrgPathNode, type OrgPathNodeType } from "./common.ts";
+import {
+  Address,
+  type AddressType,
+  OrgPathNode,
+  type OrgPathNodeType,
+  SettlementTypeEnum,
+  type SettlementTypeType,
+} from "./common.ts";
 
 // ── The anchor ──────────────────────────────────────────────────────
 
@@ -350,3 +357,177 @@ export const AgingReportSchema: z.ZodType<AgingReport> = z.strictObject({
   })).default([]),
   missing_anchor_uids: z.array(FirestoreId).default([]),
 }).meta({ title: "AgingReport" });
+
+// ── The Org Statement ───────────────────────────────────────────────
+
+/**
+ * How a statement presents the account.
+ *
+ * 🔴 **Storage is OPEN-ITEM; balance-forward is a RENDERING.** Both formats read
+ * the same lines — the difference is whether the document leads with an opening
+ * balance and a running column, or lists the outstanding items. A `param` on one
+ * template family, never two families.
+ *
+ * ⚠️ **The balance-forward presentation must not imply a posting policy.**
+ * Historically it implies FIFO application — Oracle's wording is that payments
+ * *"are not matched to bills… implicitly relieve a customer's oldest debt"* — and
+ * CFS does not work that way: every settlement names its `uid_invoice`
+ * explicitly. {@link StatementLine.balance_cents} is therefore arithmetic over
+ * dated events and nothing more. A template must not caption it as an
+ * application order.
+ */
+export const STATEMENT_FORMATS = ["open_item", "balance_forward"] as const;
+
+/** One member of {@link STATEMENT_FORMATS}. */
+export type StatementFormatType = typeof STATEMENT_FORMATS[number];
+
+/** Zod enum over {@link STATEMENT_FORMATS}. */
+export const StatementFormatEnum: z.ZodType<StatementFormatType> = z.enum(STATEMENT_FORMATS);
+
+/**
+ * One dated event against the account.
+ *
+ * ⭐ **Two money fields on purpose, and a refinement makes them agree.**
+ * `amount_cents` mirrors the journal — **always positive**, exactly as
+ * `settlement.ts` stores it, because direction there comes from `type` via
+ * `getSettlementMultiplier` and never from a sign. `effect_cents` is that
+ * direction already applied, resolved ONCE by the aggregator. Carrying only the
+ * positive value would push `getSettlementMultiplier` into every renderer;
+ * carrying only the signed one would lose the journal's own number. The
+ * refinement on {@link OrgStatementSchema} asserts `|effect| === amount`, so the
+ * pair cannot drift.
+ */
+export interface StatementLine {
+  /** `invoice` raises the balance; `settlement` moves it by its type's direction. */
+  kind: "invoice" | "settlement";
+  /** The invoice this line concerns — a settlement names the invoice it settled. */
+  uid_invoice: string;
+  /** The human invoice number, so a customer can match it to their copy. */
+  number: number;
+  /** The settlement document, or `null` on an invoice line. */
+  uid_settlement: string | null;
+  /** The journal's own type, or `null` on an invoice line. */
+  settlement_type: SettlementTypeType | null;
+  /** Invoice date, or the settlement's ALLOCATION date. */
+  date: string;
+  reference: string | null;
+  /** Always positive. See the note above. */
+  amount_cents: number;
+  /** Signed effect on the balance. `|effect_cents| === amount_cents`. */
+  effect_cents: number;
+  /** Running balance after this line, in statement order. */
+  balance_cents: number;
+  /**
+   * The source document's own FROZEN organization chain.
+   *
+   * ⭐ The statement GROUPS by the live tree and each line PRINTS the chain its
+   * document recorded — api-cloudrun#712's rule. A statement handed to a customer
+   * and re-rendered after a re-parent must not silently rewrite history.
+   */
+  organization_path: OrgPathNodeType[];
+}
+
+/** Zod schema for {@link StatementLine}. */
+export const StatementLineSchema: z.ZodType<StatementLine> = z.strictObject({
+  kind: z.enum(["invoice", "settlement"]),
+  uid_invoice: FirestoreId,
+  number: z.int(),
+  uid_settlement: FirestoreId.nullable(),
+  settlement_type: SettlementTypeEnum.nullable(),
+  date: z.string(),
+  reference: z.string().nullable(),
+  amount_cents: z.int().nonnegative(),
+  effect_cents: z.int(),
+  balance_cents: z.int(),
+  // PII by composition — `OrgPathNode.name` is already `pii: "mask"`.
+  organization_path: z.array(OrgPathNode).min(1).max(3),
+});
+
+/**
+ * A customer statement for one organization subtree.
+ *
+ * ⭐ **Two dates, as on {@link AgingReport}, and for the same reason.** `to_date`
+ * says which invoices existed; `as_of_payment_date` says which settlements count.
+ * Free because `settlements` is a dated allocation journal.
+ */
+export interface OrgStatement {
+  scope: AgingScope;
+  format: StatementFormatType;
+  /** Period start, or `null` for the whole account (the open-item default). */
+  from_date: string | null;
+  /** Period end — which invoices existed. */
+  to_date: string;
+  /** Which settlements count. */
+  as_of_payment_date: string;
+  /** The scoped organization's LIVE chain, for the document heading. */
+  organization_path: OrgPathNodeType[];
+  /** Resolved "bill to" block; `null` when the organization records none. */
+  billing_address: AddressType | null;
+  /** Balance before `from_date`. `0` when `from_date` is null. */
+  opening_balance_cents: number;
+  lines: StatementLine[];
+  /** `opening_balance_cents + Σ lines[].effect_cents`, asserted below. */
+  closing_balance_cents: number;
+  /** The aging strip a statement carries, over the same population. */
+  aging: AgingTotals;
+}
+
+/**
+ * Zod schema for {@link OrgStatement}.
+ *
+ * 🔴 **The refinement is the control total, and it is the reason this is a
+ * schema rather than a plain interface.** A statement whose lines do not add up
+ * to its own closing balance is the single defect a customer will find and CFS
+ * will not, so it is made UNREPRESENTABLE rather than checked by a test that
+ * only ever sees fixtures. Three clauses:
+ *
+ * 1. `|effect_cents| === amount_cents` on every line — the journal's positive
+ *    amount and the applied direction cannot disagree.
+ * 2. `balance_cents` is the running sum from `opening_balance_cents` — so the
+ *    printed column is derived, not asserted separately by a renderer.
+ * 3. `opening + Σ effect === closing` — the statement ties to itself.
+ *
+ * ⚠️ Clause 3 is NOT implied by clause 2 when `lines` is empty, which is a real
+ * case (a customer with an opening balance and no activity in the period).
+ */
+export const OrgStatementSchema: z.ZodType<OrgStatement> = z.strictObject({
+  scope: AgingScopeSchema,
+  format: StatementFormatEnum,
+  from_date: z.string().nullable(),
+  to_date: z.string(),
+  as_of_payment_date: z.string(),
+  organization_path: z.array(OrgPathNode).min(1).max(3),
+  billing_address: Address,
+  opening_balance_cents: z.int(),
+  lines: z.array(StatementLineSchema).default([]),
+  closing_balance_cents: z.int(),
+  aging: AgingTotalsSchema,
+}).superRefine((doc, ctx) => {
+  let running = doc.opening_balance_cents;
+  doc.lines.forEach((line, i) => {
+    if (Math.abs(line.effect_cents) !== line.amount_cents) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `effect_cents (${line.effect_cents}) must have magnitude amount_cents (${line.amount_cents})`,
+        path: ["lines", i, "effect_cents"],
+      });
+    }
+    running += line.effect_cents;
+    if (line.balance_cents !== running) {
+      ctx.addIssue({
+        code: "custom",
+        message: `balance_cents (${line.balance_cents}) is not the running total (${running})`,
+        path: ["lines", i, "balance_cents"],
+      });
+    }
+  });
+  if (running !== doc.closing_balance_cents) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        `closing_balance_cents (${doc.closing_balance_cents}) must equal opening_balance_cents + the sum of every line's effect_cents (${running})`,
+      path: ["closing_balance_cents"],
+    });
+  }
+}).meta({ title: "OrgStatement" }) as z.ZodType<OrgStatement>;

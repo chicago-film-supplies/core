@@ -922,7 +922,14 @@ export {
   type AgingRow,
   type AgingScope,
   type AgingTotals,
+  OrgStatementSchema,
+  STATEMENT_FORMATS,
+  StatementFormatEnum,
+  StatementLineSchema,
   type InvoiceAging,
+  type OrgStatement,
+  type StatementFormatType,
+  type StatementLine,
 } from "./reporting.ts";
 
 export {

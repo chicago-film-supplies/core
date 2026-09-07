@@ -206,6 +206,32 @@ export const PERMISSIONS = [
   // cannot project (api-cloudrun#698).
   "activities.read",
 
+  // Reporting (api-cloudrun#712). TWO permissions, and the split is the same
+  // argument `activities.read` makes one line up: a report is an AGGREGATE, and
+  // an aggregate cannot carry its sources' per-document read grants the way an
+  // activity row does. So the axis has to be declared here rather than derived.
+  //
+  // - `reports.read` gates the reporting SURFACE and any report whose measures
+  //   are quantities — utilization, units out, document counts.
+  // - `reports.readFinancial` gates money. It is required IN ADDITION for any
+  //   report carrying cents, which today is both of them: AR aging and the org
+  //   statement are receivables documents end to end.
+  //
+  // ⚠️ `readFinancial` is a VERB PHRASE, not an adjective — no permission in
+  // this catalog is an adjective, and `reports.financial` would be the first.
+  //
+  // ⚠️ Adding members here CANNOT break a stored role document: `Role.permissions`
+  // is `z.array(z.string())` (`schemas/role.ts`), so a role listing a subset — or
+  // a string not in this catalog — still parses. Verified 2026-09-07 against
+  // `api-cloudrun/src/lib/permissionCache.ts`, which is the only reader that
+  // parses the document. api-cloudrun#443's outage was a role-schema SHAPE
+  // change under `z.strictObject`, which is a different thing; do not read it as
+  // meaning the catalog must be seeded before a route may require a member. What
+  // IS true is that nobody holds a new permission until a role document lists
+  // it, so the route 403s until then — a seeding task, not an outage.
+  "reports.read",
+  "reports.readFinancial",
+
   "admin.reindex",
   "admin.validate",
   "admin.sync",

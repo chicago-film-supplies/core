@@ -5,6 +5,7 @@ import {
   AGING_BUCKETS,
   agingBucketOf,
   AgingReportSchema,
+  OrgStatementSchema,
   type AgingBucketType,
 } from "../src/schemas/reporting.ts";
 import { agingOf } from "../src/utils/invoices.ts";
@@ -185,5 +186,113 @@ Deno.test("🔴 every organization name on the report is PII-classified as mask"
   // is a statement about the declaration, which is exactly the claim being made.
   for (const path of ["scope.name", "rows.organization_path.name", "organizations.name"]) {
     assertEquals(leaves.includes(path), true, `${path} is not classified pii:"mask" — leaves: ${leaves}`);
+  }
+});
+
+// ── The Org Statement ───────────────────────────────────────────────
+//
+// 🔴 Each clause of OrgStatementSchema's refinement gets a PLANTED failure, not
+// just a happy path. A refinement that has never gone red is indistinguishable
+// from one the walker stopped reaching — and the whole reason this is a
+// refinement rather than a test is to make a statement that does not add up
+// unrepresentable.
+
+const ORG = [{ uid: "a".repeat(20), name: "Netflix Productions, LLC", derived: false }];
+
+const STATEMENT = {
+  scope: { kind: "organization", uid: "a".repeat(20), name: "Netflix Productions, LLC", uids: ["a".repeat(20)] },
+  format: "balance_forward",
+  from_date: "2026-08-01T00:00:00.000-05:00",
+  to_date: "2026-09-07T00:00:00.000-05:00",
+  as_of_payment_date: "2026-09-07T00:00:00.000-05:00",
+  organization_path: ORG,
+  billing_address: null,
+  opening_balance_cents: 10_000,
+  lines: [
+    {
+      kind: "invoice", uid_invoice: "b".repeat(20), number: 2247, uid_settlement: null,
+      settlement_type: null, date: "2026-08-01T00:00:00.000-05:00", reference: null,
+      amount_cents: 44_350, effect_cents: 44_350, balance_cents: 54_350, organization_path: ORG,
+    },
+    {
+      kind: "settlement", uid_invoice: "b".repeat(20), number: 2247, uid_settlement: "c".repeat(20),
+      settlement_type: "payment", date: "2026-08-20T00:00:00.000-05:00", reference: "ACH 8891",
+      amount_cents: 20_000, effect_cents: -20_000, balance_cents: 34_350, organization_path: ORG,
+    },
+  ],
+  closing_balance_cents: 34_350,
+  aging: {
+    buckets: AGING_BUCKETS.map((b) => ({ bucket: b, amount_cents: b === "31-60" ? 34_350 : 0 })),
+    credit_cents: 0,
+    total_cents: 34_350,
+  },
+};
+
+Deno.test("OrgStatementSchema accepts a statement that ties", () => {
+  const parsed = OrgStatementSchema.parse(STATEMENT);
+  assertEquals(parsed.closing_balance_cents, 34_350);
+  assertEquals(parsed.lines[1].effect_cents, -20_000);
+});
+
+Deno.test("🔴 clause 1 — a line whose effect_cents disagrees with amount_cents is refused", () => {
+  // The journal stores a POSITIVE amount and takes direction from `type`. A
+  // renderer that flipped one and not the other would print a payment as a
+  // charge; this makes the pair unrepresentable rather than merely wrong.
+  assertThrows(() =>
+    OrgStatementSchema.parse({
+      ...STATEMENT,
+      lines: [STATEMENT.lines[0], { ...STATEMENT.lines[1], effect_cents: -19_999 }],
+    })
+  );
+});
+
+Deno.test("🔴 clause 2 — a running balance that is not the running sum is refused", () => {
+  assertThrows(() =>
+    OrgStatementSchema.parse({
+      ...STATEMENT,
+      lines: [{ ...STATEMENT.lines[0], balance_cents: 54_351 }, STATEMENT.lines[1]],
+    })
+  );
+});
+
+Deno.test("🔴 clause 3 — a closing balance that does not tie is refused", () => {
+  assertThrows(() => OrgStatementSchema.parse({ ...STATEMENT, closing_balance_cents: 34_351 }));
+});
+
+Deno.test("🔴 clause 3 fires on an EMPTY statement, where clause 2 cannot", () => {
+  // A customer carrying an opening balance and no activity in the period is a
+  // real case, and the running-sum clause is vacuous over zero lines — so this
+  // is the arm that catches a wrong closing balance there.
+  const empty = { ...STATEMENT, lines: [], closing_balance_cents: 10_000 };
+  assertEquals(OrgStatementSchema.parse(empty).closing_balance_cents, 10_000);
+  assertThrows(() => OrgStatementSchema.parse({ ...empty, closing_balance_cents: 0 }));
+});
+
+Deno.test("a settlement reversal RAISES the balance", () => {
+  // Direction comes from `type`, so a reversal is a positive effect against a
+  // positive amount — the one case where kind:"settlement" does not reduce.
+  const reversal = {
+    ...STATEMENT,
+    lines: [...STATEMENT.lines, {
+      kind: "settlement" as const, uid_invoice: "b".repeat(20), number: 2247,
+      uid_settlement: "d".repeat(20), settlement_type: "payment_reversal" as const,
+      date: "2026-08-25T00:00:00.000-05:00", reference: null,
+      amount_cents: 20_000, effect_cents: 20_000, balance_cents: 54_350, organization_path: ORG,
+    }],
+    closing_balance_cents: 54_350,
+  };
+  assertEquals(OrgStatementSchema.parse(reversal).closing_balance_cents, 54_350);
+});
+
+Deno.test("OrgStatementSchema is strict and refuses an unknown format", () => {
+  assertThrows(() => OrgStatementSchema.parse({ ...STATEMENT, format: "aged" }));
+  assertThrows(() => OrgStatementSchema.parse({ ...STATEMENT, period: "august" }));
+});
+
+Deno.test("🔴 a statement line's organization names are PII-classified as mask", () => {
+  const leaves = collectMaskedLeaves(OrgStatementSchema.parse(STATEMENT), OrgStatementSchema)
+    .map((l) => l.fieldPath);
+  for (const path of ["scope.name", "organization_path.name", "lines.organization_path.name"]) {
+    assertEquals(leaves.includes(path), true, `${path} is not pii:"mask" — leaves: ${leaves}`);
   }
 });
