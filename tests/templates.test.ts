@@ -5,10 +5,13 @@ import {
   deriveBump,
   fixtureDir,
   fixturePath,
+  goldenFramePath,
+  goldenFrameSlug,
   goldenPath,
   hashTemplateContent,
   NO_FIXTURES_SENTINEL,
   parseFixturePath,
+  parseGoldenFrameSlug,
   RenderParamError,
   type RenderParamDecl,
   resolveRenderParams,
@@ -36,6 +39,27 @@ Deno.test("goldenPath includes branch, git_path, and slug", () => {
     goldenPath("sandbox", "packing-list", "tax-exempt"),
     "goldens/sandbox/packing-list/tax-exempt.png",
   );
+});
+
+Deno.test("goldenFramePath is a golden in the SAME flat directory", () => {
+  // The frame baselines share `goldens/<branch>/<gp>/` with the fixture ones —
+  // both callers list that directory and strip `.png`, so the two arrive in one
+  // `slugs` array and the LINT is what partitions them.
+  assertEquals(
+    goldenFramePath("main", "quote", "footer"),
+    "goldens/main/quote/_footer.png",
+  );
+  assertEquals(goldenFramePath("main", "quote", "footer"), goldenPath("main", "quote", "_footer"));
+});
+
+Deno.test("parseGoldenFrameSlug is TOTAL — anything it does not name is a fixture slug", () => {
+  assertEquals(parseGoldenFrameSlug(goldenFrameSlug("footer")), "footer");
+  assertEquals(parseGoldenFrameSlug(goldenFrameSlug("header")), "header");
+  assertEquals(parseGoldenFrameSlug("order-841"), null);
+  // An unknown underscore name is a FIXTURE slug, so check 4 reports it as an
+  // orphaned baseline rather than exempting a file nothing renders.
+  assertEquals(parseGoldenFrameSlug("_banner"), null);
+  assertEquals(parseGoldenFrameSlug("footer"), null);
 });
 
 Deno.test("parseFixturePath recovers git_path + slug from a valid path", () => {

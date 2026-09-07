@@ -13788,6 +13788,18 @@
         },
         {
           "kind": "variable",
+          "name": "GOLDEN_FRAMES",
+          "declaration": "const GOLDEN_FRAMES: \"footer\" | \"header\"[];",
+          "doc": "The PDF render frames a family may declare in its sidecar's `render` block.\n\nA frame is an ISOLATED Chromium document — Gotenberg renders `header.html`\nand `footer.html` in their own frames, loading no external resources at all —\nso it is a second render surface the body's golden says nothing about. The\ncustomer-facing quote footer rendered in Times for as long as it existed and\n`visual-diff` read `match` throughout (templates#137, #139).\n\n⚠️ **Order is the SLUG order the goldens sort in, not a priority.** Nothing\nreads this array positionally."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "GoldenFrame",
+          "declaration": "type GoldenFrame = indexedAccess;",
+          "doc": "One of {@link GOLDEN_FRAMES}."
+        },
+        {
+          "kind": "variable",
           "name": "NO_FIXTURES_SENTINEL",
           "declaration": "const NO_FIXTURES_SENTINEL: \"_\";",
           "doc": "The `fixture` value of the family-level \"this family has no fixtures\" row.\n\n⚠️ **This is a wire contract between two repos, and it was a bare `\"_\"`\nliteral on one side of it.** When a family has zero fixtures the API\nshort-circuits before any fan-out and persists a single synthetic result\ncarrying this value, because `golden_results` cannot be empty and still say\n*why*. The manager then reads it back: its `no-fixtures` verdict arm and its\nslug map both depend on recognising it. Change it on one side only and the\nmanager renders a fixture literally named `_` and reports `match` where it\nshould report `no-fixtures` — with nothing failing on either side.\n\n⚠️ **Nothing structurally prevents a collision** — `parseFixturePath` parses\n`fixtures/<gp>/_.json` into the slug `\"_\"` quite happily, so a fixture\nliterally named `_` would be indistinguishable from the sentinel. That is a\nconvention, not an invariant, and it is a further argument for the value\nliving in exactly one place: the cheap defence is that both sides agree, and\nthe collision is only reachable by someone adding that one filename."
@@ -13846,6 +13858,22 @@
         },
         {
           "kind": "function",
+          "name": "goldenFramePath",
+          "signature": "goldenFramePath(branch: string, gitPath: string, frame: GoldenFrame): string",
+          "doc": "Path to one branch-keyed frame golden: `goldens/<branch>/<git_path>/_footer.png`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "goldenFrameSlug",
+          "signature": "goldenFrameSlug(frame: GoldenFrame): string",
+          "doc": "The reserved golden slug for a render frame: `_footer` / `_header`.\n\n🔴 **The leading underscore is what keeps the frame goldens and the fixture\ngoldens in ONE flat directory without a collision, and it is load-bearing in\nboth directions.** `goldenTreesForFamily` and `lint-fixtures.ts` both list\n`goldens/<branch>/<gp>/*.png` and strip the extension, so a frame baseline\narrives in the same `slugs` array a fixture baseline does; check 4 in\n`template-lint.ts` partitions them back apart with {@link parseGoldenFrameSlug}\nrather than by asking the filesystem twice.\n\n⚠️ **A fixture may not take one of these names**, and check 4 says so —\notherwise the two arms fight over one file: the fixture arm would call the\nframe baseline its own and the frame arm would call it orphaned.\n\n⭐ **ONE golden per FAMILY, not per fixture — and that is a MEASUREMENT, not a\nconvention.** api-cloudrun#608 settled that a golden's filename may encode\nonly what is DERIVABLE from the family's own declaration, which makes a\nper-fixture `<slug>.footer.png` legal. It is not USEFUL: measured 2026-09-07,\nall four registered families declare the same `partials/shared/footer.eta` and\nthat partial interpolates **zero `it.*`** — it is a static FEIN line, link,\nemail and phone plus Chromium's own `.pageNumber`/`.totalPages` spans. Its\nonly per-family variance is the overlay stylesheet's root font-size. So a\nper-fixture name would mint 24 byte-identical images per branch and gate\nnothing the 4 do not. ⚠️ **If a frame partial ever reads `it.doc`, this\ndecision expires** — re-read that partial before assuming it still holds.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "goldenPath",
           "signature": "goldenPath(branch: string, gitPath: string, slug: string): string",
           "doc": "Path to one branch-keyed golden: `goldens/<branch>/<git_path>/<slug>.png`.",
@@ -13865,6 +13893,14 @@
           "name": "parseFixturePath",
           "signature": "parseFixturePath(path: string): typeLiteral | null",
           "doc": "Parse a fixture path back to `{ gitPath, slug }`. Returns `null` for any\npath that isn't of the form `fixtures/<gp>/<slug>.json`. The affected-set\nclassifier consumes this to route fixture-only PR changes into the\n`goldenOnly` bucket (golden re-run, no version bump).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "parseGoldenFrameSlug",
+          "signature": "parseGoldenFrameSlug(slug: string): GoldenFrame | null",
+          "doc": "The frame a golden slug names, or `null` when it is an ordinary fixture slug.\n\nTotal over every string, because it is the PARTITION check 4 splits a golden\ntree with: a slug this returns `null` for is a fixture baseline, and one it\nnames is a frame baseline. An unknown underscore-prefixed slug (`_banner`)\nis therefore a FIXTURE slug and reports as orphaned, which is the safe\ndirection — a name nothing renders should be noticed, not silently exempted.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13939,7 +13975,7 @@
         {
           "kind": "interface",
           "name": "LintSidecar",
-          "declaration": "interface LintSidecar {\n  collection_source?: unknown;\n  params?: unknown;\n  fixtures?: unknown;\n}",
+          "declaration": "interface LintSidecar {\n  collection_source?: unknown;\n  params?: unknown;\n  fixtures?: unknown;\n  render?: unknown;\n}",
           "doc": "The sidecar, structurally.\n\nDeclared here rather than imported from `Template` because a caller reads it\nout of a JSON file or a draft content map at runtime, where it is `unknown`\nand every field may be absent or wrong-typed. Typing it as the parsed\n`Template` would assert a validity the lint's whole job is to check."
         },
         {
@@ -13972,7 +14008,7 @@
           "kind": "function",
           "name": "lintFixtureSet",
           "signature": "lintFixtureSet(args: typeLiteral): LintReport",
-          "doc": "Every check, over completely-described families.\n\n⚠️ **Pass EVERY registered family, including ones with no fixtures.** The\ncaller decides what \"every family\" means; this fold reports what it was given\nand cannot detect an omission. A family left out is silently unchecked, which\nis the failure the `ungatedFamilies` output exists to make visible for the\nfamilies that ARE passed.\n\nFails CLOSED on: a fixtures directory with no sidecar, a sidecar with no\n`collection_source`, an unmapped collection, sidecar↔file drift in either\ndirection, a missing or placeholder coverage argument, and an undeclared\nparam key. Checks 4 and 5b fail OPEN by design — both are scoped to families\nthat have GRADUATED, because a family with no baseline has not chosen its\nfixture set yet and saying so on every PR would be noise rather than a\nfinding.",
+          "doc": "Every check, over completely-described families.\n\n⚠️ **Pass EVERY registered family, including ones with no fixtures.** The\ncaller decides what \"every family\" means; this fold reports what it was given\nand cannot detect an omission. A family left out is silently unchecked, which\nis the failure the `ungatedFamilies` output exists to make visible for the\nfamilies that ARE passed.\n\nFails CLOSED on: a fixtures directory with no sidecar, a sidecar with no\n`collection_source`, an unmapped collection, sidecar↔file drift in either\ndirection, a missing or placeholder coverage argument, an undeclared param\nkey, and a fixture taking a render frame's reserved golden slug. Checks 4 and\n5b fail OPEN by design — both are scoped to families that have GRADUATED,\nbecause a family with no baseline has not chosen its fixture set yet and\nsaying so on every PR would be noise rather than a finding.\n\n⚠️ **Check 4 has TWO graduation guards, at different grains.** The fixture\narms are scoped on the tree holding a fixture baseline; the frame arms are\nscoped on the tree holding a FRAME baseline. They are independent because\nevery family declares a `render.footer` and none had a baseline for it when\nthe frame arms shipped — so one guard would have reddened every family at\nonce (templates#137 half 2).",
           "paramTags": [],
           "returnsTag": null
         },

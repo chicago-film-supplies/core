@@ -74,6 +74,13 @@
 import type { z } from "zod";
 import { templateSchemaFor } from "../schemas/template-schemas.ts";
 import { categoryForField, collectMaskedLeaves, maskVerdict } from "./fixture-pii.ts";
+import {
+  GOLDEN_FRAMES,
+  type GoldenFrame,
+  goldenFramePath,
+  goldenFrameSlug,
+  parseGoldenFrameSlug,
+} from "./templates.ts";
 
 // ── What a caller hands in ──────────────────────────────────────────
 
@@ -89,6 +96,11 @@ export interface LintSidecar {
   collection_source?: unknown;
   params?: unknown;
   fixtures?: unknown;
+  /**
+   * The sidecar's `render` block. Read only for `footer`/`header`, which name
+   * the PDF frames check 4 expects a baseline for.
+   */
+  render?: unknown;
 }
 
 /** One fixture, already read. Parse failures are a finding, not an exception. */
@@ -332,6 +344,24 @@ function sidecarParams(sidecar: LintSidecar): SidecarParamDecl[] {
 }
 
 /** `fixtures/<gitPath>/<slug>.json` — restated locally to keep this module's imports narrow. */
+/**
+ * The PDF render frames this family declares — `render.footer` / `render.header`
+ * naming a content-map key.
+ *
+ * ⚠️ **A declared-but-EMPTY string is not a declaration.** `extractRenderConfig`
+ * in api-cloudrun resolves the key out of the content map and warns when it is
+ * absent, so a blank key can never produce a frame; treating it as declared here
+ * would ask for a baseline of a frame that never renders.
+ *
+ * ⚠️ Structural, like every other sidecar accessor here: the sidecar arrives as
+ * `unknown` from a JSON parse and this module owns no schema for it.
+ */
+function sidecarRenderFrames(sidecar: LintSidecar): GoldenFrame[] {
+  const render = sidecar.render;
+  if (render === null || typeof render !== "object") return [];
+  const block = render as Record<string, unknown>;
+  return GOLDEN_FRAMES.filter((f) => typeof block[f] === "string" && block[f] !== "");
+}
 function fixtureFile(gitPath: string, slug: string): string {
   return `fixtures/${gitPath}/${slug}.json`;
 }
@@ -543,11 +573,18 @@ export function lintFixture(args: {
  *
  * Fails CLOSED on: a fixtures directory with no sidecar, a sidecar with no
  * `collection_source`, an unmapped collection, sidecar↔file drift in either
- * direction, a missing or placeholder coverage argument, and an undeclared
- * param key. Checks 4 and 5b fail OPEN by design — both are scoped to families
- * that have GRADUATED, because a family with no baseline has not chosen its
- * fixture set yet and saying so on every PR would be noise rather than a
- * finding.
+ * direction, a missing or placeholder coverage argument, an undeclared param
+ * key, and a fixture taking a render frame's reserved golden slug. Checks 4 and
+ * 5b fail OPEN by design — both are scoped to families that have GRADUATED,
+ * because a family with no baseline has not chosen its fixture set yet and
+ * saying so on every PR would be noise rather than a finding.
+ *
+ * ⚠️ **Check 4 has TWO graduation guards, at different grains.** The fixture
+ * arms are scoped on the tree holding a fixture baseline; the frame arms are
+ * scoped on the tree holding a FRAME baseline. They are independent because
+ * every family declares a `render.footer` and none had a baseline for it when
+ * the frame arms shipped — so one guard would have reddened every family at
+ * once (templates#137 half 2).
  */
 export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
   const findings: LintFinding[] = [];
@@ -577,6 +614,24 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
     if (slugsOnDisk.size === 0) {
       // Not a finding — a family mid-build is legitimate. Reported instead.
       ungatedFamilies.push(gitPath);
+    }
+
+    // A fixture may not take a render frame's reserved golden name. Both of
+    // check 4's arm pairs key on the same flat `goldens/<branch>/<gp>/*.png`
+    // listing, so one file cannot be both — the fixture arm would claim the
+    // frame baseline as its own and the frame arm would call it orphaned, on
+    // the same path, forever. Refusing the NAME is what keeps the partition
+    // total; policing the collision downstream would need both arms to agree.
+    for (const frame of GOLDEN_FRAMES) {
+      const reserved = goldenFrameSlug(frame);
+      if (!slugsOnDisk.has(reserved)) continue;
+      note(
+        fixtureFile(gitPath, reserved),
+        "golden-parity",
+        `"${reserved}" is the reserved golden slug for the \`${frame}\` render frame, so ` +
+          `this fixture and that frame would both claim ` +
+          `\`${goldenFramePath("<branch>", gitPath, frame)}\`. Rename the fixture.`,
+      );
     }
 
     // ── 1, 2, 5a — per fixture ──────────────────────────────────────
@@ -649,9 +704,32 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
     // The `>= 1 baseline` condition is what scopes it, and it is also what keeps
     // an empty `goldens/sandbox/` silent without this check knowing anything
     // about which branch is which.
+    //
+    // ── 4b, folded in here because it partitions the SAME tree ──────
+    //
+    // A frame baseline (`_footer.png`) arrives in `tree.slugs` exactly as a
+    // fixture baseline does — both callers list `goldens/<branch>/<gp>/*.png`
+    // and strip the extension. So the frame slugs are split out FIRST, before
+    // either fixture arm runs.
+    //
+    // 🔴 **Both arms fire on the whole tree if this partition is skipped, and
+    // they fire in OPPOSITE directions depending on landing order.** Blessing
+    // `_footer.png` before this check knows the name makes every frame baseline
+    // read `orphaned`; landing a symmetric frame arm before the baselines exist
+    // makes every family read `missing` on the very pin-bump PR. Both are a
+    // self-inflicted block on `templates-lint`, which is required on `main` —
+    // which is why the frame arm below is graduation-scoped on the FRAME
+    // BASELINES rather than on the declaration.
+    const declaredFrames = sidecarRenderFrames(sidecar);
     let graduatedAnywhere = false;
     for (const tree of [...family.goldens].sort((a, b) => a.branch.localeCompare(b.branch))) {
-      const pngs = new Set(tree.slugs);
+      const pngs = new Set<string>();
+      const frames = new Set<GoldenFrame>();
+      for (const slug of tree.slugs) {
+        const frame = parseGoldenFrameSlug(slug);
+        if (frame) frames.add(frame);
+        else pngs.add(slug);
+      }
       if (pngs.size === 0) continue; // an empty tree is not a graduation
       graduatedAnywhere = true;
       goldenTrees.push(`${tree.branch}/${gitPath}`);
@@ -677,6 +755,42 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
           `orphaned — no ${fixtureFile(gitPath, slug)} renders it, so nothing will ever ` +
             `compare against it. Usually a renamed or removed fixture: delete the baseline, ` +
             `or restore the fixture if the rename was the mistake.`,
+        );
+      }
+
+      // ── The frame arms ────────────────────────────────────────────
+      //
+      // ⚠️ **Scoped on `frames.size`, NOT on `declaredFrames`, and that is the
+      // whole rollout seam.** Every registered family declares a `render.footer`
+      // today and none has a baseline for it, so a rule keyed on the
+      // DECLARATION would go red on all of them the moment it shipped. Keyed on
+      // the BASELINES, it is silent until someone blesses the first one and
+      // strict from that moment on — the same shape as the `pngs.size === 0`
+      // graduation guard above, one surface over.
+      //
+      // ⭐ **Per-TREE, matching the fixture arms.** A family may have frame
+      // baselines on `main` and none on `sandbox` yet, and saying so on
+      // `sandbox` would be reporting the bless that is in flight.
+      if (frames.size === 0) continue;
+      for (const frame of declaredFrames) {
+        if (frames.has(frame)) continue;
+        note(
+          goldenFramePath(tree.branch, gitPath, frame),
+          "golden-parity",
+          `missing — \`${gitPath}\` declares \`render.${frame}\` and has frame baselines on ` +
+            `\`${tree.branch}\`, but not for this one. A frame is an isolated Chromium ` +
+            `document that the body's golden cannot see into, so it is ungated until this ` +
+            `baseline exists. Clear it by APPROVING THE RENDER.`,
+        );
+      }
+      for (const frame of [...frames].sort()) {
+        if (declaredFrames.includes(frame)) continue;
+        note(
+          goldenFramePath(tree.branch, gitPath, frame),
+          "golden-parity",
+          `orphaned — \`${sidecarFile(gitPath)}\` declares no \`render.${frame}\`, so nothing ` +
+            `renders this frame and nothing will ever compare against it. Delete the ` +
+            `baseline, or restore \`render.${frame}\` if removing it was the mistake.`,
         );
       }
     }

@@ -321,6 +321,130 @@ Deno.test("check 4 — an UNGRADUATED family is silent, and an empty tree is not
   assertEquals(report.tally.goldenTrees, [], "an empty tree must not count as compared");
 });
 
+// ── Check 4b: the render-frame goldens ──────────────────────────────
+//
+// ⭐ **The load-bearing test is the SILENCE one**, not the two findings. Every
+// registered family declares a `render.footer` and none had a baseline for it
+// when this arm shipped, so a rule keyed on the declaration would have reddened
+// `templates-lint` — required on `main` — for every family at once. The
+// no-baselines case is the assertion that it did not.
+
+/** A family whose sidecar declares the shared footer frame. */
+function footerFamily(over: Partial<LintFamily> = {}): LintFamily {
+  return family({
+    sidecar: sidecar({
+      fixtures: [{ slug: "live", description: GOOD_DESCRIPTION }],
+      render: { footer: "partials/shared/footer.eta" },
+    }),
+    fixtures: [{ slug: "live", ok: true, doc: NOT_AN_ORDER }],
+    ...over,
+  });
+}
+
+Deno.test("check 4b — a declared frame with NO baseline anywhere is silent", () => {
+  const report = lintFixtureSet({
+    families: [footerFamily({ goldens: [{ branch: "main", slugs: ["live"] }] })],
+  });
+  assertEquals(
+    report.findings.filter((f) => f.check === "golden-parity"),
+    [],
+    "a family that has graduated its FIXTURES but not its FRAMES must stay quiet",
+  );
+});
+
+Deno.test("check 4b — a frame baseline is NOT read as an orphaned fixture", () => {
+  // The partition. Without it `_footer` falls through to the fixture arm, which
+  // has no fixture file of that name to match it against — there is none, and
+  // the reserved-slug arm below is what keeps it that way.
+  const report = lintFixtureSet({
+    families: [footerFamily({
+      goldens: [{ branch: "main", slugs: ["live", "_footer"] }],
+    })],
+  });
+  assertEquals(report.findings.filter((f) => f.check === "golden-parity"), []);
+});
+
+Deno.test("check 4b — once a frame baseline exists, a MISSING one is a finding", () => {
+  const report = lintFixtureSet({
+    families: [footerFamily({
+      sidecar: sidecar({
+        fixtures: [{ slug: "live", description: GOOD_DESCRIPTION }],
+        render: { footer: "partials/shared/footer.eta", header: "partials/quote/header.eta" },
+      }),
+      goldens: [{ branch: "main", slugs: ["live", "_footer"] }],
+    })],
+  });
+  const missing = report.findings.filter((f) =>
+    f.check === "golden-parity" && f.message.includes("missing")
+  );
+  assertEquals(missing.length, 1);
+  assertEquals(missing[0].file, "goldens/main/quote/_header.png");
+});
+
+Deno.test("check 4b — a baseline for a frame the sidecar no longer declares is orphaned", () => {
+  const report = lintFixtureSet({
+    families: [family({
+      sidecar: sidecar({ fixtures: [{ slug: "live", description: GOOD_DESCRIPTION }] }),
+      fixtures: [{ slug: "live", ok: true, doc: NOT_AN_ORDER }],
+      goldens: [{ branch: "main", slugs: ["live", "_footer"] }],
+    })],
+  });
+  const orphaned = report.findings.filter((f) =>
+    f.check === "golden-parity" && f.message.includes("orphaned")
+  );
+  assertEquals(orphaned.length, 1);
+  assertEquals(orphaned[0].file, "goldens/main/quote/_footer.png");
+});
+
+Deno.test("check 4b — the frame guard is PER TREE, like the fixture arms", () => {
+  // `main` blessed, `sandbox` mid-bless. Saying "missing" on `sandbox` would be
+  // reporting the press that is in flight.
+  const report = lintFixtureSet({
+    families: [footerFamily({
+      goldens: [
+        { branch: "main", slugs: ["live", "_footer"] },
+        { branch: "sandbox", slugs: ["live"] },
+      ],
+    })],
+  });
+  assertEquals(report.findings.filter((f) => f.check === "golden-parity"), []);
+});
+
+Deno.test("check 4b — an EMPTY frame key is not a declaration", () => {
+  // `extractRenderConfig` resolves the key out of the content map, so a blank
+  // one can never produce a frame. Asking for its baseline would be asking for
+  // a golden of something that does not render.
+  const report = lintFixtureSet({
+    families: [footerFamily({
+      sidecar: sidecar({
+        fixtures: [{ slug: "live", description: GOOD_DESCRIPTION }],
+        render: { footer: "" },
+      }),
+      goldens: [{ branch: "main", slugs: ["live", "_footer"] }],
+    })],
+  });
+  const orphaned = report.findings.filter((f) => f.check === "golden-parity");
+  assertEquals(orphaned.length, 1);
+  assert(orphaned[0].message.includes("orphaned"));
+});
+
+Deno.test("check 4b — a fixture may not take a frame's reserved slug", () => {
+  const report = lintFixtureSet({
+    families: [family({
+      sidecar: sidecar({
+        fixtures: [{ slug: "_footer", description: GOOD_DESCRIPTION }],
+        render: { footer: "partials/shared/footer.eta" },
+      }),
+      fixtures: [{ slug: "_footer", ok: true, doc: NOT_AN_ORDER }],
+    })],
+  });
+  assert(
+    report.findings.some((f) =>
+      f.check === "golden-parity" && f.message.includes("reserved golden slug")
+    ),
+  );
+});
+
 // ── Check 5b: param coverage ────────────────────────────────────────
 
 Deno.test("check 5b — a declared boolean param with only one state rendered is a finding", () => {

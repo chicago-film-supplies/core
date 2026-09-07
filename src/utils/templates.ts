@@ -53,6 +53,74 @@ export function goldenPath(branch: string, gitPath: string, slug: string): strin
   return `goldens/${branch}/${gitPath}/${slug}.png`;
 }
 
+// ── Render frames (the header/footer goldens) ───────────────────────
+
+/**
+ * The PDF render frames a family may declare in its sidecar's `render` block.
+ *
+ * A frame is an ISOLATED Chromium document — Gotenberg renders `header.html`
+ * and `footer.html` in their own frames, loading no external resources at all —
+ * so it is a second render surface the body's golden says nothing about. The
+ * customer-facing quote footer rendered in Times for as long as it existed and
+ * `visual-diff` read `match` throughout (templates#137, #139).
+ *
+ * ⚠️ **Order is the SLUG order the goldens sort in, not a priority.** Nothing
+ * reads this array positionally.
+ */
+export const GOLDEN_FRAMES = ["footer", "header"] as const;
+
+/** One of {@link GOLDEN_FRAMES}. */
+export type GoldenFrame = typeof GOLDEN_FRAMES[number];
+
+/**
+ * The reserved golden slug for a render frame: `_footer` / `_header`.
+ *
+ * 🔴 **The leading underscore is what keeps the frame goldens and the fixture
+ * goldens in ONE flat directory without a collision, and it is load-bearing in
+ * both directions.** `goldenTreesForFamily` and `lint-fixtures.ts` both list
+ * `goldens/<branch>/<gp>/*.png` and strip the extension, so a frame baseline
+ * arrives in the same `slugs` array a fixture baseline does; check 4 in
+ * `template-lint.ts` partitions them back apart with {@link parseGoldenFrameSlug}
+ * rather than by asking the filesystem twice.
+ *
+ * ⚠️ **A fixture may not take one of these names**, and check 4 says so —
+ * otherwise the two arms fight over one file: the fixture arm would call the
+ * frame baseline its own and the frame arm would call it orphaned.
+ *
+ * ⭐ **ONE golden per FAMILY, not per fixture — and that is a MEASUREMENT, not a
+ * convention.** api-cloudrun#608 settled that a golden's filename may encode
+ * only what is DERIVABLE from the family's own declaration, which makes a
+ * per-fixture `<slug>.footer.png` legal. It is not USEFUL: measured 2026-09-07,
+ * all four registered families declare the same `partials/shared/footer.eta` and
+ * that partial interpolates **zero `it.*`** — it is a static FEIN line, link,
+ * email and phone plus Chromium's own `.pageNumber`/`.totalPages` spans. Its
+ * only per-family variance is the overlay stylesheet's root font-size. So a
+ * per-fixture name would mint 24 byte-identical images per branch and gate
+ * nothing the 4 do not. ⚠️ **If a frame partial ever reads `it.doc`, this
+ * decision expires** — re-read that partial before assuming it still holds.
+ */
+export function goldenFrameSlug(frame: GoldenFrame): string {
+  return `_${frame}`;
+}
+
+/** Path to one branch-keyed frame golden: `goldens/<branch>/<git_path>/_footer.png`. */
+export function goldenFramePath(branch: string, gitPath: string, frame: GoldenFrame): string {
+  return goldenPath(branch, gitPath, goldenFrameSlug(frame));
+}
+
+/**
+ * The frame a golden slug names, or `null` when it is an ordinary fixture slug.
+ *
+ * Total over every string, because it is the PARTITION check 4 splits a golden
+ * tree with: a slug this returns `null` for is a fixture baseline, and one it
+ * names is a frame baseline. An unknown underscore-prefixed slug (`_banner`)
+ * is therefore a FIXTURE slug and reports as orphaned, which is the safe
+ * direction — a name nothing renders should be noticed, not silently exempted.
+ */
+export function parseGoldenFrameSlug(slug: string): GoldenFrame | null {
+  return GOLDEN_FRAMES.find((f) => goldenFrameSlug(f) === slug) ?? null;
+}
+
 /**
  * Parse a fixture path back to `{ gitPath, slug }`. Returns `null` for any
  * path that isn't of the form `fixtures/<gp>/<slug>.json`. The affected-set
