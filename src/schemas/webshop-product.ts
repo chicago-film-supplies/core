@@ -91,8 +91,8 @@ type WebshopProductTypeType = typeof WEBSHOP_PRODUCT_TYPES[number];
 // member here that is not a product type is a shape nothing can ever produce.
 //
 // ⚠️ Subset only, deliberately — no strict-subset second clause, unlike
-// `_ComponentFormulaSubset` in `common.ts`. That clause encodes "this may never
-// become the full set", which is defensible for component formulas and is NOT a
+// `_ComponentFormulaSubset` in `schemas/common.ts`. That clause encodes "this
+// may never become the full set", which is defensible for component formulas and is NOT a
 // claim anyone can support here: nothing rules out a future where a
 // `replacement` is shoppable. Asserting only what is true is the point; the
 // asymmetry is deliberate, not an omission.
