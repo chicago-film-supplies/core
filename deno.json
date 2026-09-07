@@ -105,7 +105,7 @@
     "audit:citations:inbound": "deno run --allow-read scripts/audit-inbound-citations.ts"
   },
   "imports": {
-    "zod": "npm:zod@^4.3.6",
+    "zod": "npm:zod@^4.5.4",
     "date-fns": "npm:date-fns@^4.1.0",
     "@date-fns/tz": "npm:@date-fns/tz@^1.4.1",
     "@std/fs": "jsr:@std/fs@^1.0.24",

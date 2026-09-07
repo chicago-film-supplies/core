@@ -89,7 +89,16 @@ export function extendChecked<
 >(
   base: z.ZodObject<Shape>,
   shape: Ext,
-): z.ZodObject<z.core.util.Extend<Shape, Ext>> {
+  // ⚠️ **`Writeable<Ext>`, not bare `Ext` — zod's own signature, restated.**
+  // As of zod 4.4 `.extend()` is
+  // `extend<U>(shape: U): ZodObject<util.Extend<Shape, util.Writeable<U>>>`, so
+  // an annotation naming bare `Ext` no longer describes what the call returns and
+  // `deno task check` fails here rather than at any call site. It was correct
+  // through 4.3.6 and is the only thing in this package that the 4.3.6 → 4.5.4
+  // bump broke. `Writeable` only strips `readonly`, so every existing call site —
+  // all of which pass object literals — is unaffected at runtime and in its
+  // resulting type.
+): z.ZodObject<z.core.util.Extend<Shape, z.core.util.Writeable<Ext>>> {
   const derived = base.extend(shape);
   sites.push({
     base: base as unknown as z.ZodObject,

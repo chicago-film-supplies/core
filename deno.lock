@@ -15,9 +15,7 @@
     "npm:currency.js@^2.0.4": "2.0.4",
     "npm:date-fns@^4.1.0": "4.1.0",
     "npm:typescript@6.0.3": "6.0.3",
-    "npm:zod@*": "4.3.6",
-    "npm:zod@4.3.6": "4.3.6",
-    "npm:zod@^4.3.6": "4.3.6"
+    "npm:zod@^4.5.4": "4.5.4"
   },
   "jsr": {
     "@std/assert@1.0.19": {
@@ -111,8 +109,8 @@
         "unist-util-visit-parents"
       ]
     },
-    "zod@4.3.6": {
-      "integrity": "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="
+    "zod@4.5.4": {
+      "integrity": "sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA=="
     }
   },
   "workspace": {
@@ -125,7 +123,7 @@
       "npm:currency.js@^2.0.4",
       "npm:date-fns@^4.1.0",
       "npm:typescript@6.0.3",
-      "npm:zod@^4.3.6"
+      "npm:zod@^4.5.4"
     ]
   }
 }

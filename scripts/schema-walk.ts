@@ -133,6 +133,28 @@ function isNullNode(node: JsonNode): boolean {
  * A genuine union keeps its remaining branches (labelled `union` downstream).
  */
 function stripNull(node: JsonNode): { inner: JsonNode; nullable: boolean } {
+  // 🔴 **TWO SPELLINGS, and reading only the second silently drops the `| null`
+  // from every `.nullable()` field in the catalogue.** Measured 2026-09-07 on the
+  // zod 4.3.6 -> 4.5.4 bump: `z.number().nullable()` used to emit
+  // `{ anyOf: [{type:"number"}, {type:"null"}] }` and now emits the JSON Schema
+  // TYPE-ARRAY form `{ type: ["number","null"] }`. Both are valid JSON Schema and
+  // neither is wrong — but the branch reader below sees no branches in the new
+  // one, returns `nullable: false`, and the generated file goes from
+  // `number? | null` to `number?`.
+  //
+  // ⚠️ That failure is quiet in the worst direction: the catalogue is what tells
+  // TEMPLATE AUTHORS whether a field can be null, so it would have promised a
+  // non-null value on 2 fields that genuinely store one, and the first symptom
+  // would be a PDF throwing at render on a real document. `check:generated` is
+  // what caught it, and only because the committed file was produced under the
+  // old spelling — regenerating without reading the diff would have banked it.
+  if (Array.isArray(node.type) && node.type.includes("null")) {
+    const rest = node.type.filter((t) => t !== "null");
+    return {
+      inner: { ...node, type: rest.length === 1 ? rest[0] : rest },
+      nullable: true,
+    };
+  }
   const branches = unionBranches(node);
   if (!branches) return { inner: node, nullable: false };
   const nonNull = branches.filter((b) => !isNullNode(b));
