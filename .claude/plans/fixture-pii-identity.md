@@ -329,10 +329,22 @@ the middle of this, not at the end. Nothing enforces the order — write it into
 - **`templates`** — re-capture the remaining 7 affected fixtures (`statement` ×3, `packing-list` ×2,
   `invoice/rental-discount-taxed`, and the two hand-set templates#185 values) and **flip the new
   corpus check from advisory to blocking**. `kind:cleanup`, `area:templates`, `size:one-session`.
-- ~~**`core`** — the `AgingScope.name` derived scalar.~~ **FILED as core#92** (`kind:decision`) —
-  it is a *whether*, not a *how*: three core publishes and two prod releases, and the question to
-  settle first is whether `AgingReport.organization_path` is wanted on its own merits.
-  Not blocked on this repair, and this repair is not blocked on it.
+- ~~**`core`** — the `AgingScope.name` derived scalar.~~ **DECIDED and FILED.** The owner settled it
+  2026-09-08 — *"path is a much better identifier for an org than name (name can be derived from
+  path via core function)"* — which is `schemas/organization.ts`'s own doctrine, so it closes an
+  exception rather than adopting a convention. Split in two once the consumers were surveyed:
+  - **core#92** (`kind:cleanup`, `size:campaign`) — `AgingScope.name` → `AgingReport.organization_path`.
+    Stays a campaign because `manager/src/routes/Reports.tsx:183` reads `scope.name`, so a real
+    reader has to stop first.
+  - **core#93** (`kind:cleanup`, `size:one-session`) — `PickSheet`'s two `{uid, name}` org refs.
+    Cheaper than first assumed: the manager folds its own sheet and already composes from `path`,
+    and the public `/packing-list` route 302s to a PDF rather than carrying the JSON.
+
+  ⭐ **Neither blocks this repair, and this repair blocks neither — but all three end in a fixture
+  re-capture and a golden re-bless over overlapping families.** Since nothing goes red under this
+  repair, its re-capture is deferrable, and one shared cycle beats three. **Take that call when this
+  lands, not before** — it reverses the "aging-report family only" choice made while planning, and
+  only makes sense if core#92/#93 are actually next.
 - **(the argument, kept here because the plan is what cites it)** — `AgingScope.name` is a derived scalar sitting beside `OrgStatement.organization_path`,
   which is the pattern api-cloudrun#778's closure says is being eliminated. **Cite
   `templates/templates/statement.eta:237-241` as the consumer that already refuses to render it** —
