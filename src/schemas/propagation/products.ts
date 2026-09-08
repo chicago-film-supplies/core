@@ -58,7 +58,7 @@ const COMPONENT_ENTRY_CATALOG_ONLY: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-component-graph.ts",
   clause:
-    "the CATALOG clause only. The override-aware business fields (`price`, `quantity`, `inclusion_type`, `zero_priced`, `description`) are reported INFORMATIONAL and never fail the run — no snapshot property separates a deliberate override from a missed cascade, and asserting equality would report every legitimate override as a defect (`audit-booking-prices.ts` is the cautionary case, measuring its own claim violated ~38% of the time).",
+    "the CATALOG clause only. The override-aware business fields (`price`, `quantity`, `inclusion_type`, `zero_priced`, `description`) are reported INFORMATIONAL and never fail the run — no snapshot property separates a deliberate override from a missed cascade, and asserting equality would report every legitimate override as a defect (`audit-booking-prices.ts` was the cautionary case, measuring its own claim violated ~38% of the time — that script has since been DELETED along with the booking money fields it verified, api-cloudrun `4635c019`, so the lesson is recorded here rather than pointed at).",
   gates: true,
 };
 
