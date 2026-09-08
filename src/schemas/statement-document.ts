@@ -20,8 +20,8 @@
  *
  * 🔴 **Why a statement is persisted at all, when nothing in CFS sends anything.**
  * Decision B4 in `api-cloudrun/.claude/plans/reporting-capability.md` reads
- * "on-demand render, PERSIST ON SEND", and there is no send: `api-cloudrun`'s
- * `src/lib/email.ts` exports four senders and all four are internal
+ * "on-demand render, PERSIST ON SEND", and there is no send:
+ * `api-cloudrun/src/lib/email.ts` exports four senders and all four are internal
  * (verification, OAuth alert, invite, password reset). The operator downloads a
  * PDF and mails it themselves — exactly as they already do for an invoice,
  * whose `pdf_versions[]` is likewise written by an explicit operator save and
