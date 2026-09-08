@@ -21,6 +21,36 @@
  * (polymorphic), divider-item `uid` (native `z.uuid()`), and third-party
  * UUIDs (`uploadcare_uuid`, `xero_id`).
  *
+ * ## 🔴 One id is DERIVED and still shaped like an auto-id — nothing records it
+ *
+ * `BookingId`, `QuoteId` and `MovementId` are deterministic, and they announce
+ * themselves *here*, because a composite has its own shape. **`templates` and
+ * `template-components` do not**: since 2026-09-08 a family REGISTERED by a
+ * template-PR merge takes 20 hex chars of SHA-256 over its `git_path`
+ * (`registerDocId`, api-cloudrun's `src/services/templates/publishFromMerge.ts`),
+ * which satisfies `FirestoreId` exactly — so it is byte-indistinguishable from an
+ * auto-id, the validator cannot tell, and neither can a reader looking at the
+ * data. **That is precisely why it is written down, and this is the only place
+ * that could carry it.**
+ *
+ * It exists to make a duplicate unrepresentable: two concurrent merges
+ * registering one `git_path` both resolve "no family" from a pre-write query, so
+ * under auto-minted ids they had nothing to collide on and both creates
+ * succeeded (api-cloudrun#639).
+ *
+ * ⚠️ **Two things not to infer from it.** It is **not a lookup key** — every
+ * family registered before that date has a real auto-id, so addressing one by
+ * derivation 404s on a family that plainly exists, and the `git_path` query stays
+ * the only way to FIND one. And it is **not uniform**: `createTemplateFamily`
+ * (the manager-driven path) still auto-mints, so *"one `git_path`, one document"*
+ * is not an invariant of the corpus.
+ *
+ * ⭐ The transferable rule: **when a deterministic id has to meet an id-shape
+ * schema, bend the DERIVATION, not the schema.** The readable `gp-<git_path>`
+ * form was written first and failed `validateBeforeWrite` at every register;
+ * widening `FirestoreId` would have weakened a guard covering 41 document types
+ * for the sake of two.
+ *
  * ## Naming: `uid` is a document id, `uuid` is someone else's id
  *
  * This module is about the **form** an id takes; the companion rule is about
