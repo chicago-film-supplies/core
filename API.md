@@ -8338,7 +8338,7 @@ interface StatementDocument {
 quote has a canonical draft because the ORDER decides its content; a statement
 does not, because the REQUEST decides it — there is no "the statement for this
 organization" for a draft to be of. Built in
-`api-cloudrun/src/services/statements.ts`.
+`api-cloudrun/src/services/reporting/statement.ts`.
 
 ```ts
 const StatementDocumentId: z.ZodType<string>;
@@ -13131,7 +13131,7 @@ type SettlementTypeType = indexedAccess;
 quote has a canonical draft because the ORDER decides its content; a statement
 does not, because the REQUEST decides it — there is no "the statement for this
 organization" for a draft to be of. Built in
-`api-cloudrun/src/services/statements.ts`.
+`api-cloudrun/src/services/reporting/statement.ts`.
 
 ```ts
 const StatementDocumentId: z.ZodType<string>;

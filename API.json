@@ -3736,7 +3736,7 @@
           "kind": "variable",
           "name": "StatementDocumentId",
           "declaration": "const StatementDocumentId: z.ZodType<string>;",
-          "doc": "`statement-documents.uid` — `{uid_organization}:v{N}`.\n\n⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A\nquote has a canonical draft because the ORDER decides its content; a statement\ndoes not, because the REQUEST decides it — there is no \"the statement for this\norganization\" for a draft to be of. Built in\n`api-cloudrun/src/services/statements.ts`."
+          "doc": "`statement-documents.uid` — `{uid_organization}:v{N}`.\n\n⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A\nquote has a canonical draft because the ORDER decides its content; a statement\ndoes not, because the REQUEST decides it — there is no \"the statement for this\norganization\" for a draft to be of. Built in\n`api-cloudrun/src/services/reporting/statement.ts`."
         },
         {
           "kind": "variable",
@@ -5931,7 +5931,7 @@
           "kind": "variable",
           "name": "StatementDocumentId",
           "declaration": "const StatementDocumentId: z.ZodType<string>;",
-          "doc": "`statement-documents.uid` — `{uid_organization}:v{N}`.\n\n⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A\nquote has a canonical draft because the ORDER decides its content; a statement\ndoes not, because the REQUEST decides it — there is no \"the statement for this\norganization\" for a draft to be of. Built in\n`api-cloudrun/src/services/statements.ts`."
+          "doc": "`statement-documents.uid` — `{uid_organization}:v{N}`.\n\n⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A\nquote has a canonical draft because the ORDER decides its content; a statement\ndoes not, because the REQUEST decides it — there is no \"the statement for this\norganization\" for a draft to be of. Built in\n`api-cloudrun/src/services/reporting/statement.ts`."
         },
         {
           "kind": "variable",
