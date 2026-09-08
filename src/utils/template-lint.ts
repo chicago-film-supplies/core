@@ -246,6 +246,30 @@ export interface LintReport {
    * that wants to ask "what renders in production ungated?" now can.
    */
   ungatedFamilies: string[];
+  /**
+   * Registered families that HAVE committed a fixture set and still gate nothing
+   * — no golden baseline on any branch (templates#256).
+   *
+   * 🔴 **The state this exists for is INVISIBLE to every other output, and it is
+   * strictly worse-observed than the state before it.** A family with no
+   * fixtures is reported by {@link ungatedFamilies}; a graduated one appears in
+   * {@link LintTally.goldenTrees}. One that has fixtures and no baseline falls
+   * out of BOTH — and check 4 keeps it quiet deliberately, because it is
+   * graduation-scoped. Measured on `statement` (templates#252 → #254): adding
+   * its first two fixtures removed the "renders in production ungated" line and
+   * added no gate, so the family became less observed by committing a fixture
+   * set. **The state that looks set up is the one nobody is watching.**
+   *
+   * ⚠️ **Not a finding, for the same reason `ungatedFamilies` is not.** A first
+   * bless cannot happen on the PR that creates the fixtures — `visual-diff`
+   * returns `no-golden`, an informational PASS — so reddening it would block the
+   * very PR that makes blessing possible. This reports; it does not gate.
+   *
+   * ⚠️ **Disjoint from `ungatedFamilies` by construction**, so a caller may
+   * print both without deduping: a family with zero fixtures is in the first and
+   * can never be in this one.
+   */
+  fixturedUngatedFamilies: string[];
 }
 
 // ── Policy constants ────────────────────────────────────────────────
@@ -591,6 +615,7 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
   const maskLeaves: MaskTally = { examined: 0, masked: 0, notMasked: 0, unverifiable: 0 };
   const goldenTrees: string[] = [];
   const ungatedFamilies: string[] = [];
+  const fixturedUngatedFamilies: string[] = [];
   let fixtures = 0;
   let descriptions = 0;
   let paramStates = 0;
@@ -811,6 +836,16 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
     // ⚠️ What this does NOT claim is that the coverage is GOOD. It says some
     // fixture renders each state, never that the fixture chosen exercises the
     // part of the document the param actually moves. That argument is the
+    // ⚠️ Keyed on `graduatedAnywhere`, NOT on `family.goldens.length` — a tree
+    // holding only render-frame baselines (`<slug>._footer.png`) has
+    // `pngs.size === 0` and is explicitly "not a graduation" above, so a length
+    // test would report such a family as gated when nothing gates what it
+    // renders. Same predicate the two graduation-scoped checks use, so this
+    // cannot disagree with them about what "has graduated" means.
+    if (slugsOnDisk.size > 0 && !graduatedAnywhere) {
+      fixturedUngatedFamilies.push(gitPath);
+    }
+
     // `description`, and check 3 is what makes it exist.
     const declaredParams = sidecarParams(sidecar);
     if (graduatedAnywhere && declaredParams.length > 0) {
@@ -855,5 +890,6 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
       maskLeaves,
     },
     ungatedFamilies,
+    fixturedUngatedFamilies,
   };
 }

@@ -30894,6 +30894,7 @@ interface LintReport {
   advisories: LintFinding[];
   tally: LintTally;
   ungatedFamilies: string[];
+  fixturedUngatedFamilies: string[];
 }
 ```
 

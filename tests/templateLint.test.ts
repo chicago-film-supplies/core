@@ -519,6 +519,71 @@ Deno.test("a registered family with NO fixtures is reported as ungated, and is N
   assertEquals(report.tally.families, 2, "but it must be COUNTED");
 });
 
+Deno.test("a family with fixtures and NO golden tree is reported, and is NOT a finding", () => {
+  // 🔴 templates#256, measured on `statement` (templates#252 → #254): it landed
+  // on `main` with two fixtures and zero goldens, and appeared in NEITHER
+  // report — out of `ungatedFamilies` because it has fixtures, out of
+  // `goldenTrees` because it has no baseline, and check 4 is graduation-scoped
+  // so it stays quiet by design. An hour before those fixtures landed the same
+  // family WAS reported. Committing a fixture set made it less observed.
+  const report = lintFixtureSet({
+    families: [
+      family({
+        gitPath: "statement",
+        sidecar: sidecar({ fixtures: [{ slug: "x", description: GOOD_DESCRIPTION }] }),
+        fixtures: [{ slug: "x", ok: true, doc: NOT_AN_ORDER }],
+        goldens: [],
+      }),
+    ],
+  });
+  assertEquals(report.fixturedUngatedFamilies, ["statement"]);
+  assertEquals(report.ungatedFamilies, [], "it HAS fixtures, so not that report");
+  assertEquals(report.tally.goldenTrees, [], "and it has not graduated");
+  assert(
+    !checksIn(report.findings).has("golden-parity"),
+    "reporting it must not turn the graduation-scoped check into a finding",
+  );
+});
+
+Deno.test("…and the two reports are DISJOINT — a family with no fixtures is only in the first", () => {
+  const report = lintFixtureSet({
+    families: [family({ gitPath: "receipt", fixtures: [], goldens: [] })],
+  });
+  assertEquals(report.ungatedFamilies, ["receipt"]);
+  assertEquals(
+    report.fixturedUngatedFamilies,
+    [],
+    "no fixtures means the OTHER report owns it — a caller printing both must not double-count",
+  );
+});
+
+Deno.test("🔴 a tree holding ONLY render frames is not a graduation, so the family still reports", () => {
+  // The predicate is `graduatedAnywhere`, not `goldens.length`. A golden tree
+  // can exist and contain nothing but `<slug>._footer.png` render frames, which
+  // the graduation loop skips (`pngs.size === 0` ⇒ "an empty tree is not a
+  // graduation"). A length test would call this family gated while nothing
+  // gates what it renders — the exact state templates#256 exists to surface.
+  const report = lintFixtureSet({
+    families: [
+      family({
+        gitPath: "statement",
+        sidecar: sidecar({ fixtures: [{ slug: "x", description: GOOD_DESCRIPTION }] }),
+        fixtures: [{ slug: "x", ok: true, doc: NOT_AN_ORDER }],
+        // `_footer` — the RESERVED frame slug is a bare leading underscore, one
+        // per family, NOT `<slug>._footer`. Written the wrong way first, and
+        // this test failed loudly rather than passing for the wrong reason.
+        goldens: [{ branch: "main", slugs: ["_footer"] }],
+      }),
+    ],
+  });
+  assertEquals(report.tally.goldenTrees, [], "a frames-only tree is not a graduation");
+  assertEquals(
+    report.fixturedUngatedFamilies,
+    ["statement"],
+    "so the family must still be reported, however many PNGs the tree holds",
+  );
+});
+
 Deno.test("a fixtures directory with no family sidecar IS a finding", () => {
   const report = lintFixtureSet({ families: [family({ sidecar: null })] });
   assert(checksIn(report.findings).has("sidecar"));

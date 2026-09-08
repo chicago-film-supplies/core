@@ -14233,7 +14233,7 @@
         {
           "kind": "interface",
           "name": "LintReport",
-          "declaration": "interface LintReport {\n  findings: LintFinding[];\n  advisories: LintFinding[];\n  tally: LintTally;\n  ungatedFamilies: string[];\n}",
+          "declaration": "interface LintReport {\n  findings: LintFinding[];\n  advisories: LintFinding[];\n  tally: LintTally;\n  ungatedFamilies: string[];\n  fixturedUngatedFamilies: string[];\n}",
           "doc": ""
         },
         {
