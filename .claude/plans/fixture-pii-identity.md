@@ -329,7 +329,11 @@ the middle of this, not at the end. Nothing enforces the order — write it into
 - **`templates`** — re-capture the remaining 7 affected fixtures (`statement` ×3, `packing-list` ×2,
   `invoice/rental-discount-taxed`, and the two hand-set templates#185 values) and **flip the new
   corpus check from advisory to blocking**. `kind:cleanup`, `area:templates`, `size:one-session`.
-- **`core`** — `AgingScope.name` is a derived scalar sitting beside `OrgStatement.organization_path`,
+- ~~**`core`** — the `AgingScope.name` derived scalar.~~ **FILED as core#92** (`kind:decision`) —
+  it is a *whether*, not a *how*: three core publishes and two prod releases, and the question to
+  settle first is whether `AgingReport.organization_path` is wanted on its own merits.
+  Not blocked on this repair, and this repair is not blocked on it.
+- **(the argument, kept here because the plan is what cites it)** — `AgingScope.name` is a derived scalar sitting beside `OrgStatement.organization_path`,
   which is the pattern api-cloudrun#778's closure says is being eliminated. **Cite
   `templates/templates/statement.eta:237-241` as the consumer that already refuses to render it** —
   that is the strongest single argument for the deletion and it is already written down. Deleting it
