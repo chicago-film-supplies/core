@@ -54,7 +54,7 @@ import type {
   Tax as SchemaTax,
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
-import { itemContract } from "../schemas/mod.ts";
+import { isDividerItemType, itemContract } from "../schemas/mod.ts";
 import { getDuration, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
@@ -2057,6 +2057,68 @@ export function validateItemParentage<T extends LineItem>(items: T[]): ItemParen
       parentUid,
       parentType: parentType ?? "<unresolved>",
     });
+  }
+  return issues;
+}
+
+/** A single violation reported by {@link validateZeroPricedComponents}. */
+export interface ZeroPricedComponentIssue {
+  /** Index of the offending item in the input array. */
+  index: number;
+  /** The item's `uid`. */
+  uid: string;
+  /** The item's `name`, for an operator-readable message. */
+  name: string;
+  /** The type of the resolved parent, or `"<root>"` when the line sits at the document root. */
+  parentType: string;
+}
+
+/**
+ * **Invariant (2) of the `zero_priced` campaign: a flagged line is a COMPONENT.**
+ * Owner ruling 2026-09-07 — `path.at(-2)` must name a LINE, not a divider and not
+ * the document root.
+ *
+ * ⚠️ **ARRAY-LEVEL, and it cannot be anything else.** Deciding whether a line is
+ * a component requires resolving its parent, which requires its siblings. A
+ * per-item refinement would turn the 29 test sites that parse a line item in
+ * isolation red for having no sibling array — including this campaign's own pin
+ * in `tests/invoices.test.ts` — and none of those failures would be about
+ * `zero_priced`. Invariant (1) has no such need and IS per-item
+ * ({@link checkZeroPricedAmount}).
+ *
+ * 🔴 **`isDividerItemType`, NOT `getStructuralUids`.** The obvious implementation
+ * reuses `getStructuralUids`, which is ORDER-shaped and does not count an
+ * invoice's `order` divider — so every top-level invoice line would resolve to a
+ * non-divider parent and read as a legitimate component, and the check would
+ * pass on exactly the documents it exists to reject.
+ *
+ * ⭐ **What made this reachable at all: the corpus was emptied first.** 44
+ * flagged top-level lines existed across both environments — all from the deleted
+ * CRMS ingest, which spread `zero_priced` into every line variant with no
+ * component check — and this refinement would have made all 35 of their documents
+ * unwritable. They were repaired on 2026-09-07; ordering a contract behind its
+ * corpus is the whole of `optional → stop the writer → empty storage → delete`
+ * applied to a refinement rather than a deletion.
+ *
+ * Returns `[]` when every flagged line is a component.
+ */
+export function validateZeroPricedComponents<T extends LineItem>(items: T[]): ZeroPricedComponentIssue[] {
+  const typeByUid = new Map<string, string>();
+  for (const item of items) typeByUid.set(item.uid, item.type);
+
+  const issues: ZeroPricedComponentIssue[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.zero_priced !== true) continue;
+    const path = item.path ?? [];
+    const parentUid = path.length >= 2 ? path[path.length - 2] : undefined;
+    const parentType = parentUid === undefined ? "<root>" : (typeByUid.get(parentUid) ?? "<unresolved>");
+    // A parent that resolves to nothing is NOT reported here: that is
+    // `validateItemParentage`'s finding, and reporting one defect through two
+    // instruments makes a single broken document look like two.
+    if (parentType === "<unresolved>") continue;
+    if (parentType !== "<root>" && !isDividerItemType(parentType)) continue;
+    issues.push({ index: i, uid: item.uid, name: item.name ?? "", parentType });
   }
   return issues;
 }

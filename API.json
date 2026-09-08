@@ -5989,7 +5989,15 @@
           "kind": "function",
           "name": "checkPriceBaseUnit",
           "signature": "checkPriceBaseUnit(price: typeLiteral | null | undefined, ctx: z.RefinementCtx): void",
-          "doc": "The unit half of a line's price: which of `base_cents` / `base_percent` a\n`formula` is allowed to carry.\n\n**This exists because `price.base` used to carry two units.** On a\n`transaction_fee` line with `formula === \"percent_of_total\"`, `base` was a\n*percentage* of the document's `subtotal_discounted`; on every other line it\nwas a per-unit dollar amount. One field, two units, discriminated only by a\nsibling — so a reader that did not consult `formula` first multiplied a 2.9%\ncard fee as if it were $2.90, and integer cents would have made 2.9%\nunrepresentable outright.\n\nThe split puts the unit in the NAME: `base_cents` is money (integer cents),\n`base_percent` is a percentage stored at 4dp — the quantum Xero's\n`DiscountRate` holds, and deliberately NOT the `RATE_SCALE = 1_000_000n`\nwidening `utils/orders.ts` uses to *apply* a rate exactly. Conflating those\ntwo would store six decimals Xero cannot carry.\n\n**The rule is exactly-one-of, in the only form a `.default(0)` leaves\ncheckable.** `base_cents` keeps its default, so it is materialized by the\nparse before any object-level refinement runs and can never be observed\n\"absent\" here; asserting it is *zero* on the fee arm is the same guarantee\nagainst the same failure, and it is the half that can actually fail. The\n`base_percent` half is asserted in both directions.",
+          "doc": "",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkZeroPricedAmount",
+          "signature": "checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "**Invariant (1) of the `zero_priced` campaign: a line flagged `zero_priced`\ncarries no charge.** Owner ruling, 2026-09-07: *\"zero priced should prevent a\ncharge\"*, restated 2026-09-08 to cover the catalog grain too — the rule holds\nat EVERY grain, with no exceptions.\n\n🔴 **Nothing used to tie the flag to the amount, and that is precisely how the\ncorpus drifted.** `zero_priced` is applied to a price in exactly one place —\n`core/src/utils/order-lines.ts`, `base_cents: comp.zero_priced ? 0 : (…)` —\nwhich runs client-side, ONCE, at line construction, and the resulting `0` is\nthen stored. Every pricer downstream reads the stored `base_cents` and never\nconsults the flag, so once a non-zero amount arrives by any route nothing\nre-zeroes it. Measured before this refinement existed: **53 order lines across\n35 documents** and **65 catalog component entries across 37 products**, both\nenvironments, including nine lines carrying $15,318 of charge on an ACTIVE\norder while its Xero quote correctly excluded them.\n\n⚠️ **PER-ITEM on purpose, unlike invariant (2).** This rule needs only the item\nit is given — a flag and an amount on one object — so it is safe on the 29 test\nsites that parse a line item in isolation. Invariant (2) (*a flagged line is a\nCOMPONENT*) cannot be expressed here at all, because deciding it requires the\nsibling array; it lives in {@link validateZeroPricedComponents} and is asserted\nat the write boundary instead.\n\n⚠️ **A flagged line with NO price is fine** and is not reported: absence cannot\ncharge anything, and dividers reach this check with `price: null`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12991,6 +12999,12 @@
           "doc": "A {@link PricingItem} that has passed {@link isTransactionFeePricingItem}."
         },
         {
+          "kind": "interface",
+          "name": "ZeroPricedComponentIssue",
+          "declaration": "interface ZeroPricedComponentIssue {\n  index: number;\n  uid: string;\n  name: string;\n  parentType: string;\n}",
+          "doc": "A single violation reported by {@link validateZeroPricedComponents}."
+        },
+        {
           "kind": "function",
           "name": "assembleLinePrice",
           "signature": "assembleLinePrice(declared: P, money: LinePriceMoney, item: PricingItem, opts?: typeLiteral): P & LinePriceMoney & typeLiteral",
@@ -13476,6 +13490,14 @@
           "name": "validatePathsAgainst",
           "signature": "validatePathsAgainst(items: T[], recompute: fnOrConstructor): ItemPathIssue[]",
           "doc": "The fixed-point comparison behind {@link validateItemPaths} and\n`validateInvoiceItemPaths`, parameterised on the recompute.\n\n**Call the named wrappers, not this.** The workspace rule that invoice items\nmust go through `computeInvoiceItemPaths` *by name* exists because handing\ninvoice items the order hierarchy silently drops every `order` divider out of\nevery path — and a `recompute` parameter is exactly the shape that lets that\nhappen at a call site rather than at a definition. This exists so the two\nwrappers cannot drift, not to make the recompute a caller's choice.\n\nIt is also a **fixed-point** check, and therefore cannot be the only guard:\nit agrees with whatever `recompute` produces, so it inherits every hole in\nit. Pair it with a property that holds independently — `validateItemParentage`\nagainst the contract table, and the direct `path.length >= 1` /\n`path.at(-1) === uid` assertions in `api-cloudrun/src/lib/validate.ts`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "validateZeroPricedComponents",
+          "signature": "validateZeroPricedComponents(items: T[]): ZeroPricedComponentIssue[]",
+          "doc": "**Invariant (2) of the `zero_priced` campaign: a flagged line is a COMPONENT.**\nOwner ruling 2026-09-07 — `path.at(-2)` must name a LINE, not a divider and not\nthe document root.\n\n⚠️ **ARRAY-LEVEL, and it cannot be anything else.** Deciding whether a line is\na component requires resolving its parent, which requires its siblings. A\nper-item refinement would turn the 29 test sites that parse a line item in\nisolation red for having no sibling array — including this campaign's own pin\nin `tests/invoices.test.ts` — and none of those failures would be about\n`zero_priced`. Invariant (1) has no such need and IS per-item\n({@link checkZeroPricedAmount}).\n\n🔴 **`isDividerItemType`, NOT `getStructuralUids`.** The obvious implementation\nreuses `getStructuralUids`, which is ORDER-shaped and does not count an\ninvoice's `order` divider — so every top-level invoice line would resolve to a\nnon-divider parent and read as a legitimate component, and the check would\npass on exactly the documents it exists to reject.\n\n⭐ **What made this reachable at all: the corpus was emptied first.** 44\nflagged top-level lines existed across both environments — all from the deleted\nCRMS ingest, which spread `zero_priced` into every line variant with no\ncomponent check — and this refinement would have made all 35 of their documents\nunwritable. They were repaired on 2026-09-07; ordering a contract behind its\ncorpus is the whole of `optional → stop the writer → empty storage → delete`\napplied to a refinement rather than a deletion.\n\nReturns `[]` when every flagged line is a component.",
           "paramTags": [],
           "returnsTag": null
         }

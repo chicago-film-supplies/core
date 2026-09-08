@@ -11,6 +11,7 @@ import {
   type DocumentOrganizationSnapshotType,
   type AddressType,
   checkItemContract,
+  checkZeroPricedAmount,
   checkItemPriceFormula,
   checkPriceBaseUnit,
   COARevenueEnum,
@@ -627,7 +628,7 @@ const OrderItemLineInner = z.object({
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable order line (input). */
-export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner;
+export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner.superRefine(checkZeroPricedAmount);
 
 /** A destination divider as a client sends it. */
 export interface OrderItemDestinationType {
@@ -1041,7 +1042,7 @@ const OrderDocLineItemInner = z.strictObject({
   // schema. See the interface docblock for why it is optional rather than
   // defaulted, and why a CRMS rebuild has to carry it forward.
   taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
-}).superRefine(checkItemContract);
+}).superRefine(checkItemContract).superRefine(checkZeroPricedAmount);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
 

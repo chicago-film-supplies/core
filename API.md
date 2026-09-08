@@ -13167,29 +13167,33 @@ deliberately NOT asserted: a flat-amount fee is legitimate, and
 
 ### `checkPriceBaseUnit(price: typeLiteral | null | undefined, ctx: z.RefinementCtx): void`
 
-The unit half of a line's price: which of `base_cents` / `base_percent` a
-`formula` is allowed to carry.
+### `checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void`
 
-**This exists because `price.base` used to carry two units.** On a
-`transaction_fee` line with `formula === "percent_of_total"`, `base` was a
-*percentage* of the document's `subtotal_discounted`; on every other line it
-was a per-unit dollar amount. One field, two units, discriminated only by a
-sibling — so a reader that did not consult `formula` first multiplied a 2.9%
-card fee as if it were $2.90, and integer cents would have made 2.9%
-unrepresentable outright.
+**Invariant (1) of the `zero_priced` campaign: a line flagged `zero_priced`
+carries no charge.** Owner ruling, 2026-09-07: *"zero priced should prevent a
+charge"*, restated 2026-09-08 to cover the catalog grain too — the rule holds
+at EVERY grain, with no exceptions.
 
-The split puts the unit in the NAME: `base_cents` is money (integer cents),
-`base_percent` is a percentage stored at 4dp — the quantum Xero's
-`DiscountRate` holds, and deliberately NOT the `RATE_SCALE = 1_000_000n`
-widening `utils/orders.ts` uses to *apply* a rate exactly. Conflating those
-two would store six decimals Xero cannot carry.
+🔴 **Nothing used to tie the flag to the amount, and that is precisely how the
+corpus drifted.** `zero_priced` is applied to a price in exactly one place —
+`core/src/utils/order-lines.ts`, `base_cents: comp.zero_priced ? 0 : (…)` —
+which runs client-side, ONCE, at line construction, and the resulting `0` is
+then stored. Every pricer downstream reads the stored `base_cents` and never
+consults the flag, so once a non-zero amount arrives by any route nothing
+re-zeroes it. Measured before this refinement existed: **53 order lines across
+35 documents** and **65 catalog component entries across 37 products**, both
+environments, including nine lines carrying $15,318 of charge on an ACTIVE
+order while its Xero quote correctly excluded them.
 
-**The rule is exactly-one-of, in the only form a `.default(0)` leaves
-checkable.** `base_cents` keeps its default, so it is materialized by the
-parse before any object-level refinement runs and can never be observed
-"absent" here; asserting it is *zero* on the fee arm is the same guarantee
-against the same failure, and it is the half that can actually fail. The
-`base_percent` half is asserted in both directions.
+⚠️ **PER-ITEM on purpose, unlike invariant (2).** This rule needs only the item
+it is given — a flag and an amount on one object — so it is safe on the 29 test
+sites that parse a line item in isolation. Invariant (2) (*a flagged line is a
+COMPONENT*) cannot be expressed here at all, because deciding it requires the
+sibling array; it lives in {@link validateZeroPricedComponents} and is asserted
+at the write boundary instead.
+
+⚠️ **A flagged line with NO price is fine** and is not reported: absence cannot
+charge anything, and dividers reach this check with `price: null`.
 
 ### `deriveName(parts: NamePartsLike): string`
 
@@ -28057,6 +28061,19 @@ A {@link PricingItem} that has passed {@link isTransactionFeePricingItem}.
 type TransactionFeePricingItem = PricingItem & typeLiteral;
 ```
 
+### `ZeroPricedComponentIssue`
+
+A single violation reported by {@link validateZeroPricedComponents}.
+
+```ts
+interface ZeroPricedComponentIssue {
+  index: number;
+  uid: string;
+  name: string;
+  parentType: string;
+}
+```
+
 ### `assembleLinePrice(declared: P, money: LinePriceMoney, item: PricingItem, opts?: typeLiteral): P & LinePriceMoney & typeLiteral`
 
 Assemble a stored line `price` object from its declared half and its money
@@ -28989,6 +29006,36 @@ it agrees with whatever `recompute` produces, so it inherits every hole in
 it. Pair it with a property that holds independently — `validateItemParentage`
 against the contract table, and the direct `path.length >= 1` /
 `path.at(-1) === uid` assertions in `api-cloudrun/src/lib/validate.ts`.
+
+### `validateZeroPricedComponents(items: T[]): ZeroPricedComponentIssue[]`
+
+**Invariant (2) of the `zero_priced` campaign: a flagged line is a COMPONENT.**
+Owner ruling 2026-09-07 — `path.at(-2)` must name a LINE, not a divider and not
+the document root.
+
+⚠️ **ARRAY-LEVEL, and it cannot be anything else.** Deciding whether a line is
+a component requires resolving its parent, which requires its siblings. A
+per-item refinement would turn the 29 test sites that parse a line item in
+isolation red for having no sibling array — including this campaign's own pin
+in `tests/invoices.test.ts` — and none of those failures would be about
+`zero_priced`. Invariant (1) has no such need and IS per-item
+({@link checkZeroPricedAmount}).
+
+🔴 **`isDividerItemType`, NOT `getStructuralUids`.** The obvious implementation
+reuses `getStructuralUids`, which is ORDER-shaped and does not count an
+invoice's `order` divider — so every top-level invoice line would resolve to a
+non-divider parent and read as a legitimate component, and the check would
+pass on exactly the documents it exists to reject.
+
+⭐ **What made this reachable at all: the corpus was emptied first.** 44
+flagged top-level lines existed across both environments — all from the deleted
+CRMS ingest, which spread `zero_priced` into every line variant with no
+component check — and this refinement would have made all 35 of their documents
+unwritable. They were repaired on 2026-09-07; ordering a contract behind its
+corpus is the whole of `optional → stop the writer → empty storage → delete`
+applied to a refinement rather than a deletion.
+
+Returns `[]` when every flagged line is a component.
 
 ## `@cfs/core/utils/organizations`
 

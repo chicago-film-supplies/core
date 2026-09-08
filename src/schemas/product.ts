@@ -30,6 +30,7 @@ import {
   TimestampFields,
   UidNameRef,
   type UidNameRefType,
+  checkZeroPricedAmount,
 } from "./common.ts";
 import { TaxRef, type TaxRefType } from "./order.ts";
 
@@ -431,7 +432,17 @@ const ComponentObject = z.strictObject({
  * `price.replacement_cents` rule is stated once rather than a third time here.
  */
 export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
-  .superRefine(checkItemContract);
+  .superRefine(checkItemContract)
+  // ⭐ The CATALOG grain of invariant (1), and the reason the rule is stated at
+  // every grain rather than only where the money is. A component entry priced
+  // above zero while flagged is inert *while the flag is set* — the order-line
+  // writer reads `comp.zero_priced ? 0 : (…)` and never consults the price. The
+  // hazard is the flag being CLEARED: `ProductRelationshipRow.tsx` `<Show>`-hides
+  // the price input rather than zeroing it, so un-ticking the box turns a hidden
+  // $30 into a live charge with the operator never having seen the number.
+  // 65 prod entries across 37 products were repaired 2026-09-08 before this
+  // landed; the corpus is emptied before the contract closes, always.
+  .superRefine(checkZeroPricedAmount);
 
 /**
  * Schema for an authored `components` entry — {@link ComponentSchema} with

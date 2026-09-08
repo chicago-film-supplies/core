@@ -31,6 +31,7 @@ import {
   StockMethodEnum,
   type StockMethodType,
   TimestampFields,
+  checkZeroPricedAmount,
 } from "./common.ts";
 import {
   DocDestination,
@@ -154,7 +155,7 @@ const FulfillmentLineItemInner = z.strictObject({
   path_substituted_for: z.array(ItemUid).optional(),
 });
 
-export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = FulfillmentLineItemInner;
+export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = FulfillmentLineItemInner.superRefine(checkZeroPricedAmount);
 
 /** Destination divider in the fulfillment items array. */
 export interface FulfillmentDestinationItemType {

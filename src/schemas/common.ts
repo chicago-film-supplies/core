@@ -1118,6 +1118,52 @@ export function checkItemContract(
  * against the same failure, and it is the half that can actually fail. The
  * `base_percent` half is asserted in both directions.
  */
+/**
+ * **Invariant (1) of the `zero_priced` campaign: a line flagged `zero_priced`
+ * carries no charge.** Owner ruling, 2026-09-07: *"zero priced should prevent a
+ * charge"*, restated 2026-09-08 to cover the catalog grain too — the rule holds
+ * at EVERY grain, with no exceptions.
+ *
+ * 🔴 **Nothing used to tie the flag to the amount, and that is precisely how the
+ * corpus drifted.** `zero_priced` is applied to a price in exactly one place —
+ * `core/src/utils/order-lines.ts`, `base_cents: comp.zero_priced ? 0 : (…)` —
+ * which runs client-side, ONCE, at line construction, and the resulting `0` is
+ * then stored. Every pricer downstream reads the stored `base_cents` and never
+ * consults the flag, so once a non-zero amount arrives by any route nothing
+ * re-zeroes it. Measured before this refinement existed: **53 order lines across
+ * 35 documents** and **65 catalog component entries across 37 products**, both
+ * environments, including nine lines carrying $15,318 of charge on an ACTIVE
+ * order while its Xero quote correctly excluded them.
+ *
+ * ⚠️ **PER-ITEM on purpose, unlike invariant (2).** This rule needs only the item
+ * it is given — a flag and an amount on one object — so it is safe on the 29 test
+ * sites that parse a line item in isolation. Invariant (2) (*a flagged line is a
+ * COMPONENT*) cannot be expressed here at all, because deciding it requires the
+ * sibling array; it lives in {@link validateZeroPricedComponents} and is asserted
+ * at the write boundary instead.
+ *
+ * ⚠️ **A flagged line with NO price is fine** and is not reported: absence cannot
+ * charge anything, and dividers reach this check with `price: null`.
+ */
+export function checkZeroPricedAmount(
+  item: {
+    zero_priced?: boolean | null;
+    price?: { base_cents?: number } | null;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (item.zero_priced !== true) return;
+  const base = item.price?.base_cents;
+  if (base === undefined || base === null || base === 0) return;
+  ctx.addIssue({
+    code: "custom",
+    path: ["price", "base_cents"],
+    message:
+      `zero_priced is true, so base_cents must be 0 — got ${base}. ` +
+      `A flagged line carries no charge (api-cloudrun#917); if this line should be charged, clear zero_priced instead.`,
+  });
+}
+
 export function checkPriceBaseUnit(
   price: {
     formula?: string;

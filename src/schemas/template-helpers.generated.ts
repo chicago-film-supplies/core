@@ -164,6 +164,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "orderHasDiscount", expr: "it.orders.orderHasDiscount(items)", desc: "Check whether any pre-tax line item has a discount.", returns: "boolean" },
     { name: "orderHasRentals", expr: "it.orders.orderHasRentals(items)", desc: "Check whether any line item is a rental.", returns: "boolean" },
     { name: "orderHasTax", expr: "it.orders.orderHasTax(items)", desc: "Check whether any pre-tax line item has taxes applied.", returns: "boolean" },
+    { name: "validateZeroPricedComponents", expr: "it.orders.validateZeroPricedComponents(items)", desc: "**Invariant (2) of the `zero_priced` campaign: a flagged line is a COMPONENT.** Owner ruling 2026-09-07 — `path.at(-2)` must name a LINE, not a divider and not the document root.", returns: "ZeroPricedComponentIssue[]" },
   ],
   "organizations": [
     { name: "composeOrgName", expr: "it.organizations.composeOrgName(path, arg2)", desc: "Render an organization node's display name from its `path`.", returns: "string" },

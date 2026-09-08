@@ -3393,11 +3393,42 @@ Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () =>
 // `taxed_as` and `price.taxes_base` above.
 Deno.test("manager#421 stage one: the invoice line SCHEMA accepts zero_priced", () => {
   const line = { ...(buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0] as InvoiceItem) };
-  const withFlag = { ...line, zero_priced: true } as unknown as Record<string, unknown>;
+  // ⚠️ The flag comes with `base_cents: 0`, and that is invariant (1) rather than
+  // fixture housekeeping. This arm originally set the flag ALONE on a priced
+  // line — legal when it was written, because nothing tied the flag to the
+  // amount, and that missing tie is exactly what let 53 order lines and 65
+  // catalog entries drift. `checkZeroPricedAmount` now refuses the pair, so the
+  // old fixture asserts a document the schema no longer admits.
+  const withFlag = {
+    ...line,
+    zero_priced: true,
+    price: { ...(line as unknown as { price: Record<string, unknown> }).price, base_cents: 0 },
+  } as unknown as Record<string, unknown>;
   assertEquals(InvoiceDocLineItemSchema.safeParse(withFlag).success, true);
   // Nullable, matching the order's own shape rather than tightening past it.
   assertEquals(
     InvoiceDocLineItemSchema.safeParse({ ...withFlag, zero_priced: null }).success,
+    true,
+  );
+});
+
+Deno.test("invariant (1): a flagged invoice line may not carry a charge", () => {
+  // ⭐ The fail-closed companion to the arm above, and the reason that one is not
+  // enough on its own: "the schema accepts `zero_priced`" would pass just as
+  // happily against a schema that accepts ANY pairing of the flag and the amount,
+  // which is precisely the world this campaign repaired 118 stored rows out of.
+  const line = { ...(buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0] as InvoiceItem) };
+  const charged = {
+    ...line,
+    zero_priced: true,
+    price: { ...(line as unknown as { price: Record<string, unknown> }).price, base_cents: 6000 },
+  } as unknown as Record<string, unknown>;
+  const parsed = InvoiceDocLineItemSchema.safeParse(charged);
+  assertEquals(parsed.success, false);
+  // Assert WHERE it failed, not merely that it did — a line that fails for an
+  // unrelated reason would satisfy a bare `success === false`.
+  assertEquals(
+    parsed.success === false && parsed.error.issues.some((i) => i.path.join(".") === "price.base_cents"),
     true,
   );
 });

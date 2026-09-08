@@ -29,6 +29,7 @@ import {
   InvoiceStatusEnum,
   TimestampFields,
   isLineItemType,
+  checkZeroPricedAmount,
 } from "./common.ts";
 import {
   Discount,
@@ -400,7 +401,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   path_substituted_for: z.array(ItemUid).optional(),
 }).superRefine(checkItemPriceFormula);
 
-export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner;
+export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner.superRefine(checkZeroPricedAmount);
 
 // ── Order divider ───────────────────────────────────────────────
 
