@@ -1003,7 +1003,7 @@ Deno.test("one reader: readPiiTag, collectLeafPaths and applyPii agree on every 
 
 /**
  * 🔴 **`PickSheetDestination.name` IS `DestinationDividerArm.name`** — assigned
- * verbatim at `api-cloudrun/src/lib/pickSheetFold.ts:256`, inside the branch
+ * verbatim at `core/src/utils/pick-sheet-fold.ts:333`, inside the branch
  * that has just matched `divider.type === "destination"`. One operator-typed
  * value, two schemas.
  *
@@ -1037,7 +1037,7 @@ Deno.test("walker: the pick sheet's copy of the destination divider name carries
     copy,
     source,
     "PickSheetDestination.name is DestinationDividerArm.name copied byte-for-byte " +
-      "(api-cloudrun/src/lib/pickSheetFold.ts:256). One fact must not carry two " +
+      "(core/src/utils/pick-sheet-fold.ts:333). One fact must not carry two " +
       "classifications — that is the cross-schema drift core `749aac6` refused for `subject`.",
   );
   assertEquals(source, "mask", "the destination divider name is masked as of core `652b1ba`");

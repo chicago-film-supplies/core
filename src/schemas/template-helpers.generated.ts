@@ -170,6 +170,14 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "organizations": [
     { name: "composeOrgName", expr: "it.organizations.composeOrgName(path, arg2)", desc: "Render an organization node's display name from its `path`.", returns: "string" },
   ],
+  "pick-sheet-fold": [
+    { name: "compareSheetOrders", expr: "it.pick-sheet-fold.compareSheetOrders(a, b)", desc: "The sheet's total order over orders. Exported so a pager sorts identically.", returns: "number" },
+    { name: "foldPickSheet", expr: "it.pick-sheet-fold.foldPickSheet(input)", desc: "Fold a membership slice plus the fulfillment documents it names into `orders[] → destinations[] → items[]`.", returns: "PickSheetFoldResult" },
+    { name: "orderDueAt", expr: "it.pick-sheet-fold.orderDueAt(order)", desc: "An order's own due date: its earliest leg's. `null` only when every leg is undated.", returns: "string | null" },
+    { name: "sheetDestinationCount", expr: "it.pick-sheet-fold.sheetDestinationCount(orders)", desc: "Legs across a page.", returns: "number" },
+    { name: "sheetOrganizations", expr: "it.pick-sheet-fold.sheetOrganizations(orders)", desc: "Distinct organizations across a page, `null` counted once, in first-seen order.", returns: "Array<typeLiteral>" },
+    { name: "sheetQuantity", expr: "it.pick-sheet-fold.sheetQuantity(orders)", desc: "Units across every leg on a page.", returns: "number" },
+  ],
   "pickSheets": [
     { name: "buildPackingList", expr: "it.pickSheets.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
     { name: "consolidateItems", expr: "it.pickSheets.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities. The seed a `bookings` document is built from.", returns: "ConsolidatedItem[]" },
@@ -179,6 +187,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "orderHasDiscount", expr: "it.pickSheets.orderHasDiscount(items)", desc: "Check whether any pre-tax line item has a discount.", returns: "boolean" },
     { name: "orderHasRentals", expr: "it.pickSheets.orderHasRentals(items)", desc: "Check whether any line item is a rental.", returns: "boolean" },
     { name: "orderHasTax", expr: "it.pickSheets.orderHasTax(items)", desc: "Check whether any pre-tax line item has taxes applied.", returns: "boolean" },
+    { name: "pickSheetLineBooking", expr: "it.pickSheets.pickSheetLineBooking(destination, item)", desc: "The booking whose quantities THIS line may state — or `null`.", returns: "PickSheetBooking | null" },
   ],
   "products": [
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },

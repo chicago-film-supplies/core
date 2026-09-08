@@ -36,21 +36,27 @@
  *
  * ## What is deliberately NOT here
  *
- * ⭐ **No quantity helper, because the fold already answered it.** The obvious
- * candidate was one resolving a line to its booking's units, since
- * {@link PickSheetItem.uid_booking} legitimately repeats across lines — a
- * booking is aggregate per `(order, product, destination)`, so a priced
- * principal beside its zero-priced accessories, a `splitItem`, or a product
- * appearing both standalone and as a kit component all name the same booking.
- * Summing it per line is N× wrong.
+ * ⭐ **No "units for this line" helper, because that question's obvious answer
+ * is N× wrong.** {@link PickSheetItem.uid_booking} legitimately repeats across
+ * lines — a booking is aggregate per `(order, product, destination)`, so a
+ * priced principal beside its zero-priced accessories, a `splitItem`, or a
+ * product appearing both standalone and as a kit component all name the same
+ * booking. Summing it per line overstates the leg.
  *
- * But a template never needs to: {@link PickSheetDestination.quantity} is that
- * leg's total and {@link PickSheetDestination.breakdown} its seven buckets, both
- * computed once in the fold over the whole membership slice. **Shipping a helper
- * for a question the document already answers is the dead helper-panel surface
- * `TEMPLATE_HELPER_DENYLIST` exists to prevent** — and worse here, it would
- * offer a template the one arithmetic that has a wrong obvious form. Read the
- * section total; do not re-derive it.
+ * For a leg's own totals a template never needs to ask at all:
+ * {@link PickSheetDestination.quantity} is that leg's total and
+ * {@link PickSheetDestination.breakdown} its seven buckets, both computed once in
+ * the fold over the whole membership slice. Read the section total; do not
+ * re-derive it.
+ *
+ * ⭐ **What IS here is {@link pickSheetLineBooking}, and it is the same rule
+ * rather than an exception to it.** A packing list with a state column per
+ * bucket needs per-ROW numbers, which the section totals cannot supply — so the
+ * fold designates one owner occurrence per booking
+ * ({@link PickSheetItem.owner_path}) and this helper hands back a booking only
+ * for that row. Every other occurrence gets `null`. The arithmetic with a wrong
+ * obvious form is not offered more safely; it is made unrepresentable, because a
+ * non-owner has nothing to sum.
  *
  * ## 🔴 The hazard a caller must handle — this document is PAGED
  *
@@ -69,6 +75,13 @@
  *
  * @module
  */
+
+import {
+  type PickSheetBooking,
+  type PickSheetDestination,
+  type PickSheetItem,
+  pickSheetItemOwnsBooking,
+} from "../schemas/mod.ts";
 
 /**
  * The **shared document sub-interface** — the five helpers a template partial
@@ -130,3 +143,64 @@ export {
   type PackingListItem,
   type StructuralItem,
 } from "./orders.ts";
+
+/**
+ * The seven quantity buckets and their operator-facing labels, re-exported so a
+ * pick-sheets template can HEAD its state columns from the declaration rather
+ * than from a hand-written list.
+ *
+ * 🔴 **Reachability is the whole reason this line exists.** These live in
+ * `schemas/booking.ts` and are re-exported by `utils/bookings.ts`, which is not
+ * an injected namespace for a pick-sheets family — so without this a template
+ * has no way to name them except by writing the seven strings out again. That
+ * copy has already been made once and had already drifted: the deleted
+ * `manager/src/utils/fulfillmentStage.ts` said "Out" where the declaration says
+ * **"Checked Out"**, and nothing asserted either string.
+ *
+ * ⚠️ **`"booked"` is NOT one of them.** It is DERIVED (`heldByBooking` =
+ * reserved + prepped + out-unless-sale), so a template that adds it as an eighth
+ * column is adding a column that double-counts three of the seven.
+ */
+export { BOOKING_BREAKDOWN_KEYS, BOOKING_BREAKDOWN_LABELS } from "../schemas/mod.ts";
+
+/**
+ * The booking whose quantities THIS line may state — or `null`.
+ *
+ * 🔴 **The one safe way for a template to put numbers on a pick-sheet row**, and
+ * it is `null` far more often than a reader expects. A booking is aggregate per
+ * `(order, product, destination)`, so several lines in one leg legitimately name
+ * the same one — measured on prod at **384 legs where one booking stands for 2+
+ * lines**. Rendering its buckets on each of them states its units N times, and
+ * the resulting sheet adds up to more gear than exists.
+ *
+ * So this returns the booking only for the line the fold DESIGNATED as its owner
+ * (`PickSheetItem.owner_path`); every other occurrence gets `null` and renders
+ * blank quantity cells, exactly as a divider does. The row is still on the sheet
+ * — it is a real line and a picker has to see it — it just does not restate
+ * somebody else's units.
+ *
+ * ⭐ **This is the helper the module docblock above says is deliberately
+ * missing, and it is not a reversal.** What was refused was a *"units for this
+ * line"* helper, because the obvious implementation sums the booking per line
+ * and is N× wrong. The owner gate is what makes the question answerable at all:
+ * the arithmetic that has a wrong obvious form is now unrepresentable, because a
+ * non-owner has nothing to sum.
+ *
+ * ```eta
+ * <% const b = it.pickSheets.pickSheetLineBooking(dest, row) %>
+ * <% for (const k of it.pickSheets.BOOKING_BREAKDOWN_KEYS) { %>
+ *   <td><%= b ? b.breakdown[k] || "" : "" %></td>
+ * <% } %>
+ * ```
+ *
+ * ⚠️ Pass the line's OWN leg. A line and a booking from two different
+ * `PickSheetDestination`s never belong together, and passing the wrong leg
+ * returns `null` rather than a wrong number — the failing-safe direction.
+ */
+export function pickSheetLineBooking(
+  destination: Pick<PickSheetDestination, "bookings">,
+  item: PickSheetItem,
+): PickSheetBooking | null {
+  if (!pickSheetItemOwnsBooking(item)) return null;
+  return destination.bookings.find((b) => b.uid === item.uid_booking) ?? null;
+}

@@ -83,6 +83,7 @@
     "./utils/reporting": "./src/utils/reporting.ts",
     "./utils/sessions": "./src/utils/sessions.ts",
     "./utils/pickSheets": "./src/utils/pickSheets.ts",
+    "./utils/pick-sheet-fold": "./src/utils/pick-sheet-fold.ts",
     "./utils/taxes": "./src/utils/taxes.ts",
     "./utils/templates": "./src/utils/templates.ts",
     "./utils/template-lint": "./src/utils/template-lint.ts",

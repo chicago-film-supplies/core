@@ -18,11 +18,18 @@
  *
  * ⚠️ **This is NOT the manager's `PickSheetSection`**
  * (`manager/src/utils/pickSheet.ts`), which is a RENDER model: it carries whole
- * `Booking` objects and a `Map` keyed by item path, neither of which crosses a
- * wire, and it designates one **owner** occurrence per aggregate booking so a
- * table does not draw the same quantities on N rows. This one is the document a
- * non-realtime caller is handed — see {@link PickSheetDestination.bookings} for
- * why it needs no owner rule at all.
+ * `Booking` objects and `Map`s keyed by item path, neither of which crosses a
+ * wire. This one is the document a non-realtime caller is handed.
+ *
+ * ⭐ **The owner designation, however, DID cross over** (`beta.381`), and the
+ * line it moved is worth knowing: the manager's *representation* of it stayed
+ * behind — two `Map`s — while the FACT it encodes, *"which one of these lines
+ * carries this booking's quantities"*, is now `PickSheetItem.owner_path`. It
+ * came over because a packing list with a state column per `breakdown` bucket
+ * asks the question per ROW, and {@link PickSheetDestination.bookings} answers
+ * only per leg. A fact every consumer would otherwise re-derive identically is a
+ * fact the writer should state; `core/CLAUDE.md` § *Promoting a type to core*
+ * carries the reversal in full.
  *
  * ## The structure is NESTING, and it is not a path grain
  *
@@ -360,15 +367,64 @@ export interface PickSheetItem {
    * or a product appearing both standalone and as a kit component. Look the
    * quantities up in {@link PickSheetDestination.bookings}; do NOT sum this
    * field's booking across the lines that name it.
+   *
+   * ⭐ **{@link PickSheetItem.owner_path} designates which one of them carries
+   * the quantities**, so a consumer never has to re-derive the rule.
    */
   uid_booking: string | null;
+  /**
+   * For a line that names a booking it does **not** own, the OWNER occurrence's
+   * own `path`. `null` on the owner itself and on any line with no booking.
+   *
+   * 🔴 **This is the field that makes an aggregate booking safe to render.**
+   * Because several lines share one `uid_booking`, drawing that booking's seven
+   * buckets on each of them states its units N times — measured on prod at
+   * **384 legs where one booking stands for 2+ lines**. Exactly one occurrence
+   * is designated the owner; it renders the quantities, and every other names it
+   * here so it can say *"counted on that line"* rather than reading as an
+   * unexplained duplicate.
+   *
+   * ⚠️ **Ownership is `uid_booking !== null && owner_path === null`, and
+   * {@link pickSheetItemOwnsBooking} is its one reader.** There is deliberately
+   * no stored `owns_booking` twin: two fields stating one fact is two fields
+   * that can disagree, and the pair that cannot is the pair with one author.
+   *
+   * The rule itself — structural parentage as a strict override, then the
+   * largest ordered line quantity, then document order — lives with the fold
+   * (`@cfs/core/utils/pick-sheet-fold`), because it is a decision about a
+   * document rather than a property of one line.
+   *
+   * ⚠️ **The path ARRAY, not a joined key.** A consumer wants
+   * `owner_path.at(-2)` — the owner's immediate parent, which names the row the
+   * units are actioned under — and splitting a joined key back apart would
+   * assume no uid ever contains a `:`.
+   */
+  owner_path: string[] | null;
 }
 
 /** Zod schema for {@link PickSheetItem}. */
 export const PickSheetItemSchema: z.ZodType<PickSheetItem> = z.strictObject({
   item: FulfillmentItem,
   uid_booking: AnyUid.nullable(),
+  owner_path: z.array(ItemUid).nullable().default(null),
 });
+
+/**
+ * Does this line carry its booking's quantities?
+ *
+ * 🔴 **The one reader of the two-clause rule** stated on
+ * {@link PickSheetItem.owner_path}. A divider and a non-stock line name no
+ * booking and own nothing; a non-owner occurrence names one and points at its
+ * owner. Only a line that names a booking and points at nobody owns it.
+ *
+ * ⚠️ **`owner_path === null` alone is NOT ownership**, and reading it that way
+ * makes every divider and every service line an owner of nothing — which then
+ * renders as a row with blank quantity cells where the sheet meant to render
+ * nothing at all.
+ */
+export function pickSheetItemOwnsBooking(item: PickSheetItem): boolean {
+  return item.uid_booking !== null && item.owner_path === null;
+}
 
 // ── A leg ───────────────────────────────────────────────────────────
 
@@ -392,7 +448,7 @@ export interface PickSheetDestination {
    * The divider's own name — the address is on `destination.delivery`.
    *
    * 🔴 **PII-masked, because this is `DestinationDividerArm.name` COPIED
-   * byte-for-byte** (`api-cloudrun/src/lib/pickSheetFold.ts:256`, under
+   * byte-for-byte** (`core/src/utils/pick-sheet-fold.ts:333`, under
    * `divider.type === "destination"`). The mask on the original is the whole
    * reason; see the schema below.
    */
@@ -422,7 +478,7 @@ export const PickSheetDestinationSchema: z.ZodType<PickSheetDestination> = z.str
   uid: ItemUid,
   // 🔴 **`mask`, and it is not a fresh ruling — it is the SAME VALUE as
   // `DestinationDividerArm.name`, which was reversed from `none` to `mask` on a
-  // measurement (core `652b1ba`, `beta.327`).** `pickSheetFold` assigns
+  // measurement (core `652b1ba`, `beta.327`).** `foldPickSheet` assigns
   // `name: divider.name` verbatim from the arm it just matched on
   // `type === "destination"`, so a pick sheet is a second projection of one
   // field. Measured at `beta.327`, before this line: a value in this `name`

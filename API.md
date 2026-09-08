@@ -6926,6 +6926,7 @@ short, which is the one failure this surface refuses. Membership answers
 interface PickSheetItem {
   item: FulfillmentItemType;
   uid_booking: string | null;
+  owner_path: string[] | null;
 }
 ```
 
@@ -11410,6 +11411,20 @@ util.** The rule is the closed vocabulary's own semantics — a second copy
 beside the enum is exactly how the `||` defect above survived as long as it
 did — and `src/utils/*` entrypoints are walked by the template-helper
 generator, which would advertise a warehouse predicate to PDF authors.
+
+### `pickSheetItemOwnsBooking(item: PickSheetItem): boolean`
+
+Does this line carry its booking's quantities?
+
+🔴 **The one reader of the two-clause rule** stated on
+{@link PickSheetItem.owner_path}. A divider and a non-stock line name no
+booking and own nothing; a non-owner occurrence names one and points at its
+owner. Only a line that names a booking and points at nobody owns it.
+
+⚠️ **`owner_path === null` alone is NOT ownership**, and reading it that way
+makes every divider and every service line an owner of nothing — which then
+renders as a row with blank quantity cells where the sheet meant to render
+nothing at all.
 
 ### `pickSheetLegAdmits(bookings: readonly PickSheetLegCustody[], leg: PickSheetLegType | null): boolean`
 
@@ -29736,21 +29751,27 @@ as the orders bindings, so a copy fails rather than diverges.
 
 ## What is deliberately NOT here
 
-⭐ **No quantity helper, because the fold already answered it.** The obvious
-candidate was one resolving a line to its booking's units, since
-{@link PickSheetItem.uid_booking} legitimately repeats across lines — a
-booking is aggregate per `(order, product, destination)`, so a priced
-principal beside its zero-priced accessories, a `splitItem`, or a product
-appearing both standalone and as a kit component all name the same booking.
-Summing it per line is N× wrong.
+⭐ **No "units for this line" helper, because that question's obvious answer
+is N× wrong.** {@link PickSheetItem.uid_booking} legitimately repeats across
+lines — a booking is aggregate per `(order, product, destination)`, so a
+priced principal beside its zero-priced accessories, a `splitItem`, or a
+product appearing both standalone and as a kit component all name the same
+booking. Summing it per line overstates the leg.
 
-But a template never needs to: {@link PickSheetDestination.quantity} is that
-leg's total and {@link PickSheetDestination.breakdown} its seven buckets, both
-computed once in the fold over the whole membership slice. **Shipping a helper
-for a question the document already answers is the dead helper-panel surface
-`TEMPLATE_HELPER_DENYLIST` exists to prevent** — and worse here, it would
-offer a template the one arithmetic that has a wrong obvious form. Read the
-section total; do not re-derive it.
+For a leg's own totals a template never needs to ask at all:
+{@link PickSheetDestination.quantity} is that leg's total and
+{@link PickSheetDestination.breakdown} its seven buckets, both computed once in
+the fold over the whole membership slice. Read the section total; do not
+re-derive it.
+
+⭐ **What IS here is {@link pickSheetLineBooking}, and it is the same rule
+rather than an exception to it.** A packing list with a state column per
+bucket needs per-ROW numbers, which the section totals cannot supply — so the
+fold designates one owner occurrence per booking
+({@link PickSheetItem.owner_path}) and this helper hands back a booking only
+for that row. Every other occurrence gets `null`. The arithmetic with a wrong
+obvious form is not offered more safely; it is made unrepresentable, because a
+non-owner has nothing to sum.
 
 ## 🔴 The hazard a caller must handle — this document is PAGED
 
@@ -29766,6 +29787,46 @@ can enforce that — by the time a template runs, a short document is
 indistinguishable from a small one. It belongs to whatever builds the `doc`,
 which is the same place `PickSheet.missing_order_uids` has to be surfaced
 rather than dropped.
+
+### `BOOKING_BREAKDOWN_KEYS`
+
+All seven keys of the booking lifecycle breakdown, in lifecycle order (which
+is NOT the schema's alphabetical field order — the UI reads left to right).
+
+These live beside the schema rather than in `utils/bookings.ts` because
+schema modules cannot import utils (the dependency runs strictly one way) and
+the movement journal needs the key union to type a custody transition.
+`utils/bookings.ts` re-exports them, so existing importers are unaffected.
+
+```ts
+const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
+```
+
+### `BOOKING_BREAKDOWN_LABELS`
+
+Display label per breakdown bucket — the ONE declaration, read both by the
+`.meta({ column: true, label })` annotations below (which drive every
+collection-table heading) and by the warehouse picker's column headers.
+
+⚠️ **It is declared as a table rather than inline on each `.meta()` because
+the picker had its own copy.** The now-deleted
+`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`
+restating all seven — which is exactly
+the drift the repo's *"columns are declared, not generated"* rule exists to
+stop, and the two had already diverged on `out` ("Out" here, "Checked Out"
+there). The picker's wording won: it is the operator-facing surface and it
+matches `FULFILLMENT_STAGE_LABELS.checkout` ("Check Out"). Nothing asserted
+either string.
+
+⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could
+read these back off the schema, but `BookingBreakdownSchema` is annotated
+`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the
+result is typed `unknown`. A shared literal in the one file that owns the
+declaration is the same guarantee with none of that.
+
+```ts
+const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;
+```
 
 ### `ConsolidatedItem`
 
@@ -29986,6 +30047,138 @@ Check whether any line item is a rental.
 ### `orderHasTax(items: LineItem[]): boolean`
 
 Check whether any pre-tax line item has taxes applied.
+
+### `pickSheetLineBooking(destination: Pick<PickSheetDestination, "bookings">, item: PickSheetItem): PickSheetBooking | null`
+
+The booking whose quantities THIS line may state — or `null`.
+
+🔴 **The one safe way for a template to put numbers on a pick-sheet row**, and
+it is `null` far more often than a reader expects. A booking is aggregate per
+`(order, product, destination)`, so several lines in one leg legitimately name
+the same one — measured on prod at **384 legs where one booking stands for 2+
+lines**. Rendering its buckets on each of them states its units N times, and
+the resulting sheet adds up to more gear than exists.
+
+So this returns the booking only for the line the fold DESIGNATED as its owner
+(`PickSheetItem.owner_path`); every other occurrence gets `null` and renders
+blank quantity cells, exactly as a divider does. The row is still on the sheet
+— it is a real line and a picker has to see it — it just does not restate
+somebody else's units.
+
+⭐ **This is the helper the module docblock above says is deliberately
+missing, and it is not a reversal.** What was refused was a *"units for this
+line"* helper, because the obvious implementation sums the booking per line
+and is N× wrong. The owner gate is what makes the question answerable at all:
+the arithmetic that has a wrong obvious form is now unrepresentable, because a
+non-owner has nothing to sum.
+
+```eta
+<% const b = it.pickSheets.pickSheetLineBooking(dest, row) %>
+<% for (const k of it.pickSheets.BOOKING_BREAKDOWN_KEYS) { %>
+  <td><%= b ? b.breakdown[k] || "" : "" %></td>
+<% } %>
+```
+
+⚠️ Pass the line's OWN leg. A line and a booking from two different
+`PickSheetDestination`s never belong together, and passing the wrong leg
+returns `null` rather than a wrong number — the failing-safe direction.
+
+## `@cfs/core/utils/pick-sheet-fold`
+
+The PURE fold behind a pick sheet — everything that decides which legs are on
+a sheet, what is on them, and which line carries each aggregate booking's
+quantities. No Firestore, no response budget, no render model.
+
+```ts
+import { foldPickSheet } from "@cfs/core/utils/pick-sheet-fold";
+```
+
+## Membership from `bookings`; rows from `fulfillments`; custody from the same bookings
+
+🔴 **Bookings cannot be the ROW source.** There is no booking row for a
+`service` / `surcharge` / `transaction_fee` line, none for a
+`stock_method: "none"` product, and no dividers at all — so a bookings-derived
+sheet is silently short, which is the one failure this surface refuses.
+Membership answers *which orders*; the sanitized fulfillment projection
+supplies every row.
+
+## It GROUPS paths; it never mints one
+
+Every `items[].path` on the output is byte-identical to its own document's.
+The sheet's extra levels are **structural nesting** —
+`orders[] → destinations[] → items[]` — not a fourth path grain, because a
+`path` is a row identity within ONE document and pooling two documents' paths
+into one namespace would collide rows that are not the same row. See
+`schemas/pick-sheet.ts` for the two reasons in full.
+
+## 🔴 Why this is in `@cfs/core` rather than beside either caller
+
+It had two homes and one rule. `api-cloudrun/src/lib/pickSheetFold.ts` built
+the wire document and `manager/src/utils/pickSheet.ts` built the screen's
+sections — same inputs, same primitives, and the same sentence in both
+docblocks. Two copies of a membership rule is how the `||` defect in
+`pickSheetGateAdmits` survived as long as it did, and it is why the screen and
+the printed document could disagree about what is at a destination. There is
+one author now; the screen PROJECTS this output rather than walking the inputs
+again.
+
+⚠️ **The PAGING half deliberately did not come with it.** `cursorFor` and
+`pagePickSheetOrders` clip against api-cloudrun's serialized response budget,
+which is a property of that service's transport and not of a pick sheet. They
+stay in `api-cloudrun/src/lib/pickSheetFold.ts`, which re-exports this module
+so its callers see one door.
+
+### `PickSheetFoldResult`
+
+What {@link foldPickSheet} produces before any page is clipped.
+
+```ts
+interface PickSheetFoldResult {
+  orders: PickSheetOrder[];
+  missingOrderUids: string[];
+}
+```
+
+### `compareSheetOrders(a: PickSheetOrder, b: PickSheetOrder): number`
+
+The sheet's total order over orders. Exported so a pager sorts identically.
+
+### `foldPickSheet(input: typeLiteral): PickSheetFoldResult`
+
+Fold a membership slice plus the fulfillment documents it names into
+`orders[] → destinations[] → items[]`.
+
+⚠️ `bookings` must already be the scope's slice — the destination's or the
+organization subtree's open bookings. This narrows by LEG, not by scope
+membership: an order in the slice for one destination may carry a second leg
+elsewhere, and the destination scope drops that one here.
+
+⚠️ **A section's order attribution comes from the DOCUMENT, not from
+`items[].uid_order`**, and that is a stated limit rather than an oversight.
+`fulfillments` is 1:1 with an order, so every line in a document belongs to
+that document's order today and the two answers cannot disagree.
+`items[].uid_order` exists for the run-of-show case — an organization
+accumulating several orders over a project and returning them all on one day
+— and the moment a fulfillment document carries lines from more than one
+order, this attribution and the booking id above become wrong together.
+Tracked as manager#357; do not paper over it here with a branch no corpus can
+reach.
+
+### `orderDueAt(order: PickSheetOrder): string | null`
+
+An order's own due date: its earliest leg's. `null` only when every leg is undated.
+
+### `sheetDestinationCount(orders: readonly PickSheetOrder[]): number`
+
+Legs across a page.
+
+### `sheetOrganizations(orders: readonly PickSheetOrder[]): Array<typeLiteral>`
+
+Distinct organizations across a page, `null` counted once, in first-seen order.
+
+### `sheetQuantity(orders: readonly PickSheetOrder[]): number`
+
+Units across every leg on a page.
 
 ## `@cfs/core/utils/taxes`
 

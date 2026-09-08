@@ -45,6 +45,7 @@ import * as organizationUtils from "../src/utils/organizations.ts";
 import * as productUtils from "../src/utils/products.ts";
 import * as reportingUtils from "../src/utils/reporting.ts";
 import * as pickSheetUtils from "../src/utils/pickSheets.ts";
+import * as pickSheetFoldUtils from "../src/utils/pick-sheet-fold.ts";
 import * as sessionUtils from "../src/utils/sessions.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
 import * as templateUtils from "../src/utils/templates.ts";
@@ -111,6 +112,14 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   movements: movementUtils,
   "order-lines": orderLineUtils,
   pickSheets: pickSheetUtils,
+  // Same exception as `fulfillment-stage` and `item-pairing`, and for the
+  // sharper version of their reason: `utils/pick-sheet-fold.ts` BUILDS the pick
+  // sheet a template is later handed. It takes `bookings` and `fulfillments`,
+  // neither of which a render context holds, and its output is `it.doc` itself —
+  // so a template calling it would be re-deriving the document it is rendering.
+  // Not injectable either (`pick-sheet-fold` is absent from
+  // `TEMPLATE_COLLECTION_UTILS`); listed so the drift guard sees its exports.
+  "pick-sheet-fold": pickSheetFoldUtils,
   orders: orderUtils,
   organizations: organizationUtils,
   products: productUtils,

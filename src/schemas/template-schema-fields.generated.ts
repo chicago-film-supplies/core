@@ -599,6 +599,7 @@ export const templateSchemaFields: Partial<
     { path: "orders[].destinations[].items", type: "object[]" },
     { path: "orders[].destinations[].items[].item", type: "union" },
     { path: "orders[].destinations[].items[].uid_booking", type: "union | null" },
+    { path: "orders[].destinations[].items[].owner_path", type: "union[] | null" },
     { path: "order_count", type: "number" },
     { path: "destination_count", type: "number" },
     { path: "quantity", type: "number" },

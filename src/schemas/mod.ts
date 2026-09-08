@@ -892,6 +892,7 @@ export {
   PickSheetGateEnum,
   pickSheetGateAdmits,
   PickSheetItemSchema,
+  pickSheetItemOwnsBooking,
   PickSheetLegEnum,
   pickSheetLegAdmits,
   pickSheetLegDirection,
