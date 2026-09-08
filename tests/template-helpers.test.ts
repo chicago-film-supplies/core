@@ -43,6 +43,7 @@ import * as orderLineUtils from "../src/utils/order-lines.ts";
 import * as orderUtils from "../src/utils/orders.ts";
 import * as organizationUtils from "../src/utils/organizations.ts";
 import * as productUtils from "../src/utils/products.ts";
+import * as reportingUtils from "../src/utils/reporting.ts";
 import * as pickSheetUtils from "../src/utils/pickSheets.ts";
 import * as sessionUtils from "../src/utils/sessions.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
@@ -113,6 +114,18 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   orders: orderUtils,
   organizations: organizationUtils,
   products: productUtils,
+  // ⚠️ **Injectable by NO family yet, and unlike the tooling entries below that
+  // is a sequencing fact rather than a ruling.** `utils/reporting.ts` is the
+  // presentation fold over an `AgingReport` — the account × bucket matrix and
+  // its reconciling residual — which is exactly what a document renderer wants;
+  // `templates/aging-report.eta` holds its own narrower copy of it today. It is
+  // not in `TEMPLATE_COLLECTION_UTILS` because putting it there is a
+  // deploy-ordered change across three repos (`eta.ts`'s module map and the
+  // templates preview harness both mirror that table), and the CSV export it was
+  // extracted for did not need it. Listed so the drift guard sees its exports;
+  // NOT denylisted, because these are helpers a template should be offered the
+  // day its family resolves the namespace.
+  reporting: reportingUtils,
   sessions: sessionUtils,
   taxes: taxUtils,
   templates: templateUtils,

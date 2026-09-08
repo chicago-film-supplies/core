@@ -13650,6 +13650,72 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/reporting",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "AgingAccountRow",
+          "declaration": "interface AgingAccountRow {\n  uid: string | null;\n  label: string;\n  totals: AgingTotals;\n}",
+          "doc": "One row of the account × bucket matrix — an account, or the reconciling residual."
+        },
+        {
+          "kind": "variable",
+          "name": "UNATTRIBUTED_ACCOUNT_LABEL",
+          "declaration": "const UNATTRIBUTED_ACCOUNT_LABEL: \"Not attributed to an account\";",
+          "doc": "How a surface names the residual row.\n\n⚠️ **A label with one author, for the same reason `composeOrgName` has one.**\nA row that says something different on the screen, in the PDF and in the CSV\nexport is three descriptions of one figure, and a reader comparing two of them\ncannot tell whether they are looking at the same thing. Recognise the row by\n`uid === null`, not by this string."
+        },
+        {
+          "kind": "function",
+          "name": "agingAccountRows",
+          "signature": "agingAccountRows(report: AgingReport): AgingAccountRow[]",
+          "doc": "The account × bucket matrix: one row per account, plus a residual row when the\naccounts do not add up to the report's own totals.\n\n🔴 **A surface prints `report.totals` as its footer and these rows must sum to\nit**, or the reader sees an aged-receivables report whose accounts disagree\nwith its total — the one defect a customer finds and CFS does not. The\nresidual row is what makes that hold for every response, rather than for the\nresponses that happen to have no unattributed money.\n\n⭐ **The label is composed from the node's own chain, which the response\ncarries** (api-cloudrun#923). It used to be joined out of `rows[]` because\n`organizations[]` sent only a leaf segment; that workaround is gone along with\nthe `name` field that made it necessary — an organization is a `uid` and a\npath, and `composeOrgName` is the one author of a label built from one.\n\n⚠️ **Sorted here rather than trusting the response's order.** The API does\nsort by the same composed label today, but a table's ordering is the\nrenderer's own guarantee and it costs one comparison. The residual is appended\nlast whatever the sort, because it is not an account.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "bucketAmountCents",
+          "signature": "bucketAmountCents(totals: AgingTotals, bucket: AgingBucketType): number",
+          "doc": "One bucket's amount out of an {@link AgingTotals}.\n\n🔴 **Keyed by NAME, never by array position.** `AgingTotals.buckets` is a\n`z.array(...).default([])` — the schema neither requires every member nor\nfixes their order, so a matrix built by index would silently shift every\ncolumn the first time a bucket was omitted. Today's fold does emit all five in\norder (`totalsOf` in `api-cloudrun/src/lib/agingFold.ts` maps over\n`AGING_BUCKETS`), which is exactly why the positional form would pass every\ntest written against a live response and be wrong against the contract.\n\nAn absent bucket reads as `0`, which is what the fold means by omitting it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isZeroAgingTotals",
+          "signature": "isZeroAgingTotals(t: AgingTotals): boolean",
+          "doc": "Whether every figure in a totals block is zero — the normal case for a residual.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "residualAgingTotals",
+          "signature": "residualAgingTotals(report: AgingReport): AgingTotals",
+          "doc": "`report.totals` minus the sum of `report.organizations[].totals` — what the\ngrouped rows do not account for.\n\n⭐ **Stated as an arithmetic residual rather than as a list of causes, so it\nties by construction.** api-cloudrun#923 closed the credit case upstream — the\nfold now emits a node for an organization holding credits and no rows — and\ndid not close the other one: a node whose chain is empty cannot be labelled at\nall, so `AgingReportSchema`'s `.min(1)` refuses it and its money stays in\n`totals`. Enumerating the causes would leave the third one unhandled.\n\n⚠️ **That remaining hole is narrower than it reads**, and worth stating so a\nreader does not delete this on a wrong premise:\n`DocumentOrganizationSnapshot.path` is `.min(1).max(3)` and both\n`Invoice.organization` and `CreditNote.organization` require it, so no\nvalidated write can produce an empty chain. It covers a document predating\napi-cloudrun#782's contract step, or a raw write bypassing\n`validateBeforeWrite` — plus any third cause, which is the property that comes\nfrom stating it as arithmetic rather than as a list.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "subtractAgingTotals",
+          "signature": "subtractAgingTotals(a: AgingTotals, b: AgingTotals): AgingTotals",
+          "doc": "`a − b`, field by field. Closed for the same reason {@link sumAgingTotals} is.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "sumAgingTotals",
+          "signature": "sumAgingTotals(all: readonly AgingTotals[]): AgingTotals",
+          "doc": "Sum the same field across several totals blocks.\n\nInteger cents, so addition is closed at the storage quantum and no rounding\ndecision exists — see the `cfs-money` skill. Emits every member of\n{@link AGING_BUCKETS} in report order, so the result is a complete block\nwhatever the inputs omitted.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/sessions",
       "moduleDoc": "Pure helpers over a movement SESSION — the document a receipt renders.\n\n```ts\nimport { groupSessionItemsByOrder } from \"@cfs/core/utils/sessions\";\n```\n\nA session is the fold of every movement sharing one `uuid_session`\n(`schemas/movement-session.ts`): one press of Check In, one printable record.\nThis namespace is what `it.sessions` resolves to for a\n`movement-sessions`-sourced template.\n\n## What belongs here, and what deliberately does not\n\nThe test is `utils/fulfillments.ts`'s: **the document's own subject.** A\nreceipt states what physically changed hands, so it needs the grouping a\ncross-order session forces and the direction each row moved. It does **not**\nneed the ledger fold — `applyMovementToLedger`, `costOfUnits`,\n`applyOutOfServiceReason` and `LedgerFoldResult` stay in `utils/movements.ts`,\nwhere the writers use them. Those are how a movement changes stock; a receipt\nis a statement about what a person handed over, and putting an accounting\nfold on it would advertise arithmetic no template should be doing.\n\n⚠️ **`movementHeldDelta` is deliberately NOT re-exported**, even though it is\nthe one helper in `utils/movements.ts` whose argument a receipt actually holds\n(`items[].lines` is a `MovementLineType[]`). It answers \"did units come back\ninto CFS custody\" — a real question, with no template asking it yet. Re-export\nit when a family calls it, and lift its `TEMPLATE_HELPER_DENYLIST` entry in the\nsame change; shipping it now would be the dead helper-panel surface that\ndenylist exists to prevent.\n\n⚠️ **There is no movement-type LABEL helper here, deliberately.** The manager\nrenders a type with a generic `startCase(camelCase(t))`\n(`manager/src/components/inventory/MovementTimeline.tsx`), and a hand-written\nmap in core would be a second authority that disagrees with it the first time\neither side is edited — for wording, which is a template's own business.",
       "symbols": [

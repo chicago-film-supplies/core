@@ -183,6 +183,14 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
+  "reporting": [
+    { name: "agingAccountRows", expr: "it.reporting.agingAccountRows(report)", desc: "The account × bucket matrix: one row per account, plus a residual row when the accounts do not add up to the report's own totals.", returns: "AgingAccountRow[]" },
+    { name: "bucketAmountCents", expr: "it.reporting.bucketAmountCents(totals, bucket)", desc: "One bucket's amount out of an {@link AgingTotals}.", returns: "number" },
+    { name: "isZeroAgingTotals", expr: "it.reporting.isZeroAgingTotals(t)", desc: "Whether every figure in a totals block is zero — the normal case for a residual.", returns: "boolean" },
+    { name: "residualAgingTotals", expr: "it.reporting.residualAgingTotals(report)", desc: "`report.totals` minus the sum of `report.organizations[].totals` — what the grouped rows do not account for.", returns: "AgingTotals" },
+    { name: "subtractAgingTotals", expr: "it.reporting.subtractAgingTotals(a, b)", desc: "`a − b`, field by field. Closed for the same reason {@link sumAgingTotals} is.", returns: "AgingTotals" },
+    { name: "sumAgingTotals", expr: "it.reporting.sumAgingTotals(all)", desc: "Sum the same field across several totals blocks.", returns: "AgingTotals" },
+  ],
   "sessions": [
     { name: "groupSessionItemsByOrder", expr: "it.sessions.groupSessionItemsByOrder(items)", desc: "Split a session's rows into one group per order.", returns: "SessionOrderGroup[]" },
     { name: "sessionItemPlaces", expr: "it.sessions.sessionItemPlaces(lines)", desc: "The distinct places a row's units moved between, as `{from, to}` labels.", returns: "Array<typeLiteral>" },
