@@ -321,30 +321,33 @@ export interface AgingReport {
    * from the roll-up itself would agree by construction.
    */
   organizations: Array<{
+    /** The organization node. An organization is identified by `uid`. */
     uid: string;
     /**
-     * The node's OWN segment.
+     * The node's chain from the root — the account's BREADCRUMB.
      *
-     * 🔴 **Not an identity, and the level it fails at is the one a receivables
-     * roll-up sits on.** The tree is `[organization] [project] [department]`
-     * (`ORG_LEVELS`); censused over all 318 prod organizations on 2026-09-07,
-     * root names are unique 264/264 and project names 15/15, while the 29
-     * department nodes carry only 8 distinct names — 24 of them share just
-     * `Locations` (12), `Office` (10) and `Transpo` (2). A department name is a
-     * small closed vocabulary a production reuses, which is the whole reason
-     * the tree exists. **Compose the label from
-     * {@link AgingReport.organizations.organization_path} instead.**
-     */
-    name: string;
-    /**
-     * The node's own chain from the root, so every consumer composes one label
-     * with `composeOrgName` — the one author of a composed organization name.
+     * ⭐ **This is the first-class representation of an organization here, not a
+     * disambiguator bolted onto one.** An org is identified by its `uid` and
+     * READ as its path; the chain carries the `[organization] [project]
+     * [department]` fold (`ORG_LEVELS`) that the roll-up groups on and that the
+     * UI renders as a breadcrumb. A leaf segment is a lossy projection of it —
+     * it throws away every level above the one it names.
      *
-     * ⚠️ **The join a client would otherwise have to do is not available to
-     * every client.** A `rows[]` entry carries the same chain, but adding a GET
-     * route auto-publishes an MCP tool, and an agent reading `organizations[]`
-     * without `rows[]` cannot tell two `Locations` nodes apart at all
-     * (api-cloudrun#923).
+     * 🔴 **A composed `name` used to sit beside this and has been REMOVED**
+     * (api-cloudrun#923), for the reason the same campaign removed it from
+     * `DocumentOrganizationSnapshot` (api-cloudrun#782, api-cloudrun#780): a
+     * label stored beside the path it composes from is a second owner of one
+     * fact, and the two can drift. `composeOrgName(organization_path)` is the
+     * one author; a consumer wanting only the leaf writes
+     * `organization_path.at(-1)`.
+     *
+     * ⚠️ **Dropping the fold is not a cosmetic loss — it was a live defect.**
+     * Censused over all 318 prod organizations on 2026-09-07: root names are
+     * unique 264/264 and project names 15/15, but the 29 department nodes carry
+     * only 8 distinct names, 24 of them sharing just `Locations` (12), `Office`
+     * (10) and `Transpo` (2). Measured on prod's open receivables the same day,
+     * two accounts both read `Locations` and are separated only by the levels a
+     * leaf segment discards.
      *
      * PII rides in by COMPOSITION — `OrgPathNode.name` is already
      * `pii: "mask"`, so this array sanitizes without a fresh ruling, exactly as
@@ -380,11 +383,14 @@ export const AgingReportSchema: z.ZodType<AgingReport> = z.strictObject({
   totals: AgingTotalsSchema,
   organizations: z.array(z.strictObject({
     uid: FirestoreId,
-    name: z.string().default("").meta({ pii: "mask" }),
-    // `.min(1)` on purpose: a node whose chain is empty cannot be labelled, and
-    // emitting one under a blank heading is the ambiguity this field exists to
-    // remove. The fold skips such a node and its money stays in `totals`, where
-    // the reader sees it as the residual rather than as a nameless account.
+    // ⭐ `uid` identifies, `organization_path` labels — there is no third field,
+    // because a composed name beside the path it composes from is a second owner
+    // of one fact (api-cloudrun#782's ruling, applied here).
+    //
+    // `.min(1)`: a node with no chain cannot be labelled at all, and emitting one
+    // under a blank heading is the defect this replaced. The fold skips such a
+    // node and its money stays in `totals`, where a reader sees it as
+    // unattributed rather than as a nameless account.
     organization_path: z.array(OrgPathNode).min(1).max(3),
     totals: AgingTotalsSchema,
   })).default([]),

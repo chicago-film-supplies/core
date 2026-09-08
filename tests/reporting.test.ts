@@ -140,7 +140,6 @@ const REPORT = {
   },
   organizations: [{
     uid: "a".repeat(20),
-    name: "Netflix Productions, LLC",
     organization_path: [{ uid: "a".repeat(20), name: "Netflix Productions, LLC", derived: false }],
     totals: {
       buckets: AGING_BUCKETS.map((b) => ({ bucket: b, amount_cents: b === "31-60" ? 44350 : 0 })),
@@ -189,11 +188,10 @@ Deno.test("🔴 every organization name on the report is PII-classified as mask"
     const path of [
       "scope.name",
       "rows.organization_path.name",
-      "organizations.name",
-      // The grouped node's own chain, added for api-cloudrun#923. It is the
-      // field a consumer is now told to compose FROM, so it carries the same
-      // classification as the row's chain rather than inheriting the sibling
-      // `name`'s by adjacency.
+      // The grouped node's own chain (api-cloudrun#923). There is no sibling
+      // `name` on these nodes any more — `uid` identifies and the chain labels —
+      // so this is the ONLY organization name the grouped presentation carries,
+      // and its classification cannot be inherited from a neighbour by adjacency.
       "organizations.organization_path.name",
     ]
   ) {
@@ -217,9 +215,21 @@ Deno.test("🔴 a grouped organization node without a chain is REFUSED", () => {
       ...REPORT,
       organizations: [{
         uid: REPORT.organizations[0].uid,
-        name: REPORT.organizations[0].name,
         totals: REPORT.organizations[0].totals,
       }],
+    })
+  );
+});
+
+Deno.test("🔴 a grouped node carrying a composed `name` beside its chain is REFUSED", () => {
+  // ⭐ The removal is enforced by `z.strictObject`, not merely documented.
+  // api-cloudrun#782 deleted the composed label from `DocumentOrganizationSnapshot`
+  // for the same reason — a name stored beside the path it composes from is a
+  // second owner of one fact — and this asserts the report cannot re-introduce it.
+  assertThrows(() =>
+    AgingReportSchema.parse({
+      ...REPORT,
+      organizations: [{ ...REPORT.organizations[0], name: "Netflix Productions, LLC" }],
     })
   );
 });
