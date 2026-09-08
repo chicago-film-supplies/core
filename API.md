@@ -23444,6 +23444,40 @@ singularized when `value === 1`.
 
 **Returns** — — `{ value, label, periodLabel, isWeeks, step }`.
 
+### `formatChicagoDate(input: string): string`
+
+A date as a CFS document prints it — `"September 1, 2026"`.
+
+⭐ **The zone is named zero times by the caller**, which is the whole point:
+these four helpers exist so a template cannot get it half-right. They also
+make the document typography enforced rather than coincidental — `MMMM d,
+yyyy` was repeated by convention in five places, and nothing stopped a sixth
+family writing `MMM d, yyyy`.
+
+⚠️ **Add a fifth NAME here rather than hand-rolling a fifth pattern.** A
+hand-rolled call is not forbidden — `templates`' `lint:dates` requires only
+that it name the zone — but a one-off pattern is how a document set stops
+looking like one company's paperwork.
+
+### `formatChicagoDateTime(input: string): string`
+
+A date and time — `"September 1, 2026 · 2:05 PM"`.
+
+For a document recording WHEN something happened to the minute: a receipt for
+goods changing hands, a pick sheet's render stamp. Two check-ins on one day
+are routine, and a date alone cannot tell them apart.
+
+### `formatChicagoShortDate(input: string): string`
+
+A compact numeric date for a dense column — `"9/1/26"`.
+
+### `formatChicagoWeekdayDate(input: string): string`
+
+A weekday and a compact date — `"Wed 9/1/26"`.
+
+The delivery/collection form. The weekday is load-bearing on those: a crew
+reads "is that a Saturday" off the page, and the date alone does not say.
+
 ### `getDefaultStartDate(holidays: string[]): Date`
 
 Get the default start date for a rental (next business day at 9am).

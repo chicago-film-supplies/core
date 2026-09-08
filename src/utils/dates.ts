@@ -165,6 +165,86 @@ export function chicagoDaysBetween(later: string, earlier: string): number {
   );
 }
 
+// ── Display formatting ──────────────────────────────────────────────
+
+/**
+ * The one timezone this business keeps. Bound once so no caller names it.
+ *
+ * 🔴 **Naming a zone at a CALL SITE is the defect these helpers exist to
+ * remove.** The correct spelling by hand is
+ * `format(parseISO(x, { in: CHICAGO }), pattern, { in: CHICAGO })` — the zone
+ * appears TWICE, and omitting either is silent, correct on a developer machine
+ * in Chicago, and wrong in a UTC container. Eleven call sites across the
+ * `templates` repo pinned the format and not the parse, and a customer statement
+ * printed its period start a day early in production as a result.
+ */
+const CHICAGO = tz("America/Chicago");
+
+/**
+ * Parse in Chicago, so a string with NO offset is read as the Chicago
+ * wall-clock day it NAMES rather than resolved against the ambient zone.
+ *
+ * ⚠️ **`{ in: … }` on the format alone does not save you** — by then the zone is
+ * already lost. Measured on one string, three container zones:
+ *
+ * ```
+ * TZ=UTC              2026-09-01  ->  August 31, 2026   (unpinned parse)
+ * TZ=Asia/Tokyo       2026-09-01  ->  August 31, 2026   (unpinned parse)
+ * TZ=America/Chicago  2026-09-01  ->  September 1, 2026 (unpinned parse)
+ * any of the three    2026-09-01  ->  September 1, 2026 (parsed in Chicago)
+ * ```
+ *
+ * An input that already carries an offset is unaffected either way, which is
+ * exactly why this class of bug is so quiet: every datetime stored by CFS
+ * carries one, so an unpinned call is correct on every document anyone tests
+ * with, and only a value that skipped the storage contract exposes it.
+ */
+const inChicago = (input: string): Date => parseISO(input, { in: CHICAGO });
+
+/**
+ * A date as a CFS document prints it — `"September 1, 2026"`.
+ *
+ * ⭐ **The zone is named zero times by the caller**, which is the whole point:
+ * these four helpers exist so a template cannot get it half-right. They also
+ * make the document typography enforced rather than coincidental — `MMMM d,
+ * yyyy` was repeated by convention in five places, and nothing stopped a sixth
+ * family writing `MMM d, yyyy`.
+ *
+ * ⚠️ **Add a fifth NAME here rather than hand-rolling a fifth pattern.** A
+ * hand-rolled call is not forbidden — `templates`' `lint:dates` requires only
+ * that it name the zone — but a one-off pattern is how a document set stops
+ * looking like one company's paperwork.
+ */
+export function formatChicagoDate(input: string): string {
+  return format(inChicago(input), "MMMM d, yyyy", { in: CHICAGO });
+}
+
+/**
+ * A date and time — `"September 1, 2026 · 2:05 PM"`.
+ *
+ * For a document recording WHEN something happened to the minute: a receipt for
+ * goods changing hands, a pick sheet's render stamp. Two check-ins on one day
+ * are routine, and a date alone cannot tell them apart.
+ */
+export function formatChicagoDateTime(input: string): string {
+  return format(inChicago(input), "MMMM d, yyyy · h:mm a", { in: CHICAGO });
+}
+
+/** A compact numeric date for a dense column — `"9/1/26"`. */
+export function formatChicagoShortDate(input: string): string {
+  return format(inChicago(input), "M/d/yy", { in: CHICAGO });
+}
+
+/**
+ * A weekday and a compact date — `"Wed 9/1/26"`.
+ *
+ * The delivery/collection form. The weekday is load-bearing on those: a crew
+ * reads "is that a Saturday" off the page, and the date alone does not say.
+ */
+export function formatChicagoWeekdayDate(input: string): string {
+  return format(inChicago(input), "EEE M/d/yy", { in: CHICAGO });
+}
+
 /** Display values returned by {@link formatChargeDays}. */
 export type ChargeDaysLabel = "day" | "days" | "week" | "weeks";
 

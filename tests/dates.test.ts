@@ -5,6 +5,10 @@ import {
   chicagoDaysBetween,
   countCfsBusinessDays,
   formatChargeDays,
+  formatChicagoDate,
+  formatChicagoDateTime,
+  formatChicagoShortDate,
+  formatChicagoWeekdayDate,
   getDuration,
   getEndDateByChargePeriod,
   isHoliday,
@@ -604,4 +608,55 @@ Deno.test("addChicagoDays and chicagoDaysBetween round-trip across both boundari
       assertEquals(chicagoDaysBetween(addChicagoDays(start, n), start), n);
     }
   }
+});
+
+// ── Chicago display formatting ──────────────────────────────────────
+
+Deno.test("formatChicago* — an offset-bearing instant renders its Chicago day", () => {
+  const iso = "2026-09-07T00:00:00.000-05:00";
+  assertEquals(formatChicagoDate(iso), "September 7, 2026");
+  assertEquals(formatChicagoShortDate(iso), "9/7/26");
+  assertEquals(formatChicagoWeekdayDate(iso), "Mon 9/7/26");
+});
+
+Deno.test("🔴 formatChicago* — a ZONE-LESS date is the Chicago day it NAMES, in any container zone", () => {
+  // The whole reason these exist. `parseISO` on a date-only string resolves it
+  // against the AMBIENT zone, so an unpinned parse formatted into Chicago lands
+  // on the previous day wherever the process is west of nothing — measured in
+  // production (UTC) as "August 31, 2026" for this exact input.
+  //
+  // ⚠️ Deno resolves the ambient zone once per process, so this arm cannot flip
+  // `TZ` and re-measure in-process; what it pins is the ANSWER, which is
+  // container-independent by construction because both the parse and the format
+  // name Chicago. `templates`' `lint:dates` is what stops an unpinned call being
+  // written in the first place.
+  assertEquals(formatChicagoDate("2026-09-01"), "September 1, 2026");
+  assertEquals(formatChicagoShortDate("2026-09-01"), "9/1/26");
+  assertEquals(formatChicagoWeekdayDate("2026-09-01"), "Tue 9/1/26");
+});
+
+Deno.test("🔴 formatChicago* — across the DST boundary, both directions", () => {
+  // CST and CDT, so an implementation that hardcoded one offset fails here. The
+  // 2026 US transitions are 8 March (spring forward) and 1 November (fall back).
+  assertEquals(formatChicagoDate("2026-01-15"), "January 15, 2026"); // CST
+  assertEquals(formatChicagoDate("2026-07-15"), "July 15, 2026"); // CDT
+  assertEquals(formatChicagoDate("2026-11-01"), "November 1, 2026"); // the fall-back day itself
+  assertEquals(formatChicagoDate("2026-03-08"), "March 8, 2026"); // the spring-forward day itself
+});
+
+Deno.test("🔴 formatChicagoDateTime — an evening instant keeps its CHICAGO day, not the UTC one", () => {
+  // 19:00 CDT is exactly 00:00 UTC, which is the boundary `quote`'s
+  // `evening-boundary` fixture exists for: unpinned, this prints the NEXT day.
+  assertEquals(
+    formatChicagoDateTime("2026-04-30T19:00:00.000-05:00"),
+    "April 30, 2026 · 7:00 PM",
+  );
+  assertEquals(formatChicagoDate("2026-04-30T19:00:00.000-05:00"), "April 30, 2026");
+});
+
+Deno.test("formatChicagoDateTime — renders the minute, which is why it is a separate helper", () => {
+  assertEquals(
+    formatChicagoDateTime("2026-09-02T14:05:00.000-05:00"),
+    "September 2, 2026 · 2:05 PM",
+  );
 });

@@ -10683,6 +10683,38 @@
         },
         {
           "kind": "function",
+          "name": "formatChicagoDate",
+          "signature": "formatChicagoDate(input: string): string",
+          "doc": "A date as a CFS document prints it — `\"September 1, 2026\"`.\n\n⭐ **The zone is named zero times by the caller**, which is the whole point:\nthese four helpers exist so a template cannot get it half-right. They also\nmake the document typography enforced rather than coincidental — `MMMM d,\nyyyy` was repeated by convention in five places, and nothing stopped a sixth\nfamily writing `MMM d, yyyy`.\n\n⚠️ **Add a fifth NAME here rather than hand-rolling a fifth pattern.** A\nhand-rolled call is not forbidden — `templates`' `lint:dates` requires only\nthat it name the zone — but a one-off pattern is how a document set stops\nlooking like one company's paperwork.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "formatChicagoDateTime",
+          "signature": "formatChicagoDateTime(input: string): string",
+          "doc": "A date and time — `\"September 1, 2026 · 2:05 PM\"`.\n\nFor a document recording WHEN something happened to the minute: a receipt for\ngoods changing hands, a pick sheet's render stamp. Two check-ins on one day\nare routine, and a date alone cannot tell them apart.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "formatChicagoShortDate",
+          "signature": "formatChicagoShortDate(input: string): string",
+          "doc": "A compact numeric date for a dense column — `\"9/1/26\"`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "formatChicagoWeekdayDate",
+          "signature": "formatChicagoWeekdayDate(input: string): string",
+          "doc": "A weekday and a compact date — `\"Wed 9/1/26\"`.\n\nThe delivery/collection form. The weekday is load-bearing on those: a crew\nreads \"is that a Saturday\" off the page, and the date alone does not say.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "getDefaultStartDate",
           "signature": "getDefaultStartDate(holidays: string[]): Date",
           "doc": "Get the default start date for a rental (next business day at 9am).\nIf after 8am today, defaults to tomorrow. Skips weekends and holidays.",
