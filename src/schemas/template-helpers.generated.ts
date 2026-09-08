@@ -73,7 +73,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "fulfillments": [
     { name: "buildPackingList", expr: "it.fulfillments.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
-    { name: "consolidateItems", expr: "it.fulfillments.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities.", returns: "ConsolidatedItem[]" },
+    { name: "consolidateItems", expr: "it.fulfillments.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities. The seed a `bookings` document is built from.", returns: "ConsolidatedItem[]" },
     { name: "getDestinationPairItemName", expr: "it.fulfillments.getDestinationPairItemName(destination, index)", desc: "Build a display name for a destination pair from its delivery/collection addresses. Falls back to \"Destination N\" when no addresses are present.", returns: "string" },
     { name: "getDestinationsLegend", expr: "it.fulfillments.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "getGroupItems", expr: "it.fulfillments.getGroupItems(items, index)", desc: "Collect the child product items belonging to a collapsible section.", returns: "LineItem[]" },
@@ -144,7 +144,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "calculateItemTotalCents", expr: "it.orders.calculateItemTotalCents(item, taxes)", desc: "Calculate the total (subtotal_discounted + taxes) for a single line item.", returns: "number" },
     { name: "calculateOrderTotals", expr: "it.orders.calculateOrderTotals(items, taxes)", desc: "Calculate aggregated pricing totals for an entire order. Owns the two-pass computation: pre-tax items first, then transaction fees.", returns: "OrderTotals" },
     { name: "calculateReplacementTotals", expr: "it.orders.calculateReplacementTotals(items, taxes)", desc: "Calculate the total replacement cost across all pre-tax items that carry a NON-ZERO replacement value on their price object.", returns: "ReplacementTotals" },
-    { name: "consolidateItems", expr: "it.orders.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities.", returns: "ConsolidatedItem[]" },
+    { name: "consolidateItems", expr: "it.orders.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities. The seed a `bookings` document is built from.", returns: "ConsolidatedItem[]" },
     { name: "getDefaultChargeDays", expr: "it.orders.getDefaultChargeDays(dates, holidays)", desc: "Compute default chargeable days from order dates and holidays. Returns null if required dates are missing.", returns: "number | null" },
     { name: "getDestinationPairItemName", expr: "it.orders.getDestinationPairItemName(destination, index)", desc: "Build a display name for a destination pair from its delivery/collection addresses. Falls back to \"Destination N\" when no addresses are present.", returns: "string" },
     { name: "getDestinationsLegend", expr: "it.orders.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
@@ -170,7 +170,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "pickSheets": [
     { name: "buildPackingList", expr: "it.pickSheets.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
-    { name: "consolidateItems", expr: "it.pickSheets.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities.", returns: "ConsolidatedItem[]" },
+    { name: "consolidateItems", expr: "it.pickSheets.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities. The seed a `bookings` document is built from.", returns: "ConsolidatedItem[]" },
     { name: "getDestinationsLegend", expr: "it.pickSheets.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "groupByDestination", expr: "it.pickSheets.groupByDestination(items, destinations, fallbackDeliveryUid, fallbackCollectionUid)", desc: "Slice the flat items array into destination sections, each carrying the endpoints its PAIR names.", returns: "DestinationGroup[]" },
     { name: "isSameAsDeliveryDates", expr: "it.pickSheets.isSameAsDeliveryDates(dates)", desc: "Whether charge dates match the delivery/collection dates (i.e. no custom charge period has been set).", returns: "boolean" },

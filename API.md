@@ -747,8 +747,8 @@ interface Booking {
   quantity: number;
   shortage: number;
   subject: string;
-  unit_price_cents: number;
-  total_price_cents: number;
+  unit_price_cents?: number;
+  total_price_cents?: number;
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
@@ -1964,8 +1964,14 @@ type ComponentTypeType = indexedAccess;
 
 ### `ConsolidatedItemType`
 
-A consolidated line item — aggregated quantity and price for display.
-Used by consolidateItems() in utilities and the manager app.
+One (product) row of an order's lines, consolidated across every line naming
+that product. The seed a `bookings` document is built from.
+
+🔴 **It carries NO MONEY, and that is the point of api-cloudrun#922.** It used
+to emit `total_price_cents` and a lossy `unit_price_cents` denorm beside it,
+which is what put money on `bookings` at all. Owner ruling 2026-09-07: those
+fields come off the collection. Removing them from HERE is what stops the
+writer, and the compiler is what finds every site that was consuming them.
 
 ```ts
 interface ConsolidatedItemType {
@@ -1973,8 +1979,6 @@ interface ConsolidatedItemType {
   name: string;
   type: string;
   quantity: number;
-  total_price_cents: number;
-  unit_price_cents: number;
   stock_method: string;
 }
 ```
@@ -13337,8 +13341,8 @@ interface Booking {
   quantity: number;
   shortage: number;
   subject: string;
-  unit_price_cents: number;
-  total_price_cents: number;
+  unit_price_cents?: number;
+  total_price_cents?: number;
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
@@ -15439,8 +15443,14 @@ interface UpdateLocationTypeInputType {
 
 ### `ConsolidatedItemType`
 
-A consolidated line item — aggregated quantity and price for display.
-Used by consolidateItems() in utilities and the manager app.
+One (product) row of an order's lines, consolidated across every line naming
+that product. The seed a `bookings` document is built from.
+
+🔴 **It carries NO MONEY, and that is the point of api-cloudrun#922.** It used
+to emit `total_price_cents` and a lossy `unit_price_cents` denorm beside it,
+which is what put money on `bookings` at all. Owner ruling 2026-09-07: those
+fields come off the collection. Removing them from HERE is what stops the
+writer, and the compiler is what finds every site that was consuming them.
 
 ```ts
 interface ConsolidatedItemType {
@@ -15448,8 +15458,6 @@ interface ConsolidatedItemType {
   name: string;
   type: string;
   quantity: number;
-  total_price_cents: number;
-  unit_price_cents: number;
   stock_method: string;
 }
 ```
@@ -25335,27 +25343,37 @@ Excludes structural rows, surcharges, transaction fees, and services.
 
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
-Deduplicate line items by product UID and sum quantities.
+Deduplicate line items by product UID and sum quantities. The seed a
+`bookings` document is built from.
 
-## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`
+## 🔴 It emits NO MONEY, as of api-cloudrun#922
 
-`total_price` is the authoritative figure — it is a sum of line totals, and
-summing money is exact. `unit_price` is derived from it by a division that
-usually has a remainder, so the two are related by *rounding*, not by
-multiplication: 3 units totalling $100 give `unit_price` $33.33, and
-`33.33 × 3` is $99.99.
+This function used to emit `total_price_cents` and derive a lossy
+`unit_price_cents` beside it, and that is what put money on `bookings` at all.
+**Owner ruling, 2026-09-07: `bookings` does not need price data.** Removing the
+fields from {@link ConsolidatedItemType} is what STOPS THE WRITER — step 2 of
+`optional → stop the writer → empty storage → delete` — and the compiler is
+what finds every consumer, which is why the fields were deleted from the type
+rather than left unset.
 
-**That is correct, and it is written down here because it does not look
-correct.** The field exists so `bookings` can be queried as a flat per-line
-fact table — sortable, filterable, "show me every line over $500/unit" — and
-for that a single representative per-unit figure is exactly right. It is
-never summed and never reconciled against; anything that multiplies it back
-to recover a total should read `total_price_cents` instead. The four money÷quantity
-sites in CFS have four different residual contracts, and this is the
-stored-denorm one: **the residual is discarded on purpose.**
+⭐ **The justification is not "nothing read them".** `bookings` is not the
+revenue fact and the MCP surface said it was: `buildBookingIdMap` returns
+early for a `draft`/`canceled` order, skips every `stock_method: "none"` line
+and every line that is not `rental`/`sale`, so `service`, `surcharge`,
+`transaction_fee` and `replacement` never produce a row; document-level
+discounts, taxes and fees are not lines at all; and the prices were ORDER-side,
+blind to invoice edits, credit notes and voids. Every reader summing them
+under-reported revenue, always in the same direction.
 
-(Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero
-recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
+⚠️ **What went with it, so it is not re-derived as a gap:** the per-unit denorm
+was one of CFS's four money÷quantity sites, and the ONLY one whose residual was
+discarded on purpose (3 units totalling $100 gave $33.33, and `33.33 × 3` is
+$99.99 — correct, and it never looked correct). It has no successor because the
+question it answered — *"show me every line over $500/unit"* — is not one this
+collection should be asked. Contrast `getXeroUnitAmountFromCents`, whose
+residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
+Quantity` on the other side of a wire; that one stays, and the two must not be
+swept into each other.
 
 ### `getDestinationPairItemName(destination: DestinationType, index: number): string`
 
@@ -28429,27 +28447,37 @@ Message quality only; nothing branches on it.
 
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
-Deduplicate line items by product UID and sum quantities.
+Deduplicate line items by product UID and sum quantities. The seed a
+`bookings` document is built from.
 
-## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`
+## 🔴 It emits NO MONEY, as of api-cloudrun#922
 
-`total_price` is the authoritative figure — it is a sum of line totals, and
-summing money is exact. `unit_price` is derived from it by a division that
-usually has a remainder, so the two are related by *rounding*, not by
-multiplication: 3 units totalling $100 give `unit_price` $33.33, and
-`33.33 × 3` is $99.99.
+This function used to emit `total_price_cents` and derive a lossy
+`unit_price_cents` beside it, and that is what put money on `bookings` at all.
+**Owner ruling, 2026-09-07: `bookings` does not need price data.** Removing the
+fields from {@link ConsolidatedItemType} is what STOPS THE WRITER — step 2 of
+`optional → stop the writer → empty storage → delete` — and the compiler is
+what finds every consumer, which is why the fields were deleted from the type
+rather than left unset.
 
-**That is correct, and it is written down here because it does not look
-correct.** The field exists so `bookings` can be queried as a flat per-line
-fact table — sortable, filterable, "show me every line over $500/unit" — and
-for that a single representative per-unit figure is exactly right. It is
-never summed and never reconciled against; anything that multiplies it back
-to recover a total should read `total_price_cents` instead. The four money÷quantity
-sites in CFS have four different residual contracts, and this is the
-stored-denorm one: **the residual is discarded on purpose.**
+⭐ **The justification is not "nothing read them".** `bookings` is not the
+revenue fact and the MCP surface said it was: `buildBookingIdMap` returns
+early for a `draft`/`canceled` order, skips every `stock_method: "none"` line
+and every line that is not `rental`/`sale`, so `service`, `surcharge`,
+`transaction_fee` and `replacement` never produce a row; document-level
+discounts, taxes and fees are not lines at all; and the prices were ORDER-side,
+blind to invoice edits, credit notes and voids. Every reader summing them
+under-reported revenue, always in the same direction.
 
-(Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero
-recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
+⚠️ **What went with it, so it is not re-derived as a gap:** the per-unit denorm
+was one of CFS's four money÷quantity sites, and the ONLY one whose residual was
+discarded on purpose (3 units totalling $100 gave $33.33, and `33.33 × 3` is
+$99.99 — correct, and it never looked correct). It has no successor because the
+question it answered — *"show me every line over $500/unit"* — is not one this
+collection should be asked. Contrast `getXeroUnitAmountFromCents`, whose
+residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
+Quantity` on the other side of a wire; that one stays, and the two must not be
+swept into each other.
 
 ### `costTransactionFees(items: LineItem[], basisCents: number): LineItem[]`
 
@@ -29464,27 +29492,37 @@ Excludes structural rows, surcharges, transaction fees, and services.
 
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
-Deduplicate line items by product UID and sum quantities.
+Deduplicate line items by product UID and sum quantities. The seed a
+`bookings` document is built from.
 
-## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`
+## 🔴 It emits NO MONEY, as of api-cloudrun#922
 
-`total_price` is the authoritative figure — it is a sum of line totals, and
-summing money is exact. `unit_price` is derived from it by a division that
-usually has a remainder, so the two are related by *rounding*, not by
-multiplication: 3 units totalling $100 give `unit_price` $33.33, and
-`33.33 × 3` is $99.99.
+This function used to emit `total_price_cents` and derive a lossy
+`unit_price_cents` beside it, and that is what put money on `bookings` at all.
+**Owner ruling, 2026-09-07: `bookings` does not need price data.** Removing the
+fields from {@link ConsolidatedItemType} is what STOPS THE WRITER — step 2 of
+`optional → stop the writer → empty storage → delete` — and the compiler is
+what finds every consumer, which is why the fields were deleted from the type
+rather than left unset.
 
-**That is correct, and it is written down here because it does not look
-correct.** The field exists so `bookings` can be queried as a flat per-line
-fact table — sortable, filterable, "show me every line over $500/unit" — and
-for that a single representative per-unit figure is exactly right. It is
-never summed and never reconciled against; anything that multiplies it back
-to recover a total should read `total_price_cents` instead. The four money÷quantity
-sites in CFS have four different residual contracts, and this is the
-stored-denorm one: **the residual is discarded on purpose.**
+⭐ **The justification is not "nothing read them".** `bookings` is not the
+revenue fact and the MCP surface said it was: `buildBookingIdMap` returns
+early for a `draft`/`canceled` order, skips every `stock_method: "none"` line
+and every line that is not `rental`/`sale`, so `service`, `surcharge`,
+`transaction_fee` and `replacement` never produce a row; document-level
+discounts, taxes and fees are not lines at all; and the prices were ORDER-side,
+blind to invoice edits, credit notes and voids. Every reader summing them
+under-reported revenue, always in the same direction.
 
-(Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero
-recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
+⚠️ **What went with it, so it is not re-derived as a gap:** the per-unit denorm
+was one of CFS's four money÷quantity sites, and the ONLY one whose residual was
+discarded on purpose (3 units totalling $100 gave $33.33, and `33.33 × 3` is
+$99.99 — correct, and it never looked correct). It has no successor because the
+question it answered — *"show me every line over $500/unit"* — is not one this
+collection should be asked. Contrast `getXeroUnitAmountFromCents`, whose
+residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
+Quantity` on the other side of a wire; that one stays, and the two must not be
+swept into each other.
 
 ### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
 

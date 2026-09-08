@@ -2387,27 +2387,37 @@ export function getGroupPath(items: LineItem[], index: number): GroupPath {
 }
 
 /**
- * Deduplicate line items by product UID and sum quantities.
+ * Deduplicate line items by product UID and sum quantities. The seed a
+ * `bookings` document is built from.
  *
- * ## `unit_price` is a stored denorm, and `unit_price × quantity ≠ total_price`
+ * ## 🔴 It emits NO MONEY, as of api-cloudrun#922
  *
- * `total_price` is the authoritative figure — it is a sum of line totals, and
- * summing money is exact. `unit_price` is derived from it by a division that
- * usually has a remainder, so the two are related by *rounding*, not by
- * multiplication: 3 units totalling $100 give `unit_price` $33.33, and
- * `33.33 × 3` is $99.99.
+ * This function used to emit `total_price_cents` and derive a lossy
+ * `unit_price_cents` beside it, and that is what put money on `bookings` at all.
+ * **Owner ruling, 2026-09-07: `bookings` does not need price data.** Removing the
+ * fields from {@link ConsolidatedItemType} is what STOPS THE WRITER — step 2 of
+ * `optional → stop the writer → empty storage → delete` — and the compiler is
+ * what finds every consumer, which is why the fields were deleted from the type
+ * rather than left unset.
  *
- * **That is correct, and it is written down here because it does not look
- * correct.** The field exists so `bookings` can be queried as a flat per-line
- * fact table — sortable, filterable, "show me every line over $500/unit" — and
- * for that a single representative per-unit figure is exactly right. It is
- * never summed and never reconciled against; anything that multiplies it back
- * to recover a total should read `total_price_cents` instead. The four money÷quantity
- * sites in CFS have four different residual contracts, and this is the
- * stored-denorm one: **the residual is discarded on purpose.**
+ * ⭐ **The justification is not "nothing read them".** `bookings` is not the
+ * revenue fact and the MCP surface said it was: `buildBookingIdMap` returns
+ * early for a `draft`/`canceled` order, skips every `stock_method: "none"` line
+ * and every line that is not `rental`/`sale`, so `service`, `surcharge`,
+ * `transaction_fee` and `replacement` never produce a row; document-level
+ * discounts, taxes and fees are not lines at all; and the prices were ORDER-side,
+ * blind to invoice edits, credit notes and voids. Every reader summing them
+ * under-reported revenue, always in the same direction.
  *
- * (Contrast `getXeroUnitAmountFromCents`, whose residual is real money because Xero
- * recomputes `LineAmount = UnitAmount × Quantity` on the other side of a wire.)
+ * ⚠️ **What went with it, so it is not re-derived as a gap:** the per-unit denorm
+ * was one of CFS's four money÷quantity sites, and the ONLY one whose residual was
+ * discarded on purpose (3 units totalling $100 gave $33.33, and `33.33 × 3` is
+ * $99.99 — correct, and it never looked correct). It has no successor because the
+ * question it answered — *"show me every line over $500/unit"* — is not one this
+ * collection should be asked. Contrast `getXeroUnitAmountFromCents`, whose
+ * residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
+ * Quantity` on the other side of a wire; that one stays, and the two must not be
+ * swept into each other.
  */
 export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
   if (!Array.isArray(lineItems)) {
@@ -2421,7 +2431,6 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
       name: string;
       type: string;
       quantity: number;
-      total_price_cents: number;
       stock_method: string;
     }
   > = {};
@@ -2430,20 +2439,14 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
     if (NON_PRODUCT_TYPES.has(item.type)) continue;
     if (!item.uid) continue;
 
-    const totalCents = item.price && "total_cents" in item.price
-      ? (item.price.total_cents || 0)
-      : 0;
-
     if (map[item.uid]) {
       map[item.uid].quantity += item.quantity || 0;
-      map[item.uid].total_price_cents += totalCents;
     } else {
       map[item.uid] = {
         uid: item.uid,
         name: item.name || "",
         type: item.type || "",
         quantity: item.quantity || 0,
-        total_price_cents: totalCents,
         stock_method: item.stock_method || "none",
       };
     }
@@ -2454,28 +2457,6 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
     name: entry.name,
     type: entry.type,
     quantity: entry.quantity,
-    total_price_cents: entry.total_price_cents,
-    // `× QTY_SCALE ÷ scaledQuantity` over integer cents: one rounding, at the
-    // end, on exact integers. `total_price_cents` stays the plain integer sum
-    // above — with every addend an exact cent count there is nothing for a
-    // decimal type to protect, and dividing money was never its job anyway.
-    //
-    // `QTY_SCALE` rather than a bare `BigInt(quantity)` for the same reason
-    // `perUnitSubtotal` uses it: `LineItem.quantity` is `number` in the type
-    // even though the schema constrains it to an int, and `BigInt(1.5)` throws
-    // — turning a data anomaly into a failed order write inside a transaction.
-    //
-    // Half **away from zero**, not plain half-up: a flat discount larger than
-    // its line gives a negative `price.total_cents`, which
-    // `calculateItemSubtotal` deliberately does not clamp, and
-    // `roundDivHalfUp` rounds a negative numerator toward zero rather than
-    // half-up.
-    unit_price_cents: entry.quantity > 0
-      ? Number(roundDivHalfAwayFromZero(
-        BigInt(entry.total_price_cents) * QTY_SCALE,
-        BigInt(Math.round(entry.quantity * Number(QTY_SCALE))),
-      ))
-      : 0,
     stock_method: entry.stock_method,
   }));
 }

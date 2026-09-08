@@ -1439,20 +1439,21 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
  * A consolidated line item — aggregated quantity and price for display.
  * Used by consolidateItems() in utilities and the manager app.
  */
+/**
+ * One (product) row of an order's lines, consolidated across every line naming
+ * that product. The seed a `bookings` document is built from.
+ *
+ * 🔴 **It carries NO MONEY, and that is the point of api-cloudrun#922.** It used
+ * to emit `total_price_cents` and a lossy `unit_price_cents` denorm beside it,
+ * which is what put money on `bookings` at all. Owner ruling 2026-09-07: those
+ * fields come off the collection. Removing them from HERE is what stops the
+ * writer, and the compiler is what finds every site that was consuming them.
+ */
 export interface ConsolidatedItemType {
   uid: string;
   name: string;
   type: string;
   quantity: number;
-  total_price_cents: number;
-  /**
-   * A LOSSY per-unit denorm of `total_price_cents` — `unit_price_cents ×
-   * quantity` does not in general equal `total_price_cents`, and that residual
-   * is discarded on purpose because nothing multiplies it back. Contrast
-   * `getXeroUnitAmountFromCents`, whose residual is real money in someone
-   * else's ledger and is absorbed through `DiscountRate`.
-   */
-  unit_price_cents: number;
   stock_method: string;
 }
 

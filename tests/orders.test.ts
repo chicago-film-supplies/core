@@ -1176,8 +1176,6 @@ Deno.test("consolidateItems deduplicates by uid", () => {
   assertEquals(result.length, 2);
   const p1 = result.find((r) => r.uid === "p1")!;
   assertEquals(p1.quantity, 3);
-  assertEquals(p1.total_price_cents, 30000);
-  assertEquals(p1.unit_price_cents, 10000);
 });
 
 Deno.test("consolidateItems skips structural items", () => {
@@ -1201,85 +1199,18 @@ Deno.test("consolidateItems skips transaction fee items", () => {
   assertEquals(result[0].uid, "p1");
 });
 
-Deno.test("consolidateItems: unit_price × quantity does NOT recover total_price, on purpose", () => {
-  // The stored-denorm residual contract, asserted so nobody 'fixes' it. The
-  // booking fact table wants one representative per-unit figure to sort and
-  // filter on; total_price is the authoritative money and is a currency.js sum,
-  // which is exact.
-  const result = consolidateItems([makeItem({ uid: "p1", quantity: 3 }, { total_cents: 10_000 })]);
-  assertEquals(result[0].total_price_cents, 10_000);
-  // 10,000 ÷ 3 = 3,333.33… cents, which rounds to 3,333 — and 3,333 × 3 is
-  // 9,999, a cent short of the 10,000 the line actually costs. Re-derived from
-  // the cents form rather than scaled from the old `33.33 / 99.99` dollar
-  // literals: the residual is a property of the division, so it has to be read
-  // off the division that now happens.
-  assertEquals(result[0].unit_price_cents, 3_333);
-  assertEquals(result[0].unit_price_cents * result[0].quantity, 9_999);
-});
-
-Deno.test("consolidateItems rounds unit_price away from zero on a negative total", () => {
-  // A flat discount larger than its line gives a negative price.total_cents, which
-  // calculateItemSubtotal deliberately does not clamp. `roundDivHalfUp` would
-  // round that toward zero; the sign must not change a magnitude.
-  // 5 cents over 2 units is an exact half-cent tie — the case that separates
-  // half-away-from-zero from half-up, and the only reason this test discriminates.
-  const negative = consolidateItems([makeItem({ uid: "p1", quantity: 2 }, { total_cents: -5 })]);
-  const positive = consolidateItems([makeItem({ uid: "p1", quantity: 2 }, { total_cents: 5 })]);
-  assertEquals(negative[0].unit_price_cents, -3);
-  assertEquals(positive[0].unit_price_cents, 3);
-  assertEquals(negative[0].unit_price_cents, -positive[0].unit_price_cents);
-});
-
-Deno.test("consolidateItems tolerates a fractional quantity rather than throwing", () => {
+Deno.test("consolidateItems passes a fractional quantity through rather than throwing", () => {
   // `LineItem.quantity` is `number` in the TS type even though the schema
   // constrains it to an int, and this runs inside the order-write transaction.
-  // `BigInt(1.5)` throws — turning a data anomaly into a failed write.
+  //
+  // ⚠️ **The hazard this was written for is GONE, and the arm is kept anyway.**
+  // It used to guard `BigInt(1.5)` throwing inside the per-unit division —
+  // turning a data anomaly into a failed order write — and api-cloudrun#922
+  // removed that division with the money. What survives is the weaker but still
+  // real claim: a fractional quantity reaches the booking seed intact rather
+  // than being coerced or dropped on the way.
   const result = consolidateItems([makeItem({ uid: "p1", quantity: 2.5 }, { total_cents: 10_000 })]);
   assertEquals(result[0].quantity, 2.5);
-  assertEquals(result[0].unit_price_cents, 4_000);
-});
-
-Deno.test("consolidateItems unit_price matches exact rational arithmetic over 200k lines", () => {
-  // Structurally distinct oracle: one reduced fraction, rounded by the
-  // definition (floor + doubled remainder) rather than the implementation's
-  // (2n+d)/2d identity.
-  const exact = (totalCents: number, quantity: number): number => {
-    const num = BigInt(totalCents) * 10_000n;
-    const den = BigInt(Math.round(quantity * 10_000));
-    const negative = num < 0n;
-    const magnitude = negative ? -num : num;
-    const floor = magnitude / den;
-    const rounded = 2n * (magnitude % den) >= den ? floor + 1n : floor;
-    return Number(negative ? -rounded : rounded);
-  };
-
-  // High bits, not low: this LCG's low bit strictly alternates, so `% evenN`
-  // freezes the parity of every same-position draw and no half-cent tie is
-  // reachable. That defect hid the negative-tie case completely.
-  let seed = 20_260_803;
-  const rand = (n: number) => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return (seed >>> 8) % n;
-  };
-
-  let checked = 0, oddCents = 0, ties = 0, negatives = 0, wrong = 0;
-  for (let i = 0; i < 200_000; i++) {
-    const cents = rand(4_000_000) - 2_000_000;
-    const quantity = rand(30) + 1;
-    if (cents % 2 !== 0) oddCents++;
-    if (cents < 0) negatives++;
-    if (2 * (Math.abs(cents) % quantity) === quantity) ties++;
-    const got = consolidateItems(
-      [makeItem({ uid: "p1", quantity }, { total_cents: cents })],
-    )[0].unit_price_cents;
-    if (got !== exact(cents, quantity)) wrong++;
-    checked++;
-  }
-  assertEquals(checked, 200_000, "the sweep must actually have run");
-  assertEquals(wrong, 0, `${wrong} of 200,000 lines disagree with exact rational arithmetic`);
-  assertEquals(oddCents > 40_000, true, `only ${oddCents} draws had an odd cent count`);
-  assertEquals(negatives > 40_000, true, `only ${negatives} draws were negative`);
-  assertEquals(ties > 500, true, `only ${ties} draws landed on an exact half-cent tie`);
 });
 
 // ── groupByDestination ───────────────────────────────────────────
