@@ -68,8 +68,6 @@ export interface BookingDocument {
   };
   quantity: number;
   shortage?: number;
-  total_price_cents?: number;
-  unit_price_cents?: number;
   dates: {
     start_fs?: number;
     end_fs?: number;

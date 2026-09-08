@@ -159,27 +159,6 @@ export interface Booking {
   quantity: number;
   shortage: number;
   subject: string;
-  /**
-   * 🔴 **BEING REMOVED — do not write these, and do not read them.**
-   * api-cloudrun#922. Owner ruling 2026-09-07: `bookings` carries no price data.
-   *
-   * ⚠️ **Optional here is a TRANSIENT state, not a design.** The removal is
-   * `optional → stop the writer → empty storage → delete`, and `BookingSchema`
-   * is a `z.strictObject`, so this window is what lets stored documents (which
-   * still carry the fields) and newly written ones (which no longer do) both
-   * parse against one deployed build. They go entirely at step 4.
-   *
-   * ⭐ **Why they are going, which is stronger than "nothing reads them":**
-   * `bookings` is not the revenue fact and the agent surface said it was.
-   * `buildBookingIdMap` returns early for a `draft`/`canceled` order, skips
-   * every `stock_method: "none"` line and every line that is not `rental`/`sale`
-   * — so `service`, `surcharge`, `transaction_fee` and `replacement` produce no
-   * row at all — and the prices carried here are ORDER-side, blind to invoice
-   * edits, credit notes and voids. Every reader summing them under-reported
-   * revenue, always in the same direction.
-   */
-  unit_price_cents?: number;
-  total_price_cents?: number;
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
@@ -425,15 +404,6 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   shortage: z.int().meta({ column: true, label: "Shortage" }),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
   subject: z.string().meta({ pii: "mask", column: true, label: "Subject" }),
-  // ⚠️ OPTIONAL as of api-cloudrun#922 step 2, and this is a TRANSIENT state, not
-  // a design. The owner ruled 2026-09-07 that `bookings` carries no money; the
-  // removal is `optional → stop the writer → empty storage → delete`, and these
-  // two are optional so that stored documents (which still have them) and newly
-  // written ones (which no longer do) BOTH parse against one deployed build.
-  // `BookingSchema` is a `z.strictObject`, so without this window one of the two
-  // populations is always unwritable. They go entirely once the corpus is empty.
-  unit_price_cents: z.int().optional().meta({ column: true, label: "Unit Price" }),
-  total_price_cents: z.int().optional().meta({ column: true, label: "Total" }),
   // crms_id and crms_product_id are written back post-transaction by CRMS sync
   crms_id: z.int().nullable().optional(),
   crms_product_id: z.int().nullable().optional(),

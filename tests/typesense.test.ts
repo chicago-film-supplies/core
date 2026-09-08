@@ -201,8 +201,6 @@ Deno.test("the money marker names exactly the amount fields — pinned, not scat
   ).sort();
 
   assertEquals(marked, [
-    "bookings:total_price_cents",
-    "bookings:unit_price_cents",
     "credit-notes:remaining_credit_cents",
     "credit-notes:totals.total_cents",
     "invoices:totals.amount_credited_cents",

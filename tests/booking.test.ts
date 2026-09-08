@@ -18,8 +18,6 @@ const validBooking = {
   status: "reserved",
   quantity: 5,
   subject: "Event lighting",
-  unit_price_cents: 10000,
-  total_price_cents: 50000,
   breakdown: {
     ...breakdownBase,
     reserved: 5,

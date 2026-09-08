@@ -747,8 +747,6 @@ interface Booking {
   quantity: number;
   shortage: number;
   subject: string;
-  unit_price_cents?: number;
-  total_price_cents?: number;
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
@@ -13384,8 +13382,6 @@ interface Booking {
   quantity: number;
   shortage: number;
   subject: string;
-  unit_price_cents?: number;
-  total_price_cents?: number;
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
@@ -18893,8 +18889,6 @@ interface BookingDocument {
   breakdown: typeLiteral;
   quantity: number;
   shortage?: number;
-  total_price_cents?: number;
-  unit_price_cents?: number;
   dates: typeLiteral;
   destinations?: typeLiteral;
   stores?: Array<typeLiteral>;

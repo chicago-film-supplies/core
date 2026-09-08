@@ -446,17 +446,6 @@ const createOrderRules: CollectionRule[] = [
         transform: "from consolidated item",
       },
       {
-        source: ["items", "price", "total_cents"],
-        target: ["total_price_cents"],
-        transform: "sum across consolidated duplicates",
-      },
-      {
-        source: ["items", "price", "total_cents"],
-        target: ["unit_price_cents"],
-        transform:
-          "consolidateItems() — total_price_cents ÷ quantity, rounded once, half away from zero. A stored denorm for the per-line fact table: unit_price_cents × quantity ≠ total_price_cents and the residual is discarded on purpose (total_price_cents is the authoritative figure)",
-      },
-      {
         source: [],
         target: ["breakdown"],
         transform:
@@ -748,7 +737,7 @@ const updateOrderRules: CollectionRule[] = [
         source: ["items"],
         target: [],
         transform:
-          "consolidated items → uid_product, name, quantity, type, total_price_cents, unit_price_cents",
+          "consolidated items → uid_product, name, quantity, type",
       },
       {
         source: [],
