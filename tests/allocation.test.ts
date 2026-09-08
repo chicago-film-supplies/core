@@ -11,7 +11,7 @@
  * reproducible); the order/bounds/projection rules are pinned with fixtures,
  * because those have exact expected values rather than an invariant.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   addAllocationToReserved,
   allocateBookingNetted,
@@ -350,4 +350,45 @@ Deno.test("allocateBookingWithNetting: a null WINDOW skips overlap netting but s
 
   const second = allocateBookingWithNetting(breakdown, 4, [reserving(5, 0, 1)], null, null, inBatch);
   assertEquals(totalAllocated(second.stores), 1, "in-batch netting was skipped");
+});
+
+/**
+ * 🔴 The allocator must not assume its caller's OBJECT REPRESENTATION.
+ *
+ * `drawFromLocationsForBooking` deep-cloned `locations` with `structuredClone`
+ * for the sole purpose of `.sort()`ing a copy — it never mutates an element, it
+ * builds fresh objects into `allocatedLocations`. That deep work for a shallow
+ * need made the function platform-dependent: `structuredClone` throws
+ * `DataCloneError: Proxy object could not be cloned` on a Proxy, and a SolidJS
+ * store — which is what the manager passes — is exactly that.
+ *
+ * Measured in prod 2026-09-07: the Stock Levels section of every product detail
+ * page failed to render with that error, while the identical call from Deno
+ * (plain objects) was fine, so nothing in this suite could see it. `src/` is
+ * platform-free by policy, and a Proxy is the cheapest standing witness to that.
+ */
+Deno.test("allocateBookingToStores: works on Proxy-wrapped input (a Solid store is one)", () => {
+  const plain = [store("Main", true, [
+    { name: "A", quantity: 3, default: true },
+    { name: "B", quantity: 4 },
+  ])];
+
+  // A pass-through Proxy over both the breakdown and the nested locations —
+  // structurally identical to the plain array, and uncloneable.
+  const proxied: StoreBreakdownEntry[] = plain.map((entry) =>
+    new Proxy(entry, {
+      get: (t, k) => (k === "locations" ? new Proxy(t.locations, {}) : Reflect.get(t, k)),
+    })
+  );
+  const proxiedBreakdown = new Proxy(proxied, {});
+
+  // The control: the old implementation's own primitive refuses this input, so
+  // the test cannot pass vacuously on an environment where cloning is cheap.
+  assertThrows(() => structuredClone(proxiedBreakdown[0].locations));
+
+  const result = allocateBookingToStores(proxiedBreakdown, 5);
+  assertEquals(totalAllocated(result.stores), 5);
+  assertEquals(result.shortage, 0);
+  // And it agrees with the same allocation over plain objects.
+  assertEquals(result.stores, allocateBookingToStores(plain, 5).stores);
 });

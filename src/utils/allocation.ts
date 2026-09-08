@@ -54,7 +54,16 @@ function drawFromLocationsForBooking(
   const allocatedLocations: StoreBreakdownLocation[] = [];
   let remaining = quantityToDraw;
 
-  const locationsCopy: StoreBreakdownLocation[] = structuredClone(locations);
+  // A SHALLOW copy, because the only thing the copy is for is `.sort()` below —
+  // this function never mutates an element, it builds fresh objects into
+  // `allocatedLocations`. `structuredClone` was therefore doing deep work for a
+  // shallow need, and it made the function platform-dependent: it throws
+  // `DataCloneError: Proxy object could not be cloned` on a SolidJS store proxy,
+  // which is exactly what the manager passes. Measured in prod 2026-09-07 — the
+  // Stock Levels section of every product detail page failed to render, while
+  // the same call from Deno (plain objects) was fine. `src/` is platform-free by
+  // policy, so a shared util must not assume its caller's object representation.
+  const locationsCopy: StoreBreakdownLocation[] = [...locations];
 
   locationsCopy.sort((a, b) => {
     if (a.default && !b.default) return -1;
