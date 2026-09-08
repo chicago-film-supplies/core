@@ -57,6 +57,46 @@ export const TemplateParamSchema: z.ZodType<TemplateParam> = z.strictObject({
   required: z.boolean().optional(),
 });
 
+/**
+ * The param DECLARATION a stored render-params map was resolved against,
+ * snapshotted at render time (core#74).
+ *
+ * A stored params map is a bag of `{key: boolean}`; everything human-readable
+ * about it — the label, and the default a value is compared against to decide
+ * whether a row says anything at all — comes from the family's `params[]`. That
+ * declaration is a projection of the family's ACTIVE version and moves whenever
+ * a template renames a param, removes one, or changes a default, so a reader
+ * resolving against it re-labels every past artifact. The sharp direction is a
+ * changed default: the annotation is the only thing on screen distinguishing
+ * "the operator hid the component rows" from the ordinary rendering.
+ *
+ * ⭐ **Denormalizing is right here, where it usually is not.** This is a
+ * HISTORICAL fact, so it cannot go stale — the whole point is that it must NOT
+ * track the family's later edits. Same shape as api-cloudrun#853's ruling.
+ *
+ * Named `params_context` rather than `uid_version`: `Invoice` already uses
+ * "version" for `pdf_versions[]`, and the collision would be genuinely
+ * ambiguous.
+ */
+export interface RenderParamsContext {
+  /** The template version whose declaration this is — a `templates-versions` uid. */
+  uid_template_version: string;
+  /** That version's `params[]`, verbatim. Reuses `TemplateParam` — no second shape to sync. */
+  params: TemplateParam[];
+}
+
+/**
+ * Zod schema for a RenderParamsContext.
+ *
+ * Required-when-present: the members inside are not optional, so an artifact is
+ * in one of TWO states (`null` = not recorded, or a complete snapshot) rather
+ * than four.
+ */
+export const RenderParamsContextSchema: z.ZodType<RenderParamsContext> = z.strictObject({
+  uid_template_version: FirestoreId,
+  params: z.array(TemplateParamSchema),
+});
+
 /** Conventional-commit metadata captured at release/publish time. */
 export interface CommitMeta {
   author: ActorRefType;

@@ -24,6 +24,7 @@ function baseQuote(extra: Record<string, unknown> = {}): Record<string, unknown>
     is_draft: true,
     uploadcare_uuid: "11111111-2222-4333-8444-555555555555",
     params: {},
+    params_context: null,
     deleted_at: null,
     expires_at: null,
     created_at: mockTimestamp,
@@ -54,6 +55,43 @@ Deno.test("QuoteSchema rejects a non-boolean param value", () => {
     QuoteSchema.safeParse(baseQuote({ params: { hide_zero_priced_components: "true" } })).success,
     false,
   );
+});
+
+Deno.test("QuoteSchema rejects a document with no params_context key", () => {
+  // The assertion the required decision rests on (core#74). `null` is a real
+  // answer — "not recorded" — and ABSENT is not; a `.default(null)` here would
+  // pass this document and write it without the key.
+  const doc = baseQuote();
+  delete doc.params_context;
+  assertEquals(QuoteSchema.safeParse(doc).success, false);
+});
+
+Deno.test("QuoteSchema accepts a params_context snapshot", () => {
+  const res = QuoteSchema.safeParse(baseQuote({
+    params: { hide_zero_priced_components: true },
+    params_context: {
+      uid_template_version: "testtplversion000001",
+      params: [{ key: "hide_zero_priced_components", type: "boolean", label: "Hide zero-priced components", default: false }],
+    },
+  }));
+  assertEquals(res.success, true);
+});
+
+Deno.test("QuoteSchema rejects a params_context missing its version uid", () => {
+  // Required-when-present: the members inside are not optional, so an artifact
+  // is in one of TWO states rather than four. A snapshot that cannot say WHICH
+  // declaration it is would be worse than `null`, which at least says so.
+  const res = QuoteSchema.safeParse(baseQuote({
+    params_context: { params: [] },
+  }));
+  assertEquals(res.success, false);
+});
+
+Deno.test("QuoteSchema rejects an undeclared key inside params_context", () => {
+  const res = QuoteSchema.safeParse(baseQuote({
+    params_context: { uid_template_version: "testtplversion000001", params: [], semver: "1.0.0" },
+  }));
+  assertEquals(res.success, false);
 });
 
 Deno.test("QuoteSchema rejects an undeclared sibling field", () => {

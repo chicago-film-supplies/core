@@ -1941,7 +1941,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string | null;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string | null;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -3321,7 +3321,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -3497,6 +3497,18 @@
           "name": "RegisterInputType",
           "declaration": "interface RegisterInputType {\n  email: string;\n  password: string;\n}",
           "doc": "Input schema for POST /auth/register.\n\nCarries the split-name parts (`first_name` required, the rest optional) the\nregister route derives the denormalized `name` from via `deriveName()`. No\n`name` field — inputs send parts; the server derives `name` at write time."
+        },
+        {
+          "kind": "interface",
+          "name": "RenderParamsContext",
+          "declaration": "interface RenderParamsContext {\n  uid_template_version: string;\n  params: TemplateParam[];\n}",
+          "doc": "The param DECLARATION a stored render-params map was resolved against,\nsnapshotted at render time (core#74).\n\nA stored params map is a bag of `{key: boolean}`; everything human-readable\nabout it — the label, and the default a value is compared against to decide\nwhether a row says anything at all — comes from the family's `params[]`. That\ndeclaration is a projection of the family's ACTIVE version and moves whenever\na template renames a param, removes one, or changes a default, so a reader\nresolving against it re-labels every past artifact. The sharp direction is a\nchanged default: the annotation is the only thing on screen distinguishing\n\"the operator hid the component rows\" from the ordinary rendering.\n\n⭐ **Denormalizing is right here, where it usually is not.** This is a\nHISTORICAL fact, so it cannot go stale — the whole point is that it must NOT\ntrack the family's later edits. Same shape as api-cloudrun#853's ruling.\n\nNamed `params_context` rather than `uid_version`: `Invoice` already uses\n\"version\" for `pdf_versions[]`, and the collision would be genuinely\nambiguous."
+        },
+        {
+          "kind": "variable",
+          "name": "RenderParamsContextSchema",
+          "declaration": "const RenderParamsContextSchema: z.ZodType<RenderParamsContext>;",
+          "doc": "Zod schema for a RenderParamsContext.\n\nRequired-when-present: the members inside are not optional, so an artifact is\nin one of TWO states (`null` = not recorded, or a complete snapshot) rather\nthan four."
         },
         {
           "kind": "interface",
@@ -6780,7 +6792,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string | null;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string | null;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -9208,7 +9220,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {

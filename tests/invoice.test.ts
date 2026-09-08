@@ -931,6 +931,10 @@ Deno.test("InvoiceSchema accepts a pdf_versions row carrying its render params",
       created_by: { uid: "u1000000000000000000", name: "Tester" },
       deleted_at: null,
       params: { hide_zero_priced_components: true },
+      params_context: {
+        uid_template_version: "testtplversion000001",
+        params: [{ key: "hide_zero_priced_components", type: "boolean", label: "Hide zero-priced components", default: false }],
+      },
     }],
   });
   assertEquals(res.success, true);
@@ -945,6 +949,7 @@ Deno.test("InvoiceSchema rejects a pdf_versions row with no params key", () => {
       created_at: mockTimestamp,
       created_by: { uid: "u1000000000000000000", name: "Tester" },
       deleted_at: null,
+      params_context: null,
     }],
   });
   assertEquals(res.success, false);
@@ -959,6 +964,41 @@ Deno.test("InvoiceSchema requires pdf_versions", () => {
   const doc = { ...validInvoice } as Record<string, unknown>;
   delete doc.pdf_versions;
   assertEquals(InvoiceSchema.safeParse(doc).success, false);
+});
+
+Deno.test("InvoiceSchema requires pdf_params_context", () => {
+  // core#74's required decision, the top-level half. `null` = not recorded;
+  // absent is not an answer.
+  const doc = { ...validInvoice } as Record<string, unknown>;
+  delete doc.pdf_params_context;
+  assertEquals(InvoiceSchema.safeParse(doc).success, false);
+});
+
+Deno.test("InvoiceSchema requires params_context on a pdf_versions row", () => {
+  const res = InvoiceSchema.safeParse({
+    ...validInvoice,
+    pdf_versions: [{
+      version: 1,
+      uploadcare_uuid: "11111111-2222-4333-8444-555555555555",
+      created_at: mockTimestamp,
+      created_by: { uid: "u1000000000000000000", name: "Tester" },
+      deleted_at: null,
+      params: {},
+    }],
+  });
+  assertEquals(res.success, false);
+});
+
+Deno.test("InvoiceSchema accepts a pdf_params_context snapshot", () => {
+  const res = InvoiceSchema.safeParse({
+    ...validInvoice,
+    pdf_params: { hide_zero_priced_components: true },
+    pdf_params_context: {
+      uid_template_version: "testtplversion000001",
+      params: [{ key: "hide_zero_priced_components", type: "boolean", default: false }],
+    },
+  });
+  assertEquals(res.success, true);
 });
 
 Deno.test("InvoiceSchema requires pdf_params", () => {

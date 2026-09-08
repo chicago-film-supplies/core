@@ -6,6 +6,7 @@ import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
+import { type RenderParamsContext, RenderParamsContextSchema } from "./template-version.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -682,6 +683,15 @@ export interface Invoice {
    * rather than re-derived. `{}` means none were recorded.
    */
   pdf_params: Record<string, boolean>;
+  /**
+   * The param DECLARATION `pdf_params` was resolved against, snapshotted at
+   * render time — see {@link RenderParamsContext}. `null` = not recorded.
+   *
+   * Named for the map it describes (`pdf_params` → `pdf_params_context`), which
+   * is what pairs it here: this document carries TWO params maps, and the other
+   * one's context sits inside `pdf_versions[]` under `params_context`.
+   */
+  pdf_params_context: RenderParamsContext | null;
   pdf_versions: Array<{
     version: number;
     uploadcare_uuid: string;
@@ -695,6 +705,11 @@ export interface Invoice {
      * empty corpus-wide when it landed).
      */
     params: Record<string, boolean>;
+    /**
+     * The param DECLARATION this row's `params` was resolved against — see
+     * {@link RenderParamsContext}. `null` = not recorded.
+     */
+    params_context: RenderParamsContext | null;
   }>;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   /**
@@ -759,6 +774,11 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   // (`validateBeforeWrite` discards `result.data`), so it would only license a
   // future writer to forget the stamp. `generateInvoicePdf` is the sole author.
   pdf_params: z.record(z.string(), z.boolean()),
+  // Required and NULLABLE for the same reason `pdf_params` is required with no
+  // `.default({})`: a default never materializes on a write, so it would only
+  // license a future writer to forget the stamp. `generateInvoicePdf` is the
+  // sole author of both.
+  pdf_params_context: RenderParamsContextSchema.nullable(),
   // REQUIRED as of the documents-menu campaign (api-cloudrun#651), and the
   // writer is what licenses it: `createInvoice` has always written
   // `pdf_versions: []` on create (`services/invoices.ts`), so the 143 prod
@@ -777,6 +797,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     created_by: ActorRef,
     deleted_at: FirestoreTimestamp.nullable(),
     params: z.record(z.string(), z.boolean()),
+    params_context: RenderParamsContextSchema.nullable(),
   })),
   // NOT tightened — see the interface. `createInvoice` writes no top-level
   // `crms_id`; the 1,019/1,019 reading is about the CRMS ingest.

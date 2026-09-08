@@ -4268,6 +4268,7 @@ interface Invoice {
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
   pdf_params: Record<string, boolean>;
+  pdf_params_context: RenderParamsContext | null;
   pdf_versions: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
@@ -7494,6 +7495,7 @@ interface Quote {
   is_draft: boolean;
   uploadcare_uuid: string | null;
   params: Record<string, boolean>;
+  params_context: RenderParamsContext | null;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -7791,6 +7793,47 @@ interface RegisterInputType {
   email: string;
   password: string;
 }
+```
+
+### `RenderParamsContext`
+
+The param DECLARATION a stored render-params map was resolved against,
+snapshotted at render time (core#74).
+
+A stored params map is a bag of `{key: boolean}`; everything human-readable
+about it — the label, and the default a value is compared against to decide
+whether a row says anything at all — comes from the family's `params[]`. That
+declaration is a projection of the family's ACTIVE version and moves whenever
+a template renames a param, removes one, or changes a default, so a reader
+resolving against it re-labels every past artifact. The sharp direction is a
+changed default: the annotation is the only thing on screen distinguishing
+"the operator hid the component rows" from the ordinary rendering.
+
+⭐ **Denormalizing is right here, where it usually is not.** This is a
+HISTORICAL fact, so it cannot go stale — the whole point is that it must NOT
+track the family's later edits. Same shape as api-cloudrun#853's ruling.
+
+Named `params_context` rather than `uid_version`: `Invoice` already uses
+"version" for `pdf_versions[]`, and the collision would be genuinely
+ambiguous.
+
+```ts
+interface RenderParamsContext {
+  uid_template_version: string;
+  params: TemplateParam[];
+}
+```
+
+### `RenderParamsContextSchema`
+
+Zod schema for a RenderParamsContext.
+
+Required-when-present: the members inside are not optional, so an artifact is
+in one of TWO states (`null` = not recorded, or a complete snapshot) rather
+than four.
+
+```ts
+const RenderParamsContextSchema: z.ZodType<RenderParamsContext>;
 ```
 
 ### `RequestLogRecord`
@@ -14728,6 +14771,7 @@ interface Invoice {
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
   pdf_params: Record<string, boolean>;
+  pdf_params_context: RenderParamsContext | null;
   pdf_versions: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
@@ -20138,6 +20182,7 @@ interface Quote {
   is_draft: boolean;
   uploadcare_uuid: string | null;
   params: Record<string, boolean>;
+  params_context: RenderParamsContext | null;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;

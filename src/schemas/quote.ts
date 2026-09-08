@@ -8,6 +8,7 @@ import { z } from "zod";
 import { FirestoreId, QuoteId } from "./_uid.ts";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
+import { type RenderParamsContext, RenderParamsContextSchema } from "./template-version.ts";
 
 /** A PDF quote document associated with an order. */
 export interface Quote {
@@ -27,6 +28,16 @@ export interface Quote {
    * is `it.params`.
    */
   params: Record<string, boolean>;
+  /**
+   * The param DECLARATION `params` was resolved against, snapshotted at render
+   * time — see {@link RenderParamsContext}. `null` = not recorded, which is the
+   * truthful value for every artifact rendered before the field existed:
+   * nobody can know which template version rendered a quote from March.
+   *
+   * A reader labels a stored key from THIS rather than from the family's
+   * current `params[]`, falling back to today's behaviour when it is `null`.
+   */
+  params_context: RenderParamsContext | null;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -42,6 +53,11 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   is_draft: z.boolean(),
   uploadcare_uuid: uploadcareRef(z.string().nullable()),
   params: z.record(z.string(), z.boolean()),
+  // Required and NULLABLE, never optional: `null` is a real answer ("not
+  // recorded") and absent is not. No `.default(null)` — a default never
+  // materializes on a write (`validateBeforeWrite` discards `result.data`), so
+  // it would only license a future writer to forget the stamp.
+  params_context: RenderParamsContextSchema.nullable(),
   deleted_at: FirestoreTimestamp.nullable(),
   expires_at: FirestoreTimestamp.nullable(),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
