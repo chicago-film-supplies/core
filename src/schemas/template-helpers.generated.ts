@@ -171,6 +171,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "composeOrgName", expr: "it.organizations.composeOrgName(path, arg2)", desc: "Render an organization node's display name from its `path`.", returns: "string" },
   ],
   "pick-sheet-fold": [
+    { name: "chooseBookingOwner", expr: "it.pick-sheet-fold.chooseBookingOwner(occurrences)", desc: "Which of an aggregate booking's occurrences carries its quantities.", returns: "T | null" },
     { name: "compareSheetOrders", expr: "it.pick-sheet-fold.compareSheetOrders(a, b)", desc: "The sheet's total order over orders. Exported so a pager sorts identically.", returns: "number" },
     { name: "foldPickSheet", expr: "it.pick-sheet-fold.foldPickSheet(input)", desc: "Fold a membership slice plus the fulfillment documents it names into `orders[] → destinations[] → items[]`.", returns: "PickSheetFoldResult" },
     { name: "orderDueAt", expr: "it.pick-sheet-fold.orderDueAt(order)", desc: "An order's own due date: its earliest leg's. `null` only when every leg is undated.", returns: "string | null" },

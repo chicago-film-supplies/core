@@ -13952,9 +13952,23 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "BookingOccurrence",
+          "declaration": "interface BookingOccurrence {\n  path: string[];\n  isStructural: boolean;\n  quantity: number;\n}",
+          "doc": "One occurrence of an aggregate booking — the three facts the owner rule reads.\n\nStructural rather than a named document type on purpose: the two callers hand\nit different rows. This fold builds it from a `PickSheetItem`'s\n`FulfillmentItem`; `manager/src/utils/orderBookingJoin.ts` builds it while\nwalking a whole order's `items[]`, including legs this fold would drop."
+        },
+        {
+          "kind": "interface",
           "name": "PickSheetFoldResult",
           "declaration": "interface PickSheetFoldResult {\n  orders: PickSheetOrder[];\n  missingOrderUids: string[];\n}",
           "doc": "What {@link foldPickSheet} produces before any page is clipped."
+        },
+        {
+          "kind": "function",
+          "name": "chooseBookingOwner",
+          "signature": "chooseBookingOwner(occurrences: readonly T[]): T | null",
+          "doc": "Which of an aggregate booking's occurrences carries its quantities.\n\n🔴 **ONE author, two callers, and the second one is why this is exported.** A\nbooking is aggregate per `(order, product, destination)`, so the same product\nlegitimately repeats inside one leg — a priced principal beside zero-priced\naccessories, a `splitItem`, or a product appearing both standalone and as a\nkit component. Exactly one occurrence renders the quantities; the rest render\nbooking-less and point at it. {@link foldPickSheet} stamps that answer onto\n`PickSheetItem.owner_path`, and the manager's order-grain join\n(`orderBookingJoin.ts`, which serves the whole fulfillment detail including\nlegs with nothing open) asks the same question about rows this fold never\nsees. Two implementations of one rule is precisely what moving the fold to\ncore was for.\n\nThe rule, in order:\n\n1. **Structural parentage** — a strict OVERRIDE, not a tiebreak, and it is\n   load-bearing. A booking-less structurally-parented row is exactly the one\n   the manager's row classifier cannot rescue through a product ancestor: it\n   has none. It still classifies, but only because SOME occurrence owns, so\n   the structural class must win outright whenever it is non-empty.\n2. **The largest ordered line quantity.** Exactly one row carries the picker,\n   the action and the reserved/prepped cells for every unit of the product in\n   this section, so it should be the row where the largest share of those\n   units physically belongs.\n\n   ⚠️ **This used to be document order alone, and that is arbitrary with\n   respect to placement.** Prod order 961 had a Long Milk Crate at four\n   component-parented occurrences (qty 1 / 1 / 2 / 1) under a steamer, two\n   tents and an extension cord; document order handed all 5 units to the\n   steamer's copy, so the crates were prepped from inside *Wardrobe* — and\n   dragged the steamer, itself fully checked out, back into the *Reserved*\n   pane as the ancestor shell needed to place its owner child.\n3. **Document order** — implicit. `occurrences` must be in it, and a tie never\n   displaces the incumbent, so the earliest of the best `(structural,\n   quantity)` pair keeps the booking.\n\nReturns `null` for an empty list, which is the honest answer: a booking with\nno occurrence on this sheet has no owner on it either.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",

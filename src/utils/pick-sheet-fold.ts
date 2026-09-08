@@ -175,30 +175,83 @@ export function compareSheetOrders(a: PickSheetOrder, b: PickSheetOrder): number
 
 // ── The owner rule ──────────────────────────────────────────────────
 
-/** Owner-selection accumulator for one aggregate booking, within one leg. */
-interface BookingOwner {
-  /** The winning occurrence's own `path`. */
+/**
+ * One occurrence of an aggregate booking — the three facts the owner rule reads.
+ *
+ * Structural rather than a named document type on purpose: the two callers hand
+ * it different rows. This fold builds it from a `PickSheetItem`'s
+ * `FulfillmentItem`; `manager/src/utils/orderBookingJoin.ts` builds it while
+ * walking a whole order's `items[]`, including legs this fold would drop.
+ */
+export interface BookingOccurrence {
+  /** The row's own `path`, carried verbatim from its document. */
   path: string[];
-  /** Whether that occurrence is structurally parented (see the rule below). */
+  /**
+   * Whether the row's immediate parent is a DIVIDER rather than another product
+   * — `getParentProductUid(item, structuralUids) === null`.
+   */
   isStructural: boolean;
-  /** Its ordered line quantity — the second sort key. */
+  /** The row's ordered line quantity. */
   quantity: number;
 }
 
 /**
- * Whether a later occurrence takes ownership from the incumbent.
+ * Which of an aggregate booking's occurrences carries its quantities.
  *
- * Structural parentage is the primary key and a strict override; ordered line
- * quantity is the second. Document order is the third and is implicit — the walk
- * is in document order and this returns `false` on a tie, so the earliest
- * occurrence of the best `(structural, quantity)` pair keeps the booking.
+ * 🔴 **ONE author, two callers, and the second one is why this is exported.** A
+ * booking is aggregate per `(order, product, destination)`, so the same product
+ * legitimately repeats inside one leg — a priced principal beside zero-priced
+ * accessories, a `splitItem`, or a product appearing both standalone and as a
+ * kit component. Exactly one occurrence renders the quantities; the rest render
+ * booking-less and point at it. {@link foldPickSheet} stamps that answer onto
+ * `PickSheetItem.owner_path`, and the manager's order-grain join
+ * (`orderBookingJoin.ts`, which serves the whole fulfillment detail including
+ * legs with nothing open) asks the same question about rows this fold never
+ * sees. Two implementations of one rule is precisely what moving the fold to
+ * core was for.
+ *
+ * The rule, in order:
+ *
+ * 1. **Structural parentage** — a strict OVERRIDE, not a tiebreak, and it is
+ *    load-bearing. A booking-less structurally-parented row is exactly the one
+ *    the manager's row classifier cannot rescue through a product ancestor: it
+ *    has none. It still classifies, but only because SOME occurrence owns, so
+ *    the structural class must win outright whenever it is non-empty.
+ * 2. **The largest ordered line quantity.** Exactly one row carries the picker,
+ *    the action and the reserved/prepped cells for every unit of the product in
+ *    this section, so it should be the row where the largest share of those
+ *    units physically belongs.
+ *
+ *    ⚠️ **This used to be document order alone, and that is arbitrary with
+ *    respect to placement.** Prod order 961 had a Long Milk Crate at four
+ *    component-parented occurrences (qty 1 / 1 / 2 / 1) under a steamer, two
+ *    tents and an extension cord; document order handed all 5 units to the
+ *    steamer's copy, so the crates were prepped from inside *Wardrobe* — and
+ *    dragged the steamer, itself fully checked out, back into the *Reserved*
+ *    pane as the ancestor shell needed to place its owner child.
+ * 3. **Document order** — implicit. `occurrences` must be in it, and a tie never
+ *    displaces the incumbent, so the earliest of the best `(structural,
+ *    quantity)` pair keeps the booking.
+ *
+ * Returns `null` for an empty list, which is the honest answer: a booking with
+ * no occurrence on this sheet has no owner on it either.
  */
-function outranksOwner(
-  candidate: { isStructural: boolean; quantity: number },
-  incumbent: BookingOwner,
-): boolean {
-  if (candidate.isStructural !== incumbent.isStructural) return candidate.isStructural;
-  return candidate.quantity > incumbent.quantity;
+export function chooseBookingOwner<T extends BookingOccurrence>(
+  occurrences: readonly T[],
+): T | null {
+  let best: T | null = null;
+  for (const candidate of occurrences) {
+    if (best === null) {
+      best = candidate;
+      continue;
+    }
+    if (candidate.isStructural !== best.isStructural) {
+      if (candidate.isStructural) best = candidate;
+      continue;
+    }
+    if (candidate.quantity > best.quantity) best = candidate;
+  }
+  return best;
 }
 
 /**
@@ -275,12 +328,12 @@ export function foldPickSheet(input: {
       // component.
       const legBookings: PickSheetBooking[] = [];
       const seen = new Set<string>();
-      // The owner accumulator, per aggregate booking, scoped to THIS leg. Scoped
-      // rather than per order because a booking belongs to exactly one leg by
-      // construction (its uid names the leg's endpoint), and a leg-scoped map
-      // cannot leak an owner across a section boundary even if that ever stops
-      // being true.
-      const owners = new Map<string, BookingOwner>();
+      // Every occurrence of each aggregate booking, in document order, scoped to
+      // THIS leg — scoped rather than per order because a booking belongs to
+      // exactly one leg by construction (its uid names the leg's endpoint), so a
+      // leg-scoped map cannot leak an owner across a section boundary even if
+      // that ever stops being true.
+      const occurrences = new Map<string, BookingOccurrence[]>();
 
       for (let j = i + 1; j <= endIndex; j++) {
         const item = fulfillment.items[j];
@@ -300,17 +353,14 @@ export function foldPickSheet(input: {
           legBookings.push(toSheetBooking(bookingByUid.get(uidBooking)!));
         }
 
-        const candidate = {
+        const list = occurrences.get(uidBooking);
+        const occurrence: BookingOccurrence = {
+          path: item.path,
           isStructural: getParentProductUid(item, structuralUids) === null,
           quantity: item.quantity,
         };
-        const incumbent = owners.get(uidBooking);
-        if (!incumbent) owners.set(uidBooking, { path: item.path, ...candidate });
-        else if (outranksOwner(candidate, incumbent)) {
-          incumbent.path = item.path;
-          incumbent.isStructural = candidate.isStructural;
-          incumbent.quantity = candidate.quantity;
-        }
+        if (list) list.push(occurrence);
+        else occurrences.set(uidBooking, [occurrence]);
       }
 
       // A leg with nothing open in the membership slice is not on this sheet.
@@ -326,7 +376,7 @@ export function foldPickSheet(input: {
       // empty set and answer `delivery` for every leg.
       if (!pickSheetLegAdmits(legBookings, leg)) continue;
 
-      stampOwners(items, owners);
+      stampOwners(items, occurrences);
 
       legs.push({
         uid: divider.uid,
@@ -371,13 +421,21 @@ export function foldPickSheet(input: {
  * The owner keeps `null` — see `PickSheetItem.owner_path` for why ownership is
  * the absence of a pointer rather than a second boolean beside it.
  */
-function stampOwners(items: PickSheetItem[], owners: ReadonlyMap<string, BookingOwner>): void {
+function stampOwners(
+  items: PickSheetItem[],
+  occurrences: ReadonlyMap<string, BookingOccurrence[]>,
+): void {
+  const ownerByBooking = new Map<string, string[]>();
+  for (const [uidBooking, list] of occurrences) {
+    const owner = chooseBookingOwner(list);
+    if (owner) ownerByBooking.set(uidBooking, owner.path);
+  }
   for (const row of items) {
     if (row.uid_booking === null) continue;
-    const owner = owners.get(row.uid_booking);
-    if (!owner) continue;
-    if (samePath(owner.path, row.item.path)) continue;
-    row.owner_path = owner.path;
+    const ownerPath = ownerByBooking.get(row.uid_booking);
+    if (!ownerPath) continue;
+    if (samePath(ownerPath, row.item.path)) continue;
+    row.owner_path = ownerPath;
   }
 }
 

@@ -34,6 +34,7 @@ import type {
 } from "../src/schemas/mod.ts";
 import { pickSheetItemOwnsBooking } from "../src/schemas/mod.ts";
 import {
+  chooseBookingOwner,
   compareSheetOrders,
   foldPickSheet,
   orderDueAt,
@@ -966,4 +967,47 @@ Deno.test("helper: pickSheetLineBooking refuses a row from a DIFFERENT leg", () 
   const [legOne, legTwo] = orders[0].destinations;
   assertEquals(pickSheetLineBooking(legOne, legOne.items[0])?.uid_product, CAMERA);
   assertEquals(pickSheetLineBooking(legTwo, legOne.items[0]), null);
+});
+
+// ── The owner rule, asked directly ──────────────────────────────────
+
+/**
+ * 🔴 **`chooseBookingOwner` has TWO callers and this is where the rule is
+ * pinned**, rather than only through the fold. The other caller is
+ * `manager/src/utils/orderBookingJoin.ts`, which walks a whole order — including
+ * the legs the fold drops for having nothing open — so a rule tested only
+ * through `foldPickSheet` is a rule half its callers exercise.
+ *
+ * ⚠️ Every arm names the OCCURRENCE that wins, never merely "one wins". Picking
+ * arbitrarily satisfies the weaker claim and is the defect prod order 961
+ * recorded.
+ */
+Deno.test("chooseBookingOwner: structural parentage is a strict override", () => {
+  const structural = { path: ["d", "p"], isStructural: true, quantity: 1 };
+  const component = { path: ["d", "k", "p"], isStructural: false, quantity: 99 };
+  assertEquals(chooseBookingOwner([structural, component]), structural);
+  assertEquals(chooseBookingOwner([component, structural]), structural, "and order-independently");
+});
+
+Deno.test("chooseBookingOwner: within one class, the largest quantity wins", () => {
+  const small = { path: ["d", "a", "p"], isStructural: false, quantity: 1 };
+  const large = { path: ["d", "b", "p"], isStructural: false, quantity: 2 };
+  const alsoSmall = { path: ["d", "c", "p"], isStructural: false, quantity: 1 };
+  assertEquals(chooseBookingOwner([small, alsoSmall, large]), large, "not the first in document order");
+});
+
+Deno.test("chooseBookingOwner: a tie keeps the EARLIEST — document order is the third key", () => {
+  const first = { path: ["d", "a", "p"], isStructural: false, quantity: 2 };
+  const second = { path: ["d", "b", "p"], isStructural: false, quantity: 2 };
+  assertEquals(chooseBookingOwner([first, second]), first);
+  assertEquals(chooseBookingOwner([second, first]), second, "…which is a fact about the INPUT order");
+});
+
+/**
+ * ⚠️ The fail-closed companion: no occurrences means no owner, not an invented
+ * one. A booking whose lines are all outside this leg has nothing here to carry
+ * its quantities, and returning a fabricated row would draw them on nothing.
+ */
+Deno.test("chooseBookingOwner: an empty list has no owner", () => {
+  assertEquals(chooseBookingOwner([]), null);
 });
