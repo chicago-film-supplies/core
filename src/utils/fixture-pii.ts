@@ -116,7 +116,7 @@ const LEAF_CATEGORY: Readonly<Record<string, MaskCategory>> = {
  * `<parent>.<leaf>` for the two leaves whose category depends on where they sit.
  *
  * Every entry was measured, not guessed: `collectLeafPaths(schema, {inherit:
- * ["pii"]})` over all seven `TEMPLATE_COLLECTION_SCHEMAS` returns 35 distinct
+ * ["pii"]})` over all eight `TEMPLATE_COLLECTION_SCHEMAS` returns 35 distinct
  * `(parent, leaf)` pairs for `pii: "mask"` STRING leaves, and these are the
  * ones whose leaf is `name` or `full`.
  *
@@ -125,6 +125,15 @@ const LEAF_CATEGORY: Readonly<Record<string, MaskCategory>> = {
  * that DOES fail lives in the other repo
  * (`api-cloudrun/tests/unit/fixturePiiStrategy.test.ts`), so `core`'s own suite
  * stays green while this sentence goes stale.
+ *
+ * ⭐ **`aging-reports` moved the SCHEMA count and not the PAIR count, and that is
+ * the useful half of the re-measurement.** Its three masked string leaves are
+ * `scope.name`, `rows[].organization_path[].name` and
+ * `organizations[].organization_path[].name` — every one of them reusing a
+ * `(parent, leaf)` pair `statements` had already introduced, so the map below
+ * needed no entry and `templates`' `capture-floor.json` `min_core` needed no
+ * bump. **A new source is not automatically a new mask**, and checking which of
+ * the two a change is costs one walk.
  */
 const QUALIFIED_CATEGORY: Readonly<Record<string, MaskCategory>> = {
   // A real person.

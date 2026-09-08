@@ -65,7 +65,7 @@ import { MovementSessionSchema } from "./movement-session.ts";
 import { OrderSchema } from "./order.ts";
 import { PickSheetSchema } from "./pick-sheet.ts";
 import { QuoteSchema } from "./quote.ts";
-import { OrgStatementSchema } from "./reporting.ts";
+import { AgingReportSchema, OrgStatementSchema } from "./reporting.ts";
 import type { TemplateCollectionType } from "./template-context.ts";
 
 /**
@@ -83,7 +83,7 @@ export const TEMPLATE_COLLECTION_SCHEMAS: Partial<
   invoices: InvoiceSchema,
   fulfillments: FulfillmentSchema,
   quotes: QuoteSchema,
-  // The three entries with no Firestore collection behind them. See the module doc.
+  // The four entries with no Firestore collection behind them. See the module doc.
   "movement-sessions": MovementSessionSchema,
   "pick-sheets": PickSheetSchema,
   // `statements` is a SOURCE and a TARGET, and this entry is the source half.
@@ -91,6 +91,10 @@ export const TEMPLATE_COLLECTION_SCHEMAS: Partial<
   // may not, so the entry is forced by the source and says nothing about the
   // target. See `TEMPLATE_TARGET_COLLECTIONS` in `template.ts`.
   statements: OrgStatementSchema,
+  // `aging-reports` is the second source-and-target member, and the entry is the
+  // source half for the same reason. ⚠️ One spelling in both vocabularies — see
+  // `TEMPLATE_TARGET_COLLECTIONS`, where the argument for it is written down.
+  "aging-reports": AgingReportSchema,
 };
 
 /**

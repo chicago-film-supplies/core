@@ -8849,8 +8849,33 @@ a bug and it is not: the freeze governs what a *document* records, never how a
 *report* groups documents. A statement already handed to a customer must not
 silently rewrite its own history when the org is re-parented.
 
+🔴 **`aging-reports` is the FOURTH source with no Firestore collection, and the
+first whose subject is not a single party at all.** An
+{@link ./reporting.ts | AgingReport} (api-cloudrun#712, built by
+api-cloudrun's `services/reporting/aging.ts`) answers *"what is owed to CFS,
+by age"* across **every** open receivable by default; a scope narrowing it to
+one organization subtree is an option, not its premise. Every other source
+here addresses one document, one operator action, or — for `statements` — one
+customer's ledger. Read `AgingReport.scope` for which question a given
+document answers; a template that assumes one organization renders a lie on
+the default run.
+
+⚠️ **The template RENDERS the fold and must never recompute it.**
+{@link ./reporting.ts | AgingReport.organizations} is already a SECOND
+derivation of {@link ./reporting.ts | AgingReport.totals} — deliberately, so
+the two can disagree and catch a roll-up bug. A template summing `rows[]` into
+its own subtotals would be a THIRD, and a third derivation cannot catch
+anything: it can only drift, and it would drift on a printed financial
+document. Same reason the manager's label composition is not copied into the
+template (api-cloudrun#923).
+
+⚠️ **Not paged, exactly as `statements` is not** — `buildAgingReport` returns
+the whole report or throws. Unlike a statement there is no closing-balance
+refinement to make a short one unrepresentable, so the guarantee here rests on
+the aggregator rather than on the schema.
+
 ```ts
-const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions" | "pick-sheets" | "statements"[];
+const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions" | "pick-sheets" | "statements" | "aging-reports"[];
 ```
 
 ### `TEMPLATE_SURFACES`
@@ -8868,8 +8893,21 @@ its own uid, and this one addresses a subtree, so a manager route binding
 `"organization"` → `/organizations/:id` is rendering a document that spans
 every descendant rather than the node it is standing on.
 
+🔴 **`"report"` is the first surface with NO subject document, and that is the
+whole distinction.** The other four name a thing you are standing on — an
+order, a fulfillment, an invoice, an organization — and a client binds each to
+a detail route. A report is offered on a REPORTING surface
+(`manager`'s `/reports`), where the scope is chosen by controls rather than
+inherited from the page's subject, so there is no uid for a client to pass.
+
+⚠️ **Do not surface an AR aging family on `"organization"` instead.** It
+type-checks and it renders, and it is a false claim about scope: an
+{@link ./reporting.ts | AgingReport} covers every open receivable unless a
+scope narrows it, so offering it from one org node's detail page states that
+the node is its subject when the node is at most a filter.
+
 ```ts
-const TEMPLATE_SURFACES: "order" | "fulfillment" | "invoice" | "organization"[];
+const TEMPLATE_SURFACES: "order" | "fulfillment" | "invoice" | "organization" | "report"[];
 ```
 
 ### `TEMPLATE_TARGET_COLLECTIONS`
@@ -8886,10 +8924,21 @@ has a schema for a reason that has nothing to do with being a target: it is
 also a SOURCE, and a source must have one. Read the presence of
 `statements` in {@link TEMPLATE_COLLECTION_SCHEMAS} as a fact about the source
 half — a target's absence from that map is the claim *"nothing computes over
-this"*, and its presence is not the converse.
+this"*, and its presence is not the converse. `aging-reports` is the second
+member of that class and reads the same way.
+
+🔴 **A concept appearing in BOTH vocabularies is spelled the same way in
+both.** `aging-reports` is hyphenated here rather than following
+`packing_lists`, because `statements` already establishes that a
+source-and-target concept carries one spelling — and the alternative
+(`aging-reports` as a source, `aging_reports` as a target) makes every join
+between the two lists need a translation table for one member. `packing_lists`
+keeps its underscore and stays the lone outlier precisely because it is a
+target ONLY: nothing computes over it, so there is no source spelling for it
+to disagree with.
 
 ```ts
-const TEMPLATE_TARGET_COLLECTIONS: "quotes" | "packing_lists" | "invoices" | "receipts" | "statements"[];
+const TEMPLATE_TARGET_COLLECTIONS: "quotes" | "packing_lists" | "invoices" | "receipts" | "statements" | "aging-reports"[];
 ```
 
 ### `TEMPLATE_VERSION_STATUSES`
@@ -20455,8 +20504,33 @@ a bug and it is not: the freeze governs what a *document* records, never how a
 *report* groups documents. A statement already handed to a customer must not
 silently rewrite its own history when the org is re-parented.
 
+🔴 **`aging-reports` is the FOURTH source with no Firestore collection, and the
+first whose subject is not a single party at all.** An
+{@link ./reporting.ts | AgingReport} (api-cloudrun#712, built by
+api-cloudrun's `services/reporting/aging.ts`) answers *"what is owed to CFS,
+by age"* across **every** open receivable by default; a scope narrowing it to
+one organization subtree is an option, not its premise. Every other source
+here addresses one document, one operator action, or — for `statements` — one
+customer's ledger. Read `AgingReport.scope` for which question a given
+document answers; a template that assumes one organization renders a lie on
+the default run.
+
+⚠️ **The template RENDERS the fold and must never recompute it.**
+{@link ./reporting.ts | AgingReport.organizations} is already a SECOND
+derivation of {@link ./reporting.ts | AgingReport.totals} — deliberately, so
+the two can disagree and catch a roll-up bug. A template summing `rows[]` into
+its own subtotals would be a THIRD, and a third derivation cannot catch
+anything: it can only drift, and it would drift on a printed financial
+document. Same reason the manager's label composition is not copied into the
+template (api-cloudrun#923).
+
+⚠️ **Not paged, exactly as `statements` is not** — `buildAgingReport` returns
+the whole report or throws. Unlike a statement there is no closing-balance
+refinement to make a short one unrepresentable, so the guarantee here rests on
+the aggregator rather than on the schema.
+
 ```ts
-const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions" | "pick-sheets" | "statements"[];
+const TEMPLATE_SOURCE_COLLECTIONS: "orders" | "invoices" | "fulfillments" | "movement-sessions" | "pick-sheets" | "statements" | "aging-reports"[];
 ```
 
 ### `TEMPLATE_SURFACES`
@@ -20474,8 +20548,21 @@ its own uid, and this one addresses a subtree, so a manager route binding
 `"organization"` → `/organizations/:id` is rendering a document that spans
 every descendant rather than the node it is standing on.
 
+🔴 **`"report"` is the first surface with NO subject document, and that is the
+whole distinction.** The other four name a thing you are standing on — an
+order, a fulfillment, an invoice, an organization — and a client binds each to
+a detail route. A report is offered on a REPORTING surface
+(`manager`'s `/reports`), where the scope is chosen by controls rather than
+inherited from the page's subject, so there is no uid for a client to pass.
+
+⚠️ **Do not surface an AR aging family on `"organization"` instead.** It
+type-checks and it renders, and it is a false claim about scope: an
+{@link ./reporting.ts | AgingReport} covers every open receivable unless a
+scope narrows it, so offering it from one org node's detail page states that
+the node is its subject when the node is at most a filter.
+
 ```ts
-const TEMPLATE_SURFACES: "order" | "fulfillment" | "invoice" | "organization"[];
+const TEMPLATE_SURFACES: "order" | "fulfillment" | "invoice" | "organization" | "report"[];
 ```
 
 ### `TEMPLATE_TARGET_COLLECTIONS`
@@ -20492,10 +20579,21 @@ has a schema for a reason that has nothing to do with being a target: it is
 also a SOURCE, and a source must have one. Read the presence of
 `statements` in {@link TEMPLATE_COLLECTION_SCHEMAS} as a fact about the source
 half — a target's absence from that map is the claim *"nothing computes over
-this"*, and its presence is not the converse.
+this"*, and its presence is not the converse. `aging-reports` is the second
+member of that class and reads the same way.
+
+🔴 **A concept appearing in BOTH vocabularies is spelled the same way in
+both.** `aging-reports` is hyphenated here rather than following
+`packing_lists`, because `statements` already establishes that a
+source-and-target concept carries one spelling — and the alternative
+(`aging-reports` as a source, `aging_reports` as a target) makes every join
+between the two lists need a translation table for one member. `packing_lists`
+keeps its underscore and stays the lone outlier precisely because it is a
+target ONLY: nothing computes over it, so there is no source spelling for it
+to disagree with.
 
 ```ts
-const TEMPLATE_TARGET_COLLECTIONS: "quotes" | "packing_lists" | "invoices" | "receipts" | "statements"[];
+const TEMPLATE_TARGET_COLLECTIONS: "quotes" | "packing_lists" | "invoices" | "receipts" | "statements" | "aging-reports"[];
 ```
 
 ### `Template`

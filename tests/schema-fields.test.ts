@@ -153,9 +153,26 @@ Deno.test("nested paths appear, and the customer name is reachable in each sourc
     // for `kind: "destination"`. **A field that sometimes holds a customer name
     // does not make one reachable.** `organization_path[]` is also what the
     // heading actually renders, through `it.organizations.composeOrgName`.
+    //
+    // ⚠️ **A FIFTH population, and it is the statements one PLURALIZED.** An
+    // `aging-reports` document is about a whole receivable book, not one
+    // customer, so the chain cannot sit at the root: it repeats, once per
+    // grouped account, at `organizations[].organization_path[].name`. That is
+    // the level a template renders as an account heading, which is the same test
+    // the statements arm applies one level up.
+    //
+    // ⭐ **`organizations[]` rather than `rows[]`, and both exist.** A row is one
+    // open INVOICE and carries the frozen chain its own document recorded; the
+    // grouped node is the ACCOUNT. Asserting on the grouped one keeps this arm
+    // aligned with what the heading renders — and `rows[]` would still pass, so
+    // picking it would make the arm agree for a reason that is not the one
+    // stated. **Neither is `scope.name`**, for exactly the reason spelled out
+    // above: on an `all` scope it labels the whole book and names no customer,
+    // which is the default scope for this source rather than an edge case.
     const reachable = fields.some((f) =>
       f.path === "organization.path[].name" || f.path === "organization.name" ||
-      f.path === "orders[].organization.name" || f.path === "organization_path[].name"
+      f.path === "orders[].organization.name" || f.path === "organization_path[].name" ||
+      f.path === "organizations[].organization_path[].name"
     );
     assertEquals(reachable, true, `no reachable customer name in ${collection}`);
   }
