@@ -23645,6 +23645,24 @@ Chargeable days exclude weekends and holidays.
 
 Test if a given date is a CFS holiday.
 
+### `isNonTerminatingWindow(start: string, end: string): boolean`
+
+Would {@link countCfsBusinessDays} fail to terminate on this window?
+
+🔴 **The boundary is `end + 1 day < start`, NOT `end < start`.** The walk
+tests `isSameDay(addDays(end, 1), …)`, so an end exactly ONE calendar day
+before its start makes the terminator equal the first value tested: the body
+never runs and the window measures a legitimate zero days. Only an end two or
+more calendar days behind is unreachable.
+
+That distinction is not cosmetic — a guard written as `end < start` refuses
+windows the corpus already stores and every consumer already renders.
+
+Both arguments are ISO datetime strings, parsed in Chicago, and only their
+calendar days are compared. Use this at a boundary that holds stored values —
+an API handler deciding whether to 400, a client deciding whether to render —
+so no caller restates the rule.
+
 ### `isOffHours(date: Date): boolean`
 
 Test if a date/time is outside business hours (before 8am or after 4pm).

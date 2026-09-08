@@ -4,6 +4,8 @@ import {
   addChicagoDays,
   chicagoDaysBetween,
   countCfsBusinessDays,
+  getDefaultStartDate,
+  isNonTerminatingWindow,
   formatChargeDays,
   formatChicagoDate,
   formatChicagoDateTime,
@@ -659,4 +661,86 @@ Deno.test("formatChicagoDateTime — renders the minute, which is why it is a se
     formatChicagoDateTime("2026-09-02T14:05:00.000-05:00"),
     "September 2, 2026 · 2:05 PM",
   );
+});
+
+// ── the non-terminating window ───────────────────────────────────
+
+// `countCfsBusinessDays` walks FORWARD from `start` toward `addDays(end, 1)`.
+// An end two or more calendar days behind the start is therefore unreachable
+// and the loop spins forever — a hung request server-side, a frozen tab in a
+// browser. These arms come in pairs on purpose: the throw alone is satisfied by
+// a naive `end < start` guard, which would refuse the one-day case below that
+// the corpus already stores and every consumer already renders correctly.
+
+Deno.test("countCfsBusinessDays throws when end is two calendar days before start", () => {
+  const start = new TZDate(2024, 5, 19, 9, 0, 0, "America/Chicago");
+  const end = new TZDate(2024, 5, 17, 17, 0, 0, "America/Chicago");
+  assertThrows(
+    () => countCfsBusinessDays(start, end, []),
+    Error,
+    "would not terminate",
+  );
+});
+
+Deno.test("countCfsBusinessDays ACCEPTS an end exactly one calendar day before start", () => {
+  // `addDays(end, 1)` lands on `start`, so the body never runs. A real,
+  // storable zero-day window — not an error.
+  const start = new TZDate(2024, 5, 18, 9, 0, 0, "America/Chicago");
+  const end = new TZDate(2024, 5, 17, 17, 0, 0, "America/Chicago");
+  const result = countCfsBusinessDays(start, end, []);
+  assertEquals(result.calendarDays, 0);
+  assertEquals(result.days, 0);
+});
+
+Deno.test("countCfsBusinessDays accepts a same-day window whose end TIME is earlier", () => {
+  // Same calendar day, end clock-time before start clock-time. The walk is
+  // day-granular, so this is the ordinary one-day answer. Brackets the `:154`
+  // arm, which covers the same day in the other direction.
+  const start = new TZDate(2024, 5, 17, 17, 0, 0, "America/Chicago");
+  const end = new TZDate(2024, 5, 17, 9, 0, 0, "America/Chicago");
+  assertEquals(countCfsBusinessDays(start, end, []).days, 1);
+});
+
+Deno.test("isNonTerminatingWindow answers the boundary, not the ordering", () => {
+  const at = (ymd: string, hm: string) => toChicagoInstant(`${ymd}T${hm}:00`);
+  // Two or more days behind — unreachable.
+  assertEquals(isNonTerminatingWindow(at("2024-06-19", "09:00"), at("2024-06-17", "17:00")), true);
+  // Exactly one day behind — reachable, zero days.
+  assertEquals(isNonTerminatingWindow(at("2024-06-18", "09:00"), at("2024-06-17", "17:00")), false);
+  // Same day, earlier clock time — reachable.
+  assertEquals(isNonTerminatingWindow(at("2024-06-17", "17:00"), at("2024-06-17", "09:00")), false);
+  // Ordinary forward window.
+  assertEquals(isNonTerminatingWindow(at("2024-06-17", "09:00"), at("2024-06-21", "17:00")), false);
+});
+
+// ── getDefaultStartDate ──────────────────────────────────────────
+
+// The default start for a new order, and until now the only helper in this
+// module with no test at all. Asserted by clock-independent PROPERTIES: it
+// reads the wall clock, and this suite runs `--parallel` on the promise that
+// nothing MUTATES the clock, which reading does not.
+
+Deno.test("getDefaultStartDate opens at 09:00 Chicago", () => {
+  const d = getDefaultStartDate([]);
+  assertEquals(d.getHours(), 9);
+  assertEquals(d.getMinutes(), 0);
+  assertEquals(d.getSeconds(), 0);
+  assertEquals(d.getMilliseconds(), 0);
+});
+
+Deno.test("getDefaultStartDate never lands on a weekend", () => {
+  const day = getDefaultStartDate([]).getDay();
+  assertEquals(day === 0 || day === 6, false);
+});
+
+Deno.test("getDefaultStartDate skips past a run of holidays", () => {
+  // Every one of the next 12 calendar days is a holiday, so the result must
+  // clear all of them — and still not be a weekend. Fixes the answer relative
+  // to today without fixing today, which is what keeps this hermetic.
+  const today = toChicagoYmd(TZDate.tz("America/Chicago").toISOString());
+  const closed = Array.from({ length: 12 }, (_, i) => toChicagoYmd(addChicagoDays(`${today}T12:00:00.000-05:00`, i)));
+  const d = getDefaultStartDate(closed);
+  assertEquals(closed.includes(toChicagoYmd(d.toISOString())), false);
+  const day = d.getDay();
+  assertEquals(day === 0 || day === 6, false);
 });

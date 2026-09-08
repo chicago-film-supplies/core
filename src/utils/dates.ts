@@ -433,7 +433,46 @@ export interface BusinessDaysResult {
 }
 
 /**
+ * The calendar-day gap at which a window stops being walkable.
+ *
+ * {@link countCfsBusinessDays} walks FORWARD from `start` toward
+ * `addDays(end, 1)`, so the walk reaches its terminator only while
+ * `end + 1 day >= start`. One shared constant, because the same boundary is
+ * asked two ways — on `Date`s inside the walk, and on ISO strings by
+ * {@link isNonTerminatingWindow} for callers holding stored values.
+ */
+const NON_TERMINATING_DAY_GAP = -2;
+
+/**
+ * Would {@link countCfsBusinessDays} fail to terminate on this window?
+ *
+ * 🔴 **The boundary is `end + 1 day < start`, NOT `end < start`.** The walk
+ * tests `isSameDay(addDays(end, 1), …)`, so an end exactly ONE calendar day
+ * before its start makes the terminator equal the first value tested: the body
+ * never runs and the window measures a legitimate zero days. Only an end two or
+ * more calendar days behind is unreachable.
+ *
+ * That distinction is not cosmetic — a guard written as `end < start` refuses
+ * windows the corpus already stores and every consumer already renders.
+ *
+ * Both arguments are ISO datetime strings, parsed in Chicago, and only their
+ * calendar days are compared. Use this at a boundary that holds stored values —
+ * an API handler deciding whether to 400, a client deciding whether to render —
+ * so no caller restates the rule.
+ */
+export function isNonTerminatingWindow(start: string, end: string): boolean {
+  return chicagoDaysBetween(end, start) <= NON_TERMINATING_DAY_GAP;
+}
+
+/**
  * Count CFS business days between two dates (excludes weekends and CFS holidays).
+ *
+ * @throws if `end` is two or more calendar days before `start`. The walk moves
+ * forward only, so such a window has no reachable terminator and the loop would
+ * spin forever — a hung request server-side and a frozen tab in a browser.
+ * Refusing is deliberate: returning a zero-day result instead would be
+ * indistinguishable from a weekend-only rental, which is an ordinary booking.
+ * See {@link isNonTerminatingWindow} to ask before calling.
  */
 export function countCfsBusinessDays(
   start: Date,
@@ -445,6 +484,11 @@ export function countCfsBusinessDays(
   }
   if (!Array.isArray(holidays)) {
     throw new Error("holidays must be an array");
+  }
+  if (differenceInCalendarDays(end, start) <= NON_TERMINATING_DAY_GAP) {
+    throw new Error(
+      "end must not be more than one calendar day before start — the business-day walk moves forward and would not terminate",
+    );
   }
 
   let calendarDays = 0;

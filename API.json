@@ -10767,6 +10767,14 @@
         },
         {
           "kind": "function",
+          "name": "isNonTerminatingWindow",
+          "signature": "isNonTerminatingWindow(start: string, end: string): boolean",
+          "doc": "Would {@link countCfsBusinessDays} fail to terminate on this window?\n\n🔴 **The boundary is `end + 1 day < start`, NOT `end < start`.** The walk\ntests `isSameDay(addDays(end, 1), …)`, so an end exactly ONE calendar day\nbefore its start makes the terminator equal the first value tested: the body\nnever runs and the window measures a legitimate zero days. Only an end two or\nmore calendar days behind is unreachable.\n\nThat distinction is not cosmetic — a guard written as `end < start` refuses\nwindows the corpus already stores and every consumer already renders.\n\nBoth arguments are ISO datetime strings, parsed in Chicago, and only their\ncalendar days are compared. Use this at a boundary that holds stored values —\nan API handler deciding whether to 400, a client deciding whether to render —\nso no caller restates the rule.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isOffHours",
           "signature": "isOffHours(date: Date): boolean",
           "doc": "Test if a date/time is outside business hours (before 8am or after 4pm).",
