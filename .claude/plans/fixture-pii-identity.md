@@ -22,6 +22,50 @@ policed.
 
 ---
 
+## Scope — this is a THREE-issue campaign, decided 2026-09-08
+
+The review spawned two cleanups, and the owner settled how they ship. **core#91 + core#92 + core#93
+land as one campaign; core#94 stays out.**
+
+| | what | prod data | fixture families |
+|---|---|---|---|
+| **core#91** | the masker: identity seeding, discriminant routing, injective vocabulary | none | aging-report |
+| **core#92** | `AgingScope.name` → `AgingReport.organization_path` | none | aging-report, statement |
+| **core#93** | three `{uid, name}` org refs → `{uid, path}` (PickSheet ×2 + MovementSession) | none | packing-list, receipt |
+| **core#94** | rename `crms_id` (it is the operator-facing account number) | **317 orgs + every order/invoice/quote snapshot** | invoice, quote |
+
+🔴 **The corpora are DISJOINT, and that is what decided it.** The first three touch
+`{aging-report, statement, packing-list, receipt}` — 13 fixtures. core#94 touches
+`{invoice, quote}` — 23 of the 36, with zero overlap. **The shared re-capture that would justify
+bundling core#94 in does not exist**; it would share only the publish/pin/deploy dance, which is
+the last thing to share with a live-data migration.
+
+The first three also interlock: core#92 and core#93 each delete arms from core#91's discriminant
+table, and core#91's identity seeding makes their new chains mask at full depth for nothing. Built
+separately, core#91 builds routing that core#92 immediately makes half-dead.
+
+### Three calls taken, so nobody re-derives them
+
+1. ⭐ **core#91's MECHANISM ships now; only its RE-CAPTURE waits for the bundle.** Nothing goes red
+   without it — `isFiller` accepts the filler for every category and every committed organization
+   value is still a `FAKE_ORGANIZATIONS` member — so the beta, the pin, the prod deploy and the
+   capture-floor raise can go as soon as the peer's pick-sheet fold settles. The aging-report
+   re-capture joins core#92/#93's cycle instead, so the live defect's fix is not stuck behind two
+   cleanups.
+2. **`MovementSession.organization` is folded into core#93**, not filed separately. Same shape, same
+   cause, and the `receipt` family is already in the bundle's re-capture set.
+3. 🔴 **The manager is on the critical path, because of core#92.** `manager/src/routes/Reports.tsx`
+   reads `scope.name`; twelve lines below it already composes from the chain. **The reader stops
+   first, then the API stops writing** — the REFINE ordering from the `cfs-release-order` skill,
+   which core#91 and core#93 alone would not need. Nothing enforces it: write it into the PR.
+
+⚠️ **Blocked on a peer session**, not on any of this: another session is mid-flight on the
+pick-sheet fold (`e681582`, `895b90c` moved it into `utils/pick-sheet-fold.ts`). Start when it
+finishes, and **re-derive every line number in this doc first** — that refactor invalidated a set of
+them twenty minutes after they were written.
+
+---
+
 ## Verification
 
 Measured 2026-09-08 over all **36** committed fixtures on `templates` `main`, walking each document
@@ -132,7 +176,8 @@ enforce.
 ## The repair
 
 Scope chosen: **fix the masker, including the collision half. No stored field moves.**
-Re-capture: **the aging-report family only.**
+Re-capture: **deferred into the campaign's single cycle** — see *Scope* above. (This was
+"the aging-report family only" until core#92 and core#93 existed to share a cycle with.)
 
 One mechanism closes all three symptoms — **give the masker and the oracle access to the leaf's
 sibling fields.** §1 needs the sibling `uid`; §2 needs the sibling `kind`; §3 needs a vocabulary
@@ -324,7 +369,11 @@ the middle of this, not at the end. Nothing enforces the order — write it into
 
 ---
 
-## Follow-ups (file before the session ends)
+## Follow-ups
+
+⭐ The first two below are no longer follow-ups — they are core#92 and core#93, and they are IN this
+campaign (see *Scope*). Kept as entries because the reasoning that produced them is here and not on
+the issues.
 
 - **`templates`** — re-capture the remaining 7 affected fixtures (`statement` ×3, `packing-list` ×2,
   `invoice/rental-discount-taxed`, and the two hand-set templates#185 values) and **flip the new
