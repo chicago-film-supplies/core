@@ -164,9 +164,29 @@ export interface Organization {
    */
   dates?: { start: string | null; wrap: string | null };
   /**
+   * The organization's **human-readable account number** — despite the name.
+   *
+   * 🔴 **It is NOT expendable CRMS surface area, and the name says otherwise, so
+   * read this before acting on a CRMS cleanup.** CRMS is retired and the
+   * workspace rule is that "CRMS correctness is expendable and never holds a
+   * release" — true of the integration, false of this field. It is the account
+   * number an operator reads and types, and the manager depends on it: it is a
+   * member of `PRETTY_ID_FIELDS` (`manager/src/stores/schemas.ts`), so
+   * `prettyHref` builds organization detail-page URLs from it
+   * (`manager/src/primitives/createEntityRouteHandle.ts`), and it is the row
+   * label fallback in `manager/src/types/store.ts`. Deleting it breaks every
+   * organization deep link.
+   *
+   * ⚠️ **A rename is intended** (owner, 2026-09-08) — it is misnamed, not
+   * misplaced. Until it lands, the name is the whole hazard. See core#94, which
+   * also carries the denormalized copies on `DocumentOrganizationSnapshot`,
+   * `Booking.organization` and `OutOfService.organization`.
+   *
    * 🔴 **Nullable because a non-leaf node has no CRMS counterpart, which is a
    * real answer rather than "unknown".** `createOrganization` POSTs a live CRMS
    * member to obtain this, and a minted root or project must not create one.
+   * ⭐ That is also consistent with reading it as an account number: only a real
+   * account has one, and a minted ancestor is not an account.
    *
    * ⚠️ **`null` here is only meaningful because the minting writer stamps an
    * explicit `null`.** `orders.crms_id` reads identically and is REQUIRED,
