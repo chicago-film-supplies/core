@@ -27,7 +27,7 @@
  * themselves *here*, because a composite has its own shape. **`templates` and
  * `template-components` do not**: since 2026-09-08 a family REGISTERED by a
  * template-PR merge takes 20 hex chars of SHA-256 over its `git_path`
- * (`registerDocId`, api-cloudrun's `src/services/templates/publishFromMerge.ts`),
+ * (`registerDocId`, in `api-cloudrun/src/services/templates/publishFromMerge.ts`),
  * which satisfies `FirestoreId` exactly — so it is byte-indistinguishable from an
  * auto-id, the validator cannot tell, and neither can a reader looking at the
  * data. **That is precisely why it is written down, and this is the only place
