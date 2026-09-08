@@ -141,6 +141,7 @@ const REPORT = {
   organizations: [{
     uid: "a".repeat(20),
     name: "Netflix Productions, LLC",
+    organization_path: [{ uid: "a".repeat(20), name: "Netflix Productions, LLC", derived: false }],
     totals: {
       buckets: AGING_BUCKETS.map((b) => ({ bucket: b, amount_cents: b === "31-60" ? 44350 : 0 })),
       credit_cents: 0,
@@ -184,9 +185,43 @@ Deno.test("🔴 every organization name on the report is PII-classified as mask"
   // ⚠️ `collectMaskedLeaves` reports SCHEMA paths, so array steps carry no index
   // — `rows.organization_path.name`, not `rows.0.organization_path.0.name`. It
   // is a statement about the declaration, which is exactly the claim being made.
-  for (const path of ["scope.name", "rows.organization_path.name", "organizations.name"]) {
+  for (
+    const path of [
+      "scope.name",
+      "rows.organization_path.name",
+      "organizations.name",
+      // The grouped node's own chain, added for api-cloudrun#923. It is the
+      // field a consumer is now told to compose FROM, so it carries the same
+      // classification as the row's chain rather than inheriting the sibling
+      // `name`'s by adjacency.
+      "organizations.organization_path.name",
+    ]
+  ) {
     assertEquals(leaves.includes(path), true, `${path} is not classified pii:"mask" — leaves: ${leaves}`);
   }
+});
+
+Deno.test("🔴 a grouped organization node without a chain is REFUSED", () => {
+  // The whole point of api-cloudrun#923 is that a bare `name` cannot identify a
+  // department node, so a node that carries none is not a shape this report
+  // supports. `.min(1)` says so at the contract, which is why the fold can skip
+  // such a node rather than inventing a blank heading for it.
+  assertThrows(() =>
+    AgingReportSchema.parse({
+      ...REPORT,
+      organizations: [{ ...REPORT.organizations[0], organization_path: [] }],
+    })
+  );
+  assertThrows(() =>
+    AgingReportSchema.parse({
+      ...REPORT,
+      organizations: [{
+        uid: REPORT.organizations[0].uid,
+        name: REPORT.organizations[0].name,
+        totals: REPORT.organizations[0].totals,
+      }],
+    })
+  );
 });
 
 // ── The Org Statement ───────────────────────────────────────────────

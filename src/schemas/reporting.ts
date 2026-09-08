@@ -322,7 +322,35 @@ export interface AgingReport {
    */
   organizations: Array<{
     uid: string;
+    /**
+     * The node's OWN segment.
+     *
+     * 🔴 **Not an identity, and the level it fails at is the one a receivables
+     * roll-up sits on.** The tree is `[organization] [project] [department]`
+     * (`ORG_LEVELS`); censused over all 318 prod organizations on 2026-09-07,
+     * root names are unique 264/264 and project names 15/15, while the 29
+     * department nodes carry only 8 distinct names — 24 of them share just
+     * `Locations` (12), `Office` (10) and `Transpo` (2). A department name is a
+     * small closed vocabulary a production reuses, which is the whole reason
+     * the tree exists. **Compose the label from
+     * {@link AgingReport.organizations.organization_path} instead.**
+     */
     name: string;
+    /**
+     * The node's own chain from the root, so every consumer composes one label
+     * with `composeOrgName` — the one author of a composed organization name.
+     *
+     * ⚠️ **The join a client would otherwise have to do is not available to
+     * every client.** A `rows[]` entry carries the same chain, but adding a GET
+     * route auto-publishes an MCP tool, and an agent reading `organizations[]`
+     * without `rows[]` cannot tell two `Locations` nodes apart at all
+     * (api-cloudrun#923).
+     *
+     * PII rides in by COMPOSITION — `OrgPathNode.name` is already
+     * `pii: "mask"`, so this array sanitizes without a fresh ruling, exactly as
+     * {@link AgingRow.organization_path} does.
+     */
+    organization_path: OrgPathNodeType[];
     totals: AgingTotals;
   }>;
   /**
@@ -353,6 +381,11 @@ export const AgingReportSchema: z.ZodType<AgingReport> = z.strictObject({
   organizations: z.array(z.strictObject({
     uid: FirestoreId,
     name: z.string().default("").meta({ pii: "mask" }),
+    // `.min(1)` on purpose: a node whose chain is empty cannot be labelled, and
+    // emitting one under a blank heading is the ambiguity this field exists to
+    // remove. The fold skips such a node and its money stays in `totals`, where
+    // the reader sees it as the residual rather than as a nameless account.
+    organization_path: z.array(OrgPathNode).min(1).max(3),
     totals: AgingTotalsSchema,
   })).default([]),
   missing_anchor_uids: z.array(FirestoreId).default([]),
