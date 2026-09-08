@@ -13,6 +13,7 @@
  * | `BookingId`      | `{id}:{itemUid}:{id}`                   | `bookings.uid` = `{uid_order}:{item uid}:{uid_destination}` |
  * | `ItemUid`        | `FirestoreId | uuid | custom-{uuid}`    | order/invoice/fulfillment `items[].uid` + `path[]` segments |
  * | `QuoteId`        | `{id}:v{N}` / `{id}:draft`              | `quotes.uid` (saved versions + working draft) |
+ * | `StatementDocumentId` | `{id}:v{N}`                        | `statement-documents.uid` (saved org statements) |
  * | `MovementId`     | `{uuid}|{type}|{FirestoreId\|BookingId}` | `transactions.uid` for journal events (see below) |
  * | *(none)*         | third-party uuid                        | `uploadcare-worklist.uuid` — an Uploadcare id, so `uuid` not `uid`; see the carve-outs below |
  *
@@ -168,6 +169,21 @@ export const MovementId: z.ZodType<string> = z.templateLiteral([
 export const QuoteId: z.ZodType<string> = z.union([
   z.templateLiteral([firestoreId, ":v", z.number()]),
   z.templateLiteral([firestoreId, ":draft"]),
+]);
+
+/**
+ * `statement-documents.uid` — `{uid_organization}:v{N}`.
+ *
+ * ⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A
+ * quote has a canonical draft because the ORDER decides its content; a statement
+ * does not, because the REQUEST decides it — there is no "the statement for this
+ * organization" for a draft to be of. Built in
+ * `api-cloudrun/src/services/statements.ts`.
+ */
+export const StatementDocumentId: z.ZodType<string> = z.templateLiteral([
+  firestoreId,
+  ":v",
+  z.number(),
 ]);
 
 /**

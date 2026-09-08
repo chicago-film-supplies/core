@@ -69,6 +69,21 @@ export const PERMISSIONS = [
   "quotes.update",
   "quotes.delete",
 
+  // Saved org statements (`statement-documents`) — the `quotes.*` set verb for
+  // verb, because the two collections are the same thing one level up: a
+  // rendered customer document, saved by an explicit operator action, addressed
+  // by `{parent uid}:v{N}`, soft-deleted and restorable.
+  //
+  // ⚠️ **Its own resource rather than `reports.readFinancial`, and rather than
+  // `organizations.*`.** Producing a statement is `reports.readFinancial` and
+  // that stays true — but a SAVED statement is an artifact somebody issued, so
+  // deleting one is a different authority from running the report, and
+  // `organizations.update` (renaming an org) must not carry it either.
+  "statements.create",
+  "statements.read",
+  "statements.update",
+  "statements.delete",
+
   "locations.create",
   "locations.read",
   "locations.update",

@@ -334,6 +334,7 @@ export type RuleId =
   // uploadcare.ts
   | "generate-invoice-pdf:upload-to-worklist"
   | "generate-quote-pdf:upload-to-worklist"
+  | "generate-statement-pdf:upload-to-worklist"
   // stock.ts
   | "stock:ledger-to-stock"
   | "stock:bookings-to-stock"

@@ -344,6 +344,7 @@ export {
   MovementId,
   QuoteId,
   RoleId,
+  StatementDocumentId,
   SEEDED_ROLE_NAMES,
   type SeededRoleName,
   ThreadId,
@@ -868,6 +869,13 @@ export {
 } from "./quote.ts";
 
 export {
+  StatementDocumentSchema,
+  StatementRequestSnapshotSchema,
+  type StatementDocument,
+  type StatementRequestSnapshot,
+} from "./statement-document.ts";
+
+export {
   MovementSessionItemSchema,
   MovementSessionOrderRefSchema,
   MovementSessionSchema,
@@ -1126,6 +1134,7 @@ import type { CreditNote } from "./credit-note.ts";
 import type { PasswordReset } from "./password-reset.ts";
 import type { Product } from "./product.ts";
 import type { Quote } from "./quote.ts";
+import type { StatementDocument } from "./statement-document.ts";
 import type { Template } from "./template.ts";
 import type { TemplateComponent } from "./template-component.ts";
 import type { TemplateVersion } from "./template-version.ts";
@@ -1229,6 +1238,7 @@ import { CreditNoteSchema } from "./credit-note.ts";
 import { PasswordResetSchema } from "./password-reset.ts";
 import { ProductSchema } from "./product.ts";
 import { QuoteSchema as QuoteSchema_ } from "./quote.ts";
+import { StatementDocumentSchema as StatementDocumentSchema_ } from "./statement-document.ts";
 import { TemplateSchema as TemplateSchema_ } from "./template.ts";
 import { TemplateVersionSchema as TemplateVersionSchema_ } from "./template-version.ts";
 import { TemplateComponentSchema as TemplateComponentSchema_ } from "./template-component.ts";
@@ -1353,6 +1363,11 @@ export interface CollectionDocs {
   products: Product;
   quote: Quote;
   quotes: Quote;
+  // One key rather than the usual singular/plural pair: the collection name is
+  // already plural on its tail ("-documents") and there is no singular form a
+  // caller would reach for. See `statement-document.ts` for why it is not
+  // called `statements`.
+  "statement-documents": StatementDocument;
   template: Template;
   templates: Template;
   "templates-versions": TemplateVersion;
@@ -1453,6 +1468,7 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "password-reset": PasswordResetSchema, "password-resets": PasswordResetSchema,
   "product": ProductSchema, "products": ProductSchema,
   "quote": QuoteSchema_, "quotes": QuoteSchema_,
+  "statement-documents": StatementDocumentSchema_,
   "template": TemplateSchema_, "templates": TemplateSchema_,
   "templates-versions": TemplateVersionSchema_,
   "template-components": TemplateComponentSchema_,

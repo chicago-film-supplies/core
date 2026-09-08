@@ -89,7 +89,7 @@
  * unapplied until someone runs it. Land it with the first writer.
  */
 import { z } from "zod";
-import { FirestoreId, QuoteId } from "./_uid.ts";
+import { FirestoreId, QuoteId, StatementDocumentId } from "./_uid.ts";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 
 /**
@@ -103,6 +103,10 @@ import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 const UPLOADCARE_OWNER_COLLECTIONS = [
   "invoices",
   "quotes",
+  // The saved-org-statement artifact collection. Named `statement-documents`
+  // rather than `statements` because that word is already a template SOURCE (the
+  // fold) and a template TARGET — see `statement-document.ts`.
+  "statement-documents",
   "orders",
   "products",
   "templates-versions",
@@ -165,6 +169,14 @@ export interface UploadcareWorkListEntry {
    * pattern admits — typing this `FirestoreId` rejected every quote-produced
    * entry at `validateBeforeWrite`, silently, since quotes are exactly where
    * draft-PDF displacement was first measured.
+   *
+   * ⚠️ **`StatementDocumentId` is named even though `QuoteId` would already
+   * admit it.** A statement id is `{orgUid}:v{N}`, which is byte-identical in
+   * shape to `QuoteId`'s first arm — so the member adds no value today and
+   * exists so the dependency is not a coincidence: narrowing `QuoteId` later
+   * (dropping `:draft`, adding an order-side prefix) would otherwise start
+   * rejecting every statement-produced entry, silently, in exactly the way this
+   * paragraph's first half records for quotes.
    */
   uid_document: string;
   collection: UploadcareOwnerCollectionType;
@@ -221,7 +233,7 @@ export const UploadcareWorkListEntrySchema: z.ZodType<UploadcareWorkListEntry> =
   // named as a deliberate carve-out from the `_uid.ts` validators.
   uuid: z.uuid(),
   // The union is required, not defensive — see the interface field.
-  uid_document: z.union([FirestoreId, QuoteId]),
+  uid_document: z.union([FirestoreId, QuoteId, StatementDocumentId]),
   collection: UploadcareOwnerCollectionEnum.meta({ column: true, label: "Collection" }),
   kind: UploadcareUploadKindEnum.meta({ column: true, label: "Kind" }),
   // `pii: "mask"` + the 260 cap follow the two siblings that already store an

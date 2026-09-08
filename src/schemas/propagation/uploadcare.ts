@@ -118,6 +118,16 @@ const uploadcareWorkListRules: CollectionRule[] = [
     enforced_by: [DISPLACEMENT_SIGNAL],
     fields: WORK_LIST_FIELDS,
   },
+  {
+    id: "generate-statement-pdf:upload-to-worklist",
+    source: "statement-documents",
+    target: "uploadcare-worklist",
+    mode: "co-write",
+    invariant:
+      "Every uuid an org-statement render uploads gets a `uploadcare-worklist` entry, created in the SAME batch as the `statement-documents` write that claims the version. ⭐ **The one producer here with NO draft to displace** — an invoice and a quote each keep a regenerating draft whose predecessor this list exists to collect, and a statement has none, because a statement is a function of its REQUEST rather than of a parent document. So the only file this rule ever records is one whose version claim LOST the create race; a won claim's uuid is live from the same batch that names it.",
+    enforced_by: [DISPLACEMENT_SIGNAL],
+    fields: WORK_LIST_FIELDS,
+  },
 ];
 
 // ── Module ──────────────────────────────────────────────────────────
