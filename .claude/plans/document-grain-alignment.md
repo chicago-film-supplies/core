@@ -11,7 +11,7 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 >
 > | shared thing | how | guard | beta |
 > |---|---|---|---|
-> | line-item core fields | per key (`schemas/_items.ts`) | `tests/item-shape-parity.test.ts` | `.387`–`.391` |
+> | line-item core fields | **SPREAD** (`schemas/_items.ts`) | `tests/item-shape-parity.test.ts` | `.387`–`.391`, spread at **`.398`** |
 > | destination pair | SPREAD (`DestinationPairCore`) | `tests/destination-pair-parity.test.ts` | `.391` |
 > | `subject`, `reference` | one declaration per grain | `tests/subject-parity.test.ts` | `.394` |
 > | dividers | already shared (`_dividers.ts`) | — | pre-existing |
@@ -19,8 +19,10 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 > | **totals** | per key (`TotalsCore`) | `tests/totals-parity.test.ts` | **`.397`** |
 > | **member naming** | invoice adopts the MEMBER convention | the compiler | **`.397`** |
 >
-> Consumers: api-cloudrun `403edaef`, manager `a53a2f2`, templates on `.396` (peer-owned; `.397`
-> touches no symbol it references).
+> Consumers, all landed: api-cloudrun `eaf4eed4`, manager `19a092d`, both at `.398`. templates is
+> on `.397` and peer-owned — `.398` is pin-only there, but it reorders
+> `src/schemas/template-schema-fields.generated.ts` (same members), which is that repo's render-context
+> surface, so it is the one file to eyeball rather than rubber-stamp.
 >
 > ### 🔴 The one rule this campaign produced, stated three times before it was right
 >
@@ -28,19 +30,29 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 > A schema's key order is its Firestore-surface column order, so a spread is an operator-visible
 > column move wearing a refactor's clothes. Three questions, three answers:
 >
-> - **line item — cannot spread WITHOUT moving a column, which is not the same as "necessary".**
->   ⚠️ Re-examined 2026-09-09 after the question *"are the distinct arrangements necessary?"*, and
->   the honest answer is **no**. Of the six shared fields only four are columns at all (`uid` and
->   `path` carry no `column` meta), and three of those four — `name`, `description`, `quantity` —
->   already sit at IDENTICAL relative positions in all three grains. The single divergent one is
->   `zero_priced`, at column index 21 / 17 / 5, and it differs **only because of how many
->   grain-specific fields happen to precede it**. Nobody chose that.
->   ⭐ **And the cost of unifying is smaller than the ruling assumed: NO `items.*` column is
->   default-visible.** All three `displayDefaults.columns` are `number`, `organization.path`,
->   `subject`, `status` (+ `reference` on invoices), so item key order affects only the ordering of
->   the column PICKER, not any operator's table. A spread is therefore available for one deliberate
->   picker reorder. It was not taken because the ruling was made against preserving the status quo
->   rather than against what the status quo was worth.
+> - **line item — SPREAD at `.398`, reversing this campaign's own earlier ruling.** ⚠️ The ruling
+>   was *"no key order leaves all three grains unchanged, therefore reference per key"*. It is TRUE
+>   and it answers the wrong question: it is a claim about preserving the status quo, not about
+>   whether the status quo is worth preserving. Asked the second way — *"are the distinct
+>   arrangements NECESSARY?"* — the answer is **no**:
+>   - only FOUR of the six are columns at all (`uid` and `path` carry no `column` meta);
+>   - three of those four — `name`, `description`, `quantity` — already sat at IDENTICAL positions
+>     in all three grains, behind `type`;
+>   - the one that differed, `zero_priced`, differed **only because of how many grain-specific
+>     fields happened to precede it** (index 21 / 17 / 5). Accretion, not design;
+>   - and NO `items.*` column is default-visible — all three `displayDefaults.columns` are
+>     `number`, `organization.path`, `subject`, `status` (+ `reference` on invoices) — so item key
+>     order reaches the column PICKER and nothing an operator sees without opting in.
+>
+>   ⭐ **Keeping each grain's own `type` AHEAD of the spread was what kept the cost to one column.**
+>   All three already led with it. The whole measured change is `zero_priced` → index 4 on all
+>   three; both consumers needed zero source edits, which is the real check on a reorder.
+>
+>   🔴 **And the dump behind the original ruling was VACUOUS on exactly this point.**
+>   `getFirestoreColumns` takes a COLLECTION NAME; it was passed a schema object, returned `[]`,
+>   and three of the nine "byte-identical surfaces" compared empty to empty. It is the ONLY one of
+>   the three that can see an `items[]` key-order change — `getTypesenseColumns` iterates
+>   `config.schema.fields`, and `getInitialValues` returns `[]` for an array without descending.
 > - **destination pair — CAN spread.** The shared fields are the whole object in its existing order
 >   and the invoice's only extra key already sat first.
 > - **totals — cannot spread.** Contiguous in both, and *still* not spreadable:
@@ -52,8 +64,8 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 > separately-declared twin carries none of the base's `.meta()` and every heading silently vanishes
 > while a structural check stays green. **Confirmed by planting the defect** on the totals arm.
 >
-> ⚠️ **The "nine surfaces byte-identical" verification was PARTLY VACUOUS, and the correction
-> matters more than the claim did.** `getFirestoreColumns(collection: string)` takes a COLLECTION
+> ⚠️ **The "nine surfaces byte-identical" verification was PARTLY VACUOUS — corrected, and the
+> corrected instrument is what licensed the `.398` spread.** `getFirestoreColumns(collection: string)` takes a COLLECTION
 > NAME; the dump passed it a schema object, so it returned `[]` and three of the nine members
 > compared empty-to-empty. The other six were real (`getInitialValues` 24/28/12 keys,
 > `getTypesenseColumns` 62/24/32).
@@ -800,70 +812,80 @@ changes the *schema*, not the override policy).
 
 ## Context recommendation
 
-**Clear. Increment 1 is COMPLETE and SHIPPED END TO END (2026-09-09)** — `@cfs/core@10.0.0-beta.391`
-published, `manager` `a3cf914` and `api-cloudrun` `4fd666fb` both pinned to it and landed, both green.
-**Start at § *2* (bookings) or § *3* (the rulings)**, in a fresh window: none of the coordination
-context that produced this — four betas, a peer handover, a prod backfill, a dev Firestore stall — is
-needed to write the next piece.
+**CLEAR.** core#97 is structurally complete and every piece is landed, published and pinned in all
+consumers. Nothing outstanding needs the session that produced it: seven betas, four repos, a prod
+backfill, a peer running a parallel release train, and several corrections that are already written
+down below. **A fresh window loses nothing that is not in this doc or on an issue.**
 
-**The next piece is a CHOICE rather than a queue, and both arms are stated so they can be picked up
-cold.** Nothing is blocked; they are independent.
+**Where things stand, so a cold reader can confirm rather than trust:**
 
-- **§ *2* — bookings.** Two audits gate two renames and neither has been run. `Booking.dates` is a
-  renamed subset (`{start, end, charge_start, charge_end}` where the pair says
-  `delivery_start`/`collection_end`, and no `days_active`/`days_charged`) — **audit
-  `buildBookingDates` before renaming**, because a booking's window is derived per item type and
-  `start` may not be a clean alias. `Booking`'s flat `uid_destination_delivery` /
-  `uid_destination_collection` are a third spelling of a join that already has one — **check
-  `api-cloudrun/infra/firestore-indexes.json` for a caller first**, since a composite index may need
-  the top-level field. If either audit says "not a clean alias", file the finding rather than force
-  the rename. `Movement.path` is a separate `kind:decision` to FILE, not to guess.
-- **§ *3* — the two open rulings, both of which need work OUTSIDE core first.** `Invoice.subject`
-  needs `createInvoice`'s `subject: input.subject ?? null` → `?? ""` written and DEPLOYED before the
-  schema can tighten — the census is 0 nulls and that is evidence about the inputs so far, not about
-  the writer. `Invoice.destinations` needs the **31 empty arrays attributed** before `.min(1)` can
-  refuse them; the earlier guess ("the 28 flat CRMS invoices") is not the number.
-- **§ *4* (naming) is last and separable**, and has no correctness payoff with the largest blast
-  radius. Keep it its own commit so it can be dropped.
+| repo | at | commit |
+|---|---|---|
+| core | `10.0.0-beta.398` published | `fe031a5` |
+| api-cloudrun | `.398` | `eaf4eed4` |
+| manager | `.398` | `19a092d` |
+| templates | `.397` — peer-owned | `6c65fa4` |
 
-⚠️ **`templates` needs neither a pin bump nor a floor raise, and that is now MEASURED.** It sits on
-`.387`, four betas behind, deliberately. `deno task lint:capture-floor` against the published `.391`:
-194 tagged leaves across 8 collections at both the `.386` floor and `.391`, green. Its fixture corpus
-is clean for the tightening too — 45 JSON files, 8 invoice-shaped destination pairs, 0 missing a flag.
-⚠️ Re-run that task only if a further beta adds a schema field carrying PII: it compares `min_core`
-against the newest **published** core rather than against the pin, and is the one cross-repo gate that
-reaches forward past a pin.
+⚠️ **The one loose end is templates' `.397` → `.398` bump**, which is pin-only but reorders
+`src/schemas/template-schema-fields.generated.ts` (same members, new order). That file is the render-context
+surface, so it is worth an eyeball rather than a rubber stamp. Handed to the peer holding that repo;
+re-confirm before assuming it landed.
 
-✅ **The `Requires-Manager: >= 25.0.0` on `api-cloudrun` `e2dc7a09` is SATISFIED.** manager#438 was
-merged 2026-09-09 and `manager-v25.0.0` is published. Verified by reading the tag's own content rather
-than inferring it from the merge: `git show manager-v25.0.0:package.json` declares
-`npm:@jsr/cfs__core@10.0.0-beta.390`, and `095ce6a` is an ancestor of the tag. `4fd666fb` adds no new
-trailer — the manager does not construct an invoice destination pair, it edits `jurisdiction` and
-echoes the stored pair back, so the destination tightening cannot refuse anything it sends.
+### What to pick up next — all of it is on an issue, none of it is in this doc
 
-⚠️ **`core`'s gate judges the WHOLE working tree at both commit and push**, so check for a peer before
-starting — `git -C core status --short` and `pgrep -fl "deno.*test"`. (Unlike `api-cloudrun` and
-`manager`'s pre-commit, which gate the subject.) A peer landed `59fde44` into this doc mid-session on
-2026-09-09 while increment 1 was being written; the commits did not collide, and they would have.
+- **core#100 — the biggest, and it is a DECISION before it is work.** ~9,214 component rows state no
+  `zero_priced`. The census counts rows that do not STATE the flag; it **cannot** say which were
+  meant to be charged, so writing `false` across them asserts something nobody has measured. That
+  question goes to the owner first. ⚠️ Its numbers moved inside a day — re-derive before sizing.
+- **core#103** — `Booking`'s flat `uid_destination_*` pair is asymmetric: `delivery` is indexed query
+  surface (`bookings: [uid_destination_delivery, status]` + a live `.where()` in
+  `api-cloudrun/src/services/pickSheets.ts`), `collection` is an unbacked denorm. Neither is checked
+  against its nested twin.
+- **api-cloudrun#943** — `OrderDocDates` models a collection WINDOW that three consumers each collapse
+  differently. 1,020/1,020 pairs are currently equal, and that is a fact about the WRITER (the manager
+  mirrors them). `booking.dates.end` feeds `stockSummary`, so the first non-zero window releases a unit
+  while it is still out. Cheap to settle now, expensive later.
+- **api-cloudrun#944** — `Movement.path` on the append-only journal.
 
-🔴 **Verify any `core` publish against the PUBLISHED TARBALL, not the source tree.** `beta.388` shipped
-`isFulfillmentLineItem` unreachable — exported from `schemas/fulfillment.ts`, missing from
-`schemas/mod.ts`'s explicit list — and **every local gate was green**: `deno check` because the module
-compiles, `check:declarations` because the symbol has a type, and the suite because core's own tests
-import schema files directly rather than through the barrel. `beta.342` shipped the same class.
-Bump a consumer, import `node_modules/@cfs/core/src/schemas/mod.js` and exercise the behaviour.
-⚠️ The npm alias installs at `node_modules/@cfs/core`, **not** `node_modules/@jsr/cfs__core`.
-🔴 **And PRINT THE INSTALLED VERSION INSIDE THE PROBE.** On 2026-09-09 `npm install` left
-`node_modules/@cfs/core` at `.390` while `package-lock.json` already said `.391`, so the first probe
-ran against the OLD package and reported the tightening ABSENT — indistinguishable from a failed
-publish. `rm -rf node_modules/@cfs/core && npm install` fixed it.
+### Deliberately NOT done, with reasons — do not re-propose without new evidence
 
-⭐ **Increment 1a is not on this plan's critical path** — ~9,214 rows, tracked as core#100. It *would*
-break the `templates` fixtures where increment 1 did not: 27 of 154 committed line items state no
-`zero_priced`.
+- **§ *4*'s remaining half.** Canonicalising `OrderItemLine` vs `InvoiceItemInputLine` across grains:
+  neither spelling is wrong, and `FulfillmentLineItem` lacking a `Doc` segment is now **accurate**
+  rather than sloppy, since it stopped doing double duty at `.396`.
+- **An unconditional `.min(1)` on `Invoice.destinations`.** The bound exists and is CONDITIONAL; see
+  the field's own docblock. Adding one refuses 31 live flat CRMS invoices.
+- **Renaming `Booking.dates`.** `buildBookingDates` is a per-item-type DERIVATION, not a renamed
+  subset — `end` is `collection_START`, and `null` for a sale.
 
-⚠️ **This doc's own line numbers will rot the same way the campaign's did.** Re-derive before acting on
-any of them; the measurements and the reasoning are the durable half.
+### One live inconsistency this campaign exposed and did not fix
 
-**Delete this doc in the commit that lands the last increment.** A stale plan reads as current intent —
-which is exactly the trap recorded above.
+The three input schemas disagree on whether `path` is required: `OrderItemLineInner` requires it,
+`InvoiceItemInputLineInner` has `.optional()`, `FulfillmentItemInputLineInner` requires it. **The
+invoice is the outlier.** Tightening it is a refinement of a client-supplied input, so it needs the
+writer check first — not a free change.
+
+### Standing hazards, re-confirmed today
+
+🔴 **Verify a `core` publish against the PUBLISHED TARBALL and print the installed version inside the
+probe.** `beta.388` shipped a symbol missing from `schemas/mod.ts` with all three local gates green.
+⚠️ The npm alias installs at `node_modules/@cfs/core`, and `npm install` alone can leave it a beta
+behind its own lockfile — `rm -rf node_modules/@cfs/core && npm install`.
+
+🔴 **`refactor:` is a NO-RELEASE type in core's convention table.** A `refactor(schemas):` commit ran
+green and published nothing on 2026-09-09, leaving the change unreachable on `beta`. If a version does
+not move, check the commit TYPE before checking JSR.
+
+🔴 **`getFirestoreColumns` takes a COLLECTION NAME, not a schema.** Passing a schema returns `[]` and
+the comparison is empty-to-empty. It is the ONLY surface that can see an `items[]` key-order change.
+
+⚠️ **`core`'s gate judges the WHOLE working tree at commit and push; `api-cloudrun`'s and `manager`'s
+gate the SUBJECT** (a throwaway worktree at the push sha — api-cloudrun#817 is closed). So a peer's
+dirty tree cannot fail your push there. What DOES bite is committing during a peer's gate: git resolves
+the ref at pack time, so a commit landing mid-gate ships having been gated by nothing (api-cloudrun#846).
+
+⚠️ **This doc's line numbers rot.** Re-derive before acting on any; the measurements and the reasoning
+are the durable half.
+
+**Delete this doc once core#100 is decided.** The structural work it planned is done; what keeps it
+alive is that core#100 and the three bookings issues still cite its § *0* census table as the record
+of what was counted.
