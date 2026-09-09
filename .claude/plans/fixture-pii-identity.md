@@ -24,7 +24,7 @@ deploy.
 | `api-cloudrun` | **`v0.243.0` MERGED AND DEPLOYED TO PROD** — revision `api-cloudrun-00359-928`, pinning beta.385. 2014 unit tests green. |
 | prod data | **2 documents repaired** (`api-cloudrun/scripts/repair-template-commit-types.ts`), verified 0 remaining. |
 | `manager` | `14f3cb9` on `main`, deployed. Typecheck clean, 1977 tests green. |
-| `templates` | branch **`core-91-92-93-campaign`**, commit `6f0b98c` — pin, `lint-capture-floor` trigger, `min_core` → beta.385, four `.eta` files. **NOT pushed, no PR yet.** ⚠️ Its pin and `min_core` need re-pointing to beta.386 before the re-capture. |
+| `templates` | branch **`core-91-92-93-campaign`**, `6f0b98c` + `c985861` (beta.386, letterhead) — pin, `lint-capture-floor` trigger, `min_core` → beta.385, four `.eta` files. **NOT pushed, no PR yet.** ⚠️ Its pin and `min_core` need re-pointing to beta.386 before the re-capture. |
 
 🔴 **The hard serialization point is PASSED.** A capture is sanitized by the DEPLOYED core
 (api-cloudrun#838); prod now serves beta.385, so captures taken from here get the fixed masker.
@@ -83,7 +83,7 @@ separately: a sidecar that recorded its own capture inputs would make a re-captu
 
 ## Also outstanding
 
-- **`api-cloudrun/.claude/skills/templates/SKILL.md:70` is now FALSE** in both clauses: *"`path` is on
+- ~~`api-cloudrun/.claude/skills/templates/SKILL.md:70` is now FALSE~~ **DONE** — rewritten, and the three facts from the deleted `pick-sheet-document.md` are rescued into the same skill. Was: in both clauses: *"`path` is on
   orders, invoices and credit-notes ONLY. The light shapes carry `{uid, name}` and no chain, so
   `session.organization` on a receipt has nothing to compose from."* After core#93 they do carry the
   chain and the receipt does compose. It is a skill — the org-shared authority every machine and cloud
@@ -95,9 +95,19 @@ separately: a sidecar that recorded its own capture inputs would make a re-captu
   prod-deploy serialization point — and paying it NOW is strictly cheaper, because the receipt fixtures
   have not been re-captured yet and deferring buys a SECOND re-capture. Landed in `core` `6ada424`
   (beta.386) with a shared `bookingOccurrencesByBooking` and an equivalence test against the fold.
-- File the **`lint-capture-floor` discriminant-probe** limit (see `6f0b98c`'s message).
-- File the **sidecar capture-inputs** gap above.
+- **All follow-ups FILED** — nothing is left in prose only:
+  - **templates#286** — `lint-capture-floor` sees a qualified route change, not a discriminant one.
+  - **templates#287** — a fixture records no capture INPUTS, which is why the re-capture below is
+    archaeology rather than a replay.
+  - **templates#288** — nothing checks that core#91's masking reached the CORPUS. Must land ADVISORY:
+    the 23 `invoice`/`quote` fixtures still violate it until core#94 re-captures them.
+  - **templates#289** — `lint:citations` does not scan `.eta` prose, found via a dead citation in
+    `letterhead.eta` that a green run reported as clean.
+  - **core#99** — `PickSheetScope` `kind:"order"` states an ORDER id where an organization identity is
+    needed, so its name stays filler.
 - `templates#270` — **already closed** (superseded, pinned beta.374).
+- **`api-cloudrun/.claude/plans/pick-sheet-document.md` — DELETED**, as it instructed. Its three
+  surviving facts are in the templates SKILL.
 
 ## Findings worth keeping
 
