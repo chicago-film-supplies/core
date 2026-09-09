@@ -113,8 +113,13 @@ separately: a sidecar that recorded its own capture inputs would make a re-captu
 
 - **The address defect is 4× larger than reported.** Measured over all 38 fixtures: **26 same-uid
   destination leg pairs, 23 masking to two different streets** — not the "6 of 6" the handoff claimed.
-  17 of the 23 are in `invoice`/`quote`, i.e. **core#94's corpus, outside this campaign**. Those stay
-  oracle-valid, so nothing is red; they simply churn when next re-captured.
+  17 of the 23 are in the `invoice` and `quote` families — **outside this campaign's re-capture set**.
+  ⚠️ Sourced precisely: that split is this campaign's own scoping (15 fixtures here, 23 there,
+  exactly disjoint), NOT something core#94 states. #94 renames
+  `DocumentOrganizationSnapshot.crms_id`, which sits on orders, invoices and quotes, so its rename is
+  what will next invalidate those 23 — but #94's body says nothing about address masking. Do not cite
+  it as though it did. Those fixtures stay oracle-valid meanwhile, so nothing is red; they churn
+  whenever they are next re-captured.
 - **`DocDestinationEndpoint.uid` is a sibling of `address`, not of `address.full`**, so the `siblings`
   seam does NOT reach it. The fix is value-identity seeding, which is simpler and also fixes emails,
   phones and people.

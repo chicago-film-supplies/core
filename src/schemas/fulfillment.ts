@@ -195,7 +195,19 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.discriminatedUn
   FulfillmentGroupItemInner,
 ]);
 
-/** Sanitized organization snapshot — uid and name only. */
+/**
+ * Sanitized organization snapshot — uid and CHAIN.
+ *
+ * ⚠️ This said "uid and name only" until 2026-09-08 and had been wrong since
+ * `beta.309` removed the composed `name`: the field is `path`, and the name is
+ * composed from it by `composeOrgName`.
+ *
+ * ⚠️ **It also carries no `crms_id`, unlike `DocumentOrganizationSnapshot` on
+ * orders, invoices and quotes.** Plausibly deliberate — this is the client-facing
+ * warehouse view, which states no price and no financial flags, and an
+ * operator-facing account number is neither — but nobody has written that down,
+ * so it reads as an omission. core#94 asks for the ruling.
+ */
 const FulfillmentOrganization = z.strictObject({
   uid: FirestoreId.nullable(),
   path: OrderDerivedOrgPath,
