@@ -1073,3 +1073,20 @@ Deno.test("path_substituted_for: the INPUT schema accepts it, or every PUT drops
   const items = (parsed.success ? parsed.data.items : []) as unknown as Array<Record<string, unknown>>;
   assertEquals(items[0].path_substituted_for, ["Destination000000001", "Item0000000000000001"]);
 });
+
+Deno.test("reference is bounded at 255, matching the order and fulfillment grains", () => {
+  // The invoice was the only one of the three without a bound (core#97
+  // increment 1). Asserted on the FIELD rather than through a whole document,
+  // so a failure is attributable to the bound and not to an unrelated required
+  // key drifting underneath the fixture.
+  // deno-lint-ignore no-explicit-any
+  const reference = (InvoiceSchema as any)._zod.def.shape.reference;
+  assertEquals(reference.safeParse("PO #12398").success, true);
+  assertEquals(reference.safeParse(null).success, true, "null stays a legal reference");
+  assertEquals(reference.safeParse("x".repeat(255)).success, true, "255 is the boundary and must pass");
+  assertEquals(
+    reference.safeParse("x".repeat(256)).success,
+    false,
+    "a 256-char reference must be refused — 0 of 1,040 stored invoices exceed 255",
+  );
+});

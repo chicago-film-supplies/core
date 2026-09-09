@@ -279,7 +279,13 @@ export interface InvoiceDocItemPrice {
 const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject({
   base_cents: z.int().default(0).meta({ column: true, label: "Base Price" }),
   base_percent: z.number().nullable().optional(),
-  chargeable_days: z.number().nullable().default(null).meta({ column: true, label: "Chargeable Days" }),
+  // 🔴 `.int()`, matching `OrderDocItemPrice.chargeable_days`. A count of days
+  // has no fractional value that means anything, which is `CLAUDE.md` § *Stored
+  // money is integer cents* — "an INTEGRAL quantity is `z.int()` … a count of
+  // things — units, documents, attempts, days". This grain admitted 2.5. 0 of
+  // 1,040 stored invoices carry a fractional value in either project, and 0
+  // across the 23 committed `invoice`+`quote` fixtures in `templates`.
+  chargeable_days: z.number().int().nullable().default(null).meta({ column: true, label: "Chargeable Days" }),
   formula: PriceFormulaEnum.default("five_day_week").meta({ column: true, label: "Formula" }),
   subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
   subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
@@ -779,7 +785,10 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   due_date_fs: FirestoreTimestamp.optional(),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
   subject: z.string().nullable().meta({ pii: "mask", column: true, label: "Subject", linkTo: "invoiceDetail" }),
-  reference: z.string().nullable().meta({ column: true, label: "Reference", linkTo: "invoiceDetail" }),
+  // `.max(255)` matches `OrderDocument.reference` and `Fulfillment.reference`;
+  // this grain was the only one without a bound. 0 of 1,040 stored invoices
+  // exceed it in either project (2026-09-09 census).
+  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "invoiceDetail" }),
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   organization: DocumentOrganizationSnapshot,
   destinations: z.array(InvoiceDocDestination).default([]),

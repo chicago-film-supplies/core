@@ -496,12 +496,29 @@ because it lands in the file and the fixture family that campaign already opens:
 ⚠️ **Rewritten 2026-09-09.** Increment 0 answered two of these with data and the owner ruled on
 the third, so this is no longer three open `kind:decision` items.
 
-- ✅ **`Invoice.subject` — ANSWERED, and it is free.** It is `string | null` where order and
-  fulfillment are `string` with `.default("")`, and `createInvoice` writes
-  `input.subject ?? null` — so this looked like a backfill. **The census found 0 nulls in
-  either environment**, so aligning it to non-nullable is a pure declaration change with
-  nothing to migrate. (`reference` is *already* nullable on all three — only `.max(255)` is
-  missing on the invoice, which increment 1 fixes, and 0 invoices exceed it.)
+- 🔴 **`Invoice.subject` — NOT free, and the "answered" verdict above was wrong. Corrected
+  2026-09-09 while landing increment 1.** The census IS 0 nulls in both environments, and that
+  is exactly the trap `CLAUDE.md` § *Making a field REQUIRED* step 2 names: **a clean census is
+  evidence about the INPUTS SO FAR, not about the writer.** `createInvoice` writes
+  `subject: input.subject ?? null` (`api-cloudrun/src/services/invoices.ts`) and
+  `CreateInvoiceInput.subject` is `z.string().optional()` — so the writer *produces* `null`, and
+  the very next invoice created without a subject would be refused by a non-nullable schema.
+  0 nulls means nobody has yet created one without a subject; it does not mean nobody can.
+
+  ⭐ This is the `orders.crms_status` case verbatim — 995/995 present, and requiring it would
+  400 the native create path the first time it ran — sitting directly beside `orders.crms_id`,
+  which reads identically and IS required because `createOrder` writes an explicit value. Same
+  census, opposite verdicts, and only the writer distinguishes them.
+
+  **So it is a cross-repo ordering, not a declaration change.** Align the writer first
+  (`?? null` → `?? ""`, matching order and fulfillment's `.default("")` / `subject: string`),
+  DEPLOY it, and only then tighten the schema. ⚠️ And note the `.default("")` on the other two
+  grains is inert on a write — `validateBeforeWrite` discards `result.data` — so the writer has
+  to supply `""` itself; the default is not doing this for order or fulfillment either.
+
+- ✅ **`reference` — done in increment 1.** Already nullable on all three; the invoice was the
+  only grain without `.max(255)`, and 0 of 1,040 exceed it. Unlike `subject`, no writer can
+  produce a violating value on its own, which is why this one genuinely was free.
 - ⚠️ **`Invoice.destinations` `.default([])` vs `.min(1)` — ANSWERED, and it is NOT free.**
   **31 invoices carry an empty `destinations`** in both environments. The guess in the earlier
   draft was "the 28 flat CRMS invoices"; the real number is 31 and it has not been attributed.

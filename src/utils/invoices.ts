@@ -84,7 +84,7 @@ import {
   type SubstitutionAnchor,
 } from "./substitutions.ts";
 import { mapPathsAcrossRebuild, pairItemsByUidOccurrence } from "./item-pairing.ts";
-import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocTotals, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocLineItem, InvoiceDocTotals, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   isDividerItemType,
@@ -452,7 +452,23 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   "crms_id",
   "crms_opportunity_id",
   "path_substituted_for",
-] as const;
+  // 🔴 Type-checked against the STORED shape, not derived from it. Derivation is
+  // wrong here and the distinction is the whole point: this is an OVERRIDE
+  // POLICY, not a structural difference — `coa_revenue` is on the order line too
+  // and `path_substituted_for` is on the fulfillment line, so "fields the
+  // invoice has and the order does not" computes a different list.
+  //
+  // What CAN be checked is that every member is really a key of the invoice's
+  // stored line item. A member that is not silently filters nothing:
+  // `invoiceItemDifferences` compares KEY SETS, so a typo here would leave the
+  // field in both sets and report every paired line permanently out of sync —
+  // which has happened three times (`base_percent`, `crms_id`,
+  // `price.discount_percent`: 8,015 of 8,978 paired lines).
+  //
+  // A `satisfies` rather than a test because it costs nothing and cannot be
+  // skipped, and because exporting the list purely to assert it from `tests/`
+  // would widen `@cfs/core/utils/invoices` for a guard.
+] as const satisfies readonly (keyof InvoiceDocLineItem)[];
 
 /** Membership form of {@link INVOICE_ONLY_ITEM_FIELDS}, for key filtering. */
 const INVOICE_ONLY_ITEM_FIELD_SET: ReadonlySet<string> = new Set(INVOICE_ONLY_ITEM_FIELDS);

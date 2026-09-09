@@ -38,7 +38,7 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { LineItemCore } from "../src/schemas/_items.ts";
-import { schemas } from "../src/schemas/mod.ts";
+import { InvoiceDocItem, schemas } from "../src/schemas/mod.ts";
 
 const GRAINS = ["orders", "invoices", "fulfillments"] as const;
 
@@ -132,4 +132,67 @@ Deno.test("the invoice grain carries the bounds it drifted from", () => {
   assertEquals(invoice.quantity.safeParse(-1).success, false, "a negative quantity must be refused");
   assertEquals(invoice.quantity.safeParse(2.5).success, false, "a fractional quantity must be refused");
   assertEquals(invoice.quantity.safeParse(3).success, true);
+});
+
+/**
+ * The remaining increment-1 tightenings, asserted as VALUES.
+ *
+ * ⚠️ Separate from the parity arms above on purpose. Instance identity says the
+ * three grains agree; it cannot say *what* they agree on, so a later edit to
+ * `LineItemCore` could relax all three at once with every parity arm still
+ * green. These pin the constraints themselves.
+ */
+Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () => {
+  // 🔴 The regression this catches is not a loosened bound — it is the refine
+  // silently detaching again. It was attached to the exported alias
+  // (`InvoiceDocLineItemSchema`) while `InvoiceDocItem`'s union is built from
+  // the un-refined Inner, so `validateBeforeWrite` on an invoice never asked
+  // whether a zero-priced line carried a charge. Asserted through the ITEM
+  // UNION, which is what the document actually parses with — testing the
+  // exported alias would have passed for that entire period.
+  const line = (over: Record<string, unknown> = {}) => ({
+    uid: "abcdefghij0123456789",
+    type: "rental",
+    name: "Light",
+    description: "",
+    quantity: 1,
+    path: ["abcdefghij0123456789"],
+    price: {
+      base_cents: 1000,
+      formula: "five_day_week",
+      chargeable_days: 1,
+      subtotal_cents: 1000,
+      subtotal_discounted_cents: 1000,
+      total_cents: 1000,
+      discount: null,
+      taxes: [],
+      taxes_base: [],
+    },
+    ...over,
+  });
+
+  // Positive control — the same line without the flag must still parse, so a
+  // failure below is attributable to `zero_priced` and not to the fixture.
+  assertEquals(InvoiceDocItem.safeParse(line()).success, true, "control line must parse");
+  assertEquals(
+    InvoiceDocItem.safeParse(line({ zero_priced: true })).success,
+    false,
+    "a zero_priced line carrying a non-zero base_cents must be REFUSED by the document union",
+  );
+  // And the flag itself is not what makes it fail — only the contradiction does.
+  const zeroed = line({ zero_priced: true });
+  (zeroed.price as Record<string, unknown>).base_cents = 0;
+  (zeroed.price as Record<string, unknown>).subtotal_cents = 0;
+  (zeroed.price as Record<string, unknown>).subtotal_discounted_cents = 0;
+  (zeroed.price as Record<string, unknown>).total_cents = 0;
+  assertEquals(InvoiceDocItem.safeParse(zeroed).success, true, "a genuinely zero-priced line must parse");
+});
+
+Deno.test("invoice items[].price.chargeable_days is integral", () => {
+  const days = (v: number) =>
+    // deno-lint-ignore no-explicit-any
+    (lineArmShape("invoices").price as any)._zod.def.shape.chargeable_days.safeParse(v).success;
+  assertEquals(days(2.5), false, "a fractional chargeable_days must be refused — a count of days is integral");
+  assertEquals(days(3), true);
+  assertEquals(days(0), true);
 });
