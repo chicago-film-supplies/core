@@ -3,29 +3,66 @@
 *Promoted from a machine-local draft on 2026-09-09. Owning repo is `core` — the schemas are
 the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 
-> ## ⚠️ STATUS 2026-09-09 — increments 0, 1, 2 and 3 are DONE and SHIPPED. Two pieces remain.
+> ## ⚠️ STATUS 2026-09-09 — core#97 is STRUCTURALLY COMPLETE. Every grain-sharing piece has shipped.
 >
-> Compacted from five blocks into one current statement. **Read this, not the increment prose,
-> wherever they disagree** — several sections below are now history and are marked where they are
-> load-bearing.
+> **The three grains now share one declaration per shared field, and each sharing has a guard.**
+> Nothing in this plan is outstanding. What remains are the SPIN-OFFS below, each with its own
+> issue.
 >
-> ### What is left, and it is all of it
+> | shared thing | how | guard | beta |
+> |---|---|---|---|
+> | line-item core fields | per key (`schemas/_items.ts`) | `tests/item-shape-parity.test.ts` | `.387`–`.391` |
+> | destination pair | SPREAD (`DestinationPairCore`) | `tests/destination-pair-parity.test.ts` | `.391` |
+> | `subject`, `reference` | one declaration per grain | `tests/subject-parity.test.ts` | `.394` |
+> | dividers | already shared (`_dividers.ts`) | — | pre-existing |
+> | **input schemas** | fulfillment got its first | `tests/fulfillment.test.ts` | **`.396`** |
+> | **totals** | per key (`TotalsCore`) | `tests/totals-parity.test.ts` | **`.397`** |
+> | **member naming** | invoice adopts the MEMBER convention | the compiler | **`.397`** |
 >
-> - **`TotalsCore` — deferred, not blocked, and now the LAST structural piece.** `OrderDocTotals`
->   and `InvoiceDocTotalsSchema` still hand-declare six byte-identical fields, and
->   `DocumentTotalsCore` (`src/utils/orders.ts`) hand-declares the intersection a third time —
->   its own docblock admits it is *"one of the places a rename does NOT arrive as a compile error
->   automatically."* The import cycle that blocked it is SOLVED, by the same move
->   `DestinationPairCore` used: `PriceModifier` lives in `order.ts`, so `TotalsCore` lives in
->   `order.ts` too, annotated, deliberately off `schemas/mod.ts`. The six fields have not drifted;
->   this is prevention, and it is one commit plus a parity test.
-> - **§ *4* (naming) — untouched, and still the piece with no correctness payoff and the largest
->   blast radius.** Keep it separable.
-> - **Increment 1a is core#100 and is NOT on this plan's critical path** — ~9,214 rows, its own
->   campaign. ⚠️ Its numbers MOVED inside a day (fulfillments 4,815 → 4,823, fee/surcharge null
->   `crms_id` 3 → 5), so re-derive before sizing it.
+> Consumers: api-cloudrun `403edaef`, manager `a53a2f2`, templates on `.396` (peer-owned; `.397`
+> touches no symbol it references).
+>
+> ### 🔴 The one rule this campaign produced, stated three times before it was right
+>
+> **Whether a shared shape can be SPREAD is decided by agreement on KEY ORDER, not by contiguity.**
+> A schema's key order is its Firestore-surface column order, so a spread is an operator-visible
+> column move wearing a refactor's clothes. Three questions, three answers:
+>
+> - **line item — cannot spread.** Six shared fields at three different arrangements; no key order
+>   leaves all three grains unchanged.
+> - **destination pair — CAN spread.** The shared fields are the whole object in its existing order
+>   and the invoice's only extra key already sat first.
+> - **totals — cannot spread.** Contiguous in both, and *still* not spreadable:
+>   `discount_amount_cents` is FIRST on the order and THIRD on the invoice.
+>
+> ⭐ The totals case is the one that sharpened the rule — contiguity looked sufficient and is not.
+> Every non-spread case puts the anti-drift guarantee in a parity test asserting **instance
+> identity**, never structural equality: `z.globalRegistry` is keyed on the instance, so a
+> separately-declared twin carries none of the base's `.meta()` and every heading silently vanishes
+> while a structural check stays green. **Confirmed by planting the defect** on the totals arm.
+>
+> ⭐ **And every shape change was verified as a DIFF rather than argued** — `getInitialValues`,
+> `getFirestoreColumns` and `getTypesenseColumns` for all three collections, dumped before and
+> after. Byte-identical, order included, at `.391`, `.397` and the rename; the only value that ever
+> moved was `invoices` initial `subject` `null` → `""` at `.394`, which was the point.
+>
+> ### What is left — all of it now lives on issues, not here
+>
+> - **core#100 (increment 1a)** — ~9,214 component rows stating no `zero_priced`. Its own campaign,
+>   and a `kind:decision` first: the census counts rows that do not STATE the flag and cannot say
+>   which were meant to be charged. ⚠️ Its numbers moved inside a day; re-derive before sizing.
+> - **core#103, api-cloudrun#943, api-cloudrun#944** — the § *2* bookings findings. Both renames
+>   § *2* proposed are REFUSED on the evidence; see below.
+> - **§ *4*'s remaining half** — canonicalising `OrderItemLine` vs `InvoiceItemInputLine` across
+>   grains. Deliberately NOT done: unlike the invoice's inverted members, neither spelling is
+>   wrong, and `FulfillmentLineItem` lacking a `Doc` segment is now *accurate* rather than sloppy.
+> - ⚠️ **One live inconsistency this pass exposed and did not fix:** the three input schemas
+>   disagree on `path`. `OrderItemLineInner` requires it, `InvoiceItemInputLineInner` has
+>   `.optional()`, and `FulfillmentItemInputLineInner` requires it. The invoice is the outlier;
+>   tightening it is a client-supplied-input refinement, so it needs the writer check first.
 >
 > ### Increment 3 — the two § *3* rulings, SHIPPED as `@cfs/core@10.0.0-beta.394`
+
 >
 > All four repos landed: core `f816cbc`, api-cloudrun `4e4f67c6` + `05ae7b4a` + `0941c8db`,
 > manager `e2c5900`. `templates` handed off at `.393` with its corpus verified (below).
