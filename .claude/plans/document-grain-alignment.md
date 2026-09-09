@@ -57,9 +57,28 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 >   `templates` fixtures where increment 1 did not: 27 of 154 committed line items state no
 >   `zero_priced`.
 >
-> **NEXT: `api-cloudrun` pins `10.0.0-beta.390`.** ⚠️ Not a `sed` — it reshapes schemas the API reads
-> on nearly every write path, so budget a typecheck-driven change plus the deploy ordering. The
-> manager is already ahead of it, which is the correct direction for a REFINE.
+> ✅ **`api-cloudrun` is pinned to `.390` and landed** (`e2dc7a09`) — 40 entries, 0 typecheck errors,
+> gate clean, `test:units` 2014/0. It carries `Requires-Manager: >= 25.0.0`: core#102 tightens INPUTS
+> the manager sends, so this is the REFINE case and the manager must release first (its `.390` pin is
+> on `main` and unreleased; manager#438 cuts 25.0.0 and covers it).
+>
+> ⚠️ **A clean `deno check` was NOT the whole answer, and what caught the gap was a different ratchet
+> than expected.** `orderInvoiceMirrorCoverage C` demands every invoice-writing script declare how the
+> `order.invoices[]` mirror converges; the backfill was uncatalogued. The seed sweep it prompted came
+> back clean for a *reason* rather than by luck: every empty `name` in that repo sits on a destination
+> DIVIDER, whose schema carries no `.min(1)`, and every negative `quantity` is a stock-location or
+> movement quantity — a different schema.
+>
+> ⭐ **Verification § re-parse: DONE, both projects, 0 failures.** 1,019 orders / 1,040 invoices /
+> 1,019 fulfillments in each — **6,156 documents, 0 parse failures** against `.390`. Strictly stronger
+> than § *0*'s census, which asks four questions where this asks the whole schema.
+>
+> **NEXT, and it is the last structural piece of increment 1:** `InvoiceDocDestination` rebuilt as
+> `z.strictObject({ uid_order: FirestoreId, ...DestinationPairCore })`. core#101's repair unblocked it,
+> and its key order already matches `DocDestination`'s exactly, so that spread is order-preserving and
+> changes no column surface. ⚠️ When it ships, **DELETE
+> `api-cloudrun/scripts/backfill-invoice-destination-flags.ts`** — a one-shot, per that repo's script
+> lifecycle.
 >
 > ⚠️ **The hold on the core#91/#92/#93 campaign is LIFTED** (templates#292 merged). The mechanism this
 > doc originally named was wrong: it was never a stale pin, it was `lint:capture-floor` comparing
