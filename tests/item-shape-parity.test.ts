@@ -10,15 +10,12 @@
  * with no `.min(0)`. So an invoice line could store an empty name and a negative
  * quantity that the order line it was billed from could not.
  *
- * The obvious fix is `z.strictObject({ ...LineItemCore, … })`, and `_items.ts`
- * explains why it is not used: the shape's key order becomes the schema's key
- * order, `getFirestoreColumns` walks the shape, and the six fields are not
- * contiguous in any grain — so a spread silently reorders the operator's column
- * picker on all three surfaces. Referencing per key preserves the order and
- * gives up exactly one thing: a new field no longer arrives on all three grains
- * for free. **This test is where that guarantee moved to.**
+ * All three grains now SPREAD `LineItemCore`, behind their own `type` — see
+ * `_items.ts` for the measurement that licensed it, and for the ruling it
+ * replaced. So a grain that OMITS a shared field is a compile error and this
+ * test no longer has to catch that case.
  *
- * ⭐ **And it is strictly stronger than the spread it replaces.** A spread cannot
+ * 🔴 **It is still required, for the case a spread structurally cannot see.** A spread cannot
  * see a grain SHADOWING a shared key — `{ ...LineItemCore, name: z.string() }`
  * compiles, and the later key silently wins. That is precisely how `name` and
  * `quantity` drifted. Instance identity catches both directions: a grain that

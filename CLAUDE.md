@@ -535,22 +535,49 @@ the picker on every surface that adopts it. ⚠️ **`buildTypesenseColumns` is 
 iterates `config.schema.fields` — so the reorder appears on the Firestore surface **only**,
 which is what makes it easy to ship unnoticed.
 
-⭐ **And when several grains share fields that are not contiguous in any of them, NO key
-order for the shared object leaves them all unchanged.** Measured on the order / invoice /
-fulfillment line item (core#97): the six shared fields sit at three different arrangements,
-`type` is second in all three, and `path`/`zero_priced` land in three different places. So
-the shared instances are referenced **per key** (`schemas/_items.ts`) rather than spread,
-and the anti-drift guarantee the spread would have given moved into
-`tests/item-shape-parity.test.ts`.
+🔴 **So the question a spread raises is "which columns move, and does anyone see them" — NOT
+"does anything move".** Something almost always moves; that is not the same as a cost. Both
+halves of this were got wrong on the order / invoice / fulfillment line item (core#97) before
+they were got right:
 
-⭐ **That test is strictly stronger than the spread it replaces, which is the transferable
-half:** a spread cannot see a grain **shadowing** a shared key — `{ ...Core, name: z.string() }`
+1. **Ask which of the shared fields are COLUMNS.** Only four of that line item's six are —
+   `uid` and `path` carry no `column` meta and appear in no picker at all. A field with no
+   annotation cannot move anything.
+2. **Ask whether any of them is DEFAULT-VISIBLE.** No `items.*` column is: all three
+   `displayDefaults.columns` are `number`, `organization.path`, `subject`, `status`
+   (+ `reference` on invoices). So an `items[]` reorder reaches the column PICKER's ordering
+   and nothing an operator sees without opting in — a far smaller cost than the rule above
+   implies on its own.
+3. **Keep a grain's own discriminator ahead of the spread** where the grains already agree on
+   it. Writing `{ type: <own enum>, ...SharedCore, …own }` preserved the head all three line
+   items already had, so the entire measured change was `zero_priced` moving to index 4 — from
+   21 / 17 / 5, positions it held only because of how many grain-specific fields happened to
+   precede it. Accretion, not design.
+
+⚠️ **The ruling this replaced — *"no key order leaves all three unchanged, therefore reference
+per key"* — was TRUE and did not answer the question.** It is a claim about preserving the
+status quo, not about whether the status quo is worth preserving. Ask the second one.
+
+🔴 **And check the instrument before trusting the diff: `getFirestoreColumns` takes a
+COLLECTION NAME, not a schema.** Passing it a schema returns `[]` and the comparison is
+empty-to-empty. It is the ONLY one of the three surfaces that can see an `items[]` key-order
+change — `getTypesenseColumns` iterates `config.schema.fields`, and `getInitialValues` returns
+`[]` for an array without descending — so a dump that gets it wrong is vacuous on exactly the
+question it was run to answer.
+
+⭐ **A spread does NOT retire the parity test, and that is the transferable half:** a spread cannot see a grain **shadowing** a shared key — `{ ...Core, name: z.string() }`
 compiles and the later key silently wins — and shadowing is exactly how the invoice's `name`
 and `quantity` drifted. Instance identity (`shape[k] === Core[k]`) catches both a grain that
 omits a shared field and one that re-declares it, and is key-order agnostic. Structural
 equality is **not** the assertion: two separately-declared but identical nodes are still a
 defect, because `z.globalRegistry` is keyed on the instance and the copy carries none of the
 base's `.meta()`.
+
+⚠️ **Some shared shapes still cannot be spread, so this is a question and not a default.**
+`TotalsCore` (`schemas/order.ts`) is referenced per key because the order puts
+`discount_amount_cents` FIRST and the invoice puts it THIRD — the fields are contiguous in
+both and still disagree on order, with no discriminator to hoist. **Contiguity is not the
+test; agreement on order is.**
 
 ⚠️ **Capture the before/after rather than arguing about it.** `getInitialValues` plus
 `getFirestoreColumns` and `getTypesenseColumns` for each affected collection, dumped to JSON

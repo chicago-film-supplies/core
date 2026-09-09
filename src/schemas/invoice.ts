@@ -390,14 +390,13 @@ const InvoiceDocLineItemInner = z.strictObject({
   // `api-cloudrun/scripts/audit-document-grain-parity.ts` — 0 offenders in
   // either project — and by the 154 line items across the 23 committed
   // `invoice`+`quote` fixtures in `templates`.
-  uid: LineItemCore.uid,
+  // 🔴 **SPREAD, not per key** — the six shared fields, one instance each, from
+  // `_items.ts`, in one canonical order at the head of every grain. A grain that
+  // omits one is now a compile error; `tests/item-shape-parity.test.ts` still
+  // holds the SHADOWING case, which no spread can catch.
   type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
-  name: LineItemCore.name,
-  description: LineItemCore.description,
-  quantity: LineItemCore.quantity,
+  ...LineItemCore,
   price: InvoiceDocItemPrice,
-  path: LineItemCore.path,
-  zero_priced: LineItemCore.zero_priced,
   coa_revenue: COARevenueEnum.nullable().optional(),
   taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
   tracking_category: z.string().nullable().optional(),

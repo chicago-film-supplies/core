@@ -30,20 +30,42 @@
  * that silences a class nothing exhibits is the stale-entry failure
  * `check-declarations.ts` documents.
  *
- * ⭐ **Referenced per key, NOT spread.** `z.strictObject({ ...LineItemCore, … })`
- * is the shorter form and it was the original design; it is not used, because
- * the shape's key order becomes the schema's key order and `getFirestoreColumns`
- * walks the shape — so a spread silently reorders the operator's column picker
- * on all three surfaces. The six fields are not contiguous in any grain (`type`
- * sits second in all three, and `path`/`zero_priced` sit in three different
- * places), so there is no key order for this object that leaves all three grains
- * unchanged.
+ * ⭐ **SPREAD, after each grain's own `type`.** Every grain writes
+ * `z.strictObject({ type: <its enum>, ...LineItemCore, …own fields })`, so the
+ * six arrive in one canonical order at the head of all three and a grain that
+ * OMITS one is a compile error rather than something only a test can see.
  *
- * ⚠️ **Per-key referencing gives up the one thing a spread buys — a new field
- * arriving on all three grains for free — so the guarantee is moved to a test
- * instead.** `tests/item-shape-parity.test.ts` asserts every key here appears in
- * all three grains carrying the *identical instance*. That is strictly stronger
- * than the spread it replaces: it also catches a grain SHADOWING a shared key
+ * ⚠️ **This was per-key first, on a ruling that was true and did not answer the
+ * question.** The ruling was *"no key order leaves all three grains
+ * unchanged"* — a statement about preserving the status quo, not about whether
+ * the status quo was worth preserving, which is what was actually being asked.
+ * Re-measured 2026-09-09 with the right instrument (`getFirestoreColumns` takes
+ * a COLLECTION NAME; the original dump passed it a schema and silently compared
+ * empty arrays):
+ *
+ * - Only FOUR of the six are columns at all — `uid` and `path` carry no
+ *   `column` meta and appear in no picker.
+ * - Three of those four (`name`, `description`, `quantity`) already sat at
+ *   IDENTICAL positions in all three grains, behind `type`.
+ * - The one that differed was `zero_priced`, at column index 21 / 17 / 5 — and
+ *   it differed only because of how many grain-specific fields happened to
+ *   precede it. Accretion, not design.
+ * - No `items.*` column is default-visible: all three `displayDefaults.columns`
+ *   are `number`, `organization.path`, `subject`, `status` (+ `reference` on
+ *   invoices). So item key order reaches the column PICKER and nothing else.
+ *
+ * Keeping `type` ahead of the spread preserves the head every grain already
+ * had, so the whole measured cost is **`zero_priced` moving to index 4 on all
+ * three** — which is the unification, not a side effect. Verified as a diff:
+ * `typesenseColumns` and `getInitialValues` byte-identical on all three
+ * (Typesense iterates `config.schema.fields`, and `getInitialValues` never
+ * descends into an array), and `firestoreColumns` same members, one move.
+ *
+ * ⚠️ **The spread does NOT retire `tests/item-shape-parity.test.ts`.**
+ * `{ ...LineItemCore, name: z.string() }` compiles and the later key silently
+ * wins, which is the original drift one level down. The test asserts every key
+ * here appears in all three grains carrying the *identical instance* — which
+ * catches a grain SHADOWING a shared key
  * with its own declaration, which is precisely how `name` and `quantity`
  * drifted, and which a spread cannot see because the later key silently wins.
  *

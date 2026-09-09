@@ -139,14 +139,13 @@ const FulfillmentLineItemInner = z.strictObject({
   // them is a no-op for this grain — fulfillment already carried the canonical
   // declarations — which is the point: it is a projection of an order item, so
   // it must not be possible for it to accept something the order refuses.
-  uid: LineItemCore.uid,
+  // 🔴 **SPREAD, not per key** — the six shared fields, one instance each, from
+  // `_items.ts`, in one canonical order at the head of every grain. A grain that
+  // omits one is now a compile error; `tests/item-shape-parity.test.ts` still
+  // holds the SHADOWING case, which no spread can catch.
   type: z.enum(FULFILLMENT_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
-  name: LineItemCore.name,
-  description: LineItemCore.description,
-  quantity: LineItemCore.quantity,
+  ...LineItemCore,
   stock_method: StockMethodEnum.optional().meta({ column: true, label: "Stock Method" }),
-  zero_priced: LineItemCore.zero_priced,
-  path: LineItemCore.path,
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   quantity_order: z.number().int().min(0).optional(),

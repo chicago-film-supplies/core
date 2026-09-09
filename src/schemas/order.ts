@@ -1080,17 +1080,15 @@ export interface OrderDocLineItemType {
 // shared const carries a `z.ZodType<…>` annotation that erases the literals.
 // See `_dividers.ts` for the full rationale.
 const OrderDocLineItemInner = z.strictObject({
-  // `uid`, `name`, `description`, `quantity`, `path` and `zero_priced` are the
-  // six fields all three grains share; each is ONE instance, declared in
-  // `_items.ts`. Referenced per key rather than spread so this object's key
-  // order — which is the column order `getFirestoreColumns` walks — is
-  // unchanged. `tests/item-shape-parity.test.ts` is what holds the three grains
-  // together; see that module's header for why the guarantee lives in a test.
-  uid: LineItemCore.uid,
+  // 🔴 **SPREAD, not per key** — `uid`, `name`, `description`, `quantity`, `path`
+  // and `zero_priced` are the six fields all three grains share, one instance
+  // each, from `_items.ts`. The spread puts them in one canonical order at the
+  // head of every grain, which is the point: it is what makes a grain that
+  // OMITS one a compile error rather than something only a test can see.
+  // `tests/item-shape-parity.test.ts` still holds the SHADOWING case, which no
+  // spread can catch.
   type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
-  name: LineItemCore.name,
-  description: LineItemCore.description,
-  quantity: LineItemCore.quantity,
+  ...LineItemCore,
   price: OrderDocItemPrice,
   // Required for every line type, `transaction_fee` included — a fee holds no
   // stock, which `"none"` says exactly (1,533 prod lines already use it). That
@@ -1099,9 +1097,7 @@ const OrderDocLineItemInner = z.strictObject({
   stock_method: StockMethodEnum.meta({ column: true, label: "Stock Method" }),
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
-  path: LineItemCore.path,
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
-  zero_priced: LineItemCore.zero_priced,
   crms_id: z.int().nullable().optional(),
   // Denormalized from the product at write time — see the interface docblock for
   // why this is on the DOC line and not the input one. `.optional()` rather than
