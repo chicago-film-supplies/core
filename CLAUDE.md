@@ -527,6 +527,37 @@ total_cents: z.int().meta({ column: true, label: "Total" }),
   (`api-cloudrun/tests/unit/typesenseDestinationDerived.test.ts`,
   `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts`).
 
+🔴 **A schema's KEY ORDER is its Firestore-surface column order, so sharing a shape by
+SPREAD is an operator-visible change wearing a refactor's clothes.**
+`buildFirestoreColumns` walks the shape (`collectDisplayColumns`), so
+`z.strictObject({ ...SharedShape, …ownFields })` moves every shared key to the front of
+the picker on every surface that adopts it. ⚠️ **`buildTypesenseColumns` is immune** — it
+iterates `config.schema.fields` — so the reorder appears on the Firestore surface **only**,
+which is what makes it easy to ship unnoticed.
+
+⭐ **And when several grains share fields that are not contiguous in any of them, NO key
+order for the shared object leaves them all unchanged.** Measured on the order / invoice /
+fulfillment line item (core#97): the six shared fields sit at three different arrangements,
+`type` is second in all three, and `path`/`zero_priced` land in three different places. So
+the shared instances are referenced **per key** (`schemas/_items.ts`) rather than spread,
+and the anti-drift guarantee the spread would have given moved into
+`tests/item-shape-parity.test.ts`.
+
+⭐ **That test is strictly stronger than the spread it replaces, which is the transferable
+half:** a spread cannot see a grain **shadowing** a shared key — `{ ...Core, name: z.string() }`
+compiles and the later key silently wins — and shadowing is exactly how the invoice's `name`
+and `quantity` drifted. Instance identity (`shape[k] === Core[k]`) catches both a grain that
+omits a shared field and one that re-declares it, and is key-order agnostic. Structural
+equality is **not** the assertion: two separately-declared but identical nodes are still a
+defect, because `z.globalRegistry` is keyed on the instance and the copy carries none of the
+base's `.meta()`.
+
+⚠️ **Capture the before/after rather than arguing about it.** `getInitialValues` plus
+`getFirestoreColumns` and `getTypesenseColumns` for each affected collection, dumped to JSON
+before the edit and diffed after — **order included**, since that is the property at risk.
+A shared-shape refactor that is genuinely inert says so in one diff; one that is not is
+otherwise invisible until an operator notices their columns moved.
+
 Enforced by `tests/display-columns.test.ts`: **T8** every `displayDefaults.columns`
 key (Typesense *and* Firestore) is a declared column; **T9** every column composes
 a non-empty heading, no two columns on one surface share one, and no heading ends
