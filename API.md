@@ -16602,6 +16602,24 @@ interface FulfillmentLineItemType {
 const FulfillmentSchema: z.ZodType<Fulfillment>;
 ```
 
+### `isFulfillmentLineItem(item: FulfillmentItemType): item is FulfillmentLineItemType`
+
+Narrows a fulfillment doc item to a line item (excludes the two dividers).
+
+🔴 **core#90.** This grain was the only one of the three without a guard, so
+the predicate was hand-written four times across three repos and two of those
+copies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`
+tests the `type` STRING, so a caller reaching for it got a truth value and
+still had to cast to touch `quantity_order` or `path_substituted_for`. The
+order and invoice grains have had `isLineItem` / `isInvoiceLineItem` all
+along; this closes the set.
+
+⚠️ **A key-presence test is not a substitute and reverses the question.**
+`"zero_priced" in item` narrows at compile time and, at runtime, skips exactly
+the documents that OMIT the key — which is the population any component census
+is counting. The decision is `ITEM_CONTRACTS[type].kind`, shared with the
+other two grains, and it is the only thing that should decide it.
+
 ## `@cfs/core/schemas/organization`
 
 ### `CreateOrganizationInput`

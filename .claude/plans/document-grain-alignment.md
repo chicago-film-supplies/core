@@ -3,22 +3,69 @@
 *Promoted from a machine-local draft on 2026-09-09. Owning repo is `core` — the schemas are
 the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 
-> ## ⚠️ STATUS UPDATE 2026-09-09 — increment 0 has RUN, and it makes two increments below WRONG
+> ## ⚠️ STATUS UPDATE 2026-09-09 — increments 0 and 1 are DONE; three items split OUT of increment 1
 >
-> `api-cloudrun/scripts/audit-document-grain-parity.ts` (`ef75a64c`) is written and run against
-> **both** projects. The numbers are in § *0 — Census*, and they change the plan in three places:
+> Compacted from two blocks. Read this instead of the increment prose where they disagree.
 >
-> - **Six of the eight questions are 0**, so most of increment 1's tightenings are cleared.
-> - **Increment 1a is ~9,214 rows, not the 44 its precedent implied** — it is its own campaign,
->   tracked separately. It is no longer a rider on increment 1.
-> - **Increment 3's `crms_id` bullet was wrong**, and the owner has ruled. It is a RENAME, not a
->   removal, and it is core#94's field rather than this pass's. Two of increment 3's three
->   "needs a ruling" items are now answered by data.
+> **Increment 0 (census) — DONE.** `api-cloudrun/scripts/audit-document-grain-parity.ts`
+> (`ef75a64c`, on `origin/main`), run against both projects. Numbers in § *0*. Six of the eight
+> questions are 0, which is what cleared increment 1; three are not, and each is now split out.
 >
-> ⚠️ **Increment 1 is still blocked** on the core#91/#92/#93 campaign's `templates` PR MERGING —
-> not on that session going idle. Confirmed with it 2026-09-09: the fixture re-capture may be
-> handed to a fresh session, and a beta cut before that merge lands a stale pin in whatever
-> checkout is running the re-capture.
+> **Increment 1 (the shared line-item shape) — DONE, and the DESIGN CHANGED.**
+> `src/schemas/_items.ts` holds `LineItemCore` (the six fields all three grains share), adopted by
+> `order.ts`, `invoice.ts` and `fulfillment.ts`. The invoice's `name` gained `.min(1).max(100)` and
+> its `quantity` gained `.min(0)`; `checkZeroPricedAmount` moved onto the invoice and fulfillment
+> **Inner** consts, so it now actually runs when those documents parse. core#90's
+> `isFulfillmentLineItem` is exported and `isStructural` plus BOTH its casts are deleted.
+>
+> 🔴 **The `z.strictObject({ ...LineItemCore, … })` spread this doc proposed is NOT what landed, and
+> the reason generalises.** The shape's key order becomes the schema's key order, and
+> `getFirestoreColumns` walks the shape — so a spread silently reorders the operator's column picker
+> on all three surfaces. The six fields are not contiguous in any grain (`type` sits second in all
+> three; `path`/`zero_priced` sit in three different places), so **no key order for that object
+> leaves all three grains unchanged.** Fields are referenced per key instead, and the guarantee the
+> spread would have given moved to `tests/item-shape-parity.test.ts`. ⭐ That test is strictly
+> stronger: a spread cannot see a grain SHADOWING a shared key (the later key silently wins), which
+> is exactly how `name` and `quantity` drifted. Verified by mutation — both the byte-identical
+> re-declaration and the original loose one turn it red.
+>
+> ⭐ **Before/after proof, not an argument:** `getInitialValues` plus the Firestore and Typesense
+> column lists for all three grains are **byte-identical**, ORDER included.
+>
+> ⚠️ **`_items.ts` is annotated and must NOT be given a `check-declarations` exemption.** The
+> assumption that `_dividers.ts`'s exemption transferred was wrong — that file holds union ARMS,
+> whose `_zod.propValues` an annotation erases; nothing here is a discriminator. Measured: annotating
+> changes no surface and `.default("")` still materializes.
+>
+> **Split OUT of increment 1, each with its own reason:**
+> - 🔴 **`InvoiceDocDestination` adopting a shared pair — BLOCKED on a backfill.** The census found
+>   **16 absent flags across 8 invoices**, identical in prod and dev. Dropping the two inert
+>   `.default(false)`s makes those 8 fail on their next write. Backfill first; see § *3*.
+> - **`TotalsCore` — deferred, not blocked.** `PriceModifier` lives in `order.ts`, so a `TotalsCore`
+>   in `_items.ts` is an import cycle. The six totals fields are byte-identical today (they have not
+>   drifted), so this is worth its own commit *after* `PriceModifier` moves — not worth a file move
+>   inside a drift repair.
+> - **`INVOICE_ONLY_ITEM_FIELDS` key-check, `reference.max(255)`, `subject` non-nullable,
+>   `chargeable_days.int()`** — all census-cleared, none written yet. `subject` additionally changes
+>   the interface and its writers.
+>
+> ⚠️ **Increment 1a is NOT a rider on increment 1** — ~9,214 rows, its own campaign. And it *would*
+> break the `templates` fixtures where increment 1 does not: **27 of 154** committed line items state
+> no `zero_priced` (20 absent, 7 null).
+>
+> ✅ **The hold on the core#91/#92/#93 campaign is LIFTED, and the mechanism this doc named was
+> wrong.** It is not a stale pin — an exact pin is fine indefinitely. It is `templates`'
+> `lint:capture-floor`, which compares `capture-floor.json`'s `min_core` against the newest
+> **published** core rather than against the pin, so only a beta introducing a new `pii: "mask"` tag
+> turns it red. Increment 1 introduces no tag at all (confirmed by that session against the script's
+> own output: 194 tagged leaves at beta.386 and at .387).
+>
+> ✅ **Fixture safety, measured twice independently:** all **23 committed `invoice`+`quote` fixtures**
+> pass every increment-1 tightening — 154 line items (names 7-46 chars), 24 destination pairs, every
+> `chargeable_days` an integer. Reproduced by the core#91/#92/#93 session in its own checkout.
+> ⚠️ **But the fixtures cannot corroborate the live census in either direction**: they were captured
+> from documents re-written since the flags became required on ORDERS, so they are a *survivorship*
+> sample. The 8-invoice split above rests on the census alone, which is the right basis.
 
 ## Status — this runs AFTER the core#91/#92/#93 campaign
 
@@ -169,7 +216,7 @@ so it is not re-proposed.
 `InvoiceDocItemType` and `FulfillmentItemType` is assignable to it."* Two call sites say
 otherwise:
 
-- `src/utils/fulfillment-items.ts:154` — `computeItemPaths(out as never) as FulfillmentItemType[]`
+- ✅ **`src/utils/fulfillment-items.ts` — the `computeItemPaths(out as never) as FulfillmentItemType[]` cast is GONE (2026-09-09, increment 1).** It turned out not to be a variance wall at all: with `isStructural` replaced by core's new `isFulfillmentLineItem`, `computeItemPaths(out)` type-checks directly. The `as never` had been *defeating* the generic (`T = never`) and casting the result back, so removing it made the call properly generic rather than merely tidier.
 - `api-cloudrun/src/lib/firestoreWrite.ts:405` — `assertArrayUniqueness` keeps orders and
   fulfillments in **separate branches** for one rule, because `T[]` is invariant and a
   fulfillment line has no `price`. Merging them previously forced `T = any` and made the
@@ -330,8 +377,8 @@ declarations because they come from the same instance. Also in this commit:
 - `checkZeroPricedAmount` moved onto the invoice and fulfillment **Inner** consts so the
   document unions enforce it, matching the order.
 - **core#90** — export `isFulfillmentLineItem` from `src/schemas/fulfillment.ts`, delete
-  core's `isStructural` (`src/utils/fulfillment-items.ts:50`) and its two casts, including
-  `computeItemPaths(out as never)`.
+  core's `isStructural` (`src/utils/fulfillment-items.ts`) and its two casts, including
+  `computeItemPaths(out as never)`. ✅ **DONE 2026-09-09.**
 - Add the `INVOICE_ONLY_ITEM_FIELDS` key-check described above.
 
 ### 1a — `zero_priced` becomes REQUIRED on components (owner's proposal, 2026-09-09)

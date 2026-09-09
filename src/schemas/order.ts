@@ -5,6 +5,7 @@ import { z } from "zod";
 import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { LineItemCore } from "./_items.ts";
 import {
   Address,
   DocumentOrganizationSnapshot,
@@ -1005,40 +1006,17 @@ export interface OrderDocLineItemType {
 // shared const carries a `z.ZodType<…>` annotation that erases the literals.
 // See `_dividers.ts` for the full rationale.
 const OrderDocLineItemInner = z.strictObject({
-  uid: ItemUid,
+  // `uid`, `name`, `description`, `quantity`, `path` and `zero_priced` are the
+  // six fields all three grains share; each is ONE instance, declared in
+  // `_items.ts`. Referenced per key rather than spread so this object's key
+  // order — which is the column order `getFirestoreColumns` walks — is
+  // unchanged. `tests/item-shape-parity.test.ts` is what holds the three grains
+  // together; see that module's header for why the guarantee lives in a test.
+  uid: LineItemCore.uid,
   type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
-  // CANONICAL RATIONALE for every item `name` in the package — the divider,
-  // transaction-fee, invoice and fulfillment leaves all point back here (#40).
-  //
-  // Catalog product name ("Dewalt Work Light") — NOT customer data, so it
-  // survives fixture sanitization verbatim, which is the whole point of drawing
-  // fixture line items from real orders. Tagged explicitly rather than left
-  // untagged so the decision is visible and the drift gate can see it. Custom
-  // items put operator-typed text here, but it is equipment/service text by
-  // convention.
-  //
-  // An item `name` is a LABEL — catalog text, a section header, a venue, a tax
-  // name, `Order #NNN`. It is not a person or an organization, which is why
-  // `order` / `invoice` / `fulfillment` are now listed in `NAME_SENSITIVE`
-  // (`src/schemas/pii/dictionary.ts`) — being listed there forces every `name`
-  // under them to state an answer instead of defaulting into one.
-  name: z.string().min(1).max(100).meta({ pii: "none", column: true }),
-  // Line-item text, classified the same as `name` above: it carries equipment,
-  // service and destination wording — a PO number, a product name — not customer
-  // data. It previously masked on the theory that a custom item's description
-  // paraphrases the customer; that is not what the field is used for in practice.
-  //
-  // Tagged explicitly rather than left untagged so the decision is visible and
-  // the drift gate can see it, and so every `items[].description` in the package
-  // (order, invoice, fulfillment, and their input schemas) states one answer.
-  // Consequence: it survives fixture sanitization verbatim and appears raw in
-  // logs — the same posture `name` has always had.
-  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
-  quantity: z.number().int().min(0).default(0).meta({ column: true, label: "Quantity" }),
-  // Required, not `.optional()` — see the interface docblock. A `.default()`
-  // would be worse than useless here: `validateBeforeWrite` persists the RAW
-  // doc, so a default never materializes, and an omitted `price` would reach
-  // Firestore absent while the published type promised one.
+  name: LineItemCore.name,
+  description: LineItemCore.description,
+  quantity: LineItemCore.quantity,
   price: OrderDocItemPrice,
   // Required for every line type, `transaction_fee` included — a fee holds no
   // stock, which `"none"` says exactly (1,533 prod lines already use it). That
@@ -1047,9 +1025,9 @@ const OrderDocLineItemInner = z.strictObject({
   stock_method: StockMethodEnum.meta({ column: true, label: "Stock Method" }),
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
-  path: z.array(ItemUid).default([]),
+  path: LineItemCore.path,
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
-  zero_priced: z.boolean().nullable().optional().meta({ column: true, label: "Zero Priced" }),
+  zero_priced: LineItemCore.zero_priced,
   crms_id: z.int().nullable().optional(),
   // Denormalized from the product at write time — see the interface docblock for
   // why this is on the DOC line and not the input one. `.optional()` rather than

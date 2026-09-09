@@ -5,6 +5,7 @@ import { z } from "zod";
 import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { LineItemCore } from "./_items.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
 import { type RenderParamsContext, RenderParamsContextSchema } from "./template-version.ts";
 import {
@@ -376,19 +377,22 @@ export interface InvoiceDocLineItem {
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
 // — see `_dividers.ts`.
 const InvoiceDocLineItemInner = z.strictObject({
-  uid: ItemUid,
+  // The six shared fields come from `_items.ts` as ONE instance each. Two of
+  // them are a TIGHTENING here and nowhere else: this grain declared `name` as a
+  // bare `z.string()` and `quantity` as `z.int()` with no lower bound, so an
+  // invoice line could store an empty name and a negative quantity that the
+  // order line it was billed from could not. Cleared by
+  // `api-cloudrun/scripts/audit-document-grain-parity.ts` — 0 offenders in
+  // either project — and by the 154 line items across the 23 committed
+  // `invoice`+`quote` fixtures in `templates`.
+  uid: LineItemCore.uid,
   type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
-  // Catalog product name — not customer data. See `OrderDocLineItem.name`.
-  name: z.string().meta({ pii: "none", column: true }),
-  // Line-item text — not customer data. See `OrderDocLineItem.description`.
-  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
-  quantity: z.int().default(0).meta({ column: true, label: "Quantity" }),
+  name: LineItemCore.name,
+  description: LineItemCore.description,
+  quantity: LineItemCore.quantity,
   price: InvoiceDocItemPriceSchema,
-  path: z.array(ItemUid).default([]),
-  // See the interface docblock — mirrored from the order line, same shape
-  // (`manager#421`). The display-column metadata matches `OrderDocLineItem`'s so
-  // the two grains render the column identically.
-  zero_priced: z.boolean().nullable().optional().meta({ column: true, label: "Zero Priced" }),
+  path: LineItemCore.path,
+  zero_priced: LineItemCore.zero_priced,
   coa_revenue: COARevenueEnum.nullable().optional(),
   taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
   tracking_category: z.string().nullable().optional(),
@@ -399,9 +403,22 @@ const InvoiceDocLineItemInner = z.strictObject({
   // Plain `.optional()`, matching `FulfillmentLineItem.path_substituted_for`
   // exactly — see the interface docblock for why this one is not `.nullable()`.
   path_substituted_for: z.array(ItemUid).optional(),
-}).superRefine(checkItemPriceFormula);
+}).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount);
 
-export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner.superRefine(checkZeroPricedAmount);
+// 🔴 `checkZeroPricedAmount` moved onto the **Inner** const on 2026-09-09, and
+// until then it never ran when an invoice document parsed. It was attached here,
+// to the exported alias, while `InvoiceDocItem`'s discriminated union below is
+// built from the un-refined `InvoiceDocLineItemInner` — so `validateBeforeWrite`
+// on an invoice never asked whether a `zero_priced` line carried a charge. The
+// order grain has always attached it to its Inner (`order.ts`), which is why the
+// two grains disagreed. Fulfillment attaches it too, but there it is vacuous:
+// a fulfillment line has no `price`, so the check returns early.
+//
+// Cleared to land by the census: 0 invoice lines in either project carry
+// `zero_priced === true` with a non-zero `base_cents`, and 0 across the fixture
+// corpus. This is a tightening of what PARSES, not a new field — it belongs in
+// the census-gated set even though nothing about it looks like a migration.
+export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner;
 
 // ── Order divider ───────────────────────────────────────────────
 

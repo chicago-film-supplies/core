@@ -7662,6 +7662,14 @@
           "name": "FulfillmentSchema",
           "declaration": "const FulfillmentSchema: z.ZodType<Fulfillment>;",
           "doc": ""
+        },
+        {
+          "kind": "function",
+          "name": "isFulfillmentLineItem",
+          "signature": "isFulfillmentLineItem(item: FulfillmentItemType): item is FulfillmentLineItemType",
+          "doc": "Narrows a fulfillment doc item to a line item (excludes the two dividers).\n\n🔴 **core#90.** This grain was the only one of the three without a guard, so\nthe predicate was hand-written four times across three repos and two of those\ncopies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`\ntests the `type` STRING, so a caller reaching for it got a truth value and\nstill had to cast to touch `quantity_order` or `path_substituted_for`. The\norder and invoice grains have had `isLineItem` / `isInvoiceLineItem` all\nalong; this closes the set.\n\n⚠️ **A key-presence test is not a substitute and reverses the question.**\n`\"zero_priced\" in item` narrows at compile time and, at runtime, skips exactly\nthe documents that OMIT the key — which is the population any component census\nis counting. The decision is `ITEM_CONTRACTS[type].kind`, shared with the\nother two grains, and it is the only thing that should decide it.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },

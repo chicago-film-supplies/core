@@ -32,6 +32,7 @@ import {
   type StockMethodType,
   TimestampFields,
   checkZeroPricedAmount,
+  isLineItemType,
 } from "./common.ts";
 import {
   DocDestination,
@@ -53,6 +54,7 @@ import {
 // which a `z.ZodType<T>` annotation erases. That is why `_dividers.ts` exists
 // and is not an entrypoint — see its module header.
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { LineItemCore } from "./_items.ts";
 
 /**
  * 🔴 **A fulfillment's status IS the order's status, so this reuses
@@ -133,29 +135,32 @@ export interface FulfillmentLineItemType {
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
 // — see `_dividers.ts`.
 const FulfillmentLineItemInner = z.strictObject({
-  uid: ItemUid,
+  // The six shared fields, one instance each, from `_items.ts`. Every one of
+  // them is a no-op for this grain — fulfillment already carried the canonical
+  // declarations — which is the point: it is a projection of an order item, so
+  // it must not be possible for it to accept something the order refuses.
+  uid: LineItemCore.uid,
   type: z.enum(FULFILLMENT_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
-  // Catalog product name — not customer data. See `OrderDocLineItem.name`.
-  // Fulfillment items are a projection of order items, so this is the same
-  // string; it must carry the same classification.
-  name: z.string().min(1).max(100).meta({ pii: "none", column: true }),
-  // Line-item text — not customer data. See `OrderDocLineItem.description`.
-  // Fulfillment items are a projection of order items, so this is the same
-  // string; it must carry the same classification.
-  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
-  quantity: z.number().int().min(0).default(0).meta({ column: true, label: "Quantity" }),
+  name: LineItemCore.name,
+  description: LineItemCore.description,
+  quantity: LineItemCore.quantity,
   stock_method: StockMethodEnum.optional().meta({ column: true, label: "Stock Method" }),
-  // See the interface docblock — mirrored from the order line, same shape and
-  // same display-column metadata (`manager#421`).
-  zero_priced: z.boolean().nullable().optional().meta({ column: true, label: "Zero Priced" }),
-  path: z.array(ItemUid).default([]),
+  zero_priced: LineItemCore.zero_priced,
+  path: LineItemCore.path,
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   quantity_order: z.number().int().min(0).optional(),
   path_substituted_for: z.array(ItemUid).optional(),
-});
+  // 🔴 Attached to the **Inner** const so `FulfillmentItem`'s discriminated union
+  // below enforces it, matching `order.ts` and (since 2026-09-09) `invoice.ts`.
+  // ⚠️ It is VACUOUS at this grain and that is deliberate rather than an
+  // oversight: a fulfillment line carries no `price`, so `checkZeroPricedAmount`
+  // returns early (`schemas/common.ts`). It is attached anyway so all three
+  // grains read identically — a reader comparing them should not have to work
+  // out whether the absence here is a decision or a gap.
+}).superRefine(checkZeroPricedAmount);
 
-export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = FulfillmentLineItemInner.superRefine(checkZeroPricedAmount);
+export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = FulfillmentLineItemInner;
 
 /** Destination divider in the fulfillment items array. */
 export interface FulfillmentDestinationItemType {
@@ -194,6 +199,27 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.discriminatedUn
   FulfillmentDestinationItemInner,
   FulfillmentGroupItemInner,
 ]);
+
+/**
+ * Narrows a fulfillment doc item to a line item (excludes the two dividers).
+ *
+ * 🔴 **core#90.** This grain was the only one of the three without a guard, so
+ * the predicate was hand-written four times across three repos and two of those
+ * copies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`
+ * tests the `type` STRING, so a caller reaching for it got a truth value and
+ * still had to cast to touch `quantity_order` or `path_substituted_for`. The
+ * order and invoice grains have had `isLineItem` / `isInvoiceLineItem` all
+ * along; this closes the set.
+ *
+ * ⚠️ **A key-presence test is not a substitute and reverses the question.**
+ * `"zero_priced" in item` narrows at compile time and, at runtime, skips exactly
+ * the documents that OMIT the key — which is the population any component census
+ * is counting. The decision is `ITEM_CONTRACTS[type].kind`, shared with the
+ * other two grains, and it is the only thing that should decide it.
+ */
+export function isFulfillmentLineItem(item: FulfillmentItemType): item is FulfillmentLineItemType {
+  return isLineItemType(item.type);
+}
 
 /**
  * Sanitized organization snapshot — uid and CHAIN.

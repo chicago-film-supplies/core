@@ -37,6 +37,7 @@
  * @module
  */
 import { computeItemPaths } from "./orders.ts";
+import { isFulfillmentLineItem } from "../schemas/fulfillment.ts";
 import type {
   FulfillmentItemType,
   FulfillmentLineItemType,
@@ -45,10 +46,6 @@ import type {
 /** `path` as a map key. `\x1f` cannot occur in a uid, so this cannot collide. */
 function pathKey(path: readonly string[] | undefined): string {
   return (path ?? []).join("\x1f");
-}
-
-function isStructural(item: FulfillmentItemType): boolean {
-  return item.type === "destination" || item.type === "group";
 }
 
 /**
@@ -80,7 +77,7 @@ export function rebuildFulfillmentItems(
   // merely ignored in pass 1: the picker does not own them, the API strips
   // them from the request body, and without this a smuggled divider would fall
   // through to pass 2 as an unmatched "new line" and be inserted into the tree.
-  const submittedLines = submitted.filter((li) => !isStructural(li as FulfillmentItemType));
+  const submittedLines = submitted.filter((li) => isFulfillmentLineItem(li));
 
   const submittedByPath = new Map<string, FulfillmentLineItemType>();
   for (const li of submittedLines) submittedByPath.set(pathKey(li.path), li);
@@ -89,7 +86,7 @@ export function rebuildFulfillmentItems(
   const out: FulfillmentItemType[] = [];
   const consumed = new Set<string>();
   for (const item of storedItems) {
-    if (isStructural(item)) {
+    if (!isFulfillmentLineItem(item)) {
       out.push(item);
       continue;
     }
@@ -151,5 +148,5 @@ export function rebuildFulfillmentItems(
 
   out.unshift(...rootless);
 
-  return computeItemPaths(out as never) as FulfillmentItemType[];
+  return computeItemPaths(out);
 }
