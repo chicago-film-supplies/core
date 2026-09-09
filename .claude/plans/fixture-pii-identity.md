@@ -22,7 +22,7 @@ deploy.
 |---|---|
 | `core` | **`@cfs/core@10.0.0-beta.385` published.** `8ec3809` walker `siblings` · `52f2c16` masker · `ce80fea` core#92 · `0da1432` core#93 + `due_at` + `TEMPLATE_COMMIT_TYPES`. Suite 2244 green. |
 | `api-cloudrun` | **`v0.243.0` MERGED AND DEPLOYED TO PROD** — revision `api-cloudrun-00359-928`, pinning beta.385. 2014 unit tests green. |
-| prod data | **2 documents repaired** (`scripts/repair-template-commit-types.ts`), verified 0 remaining. |
+| prod data | **2 documents repaired** (`api-cloudrun/scripts/repair-template-commit-types.ts`), verified 0 remaining. |
 | `manager` | `14f3cb9` on `main`, deployed. Typecheck clean, 1977 tests green. |
 | `templates` | branch **`core-91-92-93-campaign`**, commit `6f0b98c` — pin, `lint-capture-floor` trigger, `min_core` → beta.385, four `.eta` files. **NOT pushed, no PR yet.** |
 
