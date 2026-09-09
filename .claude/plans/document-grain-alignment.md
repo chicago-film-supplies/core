@@ -28,8 +28,19 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 > A schema's key order is its Firestore-surface column order, so a spread is an operator-visible
 > column move wearing a refactor's clothes. Three questions, three answers:
 >
-> - **line item — cannot spread.** Six shared fields at three different arrangements; no key order
->   leaves all three grains unchanged.
+> - **line item — cannot spread WITHOUT moving a column, which is not the same as "necessary".**
+>   ⚠️ Re-examined 2026-09-09 after the question *"are the distinct arrangements necessary?"*, and
+>   the honest answer is **no**. Of the six shared fields only four are columns at all (`uid` and
+>   `path` carry no `column` meta), and three of those four — `name`, `description`, `quantity` —
+>   already sit at IDENTICAL relative positions in all three grains. The single divergent one is
+>   `zero_priced`, at column index 21 / 17 / 5, and it differs **only because of how many
+>   grain-specific fields happen to precede it**. Nobody chose that.
+>   ⭐ **And the cost of unifying is smaller than the ruling assumed: NO `items.*` column is
+>   default-visible.** All three `displayDefaults.columns` are `number`, `organization.path`,
+>   `subject`, `status` (+ `reference` on invoices), so item key order affects only the ordering of
+>   the column PICKER, not any operator's table. A spread is therefore available for one deliberate
+>   picker reorder. It was not taken because the ruling was made against preserving the status quo
+>   rather than against what the status quo was worth.
 > - **destination pair — CAN spread.** The shared fields are the whole object in its existing order
 >   and the invoice's only extra key already sat first.
 > - **totals — cannot spread.** Contiguous in both, and *still* not spreadable:
@@ -41,10 +52,22 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 > separately-declared twin carries none of the base's `.meta()` and every heading silently vanishes
 > while a structural check stays green. **Confirmed by planting the defect** on the totals arm.
 >
-> ⭐ **And every shape change was verified as a DIFF rather than argued** — `getInitialValues`,
-> `getFirestoreColumns` and `getTypesenseColumns` for all three collections, dumped before and
-> after. Byte-identical, order included, at `.391`, `.397` and the rename; the only value that ever
-> moved was `invoices` initial `subject` `null` → `""` at `.394`, which was the point.
+> ⚠️ **The "nine surfaces byte-identical" verification was PARTLY VACUOUS, and the correction
+> matters more than the claim did.** `getFirestoreColumns(collection: string)` takes a COLLECTION
+> NAME; the dump passed it a schema object, so it returned `[]` and three of the nine members
+> compared empty-to-empty. The other six were real (`getInitialValues` 24/28/12 keys,
+> `getTypesenseColumns` 62/24/32).
+>
+> 🔴 **And the surface that was vacuous is the only one that could have seen an `items[]` key-order
+> change.** `getInitialValues` returns `[]` for an array without descending, and
+> `getTypesenseColumns` iterates `config.schema.fields` rather than the shape — so **no surface in
+> that dump ever covered the LINE ITEM's key order**, which is the one the no-spread ruling was
+> made about. The totals and destination-pair claims are unaffected: both are document-level
+> objects, so `getInitialValues` walks into them and its JSON key order reflects the shape.
+>
+> **The real instrument is `getFirestoreColumns("orders" | "invoices" | "fulfillments")`**, and run
+> properly it reports 62 / 63 / 25 columns, of which 23 / 19 / 7 sit under `items[]`. Use that
+> before making any further key-order claim.
 >
 > ### What is left — all of it now lives on issues, not here
 >
