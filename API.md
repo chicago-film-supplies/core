@@ -4260,7 +4260,7 @@ interface Invoice {
   date_fs: FirestoreTimestampType;
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
-  subject: string | null;
+  subject: string;
   reference: string | null;
   notes: string | null;
   organization: DocumentOrganizationSnapshotType;
@@ -5968,7 +5968,7 @@ interface Order {
   bookings_breakdown: typeLiteral;
   crms_id: number | null;
   crms_status?: string;
-  subject?: string;
+  subject: string;
   reference?: string | null;
   xero_id?: string | null;
   uid_thread: string;
@@ -14983,7 +14983,7 @@ interface Invoice {
   date_fs: FirestoreTimestampType;
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
-  subject: string | null;
+  subject: string;
   reference: string | null;
   notes: string | null;
   organization: DocumentOrganizationSnapshotType;
@@ -16078,7 +16078,7 @@ interface Order {
   bookings_breakdown: typeLiteral;
   crms_id: number | null;
   crms_status?: string;
-  subject?: string;
+  subject: string;
   reference?: string | null;
   xero_id?: string | null;
   uid_thread: string;

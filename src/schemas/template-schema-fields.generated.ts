@@ -209,7 +209,7 @@ export const templateSchemaFields: Partial<
     { path: "uid_store", type: "string? | null" },
     { path: "date", type: "string" },
     { path: "due_date", type: "string?" },
-    { path: "subject", type: "string | null" },
+    { path: "subject", type: "string" },
     { path: "reference", type: "string | null" },
     { path: "notes", type: "string | null" },
     { path: "organization", type: "object" },

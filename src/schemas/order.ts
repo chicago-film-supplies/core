@@ -1319,7 +1319,28 @@ export interface Order {
    * And CRMS is being retired, so the native path is the future one.
    */
   crms_status?: string;
-  subject?: string;
+  /**
+   * Required, non-nullable, and the SAME declaration as `Invoice.subject` and
+   * `Fulfillment.subject` — `""` is "no subject" at all three grains
+   * (core#97 increment 3, 2026-09-09).
+   *
+   * ⚠️ **The `?` and the `.default("")` went together, and both were wrong for
+   * the same reason.** A `.default()` is inert on a write —
+   * `validateBeforeWrite` discards `result.data` — so its only effect here was
+   * to widen the accepted set to include an ABSENT key, which is the state that
+   * yields `undefined` from `docData<T>`. Every stored order already carries
+   * it: **1,020 of 1,020 in prod and dev, 0 absent, 0 null** (2026-09-09), and
+   * `createOrder` writes a literal `subject: ""` while `updateOrder` only ever
+   * assigns a string. Nothing produced the absence the declaration allowed.
+   *
+   * ⚠️ `getInitialValues` is unaffected — its `case "string"` already returns
+   * `""`, which is the value the dropped `.default()` named. Verified as a
+   * byte-identical dump of all three document schemas' seeds.
+   *
+   * `UpdateOrderInputType.subject` stays `.optional()`: a CLIENT may omit it.
+   * Normalize at the writer, require at storage.
+   */
+  subject: string;
   reference?: string | null;
   xero_id?: string | null;
   /**
@@ -1479,7 +1500,10 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // is fixed (api-cloudrun#778 is open on exactly that machinery). A
   // plausible-but-wrong fake reads as sanitized, which is why this is written
   // down rather than left to be rediscovered.
-  subject: z.string().default("").meta({ pii: "mask", column: true, label: "Subject", linkTo: "orderDetail" }),
+  //
+  // Bare `z.string()` — the dropped `.default("")` is core#97 increment 3; the
+  // interface above carries the census and the reason.
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "orderDetail" }),
   reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference", linkTo: "orderDetail" }),
   xero_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId,

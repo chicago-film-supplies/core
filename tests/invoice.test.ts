@@ -110,6 +110,56 @@ Deno.test("InvoiceSchema rejects empty destinations when query_by_orders is non-
   }
 });
 
+/**
+ * The two states `destinations` used to conflate — core#97 increment 3.
+ *
+ * 🔴 **ABSENT and `[]` are different accepted sets under `z.strictObject`, and
+ * they get opposite verdicts.** The `.default([])` this replaces made the KEY
+ * omittable, which is inert on a write (`validateBeforeWrite` discards
+ * `result.data`) and therefore bought nothing except that 2 prod invoices
+ * carried no key at all — against a declaration that is non-optional, so
+ * `docData<Invoice>` handed their readers `undefined`. A stored `[]` is a
+ * different thing entirely and stays legal for a standalone invoice, which the
+ * arm two tests above already covers and which the document `.refine()` bounds
+ * the moment a source order appears.
+ */
+Deno.test("InvoiceSchema rejects an ABSENT destinations key, while [] stays legal", () => {
+  const { destinations: _dropped, ...withoutKey } = validInvoice;
+  const absent = InvoiceSchema.safeParse(withoutKey);
+  assertEquals(absent.success, false, "an absent `destinations` key must be refused");
+  if (!absent.success) {
+    assertEquals(absent.error.issues[0].path.join("."), "destinations");
+  }
+  // The positive control, and it is the point of the pair: dropping the default
+  // must not smuggle in an unconditional `.min(1)`.
+  const standalone = { ...validInvoice, query_by_orders: [], number_orders: [], destinations: [] };
+  assertEquals(InvoiceSchema.safeParse(standalone).success, true, "a standalone invoice may still store []");
+});
+
+/**
+ * `subject` is a bare `z.string()` at all three grains — core#97 increment 3.
+ * `tests/subject-parity.test.ts` holds the cross-grain claim; this is the
+ * document-level arm for the grain that actually moved, and for the value it
+ * moved away from.
+ */
+Deno.test("InvoiceSchema rejects a null or absent subject", () => {
+  const nulled = InvoiceSchema.safeParse({ ...validInvoice, subject: null });
+  assertEquals(nulled.success, false, "`null` is no longer how the invoice spells no-subject");
+  if (!nulled.success) assertEquals(nulled.error.issues[0].path.join("."), "subject");
+
+  // ⚠️ Deleted rather than destructured: `validInvoice` inherits `subject` from
+  // its `getInitialValues` base, so the key exists at RUNTIME and not in the
+  // literal's inferred TYPE. A destructure would not compile, and — more to the
+  // point — would not have removed anything.
+  const withoutKey = { ...validInvoice } as Record<string, unknown>;
+  delete withoutKey.subject;
+  assertEquals(InvoiceSchema.safeParse(withoutKey).success, false, "an absent `subject` key must be refused");
+
+  // `""` is the value `createInvoice` now writes, and the one order and
+  // fulfillment have always written.
+  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, subject: "" }).success, true);
+});
+
 Deno.test("InvoiceSchema rejects invalid status", () => {
   const doc = { ...validInvoice, status: "pending" };
   assertEquals(InvoiceSchema.safeParse(doc).success, false);

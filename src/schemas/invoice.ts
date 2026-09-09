@@ -656,12 +656,42 @@ export interface Invoice {
   due_date?: string;
   due_date_fs?: FirestoreTimestampType;
   /**
-    * Required and nullable — `null` is "no subject", and that is what
-    * `createInvoice` writes (`input.subject ?? null`, mirroring `reference`
-    * beside it). **1,019 of 1,019 in prod and dev carry the key**, 0 null
-    * (measured 2026-08-23, `orderBy` key-presence).
-    */
-  subject: string | null;
+   * Required, non-nullable, and the SAME declaration as `Order.subject` and
+   * `Fulfillment.subject` — `""` is "no subject" at all three grains
+   * (core#97 increment 3, 2026-09-09). This grain used to be the outlier:
+   * `z.string().nullable()`, because `createInvoice` wrote `input.subject ??
+   * null` while `createOrder` wrote `subject: ""` and the fulfillment
+   * projection wrote `orderNew.subject ?? ""`. One document, three grains, two
+   * spellings of the same absence.
+   *
+   * 🔴 **The census did NOT license this on its own, and reading it that way
+   * was the error worth recording.** `subject` measured 0 null and 0 absent
+   * across all three grains in prod and dev (1,020 orders / 1,040 invoices /
+   * 1,020 fulfillments, 2026-09-09) — and that is evidence about the INPUTS SO
+   * FAR, not about the writer. `CreateInvoiceInputType.subject` is
+   * `z.string().optional()`, so the very next invoice created without one would
+   * have been written `null` and refused here. This is the `orders.crms_status`
+   * trap in `core/CLAUDE.md` § *Making a field REQUIRED* verbatim: 995/995
+   * present, and requiring it would 400 the native create path the first time
+   * it ran. **The WRITER is what distinguishes the two cases, and it moved
+   * first** — `api-cloudrun` `createInvoice` now writes `input.subject ?? ""`,
+   * landed and pinned before this tightened.
+   *
+   * ⚠️ Note this is a bare `z.string()` and not `z.string().default("")`, which
+   * is what order and fulfillment carried until this same commit. A
+   * `.default()` is inert on a write (`validateBeforeWrite` discards
+   * `result.data`), so its one effect was to let a writer OMIT the key — the
+   * looser accepted set, and the one that yields `undefined` from
+   * `docData<T>`. `getInitialValues` is unaffected: its `case "string"` already
+   * returns `""`, which is why all three grains' form seeds are byte-identical
+   * before and after.
+   *
+   * ⚠️ `CreateInvoiceInputType.subject` stays `.optional()`: a CLIENT may omit
+   * it and the writer supplies `""`. Normalize at the writer, require at
+   * storage — the same split `reference` and `notes` below describe, which
+   * differ only in that their absence really is `null` at every grain.
+   */
+  subject: string;
   /**
    * ⚠️ **`.nullable()`, deliberately NOT `.optional()`** — present-and-null, never
    * absent. Under `z.strictObject` those are different accepted sets, and the
@@ -697,6 +727,52 @@ export interface Invoice {
    */
   notes: string | null;
   organization: DocumentOrganizationSnapshotType;
+  /**
+   * Required, and possibly empty — but only for a STANDALONE invoice. The lower
+   * bound is real and already here; it lives on the document `.refine()` at the
+   * bottom of `InvoiceSchema` rather than on the array:
+   * `query_by_orders.length === 0 || destinations.length >= 1`. So an invoice
+   * linked to at least one source order is held to `.min(1)` exactly as
+   * `OrderDocument.destinations` and `Fulfillment.destinations` are; an invoice
+   * with no source order is not.
+   *
+   * ⭐ **That conditional bound was a design intention, and core#97 increment 3
+   * turned it into a measured one.** **31 stored invoices carry `[]` in prod and
+   * dev** — 29 always did, and 2 more were repaired into it from an ABSENT key
+   * on 2026-09-09 (see below), which is why the total is 31 and not 29 and why
+   * nothing about the population changed. All 31 are FLAT
+   * CRMS-ingested invoices: every one has a `crms_id`, an empty `number_orders`
+   * and an empty `query_by_orders` (26 from the 2025-12-02 import, 5 from the
+   * CRMS webhook between 2026-07-28 and 2026-08-17). **0 of 1,040 are empty AND
+   * order-linked, in both projects** — so the refine is being used by precisely
+   * the class it was written for, rather than exempting a population nobody had
+   * looked at.
+   *
+   * 🔴 **So do NOT "add the missing `.min(1)`" to the array.** An unconditional
+   * bound is strictly stronger than that refine and would refuse every one of
+   * those 31 on its next write — 30 are `paid` and #2386 is `issued` and
+   * future-dated (2026-09-17), so all of them are still writable, and the refusal would
+   * surface on an operator unable to save rather than on a deploy. A pair is
+   * PROJECTED from its order by `toInvoiceDestinationPair`; an invoice with no
+   * order has nothing to project, and `[]` is its true state rather than a gap.
+   *
+   * ⭐ And it would buy nothing going forward: `createInvoice` always assigns
+   * this key, `CreateInvoiceInputType.query_by_orders` is `.min(1)`, and an
+   * order's own `destinations` is `.min(1)` — so a natively created invoice
+   * structurally cannot have fewer than one pair. The empty array is an artifact
+   * of an ingest that closed on 2026-09-04.
+   *
+   * 🔴 **What WAS a defect is the `.default([])`, and it is now dropped.** A
+   * default is inert on a write (`validateBeforeWrite` discards `result.data`),
+   * so its one effect was to let a writer omit the key entirely — which 2
+   * invoices did, against a declaration that is non-optional. `docData<Invoice>`
+   * casts rather than parses, so those two handed every reader `undefined` where
+   * this type promises an array, and the document `.refine()` above would have
+   * thrown on `inv.destinations.length` had anything actually parsed them. That
+   * is `reference`'s failure above verbatim (api-cloudrun#850), and core#83's
+   * class. Both were repaired to an explicit `[]` in prod and dev before this
+   * dropped (`api-cloudrun/scripts/backfill-invoice-destinations-key.ts`).
+   */
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotals;
@@ -787,14 +863,25 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   due_date: chicagoStartOfDay().optional().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs" }),
   due_date_fs: FirestoreTimestamp.optional(),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
-  subject: z.string().nullable().meta({ pii: "mask", column: true, label: "Subject", linkTo: "invoiceDetail" }),
+  // Bare `z.string()`, identical to the other two grains as of core#97
+  // increment 3 — the interface above carries the evidence and the ordering.
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "invoiceDetail" }),
   // `.max(255)` matches `OrderDocument.reference` and `Fulfillment.reference`;
   // this grain was the only one without a bound. 0 of 1,040 stored invoices
   // exceed it in either project (2026-09-09 census).
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "invoiceDetail" }),
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   organization: DocumentOrganizationSnapshot,
-  destinations: z.array(InvoiceDocDestination).default([]),
+  // No `.default([])`, and the lower bound is CONDITIONAL and lives on the
+  // document `.refine()` at the bottom of this schema — see the interface,
+  // which carries both rulings and the populations behind them. Do not add an
+  // unconditional `.min(1)` here: it is strictly stronger than that refine and
+  // refuses the standalone class the refine deliberately admits. Re-run
+  // `api-cloudrun/scripts/audit-document-grain-parity.ts` before changing
+  // either — its "destinations key ABSENT" row is this field's gate and must
+  // read 0, and its "destinations is an EMPTY array" row is EXPECTED to read 31
+  // and must NOT be driven down.
+  destinations: z.array(InvoiceDocDestination),
   items: z.array(InvoiceDocItem).default([]).meta({ label: "Item" }),
   totals: InvoiceDocTotalsSchema,
   xero_id: z.uuid().nullable(),

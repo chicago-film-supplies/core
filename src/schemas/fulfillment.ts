@@ -277,7 +277,12 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   destinations: z.array(DocDestination).min(1),
   items: z.array(FulfillmentItem).default([]).meta({ label: "Item" }),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
-  subject: z.string().default("").meta({ pii: "mask", column: true, label: "Subject", linkTo: "fulfillmentDetail" }),
+  // Bare `z.string()`, identical to the other two grains as of core#97
+  // increment 3 — the interface for `OrderDocument.subject` carries the census
+  // and the reason the `.default("")` was a widening rather than a guarantee.
+  // 1,020 of 1,020 stored fulfillments carry the key in prod and dev, and the
+  // projection writes `orderNew.subject ?? ""` explicitly.
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "fulfillmentDetail" }),
   reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference", linkTo: "fulfillmentDetail" }),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
