@@ -4,8 +4,12 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` is DONE, all 14, published as `beta.399`.
-> **No consumer is pinned to it yet — the pin sweep is the next action, see *What is left*.**
+> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` is DONE **and the PIN SWEEP IS DONE.**
+> `api-cloudrun` (`adc121bf`) and `manager` (`8edfa7b`) are landed on `beta.399`; `templates` is
+> **PR #301**, all four checks PASSED on head sha `6174ee9`, deliberately left for a human because it
+> repairs a fixture and so falls outside the auto-merge row.
+> 🔴 **Prod still runs `v0.246.0` / `beta.398` — release PR api-cloudrun#948 is the one remaining
+> ordered step, and the corpus census below is what says it is safe to merge.**
 > The wider campaign (core#95) is unstarted.
 >
 > **A `.default()` on a stored schema is inert and its only live effect is a hole.**
@@ -28,6 +32,10 @@ api-cloudrun#943's remaining half.*
 | parity-test fixture completed to all 14 keys | `core/tests/destination-pair-parity.test.ts` | ✅ landed |
 | 20 fabricated invoice windows repaired, prod + dev | `api-cloudrun/scripts/backfill-invoice-destination-windows.ts` | ✅ applied |
 | the rule + the symptom lesson | `core/CLAUDE.md` § *`.default()` and `.optional()`* | ✅ landed |
+| 40 pins + 2 parsed fixtures | `api-cloudrun` `adc121bf` | ✅ landed on `main` |
+| 1 pin | `manager` `8edfa7b` | ✅ landed on `main` |
+| 15 pins + 1 parsed fixture | `templates` PR #301 | 🟡 open, 4/4 checks passed, awaiting a human |
+| `beta.399` reaching **prod** | `api-cloudrun` release PR #948 | ⬜ not merged — the last ordered step |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -83,17 +91,44 @@ and cannot be generalised. `version` is deliberately not bumped either.
 
 ## What is left
 
-- 🔴 **FIRST: the pin sweep. `@cfs/core@10.0.0-beta.399` is published and no consumer is on it.**
-  `ded4306` is a `feat!`, so this is a BREAKING beta — but the TypeScript surface did NOT move:
-  `OrderDocDatesType` is unchanged, only the Zod runtime stopped defaulting. So consumer *source*
-  should compile untouched, and the risk is entirely in **seeds and fixtures**.
-  ⚠️ **Expect the api-cloudrun pre-push suite to be where it surfaces, not `deno check`.** This is
-  the `.394` class verbatim: a hand-spelled seed omitting a dates key type-checks (untyped literal),
-  `test:units` cannot reach the ones needing live dev, and grepping the field name finds the seeds
-  that already MENTION it — the opposite of the dangerous set. `core/CLAUDE.md` § *Making a field
-  REQUIRED* step 5 has the census-by-receiver technique and the two approaches that do not work.
-  Three consumers: `api-cloudrun/deno.json` (~40 subpath specifiers, bump by pattern and verify with
-  `grep -c`), `manager/package.json` (one npm alias), `templates` (a Renovate PR).
+- ✅ **The pin sweep is DONE** — 40 pins in `api-cloudrun`, 1 in `manager`, 15 in `templates`, all
+  bumped by `sed` over `jsr:@cfs/core@10.0.0-beta.398/` rather than by a count. The prediction held
+  exactly: `deno check` and `tsc --noEmit` were green everywhere because `OrderDocDatesType` never
+  moved, and **every one of the three real defects was a fixture the compiler cannot see**.
+  ⚠️ One correction to the prediction: it said the api-cloudrun *pre-push* suite would be where this
+  surfaces. It was not — `test:units` caught the first one in 9 seconds, and the second was found by
+  reading the file's own comment (*"`saveFixture` parses this against the `collection_source`
+  schema"*) rather than by running anything. **The cheap tier found more than the expensive one.**
+  The three: `api-cloudrun/tests/unit/fixtureFormat.test.ts`,
+  `api-cloudrun/tests/integration/templates/fixtures.test.ts`,
+  `templates/fixtures/quote/discounts-and-fee.json` — each missing **exactly the six `_fs` twins**.
+
+- 🔴 **CARRY THIS INTO THE CAMPAIGN: a sweep hit must be classified by WHICH SCHEMA IT IS, not by
+  which one it is not.** A naive census of `dates` literals reported 47 dangerous hits. It was wrong
+  in both directions — it swept in `Booking.dates` and Typesense shapes, and it **missed every JSON
+  fixture**, because `"dates":` carries a quote before the colon and a bare `\bdates\s*:` never
+  matches it. Narrowed to real destination-pair literals: 69 scanned, 36 complete, 33 incomplete —
+  **and 22 of those 33 are `OrderDates` INPUT payloads that are CORRECT and must not be touched.**
+
+  ⭐ **The discriminator, which generalises to every tightening in this campaign: omission
+  identifies the schema.** `OrderDates` (input) is exactly six nullable ISO keys; `OrderDocDates`
+  (stored) is fourteen. So *missing exactly the six `_fs` twins plus `days_active`/`days_charged`
+  is the signature of an input payload*, not of a defect. The positive form is better still — a
+  doc-shaped pair carries `customer_collecting`/`customer_returning` and the two durations; an
+  input-shaped one never does. That is what turned 33 things to look at into 3 to repair.
+  ⚠️ The classifier is still a heuristic derived from the same text it measures; **the suite is the
+  oracle.** It agreed: 2,022 unit tests and the full integration tier green, including
+  `orders/jurisdiction.test.ts` and `orderOrigin.test.ts`, which are among the 22 left alone.
+
+- ✅ **Corpus re-censused immediately before the push, because the DEPLOY is what makes the
+  tightening bite**: **3,049 destination pairs** across orders, invoices and fulfillments, in both
+  projects, **0 absent-key occurrences and 0 stored nulls**.
+  ⚠️ `destinations` is an array of maps, so `orderBy` cannot reach inside it — this has to page and
+  check in code, and it is exactly the `array-member-uncensusable` case `cfs-release-order` names.
+  ⭐ **The probe was controlled against a synthetic pair FIRST** (it correctly reported 3 missing and
+  2 nulls), because 0-absent *and* 0-null across 42,686 key slots reads identically to a broken `in`
+  check. ⚠️ And prod/dev are **not** independent samples — `devReplica` mirrors prod writes, and the
+  two read identically — so that is one confirmation, not two.
 
 - **The wider campaign — ~250 `.default(` sites across `core/src/schemas/`**, concentrated in
   `order.ts` (60), `invoice.ts` (28), `credit-note.ts` (26), `product.ts` (22). Each needs the same
@@ -116,11 +151,12 @@ and cannot be generalised. `version` is deliberately not bumped either.
 
 ## Context recommendation
 
-**Clear before the pin sweep, and again before the wider campaign.** Neither needs this session's
-working context — the policy is in `core/CLAUDE.md`, the worked example is this doc, and the
-campaign starts from a fresh grep of `src/schemas/`. ⚠️ The pin sweep in particular wants a *fresh*
-session rather than a tired one: its whole risk is a seed nobody grepped for, and that is exactly
-the kind of thing a long session skims.
+**Clear before the wider campaign.** It does not need this session's working context — the policy is
+in `core/CLAUDE.md`, the worked example is this doc, and the campaign starts from a fresh grep of
+`src/schemas/`. The pin sweep is done, so the fresh-session warning that stood here is discharged;
+what it was protecting against turned out to be real, and the census discriminator above is the
+cheap form of it.
 
 **Continue in-session** only for an immediate follow-up that leans on what is already loaded —
-picking up api-cloudrun#943's manager half, or measuring the second class named above.
+merging api-cloudrun#948 to carry `beta.399` to prod, picking up api-cloudrun#943's manager half, or
+measuring the second class named above.
