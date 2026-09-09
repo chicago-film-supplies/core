@@ -354,6 +354,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "normalizeFieldPath",
     "organizationIdentities",
   ],
+  // `bookingOccurrencesByBooking` derives WHICH ROW an aggregate booking's units
+  // are counted under, from a fulfillment. No template needs it: a pick sheet
+  // and a receipt both arrive with `owner_path` already stamped by their fold,
+  // which is the entire point of the field. Offering it to a document author
+  // would invite a second, per-render derivation of an ownership rule whose
+  // whole value is that there is one.
+  "pick-sheet-fold": [
+    "bookingOccurrencesByBooking",
+  ],
   "template-lint": [
     "lintFixture",
     "lintFixtureSet",

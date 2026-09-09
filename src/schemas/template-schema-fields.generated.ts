@@ -542,6 +542,7 @@ export const templateSchemaFields: Partial<
     { path: "items[].custody", type: "object | null" },
     { path: "items[].custody.from", type: "quoted | reserved | prepped | out | returned | lost | damaged | null" },
     { path: "items[].custody.to", type: "quoted | reserved | prepped | out | returned | lost | damaged | null" },
+    { path: "items[].owner_path", type: "union[] | null" },
     { path: "items[].lines", type: "object[]" },
     { path: "items[].lines[].quantity", type: "number" },
     { path: "items[].lines[].location", type: "object" },

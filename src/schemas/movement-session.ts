@@ -38,7 +38,7 @@
  * @module
  */
 import { z } from "zod";
-import { AnyUid, FirestoreId } from "./_uid.ts";
+import { AnyUid, FirestoreId, ItemUid } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -93,6 +93,29 @@ export interface MovementSessionItem {
   order_number: number | null;
   custody: MovementCustodyType | null;
   /**
+   * The fulfillment ROW these units are actioned under — `owner_path.at(-1)` is
+   * the line itself.
+   *
+   * 🔴 **A movement cannot say which row it moved, and that is the gap this
+   * closes.** Its subject is a BOOKING, which is aggregate per
+   * `(order, product, destination)` and legitimately spans several lines — 384
+   * prod legs carry one booking standing for 2+ lines. So a receipt line and a
+   * pick-sheet row could not be matched to the same physical row: the movement
+   * resolved to N candidates with no tiebreak. `chooseBookingOwner` is the
+   * tiebreak, and using the SAME function is what makes the two documents agree
+   * rather than each pick plausibly.
+   *
+   * ⚠️ **The predicate is NOT the same as {@link ../schemas/pick-sheet.ts}'s
+   * `PickSheetItem.owner_path`, despite the shared name — read this before
+   * assuming.** There, `owner_path` is null ON the owner and set on every other
+   * occurrence: ownership is the ABSENCE of a pointer. Here every row points,
+   * because a movement is not itself one of the occurrences — it is a journal
+   * entry ABOUT them. So `null` here means "not derivable" (no readable
+   * fulfillment, or a booking with no occurrence in it), never "this row is the
+   * owner".
+   */
+  owner_path: string[] | null;
+  /**
    * The physical movement, carried verbatim off the movement.
    *
    * Not flattened to a from/to pair of strings: `location.from` / `location.to`
@@ -116,6 +139,7 @@ export const MovementSessionItemSchema: z.ZodType<MovementSessionItem> = z.stric
   uid_order: FirestoreId.nullable(),
   order_number: z.int().nullable(),
   custody: MovementCustody.nullable(),
+  owner_path: z.array(ItemUid).nullable().default(null),
   lines: z.array(MovementLine).default([]),
   serialized_details: z.strictObject({
     asset_tags: z.array(z.string()).default([]),

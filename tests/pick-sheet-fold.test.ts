@@ -34,6 +34,7 @@ import type {
 } from "../src/schemas/mod.ts";
 import { pickSheetItemOwnsBooking } from "../src/schemas/mod.ts";
 import {
+  bookingOccurrencesByBooking,
   chooseBookingOwner,
   compareSheetOrders,
   foldPickSheet,
@@ -1022,4 +1023,62 @@ Deno.test("chooseBookingOwner: a tie keeps the EARLIEST — document order is th
  */
 Deno.test("chooseBookingOwner: an empty list has no owner", () => {
   assertEquals(chooseBookingOwner([]), null);
+});
+
+
+// ── The receipt derives the SAME owner as the pick sheet ────────────────────
+
+Deno.test("bookingOccurrencesByBooking agrees with the fold, booking for booking", () => {
+  // ⭐ **The equivalence proof, and it is why two derivations are tolerable.**
+  // The fold builds its occurrence map inline and LEG-scoped, interleaved with
+  // deciding which lines are on the sheet at all. The receipt cannot reuse that
+  // loop — it has no sheet, no scope and no gate — so it walks the whole
+  // document instead. The two are equivalent per booking only because a booking
+  // belongs to exactly one leg by construction (its uid names the leg's
+  // endpoint), which is a claim about the DATA and not about either walk. So it
+  // is asserted rather than trusted: if the fold's owner and the helper's owner
+  // ever disagree, a receipt and a pick sheet attribute one movement's units to
+  // two different rows.
+  const f = fulfillment({
+    items: [
+      divider(LEG_1, "Stage 4"),
+      line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
+      line(TRIPOD, "Sachtler", 1, [LEG_1, TRIPOD]),
+      line(CAMERA, "Alexa 35", 0, [LEG_1, TRIPOD, CAMERA]),
+    ],
+  });
+  const { orders } = foldPickSheet({
+    scope: DESTINATION_SCOPE,
+    gate: "all",
+    leg: null,
+    bookings: [booking(CAMERA, STAGE), booking(TRIPOD, STAGE, { quantity: 1 })],
+    fulfillments: docs(f),
+  });
+
+  const occurrences = bookingOccurrencesByBooking(f.uid, f.items, f.destinations);
+  assert(occurrences.size > 0, "the helper found no bookings at all — the arm would pass vacuously");
+
+  const items = orders[0].destinations[0].items;
+  const byBooking = new Map<string, typeof items>();
+  for (const row of items) {
+    if (row.uid_booking === null) continue;
+    const list = byBooking.get(row.uid_booking);
+    if (list) list.push(row);
+    else byBooking.set(row.uid_booking, [row]);
+  }
+
+  let compared = 0;
+  for (const [uidBooking, rows] of byBooking) {
+    // What the FOLD designated: the one row whose `owner_path` is null.
+    const foldOwner = rows.find((r) => r.owner_path === null);
+    // What the HELPER designates, through the same `chooseBookingOwner`.
+    const helperOwner = chooseBookingOwner(occurrences.get(uidBooking) ?? []);
+    assertEquals(
+      helperOwner?.path,
+      foldOwner?.item.path,
+      `the receipt and the pick sheet disagree about who owns ${uidBooking}`,
+    );
+    compared++;
+  }
+  assertEquals(compared, 2, "both bookings must be compared, or the arm is narrower than it reads");
 });

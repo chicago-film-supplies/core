@@ -5509,6 +5509,7 @@ interface MovementSessionItem {
   uid_order: string | null;
   order_number: number | null;
   custody: MovementCustodyType | null;
+  owner_path: string[] | null;
   lines: MovementLineType[];
   serialized_details: typeLiteral | null;
   reference: string;
@@ -20510,6 +20511,7 @@ interface MovementSessionItem {
   uid_order: string | null;
   order_number: number | null;
   custody: MovementCustodyType | null;
+  owner_path: string[] | null;
   lines: MovementLineType[];
   serialized_details: typeLiteral | null;
   reference: string;
@@ -30192,6 +30194,26 @@ interface PickSheetFoldResult {
   missingOrderUids: string[];
 }
 ```
+
+### `bookingOccurrencesByBooking(orderUid: string, items: FulfillmentItemType[], destinations: readonly typeLiteral[]): Map<string, BookingOccurrence[]>`
+
+Every aggregate booking's occurrences in ONE fulfillment, keyed by booking uid.
+
+The whole-document counterpart to the leg-scoped map {@link foldPickSheet}
+builds inline. Equivalent per booking, and the fold's own note says why: a
+booking belongs to exactly one leg by construction, because its uid names the
+leg's endpoint. So an order-scoped walk cannot merge two legs' occurrences of
+one booking — there is no such thing.
+
+⭐ **It needs no `bookings` read.** `bookingUidFor` is a pure composite of
+`(order, product, destination)`, so the keys are DERIVED; a caller that
+already holds a real booking uid — a movement does — looks it up directly and
+a key naming no real booking is simply never asked for. The fold passes a
+`bookingByUid` only because it must also decide which lines are on the sheet
+at all.
+
+Exported for the receipt (`MovementSessionItem.owner_path`), so the pick sheet
+and the receipt designate the SAME row rather than deriving ownership twice.
 
 ### `chooseBookingOwner(occurrences: readonly T[]): T | null`
 

@@ -2481,7 +2481,7 @@
         {
           "kind": "interface",
           "name": "MovementSessionItem",
-          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  lines: MovementLineType[];\n  serialized_details: typeLiteral | null;\n  reference: string;\n}",
+          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  serialized_details: typeLiteral | null;\n  reference: string;\n}",
           "doc": "One movement, joined to what a receipt has to name.\n\nCalled `items` on the session for the same reason orders, invoices and\nfulfillments call theirs that way: `partials/shared/*.eta` is written against\na document with an `items[]`, and a fourth spelling would make the shared\nmarkup un-shareable."
         },
         {
@@ -9332,7 +9332,7 @@
         {
           "kind": "interface",
           "name": "MovementSessionItem",
-          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  lines: MovementLineType[];\n  serialized_details: typeLiteral | null;\n  reference: string;\n}",
+          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  serialized_details: typeLiteral | null;\n  reference: string;\n}",
           "doc": "One movement, joined to what a receipt has to name.\n\nCalled `items` on the session for the same reason orders, invoices and\nfulfillments call theirs that way: `partials/shared/*.eta` is written against\na document with an `items[]`, and a fourth spelling would make the shared\nmarkup un-shareable."
         },
         {
@@ -13973,6 +13973,14 @@
           "name": "PickSheetFoldResult",
           "declaration": "interface PickSheetFoldResult {\n  orders: PickSheetOrder[];\n  missingOrderUids: string[];\n}",
           "doc": "What {@link foldPickSheet} produces before any page is clipped."
+        },
+        {
+          "kind": "function",
+          "name": "bookingOccurrencesByBooking",
+          "signature": "bookingOccurrencesByBooking(orderUid: string, items: FulfillmentItemType[], destinations: readonly typeLiteral[]): Map<string, BookingOccurrence[]>",
+          "doc": "Every aggregate booking's occurrences in ONE fulfillment, keyed by booking uid.\n\nThe whole-document counterpart to the leg-scoped map {@link foldPickSheet}\nbuilds inline. Equivalent per booking, and the fold's own note says why: a\nbooking belongs to exactly one leg by construction, because its uid names the\nleg's endpoint. So an order-scoped walk cannot merge two legs' occurrences of\none booking — there is no such thing.\n\n⭐ **It needs no `bookings` read.** `bookingUidFor` is a pure composite of\n`(order, product, destination)`, so the keys are DERIVED; a caller that\nalready holds a real booking uid — a movement does — looks it up directly and\na key naming no real booking is simply never asked for. The fold passes a\n`bookingByUid` only because it must also decide which lines are on the sheet\nat all.\n\nExported for the receipt (`MovementSessionItem.owner_path`), so the pick sheet\nand the receipt designate the SAME row rather than deriving ownership twice.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",

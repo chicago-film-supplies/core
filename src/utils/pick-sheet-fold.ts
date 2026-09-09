@@ -481,6 +481,61 @@ function bookingUidForItem(
   return bookingByUid.has(uid) ? uid : null;
 }
 
+/**
+ * Every aggregate booking's occurrences in ONE fulfillment, keyed by booking uid.
+ *
+ * The whole-document counterpart to the leg-scoped map {@link foldPickSheet}
+ * builds inline. Equivalent per booking, and the fold's own note says why: a
+ * booking belongs to exactly one leg by construction, because its uid names the
+ * leg's endpoint. So an order-scoped walk cannot merge two legs' occurrences of
+ * one booking — there is no such thing.
+ *
+ * ⭐ **It needs no `bookings` read.** `bookingUidFor` is a pure composite of
+ * `(order, product, destination)`, so the keys are DERIVED; a caller that
+ * already holds a real booking uid — a movement does — looks it up directly and
+ * a key naming no real booking is simply never asked for. The fold passes a
+ * `bookingByUid` only because it must also decide which lines are on the sheet
+ * at all.
+ *
+ * Exported for the receipt (`MovementSessionItem.owner_path`), so the pick sheet
+ * and the receipt designate the SAME row rather than deriving ownership twice.
+ */
+export function bookingOccurrencesByBooking(
+  orderUid: string,
+  // Non-readonly to match `getStructuralUids` / `getItemSubtreeRange`, which the
+  // fold hands the same array. Neither mutates it.
+  items: FulfillmentItemType[],
+  destinations: readonly { uid: string; delivery: { uid: string | null } }[],
+): Map<string, BookingOccurrence[]> {
+  const out = new Map<string, BookingOccurrence[]>();
+  // A property of the WHOLE document, not of one leg — same as the fold.
+  const structuralUids = getStructuralUids(items);
+
+  for (let i = 0; i < items.length; i++) {
+    const divider = items[i];
+    if (divider.type !== "destination") continue;
+    const pair = destinations.find((d) => d.uid === divider.uid);
+    const deliveryUid = pair?.delivery.uid ?? null;
+    if (deliveryUid === null) continue;
+
+    const { endIndex } = getItemSubtreeRange(items, i);
+    for (let j = i + 1; j <= endIndex; j++) {
+      const item = items[j];
+      if (item.type === "destination" || item.type === "group") continue;
+      const uidBooking = bookingUidFor(orderUid, item.uid, deliveryUid);
+      const occurrence: BookingOccurrence = {
+        path: item.path,
+        isStructural: getParentProductUid(item, structuralUids) === null,
+        quantity: item.quantity,
+      };
+      const list = out.get(uidBooking);
+      if (list) list.push(occurrence);
+      else out.set(uidBooking, [occurrence]);
+    }
+  }
+  return out;
+}
+
 /** Distinct organizations across a page, `null` counted once, in first-seen order. */
 export function sheetOrganizations(
   orders: readonly PickSheetOrder[],
