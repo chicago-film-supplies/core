@@ -3212,6 +3212,10 @@ const DmarcAggregateLogRecordSchema: z.ZodType<DmarcAggregateLogRecord>;
 
 Zod schema for a document-level destination pair.
 
+Spread from {@link DestinationPairCore}, which the invoice grain spreads too —
+see that object for why this is a spread where the line item is referenced per
+key.
+
 ```ts
 const DocDestination: z.ZodType<DocDestinationType>;
 ```
@@ -4321,22 +4325,26 @@ with a `uid_order` scope field so multi-order invoices can carry pairs
 from several orders and have them selectively synced per source order.
 Carries `dates` (rendered on the invoice) snapshotted from the source order.
 
-⚠️ **A new field on this pair is FOUR edits, and the compiler catches one.**
-The `extends` above hands over the type; everything that enumerates the pair
-by hand does not:
+⭐ **A new field on this pair is now ONE edit, and it is not in this file.**
+It used to be four, of which the compiler caught one. The `extends` below hands
+over the TYPE; `InvoiceDocDestination` restated the same six keys by hand and
+inherited nothing, so a field added to the order's pair type-checked here and
+was then REFUSED at write. That is not hypothetical — it is how both flags kept
+a `.default(false)` the order grain had already removed (core#101, 16 absent
+flags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so
+declaring a field there lands it on both grains.
 
-1. `InvoiceDocDestination` below — a `z.strictObject`, so a missing key is a
-   write-time refusal, not a compile error.
-2. `syncOrderDestinationsSelective`'s two projections
-   (`@cfs/core/utils/invoices`) — a **projection**, so enumerate what you
-   TAKE; a forgotten key drops the field, which surfaces.
-3. `pairsMatch` in the same file — an **equality check**, so enumerate what
-   you SKIP. A forgotten key there silently answers "equal", reports an
-   edited pair as unedited, and **overwrites the operator's edit** on the
-   next sync. That is why it destructures `{ uid_order, dates, ...rest }`
-   and compares `rest`: every future field is included by construction.
-4. api-cloudrun's `services/webhooks/invoice.ts` destination map, since deleted — another
-   projection, from the CRMS-rebuilt order.
+The other three enumerators have all become walks and need no edit either:
+`toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the
+spread is deliberate — do not tidy it into a field list), `pairsMatch`
+destructures `{ uid_order, dates, ...rest }` and compares `rest`, and
+api-cloudrun's CRMS invoice webhook map is deleted.
+
+⚠️ **What a new field still needs is an override RULING**: whether it belongs in
+`INVOICE_OVERRIDABLE_PAIR_FIELDS` (`@cfs/core/utils/invoices`) — payload the
+invoice owns and `carryOverridablePairFields` reconciles — or is order-authored
+and freezes the pair when it differs. That is a policy call, and no shape can
+make it.
 
 ```ts
 interface InvoiceDocDestinationType {
@@ -15012,22 +15020,26 @@ with a `uid_order` scope field so multi-order invoices can carry pairs
 from several orders and have them selectively synced per source order.
 Carries `dates` (rendered on the invoice) snapshotted from the source order.
 
-⚠️ **A new field on this pair is FOUR edits, and the compiler catches one.**
-The `extends` above hands over the type; everything that enumerates the pair
-by hand does not:
+⭐ **A new field on this pair is now ONE edit, and it is not in this file.**
+It used to be four, of which the compiler caught one. The `extends` below hands
+over the TYPE; `InvoiceDocDestination` restated the same six keys by hand and
+inherited nothing, so a field added to the order's pair type-checked here and
+was then REFUSED at write. That is not hypothetical — it is how both flags kept
+a `.default(false)` the order grain had already removed (core#101, 16 absent
+flags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so
+declaring a field there lands it on both grains.
 
-1. `InvoiceDocDestination` below — a `z.strictObject`, so a missing key is a
-   write-time refusal, not a compile error.
-2. `syncOrderDestinationsSelective`'s two projections
-   (`@cfs/core/utils/invoices`) — a **projection**, so enumerate what you
-   TAKE; a forgotten key drops the field, which surfaces.
-3. `pairsMatch` in the same file — an **equality check**, so enumerate what
-   you SKIP. A forgotten key there silently answers "equal", reports an
-   edited pair as unedited, and **overwrites the operator's edit** on the
-   next sync. That is why it destructures `{ uid_order, dates, ...rest }`
-   and compares `rest`: every future field is included by construction.
-4. api-cloudrun's `services/webhooks/invoice.ts` destination map, since deleted — another
-   projection, from the CRMS-rebuilt order.
+The other three enumerators have all become walks and need no edit either:
+`toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the
+spread is deliberate — do not tidy it into a field list), `pairsMatch`
+destructures `{ uid_order, dates, ...rest }` and compares `rest`, and
+api-cloudrun's CRMS invoice webhook map is deleted.
+
+⚠️ **What a new field still needs is an override RULING**: whether it belongs in
+`INVOICE_OVERRIDABLE_PAIR_FIELDS` (`@cfs/core/utils/invoices`) — payload the
+invoice owns and `carryOverridablePairFields` reconciles — or is order-authored
+and freezes the pair when it differs. That is a policy call, and no shape can
+make it.
 
 ```ts
 interface InvoiceDocDestinationType {
@@ -15799,6 +15811,54 @@ interface DestinationEndpointType {
 }
 ```
 
+### `DestinationPairCore`
+
+The destination-pair fields the ORDER/FULFILLMENT grain and the INVOICE grain
+both carry, as ONE instance per field.
+
+🔴 **This exists because the invoice's hand-copy of these six keys had already
+drifted, in the one direction a destination pair can least afford.** `9435a15`
+(2026-09-08) made `customer_collecting` / `customer_returning` REQUIRED on the
+order grain, because the `.default(false)` they carried never materialized in
+Firestore (`validateBeforeWrite` discards `result.data`) and its one effect was
+to let a writer omit a flag that reads downstream as *"we deliver"* — the answer
+that sends a crew to an address. `InvoiceDocDestination` was a separate
+`z.strictObject` restating the same keys, so it kept both defaults and the
+compiler could not see the gap: `InvoiceDocDestinationType extends
+DocDestinationType` hands over the TYPE and the schema inherited nothing.
+16 flags were absent across 8 prod invoices (core#101, repaired 2026-09-09).
+
+⭐ **SPREAD here, where the line item is referenced per key — and the difference
+is key ORDER, not a change of mind.** `getFirestoreColumns` walks the shape, so
+a spread sets the operator's column order. `schemas/_items.ts` cannot spread
+because its six shared fields sit at three different arrangements across the
+grains and no key order leaves all three unchanged. Here the shared fields are
+the WHOLE of `DocDestination` in its existing order, and the invoice's only
+extra key (`uid_order`) already sits first — so `{ uid_order, ...this }`
+reproduces both current shapes exactly. Verified by dumping
+`getFirestoreColumns` / `getTypesenseColumns` / `getInitialValues` for `orders`,
+`invoices` and `fulfillments` before and after: byte-identical, order included.
+
+⚠️ **A grain that SHADOWS a key after the spread is the one thing the spread
+cannot see** — `{ ...DestinationPairCore, customer_collecting: z.boolean() }`
+compiles and the later key silently wins, which is exactly how the invoice
+drifted the first time. `tests/destination-pair-parity.test.ts` asserts instance
+identity on both grains for that reason; do not delete it as redundant.
+
+🔴 **Sharing the instance is what makes `.meta()` safe.** `z.globalRegistry` is
+a WeakMap keyed on the schema instance, so a re-declaration carries none of the
+base's annotations. A grain needing a different heading writes
+`DestinationPairCore.delivery.meta({ … })`, which clones visibly at the call site.
+
+⚠️ **Not on the `@cfs/core/schemas` barrel, deliberately** — no consumer assembles
+a pair from parts, and publishing the parts would publish a second way to spell
+one. It is reachable at `@cfs/core/schemas/order` only because `order.ts` is an
+entrypoint; `DocDestination` is the shape to import.
+
+```ts
+const DestinationPairCore: typeLiteral;
+```
+
 ### `DestinationType`
 
 A destination pair — delivery and collection endpoints.
@@ -15863,6 +15923,10 @@ interface DiscountType {
 ### `DocDestination`
 
 Zod schema for a document-level destination pair.
+
+Spread from {@link DestinationPairCore}, which the invoice grain spreads too —
+see that object for why this is a spread where the line item is referenced per
+key.
 
 ```ts
 const DocDestination: z.ZodType<DocDestinationType>;

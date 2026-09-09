@@ -36,6 +36,14 @@ const validDestination = {
   dates: validDocDates,
   delivery: { uid: null, address: null, instructions: null, contact: null },
   collection: { uid: null, address: null, instructions: null, contact: null },
+  // ⚠️ **Spelled out because the invoice grain no longer defaults them, and this
+  // fixture is the reason that mattered.** `InvoiceDocDestination` carried
+  // `z.boolean().default(false)` on both flags until 2026-09-09, so this literal
+  // parsed while omitting a directional flag — the same shape as the 8 prod
+  // invoices core#101 repaired. Both grains now spread `DestinationPairCore`,
+  // where the flags are required.
+  customer_collecting: false,
+  customer_returning: false,
 };
 
 const validInvoice = {

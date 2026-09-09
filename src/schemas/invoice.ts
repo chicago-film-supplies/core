@@ -21,7 +21,6 @@ import {
   type DocLineItemTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  JurisdictionEnum,
   PriceFormulaEnum,
   type PriceFormulaType,
   TaxedAsEnum,
@@ -33,13 +32,12 @@ import {
   checkZeroPricedAmount,
 } from "./common.ts";
 import {
+  DestinationPairCore,
   Discount,
   DiscountInput,
   type DiscountInputType,
   type DiscountType,
-  DocDestinationEndpoint,
   type DocDestinationType,
-  OrderDocDates,
   type OrderDocDestinationItemType,
   type OrderDocGroupItemType,
   PriceModifier,
@@ -569,49 +567,54 @@ const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
  * from several orders and have them selectively synced per source order.
  * Carries `dates` (rendered on the invoice) snapshotted from the source order.
  *
- * ⚠️ **A new field on this pair is FOUR edits, and the compiler catches one.**
- * The `extends` above hands over the type; everything that enumerates the pair
- * by hand does not:
+ * ⭐ **A new field on this pair is now ONE edit, and it is not in this file.**
+ * It used to be four, of which the compiler caught one. The `extends` below hands
+ * over the TYPE; `InvoiceDocDestination` restated the same six keys by hand and
+ * inherited nothing, so a field added to the order's pair type-checked here and
+ * was then REFUSED at write. That is not hypothetical — it is how both flags kept
+ * a `.default(false)` the order grain had already removed (core#101, 16 absent
+ * flags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so
+ * declaring a field there lands it on both grains.
  *
- * 1. `InvoiceDocDestination` below — a `z.strictObject`, so a missing key is a
- *    write-time refusal, not a compile error.
- * 2. `syncOrderDestinationsSelective`'s two projections
- *    (`@cfs/core/utils/invoices`) — a **projection**, so enumerate what you
- *    TAKE; a forgotten key drops the field, which surfaces.
- * 3. `pairsMatch` in the same file — an **equality check**, so enumerate what
- *    you SKIP. A forgotten key there silently answers "equal", reports an
- *    edited pair as unedited, and **overwrites the operator's edit** on the
- *    next sync. That is why it destructures `{ uid_order, dates, ...rest }`
- *    and compares `rest`: every future field is included by construction.
- * 4. api-cloudrun's `services/webhooks/invoice.ts` destination map, since deleted — another
- *    projection, from the CRMS-rebuilt order.
+ * The other three enumerators have all become walks and need no edit either:
+ * `toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the
+ * spread is deliberate — do not tidy it into a field list), `pairsMatch`
+ * destructures `{ uid_order, dates, ...rest }` and compares `rest`, and
+ * api-cloudrun's CRMS invoice webhook map is deleted.
+ *
+ * ⚠️ **What a new field still needs is an override RULING**: whether it belongs in
+ * `INVOICE_OVERRIDABLE_PAIR_FIELDS` (`@cfs/core/utils/invoices`) — payload the
+ * invoice owns and `carryOverridablePairFields` reconciles — or is order-authored
+ * and freezes the pair when it differs. That is a policy call, and no shape can
+ * make it.
  */
 export interface InvoiceDocDestinationType extends DocDestinationType {
   uid_order: string;
 }
 
 export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z.strictObject({
+  // The one key the invoice grain adds: which of a multi-order invoice's source
+  // orders this pair is scoped to. It sits FIRST, which is what makes the spread
+  // below order-preserving — `uid_order` was already the first key here, and
+  // `DestinationPairCore` is the rest of this object in its existing order.
   uid_order: FirestoreId,
-  // The invoice's destination-divider uid — see {@link DocDestinationType.uid}.
-  // The invoice's divider REUSES the order's (`adoptOrderDividerStructure`
+  // 🔴 **THIS LIST USED TO INHERIT NOTHING.** It restated `DocDestination`'s six
+  // keys by hand, and had already drifted: it kept `z.boolean().default(false)`
+  // on `customer_collecting` / `customer_returning` after `9435a15` made both
+  // REQUIRED on the order grain. Nothing could see it — the TYPE is inherited
+  // through `extends`, so the compiler was satisfied, and the default is inert on
+  // a write, so no document ever gained the flag it let a writer omit.
+  //
+  // ⚠️ **The 16 absent flags this dropped default produced were REPAIRED before
+  // it was removed** (core#101, 2026-09-09, prod and dev), and repaired by
+  // projecting each invoice's source order rather than by writing the default —
+  // it would have been wrong on 5 of the 8 documents. The tightening is only safe
+  // because the census reads 0, and it reads 0 because a migration ran.
+  //
+  // ⚠️ The invoice's divider REUSES the order's (`adoptOrderDividerStructure`
   // keeps a divider the invoice already carries under the same uid), so a pair
   // projected by `toInvoiceDestinationPair` arrives already keyed correctly.
-  uid: z.uuid(),
-  dates: OrderDocDates,
-  delivery: DocDestinationEndpoint.meta({ label: "Delivery" }),
-  collection: DocDestinationEndpoint.meta({ label: "Collection" }),
-  customer_collecting: z.boolean().default(false),
-  customer_returning: z.boolean().default(false),
-  // 🔴 THIS LIST INHERITS NOTHING. `InvoiceDocDestinationType extends
-  // DocDestinationType`, so a field added to the order's pair arrives on the
-  // TYPE for free and never on this schema — a document carrying it would
-  // type-check and then be REFUSED by `validateBeforeWrite`, because a strict
-  // object rejects an unknown key. The compiler cannot see the gap; only a
-  // write can. Add every new pair field here by hand.
-  jurisdiction: JurisdictionEnum.nullable().optional().meta({
-    column: true,
-    label: "Jurisdiction",
-  }),
+  ...DestinationPairCore,
 });
 
 // ── Document schema ──────────────────────────────────────────────

@@ -387,8 +387,58 @@ export interface DocDestinationType {
   jurisdiction?: JurisdictionType | null;
 }
 
-/** Zod schema for a document-level destination pair. */
-export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
+/**
+ * The destination-pair fields the ORDER/FULFILLMENT grain and the INVOICE grain
+ * both carry, as ONE instance per field.
+ *
+ * 🔴 **This exists because the invoice's hand-copy of these six keys had already
+ * drifted, in the one direction a destination pair can least afford.** `9435a15`
+ * (2026-09-08) made `customer_collecting` / `customer_returning` REQUIRED on the
+ * order grain, because the `.default(false)` they carried never materialized in
+ * Firestore (`validateBeforeWrite` discards `result.data`) and its one effect was
+ * to let a writer omit a flag that reads downstream as *"we deliver"* — the answer
+ * that sends a crew to an address. `InvoiceDocDestination` was a separate
+ * `z.strictObject` restating the same keys, so it kept both defaults and the
+ * compiler could not see the gap: `InvoiceDocDestinationType extends
+ * DocDestinationType` hands over the TYPE and the schema inherited nothing.
+ * 16 flags were absent across 8 prod invoices (core#101, repaired 2026-09-09).
+ *
+ * ⭐ **SPREAD here, where the line item is referenced per key — and the difference
+ * is key ORDER, not a change of mind.** `getFirestoreColumns` walks the shape, so
+ * a spread sets the operator's column order. `schemas/_items.ts` cannot spread
+ * because its six shared fields sit at three different arrangements across the
+ * grains and no key order leaves all three unchanged. Here the shared fields are
+ * the WHOLE of `DocDestination` in its existing order, and the invoice's only
+ * extra key (`uid_order`) already sits first — so `{ uid_order, ...this }`
+ * reproduces both current shapes exactly. Verified by dumping
+ * `getFirestoreColumns` / `getTypesenseColumns` / `getInitialValues` for `orders`,
+ * `invoices` and `fulfillments` before and after: byte-identical, order included.
+ *
+ * ⚠️ **A grain that SHADOWS a key after the spread is the one thing the spread
+ * cannot see** — `{ ...DestinationPairCore, customer_collecting: z.boolean() }`
+ * compiles and the later key silently wins, which is exactly how the invoice
+ * drifted the first time. `tests/destination-pair-parity.test.ts` asserts instance
+ * identity on both grains for that reason; do not delete it as redundant.
+ *
+ * 🔴 **Sharing the instance is what makes `.meta()` safe.** `z.globalRegistry` is
+ * a WeakMap keyed on the schema instance, so a re-declaration carries none of the
+ * base's annotations. A grain needing a different heading writes
+ * `DestinationPairCore.delivery.meta({ … })`, which clones visibly at the call site.
+ *
+ * ⚠️ **Not on the `@cfs/core/schemas` barrel, deliberately** — no consumer assembles
+ * a pair from parts, and publishing the parts would publish a second way to spell
+ * one. It is reachable at `@cfs/core/schemas/order` only because `order.ts` is an
+ * entrypoint; `DocDestination` is the shape to import.
+ */
+export const DestinationPairCore: {
+  uid: z.ZodType<string>;
+  dates: z.ZodType<OrderDocDatesType>;
+  delivery: z.ZodType<DocDestinationEndpointType>;
+  collection: z.ZodType<DocDestinationEndpointType>;
+  customer_collecting: z.ZodType<boolean>;
+  customer_returning: z.ZodType<boolean>;
+  jurisdiction: z.ZodOptional<z.ZodNullable<z.ZodType<JurisdictionType>>>;
+} = {
   // The destination divider's uid — see {@link DocDestinationType.uid}. Typed
   // `z.uuid()` to match `DestinationDividerArm.uid` exactly, because it IS that
   // value; a looser type here would admit a pair no divider can name.
@@ -410,6 +460,13 @@ export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
   // booleans. An absent flag reads as `false`, i.e. *"we deliver"*, which is
   // the answer that sends a crew to an address.
   //
+  // ⚠️ **The invoice grain kept both defaults until 2026-09-09 and this shape is
+  // what closes it.** Its 16 absent flags were NOT backfilled `false`: they were
+  // projected from each invoice's source order, because a blanket default would
+  // have been wrong on 5 of the 8 documents (core#101). An inert default is what
+  // let those rows omit the field, so they are a biased sample by construction —
+  // see `CLAUDE.md` § *`.default()` and `.optional()`*.
+  //
   // ⭐ **No `.meta({ initial })` beside them, deliberately.** `getInitialValues`
   // falls through to `case "boolean": return false`, so the form seed is
   // unchanged — an `initial` here would restate what the type already says.
@@ -421,17 +478,34 @@ export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
   // the writer stamps, the storage schema refuses anything else.
   customer_collecting: z.boolean(),
   customer_returning: z.boolean(),
-  // ⚠️ Adding a field to this pair is TWO edits, and only one of them is
-  // enforced by the compiler: `InvoiceDocDestinationType extends
-  // DocDestinationType`, so the invoice inherits the TYPE for free, while
-  // `InvoiceDocDestination` (invoice.ts) is a hand-listed `z.strictObject`
-  // that inherits nothing. A document carrying the field would type-check and
-  // then be REFUSED at write. Three more places enumerate this pair by hand —
-  // see the note on `jurisdiction` in `InvoiceDocDestination`.
+  // ⭐ **Adding a field to this pair is now ZERO schema edits beyond this
+  // object.** It used to be two, and only one was enforced: the invoice
+  // inherited the TYPE through `InvoiceDocDestinationType extends
+  // DocDestinationType` and its schema was a hand-list that inherited nothing,
+  // so a document carrying the new field type-checked and was then REFUSED at
+  // write. Both grains now spread this shape.
+  //
+  // ⚠️ **What still needs a decision is the OVERRIDE POLICY, not the shape.**
+  // `toInvoiceDestinationPair` and `pairsMatch` (`utils/invoices.ts`) both walk
+  // the pair with `Object.entries`, so a new field is carried and compared for
+  // free; the one deliberate call is whether it belongs in
+  // `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owns and
+  // `carryOverridablePairFields` reconciles.
   jurisdiction: JurisdictionEnum.nullable().optional().meta({
     column: true,
     label: "Jurisdiction",
   }),
+};
+
+/**
+ * Zod schema for a document-level destination pair.
+ *
+ * Spread from {@link DestinationPairCore}, which the invoice grain spreads too —
+ * see that object for why this is a spread where the line item is referenced per
+ * key.
+ */
+export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
+  ...DestinationPairCore,
 });
 
 // ── Shared modifier types ─────────────────────────────────────────
