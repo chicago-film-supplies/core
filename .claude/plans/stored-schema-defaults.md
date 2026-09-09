@@ -4,7 +4,7 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` is DONE, all 14. The wider campaign is unstarted.
+> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` is DONE, all 14. The wider campaign (core#95) is unstarted.
 >
 > **A `.default()` on a stored schema is inert and its only live effect is a hole.**
 > `validateBeforeWrite` discards `result.data` and persists the raw document, so the default never
@@ -84,8 +84,9 @@ and cannot be generalised. `version` is deliberately not bumped either.
 - **The wider campaign — ~250 `.default(` sites across `core/src/schemas/`**, concentrated in
   `order.ts` (60), `invoice.ts` (28), `credit-note.ts` (26), `product.ts` (22). Each needs the same
   two-part gate: writers compliant in source, AND a corpus census proving no stored document leans
-  on the default. `OrderDocDates` is the worked example — including that the census can block on a
-  symptom rather than the field itself. **Not started; no issue filed yet.** ⚠️ Some of these are on
+  on the default. **Tracked by core#95** (`kind:guard`, `size:campaign`), which already counts ~335 sites and
+  asks for a detector as well as a sweep. `OrderDocDates` is now its worked example — including
+  that the census can block on a SYMPTOM rather than on the field itself. ⚠️ Some of these are on
   INPUT schemas, where a default is legitimate and must not be swept — the rule is about STORED
   schemas.
 - **A ratchet so no new inert default lands on a stored schema.** `tests/inert-defaults.test.ts`
@@ -106,5 +107,5 @@ working context: the policy is in `core/CLAUDE.md`, the worked example is this d
 starts from a fresh grep of `src/schemas/`. Carrying 250 sites' worth of investigation on top of an
 already-long session buys nothing.
 
-**Continue in-session** only for the immediate follow-ups — filing the campaign issue, or picking up
-api-cloudrun#943's manager half, both of which lean on what is already loaded.
+**Continue in-session** only for an immediate follow-up that leans on what is already loaded —
+picking up api-cloudrun#943's manager half, or measuring the second class named above.
