@@ -218,3 +218,31 @@ Deno.test("all three grain guards are reachable from the BARREL, not just their 
       missing.join("\n"),
   );
 });
+
+/**
+ * The key ORDER the spread produces, pinned — the arm
+ * `tests/totals-parity.test.ts` has and this file did not.
+ *
+ * 🔴 **Instance identity is key-order agnostic, so nothing else here can see a
+ * reorder.** That is fine while the order is incidental and not fine now: the
+ * spread's whole justification is that it puts the six shared fields in ONE
+ * canonical arrangement at the head of all three grains, and `getFirestoreColumns`
+ * walks the shape to build the operator's column picker. An unpinned order is a
+ * claim nothing checks.
+ *
+ * ⚠️ **`type` sits BEFORE the spread deliberately**, and that is the half worth
+ * protecting. All three grains already led with it, and hoisting it kept the
+ * entire measured cost of the spread to one column — `zero_priced` moving to
+ * index 4 from 21 / 17 / 5. Writing `{ ...LineItemCore, type }` instead would
+ * push `type` behind four fields on every surface for no gain.
+ */
+Deno.test("item shape parity: the spread's key order is identical across all three grains", () => {
+  const HEAD = ["type", ...Object.keys(LineItemCore)];
+  for (const collection of GRAINS) {
+    assertEquals(
+      Object.keys(lineArmShape(collection)).slice(0, HEAD.length),
+      HEAD,
+      `${collection}: the head must be \`type\` then the LineItemCore spread, in that order`,
+    );
+  }
+});
