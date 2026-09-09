@@ -212,6 +212,15 @@ export {
   FulfillmentLineItem,
   FulfillmentDestinationItem,
   FulfillmentGroupItem,
+  // 🔴 On the BARREL, not merely exported from `fulfillment.ts`. That is the
+  // whole of core#90: the point is to replace four hand-written copies in three
+  // repos, and every one of them imports `@cfs/core/schemas`. It shipped absent
+  // from here in beta.388 — `deno check`, `check:declarations` and the suite were
+  // all green, exactly as this barrel's own docblock warns, and only a probe of
+  // the PUBLISHED tarball found it. Its two siblings `isLineItem` and
+  // `isInvoiceLineItem` were already here; the asymmetry is what the new arm in
+  // `tests/item-shape-parity.test.ts` now refuses.
+  isFulfillmentLineItem,
   type Fulfillment,
   type FulfillmentItemType,
   type FulfillmentLineItemType,

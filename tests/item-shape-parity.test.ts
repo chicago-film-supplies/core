@@ -196,3 +196,28 @@ Deno.test("invoice items[].price.chargeable_days is integral", () => {
   assertEquals(days(3), true);
   assertEquals(days(0), true);
 });
+
+Deno.test("all three grain guards are reachable from the BARREL, not just their own module", async () => {
+  // 🔴 `schemas/mod.ts` lists its exports EXPLICITLY, and nothing else in this
+  // repo notices an omission: `deno check` passes (the module compiles),
+  // `check:declarations` passes (the symbol has a type), and the suite passes
+  // because core's tests import schema files directly rather than through the
+  // barrel. It surfaces at the first CONSUMER import, one publish later —
+  // beta.342 shipped it once, and beta.388 shipped `isFulfillmentLineItem` that
+  // way despite the source export being correct.
+  //
+  // ⚠️ Imported dynamically, by NAME, from the barrel — a static
+  // `import { x } from "../src/schemas/mod.ts"` for an unused binding is elided
+  // before the module links, so it passes for a symbol that does not exist.
+  const barrel = await import("../src/schemas/mod.ts");
+  const missing = (["isLineItem", "isInvoiceLineItem", "isFulfillmentLineItem"] as const)
+    .filter((name) => typeof (barrel as Record<string, unknown>)[name] !== "function");
+  assertEquals(
+    missing,
+    [],
+    "A grain's line-item guard is not on the `@cfs/core/schemas` barrel. Consumers " +
+      "cannot reach it, which is the entire point of core#90 — the copies it replaces " +
+      "all import the barrel. Add it to the export block in `schemas/mod.ts`:\n" +
+      missing.join("\n"),
+  );
+});
