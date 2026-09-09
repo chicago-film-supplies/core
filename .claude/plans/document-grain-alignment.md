@@ -3,6 +3,23 @@
 *Promoted from a machine-local draft on 2026-09-09. Owning repo is `core` — the schemas are
 the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 
+> ## ⚠️ STATUS UPDATE 2026-09-09 — increment 0 has RUN, and it makes two increments below WRONG
+>
+> `api-cloudrun/scripts/audit-document-grain-parity.ts` (`ef75a64c`) is written and run against
+> **both** projects. The numbers are in § *0 — Census*, and they change the plan in three places:
+>
+> - **Six of the eight questions are 0**, so most of increment 1's tightenings are cleared.
+> - **Increment 1a is ~9,214 rows, not the 44 its precedent implied** — it is its own campaign,
+>   tracked separately. It is no longer a rider on increment 1.
+> - **Increment 3's `crms_id` bullet was wrong**, and the owner has ruled. It is a RENAME, not a
+>   removal, and it is core#94's field rather than this pass's. Two of increment 3's three
+>   "needs a ruling" items are now answered by data.
+>
+> ⚠️ **Increment 1 is still blocked** on the core#91/#92/#93 campaign's `templates` PR MERGING —
+> not on that session going idle. Confirmed with it 2026-09-09: the fixture re-capture may be
+> handed to a fresh session, and a beta cut before that merge lands a stale pin in whatever
+> checkout is running the re-capture.
+
 ## Status — this runs AFTER the core#91/#92/#93 campaign
 
 **Nothing here is started.** The campaign that precedes it is planned by a separate session
@@ -245,9 +262,44 @@ api-cloudrun cast (`docData<T>` is `snapshot.data() as T`), so a legacy document
 invisible until its next *write*, when `validateBeforeWrite` refuses it — an existing invoice
 failing to save, surfacing on an operator rather than on a deploy.
 
-⚠️ **`orderBy` cannot answer any of these.** They all sit inside arrays of maps, which is
+⚠️ **`orderBy` cannot answer MOST of these.** They sit inside arrays of maps, which is
 `stored-optionality.test.ts`'s own `array-member-uncensusable`. This needs a **paging**
-script, not `api-cloudrun/scripts/audit-field-presence.ts`.
+script, not `api-cloudrun/scripts/audit-field-presence.ts`. ⚠️ The exception is any question
+that IS a plain dotted path into a map — `organization.crms_id`, say — where
+`audit-field-presence.ts` is the right tool and the paging script deliberately does not
+duplicate it.
+
+✅ **DONE 2026-09-09 — `api-cloudrun/scripts/audit-document-grain-parity.ts` (`ef75a64c`).**
+Measured against `cfs-3100` / `cfs-dev-3100`; 1,019 orders, 1,040 invoices, 1,019
+fulfillments in both.
+
+| question | prod | dev | what it clears |
+|---|---:|---:|---|
+| `items[].price.chargeable_days` fractional | **0** | **0** | invoice → `z.int()` |
+| `items[].quantity < 0` | **0** | **0** | invoice → `.min(0)` |
+| `items[].name` empty or > 100 | **0** | **0** | invoice → `.min(1).max(100)` |
+| `reference` > 255 | **0** | **0** | invoice → `.max(255)` |
+| `zero_priced` with non-zero `base_cents` | **0** | **0** | move `checkZeroPricedAmount` onto the Inner const |
+| `subject` null | **0** | **0** | **settles an increment-3 ruling — no backfill** |
+| destination pair flag absent | 16 | 16 | 8 invoices × 2 flags — the `9435a15` gap, live |
+| `destinations` empty | 31 | 31 | answers increment 3; the guess was 28 |
+| component without `zero_priced` (orders) | 2 | 2 | → increment 1a |
+| component without `zero_priced` (invoices) | 4,397 | 4,396 | → increment 1a |
+| component without `zero_priced` (fulfillments) | 4,815 | 4,815 | → increment 1a |
+| fee/surcharge line with null `crms_id` | 3 | 3 | see below |
+
+🔴 **Dev and prod differ by ONE row in ONE question, so this is one corpus measured twice —
+not two independent samples.** `devReplica` is currently mirroring prod closely, so the
+dual-census premise `audit-field-presence.ts` documents (dev carries documents the legacy
+ingest did not write, which is what makes the pair informative) **does not hold for these
+three collections today.** Do not cite "clean in both environments" as two confirmations.
+
+⭐ **The three null-`crms_id` fee lines are not a class.** All 13 `transaction_fee` /
+`surcharge` products in prod carry a `crms_id` (measured 2026-09-09) — the catalog entries
+are wired, dormant pending manager launch, per the owner. Two of the three offenders carry
+line uid `77LKBYcC09u1PZFhxmDJ`, which is the **Card Fee product itself** (`crms_id: 372`,
+active): the line names the product and the denormalized copy is null, because
+`productLineDenorms` takes `Product | undefined`. Three lines, not a population.
 
 A new `api-cloudrun/scripts/` census script — `audit-document-grain-parity` — dev + prod, one table:
 
@@ -328,9 +380,22 @@ annotation follows from it.
 **Cost — this is a tightening, so it runs the full procedure.** Census both environments for
 component lines lacking the key, across `orders`, `invoices` **and** `fulfillments`, then
 backfill an explicit `false`. ⚠️ `orderBy` cannot reach it (array of maps), so it joins
-increment 0's paging script. ⭐ Precedent and script shape already exist: the *other* direction
-was repaired on 2026-09-07 — **44 top-level flagged lines across 35 documents**, all from the
-deleted CRMS ingest — and the guard was closed behind it.
+increment 0's paging script.
+
+🔴 **MEASURED 2026-09-09, and it is 200× what this section assumed: 9,214 rows** — 2 orders,
+4,397 invoices, 4,815 fulfillments in prod. This section was sized against the *other*
+direction's repair on 2026-09-07 (**44 top-level flagged lines across 35 documents**, all from
+the deleted CRMS ingest), and that precedent gives the script shape and **not** the scale.
+
+⭐ **So 1a is NOT a rider on increment 1 — it is its own campaign, and it is tracked as one.**
+A ~9,200-row backfill across three collections, plus an array-level refine on all three, plus
+the deploy-before-backfill ordering under `z.strictObject`, is not something that rides along
+inside a schema-alignment PR. Increment 1 should ship without it.
+
+⚠️ **And the census cannot tell you what to backfill.** It counts components that do not STATE
+the flag; it cannot know whether each was meant to be charged. Writing `false` across 9,214
+rows asserts "every one of these is charged", which is probably right and is **not** measured.
+That is the part to put in front of the owner before writing anything.
 
 ⚠️ **Writing `false` is a real value, not a cushion.** It says *this component is charged*,
 which a writer genuinely produces — the `orders.crms_id` case, not the case
@@ -377,18 +442,48 @@ because it lands in the file and the fixture family that campaign already opens:
   `pdf_versions` precedent. Worth doing, and worth deciding deliberately rather than inside
   a schema-alignment PR.
 
-### 3 — The three that need a ruling, not a sweep
+### 3 — What needed a ruling; two are now answered
 
-File as `kind:decision` on `core`; do not pick a side in the PR.
+⚠️ **Rewritten 2026-09-09.** Increment 0 answered two of these with data and the owner ruled on
+the third, so this is no longer three open `kind:decision` items.
 
-- **`Invoice.subject`** is `string | null`; order and fulfillment are `string` with
-  `.default("")`. `createInvoice` writes `input.subject ?? null`. Aligning either direction
-  is a backfill. (`reference` is *already* nullable on all three — only `.max(255)` is
-  missing on the invoice, which increment 1 fixes.)
-- **`Invoice.destinations` `.default([])` vs `.min(1)`** — the 28 flat CRMS invoices with no
-  order divider decide this. Census question 6 answers it.
-- **`crms_id`** is `z.int()` on the order line and `z.union([z.int(), z.string()])` on the
-  invoice line, both marked `@deprecated`. This is probably a **removal**, not an alignment.
+- ✅ **`Invoice.subject` — ANSWERED, and it is free.** It is `string | null` where order and
+  fulfillment are `string` with `.default("")`, and `createInvoice` writes
+  `input.subject ?? null` — so this looked like a backfill. **The census found 0 nulls in
+  either environment**, so aligning it to non-nullable is a pure declaration change with
+  nothing to migrate. (`reference` is *already* nullable on all three — only `.max(255)` is
+  missing on the invoice, which increment 1 fixes, and 0 invoices exceed it.)
+- ⚠️ **`Invoice.destinations` `.default([])` vs `.min(1)` — ANSWERED, and it is NOT free.**
+  **31 invoices carry an empty `destinations`** in both environments. The guess in the earlier
+  draft was "the 28 flat CRMS invoices"; the real number is 31 and it has not been attributed.
+  `.min(1)` would refuse all 31 on their next write. Either keep `.default([])` and record why,
+  or attribute the 31 first — do not tighten on the strength of the count alone.
+- 🔴 **`crms_id` — the owner has RULED, and this bullet was wrong.** It read *"probably a
+  removal, not an alignment."* **It is a rename, not a removal** (owner, 2026-09-09; the same
+  ruling core#94 records from 2026-09-08): it is the operator-facing **human-readable account
+  number**, and deleting it breaks every organization deep link and row label.
+
+  ⚠️ **And `crms_id` is FOUR fields wearing one name — that is the trap, and it is why this
+  bullet went wrong.** Verified 2026-09-09:
+
+  | # | where | declaration | note |
+  |---|---|---|---|
+  | 1 | `DocumentOrganizationSnapshot.crms_id` (`schemas/common.ts`) | `.nullable().optional()` | **core#94's field.** The account number |
+  | 2 | order **line item** (`schemas/order.ts`) | `z.int().nullable().optional()` | **not** `@deprecated` |
+  | 3 | invoice **line item** (`schemas/invoice.ts`) | `z.union([z.int(), z.string()]).nullable().optional()` | `@deprecated Legacy CRMS field` |
+  | 4 | top-level `Order.crms_id` (`schemas/order.ts`) | `z.int().nullable()` — **required** | 995/995, CRMS-authored corpus |
+
+  The earlier bullet claimed (2) and (3) are *"both marked `@deprecated`"*. Only (3) is.
+
+  ⭐ **So core#97's scope here is ONLY the type divergence between (2) and (3)** — `z.int()`
+  against `z.union([z.int(), z.string()])`. The rename of (1) is core#94's, and (4) stays.
+  🔴 **A removal of (2) or (3) is blocked regardless**, and this doc already says why:
+  `invoiceItemDifferences` diffs KEY SETS, and `crms_id` is one of the three fields that has
+  already caused every paired line to report permanently out of sync (8,015 of 8,978). Dropping
+  it from one line arm and not the other re-triggers exactly that.
+
+  ⚠️ **Before narrowing (3) to `z.int()`, census the `string` member** — the union's string arm
+  is not covered by increment 0's questions.
 
 ### 4 — Naming (last, and separable)
 
@@ -483,18 +578,25 @@ changes the *schema*, not the override policy).
 
 ## Context recommendation
 
-**Clear. Do not start this from a session that has been planning it.**
+**Clear. Increment 0 is DONE (2026-09-09) — start at increment 1, in a fresh window.**
 
-Start at increment 0, the census, in a fresh window — it is short, its numbers gate every
-decision below it, and they belong in this doc before anyone opens a schema file. Increment 1
-touches four large schema files and wants its own window after that.
+The census no longer needs running; its numbers are in § *0* above and they are the durable
+half of that work. Increment 1 touches four large schema files and wants a window of its own,
+with none of the coordination context that produced the census in it.
 
-⚠️ **Two preconditions, both outside this doc:**
+⚠️ **One precondition, and it is narrower than it was:** the core#91/#92/#93 campaign's
+`templates` PR must **MERGE** — not merely be in progress, and not "that session went idle."
+Confirmed with that session 2026-09-09: the 14-fixture re-capture may be handed to a fresh
+session, and cutting a `core` beta before the merge lands a stale pin in whichever checkout is
+running the re-capture. The campaign has twice discovered a schema fix during that re-capture,
+so treat another beta as live until the PR is merged.
 
-1. The core#91/#92/#93 campaign lands first. It rewrites `pick-sheet.ts` and
-   `movement-session.ts`, and re-captures five `templates` fixture families.
-2. `core`'s gate judges the WHOLE working tree at both commit and push, so check for a peer
-   before starting — `git -C core status --short` and `pgrep -fl "deno.*test"`.
+⚠️ **`core`'s gate judges the WHOLE working tree at both commit and push**, so check for a peer
+before starting — `git -C core status --short` and `pgrep -fl "deno.*test"`. (Unlike
+`api-cloudrun` and `manager`'s pre-commit, which gate the subject.)
+
+⭐ **Increment 1a is no longer part of this plan's critical path** — it is ~9,214 rows and is
+tracked as its own campaign. Ship increment 1 without it.
 
 ⚠️ **This doc's own line numbers will rot the same way the campaign's did.** Re-derive before
 acting on any of them; the measurements and the reasoning are the durable half.
