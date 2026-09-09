@@ -694,11 +694,11 @@ neither a pin bump nor a floor raise for this work. ⚠️ Re-run `deno task lin
 the newest **published** core rather than against the pin, and is the one cross-repo gate that reaches
 forward past a pin.
 
-⚠️ **One thing to watch that is not a blocker: `api-cloudrun` `e2dc7a09` carries
-`Requires-Manager: >= 25.0.0`, and manager 25.0.0 is NOT yet released** (manager#438 is the open
-release PR; latest published is `manager-v24.4.0`). The trailer is **advisory by owner ruling** — it
-shows a red X on the api-cloudrun release and does not block the merge. Merge manager#438 before
-api-cloudrun's next release PR if the ordering is to hold in fact rather than on paper.
+✅ **The `Requires-Manager: >= 25.0.0` on `api-cloudrun` `e2dc7a09` is SATISFIED.** manager#438 was
+merged 2026-09-09 and `manager-v25.0.0` is published. Verified by reading the tag's own content rather
+than inferring it from the merge: `git show manager-v25.0.0:package.json` declares
+`npm:@jsr/cfs__core@10.0.0-beta.390`, and `095ce6a` is an ancestor of the tag. So the REFINE ordering
+holds in fact — the manager released the tighter input schemas before the API can ship them to prod.
 
 ⚠️ **`core`'s gate judges the WHOLE working tree at both commit and push**, so check for a peer before
 starting — `git -C core status --short` and `pgrep -fl "deno.*test"`. (Unlike `api-cloudrun` and
