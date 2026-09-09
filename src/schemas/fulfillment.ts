@@ -23,16 +23,16 @@
 import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import {
+  checkZeroPricedAmount,
   type FirestoreTimestampType,
   type FulfillableItemType,
   FULFILLMENT_LINE_ITEM_TYPES,
+  isLineItemType,
   OrderDerivedOrgPath,
   type OrgPathNodeType,
   StockMethodEnum,
   type StockMethodType,
   TimestampFields,
-  checkZeroPricedAmount,
-  isLineItemType,
 } from "./common.ts";
 import {
   DocDestination,
@@ -68,7 +68,9 @@ import { LineItemCore } from "./_items.ts";
  * harmless.
  */
 type FulfillmentOrderStatusType = OrderStatusType;
-const FulfillmentOrderStatus: z.ZodType<FulfillmentOrderStatusType> = z.enum(ORDER_STATUSES);
+const FulfillmentOrderStatus: z.ZodType<FulfillmentOrderStatusType> = z.enum(
+  ORDER_STATUSES,
+);
 
 // The list and its "why" live in `schemas/common.ts`, beside `ITEM_CONTRACTS` and the
 // compile-time assertion tying it to `fulfillable`.
@@ -93,6 +95,19 @@ export interface FulfillmentLineItemType {
    *
    * ⚠️ Same shape as the order's, `.nullable().optional()` — see the invoice
    * twin's docblock for why matching rather than tightening is the point.
+   *
+   * 🔴 **DECLARED, NOT YET EMITTED — so "carries the same fact" above is the
+   * intent and not yet the corpus.** `projectItem`
+   * (`api-cloudrun/src/services/fulfillment.ts`) does not copy this key.
+   * Measured 2026-09-09 in both projects: **0 of 4,823 fulfillment component
+   * lines carry it**, against 4,821 of 4,823 stated on the order grain — so the
+   * DECLARED and STORED surfaces of this line are different sets right now, and
+   * a census or mirror must read the stored shape rather than this interface.
+   *
+   * ⭐ This is also why `rebuildFulfillmentItems` takes sequence from the STORED
+   * document: with no value here a fulfillment cannot evaluate the
+   * zero-priced-first invariant about itself and can only inherit its
+   * projection's order. See `core/.claude/plans/zero-priced-stage-two.md`.
    */
   zero_priced?: boolean | null;
   path: string[];
@@ -143,9 +158,15 @@ const FulfillmentLineItemInner = z.strictObject({
   // `_items.ts`, in one canonical order at the head of every grain. A grain that
   // omits one is now a compile error; `tests/item-shape-parity.test.ts` still
   // holds the SHADOWING case, which no spread can catch.
-  type: z.enum(FULFILLMENT_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
+  type: z.enum(FULFILLMENT_LINE_ITEM_TYPES).meta({
+    column: true,
+    label: "Type",
+  }),
   ...LineItemCore,
-  stock_method: StockMethodEnum.optional().meta({ column: true, label: "Stock Method" }),
+  stock_method: StockMethodEnum.optional().meta({
+    column: true,
+    label: "Stock Method",
+  }),
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   quantity_order: z.number().int().min(0).optional(),
@@ -159,7 +180,8 @@ const FulfillmentLineItemInner = z.strictObject({
   // out whether the absence here is a decision or a gap.
 }).superRefine(checkZeroPricedAmount);
 
-export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> = FulfillmentLineItemInner;
+export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> =
+  FulfillmentLineItemInner;
 
 /** Destination divider in the fulfillment items array. */
 export interface FulfillmentDestinationItemType {
@@ -172,7 +194,9 @@ export interface FulfillmentDestinationItemType {
 
 const FulfillmentDestinationItemInner = DestinationDividerArm;
 
-export const FulfillmentDestinationItem: z.ZodType<FulfillmentDestinationItemType> = FulfillmentDestinationItemInner;
+export const FulfillmentDestinationItem: z.ZodType<
+  FulfillmentDestinationItemType
+> = FulfillmentDestinationItemInner;
 
 /** Group divider in the fulfillment items array. */
 export interface FulfillmentGroupItemType {
@@ -185,7 +209,8 @@ export interface FulfillmentGroupItemType {
 
 const FulfillmentGroupItemInner = GroupDividerArm;
 
-export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> = FulfillmentGroupItemInner;
+export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> =
+  FulfillmentGroupItemInner;
 
 // ── Input schemas ────────────────────────────────────────────────
 //
@@ -314,7 +339,9 @@ export interface UpdateFulfillmentItemsInputType {
   version: number;
 }
 
-export const UpdateFulfillmentItemsInput: z.ZodType<UpdateFulfillmentItemsInputType> = z.object({
+export const UpdateFulfillmentItemsInput: z.ZodType<
+  UpdateFulfillmentItemsInputType
+> = z.object({
   lineItems: z.array(FulfillmentItemInputLineInner).default([]),
   version: z.number().int().min(0),
 });
@@ -325,11 +352,12 @@ export type FulfillmentItemType =
   | FulfillmentDestinationItemType
   | FulfillmentGroupItemType;
 
-export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.discriminatedUnion("type", [
-  FulfillmentLineItemInner,
-  FulfillmentDestinationItemInner,
-  FulfillmentGroupItemInner,
-]);
+export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z
+  .discriminatedUnion("type", [
+    FulfillmentLineItemInner,
+    FulfillmentDestinationItemInner,
+    FulfillmentGroupItemInner,
+  ]);
 
 /**
  * Narrows a fulfillment doc item to a line item (excludes the two dividers).
@@ -348,7 +376,9 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z.discriminatedUn
  * is counting. The decision is `ITEM_CONTRACTS[type].kind`, shared with the
  * other two grains, and it is the only thing that should decide it.
  */
-export function isFulfillmentLineItem(item: FulfillmentItemType): item is FulfillmentLineItemType {
+export function isFulfillmentLineItem(
+  item: FulfillmentItemType,
+): item is FulfillmentLineItemType {
   return isLineItemType(item.type);
 }
 
@@ -402,7 +432,11 @@ export interface Fulfillment {
 
 export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   uid: FirestoreId,
-  number: z.int().meta({ column: true, label: "#", linkTo: "fulfillmentDetail" }),
+  number: z.int().meta({
+    column: true,
+    label: "#",
+    linkTo: "fulfillmentDetail",
+  }),
   status: FulfillmentOrderStatus.meta({ column: true, label: "Status" }),
   organization: FulfillmentOrganization.meta({ label: "Organization" }),
   destinations: z.array(DocDestination).min(1),
@@ -413,8 +447,17 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   // and the reason the `.default("")` was a widening rather than a guarantee.
   // 1,020 of 1,020 stored fulfillments carry the key in prod and dev, and the
   // projection writes `orderNew.subject ?? ""` explicitly.
-  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "fulfillmentDetail" }),
-  reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference", linkTo: "fulfillmentDetail" }),
+  subject: z.string().meta({
+    pii: "mask",
+    column: true,
+    label: "Subject",
+    linkTo: "fulfillmentDetail",
+  }),
+  reference: z.string().max(255).nullable().default(null).meta({
+    column: true,
+    label: "Reference",
+    linkTo: "fulfillmentDetail",
+  }),
   query_by_items: z.array(z.string()).default([]),
   query_by_contacts: z.array(z.string()).default([]),
   query_by_dates: z.array(z.string()).default([]),

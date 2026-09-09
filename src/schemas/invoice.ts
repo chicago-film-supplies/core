@@ -7,29 +7,32 @@ import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { LineItemCore } from "./_items.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
-import { type RenderParamsContext, RenderParamsContextSchema } from "./template-version.ts";
+import {
+  type RenderParamsContext,
+  RenderParamsContextSchema,
+} from "./template-version.ts";
 import {
   ActorRef,
   type ActorRefType,
-  DocumentOrganizationSnapshot,
-  type DocumentOrganizationSnapshotType,
   checkItemPriceFormula,
   checkPriceBaseUnit,
+  checkZeroPricedAmount,
   COARevenueEnum,
   type COARevenueType,
   DOC_LINE_ITEM_TYPES,
   type DocLineItemTypeType,
+  DocumentOrganizationSnapshot,
+  type DocumentOrganizationSnapshotType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  InvoiceStatusEnum,
+  type InvoiceStatusType,
+  isLineItemType,
   PriceFormulaEnum,
   type PriceFormulaType,
   TaxedAsEnum,
   type TaxedAsType,
-  type InvoiceStatusType,
-  InvoiceStatusEnum,
   TimestampFields,
-  isLineItemType,
-  checkZeroPricedAmount,
 } from "./common.ts";
 import {
   DestinationPairCore,
@@ -172,7 +175,10 @@ export const INVOICE_STATUS_CONTRACTS: Readonly<
  * instead of throwing on an undefined lookup.
  */
 export function canOperatorTransition(from: string, to: string): boolean {
-  const contract = (INVOICE_STATUS_CONTRACTS as Record<string, InvoiceStatusContract | undefined>)[
+  const contract = (INVOICE_STATUS_CONTRACTS as Record<
+    string,
+    InvoiceStatusContract | undefined
+  >)[
     from
   ];
   return contract?.operator_moves.some((s) => s === to) ?? false;
@@ -193,7 +199,8 @@ function statusesWhere(
  * `services/invoices.ts` and `api-cloudrun/scripts/audit-xero-quotes.ts`, the last carrying
  * a "keep in lockstep" comment that nothing enforced.
  */
-export const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[] = statusesWhere("live_in_xero");
+export const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[] =
+  statusesWhere("live_in_xero");
 
 /**
  * Statuses that have **ever** reached Xero. Includes `void` — see
@@ -201,15 +208,19 @@ export const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[] = statusesWhere
  * {@link LIVE_IN_XERO_STATUSES}, which is exactly the mistake this pair exists
  * to prevent.
  */
-export const REACHED_XERO_STATUSES: readonly InvoiceStatusType[] = statusesWhere("reached_xero");
+export const REACHED_XERO_STATUSES: readonly InvoiceStatusType[] =
+  statusesWhere("reached_xero");
 
 /** Statuses whose embedded snapshot is frozen against org-cascade rewrites. */
-export const SETTLED_STATUSES: readonly InvoiceStatusType[] = statusesWhere("settled");
+export const SETTLED_STATUSES: readonly InvoiceStatusType[] = statusesWhere(
+  "settled",
+);
 
 /** Statuses that still admit a further payment. Excludes `paid` deliberately. */
-export const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[] = statusesWhere(
-  "accepts_payment",
-);
+export const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[] =
+  statusesWhere(
+    "accepts_payment",
+  );
 
 // Invoice item types are a superset of order item types — they add the "order"
 // divider. That superset had a name here (`InvoiceItemTypeType`, an alias of
@@ -284,10 +295,19 @@ const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
   // things — units, documents, attempts, days". This grain admitted 2.5. 0 of
   // 1,040 stored invoices carry a fractional value in either project, and 0
   // across the 23 committed `invoice`+`quote` fixtures in `templates`.
-  chargeable_days: z.number().int().nullable().default(null).meta({ column: true, label: "Chargeable Days" }),
-  formula: PriceFormulaEnum.default("five_day_week").meta({ column: true, label: "Formula" }),
+  chargeable_days: z.number().int().nullable().default(null).meta({
+    column: true,
+    label: "Chargeable Days",
+  }),
+  formula: PriceFormulaEnum.default("five_day_week").meta({
+    column: true,
+    label: "Formula",
+  }),
   subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
-  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
+  subtotal_discounted_cents: z.int().default(0).meta({
+    column: true,
+    label: "Discounted Subtotal",
+  }),
   discount: Discount.nullable().default(null).meta({ label: "Discount" }),
   taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
   // Labelled for the same reason the order side's is: `TaxRef` carries `name`
@@ -323,6 +343,23 @@ export interface InvoiceDocLineItemType {
    * Making it required here would make an invoice line STRICTER than the order
    * line it mirrors, which is the opposite of the alignment this exists for; a
    * divider row and a plain top-level rental have no meaningful boolean.
+   *
+   * 🔴 **DECLARED, NOT YET EMITTED — so "carries the same fact" above is the
+   * intent and not yet the corpus.** `projectOrderItemToInvoiceItem` omits this
+   * key on purpose (stage one of `manager#421`): the schema accepts it so a
+   * deployed reader can hold a document carrying one, and nothing writes one
+   * yet. Measured 2026-09-09 in both projects: **0 of 4,397 invoice component
+   * lines carry it**, against 4,821 of 4,823 stated on the order grain.
+   *
+   * ⚠️ **So the DECLARED surface of this line and its STORED surface are
+   * different sets right now**, and anything reasoning about invoice lines —
+   * a census, a Typesense mirror, a template fixture, a key-set diff — has to
+   * read the stored shape rather than this interface. Emitting it is gated on a
+   * backfill rather than on taste: `invoiceItemDifferences` compares top-level
+   * KEY SETS and `buildOrderLine` writes the key on every order line, so an emit
+   * ahead of the backfill makes every paired line differ at once. See
+   * `projectOrderItemToInvoiceItem`'s docblock and
+   * `core/.claude/plans/zero-priced-stage-two.md`.
    */
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
@@ -398,7 +435,10 @@ const InvoiceDocLineItemInner = z.strictObject({
   ...LineItemCore,
   price: InvoiceDocItemPrice,
   coa_revenue: COARevenueEnum.nullable().optional(),
-  taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
+  taxed_as: TaxedAsEnum.nullable().optional().meta({
+    column: true,
+    label: "Taxed As",
+  }),
   tracking_category: z.string().nullable().optional(),
   xero_id: z.uuid().nullable().optional(),
   xero_tracking_option_id: z.uuid().nullable().optional(),
@@ -422,7 +462,8 @@ const InvoiceDocLineItemInner = z.strictObject({
 // `zero_priced === true` with a non-zero `base_cents`, and 0 across the fixture
 // corpus. This is a tightening of what PARSES, not a new field — it belongs in
 // the census-gated set even though nothing about it looks like a migration.
-export const InvoiceDocLineItem: z.ZodType<InvoiceDocLineItemType> = InvoiceDocLineItemInner;
+export const InvoiceDocLineItem: z.ZodType<InvoiceDocLineItemType> =
+  InvoiceDocLineItemInner;
 
 // ── Order divider ───────────────────────────────────────────────
 
@@ -448,12 +489,17 @@ const InvoiceDocOrderItemInner = z.strictObject({
 });
 
 /** Zod schema for an order divider item. */
-export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = InvoiceDocOrderItemInner;
+export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> =
+  InvoiceDocOrderItemInner;
 
 // ── Item union ──────────────────────────────────────────────────
 
 /** Union of all item types stored in an invoice document. */
-export type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
+export type InvoiceDocItemType =
+  | InvoiceDocLineItemType
+  | OrderDocGroupItemType
+  | OrderDocDestinationItemType
+  | InvoiceDocOrderItemType;
 
 /**
  * Zod schema for any invoice document item — discriminated on `type`.
@@ -462,12 +508,13 @@ export type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType 
  * always discriminable; it stayed a plain union only because the order side
  * wasn't. See `OrderDocItem`.
  */
-export const InvoiceDocItem: z.ZodType<InvoiceDocItemType> = z.discriminatedUnion("type", [
-  InvoiceDocLineItemInner,
-  GroupDividerArm,
-  DestinationDividerArm,
-  InvoiceDocOrderItemInner,
-]);
+export const InvoiceDocItem: z.ZodType<InvoiceDocItemType> = z
+  .discriminatedUnion("type", [
+    InvoiceDocLineItemInner,
+    GroupDividerArm,
+    DestinationDividerArm,
+    InvoiceDocOrderItemInner,
+  ]);
 
 /**
  * Type guard that narrows an invoice doc item to a billable line item (excludes
@@ -479,7 +526,9 @@ export const InvoiceDocItem: z.ZodType<InvoiceDocItemType> = z.discriminatedUnio
  * clause longer than the order guard, which is exactly the kind of difference
  * that looks like a bug and is not.
  */
-export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItemType {
+export function isInvoiceLineItem(
+  item: InvoiceDocItemType,
+): item is InvoiceDocLineItemType {
   return isLineItemType(item.type);
 }
 
@@ -552,16 +601,28 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
   taxes: TotalsCore.taxes,
   transaction_fees: TotalsCore.transaction_fees,
   total_cents: TotalsCore.total_cents,
-  amount_paid_cents: z.int().default(0).meta({ column: true, label: "Amount Paid" }),
+  amount_paid_cents: z.int().default(0).meta({
+    column: true,
+    label: "Amount Paid",
+  }),
   // Bare `.optional()` with NO default, deliberately: ~962 prod invoices
   // predate the field, and `validateBeforeWrite` persists the RAW doc, so a
   // schema default would never materialize anyway — it would only hide the
   // absence from the compiler at every read.
-  amount_credited_cents: z.int().optional().meta({ column: true, label: "Amount Credited" }),
+  amount_credited_cents: z.int().optional().meta({
+    column: true,
+    label: "Amount Credited",
+  }),
   // Same: bare `.optional()`, no default. See the interface docblock.
-  amount_void_cents: z.int().optional().meta({ column: true, label: "Amount Voided" }),
+  amount_void_cents: z.int().optional().meta({
+    column: true,
+    label: "Amount Voided",
+  }),
   // Unbounded on purpose: an over-credited invoice must stay negative.
-  amount_due_cents: z.int().default(0).meta({ column: true, label: "Amount Due" }),
+  amount_due_cents: z.int().default(0).meta({
+    column: true,
+    label: "Amount Due",
+  }),
 });
 
 // ── Destinations ────────────────────────────────────────────────
@@ -597,30 +658,31 @@ export interface InvoiceDocDestinationType extends DocDestinationType {
   uid_order: string;
 }
 
-export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z.strictObject({
-  // The one key the invoice grain adds: which of a multi-order invoice's source
-  // orders this pair is scoped to. It sits FIRST, which is what makes the spread
-  // below order-preserving — `uid_order` was already the first key here, and
-  // `DestinationPairCore` is the rest of this object in its existing order.
-  uid_order: FirestoreId,
-  // 🔴 **THIS LIST USED TO INHERIT NOTHING.** It restated `DocDestination`'s six
-  // keys by hand, and had already drifted: it kept `z.boolean().default(false)`
-  // on `customer_collecting` / `customer_returning` after `9435a15` made both
-  // REQUIRED on the order grain. Nothing could see it — the TYPE is inherited
-  // through `extends`, so the compiler was satisfied, and the default is inert on
-  // a write, so no document ever gained the flag it let a writer omit.
-  //
-  // ⚠️ **The 16 absent flags this dropped default produced were REPAIRED before
-  // it was removed** (core#101, 2026-09-09, prod and dev), and repaired by
-  // projecting each invoice's source order rather than by writing the default —
-  // it would have been wrong on 5 of the 8 documents. The tightening is only safe
-  // because the census reads 0, and it reads 0 because a migration ran.
-  //
-  // ⚠️ The invoice's divider REUSES the order's (`adoptOrderDividerStructure`
-  // keeps a divider the invoice already carries under the same uid), so a pair
-  // projected by `toInvoiceDestinationPair` arrives already keyed correctly.
-  ...DestinationPairCore,
-});
+export const InvoiceDocDestination: z.ZodType<InvoiceDocDestinationType> = z
+  .strictObject({
+    // The one key the invoice grain adds: which of a multi-order invoice's source
+    // orders this pair is scoped to. It sits FIRST, which is what makes the spread
+    // below order-preserving — `uid_order` was already the first key here, and
+    // `DestinationPairCore` is the rest of this object in its existing order.
+    uid_order: FirestoreId,
+    // 🔴 **THIS LIST USED TO INHERIT NOTHING.** It restated `DocDestination`'s six
+    // keys by hand, and had already drifted: it kept `z.boolean().default(false)`
+    // on `customer_collecting` / `customer_returning` after `9435a15` made both
+    // REQUIRED on the order grain. Nothing could see it — the TYPE is inherited
+    // through `extends`, so the compiler was satisfied, and the default is inert on
+    // a write, so no document ever gained the flag it let a writer omit.
+    //
+    // ⚠️ **The 16 absent flags this dropped default produced were REPAIRED before
+    // it was removed** (core#101, 2026-09-09, prod and dev), and repaired by
+    // projecting each invoice's source order rather than by writing the default —
+    // it would have been wrong on 5 of the 8 documents. The tightening is only safe
+    // because the census reads 0, and it reads 0 because a migration ran.
+    //
+    // ⚠️ The invoice's divider REUSES the order's (`adoptOrderDividerStructure`
+    // keeps a divider the invoice already carries under the same uid), so a pair
+    // projected by `toInvoiceDestinationPair` arrives already keyed correctly.
+    ...DestinationPairCore,
+  });
 
 // ── Document schema ──────────────────────────────────────────────
 
@@ -858,29 +920,53 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   number: z.int().meta({ column: true, label: "#", linkTo: "invoiceDetail" }),
   status: InvoiceStatus.meta({ column: true, label: "Status" }),
   query_by_orders: z.array(z.string()).default([]),
-  number_orders: z.array(z.int()).default([]).meta({ column: true, label: "Order #" }),
+  number_orders: z.array(z.int()).default([]).meta({
+    column: true,
+    label: "Order #",
+  }),
   // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
   // applied to prod (2,317 documents) and dev on 2026-08-22. The three steps
   // were forced, not ceremonial: every write validates the FULL document and
   // this is a `z.strictObject`, so a schema that has dropped the key REJECTS
   // every stored document still carrying it. Optional → empty storage → delete.
-  tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),
+  tax_exempt: z.boolean().nullable().optional().meta({
+    column: true,
+    label: "Tax Exempt",
+  }),
   uid_store: FirestoreId.nullable().optional(),
   // The ISO field carries the annotation; its `_fs` Timestamp mirror is the
   // same column under the other encoding — see `FS_MIRROR_SUFFIX`.
-  date: chicagoStartOfDay().meta({ column: true, label: "Date", serverSortVia: "date_fs" }),
+  date: chicagoStartOfDay().meta({
+    column: true,
+    label: "Date",
+    serverSortVia: "date_fs",
+  }),
   date_fs: FirestoreTimestamp,
-  due_date: chicagoStartOfDay().optional().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs" }),
+  due_date: chicagoStartOfDay().optional().meta({
+    column: true,
+    label: "Due Date",
+    serverSortVia: "due_date_fs",
+  }),
   due_date_fs: FirestoreTimestamp.optional(),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
   // Bare `z.string()`, identical to the other two grains as of core#97
   // increment 3 — the interface above carries the evidence and the ordering.
-  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "invoiceDetail" }),
+  subject: z.string().meta({
+    pii: "mask",
+    column: true,
+    label: "Subject",
+    linkTo: "invoiceDetail",
+  }),
   // `.max(255)` matches `OrderDocument.reference` and `Fulfillment.reference`;
   // this grain was the only one without a bound. 0 of 1,040 stored invoices
   // exceed it in either project (2026-09-09 census).
-  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "invoiceDetail" }),
-  notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
+  reference: z.string().max(255).nullable().meta({
+    column: true,
+    label: "Reference",
+    linkTo: "invoiceDetail",
+  }),
+  notes: z.string().meta({ pii: "mask", column: true, label: "Notes" })
+    .nullable(),
   organization: DocumentOrganizationSnapshot,
   // No `.default([])`, and the lower bound is CONDITIONAL and lives on the
   // document `.refine()` at the bottom of this schema — see the interface,
@@ -938,7 +1024,11 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   ...TimestampFields,
 }).refine(
   (inv) => inv.query_by_orders.length === 0 || inv.destinations.length >= 1,
-  { message: "destinations must be provided when the invoice is linked to at least one source order", path: ["destinations"] },
+  {
+    message:
+      "destinations must be provided when the invoice is linked to at least one source order",
+    path: ["destinations"],
+  },
 ).refine(
   // EXACT, not a tolerance. Every operand is an integer count of cents, so
   // there is no representation error left to absorb and "within half a cent"
@@ -957,8 +1047,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   // every invoice in the corpus.
   (inv) =>
     inv.totals.amount_paid_cents + (inv.totals.amount_credited_cents ?? 0) +
-          (inv.totals.amount_void_cents ?? 0) +
-          inv.totals.amount_due_cents === inv.totals.total_cents,
+        (inv.totals.amount_void_cents ?? 0) +
+        inv.totals.amount_due_cents === inv.totals.total_cents,
   {
     message:
       "amount_paid_cents + amount_credited_cents + amount_void_cents + amount_due_cents must equal total_cents exactly",
@@ -1053,7 +1143,8 @@ const InvoiceItemInputLineInner = z.object({
   // hits `case "string": return ""` whether or not the node carries `.min(1)`,
   // so all three spellings yield `{"name":""}`. Kept as an explicit statement of
   // intent, because the bound would otherwise read as forbidding a blank row.
-  name: z.string().min(1).max(100).meta({ pii: "none", initial: "" }).optional(),
+  name: z.string().min(1).max(100).meta({ pii: "none", initial: "" })
+    .optional(),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   description: z.string().meta({ pii: "none" }).optional(),
   // `.min(0)` to match `LineItemCore.quantity`; the input admitted a negative.
@@ -1073,7 +1164,8 @@ const InvoiceItemInputLineInner = z.object({
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable invoice line (input). */
-export const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType> = InvoiceItemInputLineInner;
+export const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType> =
+  InvoiceItemInputLineInner;
 
 /** A destination divider as a client sends it. */
 export interface InvoiceItemInputDestinationType {
@@ -1110,8 +1202,9 @@ const InvoiceItemInputDestinationInner = z.strictObject({
 });
 
 /** Zod schema for a destination divider (invoice input). */
-export const InvoiceItemInputDestination: z.ZodType<InvoiceItemInputDestinationType> =
-  InvoiceItemInputDestinationInner;
+export const InvoiceItemInputDestination: z.ZodType<
+  InvoiceItemInputDestinationType
+> = InvoiceItemInputDestinationInner;
 
 /** A group divider as a client sends it. */
 export interface InvoiceItemInputGroupType {
@@ -1133,7 +1226,8 @@ const InvoiceItemInputGroupInner = z.strictObject({
 });
 
 /** Zod schema for a group divider (invoice input). */
-export const InvoiceItemInputGroup: z.ZodType<InvoiceItemInputGroupType> = InvoiceItemInputGroupInner;
+export const InvoiceItemInputGroup: z.ZodType<InvoiceItemInputGroupType> =
+  InvoiceItemInputGroupInner;
 
 /** An order divider as a client sends it — invoice-only, scopes items to a source order. */
 export interface InvoiceItemInputOrderType {
@@ -1156,7 +1250,8 @@ const InvoiceItemInputOrderInner = z.strictObject({
 });
 
 /** Zod schema for an order divider (invoice input). */
-export const InvoiceItemInputOrder: z.ZodType<InvoiceItemInputOrderType> = InvoiceItemInputOrderInner;
+export const InvoiceItemInputOrder: z.ZodType<InvoiceItemInputOrderType> =
+  InvoiceItemInputOrderInner;
 
 /** Input version of an invoice item — a line, or one of the three dividers. */
 export type InvoiceItemInputType =
@@ -1186,12 +1281,13 @@ export type InvoiceItemInputType =
  * invoice side, unlike `CreateOrderInput`: 28 prod invoices legitimately start
  * with a line item — the flat CRMS invoices with no order divider at all.
  */
-const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z.discriminatedUnion("type", [
-  InvoiceItemInputLineInner,
-  InvoiceItemInputDestinationInner,
-  InvoiceItemInputGroupInner,
-  InvoiceItemInputOrderInner,
-]);
+const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z
+  .discriminatedUnion("type", [
+    InvoiceItemInputLineInner,
+    InvoiceItemInputDestinationInner,
+    InvoiceItemInputGroupInner,
+    InvoiceItemInputOrderInner,
+  ]);
 
 /** Input schema for POST /invoices — create an invoice from orders. */
 export interface CreateInvoiceInputType {
@@ -1230,7 +1326,10 @@ export interface CreateInvoiceInputType {
 /** Input schema for creating an invoice. */
 export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   uid: FirestoreId,
-  query_by_orders: z.array(z.string()).min(1, "At least one source order is required"),
+  query_by_orders: z.array(z.string()).min(
+    1,
+    "At least one source order is required",
+  ),
   organization: z.object({ uid: FirestoreId }),
   tax_exempt: z.boolean().optional(),
   uid_store: FirestoreId.nullable().optional(),
@@ -1355,4 +1454,3 @@ export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   version: z.int().min(0),
 });
-
