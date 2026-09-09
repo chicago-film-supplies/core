@@ -58,8 +58,10 @@ import { AnyUid, FirestoreId, ItemUid } from "./_uid.ts";
 import {
   ComponentTypeEnum,
   type ComponentTypeType,
-  NameField,
+  OrgPathNode,
+  type OrgPathNodeType,
 } from "./common.ts";
+import { chicagoInstant } from "./_datetime.ts";
 import {
   BOOKING_STATUSES,
   BookingBreakdownSchema,
@@ -503,7 +505,18 @@ export const PickSheetDestinationSchema: z.ZodType<PickSheetDestination> = z.str
   // (api-cloudrun#837).
   name: z.string().meta({ pii: "mask" }).default(""),
   destination: DocDestination,
-  due_at: z.string().nullable(),
+  // ⚠️ **A business datetime, so it takes a factory** — it was a bare
+  // `z.string()` on a RENDERED field. The producer (`dueAtForLeg` in
+  // `utils/pick-sheet-fold.ts`) byte-copies one of the pair's
+  // `chicagoInstant()` dates, so this canonicalizes what is already canonical
+  // and REFUSES anything that is not.
+  //
+  // 🔴 `chicagoStartOfDay()` would be actively wrong here. Every observed value
+  // carries a real time of day (09:00 / 09:30 / 15:00), which is the only thing
+  // a picker sequences a morning by; collapsing to midnight would tie every leg
+  // falling on one calendar day and drop the sheet through to the `uid`
+  // tiebreak.
+  due_at: chicagoInstant().nullable(),
   quantity: z.int(),
   breakdown: BookingBreakdownSchema,
   bookings: z.array(PickSheetBookingSchema).default([]),
@@ -519,7 +532,25 @@ export interface PickSheetOrder {
   /** The order's status, carried through the fulfillment projection. */
   status: OrderStatusType;
   subject: string;
-  organization: { uid: string | null; name: string };
+  /**
+   * The customer, identified by `uid` and READ as its chain.
+   *
+   * 🔴 **A composed `name` used to sit here and has been REMOVED** (core#93).
+   * `schemas/organization.ts` calls the chain "THE structural fact" — level,
+   * root, parent and the composed display name are all read off it, so none of
+   * them can drift from it. Storing the composed label instead kept the lossy
+   * projection and threw away the structure: a renderer given only a name
+   * cannot trim the chain against the document's own scope (as
+   * `statement.eta` does), cannot group by ancestor, and cannot style segments.
+   *
+   * Write `composeOrgName(organization.organization_path)` for the label.
+   *
+   * ⚠️ **`uid` and `organization_path` are null TOGETHER.** A sheet legitimately
+   * carries an unattributed order, and `null` there means *"no customer"*, not
+   * *"a customer with no name"* — the same distinction the reporting surfaces
+   * make. `.min(1)` when present, so an empty chain is unrepresentable.
+   */
+  organization: { uid: string | null; organization_path: OrgPathNodeType[] | null };
   destinations: PickSheetDestination[];
 }
 
@@ -554,7 +585,10 @@ export const PickSheetOrderSchema: z.ZodType<PickSheetOrder> = z.strictObject({
   subject: z.string().default("").meta({ pii: "mask" }),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
-    name: NameField,
+    // PII rides in by COMPOSITION — `OrgPathNode.name` is already `pii: "mask"`.
+    // ⭐ And it now masks at FULL DEPTH: each node carries its own `uid`, so a
+    // 3-level chain draws three fakes where the composed name drew one.
+    organization_path: z.array(OrgPathNode).min(1).max(3).nullable(),
   }),
   destinations: z.array(PickSheetDestinationSchema).default([]),
 });
@@ -612,8 +646,17 @@ export interface PickSheet {
    * A destination sheet spanning two customers is the case the order headers
    * exist for: a worker at a shared stage must not hand one production's gear to
    * another. {@link ./movement-session.ts} takes the same shape.
+   *
+   * ⚠️ **The composed name this used to carry was NOT a safety defect, and that
+   * is worth stating because the shape invites the misreading.** Prod holds at
+   * least twelve non-root organizations whose LEAF name is `Office` or
+   * `Locations`, which reads like two customers rendering identically on a
+   * warehouse floor. They did not: the stored value was the composed CHAIN, so
+   * `Netflix Productions, LLC / Monster S4 / Office` and `Pursuit / Locations`
+   * were already distinct. core#93 is about what a renderer can DO with the
+   * chain, not about telling customers apart.
    */
-  organizations: Array<{ uid: string | null; name: string }>;
+  organizations: Array<{ uid: string | null; organization_path: OrgPathNodeType[] | null }>;
   /**
    * Orders in the membership slice with no readable fulfillment document.
    *
@@ -656,7 +699,7 @@ export const PickSheetSchema: z.ZodType<PickSheet> = z.strictObject({
   quantity: z.int(),
   organizations: z.array(z.strictObject({
     uid: FirestoreId.nullable(),
-    name: NameField,
+    organization_path: z.array(OrgPathNode).min(1).max(3).nullable(),
   })).default([]),
   missing_order_uids: z.array(FirestoreId).default([]),
   next_cursor: z.string().nullable(),

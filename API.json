@@ -819,7 +819,7 @@
         {
           "kind": "interface",
           "name": "CommitMeta",
-          "declaration": "interface CommitMeta {\n  author: ActorRefType;\n  type: string;\n  message: string;\n  breaking: boolean;\n}",
+          "declaration": "interface CommitMeta {\n  author: ActorRefType;\n  type: TemplateCommitType;\n  message: string;\n  breaking: boolean;\n}",
           "doc": "Conventional-commit metadata captured at release/publish time."
         },
         {
@@ -3938,6 +3938,12 @@
         },
         {
           "kind": "variable",
+          "name": "TEMPLATE_COMMIT_TYPES",
+          "declaration": "const TEMPLATE_COMMIT_TYPES: \"feat\" | \"fix\" | \"chore\" | \"docs\" | \"refactor\" | \"perf\" | \"test\" | \"build\" | \"ci\" | \"style\" | \"revert\"[];",
+          "doc": "The conventional-commit types a template release may declare.\n\n🔴 **A closed vocabulary, because the open one was a guard that could not\nfire.** `type` was `z.string().min(1).max(50)` and TWO writers are\nunconstrained — `POST /templates-versions/{uid}/release` and the\n`templates_release_draft` MCP tool both accept any non-empty string. The\nincident is api-cloudrun#610: a PR titled `quote: fix the totals row` derived\n`type: \"quote\"`, and templates `4.2.1` shipped to prod under a label derived\nthat way. `deriveBump` reads this field to choose a semver bump, so an\nunrecognised type silently takes the default.\n\n⚠️ **Censused in BOTH environments before narrowing** (2026-09-08): prod holds\n93 template versions and dev 531; **zero** carry a type outside the observed\nset, and exactly **2** — both prod, both `published` — carry one outside this\nlist (`draft` and `quote`, the #610 residue). Those two are repaired rather\nthan blessed: widening this list to admit them would make the vocabulary\npermanently accept the bug it exists to stop.\n\nThe list is the 11 conventional-commit types, a superset of the 8 the\nmanager's release form offers — `build`, `ci` and `revert` are reachable\ntoday through a hand-written PR title via `parseCommitMeta`, so omitting them\nwould reject commits the publish path already mints."
+        },
+        {
+          "kind": "variable",
           "name": "TEMPLATE_LIB_GLOBALS",
           "declaration": "const TEMPLATE_LIB_GLOBALS: readonly string[];",
           "doc": "Third-party libraries injected as `it.*` globals for every template\n(`it.dateFns`, `it.tz`). Not `@cfs/core` utils — documented here so the\nrender context has one authoritative inventory.\n\n**This list IS the contract, not a description of one.** `api-cloudrun`'s\nmoney Ratchet E asserts the render context's raw injections against it\ndirectly, so adding a name here is what permits a new raw library into every\ntemplate — there is no second copy to keep in sync.\n\n⚠️ **A money library must never come back.** `currency` lived here until\nPhase 11 Phase E and was the one unguarded money surface templates had:\n`it.currency(x).divide(y)` is a real, working call that makes a silent\nrounding decision, and no ratchet in `api-cloudrun` or `core` can see what an\n`.eta` file does with it — template content is canonical in the `templates`\nrepo, not here. Money reaches templates through `it.money` (see\n{@link ALWAYS_ON_UTIL_NAMESPACES}), which is swept."
@@ -4061,6 +4067,12 @@
           "name": "TemplateCollectionType",
           "declaration": "type TemplateCollectionType = TemplateSourceCollectionType | TemplateTargetCollectionType;",
           "doc": "Any collection a template can read from or produce."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "TemplateCommitType",
+          "declaration": "type TemplateCommitType = indexedAccess;",
+          "doc": "A single conventional-commit type."
         },
         {
           "kind": "interface",

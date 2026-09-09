@@ -1884,7 +1884,7 @@ Conventional-commit metadata captured at release/publish time.
 ```ts
 interface CommitMeta {
   author: ActorRefType;
-  type: string;
+  type: TemplateCommitType;
   message: string;
   breaking: boolean;
 }
@@ -8840,6 +8840,35 @@ unmapped for that reason; a future collection needing it would map to
 const TEMPLATE_COLLECTION_UTILS: Partial<Record<TemplateCollectionType, string>>;
 ```
 
+### `TEMPLATE_COMMIT_TYPES`
+
+The conventional-commit types a template release may declare.
+
+🔴 **A closed vocabulary, because the open one was a guard that could not
+fire.** `type` was `z.string().min(1).max(50)` and TWO writers are
+unconstrained — `POST /templates-versions/{uid}/release` and the
+`templates_release_draft` MCP tool both accept any non-empty string. The
+incident is api-cloudrun#610: a PR titled `quote: fix the totals row` derived
+`type: "quote"`, and templates `4.2.1` shipped to prod under a label derived
+that way. `deriveBump` reads this field to choose a semver bump, so an
+unrecognised type silently takes the default.
+
+⚠️ **Censused in BOTH environments before narrowing** (2026-09-08): prod holds
+93 template versions and dev 531; **zero** carry a type outside the observed
+set, and exactly **2** — both prod, both `published` — carry one outside this
+list (`draft` and `quote`, the #610 residue). Those two are repaired rather
+than blessed: widening this list to admit them would make the vocabulary
+permanently accept the bug it exists to stop.
+
+The list is the 11 conventional-commit types, a superset of the 8 the
+manager's release form offers — `build`, `ci` and `revert` are reachable
+today through a hand-written PR title via `parseCommitMeta`, so omitting them
+would reject commits the publish path already mints.
+
+```ts
+const TEMPLATE_COMMIT_TYPES: "feat" | "fix" | "chore" | "docs" | "refactor" | "perf" | "test" | "build" | "ci" | "style" | "revert"[];
+```
+
 ### `TEMPLATE_LIB_GLOBALS`
 
 Third-party libraries injected as `it.*` globals for every template
@@ -9214,6 +9243,14 @@ Any collection a template can read from or produce.
 
 ```ts
 type TemplateCollectionType = TemplateSourceCollectionType | TemplateTargetCollectionType;
+```
+
+### `TemplateCommitType`
+
+A single conventional-commit type.
+
+```ts
+type TemplateCommitType = indexedAccess;
 ```
 
 ### `TemplateComponent`

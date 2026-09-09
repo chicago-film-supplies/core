@@ -43,6 +43,7 @@ import {
   sheetQuantity,
 } from "../src/utils/pick-sheet-fold.ts";
 import { pickSheetLineBooking } from "../src/utils/pickSheets.ts";
+import { composeOrgName } from "../src/utils/organizations.ts";
 import { tsAt } from "./helpers/timestamp.ts";
 
 const TS = tsAt("2023-11-14T22:13:20.000Z");
@@ -657,7 +658,18 @@ Deno.test("organizations: a sheet spanning two customers names both", () => {
     ],
     fulfillments: docs(a, b),
   });
-  assertEquals(sheetOrganizations(orders).map((o) => o.uid).sort(), [ORG, ORG_B].sort());
+  const sheetOrgs = sheetOrganizations(orders);
+  assertEquals(sheetOrgs.map((o) => o.uid).sort(), [ORG, ORG_B].sort());
+
+  // ⚠️ **The uid assertion above passes vacuously on the CHAIN**, which is the
+  // half core#93 changed — so assert the delivered value too, not merely that a
+  // row exists per customer. The fold now delivers `organization_path` and the
+  // renderer composes the label; before core#93 it delivered a composed `name`
+  // and threw the structure away.
+  assertEquals(
+    sheetOrgs.map((o) => composeOrgName(o.organization_path ?? [])).sort(),
+    ["20th Television › Pilot", "Free Spirit Media"].sort(),
+  );
   assertEquals(sheetQuantity(orders), 3);
   assertEquals(sheetDestinationCount(orders), 2);
 });

@@ -169,9 +169,25 @@ Deno.test("nested paths appear, and the customer name is reachable in each sourc
     // stated. **Neither is `scope.name`**, for exactly the reason spelled out
     // above: on an `all` scope it labels the whole book and names no customer,
     // which is the default scope for this source rather than an edge case.
+    // ⚠️ **Every clause below is LIVE — re-derive, never append.** core#93 turned
+    // the two light-shape refs from `{uid, name}` into `{uid, organization_path}`,
+    // which killed the `organization.name` and `orders[].organization.name`
+    // clauses this list used to carry. A dead clause here is the dead-denylist
+    // failure: the arm keeps passing on its other terms while the one it was
+    // written for has stopped matching anything. Current mapping, measured:
+    //   orders / invoices / fulfillments  organization.path[].name
+    //   movement-sessions                 organization.organization_path[].name
+    //   pick-sheets                       orders[].organization.organization_path[].name
+    //                                     organizations[].organization_path[].name
+    //   statements / aging-reports        organization_path[].name
+    //   aging-reports                     organizations[].organization_path[].name
+    // (`aging-reports` gained the ROOT chain in core#92, as the replacement for
+    // the deleted `scope.name`; before that only its grouped nodes carried one.)
     const reachable = fields.some((f) =>
-      f.path === "organization.path[].name" || f.path === "organization.name" ||
-      f.path === "orders[].organization.name" || f.path === "organization_path[].name" ||
+      f.path === "organization.path[].name" ||
+      f.path === "organization.organization_path[].name" ||
+      f.path === "orders[].organization.organization_path[].name" ||
+      f.path === "organization_path[].name" ||
       f.path === "organizations[].organization_path[].name"
     );
     assertEquals(reachable, true, `no reachable customer name in ${collection}`);

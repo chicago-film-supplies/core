@@ -40,7 +40,12 @@
 import { z } from "zod";
 import { AnyUid, FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
-import { ActorRef, type ActorRefType, NameField } from "./common.ts";
+import {
+  ActorRef,
+  type ActorRefType,
+  OrgPathNode,
+  type OrgPathNodeType,
+} from "./common.ts";
 import {
   MovementCustody,
   type MovementCustodyType,
@@ -171,8 +176,20 @@ export interface MovementSession {
    * accepts bookings from different orders, so a session spanning two
    * organizations is legitimate rather than a data fault; collapsing to the
    * first would put one customer's name on another's goods.
+   *
+   * 🔴 **A composed `name` used to sit here and has been REMOVED** (core#93) —
+   * the same change made to `PickSheetOrder.organization` in the same beta, for
+   * the reason `schemas/organization.ts` gives: the chain is THE structural
+   * fact and a composed label is a lossy projection of it. Write
+   * `composeOrgName(organization.organization_path)`.
+   *
+   * ⚠️ Note the DOUBLE nullability, which is deliberate and not a duplicate of
+   * the outer one. The whole object is `null` when the session spans customers
+   * (the paragraph above). `organization_path` is null when there IS one agreed
+   * customer and it has no readable chain — a different question with a
+   * different answer.
    */
-  organization: { uid: string | null; name: string } | null;
+  organization: { uid: string | null; organization_path: OrgPathNodeType[] | null } | null;
   items: MovementSessionItem[];
 }
 
@@ -187,7 +204,8 @@ export const MovementSessionSchema: z.ZodType<MovementSession> = z.strictObject(
   orders: z.array(MovementSessionOrderRefSchema).default([]),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
-    name: NameField,
+    // PII rides in by COMPOSITION — `OrgPathNode.name` is already `pii: "mask"`.
+    organization_path: z.array(OrgPathNode).min(1).max(3).nullable(),
   }).nullable(),
   items: z.array(MovementSessionItemSchema).default([]),
 }).meta({ title: "MovementSession" });

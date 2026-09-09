@@ -963,6 +963,7 @@ export {
 export {
   TEMPLATE_VERSION_STATUSES,
   TEMPLATE_PARAM_TYPES,
+  TEMPLATE_COMMIT_TYPES,
   GOLDEN_DIFF_VERDICTS,
   TemplateVersionSchema,
   TemplateParamSchema,
@@ -976,6 +977,7 @@ export {
   type TemplateVersionStatusType,
   type TemplateParam,
   type TemplateParamType,
+  type TemplateCommitType,
   type RenderParamsContext,
   type CommitMeta,
   type BlobRef,

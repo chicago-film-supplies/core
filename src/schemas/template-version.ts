@@ -33,6 +33,46 @@ export const TEMPLATE_VERSION_STATUSES = ["draft", "published", "archived"] as c
 /** A single template-version status. */
 export type TemplateVersionStatusType = typeof TEMPLATE_VERSION_STATUSES[number];
 
+/**
+ * The conventional-commit types a template release may declare.
+ *
+ * 🔴 **A closed vocabulary, because the open one was a guard that could not
+ * fire.** `type` was `z.string().min(1).max(50)` and TWO writers are
+ * unconstrained — `POST /templates-versions/{uid}/release` and the
+ * `templates_release_draft` MCP tool both accept any non-empty string. The
+ * incident is api-cloudrun#610: a PR titled `quote: fix the totals row` derived
+ * `type: "quote"`, and templates `4.2.1` shipped to prod under a label derived
+ * that way. `deriveBump` reads this field to choose a semver bump, so an
+ * unrecognised type silently takes the default.
+ *
+ * ⚠️ **Censused in BOTH environments before narrowing** (2026-09-08): prod holds
+ * 93 template versions and dev 531; **zero** carry a type outside the observed
+ * set, and exactly **2** — both prod, both `published` — carry one outside this
+ * list (`draft` and `quote`, the #610 residue). Those two are repaired rather
+ * than blessed: widening this list to admit them would make the vocabulary
+ * permanently accept the bug it exists to stop.
+ *
+ * The list is the 11 conventional-commit types, a superset of the 8 the
+ * manager's release form offers — `build`, `ci` and `revert` are reachable
+ * today through a hand-written PR title via `parseCommitMeta`, so omitting them
+ * would reject commits the publish path already mints.
+ */
+export const TEMPLATE_COMMIT_TYPES = [
+  "feat",
+  "fix",
+  "chore",
+  "docs",
+  "refactor",
+  "perf",
+  "test",
+  "build",
+  "ci",
+  "style",
+  "revert",
+] as const;
+/** A single conventional-commit type. */
+export type TemplateCommitType = typeof TEMPLATE_COMMIT_TYPES[number];
+
 /** Render-time parameter types a template can declare. v1: boolean only. */
 export const TEMPLATE_PARAM_TYPES = ["boolean"] as const;
 /** A single render-time parameter type. */
@@ -100,8 +140,8 @@ export const RenderParamsContextSchema: z.ZodType<RenderParamsContext> = z.stric
 /** Conventional-commit metadata captured at release/publish time. */
 export interface CommitMeta {
   author: ActorRefType;
-  /** Conventional-commit type (feat, fix, chore, …) — drives the semver bump. */
-  type: string;
+  /** Conventional-commit type — drives the semver bump. */
+  type: TemplateCommitType;
   /** Commit subject/message. */
   message: string;
   /** Whether the change is a breaking change (major bump). */
@@ -111,7 +151,7 @@ export interface CommitMeta {
 /** Zod schema for CommitMeta. `author` reuses the pii-annotated ActorRef. */
 export const CommitMetaSchema: z.ZodType<CommitMeta> = z.strictObject({
   author: ActorRef,
-  type: z.string().min(1).max(50),
+  type: z.enum(TEMPLATE_COMMIT_TYPES),
   message: z.string().min(1).max(2000),
   breaking: z.boolean(),
 });

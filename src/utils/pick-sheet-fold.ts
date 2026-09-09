@@ -57,9 +57,9 @@ import {
   type PickSheetOrder,
   type PickSheetScope,
 } from "../schemas/mod.ts";
+import type { OrgPathNodeType } from "../schemas/mod.ts";
 import { emptyBookingsBreakdown } from "./bookings.ts";
 import { getItemSubtreeRange, getParentProductUid, getStructuralUids } from "./orders.ts";
-import { composeOrgName } from "./organizations.ts";
 
 /** What {@link foldPickSheet} produces before any page is clipped. */
 export interface PickSheetFoldResult {
@@ -398,14 +398,31 @@ export function foldPickSheet(input: {
       number: fulfillment.number,
       status: fulfillment.status,
       subject: fulfillment.subject,
-      // ⭐ **The fold COMPOSES a name; the document no longer stores one.**
-      // A pick sheet is a read-time response body, and a derived value is fine
-      // to deliver — it is recomputed on every render, so it has no opportunity
-      // to disagree with its input. Storing it beside its input was the defect
-      // (api-cloudrun#782); delivering it is not.
+      // ⭐ **The fold DELIVERS the chain; it no longer composes a name.**
+      //
+      // This block used to compose one, under the argument that "a pick sheet
+      // is a read-time response body, and a derived value is fine to deliver —
+      // it is recomputed on every render, so it has no opportunity to disagree
+      // with its input." That argument is not wrong about staleness, and it is
+      // not the objection (core#93). Two things it does not answer:
+      //
+      //   1. Delivering ONLY the composed name is LOSSY. It discards the chain,
+      //      so no consumer can trim the path against the document's own scope
+      //      (as `statement.eta` does), group by ancestor, render the root, or
+      //      link to the organization. `schemas/organization.ts` calls the
+      //      chain "THE structural fact"; a leaf label is a projection of it.
+      //   2. A pick sheet is a REGISTERED TEMPLATE SOURCE
+      //      (`TEMPLATE_COLLECTION_SCHEMAS["pick-sheets"]`), so it is captured
+      //      into git as a fixture. "Cannot disagree with its input" holds for
+      //      a response body and NOT for a frozen artifact.
+      //
+      // `composeOrgName` is still the one author of the label — it just runs in
+      // the renderer now (`it.organizations.composeOrgName`) instead of here.
       organization: {
         uid: fulfillment.organization.uid,
-        name: composeOrgName(fulfillment.organization.path),
+        organization_path: fulfillment.organization.path.length > 0
+          ? fulfillment.organization.path
+          : null,
       },
       destinations: legs,
     });
@@ -467,8 +484,11 @@ function bookingUidForItem(
 /** Distinct organizations across a page, `null` counted once, in first-seen order. */
 export function sheetOrganizations(
   orders: readonly PickSheetOrder[],
-): Array<{ uid: string | null; name: string }> {
-  const byUid = new Map<string | null, { uid: string | null; name: string }>();
+): Array<{ uid: string | null; organization_path: OrgPathNodeType[] | null }> {
+  const byUid = new Map<
+    string | null,
+    { uid: string | null; organization_path: OrgPathNodeType[] | null }
+  >();
   for (const o of orders) {
     if (!byUid.has(o.organization.uid)) byUid.set(o.organization.uid, { ...o.organization });
   }
