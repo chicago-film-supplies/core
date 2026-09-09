@@ -123,7 +123,7 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 > pattern is in `core/CLAUDE.md` beside the inert-default table.
 >
 > ⚠️ **Unrelated but found while landing this, and recorded on api-cloudrun#753 rather than here:**
-> `tests/integration/templates/publish.test.ts` retried on 13 of the 14 pushes since 2026-09-07, and
+> `api-cloudrun/tests/integration/templates/publish.test.ts` retried on 13 of the 14 pushes since 2026-09-07, and
 > **9 of the 12 `assertion`-classed rows in the whole pre-push ledger are that one file** — with zero
 > `transport` rows, which is the opposite of the contention signature #753 was filed on.
 
