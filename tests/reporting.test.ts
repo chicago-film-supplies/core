@@ -120,7 +120,8 @@ Deno.test("🔴 every anchor names a real stored field on the invoice document",
 // ── The response schema ─────────────────────────────────────────────
 
 const REPORT = {
-  scope: { kind: "organization", uid: "a".repeat(20), name: "Netflix Productions, LLC", uids: ["a".repeat(20)] },
+  scope: { kind: "organization", uid: "a".repeat(20), uids: ["a".repeat(20)] },
+  organization_path: [{ uid: "a".repeat(20), name: "Netflix Productions, LLC", derived: false }],
   anchor: "due_date",
   as_of_invoice_date: "2026-09-07T00:00:00.000-05:00",
   as_of_payment_date: "2026-09-07T00:00:00.000-05:00",
@@ -186,7 +187,10 @@ Deno.test("🔴 every organization name on the report is PII-classified as mask"
   // is a statement about the declaration, which is exactly the claim being made.
   for (
     const path of [
-      "scope.name",
+      // `scope.name` is GONE (core#92) — its replacement is the scope-level
+      // chain below, which carries the same customer as a structure rather than
+      // as a composed label.
+      "organization_path.name",
       "rows.organization_path.name",
       // The grouped node's own chain (api-cloudrun#923). There is no sibling
       // `name` on these nodes any more — `uid` identifies and the chain labels —
@@ -245,7 +249,7 @@ Deno.test("🔴 a grouped node carrying a composed `name` beside its chain is RE
 const ORG = [{ uid: "a".repeat(20), name: "Netflix Productions, LLC", derived: false }];
 
 const STATEMENT = {
-  scope: { kind: "organization", uid: "a".repeat(20), name: "Netflix Productions, LLC", uids: ["a".repeat(20)] },
+  scope: { kind: "organization", uid: "a".repeat(20), uids: ["a".repeat(20)] },
   format: "balance_forward",
   from_date: "2026-08-01T00:00:00.000-05:00",
   to_date: "2026-09-07T00:00:00.000-05:00",
@@ -337,7 +341,9 @@ Deno.test("OrgStatementSchema is strict and refuses an unknown format", () => {
 Deno.test("🔴 a statement line's organization names are PII-classified as mask", () => {
   const leaves = collectMaskedLeaves(OrgStatementSchema.parse(STATEMENT), OrgStatementSchema)
     .map((l) => l.fieldPath);
-  for (const path of ["scope.name", "organization_path.name", "lines.organization_path.name"]) {
+  // `scope.name` is GONE (core#92); `organization_path` was always the one that
+  // mattered here, and `statement.eta` had already refused to render the other.
+  for (const path of ["organization_path.name", "lines.organization_path.name"]) {
     assertEquals(leaves.includes(path), true, `${path} is not pii:"mask" — leaves: ${leaves}`);
   }
 });

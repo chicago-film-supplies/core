@@ -77,7 +77,11 @@ function row(overrides: Partial<AgingRow> & Pick<AgingRow, "uid" | "organization
 
 function report(overrides: Partial<AgingReport> = {}): AgingReport {
   return {
-    scope: { kind: "all", uid: null, name: "", uids: [] },
+    scope: { kind: "all", uid: null, uids: [] },
+    // `null` because the default scope here is `kind: "all"` — the run is not
+    // about one account, which is a different statement from an account with no
+    // name (core#92).
+    organization_path: null,
     anchor: "due_date",
     as_of_invoice_date: "2026-09-07T00:00:00.000-05:00",
     as_of_payment_date: "2026-09-07T00:00:00.000-05:00",

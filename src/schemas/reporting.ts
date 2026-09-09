@@ -264,8 +264,6 @@ export interface AgingScope {
   kind: "organization" | "all";
   /** The organization asked about, or `null` for `all`. */
   uid: string | null;
-  /** Its display name at run time; `""` when it could not be read. */
-  name: string;
   /**
    * Every organization uid the roll-up actually ran on.
    *
@@ -282,9 +280,23 @@ export interface AgingScope {
 export const AgingScopeSchema: z.ZodType<AgingScope> = z.strictObject({
   kind: z.enum(["organization", "all"]),
   uid: FirestoreId.nullable(),
-  // `mask` — an organization name is `pii: "mask"` at its source, and a copy must
-  // not be classified independently of the value it copies.
-  name: z.string().default("").meta({ pii: "mask" }),
+  // 🔴 **A composed `name` used to sit here and has been REMOVED** (core#92),
+  // for the reason api-cloudrun#780 / #782 removed it from
+  // `DocumentOrganizationSnapshot` and api-cloudrun#923 from
+  // `AgingReport.organizations[]`: a label stored beside the path it composes
+  // from is a second owner of one fact. It was `composeOrgName(chain)` sitting
+  // directly beside `OrgStatement.organization_path`, which is that chain.
+  //
+  // ⭐ The strongest argument was that a CONSUMER had already reached this
+  // conclusion unprompted: `templates/templates/statement.eta` names
+  // `scope.name` in a "what this template deliberately does NOT render" block —
+  // *"the letterhead already prints the same customer, composed from
+  // `organization_path` ... printing both puts one name on the page twice and
+  // invites a reader to treat a difference between them as meaningful when it
+  // is only a difference of derivation."*
+  //
+  // Read it as `composeOrgName(AgingReport.organization_path)` or
+  // `composeOrgName(OrgStatement.organization_path)`.
   uids: z.array(FirestoreId).default([]),
 });
 
@@ -302,6 +314,25 @@ export const AgingScopeSchema: z.ZodType<AgingScope> = z.strictObject({
  */
 export interface AgingReport {
   scope: AgingScope;
+  /**
+   * The scoped organization's LIVE chain, for the document heading — `null` on
+   * a `kind: "all"` run, which has no scoped organization.
+   *
+   * ⭐ **Added by core#92 as the replacement for the deleted `scope.name`, and
+   * it is wanted on its own merits** rather than as a consolation for it: a
+   * chain survives a re-parent, groups, joins, and lets a renderer trim it
+   * against the row it sits above. A composed leaf label does none of those.
+   * {@link OrgStatement.organization_path} already carried exactly this and
+   * `AgingReport` was the asymmetry.
+   *
+   * `.min(1)` when present, matching every other chain in this file — a node
+   * with no chain cannot be labelled at all. `null` means *"this run is not
+   * about one account"*, which is a different statement from *"this account has
+   * no name"*, and is the same distinction {@link AgingReport.organizations}
+   * makes by SKIPPING an unattributable node rather than emitting a blank
+   * heading.
+   */
+  organization_path: OrgPathNodeType[] | null;
   anchor: AgingAnchorType;
   /** Which invoices existed. Defaults to today. */
   as_of_invoice_date: string;
@@ -376,6 +407,13 @@ export interface AgingReport {
 /** Zod schema for {@link AgingReport}. */
 export const AgingReportSchema: z.ZodType<AgingReport> = z.strictObject({
   scope: AgingScopeSchema,
+  // PII rides in by COMPOSITION — `OrgPathNode.name` is already `pii: "mask"`,
+  // so this array sanitizes without a fresh ruling, exactly as
+  // `AgingRow.organization_path` does. It is deliberately NOT the shared
+  // `OrderDerivedOrgPath`: that const carries `column: true`, and neither this
+  // document nor `OrgStatement` is in the schemas registry, so the annotation
+  // would be silently inert here.
+  organization_path: z.array(OrgPathNode).min(1).max(3).nullable(),
   anchor: AgingAnchorEnum,
   as_of_invoice_date: z.string(),
   as_of_payment_date: z.string(),

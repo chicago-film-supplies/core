@@ -195,7 +195,7 @@
         {
           "kind": "interface",
           "name": "AgingReport",
-          "declaration": "interface AgingReport {\n  scope: AgingScope;\n  anchor: AgingAnchorType;\n  as_of_invoice_date: string;\n  as_of_payment_date: string;\n  rows: AgingRow[];\n  totals: AgingTotals;\n  organizations: Array<typeLiteral>;\n  missing_anchor_uids: string[];\n}",
+          "declaration": "interface AgingReport {\n  scope: AgingScope;\n  organization_path: OrgPathNodeType[] | null;\n  anchor: AgingAnchorType;\n  as_of_invoice_date: string;\n  as_of_payment_date: string;\n  rows: AgingRow[];\n  totals: AgingTotals;\n  organizations: Array<typeLiteral>;\n  missing_anchor_uids: string[];\n}",
           "doc": "The AR Aging report.\n\n⭐ **Two as-of dates, not one, and they are free here only because\n`settlements` is already a dated allocation journal.** `as_of_invoice_date`\nsays which invoices existed; `as_of_payment_date` says which settlements\ncount. An *audit* view sets both to the period end; a *collections* view sets\ninvoices to the period end and payments to today. Dynamics 365 ships these\nseparately, Xero and NetSuite conflate them, and Oracle warns of \"balance\ndiscrepancies\" as a result. **A system without a dated journal cannot add this\nlater.**"
         },
         {
@@ -219,7 +219,7 @@
         {
           "kind": "interface",
           "name": "AgingScope",
-          "declaration": "interface AgingScope {\n  kind: \"organization\" | \"all\";\n  uid: string | null;\n  name: string;\n  uids: string[];\n}",
+          "declaration": "interface AgingScope {\n  kind: \"organization\" | \"all\";\n  uid: string | null;\n  uids: string[];\n}",
           "doc": "What an aging run was drawn for — echoed back, so a stored or forwarded report\nsays what question it answers. Same contract as `PickSheetScope`."
         },
         {

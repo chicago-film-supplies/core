@@ -457,6 +457,7 @@ later.**
 ```ts
 interface AgingReport {
   scope: AgingScope;
+  organization_path: OrgPathNodeType[] | null;
   anchor: AgingAnchorType;
   as_of_invoice_date: string;
   as_of_payment_date: string;
@@ -514,7 +515,6 @@ says what question it answers. Same contract as `PickSheetScope`.
 interface AgingScope {
   kind: "organization" | "all";
   uid: string | null;
-  name: string;
   uids: string[];
 }
 ```
