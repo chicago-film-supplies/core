@@ -39,9 +39,18 @@
  * question.** The ruling was *"no key order leaves all three grains
  * unchanged"* — a statement about preserving the status quo, not about whether
  * the status quo was worth preserving, which is what was actually being asked.
- * Re-measured 2026-09-09 with the right instrument (`getFirestoreColumns` takes
- * a COLLECTION NAME; the original dump passed it a schema and silently compared
- * empty arrays):
+ * ⚠️ **`getFirestoreColumns` takes a COLLECTION NAME, and this is the one
+ * surface that can see an `items[]` key-order change at all** — `getInitialValues`
+ * returns `[]` for an array without descending, and `getTypesenseColumns`
+ * iterates `config.schema.fields` rather than the shape. Reproduced 2026-09-09:
+ * `getFirestoreColumns("orders" | "invoices" | "fulfillments")` reports
+ * **62 / 63 / 25** columns, of which **23 / 19 / 7** sit under `items[]`, while
+ * passing a schema OBJECT returns `[]` and makes any comparison empty-to-empty.
+ * ⚠️ An earlier revision of this header blamed the per-key ruling on a dump that
+ * had made that mistake; the artefact is gone and the session that produced the
+ * baseline reports passing a name and getting non-empty output, so **the
+ * attribution is withdrawn and only the signature hazard is kept.** The ruling
+ * was answerable on its own terms without it. Re-measured with that instrument:
  *
  * - Only FOUR of the six are columns at all — `uid` and `path` carry no
  *   `column` meta and appear in no picker.
@@ -56,7 +65,10 @@
  *
  * Keeping `type` ahead of the spread preserves the head every grain already
  * had, so the whole measured cost is **`zero_priced` moving to index 4 on all
- * three** — which is the unification, not a side effect. Verified as a diff:
+ * three** — which is the unification, not a side effect. ⭐ Confirmed AFTER the
+ * spread rather than predicted before it: `getFirestoreColumns` now puts
+ * `zero_priced` at items-relative index 4 on all three grains, against 21 / 17 /
+ * 5 before. Verified as a diff:
  * `typesenseColumns` and `getInitialValues` byte-identical on all three
  * (Typesense iterates `config.schema.fields`, and `getInitialValues` never
  * descends into an array), and `firestoreColumns` same members, one move.
@@ -140,7 +152,11 @@ export const LineItemCore: {
   // (order, invoice, fulfillment, and their input schemas) states one answer.
   // Consequence: it survives fixture sanitization verbatim and appears raw in
   // logs — the same posture `name` has always had.
-  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
+  description: z.string().meta({
+    pii: "none",
+    column: true,
+    label: "Description",
+  }).default(""),
 
   // ⚠️ **`.min(0)` is the tightening.** The invoice declared `z.int()` with no
   // lower bound until 2026-09-09, so an invoice line could store a negative
@@ -152,7 +168,10 @@ export const LineItemCore: {
   // that is what the order and fulfillment grains already carried, and the two
   // produce a different `_zod.def.type` — keeping the existing spelling is what
   // makes this a no-op for those two rather than a change nobody asked for.
-  quantity: z.number().int().min(0).default(0).meta({ column: true, label: "Quantity" }),
+  quantity: z.number().int().min(0).default(0).meta({
+    column: true,
+    label: "Quantity",
+  }),
 
   // 🔴 The row identity, and it has exactly ONE author — `computeItemPaths` in
   // `src/utils/orders.ts`. An item's `path` is `[...its resolved parent's path,
@@ -173,5 +192,8 @@ export const LineItemCore: {
   // backfill across the three collections and is tracked as its own campaign —
   // deliberately NOT a rider on this module. Do not tighten it here without
   // that backfill.
-  zero_priced: z.boolean().nullable().optional().meta({ column: true, label: "Zero Priced" }),
+  zero_priced: z.boolean().nullable().optional().meta({
+    column: true,
+    label: "Zero Priced",
+  }),
 };
