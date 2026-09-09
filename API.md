@@ -22453,7 +22453,7 @@ and there is no in-band "absent" value for it.
 
 ```ts
 interface PiiStrategy {
-  apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown;
+  apply(value: unknown, classification: PiiClassification, fieldPath: string, siblings?: Readonly<Record<string, unknown>>): unknown;
 }
 ```
 

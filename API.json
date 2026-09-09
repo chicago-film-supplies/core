@@ -10077,7 +10077,7 @@
         {
           "kind": "interface",
           "name": "PiiStrategy",
-          "declaration": "interface PiiStrategy {\n  apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown;\n}",
+          "declaration": "interface PiiStrategy {\n  apply(value: unknown, classification: PiiClassification, fieldPath: string, siblings?: Readonly<Record<string, unknown>>): unknown;\n}",
           "doc": "How to transform a leaf value given its PII classification. Consumers\nprovide their own strategy; the structured logger uses\n{@link createLoggerStrategy} below.\n\nThe walker calls `apply` with the leaf value, the field's classification,\nand the dotted field path (for strategies that want path-dependent output\nlike the fixture sanitizer's deterministic fakes).\n\n`apply` is also offered every CONTAINER inside a tagged subtree (the tagged\nobject itself, each nested object/array within it, and each ENTRY of a nested\n`z.record`, at `path.<key>`) before the walker recurses into it. An untagged\nrecord's own object is never offered — only its entries, and only once a tag\nis in scope. Return the value unchanged to let the walker keep descending to\nthe leaves; return anything else to replace the container wholesale and stop\nthe descent. The fixture sanitizer uses this to null a whole `Coordinates`\nobject — a leaf-by-leaf transform cannot, because `latitude` is a `z.number()`\nand there is no in-band \"absent\" value for it."
         },
         {

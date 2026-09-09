@@ -79,7 +79,29 @@ export function readPiiTag(node: z.ZodType): PiiClassification | undefined {
  * and there is no in-band "absent" value for it.
  */
 export interface PiiStrategy {
-  apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown;
+  apply(
+    value: unknown,
+    classification: PiiClassification,
+    fieldPath: string,
+    /**
+     * The plain object CONTAINING this leaf, **pre-transform**, when there is
+     * one. Absent at the document root and for a value the walker reached
+     * without passing through an object.
+     *
+     * 🔴 **This is the only way a strategy can identify its subject.** An array
+     * element's path carries no index (see {@link RECORD_KEY_SEGMENT}), so
+     * `organizations[0].name` and `organizations[7].name` arrive at an
+     * IDENTICAL `fieldPath`. A strategy keying a deterministic fake on the path
+     * therefore draws ONE name for two different organizations, and draws TWO
+     * different names for one organization appearing at two paths. Neither is
+     * fixable from the path; both are fixable from a sibling `uid`.
+     *
+     * Always the PRISTINE container, never the copy the walker is mutating, so
+     * a value derived from it cannot depend on key order or on an
+     * already-masked sibling.
+     */
+    siblings?: Readonly<Record<string, unknown>>,
+  ): unknown;
 }
 
 /**
@@ -305,7 +327,10 @@ function walkObject(
     const value = out[key];
     if (value === null || value === undefined) continue;
     const path = prefix ? `${prefix}.${key}` : key;
-    out[key] = transformField(value, fieldSchema, strategy, path);
+    // `record`, never `out`: `out` is being mutated by this very loop, so a
+    // strategy seeding on it would see already-masked siblings and its output
+    // would depend on key order.
+    out[key] = transformField(value, fieldSchema, strategy, path, record);
   }
   return out;
 }
@@ -338,13 +363,14 @@ function applyTagged(
   pii: PiiClassification,
   strategy: PiiStrategy,
   path: string,
+  siblings?: Readonly<Record<string, unknown>>,
 ): unknown {
   if (value === null || value === undefined) return value;
 
-  if (typeof value !== "object") return strategy.apply(value, pii, path);
+  if (typeof value !== "object") return strategy.apply(value, pii, path, siblings);
 
   // Containers: strategy first refusal, then walk.
-  const replaced = strategy.apply(value, pii, path);
+  const replaced = strategy.apply(value, pii, path, siblings);
   if (replaced !== value) return replaced;
 
   const unwrapped = unwrapNonArray(schema);
@@ -355,13 +381,23 @@ function applyTagged(
     // No element schema (an array value under a tagged non-array node) — nothing
     // to descend with. Fail closed, same reasoning as the `!shape` note below.
     if (!elem) return redact();
-    return value.map((v) => applyInherited(v, elem, pii, strategy, path));
+    // `siblings` passes STRAIGHT THROUGH: an element that is itself an object
+    // re-establishes them on descent, and an array of scalars
+    // (`contact.phones`) correctly keeps the containing object's.
+    return value.map((v) => applyInherited(v, elem, pii, strategy, path, siblings));
   }
 
   // Record — must precede `getShape`, which is `null` for one. Every entry is
   // walked against the record's value schema, under the literal `<key>` segment.
   if (def.type === "record" && def.valueType) {
-    return walkRecord(value as Record<string, unknown>, def.valueType, strategy, path, pii);
+    return walkRecord(
+      value as Record<string, unknown>,
+      def.valueType,
+      strategy,
+      path,
+      pii,
+      siblings,
+    );
   }
 
   // A bare union is narrowed to the member the value discriminates to, exactly
@@ -388,10 +424,12 @@ function applyTagged(
   // `strategy.apply` is NOT called a second time here: first refusal already ran.
   if (!shape) return redact();
 
-  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  const pristine = value as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...pristine };
   for (const [key, childSchema] of Object.entries(shape)) {
     if (!(key in out)) continue;
-    out[key] = applyInherited(out[key], childSchema, pii, strategy, `${path}.${key}`);
+    // `pristine`, never `out` — same reason as `walkObject`.
+    out[key] = applyInherited(out[key], childSchema, pii, strategy, `${path}.${key}`, pristine);
   }
   return out;
 }
@@ -418,10 +456,11 @@ function applyInherited(
   inherited: PiiClassification,
   strategy: PiiStrategy,
   path: string,
+  siblings?: Readonly<Record<string, unknown>>,
 ): unknown {
   const effective = readPiiTag(schema) ?? inherited;
-  if (effective === "none") return transformField(value, schema, strategy, path);
-  return applyTagged(value, schema, effective, strategy, path);
+  if (effective === "none") return transformField(value, schema, strategy, path, siblings);
+  return applyTagged(value, schema, effective, strategy, path, siblings);
 }
 
 /**
@@ -438,15 +477,19 @@ function walkRecord(
   strategy: PiiStrategy,
   path: string,
   inherited?: PiiClassification,
+  siblings?: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const entryPath = path ? `${path}.${RECORD_KEY_SEGMENT}` : RECORD_KEY_SEGMENT;
   const out: Record<string, unknown> = { ...value };
   for (const key of Object.keys(out)) {
     const entry = out[key];
     if (entry === null || entry === undefined) continue;
+    // Like the array arm, `siblings` passes through rather than becoming the
+    // record: a record KEY is as arbitrary as an array index, so the record is
+    // not a meaningful sibling set for its entries.
     out[key] = inherited === undefined
-      ? transformField(entry, valueSchema, strategy, entryPath)
-      : applyInherited(entry, valueSchema, inherited, strategy, entryPath);
+      ? transformField(entry, valueSchema, strategy, entryPath, siblings)
+      : applyInherited(entry, valueSchema, inherited, strategy, entryPath, siblings);
   }
   return out;
 }
@@ -456,6 +499,7 @@ function transformField(
   fieldSchema: z.ZodType,
   strategy: PiiStrategy,
   path: string,
+  siblings?: Readonly<Record<string, unknown>>,
 ): unknown {
   // The field's own PII tag takes precedence. Read it through the whole wrapper
   // chain — `.nullable().meta({pii})` parks the tag on the ZodNullable, which an
@@ -463,7 +507,7 @@ function transformField(
   const pii = readPiiTag(fieldSchema);
 
   if (pii && pii !== "none") {
-    return applyTagged(value, fieldSchema, pii, strategy, path);
+    return applyTagged(value, fieldSchema, pii, strategy, path, siblings);
   }
 
   const unwrapped = unwrapNonArray(fieldSchema);
@@ -476,7 +520,7 @@ function transformField(
   if (def.type === "array" && def.element && Array.isArray(value)) {
     const elem = def.element;
     return value.map((v) =>
-      v === null || v === undefined ? v : transformField(v, elem, strategy, path)
+      v === null || v === undefined ? v : transformField(v, elem, strategy, path, siblings)
     );
   }
 
@@ -484,7 +528,7 @@ function transformField(
   // `getShape` is `null` for a record, so the walk stopped here and every tagged
   // leaf under `comment.reactions` went to the log and into git unscrubbed.
   if (def.type === "record" && def.valueType && isPlainObject(value)) {
-    return walkRecord(value, def.valueType, strategy, path);
+    return walkRecord(value, def.valueType, strategy, path, undefined, siblings);
   }
 
   // Object OR bare union — `walkObject` handles both (it narrows a union first).
