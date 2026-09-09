@@ -3,33 +3,50 @@
 *Promoted from a machine-local draft on 2026-09-09. Owning repo is `core` — the schemas are
 the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 
-> ## ⚠️ STATUS UPDATE 2026-09-09 — increments 0 and 1 are DONE and SHIPPED (`beta.390`)
+> ## ⚠️ STATUS UPDATE 2026-09-09 — increment 1 is COMPLETE and SHIPPED (`beta.391`)
 >
-> Compacted from three blocks. Read this instead of the increment prose where they disagree.
+> Compacted from four blocks. Read this instead of the increment prose where they disagree.
 >
 > **Shipped:** `f7e9b66` (the shared line-item shape), `85184ea` (`reference`/`chargeable_days`/the
-> `INVOICE_ONLY_ITEM_FIELDS` key-check), `0122a0c` (a barrel fix — see below), `83b3cfe` (core#102,
-> the input schema). Published `beta.388` → `.390`. **`manager` is pinned to `.390` and landed**
-> (`095ce6a`): 0 typecheck errors, 1977 tests. **`api-cloudrun` is NOT yet bumped** — that is the
-> remaining consumer work.
+> `INVOICE_ONLY_ITEM_FIELDS` key-check), `0122a0c` (a barrel fix), `83b3cfe` (core#102, the input
+> schema), `1477dd5` (the destination pair — increment 1's last structural piece). Published
+> `beta.388` → `.391`. **All three consumers are pinned to `.391` and landed**: `manager` `a3cf914`
+> (typecheck 0, 1977 tests), `api-cloudrun` `4fd666fb` (40 pin entries, `test:units` 2014/0, full
+> pre-push suite green). `templates` stays at `.387` deliberately — see below.
 >
-> **Increment 0** — `api-cloudrun/scripts/audit-document-grain-parity.ts` (`ef75a64c`, on
-> `origin/main`). Numbers in § *0*.
+> **Increment 0** — `api-cloudrun/scripts/audit-document-grain-parity.ts` (`ef75a64c`). Numbers in
+> § *0*, **re-run 2026-09-09 and unchanged except where noted there.**
 >
 > **Increment 1** — `src/schemas/_items.ts` holds `LineItemCore`; all three grains reference it. The
 > invoice gained `.min(1).max(100)` on `name`, `.min(0)` on `quantity`, `.int()` on
 > `price.chargeable_days` and `.max(255)` on `reference`; `checkZeroPricedAmount` moved onto the
 > invoice and fulfillment **Inner** consts so it actually runs on a document parse; core#90's
-> `isFulfillmentLineItem` is exported and `isStructural` plus both its casts are gone.
+> `isFulfillmentLineItem` is exported and `isStructural` plus both its casts are gone. And
+> `DocDestination` + `InvoiceDocDestination` now both spread `DestinationPairCore` (`schemas/order.ts`),
+> dropping the invoice's two inert `.default(false)`s. `api-cloudrun/scripts/backfill-invoice-destination-flags.ts`
+> is deleted with its `INVOICE_WRITING_SCRIPTS` catalog entry — arm C asserts BOTH directions, so a
+> catalogued file that no longer exists is a failure rather than a leftover.
 >
-> 🔴 **The `{ ...LineItemCore, … }` spread this doc proposed is NOT what landed.** Shape key order
-> becomes schema key order and `getFirestoreColumns` walks the shape, so a spread silently reorders
-> the operator's column picker on all three surfaces — and the six fields are not contiguous in any
-> grain, so **no key order for that object leaves all three unchanged.** Fields are referenced per
-> key; the anti-drift guarantee moved to `tests/item-shape-parity.test.ts`, which is **stronger**
-> (a spread cannot see a grain SHADOWING a shared key, which is exactly how `name` and `quantity`
-> drifted). All nine derived surfaces are byte-identical, order included. The general rule is now in
-> `core/CLAUDE.md` beside the display-columns section, not only here.
+> 🔴 **SPREAD or reference PER KEY is decided by key CONTIGUITY, and this pass answered it both ways.**
+> A schema's key order is its Firestore-surface column order (`getFirestoreColumns` walks the shape),
+> so a spread is an operator-visible column move wearing a refactor's clothes. The **line item** cannot
+> be spread — its six shared fields sit at three different arrangements and `type` is second in all
+> three, so **no key order for that object leaves all three grains unchanged** — and is referenced per
+> key, with the anti-drift guarantee moved to `tests/item-shape-parity.test.ts`. The **destination
+> pair** can, because the shared fields are the whole of `DocDestination` in its existing order and the
+> invoice's only extra key (`uid_order`) was already first. Same campaign, opposite answers. The
+> general rule is in `core/CLAUDE.md` beside the display-columns section.
+>
+> ⭐ **A spread cannot see a grain SHADOWING a shared key**, which is the original drift one level
+> down, so `tests/destination-pair-parity.test.ts` asserts instance identity (`===`, never structural
+> equality — `z.globalRegistry` is a WeakMap keyed on the instance, so a copy carries none of the
+> base's `.meta()`). **Confirmed by planting the shadowed key: the identity arm goes red while the
+> key-order arm stays green.** That is why identity is the load-bearing arm and why the key-order arm
+> is not a substitute for it.
+>
+> ⭐ **Both shape changes were verified as a DIFF rather than argued.** `getFirestoreColumns`,
+> `getTypesenseColumns` and `getInitialValues` for all three collections, dumped before and after —
+> **nine surfaces byte-identical, order included**, both times.
 >
 > 🔴 **`beta.388` shipped `isFulfillmentLineItem` UNREACHABLE**, and the lesson outlives this pass.
 > It was exported from `schemas/fulfillment.ts` and never added to `schemas/mod.ts`'s explicit list,
@@ -37,58 +54,78 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 > gate was green**: `deno check` (the module compiles), `check:declarations` (the symbol has a type),
 > and the suite (core's tests import schema files directly, not through the barrel). Found only by
 > probing the PUBLISHED tarball from `manager/node_modules`. ⭐ **Verify a core publish against the
-> tarball, not the source tree** — and `tests/item-shape-parity.test.ts` now asserts all three grain
-> guards are barrel-reachable, importing dynamically and by NAME because a static unused import is
-> elided before the module links.
+> tarball, not the source tree.** `.391` was probed that way too: a pair omitting both flags is
+> refused and both paths named, a pair supplying them parses, the key order is byte-identical to
+> `.390`'s, and the shared instances are `===` where they were separate objects at `.390`.
+>
+> ⚠️ **`npm install` alone did NOT deliver the new tarball** — the lockfile said `.391` and
+> `node_modules/@cfs/core/package.json` still said `.390`, so the first probe silently ran against the
+> OLD package and reported the tightening absent. `rm -rf node_modules/@cfs/core && npm install` fixed
+> it. **Print the installed version inside the probe**; a probe against a stale package reads exactly
+> like a failed publish.
 >
 > **Split OUT, with reasons:**
 > - ✅ **The destination-pair backfill is DONE** — core#101, 16 absent flags across 8 invoices,
 >   repaired in prod and dev, closed. Values were **projected from each invoice's source order**
->   (8/8 resolved), because a blanket `false` would have been **wrong on 5 of the 8**. So
->   `InvoiceDocDestination` adopting a shared `DestinationPairCore` is now UNBLOCKED — see § *3*.
+>   (8/8 resolved), because a blanket `false` would have been **wrong on 5 of the 8**.
 > - ✅ **core#102 (the input schema) is DONE** — the input refused nothing the document refuses.
 >   Closed; guard in `tests/invoice.test.ts`.
 > - **`TotalsCore` — deferred, not blocked.** `PriceModifier` lives in `order.ts`, so a `TotalsCore`
->   in `_items.ts` is an import cycle. The six fields are byte-identical today and have not drifted;
->   worth its own commit after `PriceModifier` moves.
+>   in `_items.ts` is an import cycle. (`DestinationPairCore` hit the same wall and resolved it by
+>   living in `order.ts` itself, annotated, off the barrel — the same move is available here.) The six
+>   fields are byte-identical today and have not drifted; worth its own commit.
 > - 🔴 **`Invoice.subject` is NOT free** — see § *3*. The writer produces the `null` a tightening
 >   would refuse, so it needs the api-cloudrun change deployed first.
 > - **Increment 1a** is its own campaign (core#100), ~9,214 rows, and it *would* break the
 >   `templates` fixtures where increment 1 did not: 27 of 154 committed line items state no
 >   `zero_priced`.
 >
-> ✅ **`api-cloudrun` is pinned to `.390` and landed** (`e2dc7a09`) — 40 entries, 0 typecheck errors,
-> gate clean, `test:units` 2014/0. It carries `Requires-Manager: >= 25.0.0`: core#102 tightens INPUTS
-> the manager sends, so this is the REFINE case and the manager must release first (its `.390` pin is
-> on `main` and unreleased; manager#438 cuts 25.0.0 and covers it).
->
 > ⚠️ **A clean `deno check` was NOT the whole answer, and what caught the gap was a different ratchet
 > than expected.** `orderInvoiceMirrorCoverage C` demands every invoice-writing script declare how the
 > `order.invoices[]` mirror converges; the backfill was uncatalogued. The seed sweep it prompted came
 > back clean for a *reason* rather than by luck: every empty `name` in that repo sits on a destination
 > DIVIDER, whose schema carries no `.min(1)`, and every negative `quantity` is a stock-location or
-> movement quantity — a different schema.
+> movement quantity — a different schema. ⭐ The destination-pair fixture sweep was clean for a
+> **third** reason, and it is the durable one: the four api-cloudrun literals spread
+> `getTestDoc(InvoiceDocDestination)`, which builds required keys only and **parses or throws**, so a
+> newly-required field arrives in every seed by construction. That is the class `CLAUDE.md` §
+> *Seeding* says `getTestDoc` closes, working as advertised. `core`'s own `tests/invoice.test.ts` was
+> the one hand-spelled literal and it DID have to be repaired — it omitted both flags, which is
+> exactly what the inert default allowed.
 >
-> ⭐ **Verification § re-parse: DONE, both projects, 0 failures.** 1,019 orders / 1,040 invoices /
-> 1,019 fulfillments in each — **6,156 documents, 0 parse failures** against `.390`. Strictly stronger
-> than § *0*'s census, which asks four questions where this asks the whole schema.
+> ⭐ **Verification § re-parse: DONE, both projects, 0 failures** — 1,019 orders / 1,040 invoices /
+> 1,019 fulfillments in each, **6,156 documents** against `.390`. ⚠️ Not re-run against `.391`; the
+> `.391` evidence is the census question above (0 in both projects, re-run immediately before the
+> commit) plus the tarball probe. Re-run the full re-parse if anything else in this campaign lands.
 >
-> **NEXT, and it is the last structural piece of increment 1:** `InvoiceDocDestination` rebuilt as
-> `z.strictObject({ uid_order: FirestoreId, ...DestinationPairCore })`. core#101's repair unblocked it,
-> and its key order already matches `DocDestination`'s exactly, so that spread is order-preserving and
-> changes no column surface. ⚠️ When it ships, **DELETE
-> `api-cloudrun/scripts/backfill-invoice-destination-flags.ts`** — a one-shot, per that repo's script
-> lifecycle.
+> **NEXT — increment 1 is done, so start at § *2* (bookings) or § *3* (the rulings).** Nothing is
+> blocked. § *3*'s two open calls both need work outside core first: `Invoice.subject` needs
+> `createInvoice`'s `?? null` → `?? ""` DEPLOYED before the schema tightens, and
+> `Invoice.destinations` needs the 31 empty arrays ATTRIBUTED before `.min(1)` can refuse them.
+> § *4* (naming) has no correctness payoff and the largest blast radius — keep it separable.
 >
-> ⚠️ **The hold on the core#91/#92/#93 campaign is LIFTED** (templates#292 merged). The mechanism this
-> doc originally named was wrong: it was never a stale pin, it was `lint:capture-floor` comparing
-> `min_core` against the newest *published* core, so only a beta adding a `pii: "mask"` tag can turn
-> it red. Increment 1 added none.
+> ⚠️ **`templates` needs neither a pin bump nor a floor raise, and that is now measured rather than
+> predicted.** It sits on `.387` — four betas behind, deliberately. `deno task lint:capture-floor` run
+> against the published `.391`: **194 tagged leaves across 8 collections at both the `.386` floor and
+> `.391`**, green. And its fixture corpus is clean for the tightening: 45 JSON files, **8
+> invoice-shaped destination pairs, 0 missing a flag** — so a pin bump there is safe whenever someone
+> takes it.
 >
-> ⭐ **Three clean counts today were clean for three different reasons, and none was about the
-> document** — the fixtures because of *when* they were sampled, the `subject` census because of
-> *what the writer emits*, the destination flags because *the schema's own inert default* kept the
-> field absent. That pattern is now in `core/CLAUDE.md` beside the inert-default table.
+> ⚠️ **`api-cloudrun`'s `Requires-Manager: >= 25.0.0` (`e2dc7a09`) is SATISFIED** — manager v25.0.0
+> released 2026-09-09 (manager#438 merged). `4fd666fb` adds no new trailer: the manager does not
+> construct an invoice destination pair, it edits `jurisdiction` and echoes the stored pair back, so
+> this tightening cannot refuse anything it sends.
+>
+> ⭐ **Four clean counts in this campaign were clean for four different reasons, and none was about
+> the document** — the `templates` fixtures because of *when* they were sampled, the `subject` census
+> because of *what the writer emits*, the destination flags because *the schema's own inert default*
+> kept the field absent, and the api-cloudrun seeds because *`getTestDoc` parses what it builds*. That
+> pattern is in `core/CLAUDE.md` beside the inert-default table.
+>
+> ⚠️ **Unrelated but found while landing this, and recorded on api-cloudrun#753 rather than here:**
+> `tests/integration/templates/publish.test.ts` retried on 13 of the 14 pushes since 2026-09-07, and
+> **9 of the 12 `assertion`-classed rows in the whole pre-push ledger are that one file** — with zero
+> `transport` rows, which is the opposite of the contention signature #753 was filed on.
 
 ## Status — this runs AFTER the core#91/#92/#93 campaign
 
@@ -362,8 +399,13 @@ fulfillments in both.
 ⚠️ **The destination-pair row above is the only one that has moved since.** It was repaired on
 2026-09-09 (core#101) rather than tightened around: the values were **projected from each invoice's
 source order**, which resolved 8 of 8, because a blanket `false` would have been **wrong on 5 of the
-8** — four pairs are `true/true` and two more carry a `true`. Re-run the audit rather than trusting
-this table for anything else.
+8** — four pairs are `true/true` and two more carry a `true`.
+
+⭐ **The whole table was RE-RUN on 2026-09-09 immediately before `1477dd5`, and every row is
+unchanged.** Both projects, same document counts (1,019 / 1,040 / 1,019). So the five non-zero rows
+are the standing state rather than a stale reading: 31 empty `destinations` (§ *3*), the three
+`zero_priced` component counts (core#100), and the 3 fee lines. ⚠️ It still has a shelf life — re-run
+it rather than citing this table before any further tightening.
 
 🔴 **Dev and prod differ by ONE row in ONE question, so this is one corpus measured twice —
 not two independent samples.** `devReplica` is currently mirroring prod closely, so the
@@ -394,7 +436,11 @@ A new `api-cloudrun/scripts/` census script — `audit-document-grain-parity` �
 Put the numbers and the date in the commit message, per `CLAUDE.md` § *Making a field
 REQUIRED*.
 
-### 1 — the shared `_items` module, and adopt it (the core PR's first commit)
+### 1 — the shared `_items` module, and adopt it ✅ COMPLETE 2026-09-09
+
+⚠️ **Read the status update, not this section, for what landed.** Two things below are wrong as
+written: the spread is not what the line item got (key order — see the status block), and
+`TotalsCore` was deferred rather than shipped.
 
 Shared shapes; every grain rebuilt as a spread. Where the census cleared it, adoption **is**
 the tightening — invoice `name`, `quantity` and `chargeable_days` become the order's
@@ -402,6 +448,12 @@ declarations because they come from the same instance. Also in this commit:
 
 - `InvoiceDocDestination` = `z.strictObject({ uid_order: FirestoreId, ...DestinationPairCore })`
   — which drops the two inert `.default(false)`s and closes the `9435a15` gap.
+  ✅ **DONE 2026-09-09** (`1477dd5`, `beta.391`). ⚠️ **`DestinationPairCore` lives in
+  `schemas/order.ts`, not in `_items.ts`** — it needs `OrderDocDates`, `DocDestinationEndpoint` and
+  `JurisdictionEnum`, all of which `order.ts` owns, so putting it in `_items.ts` is an import cycle
+  (the same wall `TotalsCore` hit). It is exported with an explicit annotation, in the
+  `TimestampFields` house style, and deliberately kept **off `schemas/mod.ts`** — no consumer
+  assembles a pair from parts. `tests/destination-pair-parity.test.ts` is the guard.
 - `OrderDocTotals` / `InvoiceDocTotalsSchema` rebuilt from `TotalsCore`; `DocumentTotalsCore`
   (`src/utils/orders.ts:1588`) derived from it rather than hand-declared.
 - `checkZeroPricedAmount` moved onto the invoice and fulfillment **Inner** consts so the
@@ -674,35 +726,51 @@ changes the *schema*, not the override policy).
 
 ## Context recommendation
 
-**Clear. Increments 0 and 1 are DONE and SHIPPED END TO END (2026-09-09)** — `@cfs/core@10.0.0-beta.390`
-published, `manager` `095ce6a` and `api-cloudrun` `e2dc7a09` both pinned to it and landed, both
-green. **Start at the NEXT block in the status update above**, in a fresh window: none of the
-coordination context that produced this — three betas, a peer handover, a prod backfill, a dev
-Firestore stall — is needed to write the next piece.
+**Clear. Increment 1 is COMPLETE and SHIPPED END TO END (2026-09-09)** — `@cfs/core@10.0.0-beta.391`
+published, `manager` `a3cf914` and `api-cloudrun` `4fd666fb` both pinned to it and landed, both green.
+**Start at § *2* (bookings) or § *3* (the rulings)**, in a fresh window: none of the coordination
+context that produced this — four betas, a peer handover, a prod backfill, a dev Firestore stall — is
+needed to write the next piece.
 
-**The next piece, stated so it can be picked up cold:** rebuild `InvoiceDocDestination` as
-`z.strictObject({ uid_order: FirestoreId, ...DestinationPairCore })`, dropping the two inert
-`.default(false)`s. core#101's repair is what unblocks it (16 absent flags → 0, both projects), and
-its key order already matches `DocDestination`'s exactly, so the spread is order-preserving and
-changes no column surface. ⚠️ In the same change, **delete
-`api-cloudrun/scripts/backfill-invoice-destination-flags.ts`** — a one-shot whose job is done.
+**The next piece is a CHOICE rather than a queue, and both arms are stated so they can be picked up
+cold.** Nothing is blocked; they are independent.
 
-**No blocking preconditions remain.** ✅ The core#91/#92/#93 `templates` hold is LIFTED — templates#292
-merged, and `lint:capture-floor` reads 194 tagged leaves at both `.386` and `.390`, so that repo needs
-neither a pin bump nor a floor raise for this work. ⚠️ Re-run `deno task lint:capture-floor` in
-`templates` only if a further beta touches a schema field carrying PII: it compares `min_core` against
-the newest **published** core rather than against the pin, and is the one cross-repo gate that reaches
-forward past a pin.
+- **§ *2* — bookings.** Two audits gate two renames and neither has been run. `Booking.dates` is a
+  renamed subset (`{start, end, charge_start, charge_end}` where the pair says
+  `delivery_start`/`collection_end`, and no `days_active`/`days_charged`) — **audit
+  `buildBookingDates` before renaming**, because a booking's window is derived per item type and
+  `start` may not be a clean alias. `Booking`'s flat `uid_destination_delivery` /
+  `uid_destination_collection` are a third spelling of a join that already has one — **check
+  `api-cloudrun/infra/firestore-indexes.json` for a caller first**, since a composite index may need
+  the top-level field. If either audit says "not a clean alias", file the finding rather than force
+  the rename. `Movement.path` is a separate `kind:decision` to FILE, not to guess.
+- **§ *3* — the two open rulings, both of which need work OUTSIDE core first.** `Invoice.subject`
+  needs `createInvoice`'s `subject: input.subject ?? null` → `?? ""` written and DEPLOYED before the
+  schema can tighten — the census is 0 nulls and that is evidence about the inputs so far, not about
+  the writer. `Invoice.destinations` needs the **31 empty arrays attributed** before `.min(1)` can
+  refuse them; the earlier guess ("the 28 flat CRMS invoices") is not the number.
+- **§ *4* (naming) is last and separable**, and has no correctness payoff with the largest blast
+  radius. Keep it its own commit so it can be dropped.
+
+⚠️ **`templates` needs neither a pin bump nor a floor raise, and that is now MEASURED.** It sits on
+`.387`, four betas behind, deliberately. `deno task lint:capture-floor` against the published `.391`:
+194 tagged leaves across 8 collections at both the `.386` floor and `.391`, green. Its fixture corpus
+is clean for the tightening too — 45 JSON files, 8 invoice-shaped destination pairs, 0 missing a flag.
+⚠️ Re-run that task only if a further beta adds a schema field carrying PII: it compares `min_core`
+against the newest **published** core rather than against the pin, and is the one cross-repo gate that
+reaches forward past a pin.
 
 ✅ **The `Requires-Manager: >= 25.0.0` on `api-cloudrun` `e2dc7a09` is SATISFIED.** manager#438 was
 merged 2026-09-09 and `manager-v25.0.0` is published. Verified by reading the tag's own content rather
 than inferring it from the merge: `git show manager-v25.0.0:package.json` declares
-`npm:@jsr/cfs__core@10.0.0-beta.390`, and `095ce6a` is an ancestor of the tag. So the REFINE ordering
-holds in fact — the manager released the tighter input schemas before the API can ship them to prod.
+`npm:@jsr/cfs__core@10.0.0-beta.390`, and `095ce6a` is an ancestor of the tag. `4fd666fb` adds no new
+trailer — the manager does not construct an invoice destination pair, it edits `jurisdiction` and
+echoes the stored pair back, so the destination tightening cannot refuse anything it sends.
 
 ⚠️ **`core`'s gate judges the WHOLE working tree at both commit and push**, so check for a peer before
 starting — `git -C core status --short` and `pgrep -fl "deno.*test"`. (Unlike `api-cloudrun` and
-`manager`'s pre-commit, which gate the subject.)
+`manager`'s pre-commit, which gate the subject.) A peer landed `59fde44` into this doc mid-session on
+2026-09-09 while increment 1 was being written; the commits did not collide, and they would have.
 
 🔴 **Verify any `core` publish against the PUBLISHED TARBALL, not the source tree.** `beta.388` shipped
 `isFulfillmentLineItem` unreachable — exported from `schemas/fulfillment.ts`, missing from
@@ -711,6 +779,10 @@ compiles, `check:declarations` because the symbol has a type, and the suite beca
 import schema files directly rather than through the barrel. `beta.342` shipped the same class.
 Bump a consumer, import `node_modules/@cfs/core/src/schemas/mod.js` and exercise the behaviour.
 ⚠️ The npm alias installs at `node_modules/@cfs/core`, **not** `node_modules/@jsr/cfs__core`.
+🔴 **And PRINT THE INSTALLED VERSION INSIDE THE PROBE.** On 2026-09-09 `npm install` left
+`node_modules/@cfs/core` at `.390` while `package-lock.json` already said `.391`, so the first probe
+ran against the OLD package and reported the tightening ABSENT — indistinguishable from a failed
+publish. `rm -rf node_modules/@cfs/core && npm install` fixed it.
 
 ⭐ **Increment 1a is not on this plan's critical path** — ~9,214 rows, tracked as core#100. It *would*
 break the `templates` fixtures where increment 1 did not: 27 of 154 committed line items state no
