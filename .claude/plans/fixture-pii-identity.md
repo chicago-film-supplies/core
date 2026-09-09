@@ -1,136 +1,100 @@
-# core#91 + #92 + #93 — one campaign. Code LANDED; the fixture re-capture is what remains.
+# core#91 + #92 + #93 — one campaign. Everything is SHIPPED; one PR is awaiting merge.
 
-> ## ⚠️ STATUS 2026-09-08 — everything except the templates fixture corpus has SHIPPED, including to PROD
->
-> This doc replaces the earlier plan of the same name, whose *"Blocked on a peer session"* claim was
-> false when written and whose `## Context recommendation` had expired. Do not look for that version.
+> **Compacted 2026-09-09.** This doc previously carried two stacked status blocks. It now reads as
+> one current statement, per the plan-doc convention. **Delete it in the commit that closes
+> core#91/#92/#93** — only the two lines under *What is left* survive it, and both are issues.
 
-## Context
+## Where this stands
 
-Three `core` issues describing one defect shape, plus three riders, shipped as one beta because the
-dependency graph is a fan-in rather than a chain: one publish, one re-capture cycle, one manager
-deploy.
-
-- **core#91** (`kind:defect`) — `applyPii` faked one organization as two different companies in one
-  document and masked `scope.name` as `Sample text for name....`
-- **core#92** (`kind:cleanup`) — `AgingScope.name`, a derived scalar beside its own source.
-- **core#93** (`kind:cleanup`) — three `{uid, name}` org refs stating a pre-joined name.
-
-## What has LANDED
-
-| repo | state |
+| | state |
 |---|---|
-| `core` | **beta.385 published; beta.386 adds `MovementSessionItem.owner_path`.** `8ec3809` walker `siblings` · `52f2c16` masker · `ce80fea` core#92 · `0da1432` core#93 + `due_at` + `TEMPLATE_COMMIT_TYPES`. Suite 2244 green. |
-| `api-cloudrun` | **`v0.243.0` MERGED AND DEPLOYED TO PROD** — revision `api-cloudrun-00359-928`, pinning beta.385. 2014 unit tests green. |
-| prod data | **2 documents repaired** (`api-cloudrun/scripts/repair-template-commit-types.ts`), verified 0 remaining. |
-| `manager` | `14f3cb9` on `main`, deployed. Typecheck clean, 1977 tests green. |
-| `templates` | branch **`core-91-92-93-campaign`** — **PUSHED** (`c985861`), no PR yet. Pin and `min_core` both on beta.386; `lint-capture-floor` trigger armed; four `.eta` files rewritten. Resume by checking it out, not by re-deriving it. |
+| `core` | **beta.387 published.** beta.385 the masker + walker `siblings`, beta.386 `MovementSessionItem.owner_path`, **beta.387 the oracle fix** (below). |
+| `api-cloudrun` | **`v0.244.0` deployed to PROD and DEV** (revision `api-cloudrun-00360-l2w`, 2026-09-09 05:01 UTC), pinning beta.386. |
+| prod data | 2 documents repaired, verified 0 remaining. |
+| `manager` | `14f3cb9` on `main`, deployed. |
+| `templates` | **PR #292 open** — the whole fixture corpus. `deno task lint:fixtures` **14 findings → 0**. |
 
-🔴 **The hard serialization point is PASSED.** A capture is sanitized by the DEPLOYED core
-(api-cloudrun#838); prod now serves beta.385, so captures taken from here get the fixed masker.
+🔴 **The hard serialization point (api-cloudrun#838) is PASSED and was verified against the running
+revision, not assumed** — a capture is sanitized by the DEPLOYED core, and prod serves beta.386.
 
-## What REMAINS — the fixture corpus, and only that
+## What is left
 
-`deno task lint:fixtures` is **red on 14 of 38** on that branch. That is expected and is templates#187's
-class: a `z.strictObject` shape change invalidates committed fixtures without touching a fixture file.
+1. **PR #292 merges** (auto-merges ~1 min after CI is green — there is no review window, which is why
+   the goldens were blessed and eyeballed before it was opened). Then close **core#91, #92, #93**
+   and delete this doc.
+2. **`api-cloudrun` + `manager` pin bumps to beta.387.** Not urgent and not blocking: .387 fixes the
+   fixture-lint ORACLE, so until it lands the api's *advisory* capture lint keeps reporting a
+   `scope.name` false positive on the two `pick-sheets` families. Renovate normally does these.
+   ⚠️ At the time of writing `api-cloudrun/main` is `[ahead 1]` with a peer session's commit, so a
+   push there needs the owner's say-so first.
+3. **templates#290** — open, and it should land independently of #292.
 
-| family | fixtures red | why |
-|---|---|---|
-| aging-report | 4 | `scope.name` gone; `organization_path` added |
-| statement | 3 | `scope.name` gone |
-| packing-list | 2 | org ref `{uid,name}` → `{uid,organization_path}` |
-| pick-sheet | 2 | same |
-| receipt | 3 | same (`anonymous-cross-customer` is fine — its org is `null`) |
+## The two findings worth carrying out of this campaign
 
-⚠️ **Three of these cannot be repaired by hand, and the reason decides the approach.** The old fixture
-carries only the COMPOSED NAME; the chain is not in it. So the `{uid, organization_path}` shape cannot
-be derived from what is on disk without inventing a single-node chain, which would be a lie about the
-org tree. `packing-list`, `pick-sheet` and `receipt` **must be re-captured**.
+### 🔴 A fold captured from LIVE OPEN WORK has a stable ADDRESS and an unstable DOCUMENT
 
-`statement` × 3 is a pure key deletion and IS mechanical. `aging-report` needs `scope.name` deleted and
-`organization_path` added — derivable in-document from the scoped uid's chain, which already appears
-under `rows[]`/`organizations[]`.
+`pick-sheets` and `aging-reports` are folds over whatever is open *today*. In the single day between
+the first capture and the re-capture:
 
-⚠️ **But re-capture is wanted for all of them anyway**, because it is what actually delivers core#91:
-the identity seeding and the injective allocation only reach the corpus through a fresh capture. A
-shape-only migration would leave `all-accounts` rendering 14 accounts under 10 labels.
+- `packing-list/multi-order-delivery` — an order went `out`, so an organization-scoped delivery sheet
+  returned **one** order. A fixture named *multi-order* covering one order **renders fine and covers
+  nothing**; nothing goes red. Re-pointed to an organization with three orders still to deliver.
+- `packing-list/single-order-collection` — a **second** order joined its organization's collection
+  sheet. Re-pointed to the degenerate `order:<uid>` scope (api-cloudrun#821).
+- `statement/open-item-floor` — two invoices were paid in full, taking the account from three open
+  invoices to one. **Kept**: the `open_item` population rule dropping them *is the arm working*.
 
-⚠️ `aging-report/credits-applied` is **HAND-BUILT and cannot be captured** — its sidecar says so. It
-must be REBUILT from a re-captured `subtree-invoice-date`.
+⭐ **An `order:`-scoped address is the only shape that cannot decay**, because it names one order by
+construction. Two fixtures now use it deliberately. ⚠️ Its CONTENTS can still move — a split
+breakdown is live custody — so check the property before blessing.
 
-⚠️ `buildAgingReport` refuses any as-of but today's, so `subtree-invoice-date` re-renders **different
-money by construction**. Its sidecar's anchor figures must be re-measured, not carried.
+⭐ **The general form: a fixture whose source is a query is dated; a fixture whose source is a
+document is not.** A movement session folds from an append-only journal and re-captures identically.
 
-### The capture parameters are NOT recorded anywhere
+### 🔴 An oracle that drops an argument the masker reads (core beta.387)
 
-Sidecar entries carry `slug`, `label`, `description` and nothing else — no source collection, no
-`doc_uid`, no params. Each fixture's capture inputs have to be reconstructed from its `description`,
-which does name them in prose (e.g. *"`organization-subtree` on Netflix Productions, LLC"*, *"Captured
-from prod order 991"*). **That reconstruction is the bulk of the remaining work.** Worth filing
-separately: a sidecar that recorded its own capture inputs would make a re-capture mechanical.
+`utils/template-lint.ts` called `maskVerdict(value, fieldPath)` and `categoryForField(fieldPath)`
+with **no `siblings`**, while core#91 had given `scope.name` a sibling-discriminated route. So every
+discriminated leaf fell through to `text` — whose only legal value is the filler — and the masker
+began minting values its own oracle called leaks. **3 of the 4 `pick-sheets` fixtures could not pass
+their own gate while being correctly masked.**
 
-### Then
+`MaskedLeaf.siblings` was added in the same beta carrying the exact warning — *"an oracle that drops
+it judges `scope.name` against the wrong category"* — and this was the one call site that dropped it.
 
-1. Re-bless goldens, **both namespaces** — `api-cloudrun/scripts/rebless-goldens.ts --env=dev --write`
-   with an impersonated `golden-diff-ci` token. `--env=prod` 403s **by design** (prod's Gotenberg
-   grants invoker to `api-runtime-prod` only).
-2. `deno task lint:fixtures` and `deno task lint:capture-floor` both green.
-3. **Look at the rendered page.** `goldens/main/aging-report/all-accounts.png` — 14 accounts should
-   show **14** distinct labels (10 today). `nothing-outstanding.png`'s scope line currently reads
-   `Sample text for name..........`.
-4. Open the PR. 🔴 **templates PRs AUTO-MERGE ~1 min after CI goes green** — have the goldens right
-   BEFORE CI passes; there is no review window.
+⭐ **It failed in the SAFE direction, which is why it shipped green.** `text` accepts strictly less
+than any other category, so the omission could only ever over-report; and before core#91 every
+`scope.name` **was** the filler, so the corpus agreed with the broken oracle by construction. **A
+guard that can only over-report still blocks, and it goes wrong exactly when the thing it guards
+starts working.**
 
-## Also outstanding
+## Smaller things this turned up, all filed
 
-- ~~`api-cloudrun/.claude/skills/templates/SKILL.md:70` is now FALSE~~ **DONE** — rewritten, and the three facts from the deleted `pick-sheet-document.md` are rescued into the same skill. Was: in both clauses: *"`path` is on
-  orders, invoices and credit-notes ONLY. The light shapes carry `{uid, name}` and no chain, so
-  `session.organization` on a receipt has nothing to compose from."* After core#93 they do carry the
-  chain and the receipt does compose. It is a skill — the org-shared authority every machine and cloud
-  agent reads — and no gate checks a skill's *claims*, only that its paths resolve.
-- Close **core#91, core#92, core#93** when the corpus lands.
-- ~~File `MovementSessionItem.owner_path` — DESCOPED.~~ **RE-SCOPED IN, and the descope was wrong.**
-  It claimed a new fulfillment join was prohibitive; `fulfillments` is keyed by ORDER uid, so it is the
-  same batched read the session already performs for orders. The real cost is one more trip through the
-  prod-deploy serialization point — and paying it NOW is strictly cheaper, because the receipt fixtures
-  have not been re-captured yet and deferring buys a SECOND re-capture. Landed in `core` `6ada424`
-  (beta.386) with a shared `bookingOccurrencesByBooking` and an equivalence test against the fold.
-- **All follow-ups FILED** — nothing is left in prose only:
-  - **templates#286** — `lint-capture-floor` sees a qualified route change, not a discriminant one.
-  - **templates#287** — a fixture records no capture INPUTS, which is why the re-capture below is
-    archaeology rather than a replay.
-  - **templates#288** — nothing checks that core#91's masking reached the CORPUS. Must land ADVISORY:
-    the 23 `invoice`/`quote` fixtures still violate it until core#94 re-captures them.
-  - **templates#289** — `lint:citations` does not scan `.eta` prose, found via a dead citation in
-    `letterhead.eta` that a green run reported as clean.
-  - **core#99** — `PickSheetScope` `kind:"order"` states an ORDER id where an organization identity is
-    needed, so its name stays filler.
-- `templates#270` — **already closed** (superseded, pinned beta.374).
-- **`api-cloudrun/.claude/plans/pick-sheet-document.md` — DELETED**, as it instructed. Its three
-  surviving facts are in the templates SKILL.
+- **templates#290 / #291** — `aging-report`'s sidecar `render.filename` still read the deleted
+  `scope.name`, so scoped AR Aging PDFs download as `AR Aging - undefined - <date>.pdf` **in prod**.
+  #290 repairs it (its own PR — `render` has one writer that cannot target a feature branch); #291 is
+  the missing guard, since no gate reads a sidecar Eta expression as code.
+- **templates#286, #287, #288, #289** and **core#99** — filed earlier in the campaign, all still open.
+- ⚠️ **`templates/capture-floor.json` `min_core` stays at beta.386, deliberately.** That floor asks what a
+  capture STORES; .387 repairs an oracle, not a masker. `lint:capture-floor` measures 194 tagged
+  leaves at both versions.
 
-## Findings worth keeping
+## Verified by looking, not by a gate
 
-- **The address defect is 4× larger than reported.** Measured over all 38 fixtures: **26 same-uid
-  destination leg pairs, 23 masking to two different streets** — not the "6 of 6" the handoff claimed.
-  17 of the 23 are in the `invoice` and `quote` families — **outside this campaign's re-capture set**.
-  ⚠️ Sourced precisely: that split is this campaign's own scoping (15 fixtures here, 23 there,
-  exactly disjoint), NOT something core#94 states. #94 renames
-  `DocumentOrganizationSnapshot.crms_id`, which sits on orders, invoices and quotes, so its rename is
-  what will next invalidate those 23 — but #94's body says nothing about address masking. Do not cite
-  it as though it did. Those fixtures stay oracle-valid meanwhile, so nothing is red; they churn
-  whenever they are next re-captured.
-- **`DocDestinationEndpoint.uid` is a sibling of `address`, not of `address.full`**, so the `siblings`
-  seam does NOT reach it. The fix is value-identity seeding, which is simpler and also fixes emails,
-  phones and people.
-- **`AgingReport` had no top-level `organization_path`.** core#92 is not a symmetric delete; the ADD is
-  load-bearing or `aging-report.eta:149` has nothing to compose from.
-- **Two api-cloudrun tests pinned the defect as a requirement** (`fixturePiiStrategy.test.ts:45`, `:768`)
-  and went red only on the pin bump — `core`'s own suite stays green through the fix.
+None of what this campaign fixes is visible to any check — every layer was green while the corpus was
+wrong. What the rendered pages now show:
+
+- `aging-report/all-accounts`: **16 accounts under 16 DISTINCT labels**, matrix and detail naming each
+  account identically. Before core#91: 14 accounts under 10 labels, two rows both reading
+  `Foxglove Films LLC` at $8,350.00 and $49.92 — which looked exactly like api-cloudrun#923 and was
+  not it.
+- `aging-report/nothing-outstanding`: a real three-node chain where the scope line read
+  `Sample text for name..........`.
+- `pick-sheet/multi-order-destination`: **0 same-uid endpoint pairs disagreeing** on their masked
+  address, measured over the fixture, where it was 6 of 6.
 
 ## Context recommendation
 
-**Clear, then resume from this doc.** The landed half is verifiable from git and JSR and needs no
-context to trust. The remaining work is one bounded task — reconstruct 14 captures, re-bless, open one
-PR — and it is better done with a full window than with what is left of the session that shipped the
-rest.
+**Clear.** What remains is three bounded items, each verifiable from GitHub in one command — the merge
+state of #292, two pin bumps, and the issue closures. None of it needs this session's context, and
+the two findings above are the only things worth carrying forward.
