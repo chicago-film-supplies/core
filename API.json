@@ -10805,17 +10805,17 @@
         },
         {
           "kind": "function",
-          "name": "formatChicagoWeekdayDate",
-          "signature": "formatChicagoWeekdayDate(input: string): string",
-          "doc": "A weekday and a compact date — `\"Wed 9/1/26\"`.\n\nThe delivery/collection form. The weekday is load-bearing on those: a crew\nreads \"is that a Saturday\" off the page, and the date alone does not say.",
+          "name": "formatChicagoTime",
+          "signature": "formatChicagoTime(input: string): string",
+          "doc": "The time of day alone — `\"9:00 AM\"`.\n\n⭐ **The one helper here that renders a FRAGMENT rather than a whole date**,\nand it exists because of a width. A delivery boundary carries an hour worth\nshowing — prod delivery times run 03:00 to 21:00, so a 06:30 drop and a 21:00\ndrop are otherwise the same row — but `templates`' destinations block is four\ncolumns summing to the alignment edge every table on the page shares.\nMeasured in Chromium at 9px: `Wed 12/22/26` is 60.6px and\n`Wed 12/22/26 · 12:00 AM` is 110.3px, so an inline time would have widened\nthat shared edge from 24rem to 35rem and re-gridded every document. Stacked\non a second line the time is 41.4px and fits the column already there.\n\nSo the caller pairs it with {@link formatChicagoWeekdayDate} on the line\nabove rather than asking for one combined string. It still parses in\nChicago — a fragment is exactly where a zone is easiest to lose, and\n`2026-04-30T19:00:00.000-05:00` is `7:00 PM` here and `12:00 AM` unpinned.\n\n⚠️ **A destination boundary is a POINT, not a window.** `delivery_end` equals\n`delivery_start` on every destination of the 190 prod orders sampled\n2026-09-09, so a caller renders one of the pair and never a range — a\n`9:00 AM – 9:00 AM` would be a window one instant wide that does not exist.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
-          "name": "formatChicagoWeekdayDateTime",
-          "signature": "formatChicagoWeekdayDateTime(input: string): string",
-          "doc": "A weekday, a compact date and the time — `\"Wed 9/1/26 · 9:00 AM\"`.\n\n{@link formatChicagoWeekdayDate} with the minute appended, for a\ndelivery/collection boundary on a document a customer or a crew acts on. The\ndate alone answers \"which day\"; a truck arriving at 06:30 and one arriving at\n21:00 are the same row without this.\n\n⚠️ **It is the WEEKDAY form that gains a time, not {@link\nformatChicagoDateTime}.** That helper is the long prose form for a render\nstamp or a receipt, where the document has one date and room to spell it.\nThese boundaries sit four-to-a-row in a fixed-width block, and they keep the\nweekday because a crew reads \"is that a Saturday\" off the page.\n\n⚠️ **A destination boundary is a POINT, not a window.** `delivery_end` equals\n`delivery_start` on every destination of the 190 prod orders sampled\n2026-09-09, so a caller renders one of the pair and never a range — a\n`9:00 AM – 9:00 AM` would be a window one instant wide that does not exist.",
+          "name": "formatChicagoWeekdayDate",
+          "signature": "formatChicagoWeekdayDate(input: string): string",
+          "doc": "A weekday and a compact date — `\"Wed 9/1/26\"`.\n\nThe delivery/collection form. The weekday is load-bearing on those: a crew\nreads \"is that a Saturday\" off the page, and the date alone does not say.",
           "paramTags": [],
           "returnsTag": null
         },

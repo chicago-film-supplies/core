@@ -246,26 +246,30 @@ export function formatChicagoWeekdayDate(input: string): string {
 }
 
 /**
- * A weekday, a compact date and the time — `"Wed 9/1/26 · 9:00 AM"`.
+ * The time of day alone — `"9:00 AM"`.
  *
- * {@link formatChicagoWeekdayDate} with the minute appended, for a
- * delivery/collection boundary on a document a customer or a crew acts on. The
- * date alone answers "which day"; a truck arriving at 06:30 and one arriving at
- * 21:00 are the same row without this.
+ * ⭐ **The one helper here that renders a FRAGMENT rather than a whole date**,
+ * and it exists because of a width. A delivery boundary carries an hour worth
+ * showing — prod delivery times run 03:00 to 21:00, so a 06:30 drop and a 21:00
+ * drop are otherwise the same row — but `templates`' destinations block is four
+ * columns summing to the alignment edge every table on the page shares.
+ * Measured in Chromium at 9px: `Wed 12/22/26` is 60.6px and
+ * `Wed 12/22/26 · 12:00 AM` is 110.3px, so an inline time would have widened
+ * that shared edge from 24rem to 35rem and re-gridded every document. Stacked
+ * on a second line the time is 41.4px and fits the column already there.
  *
- * ⚠️ **It is the WEEKDAY form that gains a time, not {@link
- * formatChicagoDateTime}.** That helper is the long prose form for a render
- * stamp or a receipt, where the document has one date and room to spell it.
- * These boundaries sit four-to-a-row in a fixed-width block, and they keep the
- * weekday because a crew reads "is that a Saturday" off the page.
+ * So the caller pairs it with {@link formatChicagoWeekdayDate} on the line
+ * above rather than asking for one combined string. It still parses in
+ * Chicago — a fragment is exactly where a zone is easiest to lose, and
+ * `2026-04-30T19:00:00.000-05:00` is `7:00 PM` here and `12:00 AM` unpinned.
  *
  * ⚠️ **A destination boundary is a POINT, not a window.** `delivery_end` equals
  * `delivery_start` on every destination of the 190 prod orders sampled
  * 2026-09-09, so a caller renders one of the pair and never a range — a
  * `9:00 AM – 9:00 AM` would be a window one instant wide that does not exist.
  */
-export function formatChicagoWeekdayDateTime(input: string): string {
-  return format(inChicago(input), "EEE M/d/yy · h:mm a", { in: CHICAGO });
+export function formatChicagoTime(input: string): string {
+  return format(inChicago(input), "h:mm a", { in: CHICAGO });
 }
 
 /** Display values returned by {@link formatChargeDays}. */

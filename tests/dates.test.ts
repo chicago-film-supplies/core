@@ -11,7 +11,7 @@ import {
   formatChicagoDateTime,
   formatChicagoShortDate,
   formatChicagoWeekdayDate,
-  formatChicagoWeekdayDateTime,
+  formatChicagoTime,
   getDuration,
   getEndDateByChargePeriod,
   isHoliday,
@@ -620,7 +620,7 @@ Deno.test("formatChicago* — an offset-bearing instant renders its Chicago day"
   assertEquals(formatChicagoDate(iso), "September 7, 2026");
   assertEquals(formatChicagoShortDate(iso), "9/7/26");
   assertEquals(formatChicagoWeekdayDate(iso), "Mon 9/7/26");
-  assertEquals(formatChicagoWeekdayDateTime(iso), "Mon 9/7/26 · 12:00 AM");
+  assertEquals(formatChicagoTime(iso), "12:00 AM");
 });
 
 Deno.test("🔴 formatChicago* — a ZONE-LESS date is the Chicago day it NAMES, in any container zone", () => {
@@ -637,7 +637,7 @@ Deno.test("🔴 formatChicago* — a ZONE-LESS date is the Chicago day it NAMES,
   assertEquals(formatChicagoDate("2026-09-01"), "September 1, 2026");
   assertEquals(formatChicagoShortDate("2026-09-01"), "9/1/26");
   assertEquals(formatChicagoWeekdayDate("2026-09-01"), "Tue 9/1/26");
-  assertEquals(formatChicagoWeekdayDateTime("2026-09-01"), "Tue 9/1/26 · 12:00 AM");
+  assertEquals(formatChicagoTime("2026-09-01"), "12:00 AM");
 });
 
 Deno.test("🔴 formatChicago* — across the DST boundary, both directions", () => {
@@ -666,38 +666,30 @@ Deno.test("formatChicagoDateTime — renders the minute, which is why it is a se
   );
 });
 
-Deno.test("🔴 formatChicagoWeekdayDateTime — the evening boundary, where the UTC day has already turned", () => {
-  // 19:00 CDT is exactly 00:00 UTC. This is the delivery boundary `templates`'
-  // `evening-boundary` fixture was captured for, and the form the destinations
-  // partial renders it in — unpinned it prints `Fri 5/1/26 · 12:00 AM`, moving
-  // the delivery a day AND losing the hour that makes it an evening drop.
-  assertEquals(
-    formatChicagoWeekdayDateTime("2026-04-30T19:00:00.000-05:00"),
-    "Thu 4/30/26 · 7:00 PM",
-  );
+Deno.test("🔴 formatChicagoTime — the evening boundary, where the UTC day has already turned", () => {
+  // 19:00 CDT is exactly 00:00 UTC — the boundary `templates`' `evening-boundary`
+  // fixture exists for, and the delivery this helper renders the hour of.
+  // Unpinned it reads `12:00 AM`, which is not merely a wrong hour: it is the
+  // one value that looks like an unset time rather than a bad conversion.
+  assertEquals(formatChicagoTime("2026-04-30T19:00:00.000-05:00"), "7:00 PM");
+  // Paired with the date line above it, which is what the two-line cell renders.
+  assertEquals(formatChicagoWeekdayDate("2026-04-30T19:00:00.000-05:00"), "Thu 4/30/26");
 });
 
-Deno.test("formatChicagoWeekdayDateTime — the weekday and the minute, across both DST offsets", () => {
-  // A destination boundary is stored in Chicago offset form, so the two offsets
-  // are what actually reach this helper. An implementation hardcoding one of
-  // them renders the other an hour out — which a date-only helper cannot show.
-  assertEquals(
-    formatChicagoWeekdayDateTime("2026-01-15T09:00:00.000-06:00"), // CST
-    "Thu 1/15/26 · 9:00 AM",
-  );
-  assertEquals(
-    formatChicagoWeekdayDateTime("2026-07-15T15:00:00.000-05:00"), // CDT
-    "Wed 7/15/26 · 3:00 PM",
-  );
+Deno.test("formatChicagoTime — both DST offsets, since that is what reaches it", () => {
+  // A destination boundary is stored in Chicago offset form, so CST and CDT are
+  // the real inputs. An implementation hardcoding one renders the other an hour
+  // out — invisible to every date-only helper beside it.
+  assertEquals(formatChicagoTime("2026-01-15T09:00:00.000-06:00"), "9:00 AM"); // CST
+  assertEquals(formatChicagoTime("2026-07-15T15:00:00.000-05:00"), "3:00 PM"); // CDT
 });
 
-Deno.test("formatChicagoWeekdayDateTime — a half-hour boundary keeps its minutes", () => {
-  // 06:30 and 14:30 are both real prod delivery times. An `h a` pattern would
-  // round them away and read as an on-the-hour arrival.
-  assertEquals(
-    formatChicagoWeekdayDateTime("2026-01-26T06:30:00.000-06:00"),
-    "Mon 1/26/26 · 6:30 AM",
-  );
+Deno.test("formatChicagoTime — a half-hour boundary keeps its minutes", () => {
+  // 06:30, 07:30, 09:30, 12:30, 14:30, 16:30 and 18:30 are all real prod
+  // delivery times. An `h a` pattern would round them to the hour and read as
+  // an on-the-hour arrival the crew would plan around.
+  assertEquals(formatChicagoTime("2026-01-26T06:30:00.000-06:00"), "6:30 AM");
+  assertEquals(formatChicagoTime("2025-12-10T14:30:00.000-06:00"), "2:30 PM");
 });
 
 // ── the non-terminating window ───────────────────────────────────
