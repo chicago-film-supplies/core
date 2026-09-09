@@ -24,7 +24,7 @@ deploy.
 | `api-cloudrun` | **`v0.243.0` MERGED AND DEPLOYED TO PROD** — revision `api-cloudrun-00359-928`, pinning beta.385. 2014 unit tests green. |
 | prod data | **2 documents repaired** (`api-cloudrun/scripts/repair-template-commit-types.ts`), verified 0 remaining. |
 | `manager` | `14f3cb9` on `main`, deployed. Typecheck clean, 1977 tests green. |
-| `templates` | branch **`core-91-92-93-campaign`**, `6f0b98c` + `c985861` (beta.386, letterhead) — pin, `lint-capture-floor` trigger, `min_core` → beta.385, four `.eta` files. **NOT pushed, no PR yet.** ⚠️ Its pin and `min_core` need re-pointing to beta.386 before the re-capture. |
+| `templates` | branch **`core-91-92-93-campaign`**, `6f0b98c` + `c985861` (beta.386, letterhead) — pin, `lint-capture-floor` trigger, `min_core` → beta.385, four `.eta` files. **NOT pushed, no PR yet.** Pin and `min_core` are already on beta.386. |
 
 🔴 **The hard serialization point is PASSED.** A capture is sanitized by the DEPLOYED core
 (api-cloudrun#838); prod now serves beta.385, so captures taken from here get the fixed masker.
