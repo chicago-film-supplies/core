@@ -153,9 +153,12 @@ export {
  * `schemas/booking.ts` and are re-exported by `utils/bookings.ts`, which is not
  * an injected namespace for a pick-sheets family — so without this a template
  * has no way to name them except by writing the seven strings out again. That
- * copy has already been made once and had already drifted: the deleted
- * `manager/src/utils/fulfillmentStage.ts` said "Out" where the declaration says
- * **"Checked Out"**, and nothing asserted either string.
+ * copy has already been made once and had drifted: the deleted
+ * `manager/src/utils/fulfillmentStage.ts` said "Out" where the declaration said
+ * "Checked Out". **The declaration now says "Out" too** — the owner settled the
+ * wording in the copy's favour on 2026-09-09 — so the example no longer shows
+ * two live strings. It still shows the mechanism, which is the point: a second
+ * spelling is how the two come apart, whichever word wins.
  *
  * ⚠️ **`"booked"` is NOT one of them.** It is DERIVED (`heldByBooking` =
  * reserved + prepped + out-unless-sale), so a template that adds it as an eighth

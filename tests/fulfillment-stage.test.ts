@@ -75,9 +75,14 @@ Deno.test("STAGE_SOURCE / STAGE_TARGET pairs match the lifecycle", () => {
 
 Deno.test("the bucket labels the picker renders come from the schema declaration", () => {
   // The now-deleted `manager/src/utils/fulfillmentStage.ts` carried its own
-  // `BUCKET_LABEL` map restating all seven, and the two had already diverged on
-  // `out`. This is the arm that would go red if a copy reappeared and drifted.
-  assertEquals(BOOKING_BREAKDOWN_LABELS.out, "Checked Out");
+  // `BUCKET_LABEL` map restating all seven, and the two had diverged on `out`.
+  // This is the arm that would go red if a copy reappeared and drifted.
+  //
+  // ⚠️ `out` is "Out" and NOT "Checked Out" as of 2026-09-09 — the owner settled
+  // the wording in the deleted copy's favour. It therefore no longer reads as
+  // the past participle of `FULFILLMENT_STAGE_LABELS.checkout` ("Check Out"),
+  // which the other two actionable stages still do. Deliberate, not drift.
+  assertEquals(BOOKING_BREAKDOWN_LABELS.out, "Out");
   assertEquals(BOOKING_BREAKDOWN_LABELS.quoted, "Quoted");
   assertEquals(Object.keys(BOOKING_BREAKDOWN_LABELS).length, 7);
 });

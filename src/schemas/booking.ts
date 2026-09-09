@@ -53,12 +53,23 @@ export interface BookingBreakdown {
  * ⚠️ **It is declared as a table rather than inline on each `.meta()` because
  * the picker had its own copy.** The now-deleted
  * `manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`
- * restating all seven — which is exactly
- * the drift the repo's *"columns are declared, not generated"* rule exists to
- * stop, and the two had already diverged on `out` ("Out" here, "Checked Out"
- * there). The picker's wording won: it is the operator-facing surface and it
- * matches `FULFILLMENT_STAGE_LABELS.checkout` ("Check Out"). Nothing asserted
- * either string.
+ * restating all seven — which is exactly the drift the repo's *"columns are
+ * declared, not generated"* rule exists to stop, and the two had diverged on
+ * `out`: the copy said "Out" and this declaration said "Checked Out".
+ *
+ * ⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so
+ * the drift is resolved the other way round from how it was first resolved.**
+ * "Checked Out" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where
+ * every state here reads as the past participle of an action there (`prep` →
+ * `Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer
+ * follows that pattern, and that is the cost of the change rather than an
+ * oversight: it is the longest heading on an eleven-column pick sheet, where the
+ * shorter word buys real width and "Out" reads as a state on its own.
+ *
+ * ⚠️ **What does NOT change is that there is one declaration.** The lesson of
+ * the deleted copy was never which word to use — it was that two places spelling
+ * it is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so
+ * a reappearing copy still goes red.
  *
  * ⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could
  * read these back off the schema, but `BookingBreakdownSchema` is annotated
@@ -70,7 +81,7 @@ export const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string> = 
   quoted: "Quoted",
   reserved: "Reserved",
   prepped: "Prepped",
-  out: "Checked Out",
+  out: "Out",
   returned: "Returned",
   lost: "Lost",
   damaged: "Damaged",
