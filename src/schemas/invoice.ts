@@ -44,6 +44,7 @@ import {
   type PriceModifierType,
   TaxRef,
   type TaxRefType,
+  TotalsCore,
 } from "./order.ts";
 
 export { type InvoiceStatusType } from "./common.ts";
@@ -540,13 +541,18 @@ export interface InvoiceDocTotals {
   amount_due_cents: number;
 }
 
+// The six shared fields come from `TotalsCore` (`schemas/order.ts`) as ONE
+// instance each, referenced per key rather than spread: this grain orders
+// `discount_amount_cents` THIRD where the order puts it first, and a schema's
+// key order is its Firestore column order. `tests/totals-parity.test.ts` holds
+// the anti-drift guarantee the syntax cannot.
 const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
-  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
-  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
-  discount_amount_cents: z.int().default(0).meta({ column: true, label: "Discount" }),
-  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
-  transaction_fees: z.array(PriceModifier).default([]).meta({ label: "Transaction Fee" }),
-  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+  subtotal_cents: TotalsCore.subtotal_cents,
+  subtotal_discounted_cents: TotalsCore.subtotal_discounted_cents,
+  discount_amount_cents: TotalsCore.discount_amount_cents,
+  taxes: TotalsCore.taxes,
+  transaction_fees: TotalsCore.transaction_fees,
+  total_cents: TotalsCore.total_cents,
   amount_paid_cents: z.int().default(0).meta({ column: true, label: "Amount Paid" }),
   // Bare `.optional()` with NO default, deliberately: ~962 prod invoices
   // predate the field, and `validateBeforeWrite` persists the RAW doc, so a

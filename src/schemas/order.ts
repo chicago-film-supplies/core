@@ -1203,6 +1203,51 @@ export function isFulfillableItem(item: OrderDocItemType): item is OrderDocLineI
 const OrderDocOrganization = DocumentOrganizationSnapshot;
 
 /** Order totals. */
+/**
+ * The six totals fields an order and an invoice declare identically.
+ *
+ * ⭐ **Referenced PER KEY, not spread — and unlike `DestinationPairCore` above,
+ * that was forced.** The shared fields are contiguous in both grains, but their
+ * internal order differs: `discount_amount_cents` is FIRST on the order and
+ * THIRD on the invoice. A schema's key order is its Firestore-surface column
+ * order (`getFirestoreColumns` walks the shape), so `{ ...TotalsCore, … }` would
+ * move that column on whichever grain did not supply the ordering — an
+ * operator-visible change wearing a refactor's clothes. Same answer as the line
+ * item in `_items.ts`, same reason, and the opposite answer to the destination
+ * pair. **Contiguity is not the test; agreement on ORDER is.**
+ *
+ * 🔴 **So the anti-drift guarantee lives in `tests/totals-parity.test.ts`, not in
+ * the syntax.** A per-key reference cannot stop a grain re-declaring a field
+ * inline any more than a spread can stop one shadowing it; only instance
+ * identity (`shape[k] === TotalsCore[k]`) sees either. Structural equality would
+ * NOT do — `z.globalRegistry` is keyed on the instance, so a separately-declared
+ * twin carries none of these `.meta()` annotations and every heading below would
+ * silently vanish from the tables.
+ *
+ * ⚠️ **`replacement_total_cents` being order-only is correct, not a gap.** An
+ * invoice price has no `replacement_cents`, so an invoice structurally cannot
+ * compute one. Written down because it reads like an omission.
+ *
+ * ⚠️ **Not on the `@cfs/core/schemas` barrel**, for the same reason as
+ * `DestinationPairCore`: no consumer assembles a totals object from parts, and
+ * publishing the parts publishes a second way to spell one.
+ */
+export const TotalsCore: {
+  discount_amount_cents: z.ZodType<number>;
+  subtotal_cents: z.ZodType<number>;
+  subtotal_discounted_cents: z.ZodType<number>;
+  taxes: z.ZodType<PriceModifierType[]>;
+  transaction_fees: z.ZodType<PriceModifierType[]>;
+  total_cents: z.ZodType<number>;
+} = {
+  discount_amount_cents: z.int().default(0).meta({ column: true, label: "Discount" }),
+  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
+  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  transaction_fees: z.array(PriceModifier).default([]).meta({ label: "Transaction Fee" }),
+  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+};
+
 export interface OrderDocTotalsType {
   discount_amount_cents: number;
   subtotal_cents: number;
@@ -1213,13 +1258,15 @@ export interface OrderDocTotalsType {
   replacement_total_cents: number;
 }
 
+// Key order is this grain's own and is preserved exactly — see `TotalsCore`.
 const OrderDocTotals: z.ZodType<OrderDocTotalsType> = z.strictObject({
-  discount_amount_cents: z.int().default(0).meta({ column: true, label: "Discount" }),
-  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
-  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
-  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
-  transaction_fees: z.array(PriceModifier).default([]).meta({ label: "Transaction Fee" }),
-  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+  discount_amount_cents: TotalsCore.discount_amount_cents,
+  subtotal_cents: TotalsCore.subtotal_cents,
+  subtotal_discounted_cents: TotalsCore.subtotal_discounted_cents,
+  taxes: TotalsCore.taxes,
+  transaction_fees: TotalsCore.transaction_fees,
+  total_cents: TotalsCore.total_cents,
+  // Order-only, and correctly so: an invoice price has no `replacement_cents`.
   replacement_total_cents: z.int().default(0).meta({ column: true, label: "Replacement Total" }),
 });
 

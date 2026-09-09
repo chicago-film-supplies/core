@@ -2806,7 +2806,7 @@
           "kind": "interface",
           "name": "OrderDocTotalsType",
           "declaration": "interface OrderDocTotalsType {\n  discount_amount_cents: number;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  replacement_total_cents: number;\n}",
-          "doc": "Order totals."
+          "doc": ""
         },
         {
           "kind": "interface",
@@ -7499,7 +7499,7 @@
           "kind": "interface",
           "name": "OrderDocTotalsType",
           "declaration": "interface OrderDocTotalsType {\n  discount_amount_cents: number;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  replacement_total_cents: number;\n}",
-          "doc": "Order totals."
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -7590,6 +7590,12 @@
           "name": "TaxRefType",
           "declaration": "interface TaxRefType {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n}",
           "doc": "Denormalized tax snapshot without computed amount — used on product catalog entries.\nPriceModifier extends this shape with `amount` for order-time computation."
+        },
+        {
+          "kind": "variable",
+          "name": "TotalsCore",
+          "declaration": "const TotalsCore: typeLiteral;",
+          "doc": "The six totals fields an order and an invoice declare identically.\n\n⭐ **Referenced PER KEY, not spread — and unlike `DestinationPairCore` above,\nthat was forced.** The shared fields are contiguous in both grains, but their\ninternal order differs: `discount_amount_cents` is FIRST on the order and\nTHIRD on the invoice. A schema's key order is its Firestore-surface column\norder (`getFirestoreColumns` walks the shape), so `{ ...TotalsCore, … }` would\nmove that column on whichever grain did not supply the ordering — an\noperator-visible change wearing a refactor's clothes. Same answer as the line\nitem in `_items.ts`, same reason, and the opposite answer to the destination\npair. **Contiguity is not the test; agreement on ORDER is.**\n\n🔴 **So the anti-drift guarantee lives in `tests/totals-parity.test.ts`, not in\nthe syntax.** A per-key reference cannot stop a grain re-declaring a field\ninline any more than a spread can stop one shadowing it; only instance\nidentity (`shape[k] === TotalsCore[k]`) sees either. Structural equality would\nNOT do — `z.globalRegistry` is keyed on the instance, so a separately-declared\ntwin carries none of these `.meta()` annotations and every heading below would\nsilently vanish from the tables.\n\n⚠️ **`replacement_total_cents` being order-only is correct, not a gap.** An\ninvoice price has no `replacement_cents`, so an invoice structurally cannot\ncompute one. Written down because it reads like an omission.\n\n⚠️ **Not on the `@cfs/core/schemas` barrel**, for the same reason as\n`DestinationPairCore`: no consumer assembles a totals object from parts, and\npublishing the parts publishes a second way to spell one."
         },
         {
           "kind": "variable",
@@ -12991,10 +12997,10 @@
           "doc": ""
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "DocumentTotalsCore",
-          "declaration": "interface DocumentTotalsCore {\n  discount_amount_cents: number;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  taxes: PriceModifier[];\n  transaction_fees: PriceModifier[];\n  total_cents: number;\n}",
-          "doc": "The six totals fields an order and an invoice compute identically.\n\nDeliberately the **intersection**, not a superset: both document totals are\n`z.strictObject`s embedded in schemas `assertValidPatch` enforces at write\ntime, so an order doc carrying `amount_paid_cents` — or an invoice doc\ncarrying `replacement_total_cents` — fails validation. Each caller appends\nits own tail.\n\n**Hand-declared as the intersection of two schema-derived shapes**, so it is\none of the places a rename does NOT arrive as a compile error automatically:\nit must be edited in the same commit as `OrderDocTotalsType` and\n`InvoiceDocTotals`, which is one of the three reasons Phase 11's core change\nis a single commit rather than a series."
+          "declaration": "type DocumentTotalsCore = Pick<OrderDocTotalsType, \"discount_amount_cents\" | \"subtotal_cents\" | \"subtotal_discounted_cents\" | \"taxes\" | \"transaction_fees\" | \"total_cents\">;",
+          "doc": "The six totals fields an order and an invoice compute identically.\n\nDeliberately the **intersection**, not a superset: both document totals are\n`z.strictObject`s embedded in schemas `assertValidPatch` enforces at write\ntime, so an order doc carrying `amount_paid_cents` — or an invoice doc\ncarrying `replacement_total_cents` — fails validation. Each caller appends\nits own tail.\n\n⭐ **DERIVED from `OrderDocTotalsType`, not hand-declared — core#97.** This\ndocblock used to say it was \"one of the places a rename does NOT arrive as a\ncompile error automatically\", and that was true: it was a third hand-written\ncopy of six fields the order and invoice schemas each declared separately, and\nit had to be remembered in the same commit as both.\n\nA `Pick` closes the loop the schema side opened. The two schemas now reference\none `TotalsCore` instance per field (`schemas/order.ts`, guarded by\n`tests/totals-parity.test.ts`), and this names the six keys literally against\nthe order's interface — so renaming any of them breaks HERE, at compile time,\nrather than being caught by whoever remembers.\n\n⚠️ **`Pick` and not the shared shape's inferred type**, deliberately: an\nexplicit type expression is what JSR can emit and what\n`deno task check:declarations` requires, and a mapped type over a const's\ninference is exactly the \"slow type\" that ships a wrong `.d.ts` to npm\nconsumers rather than failing."
         },
         {
           "kind": "typeAlias",

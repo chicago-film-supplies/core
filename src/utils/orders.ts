@@ -1579,20 +1579,33 @@ export function costTransactionFees(items: LineItem[], basisCents: number): Line
  * carrying `replacement_total_cents` — fails validation. Each caller appends
  * its own tail.
  *
- * **Hand-declared as the intersection of two schema-derived shapes**, so it is
- * one of the places a rename does NOT arrive as a compile error automatically:
- * it must be edited in the same commit as `OrderDocTotalsType` and
- * `InvoiceDocTotals`, which is one of the three reasons Phase 11's core change
- * is a single commit rather than a series.
+ * ⭐ **DERIVED from `OrderDocTotalsType`, not hand-declared — core#97.** This
+ * docblock used to say it was "one of the places a rename does NOT arrive as a
+ * compile error automatically", and that was true: it was a third hand-written
+ * copy of six fields the order and invoice schemas each declared separately, and
+ * it had to be remembered in the same commit as both.
+ *
+ * A `Pick` closes the loop the schema side opened. The two schemas now reference
+ * one `TotalsCore` instance per field (`schemas/order.ts`, guarded by
+ * `tests/totals-parity.test.ts`), and this names the six keys literally against
+ * the order's interface — so renaming any of them breaks HERE, at compile time,
+ * rather than being caught by whoever remembers.
+ *
+ * ⚠️ **`Pick` and not the shared shape's inferred type**, deliberately: an
+ * explicit type expression is what JSR can emit and what
+ * `deno task check:declarations` requires, and a mapped type over a const's
+ * inference is exactly the "slow type" that ships a wrong `.d.ts` to npm
+ * consumers rather than failing.
  */
-export interface DocumentTotalsCore {
-  discount_amount_cents: number;
-  subtotal_cents: number;
-  subtotal_discounted_cents: number;
-  taxes: PriceModifier[];
-  transaction_fees: PriceModifier[];
-  total_cents: number;
-}
+export type DocumentTotalsCore = Pick<
+  OrderDocTotalsType,
+  | "discount_amount_cents"
+  | "subtotal_cents"
+  | "subtotal_discounted_cents"
+  | "taxes"
+  | "transaction_fees"
+  | "total_cents"
+>;
 
 /**
  * The two-pass totals fold shared by {@link calculateOrderTotals} and

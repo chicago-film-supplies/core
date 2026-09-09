@@ -6268,8 +6268,6 @@ interface OrderDocLineItemType {
 
 ### `OrderDocTotalsType`
 
-Order totals.
-
 ```ts
 interface OrderDocTotalsType {
   discount_amount_cents: number;
@@ -16405,8 +16403,6 @@ interface OrderDocLineItemType {
 
 ### `OrderDocTotalsType`
 
-Order totals.
-
 ```ts
 interface OrderDocTotalsType {
   discount_amount_cents: number;
@@ -16612,6 +16608,40 @@ interface TaxRefType {
   rate: number;
   type: RateType;
 }
+```
+
+### `TotalsCore`
+
+The six totals fields an order and an invoice declare identically.
+
+⭐ **Referenced PER KEY, not spread — and unlike `DestinationPairCore` above,
+that was forced.** The shared fields are contiguous in both grains, but their
+internal order differs: `discount_amount_cents` is FIRST on the order and
+THIRD on the invoice. A schema's key order is its Firestore-surface column
+order (`getFirestoreColumns` walks the shape), so `{ ...TotalsCore, … }` would
+move that column on whichever grain did not supply the ordering — an
+operator-visible change wearing a refactor's clothes. Same answer as the line
+item in `_items.ts`, same reason, and the opposite answer to the destination
+pair. **Contiguity is not the test; agreement on ORDER is.**
+
+🔴 **So the anti-drift guarantee lives in `tests/totals-parity.test.ts`, not in
+the syntax.** A per-key reference cannot stop a grain re-declaring a field
+inline any more than a spread can stop one shadowing it; only instance
+identity (`shape[k] === TotalsCore[k]`) sees either. Structural equality would
+NOT do — `z.globalRegistry` is keyed on the instance, so a separately-declared
+twin carries none of these `.meta()` annotations and every heading below would
+silently vanish from the tables.
+
+⚠️ **`replacement_total_cents` being order-only is correct, not a gap.** An
+invoice price has no `replacement_cents`, so an invoice structurally cannot
+compute one. Written down because it reads like an omission.
+
+⚠️ **Not on the `@cfs/core/schemas` barrel**, for the same reason as
+`DestinationPairCore`: no consumer assembles a totals object from parts, and
+publishing the parts publishes a second way to spell one.
+
+```ts
+const TotalsCore: typeLiteral;
 ```
 
 ### `UpdateOrderInput`
@@ -28242,21 +28272,26 @@ time, so an order doc carrying `amount_paid_cents` — or an invoice doc
 carrying `replacement_total_cents` — fails validation. Each caller appends
 its own tail.
 
-**Hand-declared as the intersection of two schema-derived shapes**, so it is
-one of the places a rename does NOT arrive as a compile error automatically:
-it must be edited in the same commit as `OrderDocTotalsType` and
-`InvoiceDocTotals`, which is one of the three reasons Phase 11's core change
-is a single commit rather than a series.
+⭐ **DERIVED from `OrderDocTotalsType`, not hand-declared — core#97.** This
+docblock used to say it was "one of the places a rename does NOT arrive as a
+compile error automatically", and that was true: it was a third hand-written
+copy of six fields the order and invoice schemas each declared separately, and
+it had to be remembered in the same commit as both.
+
+A `Pick` closes the loop the schema side opened. The two schemas now reference
+one `TotalsCore` instance per field (`schemas/order.ts`, guarded by
+`tests/totals-parity.test.ts`), and this names the six keys literally against
+the order's interface — so renaming any of them breaks HERE, at compile time,
+rather than being caught by whoever remembers.
+
+⚠️ **`Pick` and not the shared shape's inferred type**, deliberately: an
+explicit type expression is what JSR can emit and what
+`deno task check:declarations` requires, and a mapped type over a const's
+inference is exactly the "slow type" that ships a wrong `.d.ts` to npm
+consumers rather than failing.
 
 ```ts
-interface DocumentTotalsCore {
-  discount_amount_cents: number;
-  subtotal_cents: number;
-  subtotal_discounted_cents: number;
-  taxes: PriceModifier[];
-  transaction_fees: PriceModifier[];
-  total_cents: number;
-}
+type DocumentTotalsCore = Pick<OrderDocTotalsType, "discount_amount_cents" | "subtotal_cents" | "subtotal_discounted_cents" | "taxes" | "transaction_fees" | "total_cents">;
 ```
 
 ### `GroupPath`
