@@ -69,9 +69,10 @@ the work; `api-cloudrun` owns only the census/backfill script this doc names.*
 
 ## Status — this runs AFTER the core#91/#92/#93 campaign
 
-**Nothing here is started.** The campaign that precedes it is planned by a separate session
-and tracked in `core/.claude/plans/fixture-pii-identity.md`, which owns its own status. This
-doc is the follow-on work.
+**Nothing here is started.** The campaign that precedes it has LANDED — core#91, core#92 and
+core#93 are closed and the fixture corpus merged as templates#292 — so its plan doc
+(`core/.claude/plans/fixture-pii-identity.md`) is deleted, per the convention that the commit
+landing a campaign's last piece removes it. This doc is the follow-on work.
 
 The two are deliberately separate: the campaign's corpus is the committed `templates`
 fixtures, this one's is stored Firestore documents across `orders`, `invoices` and
@@ -80,10 +81,10 @@ that has not run. Consolidating them would produce one unshippable campaign.
 
 ### Findings handed to that campaign on 2026-09-09 — recorded, not owned
 
-Delivered by message to the session planning it; `fixture-pii-identity.md` is their home now.
-Kept here only because they were expensive to measure and cheap to keep, and because a reader
-of THIS doc may wonder whether they were checked. **If they disagree with the campaign's doc,
-the campaign's doc is right.**
+Delivered by message to the session planning it; `fixture-pii-identity.md` was their home and
+is now deleted with that campaign, so what follows is the surviving copy rather than a
+duplicate. Kept because they were expensive to measure and cheap to keep, and because a reader
+of THIS doc may wonder whether they were checked.
 
 - **The staleness in that plan is LOCALIZED.** Its `core#91` half is citation-exact —
   `fixture-pii.ts` `:533`/`:611`/`:658` and `walker.ts` `:130`/`:335`/`:415`/`:454` all
@@ -451,8 +452,9 @@ which a writer genuinely produces — the `orders.crms_id` case, not the case
 ### 2 — Bookings
 
 ⚠️ `PickSheetDestination.due_at` and `MovementSessionItem.owner_path` **moved to the
-core#91/#92/#93 campaign** (`core/.claude/plans/fixture-pii-identity.md`) — they land in the
-files and fixture families that campaign already opens. What remains here is bookings only.
+core#91/#92/#93 campaign** and SHIPPED there in `@cfs/core@10.0.0-beta.386` — its plan doc
+(`core/.claude/plans/fixture-pii-identity.md`) has since been deleted, so read the closed
+issues rather than looking for it. What remains here is bookings only.
 
 - `Booking`'s flat `uid_destination_delivery` / `uid_destination_collection`: check
   `api-cloudrun/infra/firestore-indexes.json` for a caller before proposing removal — they
@@ -610,9 +612,10 @@ a migration.
 **Filed by this work:** the three rulings in increment 3; `Movement.path` from increment
 2(b); and anything the census turns up non-zero that is too large to repair in this campaign.
 
-**Runs BEFORE this plan, and takes two items from it:** core#91 + core#92 + core#93
-(`core/.claude/plans/fixture-pii-identity.md`), plus `PickSheetDestination.due_at`,
-`MovementSessionItem.owner_path` and `TEMPLATE_COMMIT_TYPES`. See § *Status* above.
+**Ran BEFORE this plan and is now DONE, having taken two items from it:** core#91 + core#92 +
+core#93 — all three closed, plan doc `core/.claude/plans/fixture-pii-identity.md` deleted with
+them — plus `PickSheetDestination.due_at`, `MovementSessionItem.owner_path` and
+`TEMPLATE_COMMIT_TYPES`. See § *Status* above.
 
 **Adjacent, do not absorb:** core#83 (`.nullable().optional()` ratchet — respect it, do not
 add entries), core#95 (inert `.default()` guard — this pass removes two of its instances but
