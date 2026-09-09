@@ -514,15 +514,34 @@ export function lintFixture(args: {
   // shape-preservingly on purpose and no oracle can settle them.
   if (resolved && fixture.doc !== null && typeof fixture.doc === "object") {
     const unrouted: string[] = [];
-    for (const { fieldPath, value } of collectMaskedLeaves(fixture.doc, resolved)) {
-      const verdict = maskVerdict(value, fieldPath);
+    // 🔴 **`siblings` is passed through, and dropping it is a FALSE POSITIVE
+    // generator rather than a blind spot.** `DISCRIMINANT_CATEGORY` routes
+    // `scope.name` by its sibling `kind`, so the masker mints an organization
+    // fake on a `kind: "organization"` pick sheet and an address on a
+    // `kind: "destination"` one. An oracle that omits the argument falls
+    // through to `text`, whose only legal value is the filler — so it judges a
+    // correctly masked leaf `not-masked` and blocks the gate on a repair that
+    // has already happened. Measured 2026-09-09 on the first `pick-sheets`
+    // fixture re-captured against core#91; `MaskedLeaf.siblings`' own docstring
+    // predicted it in the same beta that introduced the routing.
+    //
+    // ⚠️ It failed in the SAFE direction, which is why it survived the beta:
+    // `text` accepts strictly less than any other category, so the omission
+    // could only ever over-report. That is also why the corpus stayed green —
+    // before core#91 every `scope.name` WAS the filler.
+    for (const { fieldPath, value, siblings } of collectMaskedLeaves(fixture.doc, resolved)) {
+      const verdict = maskVerdict(value, fieldPath, siblings);
       if (args.maskTally) {
         args.maskTally.examined++;
         if (verdict === "masked") args.maskTally.masked++;
         else if (verdict === "not-masked") args.maskTally.notMasked++;
         else args.maskTally.unverifiable++;
       }
-      if (verdict === "not-masked") unrouted.push(`${fieldPath} (${categoryForField(fieldPath)})`);
+      // The reported category has to be the one the verdict was REACHED on, or
+      // the finding names a repair for a category the masker never chose.
+      if (verdict === "not-masked") {
+        unrouted.push(`${fieldPath} (${categoryForField(fieldPath, siblings)})`);
+      }
     }
     if (unrouted.length > 0) {
       // ⚠️ **Paths and categories, never the VALUES.** The whole finding is that

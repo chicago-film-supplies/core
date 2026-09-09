@@ -630,6 +630,81 @@ Deno.test("check 2b — a leaf drawn from the vocabularies clears it", () => {
   assertEquals(report.tally.maskLeaves.masked, 1, "and it was actually EXAMINED");
 });
 
+/** A `pick-sheets` sidecar — the one source whose `scope.name` survives core#92. */
+const PICK_SHEET_SIDECAR = (slug: string) =>
+  sidecar({
+    collection_source: "pick-sheets",
+    fixtures: [{ slug, description: GOOD_DESCRIPTION }],
+  });
+
+Deno.test("check 2b — the oracle routes `scope.name` on its SIBLING, as the masker does", () => {
+  // 🔴 The regression this closes: `maskVerdict` and `categoryForField` were
+  // called without `siblings`, so every discriminated leaf fell through to
+  // `text` — whose only legal value is the filler. `DISCRIMINANT_CATEGORY`
+  // routes `scope.name` by `kind`, so on a `kind: "organization"` sheet the
+  // masker mints a FAKE_ORGANIZATIONS entry and the blind oracle called it a
+  // leak. A correctly masked corpus could not pass its own gate.
+  const report = lintFixtureSet({
+    families: [
+      family({
+        gitPath: "pick-sheet",
+        sidecar: PICK_SHEET_SIDECAR("org-scope"),
+        fixtures: [{
+          slug: "org-scope",
+          ok: true,
+          doc: {
+            scope: {
+              kind: "organization",
+              uid: "s7WXepzsnaTbaKF0Et1T",
+              name: "Rooksbridge Media Group",
+              uids: ["s7WXepzsnaTbaKF0Et1T"],
+            },
+          },
+        }],
+      }),
+    ],
+  });
+  assert(
+    !checksIn(report.findings).has("pii-mask"),
+    "an organization fake is what the masker produces for a kind:organization scope",
+  );
+  assertEquals(report.tally.maskLeaves.notMasked, 0);
+  assertEquals(report.tally.maskLeaves.masked, 1, "and the leaf was actually EXAMINED");
+});
+
+Deno.test("check 2b — routing by sibling still CATCHES the other arm", () => {
+  // The direction that stops the fix above from being "accept everything".
+  // `kind: "destination"` routes the same leaf to `address_full`, which decides
+  // on segment 0 — so a real street address there is still a leak, and the
+  // organization vocabulary must not rescue it either.
+  const report = lintFixtureSet({
+    families: [
+      family({
+        gitPath: "pick-sheet",
+        sidecar: PICK_SHEET_SIDECAR("dest-scope"),
+        fixtures: [{
+          slug: "dest-scope",
+          ok: true,
+          doc: {
+            scope: {
+              kind: "destination",
+              uid: "x07P9fuCbGctZmB4zqhg",
+              name: "2621 W 15th Pl, Chicago, IL 60608",
+              uids: ["x07P9fuCbGctZmB4zqhg"],
+            },
+          },
+        }],
+      }),
+    ],
+  });
+  assert(checksIn(report.findings).has("pii-mask"), "a real street in a destination scope is a leak");
+  assertEquals(report.tally.maskLeaves.notMasked, 1);
+  assert(
+    report.findings.some((f) => f.check === "pii-mask" && f.message.includes("address_full")),
+    "and the finding names the category the verdict was reached on, not `text`",
+  );
+});
+
 // ── The tallies, which are what make a vacuous run visible ──────────
 
 Deno.test("the report EXAMINES what it claims to examine", () => {
