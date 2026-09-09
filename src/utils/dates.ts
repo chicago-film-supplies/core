@@ -263,10 +263,24 @@ export function formatChicagoWeekdayDate(input: string): string {
  * Chicago — a fragment is exactly where a zone is easiest to lose, and
  * `2026-04-30T19:00:00.000-05:00` is `7:00 PM` here and `12:00 AM` unpinned.
  *
- * ⚠️ **A destination boundary is a POINT, not a window.** `delivery_end` equals
- * `delivery_start` on every destination of the 190 prod orders sampled
- * 2026-09-09, so a caller renders one of the pair and never a range — a
- * `9:00 AM – 9:00 AM` would be a window one instant wide that does not exist.
+ * ⚠️ **A destination boundary renders as a POINT — because of the WRITER, and
+ * not because the domain forbids a window.** `delivery_end` equals
+ * `delivery_start`, and `collection_end` equals `collection_start`, on all
+ * 1,020 destinations of all 1,020 prod orders (full census 2026-09-09, widened
+ * from the 190-order sample this note first cited). That is a fact about
+ * `manager`'s `OrderDestinationDates.saveDatesAndSync`, which mirrors both
+ * `*_end ← *_start` and offers no editor for either end. So today a caller
+ * renders one of the pair and never a range — `9:00 AM – 9:00 AM` would be a
+ * window one instant wide that does not exist.
+ *
+ * 🔴 **Do not read this as a ruling that a boundary IS a point. Windows are a
+ * roadmap item** (owner, 2026-09-09: *"right now they set equal, in the future
+ * they wont"*), so the day an editor ships, `start !== end` becomes ordinary and
+ * a caller rendering one half starts hiding real information. ⭐ The `charge`
+ * pair in the same map is the control: it DIFFERS on 970 of the same 1,020
+ * destinations, because it is the one pair that already has an independent
+ * editor. **The uniformity measures the missing editor, never the domain.**
+ * api-cloudrun#943 has the consumer map and the decision.
  */
 export function formatChicagoTime(input: string): string {
   return format(inChicago(input), "h:mm a", { in: CHICAGO });
