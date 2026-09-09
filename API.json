@@ -14585,6 +14585,12 @@
           "doc": "What a masked value is faked AS.\n\n`text` is the fallback and the only member that claims nothing — it renders\nthe self-announcing filler. Every other member asserts a category, so routing\na field to one is a claim about that field that must be true."
         },
         {
+          "kind": "interface",
+          "name": "MaskContext",
+          "declaration": "interface MaskContext {\n  siblings?: Readonly<Record<string, unknown>>;\n  organizationFakes?: ReadonlyMap<string, string>;\n}",
+          "doc": "Optional per-document context for {@link fakeForMask}."
+        },
+        {
           "kind": "typeAlias",
           "name": "MaskVerdict",
           "declaration": "type MaskVerdict = \"masked\" | \"not-masked\" | \"unverifiable\";",
@@ -14593,7 +14599,7 @@
         {
           "kind": "interface",
           "name": "MaskedLeaf",
-          "declaration": "interface MaskedLeaf {\n  fieldPath: string;\n  value: string;\n}",
+          "declaration": "interface MaskedLeaf {\n  fieldPath: string;\n  value: string;\n  siblings?: Readonly<Record<string, unknown>>;\n}",
           "doc": "One `pii: \"mask\"` string leaf, as the real walker offered it."
         },
         {
@@ -14604,9 +14610,17 @@
         },
         {
           "kind": "function",
+          "name": "allocateOrganizationFakes",
+          "signature": "allocateOrganizationFakes(identities: Iterable<string>, seedFor: SeedFor): ReadonlyMap<string, string>",
+          "doc": "Assign each organization identity in ONE document a DISTINCT fake.\n\nIdentity seeding alone makes one organization one name everywhere, but it\ndoes not stop two organizations drawing the SAME name: at 18 identities into\n40 slots the birthday bound puts roughly 3.8 collisions on\n`all-accounts.json`. Today it is worse than that bound — 14 accounts render\nunder 10 labels, one of them a triple.\n\n⭐ **Ordered by identity SEED, never by document order.** That is what makes\nthe result a function of the SET rather than of the array: an organization\nwhose first-choice slot is free is unaffected by everything else in the\ndocument, so reordering a document reshuffles nothing and churn on re-capture\nis bounded to actual colliders.\n\nCollisions resolve by forward linear probing. **Exhaustion THROWS**, naming\nthe remedy: a wrapped allocation is precisely the defect this function exists\nto remove, and a capture that fails is recoverable where a capture that\nsilently collides is not.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "categoryForField",
-          "signature": "categoryForField(fieldPath: string): MaskCategory",
-          "doc": "The category to fake a `mask`-tagged value as, from its field path alone.\n\n🔴 **The value is never consulted.** That is the whole of api-cloudrun#837:\nthe pii walker routes by schema tag and this strategy used to route by\npunctuation and token count, so `6 Walkies` in a `subject` masked to\n`5365 Aspen Dr`. A field knows what it is; the string in it does not.\n\nUnrouted → `text`. Being incomplete is safe by construction here — the filler\nannounces itself as a placeholder, so a field nobody has classified reads as\nobviously fake rather than as a confidently wrong address.",
+          "signature": "categoryForField(fieldPath: string, siblings?: Readonly<Record<string, unknown>>): MaskCategory",
+          "doc": "The category to fake a `mask`-tagged value as, from its field path alone.\n\n🔴 **The value is never consulted.** That is the whole of api-cloudrun#837:\nthe pii walker routes by schema tag and this strategy used to route by\npunctuation and token count, so `6 Walkies` in a `subject` masked to\n`5365 Aspen Dr`. A field knows what it is; the string in it does not.\n\nUnrouted → `text`. Being incomplete is safe by construction here — the filler\nannounces itself as a placeholder, so a field nobody has classified reads as\nobviously fake rather than as a confidently wrong address.\n\n`siblings` is the leaf's containing object, as the walker offers it. It is\nconsulted ONLY by {@link DISCRIMINANT_CATEGORY}; omit it and every\ndiscriminated path falls through to `text`, which is what every caller\npredating core#91 gets.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14621,15 +14635,23 @@
         {
           "kind": "function",
           "name": "fakeForMask",
-          "signature": "fakeForMask(value: string, fieldPath: string, seed: string, seedFor: SeedFor): string",
+          "signature": "fakeForMask(value: string, fieldPath: string, seed: string, seedFor: SeedFor, _: unknown): string",
           "doc": "Mask transform — dispatched on the FIELD's category, never on the value.\n\n`seed` is the caller's HMAC of (salt, fieldPath, value) as lowercase hex;\n`seedFor` computes the same for another path. Both stay outside core so the\nsalt does. @see the module header.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
+          "name": "maskIdentity",
+          "signature": "maskIdentity(category: MaskCategory, value: string, siblings?: Readonly<Record<string, unknown>>): string | undefined",
+          "doc": "The identity a fake for this category should be drawn on, or `undefined` when\nthe leaf has none and the caller's own path-derived seed must stand.\n\nReturning `undefined` is the FALLBACK, not a failure: a leaf whose sibling\nidentity is absent keeps exactly the behaviour it had before core#91, so\nnothing regresses for a shape this table does not know about.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "maskVerdict",
-          "signature": "maskVerdict(value: string, fieldPath: string): MaskVerdict",
+          "signature": "maskVerdict(value: string, fieldPath: string, siblings?: Readonly<Record<string, unknown>>): MaskVerdict",
           "doc": "The verdict for one `pii: \"mask\"` string leaf.\n\n⚠️ **`fieldPath` decides the category, exactly as it does for the mask\nitself** — pass the leaf's real path, not a guess. A path this module does\nnot route falls to `text`, whose fake is the self-announcing filler, so an\nunrouted field holding a real value reads `not-masked`, which is right.",
           "paramTags": [],
           "returnsTag": null
@@ -14639,6 +14661,14 @@
           "name": "normalizeFieldPath",
           "signature": "normalizeFieldPath(fieldPath: string): string[]",
           "doc": "Field path → segments, with array markers and indices dropped.\n\nThe runtime walker reports an array's elements at the array's OWN path (see\n`pii/walker.ts` — a reordered array must not reseed every element), so\n`phones[]` arrives as `…contact.phones`. Tests and callers that write an\nindex anyway (`contact.phones.0`, `destinations[0].delivery.instructions`)\nare normalized to the same thing, and so is `collectLeafPaths`'s static\n`destinations[].delivery.address.postcode` — which is what lets a census\ncompare a static schema walk and a runtime walk directly.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "organizationIdentities",
+          "signature": "organizationIdentities(leaves: readonly MaskedLeaf[]): string[]",
+          "doc": "Every distinct organization identity among a document's masked leaves — the\ninput {@link allocateOrganizationFakes} wants, computed from the same walk the\nmasker itself uses so the two cannot disagree about scope.",
           "paramTags": [],
           "returnsTag": null
         }

@@ -12,6 +12,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { z } from "zod";
 import {
+  allocateOrganizationFakes,
   categoryForField,
   collectMaskedLeaves,
   FAKE_FIRST_NAMES,
@@ -248,7 +249,18 @@ Deno.test("no place or organization fake can be read as a person's name", () => 
     assert(entry.trim().split(/\s+/).length >= 3, `${entry} is under the three-token floor`);
   }
   assertEquals(FAKE_PLACES.length, 16);
-  assertEquals(FAKE_ORGANIZATIONS.length, 16);
+  // A FLOOR rather than an equality, and the asymmetry with FAKE_PLACES above is
+  // deliberate. `allocateOrganizationFakes` assigns a DISTINCT fake per
+  // organization in one document and THROWS on exhaustion, so this number is the
+  // largest document a capture can sanitize — it is capacity, not style.
+  // `fixtures/aging-report/all-accounts.json` carries 18 distinct organization
+  // uids, so a cut below that is a capture OUTAGE. core#91 grew it 16 -> 40.
+  assert(
+    FAKE_ORGANIZATIONS.length >= 40,
+    `FAKE_ORGANIZATIONS holds ${FAKE_ORGANIZATIONS.length}. The injective ` +
+      `allocator needs one entry per distinct organization in a document; the ` +
+      `largest committed fixture carries 18. The floor is 40 (2.2x headroom).`,
+  );
 });
 
 Deno.test("no first name is also a last name", () => {
@@ -366,4 +378,135 @@ Deno.test("a malformed fixture does not crash the mask arm", async () => {
   // is what the manager renders on, and an accidental re-add would make a real
   // leak display as a notice.
   assertEquals(real.find((f) => f.check === "pii-mask")?.severity, undefined);
+});
+
+// ── core#91: identity, not location ─────────────────────────────────────────
+//
+// Each arm below fails on the PRE-core#91 masker, which is what makes them a
+// regression guard rather than a restatement. The mechanism they exercise is
+// `maskIdentity`: a fake is drawn on WHAT the value is, never on WHERE it sits.
+
+Deno.test("identity: one organization uid draws ONE name at every path", () => {
+  // The reported defect. `organizations[].organization_path[].name` and
+  // `rows[].organization_path[].name` are different paths holding one customer,
+  // and an aging report's whole job is that the summary reconciles against the
+  // detail beneath it.
+  const siblings = { uid: "gql6Tjro2tSVrgP5NKOH", name: "Vermillion Pictures" };
+  const draw = (path: string) =>
+    fakeForMask("Vermillion Pictures", path, seedFor(path, "Vermillion Pictures"), seedFor, {
+      siblings,
+    });
+
+  assertEquals(draw("organizations.organization_path.name"), draw("rows.organization_path.name"));
+  assertEquals(draw("organizations.organization_path.name"), draw("organization.name"));
+});
+
+Deno.test("identity: two organizations sharing a real name draw TWO names", () => {
+  // The constraint pulling against the arm above, and the reason an
+  // organization is identified by uid rather than by value: 24 of the 29 prod
+  // department nodes are called `Locations`, `Office` or `Transpo`.
+  const draw = (uid: string) =>
+    fakeForMask("Office", "organizations.name", seedFor("organizations.name", "Office"), seedFor, {
+      siblings: { uid, name: "Office" },
+    });
+
+  assert(draw("ORG_A") !== draw("ORG_B"), "two organizations collapsed to one fake name");
+});
+
+Deno.test("identity: one address at two paths draws ONE street", () => {
+  // 23 of 26 same-uid destination leg pairs in the committed corpus masked to
+  // two different streets, because `delivery.…` and `collection.…` are two
+  // paths. An address is identified by its own value: two identical address
+  // strings ARE one address.
+  const value = "2621 W 15th Pl";
+  const draw = (path: string) => fakeForMask(value, path, seedFor(path, value), seedFor);
+
+  assertEquals(draw("delivery.address.street"), draw("collection.address.street"));
+
+  // And two DIFFERENT addresses must still differ, or the arm above would be
+  // satisfied by a constant.
+  const other = "914 N Ashland Ave";
+  assert(
+    draw("delivery.address.street") !==
+      fakeForMask(other, "delivery.address.street", seedFor("delivery.address.street", other), seedFor),
+  );
+});
+
+Deno.test("discriminant: scope.name routes on its sibling kind", () => {
+  assertEquals(categoryForField("scope.name", { kind: "organization" }), "organization");
+  // Holds `destination.address.full` VERBATIM — routing it as an organization
+  // is the `Oak Brook Mall` -> `Jordan B Holloway` failure, one field over.
+  assertEquals(categoryForField("scope.name", { kind: "destination" }), "address_full");
+  // By category an organization, but `scope.uid` is the ORDER's id, so there is
+  // no identity to seed on and the filler is the honest answer.
+  assertEquals(categoryForField("scope.name", { kind: "order" }), "text");
+});
+
+Deno.test("discriminant: an absent or unrecognised kind still falls to text", () => {
+  // The safe direction, preserved. A caller predating core#91 passes no
+  // siblings at all and must get exactly what it got before.
+  assertEquals(categoryForField("scope.name"), "text");
+  assertEquals(categoryForField("scope.name", {}), "text");
+  assertEquals(categoryForField("scope.name", { kind: "something_new" }), "text");
+  assertEquals(categoryForField("scope.name", { kind: 7 }), "text");
+  assertEquals(categoryForField("scope.name", { kind: null }), "text");
+});
+
+Deno.test("allocator: distinct organizations get DISTINCT names", () => {
+  // Identity seeding alone leaves ~3.8 expected collisions at 18-into-40.
+  const uids = Array.from({ length: 18 }, (_, i) => `ORG_${i}`);
+  const allocation = allocateOrganizationFakes(uids, seedFor);
+
+  assertEquals(allocation.size, 18);
+  assertEquals(new Set(allocation.values()).size, 18, "two organizations share one fake name");
+  for (const name of allocation.values()) assert(FAKE_ORGANIZATIONS.includes(name));
+});
+
+Deno.test("allocator: the assignment is a function of the SET, not of document order", () => {
+  // Ordered by identity seed rather than by document order, so re-ordering a
+  // document reshuffles nothing and a re-capture does not churn every golden.
+  const uids = Array.from({ length: 12 }, (_, i) => `ORG_${i}`);
+  const forward = allocateOrganizationFakes(uids, seedFor);
+  const reversed = allocateOrganizationFakes([...uids].reverse(), seedFor);
+
+  for (const uid of uids) assertEquals(forward.get(uid), reversed.get(uid));
+});
+
+Deno.test("allocator: exhaustion THROWS rather than wrapping", () => {
+  // A wrapped allocation is precisely the defect the allocator removes, and a
+  // silent collision in a committed fixture is not recoverable the way a failed
+  // capture is.
+  const tooMany = Array.from({ length: FAKE_ORGANIZATIONS.length + 1 }, (_, i) => `ORG_${i}`);
+  let threw = "";
+  try {
+    allocateOrganizationFakes(tooMany, seedFor);
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  assert(threw.includes("An injective"), `expected an exhaustion throw, got: ${threw || "<none>"}`);
+  // The message must name the remedy AND its constraint — appending in the
+  // wrong place re-seeds every entry after it.
+  assert(threw.includes("END only"), "the throw does not name the append-at-the-end constraint");
+});
+
+Deno.test("re-running the masker is byte-stable", () => {
+  // What keeps a re-capture from churning every golden.
+  const siblings = { uid: "ORG_X", name: "Something Real Ltd" };
+  const ctx = { siblings, organizationFakes: allocateOrganizationFakes(["ORG_X"], seedFor) };
+  const once = fakeForMask(
+    "Something Real Ltd",
+    "organizations.name",
+    seedFor("organizations.name", "Something Real Ltd"),
+    seedFor,
+    ctx,
+  );
+  const twice = fakeForMask(
+    "Something Real Ltd",
+    "organizations.name",
+    seedFor("organizations.name", "Something Real Ltd"),
+    seedFor,
+    ctx,
+  );
+  assertEquals(once, twice);
+  assertEquals(maskVerdict(once, "organizations.name", siblings), "masked");
 });

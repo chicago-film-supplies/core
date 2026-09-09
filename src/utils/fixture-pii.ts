@@ -166,6 +166,55 @@ const QUALIFIED_CATEGORY: Readonly<Record<string, MaskCategory>> = {
 };
 
 /**
+ * `<parent>.<leaf>` whose category depends on a SIBLING DISCRIMINANT, not on the
+ * path — the third and last routing table, consulted before the other two.
+ *
+ * 🔴 **`QUALIFIED_CATEGORY` is keyed on `(parent, leaf)` and structurally cannot
+ * see a sibling**, which is why `scope.name` fell to `text` and rendered
+ * `Sample text for name....` on every aging report and statement (core#91 §2).
+ * The leaf genuinely has no single category: on a pick sheet `scope.name` holds
+ * `destination.address.full` verbatim for `kind: "destination"` and an
+ * organization chain for `kind: "organization"`. Routing it by parent alone
+ * would mask a real delivery address as a company name — the `Oak Brook Mall`
+ * → `Jordan B Holloway` failure api-cloudrun#778 was filed about, one field
+ * over.
+ *
+ * ⚠️ **An absent or unrecognised discriminant falls THROUGH to the tables
+ * below, i.e. to `text`.** The safe direction is preserved exactly as the
+ * module docstring argues for it: a filler announces itself as a placeholder,
+ * where a confidently wrong category does not.
+ */
+interface DiscriminantRoute {
+  /** The sibling key whose value selects the arm. */
+  on: string;
+  arms: Readonly<Record<string, MaskCategory>>;
+}
+
+const DISCRIMINANT_CATEGORY: Readonly<Record<string, DiscriminantRoute>> = {
+  "scope.name": {
+    on: "kind",
+    arms: {
+      // `PickSheetScope` / `AgingScope` / `OrgStatementScope` — a customer.
+      organization: "organization",
+      // `PickSheetScope` — this arm holds `destination.address.full` VERBATIM.
+      destination: "address_full",
+      // 🔴 `PickSheetScope`, `kind: "order"`. By CATEGORY this is an
+      // organization: `resolveOrderScope` fills it with
+      // `composeOrgName(order.organization.path)`. It is deliberately NOT
+      // routed there, because its IDENTITY is missing — that same resolver
+      // sets `scope.uid` to the ORDER's document id, not the organization's.
+      // Seeding an organization fake on an order id would mint a label that
+      // CONTRADICTS the same pick sheet's `organizations[]` and
+      // `orders[].organization`, manufacturing a fresh core#91 §1 on the one
+      // document that physically leaves the building. The filler claims
+      // nothing; a contradiction is a lie. Its durable fix is to carry the
+      // chain instead of a composed name, as core#93 does elsewhere.
+      order: "text",
+    },
+  },
+};
+
+/**
  * Field path → segments, with array markers and indices dropped.
  *
  * The runtime walker reports an array's elements at the array's OWN path (see
@@ -194,12 +243,31 @@ export function normalizeFieldPath(fieldPath: string): string[] {
  * Unrouted → `text`. Being incomplete is safe by construction here — the filler
  * announces itself as a placeholder, so a field nobody has classified reads as
  * obviously fake rather than as a confidently wrong address.
+ *
+ * `siblings` is the leaf's containing object, as the walker offers it. It is
+ * consulted ONLY by {@link DISCRIMINANT_CATEGORY}; omit it and every
+ * discriminated path falls through to `text`, which is what every caller
+ * predating core#91 gets.
  */
-export function categoryForField(fieldPath: string): MaskCategory {
+export function categoryForField(
+  fieldPath: string,
+  siblings?: Readonly<Record<string, unknown>>,
+): MaskCategory {
   const segments = normalizeFieldPath(fieldPath);
   const leaf = segments.at(-1) ?? "";
   const parent = segments.at(-2) ?? "";
-  return QUALIFIED_CATEGORY[`${parent}.${leaf}`] ?? LEAF_CATEGORY[leaf] ?? "text";
+  const qualified = `${parent}.${leaf}`;
+
+  const route = DISCRIMINANT_CATEGORY[qualified];
+  if (route !== undefined && siblings !== undefined) {
+    const arm = siblings[route.on];
+    if (typeof arm === "string") {
+      const routed = route.arms[arm];
+      if (routed !== undefined) return routed;
+    }
+  }
+
+  return QUALIFIED_CATEGORY[qualified] ?? LEAF_CATEGORY[leaf] ?? "text";
 }
 
 // ── The fake vocabularies ───────────────────────────────────────────
@@ -249,6 +317,32 @@ export const FAKE_ORGANIZATIONS: readonly string[] = [
   "Brightwater Films Inc", "Kestrel Media Group", "Longview Productions LLC",
   "Two Rivers Pictures", "Amberline Studios Inc", "Foxglove Films LLC",
   "Meridian Media Group",
+  // ── Appended for core#91. 16 → 40. ──────────────────────────────────────
+  //
+  // 🔴 **APPEND AT THE END ONLY — never insert, never reorder.** `pick` is
+  // `items[n % items.length]`, so an insertion re-seeds every entry after it
+  // and churns every golden masked under the old list.
+  //
+  // Why 40 and not 20: `fixtures/aging-report/all-accounts.json` carries 18
+  // distinct organization uids, so the injective draw
+  // {@link allocateOrganizationFakes} performs was a pigeonhole failure at 16
+  // before it was a design question. 40 is 2.2x the largest observed document.
+  //
+  // ⚠️ **A COMPOSED grammar was considered and rejected**, and the reason is
+  // the oracle rather than taste. `<stem> <trade> <suffix>` would let
+  // {@link maskVerdict} recognise a masked organization by regex instead of by
+  // list membership — but real production companies follow exactly that
+  // grammar, so a genuine customer called "Anderson Media Group" would be
+  // judged `masked`. An arm that accepts real company names is a
+  // leak-detection regression, not a widening. A literal list cannot do that.
+  "Ashgrove Pictures LLC", "Bellweather Media Group", "Cindercroft Studios Inc",
+  "Dovetail Films LLC", "Emberton Pictures Group", "Fernbank Studios LLC",
+  "Goldenrod Media Inc", "Hollowpine Films Group", "Inkwell Productions LLC",
+  "Jasperfield Studios Inc", "Kingfisher Media Group", "Lanternhouse Films LLC",
+  "Marblehead Pictures Inc", "Nightjar Productions LLC", "Oakhaven Media Group",
+  "Pinewhistle Studios Inc", "Quarrylight Films LLC", "Rooksbridge Media Group",
+  "Stonecrop Pictures Inc", "Thistledown Films LLC", "Umberfield Studios Group",
+  "Vantagepoint Media Inc", "Windermere Pictures LLC", "Yarrowfield Films Group",
 ];
 /** Secondary address lines — "Suite 1900", "2nd Floor", "Stage 25" in prod. */
 export const FAKE_UNIT_PREFIXES: readonly string[] = [
@@ -399,6 +493,99 @@ const COARSE_SEGMENT = /^[A-Za-z][A-Za-z .'\-]*$/;
 export type SeedFor = (fieldPath: string, value: string) => string;
 
 /**
+ * The synthetic field path every IDENTITY-seeded fake draws its seed on.
+ *
+ * A constant, so a seed computed through it is a function of the IDENTITY alone
+ * and not of where the value happened to appear. `\u0000` cannot occur in a
+ * schema field name, so it can never collide with a real path.
+ */
+const IDENTITY_SEED_PATH = "\u0000identity";
+
+/**
+ * Categories whose identity IS the value — one value, one fake, everywhere.
+ *
+ * 🔴 **This is the general repair for core#91 §1, and it is not the same rule
+ * as the organization one below.** The seed used to be
+ * `HMAC(salt, fieldPath::value)`, so one address appearing at two paths drew two
+ * different fakes. Measured over all 38 committed fixtures: of the 26
+ * destination leg pairs whose `delivery.uid === collection.uid` — the SAME
+ * destination document, therefore the same address — **23 masked to two
+ * different streets**, across `invoice`, `quote`, `packing-list` and
+ * `pick-sheet`.
+ *
+ * For these categories the value is a safe identity because two equal values
+ * genuinely ARE the same thing: two identical address strings are one address,
+ * two identical emails one mailbox. Seeding on the value makes that true by
+ * construction and needs nothing from the walker.
+ *
+ * ⚠️ **`organization` is deliberately NOT here**, and that exclusion is the
+ * whole reason a sibling `uid` had to be threaded at all — see
+ * {@link SIBLING_IDENTITY}. `text` is absent too: its fake is the
+ * self-announcing filler, which embeds the LEAF NAME and so must stay a
+ * function of the path.
+ */
+const VALUE_IDENTIFIED: ReadonlySet<MaskCategory> = new Set<MaskCategory>([
+  "email",
+  "phone",
+  "postcode",
+  "street",
+  "street2",
+  "address_full",
+  "person",
+  "given_name",
+  "family_name",
+  "place",
+  "opaque",
+]);
+
+/**
+ * Categories whose identity is a SIBLING field rather than the value.
+ *
+ * 🔴 **An organization must not be identified by its name.** Censused over all
+ * 318 prod organizations: the 29 department nodes carry only 8 distinct names,
+ * 24 of them sharing `Locations`, `Office` and `Transpo`. Seeding on the value
+ * would collapse exactly the accounts api-cloudrun#923 exists to keep apart —
+ * two different customers rendering as one company on a warehouse floor. The
+ * uid is the identity; the name is a label that repeats.
+ */
+const SIBLING_IDENTITY: Readonly<Partial<Record<MaskCategory, string>>> = {
+  organization: "uid",
+};
+
+/**
+ * The identity a fake for this category should be drawn on, or `undefined` when
+ * the leaf has none and the caller's own path-derived seed must stand.
+ *
+ * Returning `undefined` is the FALLBACK, not a failure: a leaf whose sibling
+ * identity is absent keeps exactly the behaviour it had before core#91, so
+ * nothing regresses for a shape this table does not know about.
+ */
+export function maskIdentity(
+  category: MaskCategory,
+  value: string,
+  siblings?: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const siblingKey = SIBLING_IDENTITY[category];
+  if (siblingKey !== undefined) {
+    const identity = siblings?.[siblingKey];
+    return typeof identity === "string" && identity !== "" ? identity : undefined;
+  }
+  return VALUE_IDENTIFIED.has(category) ? value : undefined;
+}
+
+/** Optional per-document context for {@link fakeForMask}. */
+export interface MaskContext {
+  /** The pristine object containing this leaf, as the walker offers it. */
+  siblings?: Readonly<Record<string, unknown>>;
+  /**
+   * Document-scoped injective allocation from
+   * {@link allocateOrganizationFakes}. Omit it and organizations are still
+   * identity-seeded (one org, one name) but may collide with each other.
+   */
+  organizationFakes?: ReadonlyMap<string, string>;
+}
+
+/**
  * The whole-address column, masked segment by segment.
  *
  * Measured over 200 prod `destinations` (2026-09-06): `full` is
@@ -425,7 +612,6 @@ export type SeedFor = (fieldPath: string, value: string) => string;
  */
 function fakeAddressFull(
   value: string,
-  fieldPath: string,
   seed: string,
   seedFor: SeedFor,
 ): string {
@@ -434,12 +620,15 @@ function fakeAddressFull(
     .map((segment, i) => {
       if (segment === "") return segment;
       if (i === 0) {
-        // Seeded as if it were the sibling `street`, so a `full` that opens with
-        // exactly that value masks to the SAME street and the rendered address
-        // block stays internally consistent. Nothing depends on the two
-        // agreeing — where the values differ, so do the fakes.
-        const siblingPath = `${fieldPath.slice(0, -"full".length)}street`;
-        return fakeStreet(seedFor(siblingPath, segment));
+        // Seeded on the street segment's own VALUE, so a `full` that opens with
+        // exactly that value masks to the SAME street as a `street` field
+        // holding it — anywhere in the document, not merely the sibling one.
+        // This used to synthesize the sibling `street` PATH, which got the
+        // address block internally consistent but left the same address at two
+        // paths (a destination's `delivery` and `collection` legs, 23 of 26 in
+        // the corpus) drawing two different streets. Same rule as every other
+        // VALUE_IDENTIFIED category now.
+        return fakeStreet(seedFor(IDENTITY_SEED_PATH, segment));
       }
       return COARSE_SEGMENT.test(segment) ? segment : maskDigits(segment, seed, i * 7);
     })
@@ -491,8 +680,16 @@ export function fakeForMask(
   fieldPath: string,
   seed: string,
   seedFor: SeedFor,
+  ctx: MaskContext = {},
 ): string {
-  switch (categoryForField(fieldPath)) {
+  const category = categoryForField(fieldPath, ctx.siblings);
+  // The IDENTITY seed where the leaf has one, the caller's path-derived seed
+  // where it does not. This single line is core#91 §1: the draw becomes a
+  // function of the SUBJECT rather than of where the subject appears.
+  const identity = maskIdentity(category, value, ctx.siblings);
+  const drawSeed = identity === undefined ? seed : seedFor(IDENTITY_SEED_PATH, identity);
+
+  switch (category) {
     // Email — keep the @domain shape so address-validation in the template
     // renderer (if any) still parses.
     //
@@ -501,7 +698,7 @@ export function fakeForMask(
     // two different source contacts must remain distinguishable, and the digest
     // is what keeps a re-capture byte-stable so goldens do not churn.
     case "email":
-      return `masked_${seed.slice(0, 4)}@${MASKED_EMAIL_DOMAIN}`;
+      return `masked_${drawSeed.slice(0, 4)}@${MASKED_EMAIL_DOMAIN}`;
     // Phone — the digit shape roughly preserved so column widths don't reflow,
     // inside 555-0100..555-0199, the block NANP reserves for fiction. Only the
     // area code and the last two digits carry the seed; the `555 01` in the
@@ -510,29 +707,37 @@ export function fakeForMask(
     // printing our switchboard as the customer's contact is a different kind of
     // wrong.
     case "phone": {
-      const digits = seed.replace(/[a-f]/g, "").padEnd(5, "0");
+      const digits = drawSeed.replace(/[a-f]/g, "").padEnd(5, "0");
       return `(${digits.slice(0, 3)}) 555-01${digits.slice(3, 5)}`;
     }
     case "postcode":
-      return fakePostcode(value, seed);
+      return fakePostcode(value, drawSeed);
     case "street":
-      return fakeStreet(seed);
+      return fakeStreet(drawSeed);
     case "street2":
-      return fakeUnit(seed);
+      return fakeUnit(drawSeed);
     case "address_full":
-      return fakeAddressFull(value, fieldPath, seed, seedFor);
+      return fakeAddressFull(value, drawSeed, seedFor);
     case "person":
-      return fakePerson(value, seed);
+      return fakePerson(value, drawSeed);
     case "given_name":
-      return pick(FAKE_FIRST_NAMES, seed);
+      return pick(FAKE_FIRST_NAMES, drawSeed);
     case "family_name":
-      return pick(FAKE_LAST_NAMES, seed, 4);
+      return pick(FAKE_LAST_NAMES, drawSeed, 4);
     case "place":
-      return pick(FAKE_PLACES, seed);
-    case "organization":
-      return pick(FAKE_ORGANIZATIONS, seed);
+      return pick(FAKE_PLACES, drawSeed);
+    case "organization": {
+      // The document-scoped allocation wins where there is one: it is the only
+      // thing that makes two DIFFERENT organizations provably two different
+      // names. Without it the identity seed still gives one organization one
+      // name, which is the larger half of the defect.
+      const allocated = identity === undefined
+        ? undefined
+        : ctx.organizationFakes?.get(identity);
+      return allocated ?? pick(FAKE_ORGANIZATIONS, drawSeed);
+    }
     case "opaque":
-      return shapePreservingDistinct(value, seed);
+      return shapePreservingDistinct(value, drawSeed);
     case "text":
       return fakeText(value, fieldPath);
   }
@@ -630,7 +835,11 @@ function isFiller(value: string): boolean {
  * not route falls to `text`, whose fake is the self-announcing filler, so an
  * unrouted field holding a real value reads `not-masked`, which is right.
  */
-export function maskVerdict(value: string, fieldPath: string): MaskVerdict {
+export function maskVerdict(
+  value: string,
+  fieldPath: string,
+  siblings?: Readonly<Record<string, unknown>>,
+): MaskVerdict {
   // The strategy returns an empty or whitespace-only string unchanged — there
   // was nothing to leak, so there is nothing to have masked. 97.8% of real
   // order items carry an empty `description`.
@@ -639,7 +848,7 @@ export function maskVerdict(value: string, fieldPath: string): MaskVerdict {
   // The filler is a valid mask for any category — see {@link isFiller}.
   if (isFiller(value)) return "masked";
 
-  switch (categoryForField(fieldPath)) {
+  switch (categoryForField(fieldPath, siblings)) {
     case "email":
       return MASKED_EMAIL_RE.test(value) ? "masked" : "not-masked";
     case "phone":
@@ -697,6 +906,14 @@ export interface MaskedLeaf {
   /** The walker's own path — `destinations.0.delivery.address.postcode`. */
   fieldPath: string;
   value: string;
+  /**
+   * The object that contained this leaf, as the walker offered it.
+   *
+   * Required to route a discriminated leaf ({@link DISCRIMINANT_CATEGORY}) and
+   * to resolve an organization's identity — so an oracle that drops it judges
+   * `scope.name` against the wrong category.
+   */
+  siblings?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -739,12 +956,83 @@ export function collectMaskedLeaves(
 ): MaskedLeaf[] {
   const out: MaskedLeaf[] = [];
   applyPii(doc, schema as z.ZodType<object>, {
-    apply(value: unknown, classification: PiiClassification, fieldPath: string): unknown {
+    apply(
+      value: unknown,
+      classification: PiiClassification,
+      fieldPath: string,
+      siblings?: Readonly<Record<string, unknown>>,
+    ): unknown {
       if (classification === "mask" && typeof value === "string") {
-        out.push({ fieldPath, value });
+        out.push({ fieldPath, value, siblings });
       }
       return value;
     },
   });
   return out;
+}
+
+/**
+ * Assign each organization identity in ONE document a DISTINCT fake.
+ *
+ * Identity seeding alone makes one organization one name everywhere, but it
+ * does not stop two organizations drawing the SAME name: at 18 identities into
+ * 40 slots the birthday bound puts roughly 3.8 collisions on
+ * `all-accounts.json`. Today it is worse than that bound — 14 accounts render
+ * under 10 labels, one of them a triple.
+ *
+ * ⭐ **Ordered by identity SEED, never by document order.** That is what makes
+ * the result a function of the SET rather than of the array: an organization
+ * whose first-choice slot is free is unaffected by everything else in the
+ * document, so reordering a document reshuffles nothing and churn on re-capture
+ * is bounded to actual colliders.
+ *
+ * Collisions resolve by forward linear probing. **Exhaustion THROWS**, naming
+ * the remedy: a wrapped allocation is precisely the defect this function exists
+ * to remove, and a capture that fails is recoverable where a capture that
+ * silently collides is not.
+ */
+export function allocateOrganizationFakes(
+  identities: Iterable<string>,
+  seedFor: SeedFor,
+): ReadonlyMap<string, string> {
+  const unique = [...new Set(identities)];
+  if (unique.length > FAKE_ORGANIZATIONS.length) {
+    throw new Error(
+      `fixture-pii: ${unique.length} distinct organizations in one document, but ` +
+        `FAKE_ORGANIZATIONS holds ${FAKE_ORGANIZATIONS.length}. An injective ` +
+        `assignment is impossible. Append entries to FAKE_ORGANIZATIONS (at the ` +
+        `END only — inserting re-seeds every entry after it and churns every ` +
+        `golden masked under the old list).`,
+    );
+  }
+
+  const seeded = unique
+    .map((identity) => ({ identity, seed: seedFor(IDENTITY_SEED_PATH, identity) }))
+    .sort((a, b) => (a.seed < b.seed ? -1 : a.seed > b.seed ? 1 : 0));
+
+  const taken = new Set<number>();
+  const out = new Map<string, string>();
+  for (const { identity, seed } of seeded) {
+    let slot = parseInt(seed.slice(0, 8), 16) % FAKE_ORGANIZATIONS.length;
+    while (taken.has(slot)) slot = (slot + 1) % FAKE_ORGANIZATIONS.length;
+    taken.add(slot);
+    out.set(identity, FAKE_ORGANIZATIONS[slot]);
+  }
+  return out;
+}
+
+/**
+ * Every distinct organization identity among a document's masked leaves — the
+ * input {@link allocateOrganizationFakes} wants, computed from the same walk the
+ * masker itself uses so the two cannot disagree about scope.
+ */
+export function organizationIdentities(leaves: readonly MaskedLeaf[]): string[] {
+  const out = new Set<string>();
+  for (const leaf of leaves) {
+    const category = categoryForField(leaf.fieldPath, leaf.siblings);
+    if (category !== "organization") continue;
+    const identity = maskIdentity(category, leaf.value, leaf.siblings);
+    if (identity !== undefined) out.add(identity);
+  }
+  return [...out];
 }

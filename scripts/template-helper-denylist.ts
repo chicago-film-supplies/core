@@ -345,11 +345,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // oracle that judges them — capture-time and CI tooling. Offering a document
   // author `it.fixture-pii.fakeForMask` would hand them a seeded PII generator.
   "fixture-pii": [
+    "allocateOrganizationFakes",
     "categoryForField",
     "collectMaskedLeaves",
     "fakeForMask",
+    "maskIdentity",
     "maskVerdict",
     "normalizeFieldPath",
+    "organizationIdentities",
   ],
   "template-lint": [
     "lintFixture",

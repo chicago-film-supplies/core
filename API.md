@@ -31831,6 +31831,17 @@ a field to one is a claim about that field that must be true.
 type MaskCategory = "email" | "phone" | "postcode" | "street" | "street2" | "address_full" | "person" | "given_name" | "family_name" | "place" | "organization" | "opaque" | "text";
 ```
 
+### `MaskContext`
+
+Optional per-document context for {@link fakeForMask}.
+
+```ts
+interface MaskContext {
+  siblings?: Readonly<Record<string, unknown>>;
+  organizationFakes?: ReadonlyMap<string, string>;
+}
+```
+
 ### `MaskVerdict`
 
 Whether a committed value could have come out of {@link fakeForMask}.
@@ -31853,6 +31864,7 @@ One `pii: "mask"` string leaf, as the real walker offered it.
 interface MaskedLeaf {
   fieldPath: string;
   value: string;
+  siblings?: Readonly<Record<string, unknown>>;
 }
 ```
 
@@ -31865,7 +31877,28 @@ itself, because the salt stays in the service.
 type SeedFor = fnOrConstructor;
 ```
 
-### `categoryForField(fieldPath: string): MaskCategory`
+### `allocateOrganizationFakes(identities: Iterable<string>, seedFor: SeedFor): ReadonlyMap<string, string>`
+
+Assign each organization identity in ONE document a DISTINCT fake.
+
+Identity seeding alone makes one organization one name everywhere, but it
+does not stop two organizations drawing the SAME name: at 18 identities into
+40 slots the birthday bound puts roughly 3.8 collisions on
+`all-accounts.json`. Today it is worse than that bound — 14 accounts render
+under 10 labels, one of them a triple.
+
+⭐ **Ordered by identity SEED, never by document order.** That is what makes
+the result a function of the SET rather than of the array: an organization
+whose first-choice slot is free is unaffected by everything else in the
+document, so reordering a document reshuffles nothing and churn on re-capture
+is bounded to actual colliders.
+
+Collisions resolve by forward linear probing. **Exhaustion THROWS**, naming
+the remedy: a wrapped allocation is precisely the defect this function exists
+to remove, and a capture that fails is recoverable where a capture that
+silently collides is not.
+
+### `categoryForField(fieldPath: string, siblings?: Readonly<Record<string, unknown>>): MaskCategory`
 
 The category to fake a `mask`-tagged value as, from its field path alone.
 
@@ -31877,6 +31910,11 @@ punctuation and token count, so `6 Walkies` in a `subject` masked to
 Unrouted → `text`. Being incomplete is safe by construction here — the filler
 announces itself as a placeholder, so a field nobody has classified reads as
 obviously fake rather than as a confidently wrong address.
+
+`siblings` is the leaf's containing object, as the walker offers it. It is
+consulted ONLY by {@link DISCRIMINANT_CATEGORY}; omit it and every
+discriminated path falls through to `text`, which is what every caller
+predating core#91 gets.
 
 ### `collectMaskedLeaves(doc: object, schema: z.ZodType): MaskedLeaf[]`
 
@@ -31913,7 +31951,7 @@ a committed fixture, and the oracle has no fake shape to compare against.
 The walk is read-only — the strategy returns every value unchanged, which is
 also how `applyPii` is told to keep descending into a container.
 
-### `fakeForMask(value: string, fieldPath: string, seed: string, seedFor: SeedFor): string`
+### `fakeForMask(value: string, fieldPath: string, seed: string, seedFor: SeedFor, _: unknown): string`
 
 Mask transform — dispatched on the FIELD's category, never on the value.
 
@@ -31921,7 +31959,16 @@ Mask transform — dispatched on the FIELD's category, never on the value.
 `seedFor` computes the same for another path. Both stay outside core so the
 salt does. @see the module header.
 
-### `maskVerdict(value: string, fieldPath: string): MaskVerdict`
+### `maskIdentity(category: MaskCategory, value: string, siblings?: Readonly<Record<string, unknown>>): string | undefined`
+
+The identity a fake for this category should be drawn on, or `undefined` when
+the leaf has none and the caller's own path-derived seed must stand.
+
+Returning `undefined` is the FALLBACK, not a failure: a leaf whose sibling
+identity is absent keeps exactly the behaviour it had before core#91, so
+nothing regresses for a shape this table does not know about.
+
+### `maskVerdict(value: string, fieldPath: string, siblings?: Readonly<Record<string, unknown>>): MaskVerdict`
 
 The verdict for one `pii: "mask"` string leaf.
 
@@ -31941,6 +31988,12 @@ index anyway (`contact.phones.0`, `destinations[0].delivery.instructions`)
 are normalized to the same thing, and so is `collectLeafPaths`'s static
 `destinations[].delivery.address.postcode` — which is what lets a census
 compare a static schema walk and a runtime walk directly.
+
+### `organizationIdentities(leaves: readonly MaskedLeaf[]): string[]`
+
+Every distinct organization identity among a document's masked leaves — the
+input {@link allocateOrganizationFakes} wants, computed from the same walk the
+masker itself uses so the two cannot disagree about scope.
 
 ## `@cfs/core/utils/citations`
 
