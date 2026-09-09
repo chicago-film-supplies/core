@@ -11,6 +11,12 @@ saying something different from what it predicted. That doc — `document-grain-
 this directory — is **deleted**, its structural work having landed and its every leftover now
 sitting on an issue (core#100, core#103, core#105, api-cloudrun#943, api-cloudrun#944).*
 
+> **State at hand-off, 2026-09-09:** nothing in *The order of work* below has started. What
+> exists is the measurement (`api-cloudrun/scripts/audit-zero-priced-components.ts`, api-cloudrun
+> `d8c93822`), the issues (manager#421 re-titled and re-sized, core#100 re-scoped to `kind:guard`
+> and `blocked:sequenced`), and two docblock repairs in `core` — `f64122f` and `5f01294`. Step 1
+> is the next thing anyone does.
+
 ## The one-sentence version
 
 **Every component line on an invoice or a fulfillment is missing `zero_priced`, and the order
@@ -101,6 +107,11 @@ since `@cfs/core@10.0.0-beta.366` (manager#421 stage one) and every consumer is 
 3. **Emit** — `projectOrderItemToInvoiceItem` and `projectItem`, plus `createInvoice`'s
    hand-mirrored mapping in `api-cloudrun` (`projectOrderItemToInvoiceItem`'s own docblock says
    the two mirror each other hand-for-hand). Publish, pin all three consumers.
+   ⚠️ **This step must also DELETE the 🔴 *"DECLARED, NOT YET EMITTED"* blocks on
+   `InvoiceDocLineItemType.zero_priced` and `FulfillmentLineItemType.zero_priced`** (core
+   `5f01294`). They carry measured counts — 0 of 4,397 and 0 of 4,823 — that this step makes
+   false, and a stale present-tense claim in a schema docblock is the exact defect they were
+   added to repair. The docblocks were asserting the mirroring as fact while nothing stored it.
 4. **The refine** — core#100. Array-level, **both directions** in one place: a flagged line is
    a component, and a component states the flag. It cannot be a per-item refine;
    `checkZeroPricedAmount`'s docblock says why (componenthood is positional, so deciding it
