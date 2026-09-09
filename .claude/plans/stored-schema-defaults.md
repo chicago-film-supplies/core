@@ -4,13 +4,14 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` is DONE **and the PIN SWEEP IS DONE.**
-> `api-cloudrun` (`adc121bf`) and `manager` (`8edfa7b`) are landed on `beta.399`; `templates` is
-> **PR #301**, all four checks PASSED on head sha `6174ee9`, deliberately left for a human because it
-> repairs a fixture and so falls outside the auto-merge row.
-> 🔴 **Prod still runs `v0.246.0` / `beta.398` — release PR api-cloudrun#948 is the one remaining
-> ordered step, and the corpus census below is what says it is safe to merge.**
-> The wider campaign (core#95) is unstarted.
+> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` DONE, **pin sweep DONE, shipped to PROD, ratchet LANDED.**
+> All four repos are on `beta.399` — `api-cloudrun` `adc121bf`, `manager` `8edfa7b`, `templates`
+> `cb9b44b` (PR #301 merged). **Prod runs it**: `v0.247.0`, Cloud Run revision
+> `api-cloudrun-00364-v6z`, verified against the release tag's own `deno.json` rather than the tag
+> alone.
+> **The campaign's INSTRUMENT now exists** — `tests/stored-defaults.test.ts` (`5d14347`) pins all 291
+> stored `.default()` paths and makes the partition core#95 asked for: 32 sentinel-legitimate, 259
+> debt. The 259 removals themselves are unstarted.
 >
 > **A `.default()` on a stored schema is inert and its only live effect is a hole.**
 > `validateBeforeWrite` discards `result.data` and persists the raw document, so the default never
@@ -34,8 +35,9 @@ api-cloudrun#943's remaining half.*
 | the rule + the symptom lesson | `core/CLAUDE.md` § *`.default()` and `.optional()`* | ✅ landed |
 | 40 pins + 2 parsed fixtures | `api-cloudrun` `adc121bf` | ✅ landed on `main` |
 | 1 pin | `manager` `8edfa7b` | ✅ landed on `main` |
-| 15 pins + 1 parsed fixture | `templates` PR #301 | 🟡 open, 4/4 checks passed, awaiting a human |
-| `beta.399` reaching **prod** | `api-cloudrun` release PR #948 | ⬜ not merged — the last ordered step |
+| 15 pins + 1 parsed fixture | `templates` `cb9b44b` (PR #301) | ✅ merged |
+| `beta.399` reaching **prod** | `v0.247.0` → revision `api-cloudrun-00364-v6z` | ✅ deployed |
+| the campaign's ratchet, 291 paths partitioned | `core/tests/stored-defaults.test.ts` (`5d14347`) | ✅ landed |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -130,17 +132,33 @@ and cannot be generalised. `version` is deliberately not bumped either.
   check. ⚠️ And prod/dev are **not** independent samples — `devReplica` mirrors prod writes, and the
   two read identically — so that is one confirmation, not two.
 
-- **The wider campaign — ~250 `.default(` sites across `core/src/schemas/`**, concentrated in
-  `order.ts` (60), `invoice.ts` (28), `credit-note.ts` (26), `product.ts` (22). Each needs the same
+- **The wider campaign — now MEASURED rather than estimated: 259 inert paths across 37 collections**,
+  concentrated in `orders` (48), `invoices` (41), `credit-notes` (33), `fulfillments` (22),
+  `cards` (20) — read the live split off `tests/stored-defaults.test.ts` rather than this list, which
+  is the one thing here that can rot. ⚠️ The older "~250 sites / ~335 distinct" figures counted
+  DECLARATIONS; 291 is *resolved paths*, which is what actually reaches storage — a shared block like
+  `Address` appears once per embedding collection. Each needs the same
   two-part gate: writers compliant in source, AND a corpus census proving no stored document leans
   on the default. **Tracked by core#95** (`kind:guard`, `size:campaign`), which already counts ~335 sites and
   asks for a detector as well as a sweep. `OrderDocDates` is now its worked example — including
   that the census can block on a SYMPTOM rather than on the field itself. ⚠️ Some of these are on
   INPUT schemas, where a default is legitimate and must not be swept — the rule is about STORED
   schemas.
-- **A ratchet so no new inert default lands on a stored schema.** `tests/inert-defaults.test.ts`
-  already covers the `.default(x).optional()` dead-default shape; this is the adjacent question and
-  has no guard.
+- ✅ **The ratchet is LANDED** — `core/tests/stored-defaults.test.ts` (`5d14347`). It walks the
+  Firestore registry, which excludes every INPUT schema by construction, and catalogues all **291
+  resolved `.default()` paths across 37 collections**, partitioned:
+  - **`SENTINEL_DEFAULTS` (32) — legitimate, not debt.** The writer sends a FieldValue sentinel that
+    `validateBeforeWrite` STRIPS before parsing, so the key really is absent at validation time. 29
+    are `version` under `FieldValue.increment(1)`; the other three are `arrayUnion`/`arrayRemove`
+    targets — `cards.recurrence_overrides`, `recurrences.exception_dates`, `products.tags` — each
+    entry naming its write site. **This is the partition core#95 asked for, and it is now made.**
+  - **`INERT_DEFAULTS` (259)** — the campaign backlog. Only shrinks.
+  ⚠️ **The catalogue was GENERATED from the walk, so it agrees by construction and the first green
+  run proved nothing.** Both directions were verified by mutation instead: `.default("untitled")` on
+  `TagSchema.name` failed the *catalogued* arm naming `tags.name`, and an unfindable catalogue entry
+  failed the *shrink* arm naming it — each failing only its own arm.
+  ⭐ It also pins the property the whole campaign rests on: **a parse does not add the key to the
+  input object**, which is exactly why a `.default()` cannot seed a stored document.
 - **api-cloudrun#943's remaining half** — the manager needs `collection_end` / `delivery_end`
   editors, and `assertWalkableWindow` must order four boundaries rather than two. Re-scoped to
   `kind:gap` this session.
