@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
+import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceItemInputLine, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
 import { derivePaymentStatus } from "../src/utils/invoices.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -1089,4 +1089,62 @@ Deno.test("reference is bounded at 255, matching the order and fulfillment grain
     false,
     "a 256-char reference must be refused — 0 of 1,040 stored invoices exceed 255",
   );
+});
+
+Deno.test("the input schema refuses everything the document schema refuses (core#102)", async (t) => {
+  // 🔴 The gap this closes: the input was a plain `z.object` with no bounds
+  // while the stored schema carried them, so a client could send `name: ""`,
+  // pass request validation, and have the document refused one layer down at
+  // `validateBeforeWrite`. The failure surfaced inside the write path instead of
+  // at the boundary — a worse error for an operator and a worse log line.
+  //
+  // ⭐ Written BEHAVIOURALLY rather than by comparing declarations, because the
+  // two sides legitimately differ in shape: the document requires what the input
+  // leaves `.optional()`, and only the *constraint* has to line up. Each case
+  // asserts the document refuses the value FIRST, so the arm cannot pass
+  // vacuously if a document bound is ever relaxed — that control is the half
+  // that makes this a guard rather than a restatement.
+  // deno-lint-ignore no-explicit-any
+  const docLine = (InvoiceDocLineItemSchema as any)._zod.def.shape ??
+    // deno-lint-ignore no-explicit-any
+    (InvoiceDocLineItemSchema as any)._zod.def.innerType._zod.def.shape;
+  // deno-lint-ignore no-explicit-any
+  const inLine = (InvoiceItemInputLine as any)._zod.def.innerType?._zod.def.shape ??
+    // deno-lint-ignore no-explicit-any
+    (InvoiceItemInputLine as any)._zod.def.shape;
+
+  const cases: Array<[string, unknown, unknown, unknown]> = [
+    ["items[].name — empty", docLine.name, inLine.name, ""],
+    ["items[].name — 101 chars", docLine.name, inLine.name, "x".repeat(101)],
+    ["items[].quantity — negative", docLine.quantity, inLine.quantity, -1],
+    ["items[].quantity — fractional", docLine.quantity, inLine.quantity, 2.5],
+  ];
+  for (const [label, docNode, inNode, value] of cases) {
+    await t.step(label, () => {
+      // deno-lint-ignore no-explicit-any
+      assertEquals((docNode as any).safeParse(value).success, false, `control: the DOCUMENT must refuse ${label}`);
+      // deno-lint-ignore no-explicit-any
+      assertEquals((inNode as any).safeParse(value).success, false, `the INPUT must refuse it too — ${label}`);
+    });
+  }
+
+  await t.step("reference — 256 chars", () => {
+    // deno-lint-ignore no-explicit-any
+    const doc = (InvoiceSchema as any)._zod.def.shape.reference;
+    // deno-lint-ignore no-explicit-any
+    const inp = (UpdateInvoiceInput as any)._zod.def.shape.reference;
+    const long = "x".repeat(256);
+    assertEquals(doc.safeParse(long).success, false, "control: the DOCUMENT must refuse a 256-char reference");
+    assertEquals(inp.safeParse(long).success, false, "the INPUT must refuse it too");
+    assertEquals(inp.safeParse("x".repeat(255)).success, true, "255 is the boundary and must still pass");
+    assertEquals(inp.safeParse(null).success, true, "null stays a legal reference");
+  });
+
+  await t.step("a blank row still SEEDS, even though it cannot be submitted", () => {
+    // The whole reason `name` carries `initial: ""`. Seeding and submitting are
+    // different questions and this pins both halves at once.
+    assertEquals(getInitialValues(InvoiceItemInputLine).name, "");
+    // deno-lint-ignore no-explicit-any
+    assertEquals((inLine.name as any).safeParse("").success, false);
+  });
 });

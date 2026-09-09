@@ -889,7 +889,9 @@ export interface InvoiceItemInputPrice {
 const InvoiceItemInputPriceSchema: z.ZodType<InvoiceItemInputPrice> = z.object({
   base_cents: z.int().optional(),
   base_percent: z.number().nullable().optional(),
-  chargeable_days: z.number().nullable().optional(),
+  // `.int()` to match the stored `InvoiceDocItemPrice.chargeable_days`. A count
+  // of days is integral — `CLAUDE.md` § *Stored money is integer cents*.
+  chargeable_days: z.int().nullable().optional(),
   formula: PriceFormulaEnum.optional(),
   discount: DiscountInput.nullable().optional(),
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),
@@ -934,10 +936,34 @@ const InvoiceItemInputLineInner = z.object({
   uid: ItemUid,
   type: z.enum(DOC_LINE_ITEM_TYPES),
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
-  name: z.string().meta({ pii: "none" }).optional(),
+  //
+  // 🔴 **Bounded to match the STORED schema (core#102).** Until 2026-09-09 this
+  // was a bare `z.string()` while `LineItemCore.name` is `.min(1).max(100)`, so
+  // a client could send `""`, pass request validation, and have the document
+  // refused one layer down at `validateBeforeWrite` — an opaque failure inside
+  // the write path instead of a clean rejection at the boundary. `CLAUDE.md`
+  // § *Making a field REQUIRED* step 3 is the rule: tighten the input in the
+  // same pass, wherever the writer cannot supply the value itself. The API
+  // cannot invent an item name.
+  //
+  // ⭐ **`initial: ""` is what keeps "add a blank row, then type into it"
+  // working**, and it is deliberately NOT a loosening of the constraint: the
+  // form seeds an empty box, and a SUBMIT of `""` is still refused. ⚠️ Measured
+  // 2026-09-09: it is redundant against `getInitialValues` today — `resolveField`
+  // hits `case "string": return ""` whether or not the node carries `.min(1)`,
+  // so all three spellings yield `{"name":""}`. Kept as an explicit statement of
+  // intent, because the bound would otherwise read as forbidding a blank row.
+  name: z.string().min(1).max(100).meta({ pii: "none", initial: "" }).optional(),
   // Line-item text — not customer data. See `OrderDocLineItem.description`.
   description: z.string().meta({ pii: "none" }).optional(),
-  quantity: z.int().optional(),
+  // `.min(0)` to match `LineItemCore.quantity`; the input admitted a negative.
+  // ⚠️ **No `.meta({ initial })` beside it, and that is checked rather than
+  // assumed** — no `quantity` field anywhere in the package carries one, and
+  // `getInitialValues` derives `0` from `case "number"`, which is the RIGHT
+  // seed. The five fields that do carry an `initial` are `z.boolean().default(true)`,
+  // where the type-derived zero is wrong. Same reasoning `9435a15` recorded for
+  // the destination pair's two flags.
+  quantity: z.int().min(0).optional(),
   price: InvoiceItemInputPriceSchema.optional(),
   path: z.array(ItemUid).optional(),
   coa_revenue: COARevenueEnum.nullable().optional(),
@@ -1113,7 +1139,8 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
   date: chicagoStartOfDay().optional(),
   due_date: chicagoStartOfDay().optional(),
   subject: z.string().optional(),
-  reference: z.string().nullable().optional(),
+  // Bounded at the stored maximum (core#102); `Invoice.reference` is `.max(255)`.
+  reference: z.string().max(255).nullable().optional(),
   // ⚠️ `.nullable()`, not merely `.optional()` — api-cloudrun#492's shape, one
   // schema over. The STORED arm is bare `.nullable()`, so
   // `getInitialValues(InvoiceSchema)` seeds this as `null`, and the manager
@@ -1212,7 +1239,8 @@ export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
   // send null, not an empty string.
   due_date: chicagoStartOfDay().nullish(),
   subject: z.string().optional(),
-  reference: z.string().nullable().optional(),
+  // Bounded at the stored maximum (core#102); `Invoice.reference` is `.max(255)`.
+  reference: z.string().max(255).nullable().optional(),
   // ⚠️ `.nullable()`, not merely `.optional()` — api-cloudrun#492's shape, one
   // schema over. The STORED arm is bare `.nullable()`, so
   // `getInitialValues(InvoiceSchema)` seeds this as `null`, and the manager
