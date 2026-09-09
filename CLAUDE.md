@@ -670,6 +670,26 @@ on `(uid_order, divider uid)`, and it resolved **8 of 8**. A pair that had not r
 reported and skipped rather than defaulted — an unresolvable row is a question for the owner,
 and a migration is the worst possible place to answer one by guessing.
 
+🔴 **And before repairing the key, ask what ELSE is wrong with the rows it names — the absent
+key is often a SYMPTOM, not the defect.** Measured 2026-09-09, `OrderDocDates`: removing the
+fourteen inert `.default(null)`s was clean on twelve keys and blocked on the two DERIVED ones,
+`days_active`/`days_charged`, absent on 20 invoice pairs. The obvious repair — project the
+duration from the source order, exactly as core#101 did for the flags — was **wrong**, and the
+arm that caught it was an assertion that the two documents' windows already agreed *before*
+projecting. They did not: all six boundary instants on those 20 pairs held one value,
+`2026-01-24T15:37:56.xxx`, a migration's own clock written into delivery, collection and charge
+alike, while the real 2023 windows sat on the orders. **There was no duration because there was
+no window.** Grafting each order's real duration onto a fabricated window would have written 20
+plausible wrong values and turned the census green.
+
+⭐ **So a repair that projects from an authority should assert the authority and the subject
+already agree on everything the projected value DEPENDS on.** That assertion costs one
+predicate, fails closed, and is the only thing standing between "the census reads 0" and "the
+census reads 0 because I filled it in". Repaired via
+`api-cloudrun/scripts/backfill-invoice-destination-windows.ts`, which projects the whole `dates`
+map rather than the two keys, on a triple-confirmed predicate — criterion 1 alone would have hit
+46 legitimate same-day pairs.
+
 ⚠️ **And this is why "the census is 0" does not license the tightening on its own.**
 `Invoice.subject` reads 0 nulls across 1,040 documents and is *still* not free, because
 `createInvoice` writes `input.subject ?? null` — the writer PRODUCES the value the tightening

@@ -6094,6 +6094,41 @@ interface OrderDatesType {
 
 Zod schema for order dates with Firestore timestamp companions.
 
+🔴 **The twelve BOUNDARY fields carry no `.default(null)`, deliberately.** A
+default is inert on the CFS write path — `validateBeforeWrite` discards
+`result.data` and writes the raw document — so its only live effect was to let
+a payload OMIT a key and still parse, which is how a non-optional field ends
+up absent in Firestore. Without one, an omitted boundary is a refused write.
+Same reasoning that dropped `Invoice.destinations`' `.default([])`, and the
+same house rule: prefer making a defect class unrepresentable over policing
+it.
+
+Verified before removing, because a stored document missing a key is
+invisible until its next WRITE (reads cast via `docData<T>`, they do not
+parse) and would then be refused in front of an operator: **0 absent
+boundary keys across all 1,020 orders, 1,009 invoice destinations and 1,020
+fulfillments, in BOTH projects** (census 2026-09-09). The one constructor is
+`canonicalizeDestinationDates` (`api-cloudrun/src/services/orders.ts`), which
+builds all fourteen explicitly; every other path copies the whole map.
+
+🔴 **The census BLOCKED on the two derived fields, and what it found was not
+two missing keys.** `days_active` / `days_charged` were absent on 20 invoice
+pairs — the 2025-12-02 CRMS import — and the absence was a SYMPTOM: all six
+boundary instants on those pairs held one value, `2026-01-24T15:37:56.xxx`, a
+migration's own clock written into delivery, collection and charge alike,
+while the real 2023 windows sat on the source orders. There was no duration
+because there was no window. Repaired 2026-09-09 with owner approval by
+projecting each order's whole `dates` map
+(`api-cloudrun/scripts/backfill-invoice-destination-windows.ts`), prod then
+dev-by-mirror, both verified at 0 by two independent instruments.
+
+⭐ **The instrument that caught it was an anti-vacuity arm, not the census.**
+The first repair drafted here projected only the two durations and asserted
+the windows already agreed before doing so. They did not — on all twelve
+boundaries, on all 20 — so it wrote nothing. Without that arm it would have
+grafted each order's real duration onto a fabricated window and the census
+would have gone green.
+
 ```ts
 const OrderDocDates: z.ZodType<OrderDocDatesType>;
 ```
@@ -16228,6 +16263,41 @@ interface OrderDatesType {
 ### `OrderDocDates`
 
 Zod schema for order dates with Firestore timestamp companions.
+
+🔴 **The twelve BOUNDARY fields carry no `.default(null)`, deliberately.** A
+default is inert on the CFS write path — `validateBeforeWrite` discards
+`result.data` and writes the raw document — so its only live effect was to let
+a payload OMIT a key and still parse, which is how a non-optional field ends
+up absent in Firestore. Without one, an omitted boundary is a refused write.
+Same reasoning that dropped `Invoice.destinations`' `.default([])`, and the
+same house rule: prefer making a defect class unrepresentable over policing
+it.
+
+Verified before removing, because a stored document missing a key is
+invisible until its next WRITE (reads cast via `docData<T>`, they do not
+parse) and would then be refused in front of an operator: **0 absent
+boundary keys across all 1,020 orders, 1,009 invoice destinations and 1,020
+fulfillments, in BOTH projects** (census 2026-09-09). The one constructor is
+`canonicalizeDestinationDates` (`api-cloudrun/src/services/orders.ts`), which
+builds all fourteen explicitly; every other path copies the whole map.
+
+🔴 **The census BLOCKED on the two derived fields, and what it found was not
+two missing keys.** `days_active` / `days_charged` were absent on 20 invoice
+pairs — the 2025-12-02 CRMS import — and the absence was a SYMPTOM: all six
+boundary instants on those pairs held one value, `2026-01-24T15:37:56.xxx`, a
+migration's own clock written into delivery, collection and charge alike,
+while the real 2023 windows sat on the source orders. There was no duration
+because there was no window. Repaired 2026-09-09 with owner approval by
+projecting each order's whole `dates` map
+(`api-cloudrun/scripts/backfill-invoice-destination-windows.ts`), prod then
+dev-by-mirror, both verified at 0 by two independent instruments.
+
+⭐ **The instrument that caught it was an anti-vacuity arm, not the census.**
+The first repair drafted here projected only the two durations and asserted
+the windows already agreed before doing so. They did not — on all twelve
+boundaries, on all 20 — so it wrote nothing. Without that arm it would have
+grafted each order's real duration onto a fabricated window and the census
+would have gone green.
 
 ```ts
 const OrderDocDates: z.ZodType<OrderDocDatesType>;

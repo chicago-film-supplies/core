@@ -38,6 +38,13 @@
 import { assert, assertEquals } from "@std/assert";
 import { DestinationPairCore } from "../src/schemas/order.ts";
 import { DocDestination, InvoiceDocDestination } from "../src/schemas/mod.ts";
+import type { FirestoreTimestampType } from "../src/schemas/common.ts";
+
+/** `core` has no firebase-admin dependency — `FirestoreTimestamp` is a duck-typed
+ *  `z.custom` accepting the public `{seconds, nanoseconds}` accessor shape. */
+function fsTs(iso: string): FirestoreTimestampType {
+  return { seconds: Math.floor(new Date(iso).getTime() / 1000), nanoseconds: 0 } as FirestoreTimestampType;
+}
 
 /** The `z.strictObject` shape behind an annotated `z.ZodType<T>` schema. */
 // deno-lint-ignore no-explicit-any
@@ -135,11 +142,28 @@ Deno.test("InvoiceDocDestination REFUSES a pair that omits customer_collecting/r
   const base = {
     uid_order: "testorder10000000000",
     uid: "11111111-1111-4111-8111-111111111111",
+    // ⚠️ **Complete on purpose, all fourteen keys.** This map used to state six
+    // and parse anyway, because `OrderDocDates` carried `.default(null)` on
+    // every field. Those defaults are gone (a default on a stored schema is
+    // inert — `validateBeforeWrite` persists the raw document — so its one
+    // effect was letting a writer omit a key), which means an incomplete map is
+    // now itself a refusal. That would make the assertion below pass for the
+    // WRONG reason: the subject here is the two flags, and the positive control
+    // at the foot of this test is only a control if the fixture's dates are not
+    // also at fault.
     dates: {
       delivery_start: "2026-01-05T08:00:00.000-06:00",
+      delivery_start_fs: fsTs("2026-01-05T08:00:00.000-06:00"),
       delivery_end: "2026-01-05T09:00:00.000-06:00",
+      delivery_end_fs: fsTs("2026-01-05T09:00:00.000-06:00"),
       collection_start: "2026-01-09T08:00:00.000-06:00",
+      collection_start_fs: fsTs("2026-01-09T08:00:00.000-06:00"),
       collection_end: "2026-01-09T09:00:00.000-06:00",
+      collection_end_fs: fsTs("2026-01-09T09:00:00.000-06:00"),
+      charge_start: "2026-01-05T08:00:00.000-06:00",
+      charge_start_fs: fsTs("2026-01-05T08:00:00.000-06:00"),
+      charge_end: "2026-01-09T09:00:00.000-06:00",
+      charge_end_fs: fsTs("2026-01-09T09:00:00.000-06:00"),
       days_active: 5,
       days_charged: 5,
     },
