@@ -51,6 +51,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "formatChicagoDateTime", expr: "it.dates.formatChicagoDateTime(input)", desc: "A date and time — `\"September 1, 2026 · 2:05 PM\"`.", returns: "string" },
     { name: "formatChicagoShortDate", expr: "it.dates.formatChicagoShortDate(input)", desc: "A compact numeric date for a dense column — `\"9/1/26\"`.", returns: "string" },
     { name: "formatChicagoWeekdayDate", expr: "it.dates.formatChicagoWeekdayDate(input)", desc: "A weekday and a compact date — `\"Wed 9/1/26\"`.", returns: "string" },
+    { name: "formatChicagoWeekdayDateTime", expr: "it.dates.formatChicagoWeekdayDateTime(input)", desc: "A weekday, a compact date and the time — `\"Wed 9/1/26 · 9:00 AM\"`.", returns: "string" },
     { name: "getDefaultStartDate", expr: "it.dates.getDefaultStartDate(holidays)", desc: "Get the default start date for a rental (next business day at 9am). If after 8am today, defaults to tomorrow. Skips weekends and holidays.", returns: "Date" },
     { name: "getDuration", expr: "it.dates.getDuration(dates, holidays)", desc: "Calculate active and chargeable durations for an order's dates.", returns: "DurationResult" },
     { name: "getEndDateByChargePeriod", expr: "it.dates.getEndDateByChargePeriod(startDate, chargePeriod, holidays)", desc: "Calculate end date based on start date and number of chargeable days. Chargeable days exclude weekends and holidays.", returns: "Date" },

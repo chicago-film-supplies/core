@@ -23847,7 +23847,7 @@ singularized when `value === 1`.
 A date as a CFS document prints it — `"September 1, 2026"`.
 
 ⭐ **The zone is named zero times by the caller**, which is the whole point:
-these four helpers exist so a template cannot get it half-right. They also
+these five helpers exist so a template cannot get it half-right. They also
 make the document typography enforced rather than coincidental — `MMMM d,
 yyyy` was repeated by convention in five places, and nothing stopped a sixth
 family writing `MMM d, yyyy`.
@@ -23875,6 +23875,26 @@ A weekday and a compact date — `"Wed 9/1/26"`.
 
 The delivery/collection form. The weekday is load-bearing on those: a crew
 reads "is that a Saturday" off the page, and the date alone does not say.
+
+### `formatChicagoWeekdayDateTime(input: string): string`
+
+A weekday, a compact date and the time — `"Wed 9/1/26 · 9:00 AM"`.
+
+{@link formatChicagoWeekdayDate} with the minute appended, for a
+delivery/collection boundary on a document a customer or a crew acts on. The
+date alone answers "which day"; a truck arriving at 06:30 and one arriving at
+21:00 are the same row without this.
+
+⚠️ **It is the WEEKDAY form that gains a time, not {@link
+formatChicagoDateTime}.** That helper is the long prose form for a render
+stamp or a receipt, where the document has one date and room to spell it.
+These boundaries sit four-to-a-row in a fixed-width block, and they keep the
+weekday because a crew reads "is that a Saturday" off the page.
+
+⚠️ **A destination boundary is a POINT, not a window.** `delivery_end` equals
+`delivery_start` on every destination of the 190 prod orders sampled
+2026-09-09, so a caller renders one of the pair and never a range — a
+`9:00 AM – 9:00 AM` would be a window one instant wide that does not exist.
 
 ### `getDefaultStartDate(holidays: string[]): Date`
 

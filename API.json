@@ -10783,7 +10783,7 @@
           "kind": "function",
           "name": "formatChicagoDate",
           "signature": "formatChicagoDate(input: string): string",
-          "doc": "A date as a CFS document prints it — `\"September 1, 2026\"`.\n\n⭐ **The zone is named zero times by the caller**, which is the whole point:\nthese four helpers exist so a template cannot get it half-right. They also\nmake the document typography enforced rather than coincidental — `MMMM d,\nyyyy` was repeated by convention in five places, and nothing stopped a sixth\nfamily writing `MMM d, yyyy`.\n\n⚠️ **Add a fifth NAME here rather than hand-rolling a fifth pattern.** A\nhand-rolled call is not forbidden — `templates`' `lint:dates` requires only\nthat it name the zone — but a one-off pattern is how a document set stops\nlooking like one company's paperwork.",
+          "doc": "A date as a CFS document prints it — `\"September 1, 2026\"`.\n\n⭐ **The zone is named zero times by the caller**, which is the whole point:\nthese five helpers exist so a template cannot get it half-right. They also\nmake the document typography enforced rather than coincidental — `MMMM d,\nyyyy` was repeated by convention in five places, and nothing stopped a sixth\nfamily writing `MMM d, yyyy`.\n\n⚠️ **Add a fifth NAME here rather than hand-rolling a fifth pattern.** A\nhand-rolled call is not forbidden — `templates`' `lint:dates` requires only\nthat it name the zone — but a one-off pattern is how a document set stops\nlooking like one company's paperwork.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10808,6 +10808,14 @@
           "name": "formatChicagoWeekdayDate",
           "signature": "formatChicagoWeekdayDate(input: string): string",
           "doc": "A weekday and a compact date — `\"Wed 9/1/26\"`.\n\nThe delivery/collection form. The weekday is load-bearing on those: a crew\nreads \"is that a Saturday\" off the page, and the date alone does not say.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "formatChicagoWeekdayDateTime",
+          "signature": "formatChicagoWeekdayDateTime(input: string): string",
+          "doc": "A weekday, a compact date and the time — `\"Wed 9/1/26 · 9:00 AM\"`.\n\n{@link formatChicagoWeekdayDate} with the minute appended, for a\ndelivery/collection boundary on a document a customer or a crew acts on. The\ndate alone answers \"which day\"; a truck arriving at 06:30 and one arriving at\n21:00 are the same row without this.\n\n⚠️ **It is the WEEKDAY form that gains a time, not {@link\nformatChicagoDateTime}.** That helper is the long prose form for a render\nstamp or a receipt, where the document has one date and room to spell it.\nThese boundaries sit four-to-a-row in a fixed-width block, and they keep the\nweekday because a crew reads \"is that a Saturday\" off the page.\n\n⚠️ **A destination boundary is a POINT, not a window.** `delivery_end` equals\n`delivery_start` on every destination of the 190 prod orders sampled\n2026-09-09, so a caller renders one of the pair and never a range — a\n`9:00 AM – 9:00 AM` would be a window one instant wide that does not exist.",
           "paramTags": [],
           "returnsTag": null
         },
