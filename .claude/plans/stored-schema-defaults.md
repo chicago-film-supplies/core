@@ -4,7 +4,9 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` is DONE, all 14. The wider campaign (core#95) is unstarted.
+> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` is DONE, all 14, published as `beta.399`.
+> **No consumer is pinned to it yet — the pin sweep is the next action, see *What is left*.**
+> The wider campaign (core#95) is unstarted.
 >
 > **A `.default()` on a stored schema is inert and its only live effect is a hole.**
 > `validateBeforeWrite` discards `result.data` and persists the raw document, so the default never
@@ -81,6 +83,18 @@ and cannot be generalised. `version` is deliberately not bumped either.
 
 ## What is left
 
+- 🔴 **FIRST: the pin sweep. `@cfs/core@10.0.0-beta.399` is published and no consumer is on it.**
+  `ded4306` is a `feat!`, so this is a BREAKING beta — but the TypeScript surface did NOT move:
+  `OrderDocDatesType` is unchanged, only the Zod runtime stopped defaulting. So consumer *source*
+  should compile untouched, and the risk is entirely in **seeds and fixtures**.
+  ⚠️ **Expect the api-cloudrun pre-push suite to be where it surfaces, not `deno check`.** This is
+  the `.394` class verbatim: a hand-spelled seed omitting a dates key type-checks (untyped literal),
+  `test:units` cannot reach the ones needing live dev, and grepping the field name finds the seeds
+  that already MENTION it — the opposite of the dangerous set. `core/CLAUDE.md` § *Making a field
+  REQUIRED* step 5 has the census-by-receiver technique and the two approaches that do not work.
+  Three consumers: `api-cloudrun/deno.json` (~40 subpath specifiers, bump by pattern and verify with
+  `grep -c`), `manager/package.json` (one npm alias), `templates` (a Renovate PR).
+
 - **The wider campaign — ~250 `.default(` sites across `core/src/schemas/`**, concentrated in
   `order.ts` (60), `invoice.ts` (28), `credit-note.ts` (26), `product.ts` (22). Each needs the same
   two-part gate: writers compliant in source, AND a corpus census proving no stored document leans
@@ -102,10 +116,11 @@ and cannot be generalised. `version` is deliberately not bumped either.
 
 ## Context recommendation
 
-**Clear before starting the wider `.default(` campaign.** Nothing above needs this session's
-working context: the policy is in `core/CLAUDE.md`, the worked example is this doc, and the campaign
-starts from a fresh grep of `src/schemas/`. Carrying 250 sites' worth of investigation on top of an
-already-long session buys nothing.
+**Clear before the pin sweep, and again before the wider campaign.** Neither needs this session's
+working context — the policy is in `core/CLAUDE.md`, the worked example is this doc, and the
+campaign starts from a fresh grep of `src/schemas/`. ⚠️ The pin sweep in particular wants a *fresh*
+session rather than a tired one: its whole risk is a seed nobody grepped for, and that is exactly
+the kind of thing a long session skims.
 
 **Continue in-session** only for an immediate follow-up that leans on what is already loaded —
 picking up api-cloudrun#943's manager half, or measuring the second class named above.
