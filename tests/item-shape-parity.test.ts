@@ -145,7 +145,7 @@ Deno.test("the invoice grain carries the bounds it drifted from", () => {
 Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () => {
   // 🔴 The regression this catches is not a loosened bound — it is the refine
   // silently detaching again. It was attached to the exported alias
-  // (`InvoiceDocLineItemSchema`) while `InvoiceDocItem`'s union is built from
+  // (`InvoiceDocLineItem`) while `InvoiceDocItem`'s union is built from
   // the un-refined Inner, so `validateBeforeWrite` on an invoice never asked
   // whether a zero-priced line carried a charge. Asserted through the ITEM
   // UNION, which is what the document actually parses with — testing the

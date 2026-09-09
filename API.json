@@ -1953,7 +1953,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -1988,27 +1988,27 @@
         },
         {
           "kind": "interface",
-          "name": "InvoiceDocItemPrice",
-          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
+          "name": "InvoiceDocItemPriceType",
+          "declaration": "interface InvoiceDocItemPriceType {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
           "kind": "typeAlias",
           "name": "InvoiceDocItemType",
-          "declaration": "type InvoiceDocItemType = InvoiceDocLineItem | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;",
+          "declaration": "type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;",
           "doc": "Union of all item types stored in an invoice document."
         },
         {
-          "kind": "interface",
+          "kind": "variable",
           "name": "InvoiceDocLineItem",
-          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n}",
-          "doc": "A billable line item on an invoice."
+          "declaration": "const InvoiceDocLineItem: z.ZodType<InvoiceDocLineItemType>;",
+          "doc": ""
         },
         {
-          "kind": "variable",
-          "name": "InvoiceDocLineItemSchema",
-          "declaration": "const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem>;",
-          "doc": ""
+          "kind": "interface",
+          "name": "InvoiceDocLineItemType",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n}",
+          "doc": "A billable line item on an invoice."
         },
         {
           "kind": "variable",
@@ -2024,8 +2024,8 @@
         },
         {
           "kind": "interface",
-          "name": "InvoiceDocTotals",
-          "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n}",
+          "name": "InvoiceDocTotalsType",
+          "declaration": "interface InvoiceDocTotalsType {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n}",
           "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`api-cloudrun/scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock/{P}` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
         },
         {
@@ -2067,8 +2067,8 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
-          "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItemSchema`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
+          "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
           "kind": "variable",
@@ -5134,7 +5134,7 @@
         {
           "kind": "function",
           "name": "isInvoiceLineItem",
-          "signature": "isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem",
+          "signature": "isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItemType",
           "doc": "Type guard that narrows an invoice doc item to a billable line item (excludes\nstructural dividers).\n\nThe narrowing target is invoice-specific, but the DECISION is not: it is\n`ITEM_CONTRACTS[type].kind`, shared with `isLineItem` in `order.ts`. Written\nout by hand this read `!== \"destination\" && !== \"group\" && !== \"order\"` — one\nclause longer than the order guard, which is exactly the kind of difference\nthat looks like a bug and is not.",
           "paramTags": [],
           "returnsTag": null
@@ -6888,7 +6888,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotals;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -6911,27 +6911,27 @@
         },
         {
           "kind": "interface",
-          "name": "InvoiceDocItemPrice",
-          "declaration": "interface InvoiceDocItemPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
+          "name": "InvoiceDocItemPriceType",
+          "declaration": "interface InvoiceDocItemPriceType {\n  base_cents: number;\n  base_percent?: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount: DiscountType | null;\n  taxes: PriceModifierType[];\n  taxes_base?: TaxRefType[];\n  total_cents: number;\n}",
           "doc": "Pricing breakdown for a single invoice line item."
         },
         {
           "kind": "typeAlias",
           "name": "InvoiceDocItemType",
-          "declaration": "type InvoiceDocItemType = InvoiceDocLineItem | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;",
+          "declaration": "type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;",
           "doc": "Union of all item types stored in an invoice document."
         },
         {
-          "kind": "interface",
+          "kind": "variable",
           "name": "InvoiceDocLineItem",
-          "declaration": "interface InvoiceDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPrice;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n}",
-          "doc": "A billable line item on an invoice."
+          "declaration": "const InvoiceDocLineItem: z.ZodType<InvoiceDocLineItemType>;",
+          "doc": ""
         },
         {
-          "kind": "variable",
-          "name": "InvoiceDocLineItemSchema",
-          "declaration": "const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem>;",
-          "doc": ""
+          "kind": "interface",
+          "name": "InvoiceDocLineItemType",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n}",
+          "doc": "A billable line item on an invoice."
         },
         {
           "kind": "variable",
@@ -6947,8 +6947,8 @@
         },
         {
           "kind": "interface",
-          "name": "InvoiceDocTotals",
-          "declaration": "interface InvoiceDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n}",
+          "name": "InvoiceDocTotalsType",
+          "declaration": "interface InvoiceDocTotalsType {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n}",
           "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`api-cloudrun/scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock/{P}` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
         },
         {
@@ -6984,8 +6984,8 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPrice;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
-          "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItemSchema`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
+          "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
           "kind": "variable",
@@ -7001,8 +7001,8 @@
         },
         {
           "kind": "interface",
-          "name": "InvoiceItemInputPrice",
-          "declaration": "interface InvoiceItemInputPrice {\n  base_cents?: number;\n  base_percent?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
+          "name": "InvoiceItemInputPriceType",
+          "declaration": "interface InvoiceItemInputPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
           "doc": "Item price input — partial, server computes the rest."
         },
         {
@@ -7070,7 +7070,7 @@
         {
           "kind": "function",
           "name": "isInvoiceLineItem",
-          "signature": "isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem",
+          "signature": "isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItemType",
           "doc": "Type guard that narrows an invoice doc item to a billable line item (excludes\nstructural dividers).\n\nThe narrowing target is invoice-specific, but the DECISION is not: it is\n`ITEM_CONTRACTS[type].kind`, shared with `isLineItem` in `order.ts`. Written\nout by hand this read `!== \"destination\" && !== \"group\" && !== \"order\"` — one\nclause longer than the order guard, which is exactly the kind of difference\nthat looks like a bug and is not.",
           "paramTags": [],
           "returnsTag": null
@@ -11058,8 +11058,8 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPrice;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  path_substituted_for?: string[];\n}",
-          "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPrice from schemas to avoid type drift."
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  path_substituted_for?: string[];\n}",
+          "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPriceType from schemas to avoid type drift."
         },
         {
           "kind": "typeAlias",
@@ -11082,7 +11082,7 @@
         {
           "kind": "typeAlias",
           "name": "InvoiceTotals",
-          "declaration": "type InvoiceTotals = InvoiceDocTotals;",
+          "declaration": "type InvoiceTotals = InvoiceDocTotalsType;",
           "doc": ""
         },
         {
@@ -11523,7 +11523,7 @@
           "kind": "function",
           "name": "isItemSynced",
           "signature": "isItemSynced(prevOrderItem: LineItem, invoiceItem: InvoiceItem, orderDividerUid: string): boolean",
-          "doc": "Compare a previous order item to a current invoice item to detect overrides.\nReturns true if the invoice item is \"synced\" (matches the order item on all\nnon-invoice-only fields), false if it has been manually overridden.\n\n**It projects the order item first, then delegates to\n{@link invoiceItemsMatch} — and that projection IS core#52's fix.** The\nfunction used to compare an order-SHAPED item against an invoice-SHAPED one,\nkey sets before values; `stock_method` is required on a stored order line\n(`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItemSchema`,\nso the two sets could never be equal and an unchanged item reported\n\"overridden\" — for every real line item in the corpus, with nothing thrown.\n`price.replacement_cents` was a second, independent mismatch. The consequence\nwas that the order→invoice draft mirror propagated additions only: never an\nedit, never a removal. Filtering both sides did NOT fix it — those are\norder-only fields, not invoice-only overrides — so the fix had to be to\ncompare two invoice-shaped items, which is a real behavioural change to the\nmirror rather than a tidy-up.\n\n⚠️ The covering unit test's fixture omits `stock_method`, which is why it was\ngreen throughout. Keep it that way only if it is testing something else — a\nfixture repaired to make this green would delete the evidence.",
+          "doc": "Compare a previous order item to a current invoice item to detect overrides.\nReturns true if the invoice item is \"synced\" (matches the order item on all\nnon-invoice-only fields), false if it has been manually overridden.\n\n**It projects the order item first, then delegates to\n{@link invoiceItemsMatch} — and that projection IS core#52's fix.** The\nfunction used to compare an order-SHAPED item against an invoice-SHAPED one,\nkey sets before values; `stock_method` is required on a stored order line\n(`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItem`,\nso the two sets could never be equal and an unchanged item reported\n\"overridden\" — for every real line item in the corpus, with nothing thrown.\n`price.replacement_cents` was a second, independent mismatch. The consequence\nwas that the order→invoice draft mirror propagated additions only: never an\nedit, never a removal. Filtering both sides did NOT fix it — those are\norder-only fields, not invoice-only overrides — so the fix had to be to\ncompare two invoice-shaped items, which is a real behavioural change to the\nmirror rather than a tidy-up.\n\n⚠️ The covering unit test's fixture omits `stock_method`, which is why it was\ngreen throughout. Keep it that way only if it is testing something else — a\nfixture repaired to make this green would delete the evidence.",
           "paramTags": [
             {
               "name": "prevOrderItem",
@@ -11608,7 +11608,7 @@
           "kind": "function",
           "name": "projectOrderItemToInvoiceItem",
           "signature": "projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType",
-          "doc": "Project an order item to its invoice-item shape, scoped under an order divider.\n\nOrder items carry fields (`stock_method`, `order_number`, `uid_order`,\n`inclusion_type`, `uid_delivery`/`uid_collection` on line items,\n`price.replacement`) that `InvoiceDocLineItemSchema` (strict) rejects. Spreading\n`...orderItem` into an invoice item leaks them. Call this helper at every\norder → invoice boundary instead.\n\n🔴 **`zero_priced` is DECLARED on the invoice line now and is deliberately\nstill NOT projected — that pairing is the whole of stage one** (`manager#421`).\nThe schema accepts the key so a deployed reader can hold a document carrying\nit; nothing emits one yet, so no stored line changes and no verdict moves.\n\n⚠️ **Emitting it is gated on a BACKFILL, not on taste**, and the reason is\n`invoiceItemDifferences` comparing top-level KEY SETS. `buildOrderLine` writes\n`zero_priced: null` explicitly on every order line — see its own comment,\n*\"the server writes both as an explicit `null` so the optimistic row matches\nthe echo\"* — so the key is present on every order line without exception. Add\nit to this projection before the stored invoice lines carry it and EVERY\npaired line reports a key-set difference at once. That is not hypothetical:\nthis file already records it happening three times (`base_percent`,\n`crms_id`, `price.discount_percent` — 8,015 of 8,978 paired lines), which is\nwhy `coa_revenue`, `taxed_as` and `price.taxes_base` below are all spread\nCONDITIONALLY.\n\n**Stage two is therefore: backfill the corpus, then emit here, in that\norder** — and a conditional spread does NOT rescue it, because the condition\nis true for every line.\n\n`destination` and `group` items share their shape with the order doc, so they\npass through. Line items (and `transaction_fee`, which is stored as a\nline-item-shaped invoice item) are narrowed to the invoice-line-item keys.\n\nThe divider/line split is `ITEM_CONTRACTS[type].kind`, not a list of type\nliterals — so a new line type projects correctly the day it is added to the\ntable, instead of silently falling through to whichever branch happened to be\nlast. The per-branch KEY sets stay hand-written on purpose: they mirror\n`InvoiceDocLineItemSchema`'s strict shape, and deriving them from the contract\nwould make the table a second source of truth for the schema.\n\nMirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`\n(`createInvoice`) so sync output is shape-consistent with create output.\n\n⚠️ **Exported for probes and audits, and that is the point** (api-cloudrun#481).\nAnything asking *\"does this invoice line equal its order line?\"* has to compare\nagainst the PROJECTION, not the raw order item — the two differ by exactly the\norder-only fields this function drops. A prod probe that compared raw order\nprices invented a phantom `taxes_base: 8,360` difference across the corpus,\nbecause `taxes_base` is order-only and never reaches an invoice line. There is\nno way to reimplement this faithfully outside the module, so the answer is to\nexport it rather than to keep re-deriving it. Paired with\n{@link invoiceItemDifferences}, which is the other half a probe needs.",
+          "doc": "Project an order item to its invoice-item shape, scoped under an order divider.\n\nOrder items carry fields (`stock_method`, `order_number`, `uid_order`,\n`inclusion_type`, `uid_delivery`/`uid_collection` on line items,\n`price.replacement`) that `InvoiceDocLineItem` (strict) rejects. Spreading\n`...orderItem` into an invoice item leaks them. Call this helper at every\norder → invoice boundary instead.\n\n🔴 **`zero_priced` is DECLARED on the invoice line now and is deliberately\nstill NOT projected — that pairing is the whole of stage one** (`manager#421`).\nThe schema accepts the key so a deployed reader can hold a document carrying\nit; nothing emits one yet, so no stored line changes and no verdict moves.\n\n⚠️ **Emitting it is gated on a BACKFILL, not on taste**, and the reason is\n`invoiceItemDifferences` comparing top-level KEY SETS. `buildOrderLine` writes\n`zero_priced: null` explicitly on every order line — see its own comment,\n*\"the server writes both as an explicit `null` so the optimistic row matches\nthe echo\"* — so the key is present on every order line without exception. Add\nit to this projection before the stored invoice lines carry it and EVERY\npaired line reports a key-set difference at once. That is not hypothetical:\nthis file already records it happening three times (`base_percent`,\n`crms_id`, `price.discount_percent` — 8,015 of 8,978 paired lines), which is\nwhy `coa_revenue`, `taxed_as` and `price.taxes_base` below are all spread\nCONDITIONALLY.\n\n**Stage two is therefore: backfill the corpus, then emit here, in that\norder** — and a conditional spread does NOT rescue it, because the condition\nis true for every line.\n\n`destination` and `group` items share their shape with the order doc, so they\npass through. Line items (and `transaction_fee`, which is stored as a\nline-item-shaped invoice item) are narrowed to the invoice-line-item keys.\n\nThe divider/line split is `ITEM_CONTRACTS[type].kind`, not a list of type\nliterals — so a new line type projects correctly the day it is added to the\ntable, instead of silently falling through to whichever branch happened to be\nlast. The per-branch KEY sets stay hand-written on purpose: they mirror\n`InvoiceDocLineItem`'s strict shape, and deriving them from the contract\nwould make the table a second source of truth for the schema.\n\nMirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`\n(`createInvoice`) so sync output is shape-consistent with create output.\n\n⚠️ **Exported for probes and audits, and that is the point** (api-cloudrun#481).\nAnything asking *\"does this invoice line equal its order line?\"* has to compare\nagainst the PROJECTION, not the raw order item — the two differ by exactly the\norder-only fields this function drops. A prod probe that compared raw order\nprices invented a phantom `taxes_base: 8,360` difference across the corpus,\nbecause `taxes_base` is order-only and never reaches an invoice line. There is\nno way to reimplement this faithfully outside the module, so the answer is to\nexport it rather than to keep re-deriving it. Paired with\n{@link invoiceItemDifferences}, which is the other half a probe needs.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12481,7 +12481,7 @@
           "kind": "function",
           "name": "collectSubstitutionAnchors",
           "signature": "collectSubstitutionAnchors(rows: readonly MaybeSubstitution[]): SubstitutionAnchor[]",
-          "doc": "Reduce a row set to its substitution anchors.\n\n⚠️ A row with no `path_substituted_for` is not an anchor even if it sits\ninside a substituted subtree — the components of Y explain nothing, they are\nthemselves explained. Only the row that names X licenses anything.\n\n🔴 **An EMPTY path on either side is refused, and it is the sharp case.**\n`[]` is a prefix of every path, so an anchor holding one turns\n{@link isRemovedBySubstitution} and {@link isInSubstitutedSubtree} into\n`true` for the entire document — every guard relaxed at once, every audit\ncertifying its whole corpus as explained. The failure is silent and it is in\nthe permissive direction, which is why this refuses rather than warns.\n\n⚠️ **It is reachable, not theoretical.** The field is `.optional()` on both\nsurfaces with no `.min(1)`, and `getInitialValues` materializes an optional\narray as `[]` — so any line seeded from the schema carries an empty one.\nMeasured: a `getInitialValues(InvoiceDocLineItemSchema)` fixture made a\nsubstitution \"explain\" the removal of a row sharing no path segment with it.\nThe wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to\nreject an empty `path_substituted_for` on submission (it resolves to no order\nitem), but the audits and projections read STORED rows and had no such\nbackstop.\n\n⭐ Refusing here rather than in the schema is deliberate: `.min(1)` would make\na form seed fail to parse, and the defect is not that `[]` can be written —\nit is that `[]` must not LICENSE anything.",
+          "doc": "Reduce a row set to its substitution anchors.\n\n⚠️ A row with no `path_substituted_for` is not an anchor even if it sits\ninside a substituted subtree — the components of Y explain nothing, they are\nthemselves explained. Only the row that names X licenses anything.\n\n🔴 **An EMPTY path on either side is refused, and it is the sharp case.**\n`[]` is a prefix of every path, so an anchor holding one turns\n{@link isRemovedBySubstitution} and {@link isInSubstitutedSubtree} into\n`true` for the entire document — every guard relaxed at once, every audit\ncertifying its whole corpus as explained. The failure is silent and it is in\nthe permissive direction, which is why this refuses rather than warns.\n\n⚠️ **It is reachable, not theoretical.** The field is `.optional()` on both\nsurfaces with no `.min(1)`, and `getInitialValues` materializes an optional\narray as `[]` — so any line seeded from the schema carries an empty one.\nMeasured: a `getInitialValues(InvoiceDocLineItem)` fixture made a\nsubstitution \"explain\" the removal of a row sharing no path segment with it.\nThe wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to\nreject an empty `path_substituted_for` on submission (it resolves to no order\nitem), but the audits and projections read STORED rows and had no such\nbackstop.\n\n⭐ Refusing here rather than in the schema is deliberate: `.min(1)` would make\na form seed fail to parse, and the defect is not that `[]` can be written —\nit is that `[]` must not LICENSE anything.",
           "paramTags": [
             {
               "name": "rows",
@@ -12913,7 +12913,7 @@
         {
           "kind": "function",
           "name": "buildCustomInvoiceLine",
-          "signature": "buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, \"uidOrder\">): InvoiceDocLineItem",
+          "signature": "buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, \"uidOrder\">): InvoiceDocLineItemType",
           "doc": "Build a custom (no-product) invoice line item.\n\nAn invoice line is a strictly smaller shape than an order line: no\n`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`/\n`zero_priced`, and no `price.replacement_cents` — an invoice does not track\nreplacement value. This used to claim it \"strips order-only fields\" while the\n`initial` spread put `stock_method: \"bulk\"`, `order_number: 0` and\n`uid_order: \"\"` straight back in; constructing the object outright is what\nmakes the docblock true.",
           "paramTags": [],
           "returnsTag": null

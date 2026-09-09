@@ -4334,7 +4334,7 @@ interface Invoice {
   organization: DocumentOrganizationSnapshotType;
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
-  totals: InvoiceDocTotals;
+  totals: InvoiceDocTotalsType;
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -4432,12 +4432,12 @@ wasn't. See `OrderDocItem`.
 const InvoiceDocItem: z.ZodType<InvoiceDocItemType>;
 ```
 
-### `InvoiceDocItemPrice`
+### `InvoiceDocItemPriceType`
 
 Pricing breakdown for a single invoice line item.
 
 ```ts
-interface InvoiceDocItemPrice {
+interface InvoiceDocItemPriceType {
   base_cents: number;
   base_percent?: number | null;
   chargeable_days: number | null;
@@ -4456,21 +4456,27 @@ interface InvoiceDocItemPrice {
 Union of all item types stored in an invoice document.
 
 ```ts
-type InvoiceDocItemType = InvoiceDocLineItem | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
+type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
 ```
 
 ### `InvoiceDocLineItem`
 
+```ts
+const InvoiceDocLineItem: z.ZodType<InvoiceDocLineItemType>;
+```
+
+### `InvoiceDocLineItemType`
+
 A billable line item on an invoice.
 
 ```ts
-interface InvoiceDocLineItem {
+interface InvoiceDocLineItemType {
   uid: string;
   type: DocLineItemTypeType;
   name: string;
   description: string;
   quantity: number;
-  price: InvoiceDocItemPrice;
+  price: InvoiceDocItemPriceType;
   path: string[];
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
@@ -4482,12 +4488,6 @@ interface InvoiceDocLineItem {
   crms_id?: number | string | null;
   path_substituted_for?: string[];
 }
-```
-
-### `InvoiceDocLineItemSchema`
-
-```ts
-const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem>;
 ```
 
 ### `InvoiceDocOrderItem`
@@ -4512,7 +4512,7 @@ interface InvoiceDocOrderItemType {
 }
 ```
 
-### `InvoiceDocTotals`
+### `InvoiceDocTotalsType`
 
 Invoice-level totals with settlement tracking.
 
@@ -4529,7 +4529,7 @@ rebuild is deliberately **partial**: it repairs the settlement-fed fields
 without re-pricing anything.
 
 ```ts
-interface InvoiceDocTotals {
+interface InvoiceDocTotalsType {
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount_amount_cents: number;
@@ -4604,7 +4604,7 @@ const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType>;
 ### `InvoiceItemInputLineType`
 
 A billable invoice line as a client sends it — the input mirror of
-`InvoiceDocLineItemSchema`.
+`InvoiceDocLineItem`.
 
 `uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The
 flat schema this replaces accepted all three on any item; `buildInvoiceItems`
@@ -4620,7 +4620,7 @@ interface InvoiceItemInputLineType {
   name?: string;
   description?: string;
   quantity?: number;
-  price?: InvoiceItemInputPrice;
+  price?: InvoiceItemInputPriceType;
   path?: string[];
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
@@ -11515,7 +11515,7 @@ so it answers `false` here — correctly, because it is not a number. The 73
 declarations backed by one are exempted structurally by their callers, on the
 `firestoreTimestamp` meta marker rather than on a name.
 
-### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem`
+### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItemType`
 
 Type guard that narrows an invoice doc item to a billable line item (excludes
 structural dividers).
@@ -15094,7 +15094,7 @@ interface Invoice {
   organization: DocumentOrganizationSnapshotType;
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
-  totals: InvoiceDocTotals;
+  totals: InvoiceDocTotalsType;
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -15164,12 +15164,12 @@ wasn't. See `OrderDocItem`.
 const InvoiceDocItem: z.ZodType<InvoiceDocItemType>;
 ```
 
-### `InvoiceDocItemPrice`
+### `InvoiceDocItemPriceType`
 
 Pricing breakdown for a single invoice line item.
 
 ```ts
-interface InvoiceDocItemPrice {
+interface InvoiceDocItemPriceType {
   base_cents: number;
   base_percent?: number | null;
   chargeable_days: number | null;
@@ -15188,21 +15188,27 @@ interface InvoiceDocItemPrice {
 Union of all item types stored in an invoice document.
 
 ```ts
-type InvoiceDocItemType = InvoiceDocLineItem | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
+type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
 ```
 
 ### `InvoiceDocLineItem`
 
+```ts
+const InvoiceDocLineItem: z.ZodType<InvoiceDocLineItemType>;
+```
+
+### `InvoiceDocLineItemType`
+
 A billable line item on an invoice.
 
 ```ts
-interface InvoiceDocLineItem {
+interface InvoiceDocLineItemType {
   uid: string;
   type: DocLineItemTypeType;
   name: string;
   description: string;
   quantity: number;
-  price: InvoiceDocItemPrice;
+  price: InvoiceDocItemPriceType;
   path: string[];
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
@@ -15214,12 +15220,6 @@ interface InvoiceDocLineItem {
   crms_id?: number | string | null;
   path_substituted_for?: string[];
 }
-```
-
-### `InvoiceDocLineItemSchema`
-
-```ts
-const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem>;
 ```
 
 ### `InvoiceDocOrderItem`
@@ -15244,7 +15244,7 @@ interface InvoiceDocOrderItemType {
 }
 ```
 
-### `InvoiceDocTotals`
+### `InvoiceDocTotalsType`
 
 Invoice-level totals with settlement tracking.
 
@@ -15261,7 +15261,7 @@ rebuild is deliberately **partial**: it repairs the settlement-fed fields
 without re-pricing anything.
 
 ```ts
-interface InvoiceDocTotals {
+interface InvoiceDocTotalsType {
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount_amount_cents: number;
@@ -15330,7 +15330,7 @@ const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType>;
 ### `InvoiceItemInputLineType`
 
 A billable invoice line as a client sends it — the input mirror of
-`InvoiceDocLineItemSchema`.
+`InvoiceDocLineItem`.
 
 `uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The
 flat schema this replaces accepted all three on any item; `buildInvoiceItems`
@@ -15346,7 +15346,7 @@ interface InvoiceItemInputLineType {
   name?: string;
   description?: string;
   quantity?: number;
-  price?: InvoiceItemInputPrice;
+  price?: InvoiceItemInputPriceType;
   path?: string[];
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
@@ -15377,12 +15377,12 @@ interface InvoiceItemInputOrderType {
 }
 ```
 
-### `InvoiceItemInputPrice`
+### `InvoiceItemInputPriceType`
 
 Item price input — partial, server computes the rest.
 
 ```ts
-interface InvoiceItemInputPrice {
+interface InvoiceItemInputPriceType {
   base_cents?: number;
   base_percent?: number | null;
   chargeable_days?: number | null;
@@ -15503,7 +15503,7 @@ Read this rather than the column, so the manager cannot offer a button the
 server will 400 — and so a status outside the vocabulary answers `false`
 instead of throwing on an undefined lookup.
 
-### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem`
+### `isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItemType`
 
 Type guard that narrows an invoice doc item to a billable line item (excludes
 structural dividers).
@@ -24423,13 +24423,13 @@ Extends LineItem with properties that should be carried forward during sync
 and fields needed for Xero mapping.
 
 `price` accepts both the utility's intermediate PriceObject and the full
-InvoiceDocItemPrice from schemas to avoid type drift.
+InvoiceDocItemPriceType from schemas to avoid type drift.
 
 ```ts
 interface InvoiceItem {
   uid_order?: string | null;
   description?: string;
-  price?: PriceObject | InvoiceDocItemPrice;
+  price?: PriceObject | InvoiceDocItemPriceType;
   coa_revenue?: COARevenueType | null;
   tracking_category?: string | null;
   xero_id?: string | null;
@@ -24478,7 +24478,7 @@ interface InvoiceSyncExplanation {
 ### `InvoiceTotals`
 
 ```ts
-type InvoiceTotals = InvoiceDocTotals;
+type InvoiceTotals = InvoiceDocTotalsType;
 ```
 
 ### `ItemPathIssue`
@@ -25355,7 +25355,7 @@ non-invoice-only fields), false if it has been manually overridden.
 {@link invoiceItemsMatch} — and that projection IS core#52's fix.** The
 function used to compare an order-SHAPED item against an invoice-SHAPED one,
 key sets before values; `stock_method` is required on a stored order line
-(`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItemSchema`,
+(`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItem`,
 so the two sets could never be equal and an unchanged item reported
 "overridden" — for every real line item in the corpus, with nothing thrown.
 `price.replacement_cents` was a second, independent mismatch. The consequence
@@ -25421,7 +25421,7 @@ Project an order item to its invoice-item shape, scoped under an order divider.
 
 Order items carry fields (`stock_method`, `order_number`, `uid_order`,
 `inclusion_type`, `uid_delivery`/`uid_collection` on line items,
-`price.replacement`) that `InvoiceDocLineItemSchema` (strict) rejects. Spreading
+`price.replacement`) that `InvoiceDocLineItem` (strict) rejects. Spreading
 `...orderItem` into an invoice item leaks them. Call this helper at every
 order → invoice boundary instead.
 
@@ -25454,7 +25454,7 @@ The divider/line split is `ITEM_CONTRACTS[type].kind`, not a list of type
 literals — so a new line type projects correctly the day it is added to the
 table, instead of silently falling through to whichever branch happened to be
 last. The per-branch KEY sets stay hand-written on purpose: they mirror
-`InvoiceDocLineItemSchema`'s strict shape, and deriving them from the contract
+`InvoiceDocLineItem`'s strict shape, and deriving them from the contract
 would make the table a second source of truth for the schema.
 
 Mirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`
@@ -27301,7 +27301,7 @@ the permissive direction, which is why this refuses rather than warns.
 ⚠️ **It is reachable, not theoretical.** The field is `.optional()` on both
 surfaces with no `.min(1)`, and `getInitialValues` materializes an optional
 array as `[]` — so any line seeded from the schema carries an empty one.
-Measured: a `getInitialValues(InvoiceDocLineItemSchema)` fixture made a
+Measured: a `getInitialValues(InvoiceDocLineItem)` fixture made a
 substitution "explain" the removal of a row sharing no path segment with it.
 The wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to
 reject an empty `path_substituted_for` on submission (it resolves to no order
@@ -28066,7 +28066,7 @@ interface OrderLineBuildOptions {
 }
 ```
 
-### `buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, "uidOrder">): InvoiceDocLineItem`
+### `buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, "uidOrder">): InvoiceDocLineItemType`
 
 Build a custom (no-product) invoice line item.
 

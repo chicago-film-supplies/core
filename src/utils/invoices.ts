@@ -84,7 +84,7 @@ import {
   type SubstitutionAnchor,
 } from "./substitutions.ts";
 import { mapPathsAcrossRebuild, pairItemsByUidOccurrence } from "./item-pairing.ts";
-import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPrice, InvoiceDocItemType, InvoiceDocLineItem, InvoiceDocTotals, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   isDividerItemType,
@@ -129,12 +129,12 @@ export function flattenForXero(items: LineItem[]): LineItem[] {
  * and fields needed for Xero mapping.
  *
  * `price` accepts both the utility's intermediate PriceObject and the full
- * InvoiceDocItemPrice from schemas to avoid type drift.
+ * InvoiceDocItemPriceType from schemas to avoid type drift.
  */
 export interface InvoiceItem extends LineItem {
   uid_order?: string | null;
   description?: string;
-  price?: PriceObject | InvoiceDocItemPrice;
+  price?: PriceObject | InvoiceDocItemPriceType;
   coa_revenue?: COARevenueType | null;
   tracking_category?: string | null;
   xero_id?: string | null;
@@ -145,7 +145,7 @@ export interface InvoiceItem extends LineItem {
   // four hand-maintained copies of {@link INVOICE_ONLY_ITEM_FIELDS}.
   crms_opportunity_id?: number | null;
   /**
-   * @see `InvoiceDocLineItem.path_substituted_for`. Declared here as well as on
+   * @see `InvoiceDocLineItemType.path_substituted_for`. Declared here as well as on
    * the stored schema because {@link InvoiceOnlyOverrides} is
    * `Pick<InvoiceItem, …>` — a member of {@link INVOICE_ONLY_ITEM_FIELDS}
    * missing from this shadow does not compile, which is the guard the
@@ -156,8 +156,8 @@ export interface InvoiceItem extends LineItem {
 
 // ── Invoice totals ──────────────────────────────────────────────
 
-/** @see {@link InvoiceDocTotals} from `@cfs/core/schemas` */
-export type InvoiceTotals = InvoiceDocTotals;
+/** @see {@link InvoiceDocTotalsType} from `@cfs/core/schemas` */
+export type InvoiceTotals = InvoiceDocTotalsType;
 
 /**
  * Calculate aggregated pricing totals for an invoice.
@@ -468,7 +468,7 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   // A `satisfies` rather than a test because it costs nothing and cannot be
   // skipped, and because exporting the list purely to assert it from `tests/`
   // would widen `@cfs/core/utils/invoices` for a guard.
-] as const satisfies readonly (keyof InvoiceDocLineItem)[];
+] as const satisfies readonly (keyof InvoiceDocLineItemType)[];
 
 /** Membership form of {@link INVOICE_ONLY_ITEM_FIELDS}, for key filtering. */
 const INVOICE_ONLY_ITEM_FIELD_SET: ReadonlySet<string> = new Set(INVOICE_ONLY_ITEM_FIELDS);
@@ -541,7 +541,7 @@ export function buildInvoiceDestinationDivider(
  *
  * Order items carry fields (`stock_method`, `order_number`, `uid_order`,
  * `inclusion_type`, `uid_delivery`/`uid_collection` on line items,
- * `price.replacement`) that `InvoiceDocLineItemSchema` (strict) rejects. Spreading
+ * `price.replacement`) that `InvoiceDocLineItem` (strict) rejects. Spreading
  * `...orderItem` into an invoice item leaks them. Call this helper at every
  * order → invoice boundary instead.
  *
@@ -574,7 +574,7 @@ export function buildInvoiceDestinationDivider(
  * literals — so a new line type projects correctly the day it is added to the
  * table, instead of silently falling through to whichever branch happened to be
  * last. The per-branch KEY sets stay hand-written on purpose: they mirror
- * `InvoiceDocLineItemSchema`'s strict shape, and deriving them from the contract
+ * `InvoiceDocLineItem`'s strict shape, and deriving them from the contract
  * would make the table a second source of truth for the schema.
  *
  * Mirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`
@@ -613,7 +613,7 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     };
   }
 
-  const p = (item.price ?? {}) as Partial<InvoiceDocItemPrice>;
+  const p = (item.price ?? {}) as Partial<InvoiceDocItemPriceType>;
   return {
     uid: item.uid,
     type: item.type,
@@ -731,7 +731,7 @@ function stableStringify(value: unknown): string {
  * (That key is gone from the schema and the corpus as of api-cloudrun#480; the
  * structural comparison is what makes the NEXT such key a non-event.)
  * The `base_percent` encoding split — the projection emits an explicit `null`,
- * a stored CRMS line omits the key, and `InvoiceDocItemPriceSchema` blesses
+ * a stored CRMS line omits the key, and `InvoiceDocItemPrice` blesses
  * both (`.nullable().optional()`) — is the same class.
  *
  * **Absent ≡ null, with no list of which keys it applies to.** A null-valued
@@ -1048,7 +1048,7 @@ export function explainInvoiceItemDifferences(
  * {@link invoiceItemsMatch} — and that projection IS core#52's fix.** The
  * function used to compare an order-SHAPED item against an invoice-SHAPED one,
  * key sets before values; `stock_method` is required on a stored order line
- * (`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItemSchema`,
+ * (`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItem`,
  * so the two sets could never be equal and an unchanged item reported
  * "overridden" — for every real line item in the corpus, with nothing thrown.
  * `price.replacement_cents` was a second, independent mismatch. The consequence

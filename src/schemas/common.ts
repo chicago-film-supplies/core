@@ -1492,7 +1492,7 @@ export interface SettlementContract {
    * the semantic name.**
    *
    * The `_cents` suffix is not decoration that drifted in from the migration:
-   * these literals must keep matching a real field on `InvoiceDocTotals`, and
+   * these literals must keep matching a real field on `InvoiceDocTotalsType`, and
    * "renaming them back to the semantic name" is precisely how a literal comes
    * to name a field that no longer exists. Verified when the suffix landed —
    * every consumer compares this as a literal (`=== "amount_paid_cents"`) and

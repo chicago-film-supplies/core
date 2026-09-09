@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItemSchema, InvoiceDocOrderItem, InvoiceItemInputLine, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
+import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItem, InvoiceDocOrderItem, InvoiceItemInputLine, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
 import { derivePaymentStatus } from "../src/utils/invoices.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -8,7 +8,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 // `""`, which it rejects. Supply a real id, as every prod doc carries one.
 const invoiceBase = { ...getInitialValues(InvoiceSchema), uid_thread: "testthread0000000001" } as Record<string, unknown>;
 const totalsBase = invoiceBase.totals as Record<string, unknown>;
-const lineItemBase = getInitialValues(InvoiceDocLineItemSchema) as Record<string, unknown>;
+const lineItemBase = getInitialValues(InvoiceDocLineItem) as Record<string, unknown>;
 const priceBase = (lineItemBase as { price: Record<string, unknown> }).price;
 
 const validDocDates = {
@@ -1085,7 +1085,7 @@ Deno.test("path_substituted_for: absent is the ordinary state, and it parses", (
     path: ["Item0000000000000001"],
   } as Record<string, unknown>;
   assert(!("path_substituted_for" in withoutKey));
-  const parsed = InvoiceDocLineItemSchema.safeParse(withoutKey);
+  const parsed = InvoiceDocLineItem.safeParse(withoutKey);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
 });
 
@@ -1103,11 +1103,11 @@ Deno.test("path_substituted_for: a path is accepted and NULL is refused", () => 
     path_substituted_for: ["Destination000000001", "Item0000000000000001"],
   } as Record<string, unknown>;
 
-  const ok = InvoiceDocLineItemSchema.safeParse(line);
+  const ok = InvoiceDocLineItem.safeParse(line);
   assertEquals(ok.success, true, JSON.stringify(ok.success ? {} : ok.error.issues));
 
   assertEquals(
-    InvoiceDocLineItemSchema.safeParse({ ...line, path_substituted_for: null }).success,
+    InvoiceDocLineItem.safeParse({ ...line, path_substituted_for: null }).success,
     false,
   );
 });
@@ -1163,9 +1163,9 @@ Deno.test("the input schema refuses everything the document schema refuses (core
   // vacuously if a document bound is ever relaxed — that control is the half
   // that makes this a guard rather than a restatement.
   // deno-lint-ignore no-explicit-any
-  const docLine = (InvoiceDocLineItemSchema as any)._zod.def.shape ??
+  const docLine = (InvoiceDocLineItem as any)._zod.def.shape ??
     // deno-lint-ignore no-explicit-any
-    (InvoiceDocLineItemSchema as any)._zod.def.innerType._zod.def.shape;
+    (InvoiceDocLineItem as any)._zod.def.innerType._zod.def.shape;
   // deno-lint-ignore no-explicit-any
   const inLine = (InvoiceItemInputLine as any)._zod.def.innerType?._zod.def.shape ??
     // deno-lint-ignore no-explicit-any

@@ -244,7 +244,7 @@ export const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[] = statusesWh
 // ── Item price ───────────────────────────────────────────────────
 
 /** Pricing breakdown for a single invoice line item. */
-export interface InvoiceDocItemPrice {
+export interface InvoiceDocItemPriceType {
   base_cents: number;
   /** See {@link OrderDocItemPriceType.base_percent} — same biconditional. */
   base_percent?: number | null;
@@ -275,7 +275,7 @@ export interface InvoiceDocItemPrice {
   total_cents: number;
 }
 
-const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject({
+const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
   base_cents: z.int().default(0).meta({ column: true, label: "Base Price" }),
   base_percent: z.number().nullable().optional(),
   // 🔴 `.int()`, matching `OrderDocItemPrice.chargeable_days`. A count of days
@@ -300,13 +300,13 @@ const InvoiceDocItemPriceSchema: z.ZodType<InvoiceDocItemPrice> = z.strictObject
 // ── Line items ───────────────────────────────────────────────────
 
 /** A billable line item on an invoice. */
-export interface InvoiceDocLineItem {
+export interface InvoiceDocLineItemType {
   uid: string;
   type: DocLineItemTypeType;
   name: string;
   description: string;
   quantity: number;
-  price: InvoiceDocItemPrice;
+  price: InvoiceDocItemPriceType;
   path: string[];
   /**
    * Was this line included at no charge as part of its parent product?
@@ -395,7 +395,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   name: LineItemCore.name,
   description: LineItemCore.description,
   quantity: LineItemCore.quantity,
-  price: InvoiceDocItemPriceSchema,
+  price: InvoiceDocItemPrice,
   path: LineItemCore.path,
   zero_priced: LineItemCore.zero_priced,
   coa_revenue: COARevenueEnum.nullable().optional(),
@@ -423,7 +423,7 @@ const InvoiceDocLineItemInner = z.strictObject({
 // `zero_priced === true` with a non-zero `base_cents`, and 0 across the fixture
 // corpus. This is a tightening of what PARSES, not a new field — it belongs in
 // the census-gated set even though nothing about it looks like a migration.
-export const InvoiceDocLineItemSchema: z.ZodType<InvoiceDocLineItem> = InvoiceDocLineItemInner;
+export const InvoiceDocLineItem: z.ZodType<InvoiceDocLineItemType> = InvoiceDocLineItemInner;
 
 // ── Order divider ───────────────────────────────────────────────
 
@@ -454,7 +454,7 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> = InvoiceDo
 // ── Item union ──────────────────────────────────────────────────
 
 /** Union of all item types stored in an invoice document. */
-export type InvoiceDocItemType = InvoiceDocLineItem | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
+export type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;
 
 /**
  * Zod schema for any invoice document item — discriminated on `type`.
@@ -480,7 +480,7 @@ export const InvoiceDocItem: z.ZodType<InvoiceDocItemType> = z.discriminatedUnio
  * clause longer than the order guard, which is exactly the kind of difference
  * that looks like a bug and is not.
  */
-export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItem {
+export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocLineItemType {
   return isLineItemType(item.type);
 }
 
@@ -501,7 +501,7 @@ export function isInvoiceLineItem(item: InvoiceDocItemType): item is InvoiceDocL
  * rebuild is deliberately **partial**: it repairs the settlement-fed fields
  * without re-pricing anything.
  */
-export interface InvoiceDocTotals {
+export interface InvoiceDocTotalsType {
   subtotal_cents: number;
   subtotal_discounted_cents: number;
   discount_amount_cents: number;
@@ -546,7 +546,7 @@ export interface InvoiceDocTotals {
 // `discount_amount_cents` THIRD where the order puts it first, and a schema's
 // key order is its Firestore column order. `tests/totals-parity.test.ts` holds
 // the anti-drift guarantee the syntax cannot.
-const InvoiceDocTotalsSchema: z.ZodType<InvoiceDocTotals> = z.strictObject({
+const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
   subtotal_cents: TotalsCore.subtotal_cents,
   subtotal_discounted_cents: TotalsCore.subtotal_discounted_cents,
   discount_amount_cents: TotalsCore.discount_amount_cents,
@@ -786,7 +786,7 @@ export interface Invoice {
    */
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
-  totals: InvoiceDocTotals;
+  totals: InvoiceDocTotalsType;
   xero_id: string | null;
   uploadcare_uuid: string | null;
   pdf_generated_at: FirestoreTimestampType | null;
@@ -894,7 +894,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   // and must NOT be driven down.
   destinations: z.array(InvoiceDocDestination),
   items: z.array(InvoiceDocItem).default([]).meta({ label: "Item" }),
-  totals: InvoiceDocTotalsSchema,
+  totals: InvoiceDocTotals,
   xero_id: z.uuid().nullable(),
   uploadcare_uuid: uploadcareRef(z.string().nullable().default(null)),
   pdf_generated_at: FirestoreTimestamp.nullable().default(null),
@@ -978,7 +978,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
 // ── Input schemas ────────────────────────────────────────────────
 
 /** Item price input — partial, server computes the rest. */
-export interface InvoiceItemInputPrice {
+export interface InvoiceItemInputPriceType {
   base_cents?: number;
   base_percent?: number | null;
   chargeable_days?: number | null;
@@ -987,10 +987,10 @@ export interface InvoiceItemInputPrice {
   taxes?: Array<{ uid: string }>;
 }
 
-const InvoiceItemInputPriceSchema: z.ZodType<InvoiceItemInputPrice> = z.object({
+const InvoiceItemInputPrice: z.ZodType<InvoiceItemInputPriceType> = z.object({
   base_cents: z.int().optional(),
   base_percent: z.number().nullable().optional(),
-  // `.int()` to match the stored `InvoiceDocItemPrice.chargeable_days`. A count
+  // `.int()` to match the stored `InvoiceDocItemPriceType.chargeable_days`. A count
   // of days is integral — `CLAUDE.md` § *Stored money is integer cents*.
   chargeable_days: z.int().nullable().optional(),
   formula: PriceFormulaEnum.optional(),
@@ -1000,7 +1000,7 @@ const InvoiceItemInputPriceSchema: z.ZodType<InvoiceItemInputPrice> = z.object({
 
 /**
  * A billable invoice line as a client sends it — the input mirror of
- * `InvoiceDocLineItemSchema`.
+ * `InvoiceDocLineItem`.
  *
  * `uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The
  * flat schema this replaces accepted all three on any item; `buildInvoiceItems`
@@ -1015,14 +1015,14 @@ export interface InvoiceItemInputLineType {
   name?: string;
   description?: string;
   quantity?: number;
-  price?: InvoiceItemInputPrice;
+  price?: InvoiceItemInputPriceType;
   path?: string[];
   coa_revenue?: COARevenueType | null;
   /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
   taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
   /**
-   * @see `InvoiceDocLineItem.path_substituted_for`. Operator-authored, so it
+   * @see `InvoiceDocLineItemType.path_substituted_for`. Operator-authored, so it
    * needs an input channel: this schema is a plain `z.object` and STRIPS
    * unknown keys, and `buildInvoiceItems` rebuilds each stored line from typed
    * fields — so a field absent here is silently dropped on every PUT rather
@@ -1065,7 +1065,7 @@ const InvoiceItemInputLineInner = z.object({
   // where the type-derived zero is wrong. Same reasoning `9435a15` recorded for
   // the destination pair's two flags.
   quantity: z.int().min(0).optional(),
-  price: InvoiceItemInputPriceSchema.optional(),
+  price: InvoiceItemInputPrice.optional(),
   path: z.array(ItemUid).optional(),
   coa_revenue: COARevenueEnum.nullable().optional(),
   taxed_as: TaxedAsEnum.nullable().optional(),

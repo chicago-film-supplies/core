@@ -1,5 +1,5 @@
 import { assertEquals, assertExists } from "@std/assert";
-import { getInitialValues, InvoiceDocLineItemSchema, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
+import { getInitialValues, InvoiceDocLineItem, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
 import { calculateOrderTotals, computeItemPaths, sumDocumentTotals, validateItemPaths } from "../src/utils/orders.ts";
 import {
   adoptOrderDividerStructure,
@@ -72,7 +72,7 @@ const NO_DOC_DATES: OrderDocDatesType = {
 
 // ── Schema bases ────────────────────────────────────────────────
 
-const lineItemBase = getInitialValues(InvoiceDocLineItemSchema);
+const lineItemBase = getInitialValues(InvoiceDocLineItem);
 const priceBase = lineItemBase.price;
 const orderDividerBase = getInitialValues(InvoiceDocOrderItem);
 const destBase = getInitialValues(OrderDocDestinationItem);
@@ -323,7 +323,7 @@ Deno.test("buildOrderScopedItems projects order-only fields off line items", () 
   const [projected] = buildOrderScopedItems(orderItems, ORDER_DIV_1);
 
   // Projected item passes strict invoice line-item schema — rejects any leaked key.
-  const result = InvoiceDocLineItemSchema.safeParse(projected);
+  const result = InvoiceDocLineItem.safeParse(projected);
   assertEquals(result.success, true, JSON.stringify(result.success ? {} : result.error.issues, null, 2));
 
   // Projected price passes — rejects leaked `replacement`.
@@ -564,7 +564,7 @@ Deno.test("syncOrderItems projects order-only fields off new items (strict schem
   ];
   const result = syncOrderItems(invoiceItems, orderItems, ORDER_DIV_1);
   const lineItem = result.find((i) => i.uid === ITEM_1)!;
-  const parsed = InvoiceDocLineItemSchema.safeParse(lineItem);
+  const parsed = InvoiceDocLineItem.safeParse(lineItem);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
 });
 
@@ -605,7 +605,7 @@ Deno.test("syncOrderToInvoiceSelective projects new items to invoice-line-item s
   ];
   const result = syncOrderToInvoiceSelective([], newOrderItems, [], ORDER_DIV_1);
   assertEquals(result.length, 1);
-  const parsed = InvoiceDocLineItemSchema.safeParse(result[0]);
+  const parsed = InvoiceDocLineItem.safeParse(result[0]);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
 });
 
@@ -664,7 +664,7 @@ Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward
   assertEquals((out as InvoiceItem).coa_revenue, 4100);
   assertEquals((out as InvoiceItem).xero_id, "00000000-0000-4000-8000-000000000001");
   // Projected — strict schema passes
-  const parsed = InvoiceDocLineItemSchema.safeParse(out);
+  const parsed = InvoiceDocLineItem.safeParse(out);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
 });
 
@@ -699,7 +699,7 @@ Deno.test("projection: `price.taxes_base` inherits, so an invoice profile revert
   );
   // …and the strict invoice schema accepts it, which is the half `core` had to
   // ship before any of this could be written.
-  const parsed = InvoiceDocLineItemSchema.safeParse(result[0]);
+  const parsed = InvoiceDocLineItem.safeParse(result[0]);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
 });
 
@@ -1001,7 +1001,7 @@ Deno.test("substitution: graduation REMOVES the key, it does not null it", () =>
 
   assertEquals(lineNames(result), ["Light Y"]);
   assertEquals("path_substituted_for" in (result[0] as object), false);
-  const parsed = InvoiceDocLineItemSchema.safeParse(result[0]);
+  const parsed = InvoiceDocLineItem.safeParse(result[0]);
   assertEquals(
     parsed.success,
     true,
@@ -2544,7 +2544,7 @@ function blobComparison(expected: InvoiceItem, current: InvoiceItem): boolean {
 
 Deno.test("invoiceItemsMatch: an absent nullable price key equals an explicit null", () => {
   // The projection emits `base_percent: null`; a stored CRMS line omits the key.
-  // `InvoiceDocItemPriceSchema` declares it `.nullable().optional()` and blesses
+  // `InvoiceDocItemPrice` declares it `.nullable().optional()` and blesses
   // BOTH encodings, so a comparator that separates them is reporting a
   // difference the schema says does not exist.
   const expected = projectedLineA();
@@ -2553,8 +2553,8 @@ Deno.test("invoiceItemsMatch: an absent nullable price key equals an explicit nu
   assertEquals(invoiceItemsMatch(expected, stored as unknown as InvoiceItem), true);
 
   // Both encodings really are legal — probed, not asserted from memory.
-  assertEquals(InvoiceDocLineItemSchema.safeParse(expected).success, true);
-  assertEquals(InvoiceDocLineItemSchema.safeParse(stored).success, true);
+  assertEquals(InvoiceDocLineItem.safeParse(expected).success, true);
+  assertEquals(InvoiceDocLineItem.safeParse(stored).success, true);
 });
 
 Deno.test("fail-closed companion: the old JSON-blob price comparison DISAGREES", () => {
@@ -3375,7 +3375,7 @@ Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () =>
 // ── manager#421, stage one: the field is DECLARED and deliberately UNPROJECTED ──
 //
 // 🔴 **This pair is the whole of stage one, and asserting only the first half
-// would let stage two ship by accident.** `InvoiceDocLineItem` now declares
+// would let stage two ship by accident.** `InvoiceDocLineItemType` now declares
 // `zero_priced` so a deployed reader can hold a document carrying it; the
 // projection must NOT emit it until the stored corpus has been backfilled.
 //
@@ -3404,10 +3404,10 @@ Deno.test("manager#421 stage one: the invoice line SCHEMA accepts zero_priced", 
     zero_priced: true,
     price: { ...(line as unknown as { price: Record<string, unknown> }).price, base_cents: 0 },
   } as unknown as Record<string, unknown>;
-  assertEquals(InvoiceDocLineItemSchema.safeParse(withFlag).success, true);
+  assertEquals(InvoiceDocLineItem.safeParse(withFlag).success, true);
   // Nullable, matching the order's own shape rather than tightening past it.
   assertEquals(
-    InvoiceDocLineItemSchema.safeParse({ ...withFlag, zero_priced: null }).success,
+    InvoiceDocLineItem.safeParse({ ...withFlag, zero_priced: null }).success,
     true,
   );
 });
@@ -3423,7 +3423,7 @@ Deno.test("invariant (1): a flagged invoice line may not carry a charge", () => 
     zero_priced: true,
     price: { ...(line as unknown as { price: Record<string, unknown> }).price, base_cents: 6000 },
   } as unknown as Record<string, unknown>;
-  const parsed = InvoiceDocLineItemSchema.safeParse(charged);
+  const parsed = InvoiceDocLineItem.safeParse(charged);
   assertEquals(parsed.success, false);
   // Assert WHERE it failed, not merely that it did — a line that fails for an
   // unrelated reason would satisfy a bare `success === false`.

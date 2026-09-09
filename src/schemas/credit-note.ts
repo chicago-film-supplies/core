@@ -223,7 +223,7 @@ export interface CreditNoteDocLineItem {
   price: CreditNoteDocItemPrice;
   /**
    * The revenue account of the thing credited. **Nullable**, matching
-   * `InvoiceDocLineItem` — a credit can be raised on a free-text line with no
+   * `InvoiceDocLineItemType` — a credit can be raised on a free-text line with no
    * catalog product behind it, and the live tenant already holds one (CN-1012's
    * sole line has no `ItemCode`). A schema stricter than the invoice it credits
    * cannot represent the corpus.

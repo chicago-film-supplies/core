@@ -150,10 +150,10 @@ export interface LineItem {
    * coa."* {@link isTaxableCoa} is the retired gate.
    *
    * `COARevenueType`, not `number` — every schema that stores this field
-   * (`OrderDocLineItem`, `InvoiceDocLineItem`, and the product) types it with
+   * (`OrderDocLineItem`, `InvoiceDocLineItemType`, and the product) types it with
    * `COARevenueEnum`, so a bare `number` here made this type *not* a supertype
    * of the three it claims to generalise: a `LineItem` was not assignable to an
-   * `InvoiceDocLineItem` on this one field, and the first projection that had to
+   * `InvoiceDocLineItemType` on this one field, and the first projection that had to
    * emit it hit TS2322.
    *
    * The looser `number` is still correct one layer down, on

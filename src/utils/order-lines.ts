@@ -45,7 +45,7 @@
 import type {
   ComponentTypeType,
   DocLineItemTypeType,
-  InvoiceDocLineItem,
+  InvoiceDocLineItemType,
   OrderDocLineItemType,
   PriceFormulaType,
   PriceModifierType,
@@ -246,7 +246,7 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
  */
 export function buildCustomInvoiceLine(
   opts: Omit<CustomLineBuildOptions, "uidOrder">,
-): InvoiceDocLineItem {
+): InvoiceDocLineItemType {
   const isRental = opts.type === "rental";
   return {
     uid: "custom-" + crypto.randomUUID(),

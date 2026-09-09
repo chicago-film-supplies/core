@@ -139,7 +139,7 @@ export function isStrictlyBelow(
  * ⚠️ **It is reachable, not theoretical.** The field is `.optional()` on both
  * surfaces with no `.min(1)`, and `getInitialValues` materializes an optional
  * array as `[]` — so any line seeded from the schema carries an empty one.
- * Measured: a `getInitialValues(InvoiceDocLineItemSchema)` fixture made a
+ * Measured: a `getInitialValues(InvoiceDocLineItem)` fixture made a
  * substitution "explain" the removal of a row sharing no path segment with it.
  * The wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to
  * reject an empty `path_substituted_for` on submission (it resolves to no order
