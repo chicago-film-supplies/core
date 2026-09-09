@@ -399,8 +399,27 @@ export const DocDestination: z.ZodType<DocDestinationType> = z.strictObject({
   // own prefix ("Delivery Address" / "Collection Address").
   delivery: DocDestinationEndpoint.meta({ label: "Delivery" }),
   collection: DocDestinationEndpoint.meta({ label: "Collection" }),
-  customer_collecting: z.boolean().default(false),
-  customer_returning: z.boolean().default(false),
+  // 🔴 **REQUIRED, and the `.default(false)` they carried until 2026-09-08 was
+  // doing the opposite of what it looked like.** `validateBeforeWrite` discards
+  // `result.data` and writes the RAW doc (`api-cloudrun/src/lib/validate.ts`
+  // says so in place), so a `.default()` on a stored schema never materializes
+  // in Firestore. Its one effect was to let a writer omit the field and pass
+  // validation — which is the failure this pair can least afford, because the
+  // two flags are DIRECTIONAL and independent and every consumer reads them as
+  // booleans. An absent flag reads as `false`, i.e. *"we deliver"*, which is
+  // the answer that sends a crew to an address.
+  //
+  // ⭐ **No `.meta({ initial })` beside them, deliberately.** `getInitialValues`
+  // falls through to `case "boolean": return false`, so the form seed is
+  // unchanged — an `initial` here would restate what the type already says.
+  // The five `z.boolean().default(true)` fields needed one because their
+  // type-derived zero was the WRONG seed; see `schemas/initial.ts`.
+  //
+  // ⚠️ The INPUT (`Destination`, above) stays `.optional()`: a client may leave
+  // the flags out and the writer fills them in explicitly. That is the rule —
+  // the writer stamps, the storage schema refuses anything else.
+  customer_collecting: z.boolean(),
+  customer_returning: z.boolean(),
   // ⚠️ Adding a field to this pair is TWO edits, and only one of them is
   // enforced by the compiler: `InvoiceDocDestinationType extends
   // DocDestinationType`, so the invoice inherits the TYPE for free, while

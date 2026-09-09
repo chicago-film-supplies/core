@@ -285,18 +285,61 @@ Deno.test("a destination pair's uid REFUSES a destinations doc id", () => {
   assertEquals(result.success, false);
 });
 
-Deno.test("DocDestination defaults customer_collecting/returning to false", () => {
-  const result = DocDestination.safeParse({
+/**
+ * 🔴 **This arm asserted the OPPOSITE until 2026-09-08, and the reversal is the
+ * point.** It read "DocDestination defaults customer_collecting/returning to
+ * false" and passed a pair with neither flag.
+ *
+ * That default never reached Firestore: `validateBeforeWrite` discards
+ * `result.data` and writes the RAW doc, so its one effect was to let a writer
+ * omit the field and pass validation. An absent flag then reads as `false`
+ * everywhere downstream — *"we deliver"* — which is the answer that sends a
+ * crew to an address.
+ *
+ * ⚠️ Both polarities are asserted. "The parse fails" alone would also pass
+ * against a schema that had broken some other way, so the arm below it supplies
+ * the pair explicitly and requires success.
+ */
+Deno.test("DocDestination REFUSES a pair that omits customer_collecting/returning", () => {
+  const withoutFlags = {
     uid: "11111111-1111-4111-8111-111111111111",
     dates: validDocDates,
     delivery: { uid: null, address: null, instructions: null, contact: null },
     collection: { uid: null, address: null, instructions: null, contact: null },
+  };
+  const refused = DocDestination.safeParse(withoutFlags);
+  assertEquals(refused.success, false, "an omitted flag must not parse to `false`");
+  assertEquals(
+    refused.success === false &&
+      refused.error.issues.map((i) => i.path.join(".")).sort(),
+    ["customer_collecting", "customer_returning"],
+    "and BOTH are named, so a writer is told what to stamp",
+  );
+
+  const stamped = DocDestination.safeParse({
+    ...withoutFlags,
+    customer_collecting: false,
+    customer_returning: false,
   });
-  assertEquals(result.success, true);
-  if (result.success) {
-    assertEquals(result.data.customer_collecting, false);
-    assertEquals(result.data.customer_returning, false);
+  assertEquals(stamped.success, true);
+  if (stamped.success) {
+    assertEquals(stamped.data.customer_collecting, false);
+    assertEquals(stamped.data.customer_returning, false);
   }
+});
+
+/**
+ * ⭐ **The form seed is UNCHANGED by that removal, and this is what says so.**
+ * `getInitialValues` falls through to `case "boolean": return false`, so
+ * dropping the `.default(false)` needed no `.meta({ initial })` beside it — the
+ * type-derived zero was already the right seed. The five
+ * `z.boolean().default(true)` fields needed one precisely because theirs was
+ * not (`schemas/initial.ts`).
+ */
+Deno.test("getInitialValues still seeds both flags false with no default to read", () => {
+  const seed = getInitialValues(DocDestination) as Record<string, unknown>;
+  assertEquals(seed.customer_collecting, false);
+  assertEquals(seed.customer_returning, false);
 });
 
 Deno.test("CreateOrderInput rejects invalid item inclusion_type", () => {
@@ -795,6 +838,8 @@ Deno.test("OrderSchema validates destination with contact", () => {
         instructions: null,
         contact: null,
       },
+      customer_collecting: false,
+      customer_returning: false,
     }],
   };
   assertEquals(OrderSchema.safeParse(doc).success, true);
