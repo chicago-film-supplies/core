@@ -624,6 +624,32 @@ the parse pass, not the document complete. That is why "every document carries i
 ⭐ **The order that DOES work is `.optional().default(x)`** — default outermost, so `undefined`
 reaches it. Reach for it only when a parse genuinely should substitute a value.
 
+🔴 **When you retire an inert `.default(x)`, do NOT backfill `x`. It is a value, not a
+cushion, and the population it never materialized on is exactly the population most likely to
+disagree with it.** The inert default *is* what let those documents omit the field, so they are
+a biased sample by construction: the writers that skipped it are disproportionately the ones
+with something else to say.
+
+⭐ **Measured, 2026-09-09, core#101.** `InvoiceDocDestination.customer_collecting` /
+`.customer_returning` carried `z.boolean().default(false)` while the order grain had made both
+required. 8 prod invoices stated neither. Backfilling the default would have been **wrong on 5
+of the 8** — four pairs are `true/true` and two more carry a `true` — so it would have asserted
+*"we deliver"* on five invoices where the customer collects or returns, silently, in the one
+direction that sends a crew to an address.
+
+⚠️ **The remedy is to find the value's AUTHOR, not to pick a plausible one.** Here the truth was
+one hop away and already required: the invoice pair carries `uid_order`, the order's pair joins
+on `(uid_order, divider uid)`, and it resolved **8 of 8**. A pair that had not resolved was
+reported and skipped rather than defaulted — an unresolvable row is a question for the owner,
+and a migration is the worst possible place to answer one by guessing.
+
+⚠️ **And this is why "the census is 0" does not license the tightening on its own.**
+`Invoice.subject` reads 0 nulls across 1,040 documents and is *still* not free, because
+`createInvoice` writes `input.subject ?? null` — the writer PRODUCES the value the tightening
+would refuse, so the count measures which inputs happened to carry a subject, not what the
+schema may assume. **Read the writer; see § *Making a field REQUIRED* step 2, which is the same
+rule stated from the other side.**
+
 ### Making a field REQUIRED — the procedure, and what the corpus can and cannot say
 
 **Measure the corpus in BOTH environments, put the numbers and the date in the
