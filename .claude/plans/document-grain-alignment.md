@@ -674,28 +674,50 @@ changes the *schema*, not the override policy).
 
 ## Context recommendation
 
-**Clear. Increment 0 is DONE (2026-09-09) — start at increment 1, in a fresh window.**
+**Clear. Increments 0 and 1 are DONE and SHIPPED END TO END (2026-09-09)** — `@cfs/core@10.0.0-beta.390`
+published, `manager` `095ce6a` and `api-cloudrun` `e2dc7a09` both pinned to it and landed, both
+green. **Start at the NEXT block in the status update above**, in a fresh window: none of the
+coordination context that produced this — three betas, a peer handover, a prod backfill, a dev
+Firestore stall — is needed to write the next piece.
 
-The census no longer needs running; its numbers are in § *0* above and they are the durable
-half of that work. Increment 1 touches four large schema files and wants a window of its own,
-with none of the coordination context that produced the census in it.
+**The next piece, stated so it can be picked up cold:** rebuild `InvoiceDocDestination` as
+`z.strictObject({ uid_order: FirestoreId, ...DestinationPairCore })`, dropping the two inert
+`.default(false)`s. core#101's repair is what unblocks it (16 absent flags → 0, both projects), and
+its key order already matches `DocDestination`'s exactly, so the spread is order-preserving and
+changes no column surface. ⚠️ In the same change, **delete
+`api-cloudrun/scripts/backfill-invoice-destination-flags.ts`** — a one-shot whose job is done.
 
-⚠️ **One precondition, and it is narrower than it was:** the core#91/#92/#93 campaign's
-`templates` PR must **MERGE** — not merely be in progress, and not "that session went idle."
-Confirmed with that session 2026-09-09: the 14-fixture re-capture may be handed to a fresh
-session, and cutting a `core` beta before the merge lands a stale pin in whichever checkout is
-running the re-capture. The campaign has twice discovered a schema fix during that re-capture,
-so treat another beta as live until the PR is merged.
+**No blocking preconditions remain.** ✅ The core#91/#92/#93 `templates` hold is LIFTED — templates#292
+merged, and `lint:capture-floor` reads 194 tagged leaves at both `.386` and `.390`, so that repo needs
+neither a pin bump nor a floor raise for this work. ⚠️ Re-run `deno task lint:capture-floor` in
+`templates` only if a further beta touches a schema field carrying PII: it compares `min_core` against
+the newest **published** core rather than against the pin, and is the one cross-repo gate that reaches
+forward past a pin.
 
-⚠️ **`core`'s gate judges the WHOLE working tree at both commit and push**, so check for a peer
-before starting — `git -C core status --short` and `pgrep -fl "deno.*test"`. (Unlike
-`api-cloudrun` and `manager`'s pre-commit, which gate the subject.)
+⚠️ **One thing to watch that is not a blocker: `api-cloudrun` `e2dc7a09` carries
+`Requires-Manager: >= 25.0.0`, and manager 25.0.0 is NOT yet released** (manager#438 is the open
+release PR; latest published is `manager-v24.4.0`). The trailer is **advisory by owner ruling** — it
+shows a red X on the api-cloudrun release and does not block the merge. Merge manager#438 before
+api-cloudrun's next release PR if the ordering is to hold in fact rather than on paper.
 
-⭐ **Increment 1a is no longer part of this plan's critical path** — it is ~9,214 rows and is
-tracked as its own campaign. Ship increment 1 without it.
+⚠️ **`core`'s gate judges the WHOLE working tree at both commit and push**, so check for a peer before
+starting — `git -C core status --short` and `pgrep -fl "deno.*test"`. (Unlike `api-cloudrun` and
+`manager`'s pre-commit, which gate the subject.)
 
-⚠️ **This doc's own line numbers will rot the same way the campaign's did.** Re-derive before
-acting on any of them; the measurements and the reasoning are the durable half.
+🔴 **Verify any `core` publish against the PUBLISHED TARBALL, not the source tree.** `beta.388` shipped
+`isFulfillmentLineItem` unreachable — exported from `schemas/fulfillment.ts`, missing from
+`schemas/mod.ts`'s explicit list — and **every local gate was green**: `deno check` because the module
+compiles, `check:declarations` because the symbol has a type, and the suite because core's own tests
+import schema files directly rather than through the barrel. `beta.342` shipped the same class.
+Bump a consumer, import `node_modules/@cfs/core/src/schemas/mod.js` and exercise the behaviour.
+⚠️ The npm alias installs at `node_modules/@cfs/core`, **not** `node_modules/@jsr/cfs__core`.
 
-**Delete this doc in the commit that lands the last increment.** A stale plan reads as current
-intent — which is exactly the trap recorded above.
+⭐ **Increment 1a is not on this plan's critical path** — ~9,214 rows, tracked as core#100. It *would*
+break the `templates` fixtures where increment 1 did not: 27 of 154 committed line items state no
+`zero_priced`.
+
+⚠️ **This doc's own line numbers will rot the same way the campaign's did.** Re-derive before acting on
+any of them; the measurements and the reasoning are the durable half.
+
+**Delete this doc in the commit that lands the last increment.** A stale plan reads as current intent —
+which is exactly the trap recorded above.
