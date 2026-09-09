@@ -221,11 +221,20 @@ export {
   // `isInvoiceLineItem` were already here; the asymmetry is what the new arm in
   // `tests/item-shape-parity.test.ts` now refuses.
   isFulfillmentLineItem,
+  // The grain's first INPUT schemas (core#97). Same barrel duty as the guard
+  // above and for the same reason: `api-cloudrun`'s picker route is the only
+  // consumer and it imports `@cfs/core/schemas`, so an omission here ships a
+  // route that silently keeps validating its body against the DOCUMENT schema —
+  // which is exactly the state these replace.
+  FulfillmentItemInputLine,
+  UpdateFulfillmentItemsInput,
   type Fulfillment,
   type FulfillmentItemType,
   type FulfillmentLineItemType,
   type FulfillmentDestinationItemType,
   type FulfillmentGroupItemType,
+  type FulfillmentItemInputLineType,
+  type UpdateFulfillmentItemsInputType,
 } from "./fulfillment.ts";
 
 export {

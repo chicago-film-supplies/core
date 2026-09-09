@@ -3828,6 +3828,63 @@ interface FulfillmentGroupItemType {
 const FulfillmentItem: z.ZodType<FulfillmentItemType>;
 ```
 
+### `FulfillmentItemInputLine`
+
+```ts
+const FulfillmentItemInputLine: z.ZodType<FulfillmentItemInputLineType>;
+```
+
+### `FulfillmentItemInputLineType`
+
+One picker-editable line in a `PUT /fulfillments/{uid}/items` body.
+
+⚠️ **`quantity_order` is declared here even though the API always refuses it,
+and that is load-bearing rather than sloppy.** It is the divergence marker
+between the picker's count and the order's — `mergeLineItem` stamps the
+ORDER's quantity onto it when the two disagree — so a client structurally
+cannot compute it, and `updateFulfillmentItems` throws
+*"quantity_order is server-managed"* for any body carrying it.
+
+🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an
+undeclared key, so the service would never see the field and would answer 200
+while silently ignoring what the client asserted — the exact silent-acceptance
+class this whole block exists to close. Declaring it keeps the key intact
+through the parse so the service's check still fires.
+
+⚠️ **The refusal deliberately stays in the SERVICE rather than moving to a
+`z.never()` here**, though the boundary is where a constraint would normally
+live. Two reasons, and the second is the stronger one: the service's message
+names the field and says *why*, where Zod's would not; and `never` is a
+construct nothing in this package walks — `collectLeafPaths`
+(`schemas/zod-walk.ts`) reports it as uninterpretable and `tests/pii.test.ts`
+fails rather than skipping it, correctly. Introducing the package's only
+`never` node to save one runtime check would mean teaching a SHARED walker a
+new arm, which is a worse trade than one owner in the service.
+
+⚠️ **`path` is REQUIRED here, and the two existing input schemas disagree
+about that** — `OrderItemLineInner` has `path: z.array(ItemUid)` while
+`InvoiceItemInputLineInner` has `.optional()`. This grain follows the order,
+for a reason rather than by majority: `updateFulfillmentItems` map-keys the
+submission on `pathKey(li.path)` and `rebuildFulfillmentItems` treats it as a
+SET keyed on `path`, so an absent one is not a defaulted value but a row that
+addresses nothing. Requiring it turns a confusing failure deep in the rebuild
+into a 400 that names the field.
+
+⚠️ It is a refinement of the boundary — the DOCUMENT schema standing in as
+the request contract accepted an absent `path` via `LineItemCore.path`'s
+`.default([])` — but no writer can produce one: the manager sends stored
+lines, and `computeItemPaths` authors `path` on every stored line.
+
+```ts
+interface FulfillmentItemInputLineType {
+  uid: string;
+  path: string[];
+  quantity: number;
+  path_substituted_for?: string[];
+  quantity_order?: number;
+}
+```
+
 ### `FulfillmentItemType`
 
 Union of all item types in the fulfillment order view.
@@ -10008,6 +10065,34 @@ interface UpdateFixedHolidayInputType {
   name: string;
   month: number;
   date: number;
+}
+```
+
+### `UpdateFulfillmentItemsInput`
+
+```ts
+const UpdateFulfillmentItemsInput: z.ZodType<UpdateFulfillmentItemsInputType>;
+```
+
+### `UpdateFulfillmentItemsInputType`
+
+The whole `PUT /fulfillments/{uid}/items` body.
+
+Lives here rather than in the route for the same reason `UpdateOrderInput`
+and `UpdateInvoiceInput` do: the request contract is part of the grain's
+shape, and a body declared beside its handler is invisible to every guard in
+this package.
+
+⚠️ **`lineItems` is the COMPLETE set of picker-editable lines, and structural
+items are not in it.** The server preserves stored dividers and reassembles
+via `computeItemPaths`, so there is no divider arm here and no union — the
+one place the three grains' item schemas legitimately differ in ARITY rather
+than in field list.
+
+```ts
+interface UpdateFulfillmentItemsInputType {
+  lineItems: FulfillmentItemInputLineType[];
+  version: number;
 }
 ```
 
@@ -16665,6 +16750,63 @@ interface FulfillmentGroupItemType {
 const FulfillmentItem: z.ZodType<FulfillmentItemType>;
 ```
 
+### `FulfillmentItemInputLine`
+
+```ts
+const FulfillmentItemInputLine: z.ZodType<FulfillmentItemInputLineType>;
+```
+
+### `FulfillmentItemInputLineType`
+
+One picker-editable line in a `PUT /fulfillments/{uid}/items` body.
+
+⚠️ **`quantity_order` is declared here even though the API always refuses it,
+and that is load-bearing rather than sloppy.** It is the divergence marker
+between the picker's count and the order's — `mergeLineItem` stamps the
+ORDER's quantity onto it when the two disagree — so a client structurally
+cannot compute it, and `updateFulfillmentItems` throws
+*"quantity_order is server-managed"* for any body carrying it.
+
+🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an
+undeclared key, so the service would never see the field and would answer 200
+while silently ignoring what the client asserted — the exact silent-acceptance
+class this whole block exists to close. Declaring it keeps the key intact
+through the parse so the service's check still fires.
+
+⚠️ **The refusal deliberately stays in the SERVICE rather than moving to a
+`z.never()` here**, though the boundary is where a constraint would normally
+live. Two reasons, and the second is the stronger one: the service's message
+names the field and says *why*, where Zod's would not; and `never` is a
+construct nothing in this package walks — `collectLeafPaths`
+(`schemas/zod-walk.ts`) reports it as uninterpretable and `tests/pii.test.ts`
+fails rather than skipping it, correctly. Introducing the package's only
+`never` node to save one runtime check would mean teaching a SHARED walker a
+new arm, which is a worse trade than one owner in the service.
+
+⚠️ **`path` is REQUIRED here, and the two existing input schemas disagree
+about that** — `OrderItemLineInner` has `path: z.array(ItemUid)` while
+`InvoiceItemInputLineInner` has `.optional()`. This grain follows the order,
+for a reason rather than by majority: `updateFulfillmentItems` map-keys the
+submission on `pathKey(li.path)` and `rebuildFulfillmentItems` treats it as a
+SET keyed on `path`, so an absent one is not a defaulted value but a row that
+addresses nothing. Requiring it turns a confusing failure deep in the rebuild
+into a 400 that names the field.
+
+⚠️ It is a refinement of the boundary — the DOCUMENT schema standing in as
+the request contract accepted an absent `path` via `LineItemCore.path`'s
+`.default([])` — but no writer can produce one: the manager sends stored
+lines, and `computeItemPaths` authors `path` on every stored line.
+
+```ts
+interface FulfillmentItemInputLineType {
+  uid: string;
+  path: string[];
+  quantity: number;
+  path_substituted_for?: string[];
+  quantity_order?: number;
+}
+```
+
 ### `FulfillmentItemType`
 
 Union of all item types in the fulfillment order view.
@@ -16704,6 +16846,34 @@ interface FulfillmentLineItemType {
 
 ```ts
 const FulfillmentSchema: z.ZodType<Fulfillment>;
+```
+
+### `UpdateFulfillmentItemsInput`
+
+```ts
+const UpdateFulfillmentItemsInput: z.ZodType<UpdateFulfillmentItemsInputType>;
+```
+
+### `UpdateFulfillmentItemsInputType`
+
+The whole `PUT /fulfillments/{uid}/items` body.
+
+Lives here rather than in the route for the same reason `UpdateOrderInput`
+and `UpdateInvoiceInput` do: the request contract is part of the grain's
+shape, and a body declared beside its handler is invisible to every guard in
+this package.
+
+⚠️ **`lineItems` is the COMPLETE set of picker-editable lines, and structural
+items are not in it.** The server preserves stored dividers and reassembles
+via `computeItemPaths`, so there is no divider arm here and no union — the
+one place the three grains' item schemas legitimately differ in ARITY rather
+than in field list.
+
+```ts
+interface UpdateFulfillmentItemsInputType {
+  lineItems: FulfillmentItemInputLineType[];
+  version: number;
+}
 ```
 
 ### `isFulfillmentLineItem(item: FulfillmentItemType): item is FulfillmentLineItemType`

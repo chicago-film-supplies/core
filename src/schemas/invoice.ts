@@ -771,7 +771,12 @@ export interface Invoice {
    * thrown on `inv.destinations.length` had anything actually parsed them. That
    * is `reference`'s failure above verbatim (api-cloudrun#850), and core#83's
    * class. Both were repaired to an explicit `[]` in prod and dev before this
-   * dropped (`api-cloudrun/scripts/backfill-invoice-destinations-key.ts`).
+   * dropped, by `api-cloudrun/scripts/backfill-invoice-destinations-key.ts` —
+   * **a one-shot, since deleted with the pin bump that adopted this schema.**
+   * ⚠️ The re-runnable check is not that script but
+   * `api-cloudrun/scripts/audit-document-grain-parity.ts`, whose
+   * "invoices: destinations key ABSENT" row is this field's gate and must read
+   * 0, beside an "EMPTY array" row that is EXPECTED to read 31.
    */
   destinations: InvoiceDocDestinationType[];
   items: InvoiceDocItemType[];
