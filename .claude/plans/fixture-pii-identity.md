@@ -20,11 +20,11 @@ deploy.
 
 | repo | state |
 |---|---|
-| `core` | **`@cfs/core@10.0.0-beta.385` published.** `8ec3809` walker `siblings` · `52f2c16` masker · `ce80fea` core#92 · `0da1432` core#93 + `due_at` + `TEMPLATE_COMMIT_TYPES`. Suite 2244 green. |
+| `core` | **beta.385 published; beta.386 adds `MovementSessionItem.owner_path`.** `8ec3809` walker `siblings` · `52f2c16` masker · `ce80fea` core#92 · `0da1432` core#93 + `due_at` + `TEMPLATE_COMMIT_TYPES`. Suite 2244 green. |
 | `api-cloudrun` | **`v0.243.0` MERGED AND DEPLOYED TO PROD** — revision `api-cloudrun-00359-928`, pinning beta.385. 2014 unit tests green. |
 | prod data | **2 documents repaired** (`api-cloudrun/scripts/repair-template-commit-types.ts`), verified 0 remaining. |
 | `manager` | `14f3cb9` on `main`, deployed. Typecheck clean, 1977 tests green. |
-| `templates` | branch **`core-91-92-93-campaign`**, commit `6f0b98c` — pin, `lint-capture-floor` trigger, `min_core` → beta.385, four `.eta` files. **NOT pushed, no PR yet.** |
+| `templates` | branch **`core-91-92-93-campaign`**, commit `6f0b98c` — pin, `lint-capture-floor` trigger, `min_core` → beta.385, four `.eta` files. **NOT pushed, no PR yet.** ⚠️ Its pin and `min_core` need re-pointing to beta.386 before the re-capture. |
 
 🔴 **The hard serialization point is PASSED.** A capture is sanitized by the DEPLOYED core
 (api-cloudrun#838); prod now serves beta.385, so captures taken from here get the fixed masker.
@@ -89,9 +89,12 @@ separately: a sidecar that recorded its own capture inputs would make a re-captu
   chain and the receipt does compose. It is a skill — the org-shared authority every machine and cloud
   agent reads — and no gate checks a skill's *claims*, only that its paths resolve.
 - Close **core#91, core#92, core#93** when the corpus lands.
-- File **`MovementSessionItem.owner_path`** — DESCOPED from this campaign. It was assumed cheap; it is
-  not. `services/movementSessions.ts` never loads fulfillments, so populating it needs a new per-order
-  fulfillment join. Shipping the field without the populator would be a declared-but-inert value.
+- ~~File `MovementSessionItem.owner_path` — DESCOPED.~~ **RE-SCOPED IN, and the descope was wrong.**
+  It claimed a new fulfillment join was prohibitive; `fulfillments` is keyed by ORDER uid, so it is the
+  same batched read the session already performs for orders. The real cost is one more trip through the
+  prod-deploy serialization point — and paying it NOW is strictly cheaper, because the receipt fixtures
+  have not been re-captured yet and deferring buys a SECOND re-capture. Landed in `core` `6ada424`
+  (beta.386) with a shared `bookingOccurrencesByBooking` and an equivalence test against the fold.
 - File the **`lint-capture-floor` discriminant-probe** limit (see `6f0b98c`'s message).
 - File the **sidecar capture-inputs** gap above.
 - `templates#270` — **already closed** (superseded, pinned beta.374).
