@@ -598,6 +598,34 @@ ask what the instrument cannot see.**
 **prod is still `beta.403`** and nothing will change that until a releasable commit lands in
 `api-cloudrun`; the status block above says why that is safe to leave.
 
+**The owner has granted merging Release Please PRs** (2026-09-10), so whoever picks this up may land
+one without asking. ⚠️ **There is none to land** — and there will not be until a releasable commit
+exists, so do not go looking for one and conclude something is broken.
+
+⭐ **If prod is wanted on `beta.404`, the vehicle is api-cloudrun#952, not a no-op commit.** Deleting
+`findOrCreateDestination`'s `Partial<AddressType>` and its three `as` casts is a genuine
+`fix(destinations):`, it is one session's work, batch 3 is what unblocked it, and it cuts `v0.249.0`
+carrying the pin with it. A commit manufactured only to trigger a release would put a false
+changelog line in front of the one release note that matters.
+
+### ⚠️ Every batch's pin bump is a `chore(deps)` carrying a BREAKING change — and that is mis-typed
+
+This has now bitten twice and will bite batch 4 identically, so it belongs here rather than in a
+session's head. A pin bump is spelled `chore(deps)`, which says *"tooling, no behaviour change"* —
+and in this campaign it always carries one: batch 3's made `POST /orders` and `PATCH /orders/{uid}`
+**400 a partial address** where they used to silently complete it.
+
+| batch | symptom |
+|---|---|
+| 2 | a release PR already existed, so the pin rode in and the NOTES under-described the artifact |
+| 3 | no release PR existed, so **nothing was cut at all** and prod stayed a beta behind |
+
+⭐ Batch 3 is the sharper failure and the easier one to miss, because nothing looks wrong: `main` is
+green, dev is correct, and the absence of a release is indistinguishable from not needing one. Same
+family as api-cloudrun#947 (a `!` with no `BREAKING CHANGE` footer) and core#71 — noted on #947.
+**For batch 4, decide the commit TYPE deliberately before pushing the pin**, and say in the message
+what a consumer of the API would notice.
+
 **Not this session:** api-cloudrun#951 (the corpus re-parse guard — that probe has now been written
 **four** times, and batch 3's version added the two things the others lacked, a per-position
 denominator and a reach check, so it is the one to lift), api-cloudrun#943's manager half, and batch 4
