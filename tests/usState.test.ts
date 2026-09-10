@@ -57,13 +57,33 @@ Deno.test("toRegionCode: normalizes rather than validates", () => {
   assertEquals(toRegionCode(""), "");
 });
 
+/**
+ * A complete address stating `overrides` over blanks.
+ *
+ * ⚠️ Spelled out because `Address` carries NO `.default("")` any more (core#95
+ * batch 3). These two tests used to pass three keys and inherit four, which made
+ * them assertions about the DEFAULT as much as about the canonicalizer — and a
+ * test that can only be written while a field is optional is that field's own
+ * spec. Their subject is `region`; everything else is stated so it is visible.
+ */
+const addressStating = (overrides: Record<string, string>) => ({
+  city: "",
+  country_name: "",
+  full: "",
+  name: "",
+  postcode: "",
+  region: "",
+  street: "",
+  ...overrides,
+});
+
 Deno.test("Address parses region through the canonicalizer", () => {
-  const parsed = Address.parse({ city: "Chicago", region: "Illinois", postcode: "60607" });
+  const parsed = Address.parse(addressStating({ city: "Chicago", region: "Illinois", postcode: "60607" }));
   assertEquals((parsed as { region: string }).region, "IL");
 });
 
 Deno.test("Address still accepts a region it cannot resolve", () => {
-  const parsed = Address.parse({ city: "Toronto", region: "Ontario" });
+  const parsed = Address.parse(addressStating({ city: "Toronto", region: "Ontario" }));
   assertEquals((parsed as { region: string }).region, "Ontario");
 });
 

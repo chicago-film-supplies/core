@@ -1842,22 +1842,22 @@ export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.stric
  * the two `Coordinates` — stay masked.
  */
 export const Address: z.ZodType<AddressType | null> = z.strictObject({
-  city: z.string().default("").meta({ pii: "none", column: true, label: "City" }),
-  country_name: z.string().default("").meta({ pii: "none" }),
+  city: z.string().meta({ pii: "none", column: true, label: "City" }),
+  country_name: z.string().meta({ pii: "none" }),
   // The whole-address column. Labelled once here and prefixed by whatever key
   // holds the address, so `destinations[].delivery.address.full` reads "Delivery
   // Address" and `destinations[].collection.address.full` reads "Collection
   // Address" without forking the schema — `.meta()` on the two *legs* clones,
   // this shared node does not.
-  full: z.string().default("").meta({ column: true, label: "Address" }),
-  name: z.string().max(100).default(""),
-  postcode: z.string().default(""),
+  full: z.string().meta({ column: true, label: "Address" }),
+  name: z.string().max(100),
+  postcode: z.string(),
   // Canonicalized to the two-letter USPS code on parse — see `_usState.ts` for
   // why this normalizes rather than validates, and for the caveat that a
   // document-schema transform does NOT rewrite what `validateBeforeWrite`
   // stores.
-  region: usState().default("").meta({ pii: "none", column: true, label: "State" }),
-  street: z.string().default(""),
+  region: usState().meta({ pii: "none", column: true, label: "State" }),
+  street: z.string(),
   street2: z.string().optional(),
   mapbox_id: z.string().optional(),
   address_coordinates: Coordinates.optional(),

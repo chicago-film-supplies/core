@@ -697,6 +697,46 @@ would refuse, so the count measures which inputs happened to carry a subject, no
 schema may assume. **Read the writer; see § *Making a field REQUIRED* step 2, which is the same
 rule stated from the other side.**
 
+🔴 **A LEAF census cannot see a NULL parent, and under a nullable block that is the whole answer.**
+`orderBy("billing_address.city")` excludes a document whose `billing_address` is `null` — which is
+legal, and on a derived organization placeholder is *mandatory* (invariant 10). So the leaf reads
+absent, and the natural reading — *"this document leans on the default"* — is false. Measured
+2026-09-10, core#95 batch 3: the five `Address` embeddings carrying absences (49 of 318
+organizations, then 2, 1, 1, 1) were stored `null`s **to the document**, and a whole-document parse
+of both corpora against the tightened schema returned **0 defects across 24,120 address objects**.
+The census numbers were right and their interpretation was not.
+
+⭐ **So for a tightening, the oracle is a PARSE of the corpus, not a census of the key.** The parse
+asks exactly the question the change poses — *which stored documents stop parsing?* — and it is
+immune to this confound, native on `array[]` members the `orderBy` oracle cannot address at all, and
+indifferent to how many positions a shared block has. The census stays useful as a cheap pre-filter
+that runs before the change exists. ⚠️ **A clean parse still needs a DENOMINATOR per position**: a
+position where every document stores `null` passes while saying nothing about its writer. Count the
+non-null objects per position, and prove the parse REACHES each one by deleting a key from a real
+document and requiring the issue path to name it.
+
+🔴 **A node shared between a STORED schema and an INPUT schema holds its default in two states at
+once, and the ratchet's *"input schemas are excluded by construction"* argument does not reach it.**
+`tests/stored-defaults.test.ts` walks the Firestore registry, so every path it catalogues is reached
+through a stored schema — but the NODE may also be embedded by an input schema, and **there the
+default is LIVE**, because handlers read `c.req.valid("json")`, which is the parsed output, not the
+body. Measured 2026-09-10: `Address` sits at **15 stored positions**, where `.default("")` is inert,
+and at **three input ones** — `DestinationEndpoint.address`, `CreateOrganizationInput.billing_address`
+and `UpdateOrganizationInput.billing_address` — where it silently completes a partial address.
+
+⭐ **So removing such a default is TWO changes, and you have to say which you intend:** a storage
+tightening, and an API-input tightening that makes a previously-accepted payload a 400. Grep the
+NODE, not the path — a registry walk by construction shows you only the half where it is inert.
+
+⚠️ **Here both were wanted, and the input half carried the stronger argument.** `billing_address: {}`
+parsed to seven empty strings — a third state the organization model does not have. Invariants 10 and
+11 make `null` mean *"states nothing, ask my parent"*, so an all-blank object would stop
+`resolveBillingAddress`'s walk at that node and blank the billing block on every descendant's
+invoices. Prod holds **0** such objects, so the removal makes that unrepresentable rather than
+policed. ⭐ And the decision was a judgement, not a measurement: the manager's own `|| ""` fallbacks
+produce the same blank-key signature as a fired input default, so *"has this leniency ever been
+used?"* is **not answerable from stored data** — two causes, one observable.
+
 ### Making a field REQUIRED — the procedure, and what the corpus can and cannot say
 
 **Measure the corpus in BOTH environments, put the numbers and the date in the

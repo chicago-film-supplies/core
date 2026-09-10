@@ -250,7 +250,7 @@ Deno.test("tree invariant 10 — a DERIVED placeholder states no billing address
   // The negative, which is what `updateOrganization` would otherwise accept.
   assertEquals(
     OrganizationSchema.safeParse(placeholder({
-      billing_address: { full: "5808 W Sunset Blvd, Los Angeles, CA, 90028, United States" },
+      billing_address: statedAddress("5808 W Sunset Blvd, Los Angeles, CA, 90028, United States"),
     })).success,
     false,
   );
@@ -262,10 +262,31 @@ Deno.test("tree invariant 10 — a DERIVED placeholder states no billing address
   // that proves 10 and 11 together have not swallowed the rule they enforce.
   assertEquals(
     OrganizationSchema.safeParse(namedProject({
-      billing_address: { full: "2558 W 16th St, Chicago, IL, 60608, United States" },
+      billing_address: statedAddress("2558 W 16th St, Chicago, IL, 60608, United States"),
     })).success,
     true,
   );
+});
+
+/**
+ * An address that STATES something — complete, because `Address` has no
+ * `.default("")` any more (core#95 batch 3).
+ *
+ * ⭐ These three literals used to be `{ full: "…" }` alone, and the tightening is
+ * what showed why {@link assertBillingIssue} asserts the issue PATH rather than
+ * `success`. A one-key address is now refused for INCOMPLETENESS, at
+ * `billing_address.city` and six siblings — which means `superRefine` never runs
+ * and there is no `billing_address` issue at all. A bare `success === false`
+ * would have gone green on a document refused for a reason the test is not about.
+ */
+const statedAddress = (full: string) => ({
+  city: "",
+  country_name: "",
+  full,
+  name: "",
+  postcode: "",
+  region: "",
+  street: "",
 });
 
 /**
@@ -292,7 +313,7 @@ Deno.test("tree invariant 11 — a DEPARTMENT inherits its billing address, it n
   // (29 prod departments cleared 2026-09-04) and after manager stopped offering
   // the editor. Until it existed the corpus was clean and nothing kept it clean:
   // the manager gate read `derived`, and depth is not in `derived`.
-  const stated = { full: "5808 W Sunset Blvd, Los Angeles, CA, 90028, United States" };
+  const stated = statedAddress("5808 W Sunset Blvd, Los Angeles, CA, 90028, United States");
 
   // The positive: a department stating nothing is what all 29 prod departments
   // are now, and it must keep parsing.
