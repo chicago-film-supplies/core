@@ -11,6 +11,61 @@ saying something different from what it predicted. That doc — `document-grain-
 this directory — is **deleted**, its structural work having landed and its every leftover now
 sitting on an issue (core#100, core#103, core#105, api-cloudrun#943, api-cloudrun#944).*
 
+> ## ⚠️ STATUS UPDATE 2026-09-10
+>
+> **The backfill script exists and has written nothing yet** —
+> `api-cloudrun/scripts/backfill-zero-priced-projections.ts`, dry-run by default,
+> type-checks, unrun (ADC was expired). Step 1 is still the next thing anyone does, but
+> three facts found while writing it change what step 1 and step 3 have to be.
+>
+> 🔴 **1. The emit's population is LINES, not components — or the emit rule changes.**
+> `invoiceItemDifferences` counts a `null`-valued key as PRESENT, and
+> `buildOrderLineFromProduct` / `buildCustomOrderLine` write `zero_priced: null` on EVERY
+> order line, not only components. So an unconditional emit makes every *paired* line
+> differ, not the 4,397 component rows — and the backfill has to cover ~1,040 invoices
+> and ~1,020 fulfillments rather than the documents that happen to hold components. Three
+> resolutions, **undecided**, to be settled on the dry-run numbers:
+> **(a)** unconditional `?? null` + backfill every line — the key set stops depending on
+> the value, which is why `base_percent` and `taxed_as` are both spelled that way;
+> **(c)** emit only a stated boolean — the plan's original population, but a line's key
+> set then moves when its value does, so clearing a catalog flag strands the stored key
+> and reports `out_of_sync` forever; **(e)** teach the TOP-LEVEL key comparison
+> absent ≡ null, which `invoicePriceDifferences` already does one level down — zero
+> corpus writes for the non-component population, but it moves sync verdicts corpus-wide
+> and needs its own before/after. The script's `--stated-only` lever prices (a) against
+> (c) in one dry run each.
+>
+> 🔴 **2. Stamping the flag can make a document UNWRITABLE.** `computeItemPaths` sorts
+> `zero_priced === true` ahead of its priced siblings and `validatePathsAgainst` compares
+> `items[i].uid` against the recomputed array — so the write boundary checks the
+> LINEARIZATION, not just the paths. There is no "stamp but keep the order" option; the
+> only writable form is the canonical one. The script recomputes per grain and holds
+> documents whose row order actually moves behind `--allow-reorder`, because reordering
+> the lines of an issued invoice is customer-visible. Neither this doc nor core#100 knew.
+>
+> 🔴 **3. Step 3 must widen the invoice INPUT schema too.** `buildInvoiceItems` rebuilds
+> every stored line from typed fields and `InvoiceItemInputLineInner` is a plain
+> `z.object` that strips unknown keys — so without `zero_priced` on
+> `InvoiceItemInputLineType`, the next `PUT /invoices` drops the backfilled key line by
+> line. It is the `path_substituted_for` shape exactly.
+>
+> ⭐ **Owner ruling 2026-09-10 — the templates key on `zero_priced`.** `invoice.eta`'s
+> `hide_zero_priced_components` filters on `price.base_cents === 0 && componentDepth > 0`
+> as a PROXY, with a docblock stating the invoice line has no such field; step 3 makes
+> that false and the predicate becomes `i.zero_priced === true`, which is what
+> `quote.eta:307` already does. One line plus its docblock in each of two families, and
+> the two stop disagreeing. ⚠️ Invariant (1) makes `zero_priced === true` a SUBSET of
+> `base_cents === 0`, so the switch can only ever make a hidden row VISIBLE, never the
+> reverse — measure that population before shipping it. Default renders are unaffected
+> (the param defaults false); the exposed goldens are the two
+> `hide-zero-priced-components` fixtures. ⚠️ It also means a component row the backfill
+> MISSES stops being hidden — completeness now has a rendering consequence, not only a
+> refine one.
+>
+> ⚠️ The two `invoice.meta.json` fixture descriptions repeat the "an invoice line has NO
+> `zero_priced` field" claim verbatim. They are prose about the corpus and go stale in
+> the same commit.
+
 > **State at hand-off, 2026-09-09:** nothing in *The order of work* below has started. What
 > exists is the measurement (`api-cloudrun/scripts/audit-zero-priced-components.ts`, api-cloudrun
 > `d8c93822`), the issues (manager#421 re-titled and re-sized, core#100 re-scoped to `kind:guard`
