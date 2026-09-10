@@ -4,57 +4,77 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-10 — **batch 2 is IN PROD. `beta.403` swept to all three consumers. Backlog 239 → 211.**
-> Batch 1 is closed and is now history: 20 `totals` defaults, in prod as `v0.247.0` / revision
-> `api-cloudrun-00364-v6z`. Its details live in *What shipped* below.
+> ## ⚠️ STATUS 2026-09-10 — **batch 3 is LANDED and published. Backlog 211 → 258 → 153.**
+> Three batches are done. Batches 1 and 2 are history and their details live below; this block is the
+> one current statement the convention asks for, compacted rather than stacked.
 >
-> **Batch 2 — the derived-denorm family.** The boundary is one the codebase already draws:
-> `core/src/schemas/propagation/orders.ts` names `totals`, `number`, `query_by_*` and
-> `bookings_breakdown` as the values the order INPUT schemas carry no channel for. Batch 1 took
-> `totals`; this took the other two — **20 `query_by_*` across 11 collections + the 8 on
-> `orders.bookings_breakdown`** (wrapper + seven numeric leaves).
+> | batch | what | backlog | state |
+> |---|---|---:|---|
+> | 1 | 20 `totals` defaults | 259 → 239 | ✅ prod, `v0.247.0`, revision `api-cloudrun-00364-v6z` |
+> | 2 | 20 `query_by_*` + 8 `bookings_breakdown` | 239 → 211 | ✅ prod, `v0.248.0`, revision `api-cloudrun-00365-8t9` |
+> | — | **the ratchet hole**: +47 paths nothing had ever enumerated | 211 → **258** | ✅ `core` `4f73bca` |
+> | 3 | **the seven `Address` keys — 105 paths, 15 positions** | 258 → **153** | ✅ `core` `ce8272d` → `beta.404` |
+>
+> **Batch 3's two findings are the ones that outlive it, and both say the instruments were wrong
+> rather than the corpus.**
+>
+> 🔴 **The ratchet could not see six of `Address`'s fifteen embeddings.** All three schema ratchets
+> carried ONE `seen` set per collection walk, keyed on node identity, so a shared block was
+> catalogued once per COLLECTION instead of once per POSITION. `Address` is one module-level object;
+> nine positions were enumerated and six were not, including every `collection` leg and both
+> `destinations[]` legs on orders and invoices. ⚠️ **The premise behind it was TRUE and carried one
+> level too far** — `.meta()` does clone, so the walk really does enter both legs of a destination
+> pair, but the clone is SHALLOW and both legs share the very same inner `Address` node. Fixed by
+> scoping the guard to the current PATH; `stored-optionality` gained 19 paths by the same fix and
+> `inert-defaults` (a zero-tolerance gate) stayed green while finally covering re-embedded positions.
+> ⭐ **A guard cannot find what its own enumerator cannot reach**: re-running the OLD walk against the
+> NEW catalogue leaves the `catalogued` arm GREEN — it is a subset check — and fails only
+> `only shrinks`. The arm that detects the hole is the one that needs the catalogue to already know
+> the paths, which is why the catalogue being GENERATED from the walk had hidden it for the whole
+> campaign.
+>
+> 🔴 **And the 35 paths this doc called BLOCKED were stored NULLS.** A leaf census is
+> `orderBy("billing_address.city")`, which EXCLUDES a document whose `billing_address` is `null` —
+> legal, and on a derived organization placeholder mandatory under invariant 10, where `null` means
+> *"states nothing, ask my parent"*. So the leaf read absent and that read as *"leans on the
+> default"*. The five embeddings with absences (49 of 318 organizations, then 2, 1, 1, 1) reproduce
+> EXACTLY as null counts. ⭐ **So for a tightening the oracle is a PARSE of the corpus, not a census
+> of the key** — it asks the question the change poses, is immune to this confound, and is native on
+> the `array[]` positions `orderBy` cannot address at all. Both findings are now in
+> `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+>
+> ⚠️ **Batch 3 also tightened the API INPUT, deliberately** — `Address` is shared with
+> `DestinationEndpoint.address`, `CreateOrganizationInput.billing_address` and
+> `UpdateOrganizationInput.billing_address`, and on an input schema a default is LIVE because handlers
+> read the parsed body. A `billing_address` of `{}` parsed to seven empty strings, a third state the
+> organization model does not have, which would stop billing-address resolution at that node and
+> blank the block on every descendant's invoices. Prod holds 0 such objects. ⚠️ Whether the leniency
+> was ever USED is **not answerable from stored data** — the manager's own `|| ""` fallbacks leave the
+> same blank-key signature — so it is a judgement, recorded as one.
 >
 > | repo | commit | state |
 > |---|---|---|
-> | `core` (`beta`) | `fb4a572` | ✅ published — `@cfs/core@10.0.0-beta.403` on JSR |
-> | `api-cloudrun` (`main`) | `c499891d` + `1c552f07` (40 pins) | ✅ pushed |
-> | `manager` (`main`) | `3fed294` (1 pin) | ✅ pushed |
-> | `templates` (`main`) | `a2adc13` (PR #306, 15 pins) | ✅ merged; templates#305 closed |
+> | `core` (`beta`) | `4f73bca` + `ce8272d` | ✅ published — `@cfs/core@10.0.0-beta.404` |
+> | `api-cloudrun` (`main`) | `200af2cf` (42 pins) | ⏳ pushing — full suite, escalated to `test:serial` |
+> | `manager` (`main`) | pending — held until api-cloudrun releases dev Firestore | ⏸ |
+> | `templates` | PR #307 (15 pins + lockfile) | ⏳ open, auto-merges on green |
 >
-> ✅ **In PROD as `v0.248.0`** — build `b5c04b92` from tag `v0.248.0` at commit `b88296ce`, image
-> `sha256:0733f9fd…`, serving as revision **`api-cloudrun-00365-8t9`** at 100%. Verified by digest
-> rather than by the tag: the build's `results.images[0].digest` and the revision's serving digest are
-> the same string — a tag is a fact about the repo, not about what prod executes.
+> **Gate, both projects, run against the LOCAL schemas before the beta was cut:** 12,004 prod /
+> 12,006 dev documents parsed over the nine `Address`-bearing collections, **0 failures**; **24,120
+> prod / 24,110 dev non-null address objects, 0 missing any of the seven keys**, 0 missing a parent
+> key. A DENOMINATOR per position (14 of 15 carry 269–7,111 objects) because a position where every
+> document stores `null` passes while saying nothing, and every one of those 14 REACH-verified by
+> deleting `city` from a real document and requiring the issue path to name that position. The 15th,
+> `recurrences.prototype.destination.address`, has no corpus and rests on its writer instead.
+> Form seeds byte-identical across all 103 registered schemas. Consumer side: 0 of 79 JSON fixture
+> address objects incomplete under two independent predicates, `templates` `lint:fixtures` clean on
+> the first run, `test:units` 2,024 green, manager 1,977 green.
 >
-> ⚠️ **The release NOTES say `beta.402`, and the artifact runs `beta.403`.** Release Please left
-> `#949` untouched when the pin landed because `chore(deps)` and `test(fixtures)` are not releasable
-> types, so the bump earns no changelog line. The deployed code is correct and the notes
-> under-describe it — same family as api-cloudrun#947 and core#71.
->
-> **Gate taken, both projects:** census 0-absent/0-null on all 28; every create path audited; step 6
-> re-parse **26,147 documents, 0 batch-field failures**. Two repairs, both invisible to `deno check`:
-> a literal calling itself *"a complete document"* while missing one sibling key, and an INVERTED
-> test that was the default's own spec.
->
-> ⭐ **templates#305 is CLOSED, and the answer was already written down.** `long-multi-group.json`
-> carried `zero_priced: true` on two kit-header lines under a `group`, which api-cloudrun#917's refine
-> refuses. It looked like a semantic call; it was not — `core/src/schemas/common.ts` records
-> *"Invariant (2): a line flagged `zero_priced` is a COMPONENT. Owner ruling 2026-09-07."* ⚠️ **The
-> repo was TWO betas behind**, so its own corpus had been red against `beta.402` with nobody able to
-> see it: the stale pin was what held the refine back. Set to `false` not `null` because prod says so
-> — 5,146 `false` vs 96 `null` on top-level lines across 1,020 orders — and `visual-diff` confirmed
-> render-neutrality rather than it being merely predicted.
->
-> ⚠️ **`getInitialValues` reads `.default()` as the FORM SEED** (`core/src/schemas/initial.ts`,
-> `case "default"`), so 28 removals could have moved manager's create forms. Measured, not assumed:
-> **byte-identical across all 103 registered schemas**, because the type-derived zero for `z.array()`
-> is `[]` and for `z.number()` is `0` — the same values the defaults named. **Re-run this per batch**;
-> a default that differs from its type's zero moves the seed, and `z.boolean().default(true)` is the
-> known case.
->
-> **Also filed: api-cloudrun#951** (`kind:guard`, `risk:live-data`) — the step-6 re-parse found two
-> stored documents that violate their own schema, and nothing routinely looks. One is a **prod**
-> `purchase` transaction with `supplier: null` whose offset is Accounts Payable.
+> ⭐ **Four inverted tests repaired as MIRRORS** — two passing three keys and inheriting four, three
+> organization literals spelling `{ full }` alone. And `tests/organization.test.ts`'s existing
+> discipline paid off exactly as its docblock predicted: it asserts the issue PATH rather than
+> `success`, so a one-key address now refused for INCOMPLETENESS fails loudly instead of going green
+> for a reason the test is not about.
 
 ## What shipped
 
@@ -73,7 +93,13 @@ api-cloudrun#943's remaining half.*
 | 2 order literals completed to the four new keys | `api-cloudrun` `c499891d` | ✅ landed on `main` |
 | 40 pins | `api-cloudrun` `1c552f07` | ✅ landed on `main` |
 | 1 pin | `manager` `3fed294` | ✅ landed on `main` |
-| 1 quote fixture + templates#305 + 15 pins | `templates` PR #306 | ⏸ green, awaiting merge |
+| 1 quote fixture + templates#305 + 15 pins | `templates` PR #306 | ✅ merged |
+| **the ratchet hole** — all three walks re-scoped, +47 then +19 paths | `core` `4f73bca` | ✅ landed |
+| **batch 3** — the seven `.default("")` on `Address`, 105 paths | `core` `ce8272d` → `beta.404` | ✅ published |
+| the parse-not-census rule + the shared stored/input node rule | `core/CLAUDE.md` § *`.default()` and `.optional()`* | ✅ landed |
+| 4 inverted tests repaired as mirrors | `core/tests/{usState,organization}.test.ts` | ✅ landed |
+| 42 pins | `api-cloudrun` `200af2cf` | ⏳ pushing |
+| 15 pins + lockfile | `templates` PR #307 | ⏳ open |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -242,10 +268,11 @@ and cannot be generalised. `version` is deliberately not bumped either.
   check. ⚠️ And prod/dev are **not** independent samples — `devReplica` mirrors prod writes, and the
   two read identically — so that is one confirmation, not two.
 
-- **The wider campaign — 211 inert paths remain** (259 − batch 1's 20 − batch 2's 28),
-  concentrated in `orders` (48), `invoices` (41), `credit-notes` (33), `fulfillments` (22),
-  `cards` (20) — read the live split off `tests/stored-defaults.test.ts` rather than this list, which
-  is the one thing here that can rot. ⚠️ The older "~250 sites / ~335 distinct" figures counted
+- **The wider campaign — 153 inert paths remain**, and the arithmetic is NOT a subtraction:
+  259 − 20 − 28 + **47** (the paths the ratchet had never enumerated) − 105 (batch 3) = 153.
+  Concentrated in `invoices` (25), `orders` (23), `credit-notes` (19), `fulfillments` (12),
+  `cards` (11) — 80 scalar and 73 `array[]`. Read the live split off
+  `tests/stored-defaults.test.ts` rather than this list, which is the one thing here that can rot. ⚠️ The older "~250 sites / ~335 distinct" figures counted
   DECLARATIONS; 291 is *resolved paths*, which is what actually reaches storage — a shared block like
   `Address` appears once per embedding collection. Each needs the same
   two-part gate: writers compliant in source, AND a corpus census proving no stored document leans
@@ -396,49 +423,60 @@ decision is stable:
   that `totals`, `number`, `query_by_*` and `bookings_breakdown` are the client-untouchable derived
   set — so the batch boundary was a lookup, and the writer audit generalised across all 11
   collections instead of being re-argued per path.
-### 🔴 `Address` is batch 3, and it is ONE declaration spanning EVERY partition class
+### ✅ `Address` WAS batch 3 — and what its table got wrong is the lesson
 
-Measured 2026-09-10, after batch 2. `core/src/schemas/common.ts:1844` — `export const Address`,
-`.default("")` on each of seven keys — resolves to **63 backlog paths = 7 keys × 9 embeddings**.
-⚠️ **Not 35, and not 49.** Earlier versions of this doc said "35 blocked paths in five embeddings";
-that counted only the blocked half. The 63 partition like this:
+**Done** (`core` `ce8272d` → `beta.404`). The table that stood here is kept only as a worked error,
+because it was wrong in both directions and both errors were in the INSTRUMENTS:
 
-| embedding | class | absent (prod / dev) |
-|---|---|---|
-| `organizations.billing_address` | BLOCKED | **49 of 318 / 53 of 322** |
-| `cards.destination.address` | BLOCKED | 2 of 1,159 / 11 of 1,166 |
-| `bookings.destinations.delivery.address` | BLOCKED | 1 of 7,112 / 11 of 7,120 |
-| `destinations.address` | BLOCKED | 1 of 322 / 1 of 323 |
-| `orders.organization.billing_address` | BLOCKED | 1 of 1,020 / 1 of 1,020 |
-| `invoices.organization.billing_address` | FREE | 0 / 0 |
-| `credit-notes.organization.billing_address` | FREE | 0 / 0 |
-| `fulfillments.destinations[].delivery.address` | **ARRAY-MEMBER — never censused** | unknown |
-| `recurrences.prototype.destination.address` | **VACUOUS** — collection empty both projects | says nothing |
+- It said **63 paths across 9 embeddings**. The real figure is **105 across 15** — the ratchet's walk
+  deduped on node identity and could not see six of them (`4f73bca`).
+- It said **35 blocked, in five embeddings carrying 49 / 2 / 1 / 1 / 1 absences**. Those counts were
+  right and they were **stored nulls**: a leaf census cannot see a null parent. A whole-document
+  parse found **0 defects across 24,120 prod address objects**, so every "blocked" path was free.
+- Its plan of work — *"find the AUTHOR of an address"*, *"expect several populations"* — was sound
+  advice aimed at a defect that did not exist. ⭐ **Ask what the instrument can SEE before designing
+  a repair around what it reported.**
 
-🔴 **The halves cannot be split, because it is one declaration.** Removing `.default("")` from
-`Address` tightens all nine embeddings at once. So the 14 free paths are not free — the blocked 35
-gate them, and so do the two that no instrument has answered for.
+### 🔴 Batch 4 is `DocDestinationContact.phones` — the same shape, one tenth the size
 
-⭐ **This is the first backlog item that needs every instrument the campaign has**: the `orderBy`
-census for five embeddings, a PAGED probe for `fulfillments.destinations[]` (an array of maps —
-see the `array[]` bullet below), and a WRITER argument for `recurrences`, whose corpus is empty and
-therefore cannot answer (the VACUOUS warning above — an empty collection makes the gate
-pass by vacuity while saying nothing about the writer).
+Measured 2026-09-10 off the post-batch-3 catalogue. Backlog **153** — 80 scalar, 73 `array[]`.
 
-**The work, in order:**
-1. **Census the two unmeasured embeddings** — page `fulfillments.destinations[]`; read the
-   `recurrences` prototype WRITER, since its corpus cannot speak.
-2. **Find the AUTHOR of an address**, per core#101 — a geocode? the retired CRMS import? an operator
-   typing it? — rather than picking a plausible default. ⚠️ `.default("")` is the trap in miniature:
-   `""` is not "unknown", and 49 organizations with no billing address is a business fact somebody
-   knows, not a hole to fill with empty strings.
-3. **Expect several populations.** 49-of-318 on `organizations` against 1-of-1,020 on `orders` is not
-   one defect at different scales — the org one is plausibly "we never collected it", the order one a
-   single stray document. Attribute before repairing.
-4. ⚠️ **`organizations` is the only one where dev genuinely adds rows** (322 vs 318, and 53 vs 49
-   absent). Everywhere else the two projects are a mirror — check the counts before claiming a
-   second sample, as *Batch 2* records.
-- **The 75 `array[]` paths need a different instrument** — a paged census in the shape of
+`phones` is 9 of those 153, from **two** declarations, and the larger one is the same
+one-declaration-many-positions shape `Address` just proved out:
+
+| declaration | paths | positions |
+|---|---:|---|
+| `DocDestinationContact.phones` (`schemas/order.ts:243`, `z.array(Phone).default([])`) | **8** | `cards.destination.contact`, `orders`/`invoices`/`fulfillments` `destinations[].{delivery,collection}.contact`, `recurrences.prototype.destination.contact` |
+| `OrganizationSchema.phones` (`schemas/organization.ts:455`) | 1 | `organizations.phones` |
+
+⭐ **Half of the 8 only exist because of the walker fix** — every `collection` leg was invisible
+before `4f73bca`, so a batch scoped from the old catalogue would have tightened four positions it had
+never measured. That is the concrete cost of the hole, and the reason to re-derive rather than quote.
+
+**Why it is the right next batch:**
+
+- **6 of the 8 positions are `array[]` members**, which the `orderBy` oracle cannot address at all —
+  so it needs the parse instrument, which batch 3 has now built and validated. It is the cheapest
+  possible first use of it.
+- `Phone` is a leaf type, so `[]` vs absent is the whole question; there is no nested map to confuse
+  a census the way `Address`'s nullable parent did.
+- ⚠️ **`DocDestinationContact` is reached through `DocDestinationEndpoint.contact`, which is
+  `.nullable()`** — so expect exactly the batch-3 confound again: a null CONTACT makes `phones`
+  legitimately absent. **Parse; do not census the leaf.**
+- ⚠️ And check whether this node is shared with an INPUT schema before deciding scope —
+  `schemas/order.ts:226` is a second `phones: z.array(Phone).optional()` on what looks like the input
+  contact. Batch 3's rule applies: grep the NODE, not the path.
+
+**The other coherent families in the remaining 153**, for when `phones` is done — all re-derivable by
+the recipe above, none of them quoted as gospel:
+
+| family | paths | note |
+|---|---:|---|
+| `items[]` across orders / invoices / credit-notes / fulfillments | **57** | 19 invoices, 16 orders, 14 credit-notes, 8 fulfillments — unchanged by batch 3, and the hazard bullet below still stands |
+| `sources[]` / `reference` | 6 | small, scalar, likely free |
+| `products` / `webshop-products` (`webshop.*`, `component_of[]`) | 15 | two collections, one shared `component_of` block |
+
+- **The 73 `array[]` paths need a different instrument** — a paged census in the shape of
   `audit-zero-priced-components.ts`, which already pages `items[]` on three grains. The stored
   invoice item `path` (`schemas/invoice.ts:487`, `z.array(ItemUid).default([])`) is in this family.
 
@@ -450,8 +488,8 @@ pass by vacuity while saying nothing about the writer).
   onto a stored items array changes the recomputed order, and the stored array then fails its own
   boundary check. **Measured by the zero_priced stage-two backfill (cfs-f0, 2026-09-10): three prod
   invoices reordered and had to be written in canonical order.**
-  ⚠️ **Reach: 57 of the 239 remaining paths are `items[]` paths** — 19 invoices, 16 orders,
-  14 credit-notes, 8 fulfillments. `zero_priced` is the only sort key today and is NOT itself in the
+  ⚠️ **Reach: 57 of the 153 remaining paths are `items[]` paths** — 19 invoices, 16 orders,
+  14 credit-notes, 8 fulfillments, unchanged by batch 3. `zero_priced` is the only sort key today and is NOT itself in the
   backlog, so the hazard is not that this campaign stamps it; it is that any items-array backfill
   must WRITE IN CANONICAL ORDER rather than patching a key in place, and must expect arrays a
   previous backfill has already reordered.
@@ -496,25 +534,34 @@ pass by vacuity while saying nothing about the writer).
 
 ## Context recommendation
 
-**Clear before batch 3.** Batch 2 is gated and committed; what remains on it is a *decision*
-(publish + sweep, below), not analysis, and nothing about batch 3 depends on this session's working
-context. The backlog is read off `core/tests/stored-defaults.test.ts`, the partition is re-derived
-by the recipe above, and the policy is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+**Clear before batch 4.** Batch 3 is gated, committed and published; what remains is mechanical —
+watch `api-cloudrun` `200af2cf` land, merge `templates` #307, bump and push `manager`'s one pin, and
+confirm the release reaches prod by image digest. None of that needs this session's analysis, and
+nothing about batch 4 depends on it: the backlog is read off `core/tests/stored-defaults.test.ts`, the
+partition is re-derived by the recipe above, and the policy — now including the parse-not-census rule
+and the shared stored/input-node rule — is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
 
-⚠️ **Do not carry the numbers in this doc into batch 3 — re-run the recipe.** They are a measurement
-over a corpus two other campaigns are actively writing to. Batch 2's re-derivation reconciled with
-batch 1's exactly, which is the check worth repeating rather than the numbers worth reusing.
+⚠️ **Do not carry the numbers in this doc into batch 4 — re-run the recipe.** Batch 3 is the proof:
+this doc's own `Address` table was wrong in both directions, and the errors were in the instruments
+rather than in the arithmetic. ⭐ **Batch 3 also retires the reconciliation check this section used to
+recommend.** "Batch 2's re-derivation reconciled with batch 1's exactly" was offered as the check
+worth repeating — and a reconciliation is exactly what a hole in the ENUMERATOR survives, because both
+sides come from the same walk. It reconciled at 211 while 47 paths were invisible. **Re-derive, and
+ask what the instrument cannot see.**
 
-**Continue in-session** only for the immediate follow-ups that lean on what is already loaded:
+**Continue in-session** only for these:
 
-1. ✅ Done this session: `templates` #306 merged (templates#305 closed with it), `api-cloudrun` #949
-   merged, `v0.248.0` deployed and verified by image digest.
-2. **Batch 3 is a DECISION, not a sweep, and that is new.** Batch 2 took the last of the large
-   coherent free blocks; the 74 free scalar paths that remain fragment into families of 4, 3 and 2
-   (`items` containers ×4, `sources` ×3, `reference` ×3). ⭐ **`Address` is the pivot** — ONE
-   declaration resolving to **63 paths across 9 embeddings**, spanning every partition class the
-   campaign has: 35 blocked, 14 free, 7 vacuous and 7 never censused at all. The full table, the
-   per-embedding absence counts and the order of work are in *The next batch* above; **start there,
-   not here.**
-3. api-cloudrun#951 (the corpus re-parse guard — that probe has now been written three times, and
-   found a prod defect on its first run) and api-cloudrun#943's manager half.
+1. ⏳ **`api-cloudrun` `200af2cf` is mid-push** (42 pins), escalated to `test:serial`. ⚠️ If that push
+   dies, an escaped suite outlives it — `pgrep -fl "deno.*test"`, and reap by the **pgid**.
+2. ⏳ **`templates` #307** — verify it merged on the newest run against the HEAD sha, never merely
+   "concluded".
+3. ⏸ **`manager`'s one pin** — deliberately held until api-cloudrun's suite releases dev Firestore,
+   since manager's pre-push e2e smoke hits the live dev API. Its typecheck and 1,977 unit tests are
+   already green against `beta.404`.
+4. Then the release: `api-cloudrun` cuts a release PR; prod is confirmed by comparing the build's
+   `results.images[0].digest` to the serving revision's digest, **not** by the tag.
+
+**Not this session:** api-cloudrun#951 (the corpus re-parse guard — that probe has now been written
+**four** times, and batch 3's version added the two things the others lacked, a per-position
+denominator and a reach check, so it is the one to lift), api-cloudrun#943's manager half, and batch 4
+(`DocDestinationContact.phones`, 8 paths across 6 collections — see *The next batch*).
