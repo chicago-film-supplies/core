@@ -52,15 +52,33 @@ function isZodNode(value: unknown): boolean {
  * Every `Optional(Default(x))` under `root`, reported as a dotted path.
  *
  * Traverses wrappers, objects, arrays, tuples, unions, records, maps, sets,
- * intersections, pipes and `lazy`. `seen` is keyed on the node identity so a
- * recursive schema terminates; `.meta()` clones, so two annotated instances of
- * one block are visited separately and that is correct — the annotation is what
- * distinguishes them.
+ * intersections, pipes and `lazy`. `stack` holds the nodes on the CURRENT
+ * path, so it breaks cycles without hiding re-embeddings. ⚠️ It was a
+ * walk-global identity set until 2026-09-10, on the reasoning that *".meta()
+ * clones, so two annotated instances of one block are visited separately."*
+ * True, and one level short: the clone is SHALLOW, so both legs of a
+ * destination pair share the very same inner `Address` node and the dedupe bit
+ * there instead. See `tests/stored-defaults.test.ts`, which the same hole cost
+ * 47 catalogued paths.
  */
 // deno-lint-ignore no-explicit-any
-function findInert(root: any, prefix: string, seen: Set<unknown>, out: string[]): void {
-  if (!isZodNode(root) || seen.has(root)) return;
-  seen.add(root);
+function findInert(root: any, prefix: string, stack: Set<unknown>, out: string[]): void {
+  if (!isZodNode(root) || stack.has(root)) return;
+  stack.add(root);
+  try {
+    walkInertInto(root, prefix, stack, out);
+  } finally {
+    stack.delete(root);
+  }
+}
+
+/**
+ * The body of {@link findInert}. Never call it directly — the cycle guard lives in
+ * the wrapper so no `return` inside the switch can skip the paired
+ * `stack.delete`.
+ */
+// deno-lint-ignore no-explicit-any
+function walkInertInto(root: any, prefix: string, stack: Set<unknown>, out: string[]): void {
 
   const def = defOf(root);
   const type: string = def.type;
@@ -90,42 +108,42 @@ function findInert(root: any, prefix: string, seen: Set<unknown>, out: string[])
     case "nonoptional":
     case "catch":
     case "promise":
-      findInert(def.innerType ?? def.in, prefix, seen, out);
+      findInert(def.innerType ?? def.in, prefix, stack, out);
       return;
     case "pipe":
-      findInert(def.in, prefix, seen, out);
-      findInert(def.out, prefix, seen, out);
+      findInert(def.in, prefix, stack, out);
+      findInert(def.out, prefix, stack, out);
       return;
     case "lazy":
-      findInert(def.getter(), prefix, seen, out);
+      findInert(def.getter(), prefix, stack, out);
       return;
     case "object":
     case "interface":
       for (const [key, member] of Object.entries(def.shape ?? {})) {
-        findInert(member, prefix ? `${prefix}.${key}` : key, seen, out);
+        findInert(member, prefix ? `${prefix}.${key}` : key, stack, out);
       }
       return;
     case "array":
-      findInert(def.element, `${prefix}[]`, seen, out);
+      findInert(def.element, `${prefix}[]`, stack, out);
       return;
     case "set":
-      findInert(def.valueType, `${prefix}{set}`, seen, out);
+      findInert(def.valueType, `${prefix}{set}`, stack, out);
       return;
     case "tuple":
-      (def.items ?? []).forEach((item: unknown, i: number) => findInert(item, `${prefix}[${i}]`, seen, out));
-      if (def.rest) findInert(def.rest, `${prefix}[...]`, seen, out);
+      (def.items ?? []).forEach((item: unknown, i: number) => findInert(item, `${prefix}[${i}]`, stack, out));
+      if (def.rest) findInert(def.rest, `${prefix}[...]`, stack, out);
       return;
     case "union":
-      (def.options ?? []).forEach((opt: unknown, i: number) => findInert(opt, `${prefix}|${i}`, seen, out));
+      (def.options ?? []).forEach((opt: unknown, i: number) => findInert(opt, `${prefix}|${i}`, stack, out));
       return;
     case "intersection":
-      findInert(def.left, prefix, seen, out);
-      findInert(def.right, prefix, seen, out);
+      findInert(def.left, prefix, stack, out);
+      findInert(def.right, prefix, stack, out);
       return;
     case "record":
     case "map":
-      findInert(def.keyType, `${prefix}{key}`, seen, out);
-      findInert(def.valueType, `${prefix}{}`, seen, out);
+      findInert(def.keyType, `${prefix}{key}`, stack, out);
+      findInert(def.valueType, `${prefix}{}`, stack, out);
       return;
     default:
       return;

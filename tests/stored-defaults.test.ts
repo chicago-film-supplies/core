@@ -112,6 +112,13 @@ const SENTINEL_DEFAULTS: ReadonlyMap<string, string> = new Map([
  * let a writer omit the key. **This set only ever shrinks.**
  */
 const INERT_DEFAULTS: ReadonlySet<string> = new Set([
+  "bookings.destinations.collection.address.city",
+  "bookings.destinations.collection.address.country_name",
+  "bookings.destinations.collection.address.full",
+  "bookings.destinations.collection.address.name",
+  "bookings.destinations.collection.address.postcode",
+  "bookings.destinations.collection.address.region",
+  "bookings.destinations.collection.address.street",
   "bookings.destinations.delivery.address.city",
   "bookings.destinations.delivery.address.country_name",
   "bookings.destinations.delivery.address.full",
@@ -176,6 +183,14 @@ const INERT_DEFAULTS: ReadonlySet<string> = new Set([
   "destinations.address.postcode",
   "destinations.address.region",
   "destinations.address.street",
+  "fulfillments.destinations[].collection.address.city",
+  "fulfillments.destinations[].collection.address.country_name",
+  "fulfillments.destinations[].collection.address.full",
+  "fulfillments.destinations[].collection.address.name",
+  "fulfillments.destinations[].collection.address.postcode",
+  "fulfillments.destinations[].collection.address.region",
+  "fulfillments.destinations[].collection.address.street",
+  "fulfillments.destinations[].collection.contact.phones",
   "fulfillments.destinations[].delivery.address.city",
   "fulfillments.destinations[].delivery.address.country_name",
   "fulfillments.destinations[].delivery.address.full",
@@ -200,6 +215,21 @@ const INERT_DEFAULTS: ReadonlySet<string> = new Set([
   "inventory-ledgers.store_breakdown[].locations",
   "invites.roles",
   "invites.used",
+  "invoices.destinations[].collection.address.city",
+  "invoices.destinations[].collection.address.country_name",
+  "invoices.destinations[].collection.address.full",
+  "invoices.destinations[].collection.address.name",
+  "invoices.destinations[].collection.address.postcode",
+  "invoices.destinations[].collection.address.region",
+  "invoices.destinations[].collection.address.street",
+  "invoices.destinations[].collection.contact.phones",
+  "invoices.destinations[].delivery.address.city",
+  "invoices.destinations[].delivery.address.country_name",
+  "invoices.destinations[].delivery.address.full",
+  "invoices.destinations[].delivery.address.name",
+  "invoices.destinations[].delivery.address.postcode",
+  "invoices.destinations[].delivery.address.region",
+  "invoices.destinations[].delivery.address.street",
   "invoices.destinations[].delivery.contact.phones",
   "invoices.items",
   "invoices.items[]|0.description",
@@ -237,6 +267,21 @@ const INERT_DEFAULTS: ReadonlySet<string> = new Set([
   "location-types.product_capacities",
   "locations.product_capacities",
   "locations.products",
+  "orders.destinations[].collection.address.city",
+  "orders.destinations[].collection.address.country_name",
+  "orders.destinations[].collection.address.full",
+  "orders.destinations[].collection.address.name",
+  "orders.destinations[].collection.address.postcode",
+  "orders.destinations[].collection.address.region",
+  "orders.destinations[].collection.address.street",
+  "orders.destinations[].collection.contact.phones",
+  "orders.destinations[].delivery.address.city",
+  "orders.destinations[].delivery.address.country_name",
+  "orders.destinations[].delivery.address.full",
+  "orders.destinations[].delivery.address.name",
+  "orders.destinations[].delivery.address.postcode",
+  "orders.destinations[].delivery.address.region",
+  "orders.destinations[].delivery.address.street",
   "orders.destinations[].delivery.contact.phones",
   "orders.invoices",
   "orders.items",
@@ -281,6 +326,7 @@ const INERT_DEFAULTS: ReadonlySet<string> = new Set([
   "out-of-service.stores[].locations",
   "products.alternates",
   "products.component_of",
+  "products.component_of[].price.taxes",
   "products.components",
   "products.components[].price.taxes",
   "products.price.discountable",
@@ -319,6 +365,7 @@ const INERT_DEFAULTS: ReadonlySet<string> = new Set([
   "transactions.sources",
   "webshop-products.alternates",
   "webshop-products.component_of",
+  "webshop-products.component_of[].price.taxes",
   "webshop-products.components",
   "webshop-products.components[].price.taxes",
   "webshop-products.price.taxes",
@@ -344,12 +391,45 @@ function isZodNode(value: unknown): boolean {
  * uses, because **a ratchet with a hole reports CLEAN rather than smaller.**
  * The companion test below plants the construct in each and fails if the walk
  * cannot see it.
+ *
+ * 🔴 **`stack` holds the nodes on the CURRENT path, and that is the whole point
+ * — it breaks cycles without hiding re-embeddings.** A `Set` held for the whole
+ * walk terminates too, and it silently catalogues a shared block ONCE however
+ * many storage positions embed it. This walk did that until 2026-09-10 and
+ * under-reported by **47 paths**: {@link Address} is one module-level object
+ * reached from FIFTEEN positions and only nine were ever enumerated, so
+ * `orders.destinations[].delivery.address.*` and every `collection` leg were
+ * invisible to the ratchet whose job is to bound the campaign.
+ *
+ * ⚠️ **The reasoning that produced the hole was a true premise carried one level
+ * too far**, and the sibling walks stated it outright: *".meta() clones, so two
+ * annotated instances of one block are visited separately — they are different
+ * storage positions."* Both halves are true. `.meta()` does clone, so
+ * `delivery: X.meta(…)` and `collection: X.meta(…)` are distinct nodes and the
+ * walk does enter both legs — but the clone is **shallow**, so
+ * `shape(delivery).address === shape(collection).address`, and the dedupe bit at
+ * the first shared node INSIDE the legs. "Different storage positions" was the
+ * right principle; an identity set honours it only at the depth the annotation
+ * sits at.
  */
 // deno-lint-ignore no-explicit-any
-function findDefaults(root: any, prefix: string, seen: Set<unknown>, out: string[]): void {
-  if (!isZodNode(root) || seen.has(root)) return;
-  seen.add(root);
+function findDefaults(root: any, prefix: string, stack: Set<unknown>, out: string[]): void {
+  if (!isZodNode(root) || stack.has(root)) return;
+  stack.add(root);
+  try {
+    walkInto(root, prefix, stack, out);
+  } finally {
+    stack.delete(root);
+  }
+}
 
+/**
+ * The body of {@link findDefaults}. Never call it directly — the cycle guard
+ * lives in the wrapper, so that no `return` inside the switch can skip the
+ * paired `stack.delete`.
+ */
+// deno-lint-ignore no-explicit-any
+function walkInto(root: any, prefix: string, stack: Set<unknown>, out: string[]): void {
   const def = defOf(root);
   const type: string = def.type;
 
@@ -364,41 +444,41 @@ function findDefaults(root: any, prefix: string, seen: Set<unknown>, out: string
     case "nonoptional":
     case "catch":
     case "promise":
-      findDefaults(def.innerType ?? def.in, prefix, seen, out);
+      findDefaults(def.innerType ?? def.in, prefix, stack, out);
       return;
     case "pipe":
-      findDefaults(def.in, prefix, seen, out);
-      findDefaults(def.out, prefix, seen, out);
+      findDefaults(def.in, prefix, stack, out);
+      findDefaults(def.out, prefix, stack, out);
       return;
     case "lazy":
-      findDefaults(def.getter(), prefix, seen, out);
+      findDefaults(def.getter(), prefix, stack, out);
       return;
     case "object":
     case "interface":
       for (const [key, member] of Object.entries(def.shape ?? {})) {
-        findDefaults(member, prefix ? `${prefix}.${key}` : key, seen, out);
+        findDefaults(member, prefix ? `${prefix}.${key}` : key, stack, out);
       }
       return;
     case "array":
-      findDefaults(def.element, `${prefix}[]`, seen, out);
+      findDefaults(def.element, `${prefix}[]`, stack, out);
       return;
     case "set":
-      findDefaults(def.valueType, `${prefix}{set}`, seen, out);
+      findDefaults(def.valueType, `${prefix}{set}`, stack, out);
       return;
     case "tuple":
-      (def.items ?? []).forEach((item: unknown, i: number) => findDefaults(item, `${prefix}[${i}]`, seen, out));
-      if (def.rest) findDefaults(def.rest, `${prefix}[...]`, seen, out);
+      (def.items ?? []).forEach((item: unknown, i: number) => findDefaults(item, `${prefix}[${i}]`, stack, out));
+      if (def.rest) findDefaults(def.rest, `${prefix}[...]`, stack, out);
       return;
     case "union":
-      (def.options ?? []).forEach((opt: unknown, i: number) => findDefaults(opt, `${prefix}|${i}`, seen, out));
+      (def.options ?? []).forEach((opt: unknown, i: number) => findDefaults(opt, `${prefix}|${i}`, stack, out));
       return;
     case "intersection":
-      findDefaults(def.left, prefix, seen, out);
-      findDefaults(def.right, prefix, seen, out);
+      findDefaults(def.left, prefix, stack, out);
+      findDefaults(def.right, prefix, stack, out);
       return;
     case "record":
     case "map":
-      findDefaults(def.valueType, `${prefix}.<key>`, seen, out);
+      findDefaults(def.valueType, `${prefix}.<key>`, stack, out);
       return;
     default:
       return;

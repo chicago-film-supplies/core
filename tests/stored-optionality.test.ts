@@ -41,8 +41,12 @@
  * ## What the paths mean
  *
  * Resolved leaf paths, not declaration sites: a shared block (`Address`,
- * `DocSource`, `DocumentOrganizationSnapshot`) appears once per collection that
- * embeds it, because that is what actually reaches storage. `[]` marks an array
+ * `DocSource`, `DocumentOrganizationSnapshot`) appears once per POSITION that
+ * embeds it, because that is what actually reaches storage — `orders` embeds
+ * `Address` three times (`organization.billing_address` plus the two
+ * `destinations[]` legs) and all three are here. ⚠️ It said *"once per
+ * collection"* until 2026-09-10, and the walk made that true by deduping on node
+ * identity: 19 of these paths were invisible. `[]` marks an array
  * of maps — the marker matters, see `array-member-uncensusable` below.
  *
  * @see `api-cloudrun/scripts/audit-field-presence.ts` — the `orderBy` oracle
@@ -74,6 +78,8 @@ type Reason =
 const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // ── pending-census — measurable with `orderBy`, awaiting the both-environment
   //    census before any of them is tightened. The directly actionable set.
+  ["bookings.destinations.collection.address.address_coordinates", "pending-census"],
+  ["bookings.destinations.collection.address.user_coordinates", "pending-census"],
   ["bookings.destinations.delivery.address.address_coordinates", "pending-census"],
   ["bookings.destinations.delivery.address.user_coordinates", "pending-census"],
   ["cards.destination.address.address_coordinates", "pending-census"],
@@ -134,9 +140,15 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["comments.sources[].label", "array-member-uncensusable"],
   ["credit-notes.items[].price.base_percent", "array-member-uncensusable"],
   ["credit-notes.sources[].label", "array-member-uncensusable"],
+  ["fulfillments.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
+  ["fulfillments.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
   ["fulfillments.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
   ["fulfillments.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
   ["fulfillments.destinations[].jurisdiction", "array-member-uncensusable"],
+  ["invoices.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
+  ["invoices.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
+  ["invoices.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
+  ["invoices.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
   ["invoices.destinations[].jurisdiction", "array-member-uncensusable"],
   ["invoices.items[].coa_revenue", "array-member-uncensusable"],
   ["invoices.items[].price.base_percent", "array-member-uncensusable"],
@@ -144,6 +156,10 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["invoices.items[].tracking_category", "array-member-uncensusable"],
   ["invoices.items[].xero_id", "array-member-uncensusable"],
   ["invoices.items[].xero_tracking_option_id", "array-member-uncensusable"],
+  ["orders.destinations[].collection.address.address_coordinates", "array-member-uncensusable"],
+  ["orders.destinations[].collection.address.user_coordinates", "array-member-uncensusable"],
+  ["orders.destinations[].delivery.address.address_coordinates", "array-member-uncensusable"],
+  ["orders.destinations[].delivery.address.user_coordinates", "array-member-uncensusable"],
   ["orders.destinations[].jurisdiction", "array-member-uncensusable"],
   ["orders.items[].coa_revenue", "array-member-uncensusable"],
   ["orders.items[].inclusion_type", "array-member-uncensusable"],
@@ -159,11 +175,17 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["fulfillments.items[].zero_priced", "array-member-uncensusable"],
   ["out-of-service.sources[].label", "array-member-uncensusable"],
   ["out-of-service.stores[].locations[].max", "array-member-uncensusable"],
+  ["out-of-service.transactions[].source.label", "array-member-uncensusable"],
+  ["products.component_of[].price.base_percent", "array-member-uncensusable"],
+  ["products.component_of[].price.replacement_cents", "array-member-uncensusable"],
   ["products.components[].price.base_percent", "array-member-uncensusable"],
   ["products.components[].price.replacement_cents", "array-member-uncensusable"],
   ["recurrences.prototype.sources[].label", "array-member-uncensusable"],
   ["threads.sources[].label", "array-member-uncensusable"],
   ["transactions.lines[].location.from.label", "array-member-uncensusable"],
+  ["transactions.lines[].location.to.label", "array-member-uncensusable"],
+  ["transactions.sources[].label", "array-member-uncensusable"],
+  ["webshop-products.component_of[].price.replacement_cents", "array-member-uncensusable"],
   ["webshop-products.components[].price.replacement_cents", "array-member-uncensusable"],
   // ── crms-pending-removal — 🔴 do NOT tighten. api-cloudrun#556 defers removing
   //    the stored CRMS fields from `@cfs/core` as "a separate, later decision",
@@ -183,6 +205,7 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["out-of-service.transactions[].crms_id", "crms-pending-removal"],
   ["out-of-service.transactions[].crms_quarantine_id", "crms-pending-removal"],
   ["out-of-service.transactions[].crms_stock_level_id", "crms-pending-removal"],
+  ["products.component_of[].crms_accessory_id", "crms-pending-removal"],
   ["products.components[].crms_accessory_id", "crms-pending-removal"],
   ["products.crms_linked_rental_id", "crms-pending-removal"],
   ["products.crms_linked_replacement_id", "crms-pending-removal"],
@@ -227,14 +250,33 @@ function isZodNode(value: unknown): boolean {
  * same three states. A walk that knew only one spelling would report the other as
  * clean.
  *
- * `seen` is keyed on node identity so a recursive schema terminates. `.meta()`
- * clones, so two annotated instances of one block are visited separately — which
- * is correct: they are different storage positions.
+ * `stack` holds the nodes on the CURRENT
+ * path, so it breaks cycles without hiding re-embeddings. ⚠️ It was a
+ * walk-global identity set until 2026-09-10, on the reasoning that *".meta()
+ * clones, so two annotated instances of one block are visited separately."*
+ * True, and one level short: the clone is SHALLOW, so both legs of a
+ * destination pair share the very same inner `Address` node and the dedupe bit
+ * there instead. See `tests/stored-defaults.test.ts`, which the same hole cost
+ * 47 catalogued paths.
  */
 // deno-lint-ignore no-explicit-any
-function findNullableOptional(root: any, prefix: string, seen: Set<unknown>, out: string[]): void {
-  if (!isZodNode(root) || seen.has(root)) return;
-  seen.add(root);
+function findNullableOptional(root: any, prefix: string, stack: Set<unknown>, out: string[]): void {
+  if (!isZodNode(root) || stack.has(root)) return;
+  stack.add(root);
+  try {
+    walkOptionalityInto(root, prefix, stack, out);
+  } finally {
+    stack.delete(root);
+  }
+}
+
+/**
+ * The body of {@link findNullableOptional}. Never call it directly — the cycle guard lives in
+ * the wrapper so no `return` inside the switch can skip the paired
+ * `stack.delete`.
+ */
+// deno-lint-ignore no-explicit-any
+function walkOptionalityInto(root: any, prefix: string, stack: Set<unknown>, out: string[]): void {
 
   const def = defOf(root);
   const type: string = def.type;
@@ -266,45 +308,45 @@ function findNullableOptional(root: any, prefix: string, seen: Set<unknown>, out
     case "nonoptional":
     case "catch":
     case "promise":
-      findNullableOptional(def.innerType ?? def.in, prefix, seen, out);
+      findNullableOptional(def.innerType ?? def.in, prefix, stack, out);
       return;
     case "pipe":
-      findNullableOptional(def.in, prefix, seen, out);
-      findNullableOptional(def.out, prefix, seen, out);
+      findNullableOptional(def.in, prefix, stack, out);
+      findNullableOptional(def.out, prefix, stack, out);
       return;
     case "lazy":
-      findNullableOptional(def.getter(), prefix, seen, out);
+      findNullableOptional(def.getter(), prefix, stack, out);
       return;
     case "object":
     case "interface":
       for (const [key, member] of Object.entries(def.shape ?? {})) {
-        findNullableOptional(member, prefix ? `${prefix}.${key}` : key, seen, out);
+        findNullableOptional(member, prefix ? `${prefix}.${key}` : key, stack, out);
       }
       return;
     case "array":
-      findNullableOptional(def.element, `${prefix}[]`, seen, out);
+      findNullableOptional(def.element, `${prefix}[]`, stack, out);
       return;
     case "set":
-      findNullableOptional(def.valueType, `${prefix}{set}`, seen, out);
+      findNullableOptional(def.valueType, `${prefix}{set}`, stack, out);
       return;
     case "tuple":
       (def.items ?? []).forEach((item: unknown, i: number) =>
-        findNullableOptional(item, `${prefix}[${i}]`, seen, out)
+        findNullableOptional(item, `${prefix}[${i}]`, stack, out)
       );
-      if (def.rest) findNullableOptional(def.rest, `${prefix}[...]`, seen, out);
+      if (def.rest) findNullableOptional(def.rest, `${prefix}[...]`, stack, out);
       return;
     case "union":
       // Members are emitted at the SAME path — an items[] union arm is a storage
       // position of the array, not a distinct key.
-      (def.options ?? []).forEach((opt: unknown) => findNullableOptional(opt, prefix, seen, out));
+      (def.options ?? []).forEach((opt: unknown) => findNullableOptional(opt, prefix, stack, out));
       return;
     case "intersection":
-      findNullableOptional(def.left, prefix, seen, out);
-      findNullableOptional(def.right, prefix, seen, out);
+      findNullableOptional(def.left, prefix, stack, out);
+      findNullableOptional(def.right, prefix, stack, out);
       return;
     case "record":
     case "map":
-      findNullableOptional(def.valueType, `${prefix}.<key>`, seen, out);
+      findNullableOptional(def.valueType, `${prefix}.<key>`, stack, out);
       return;
     default:
       return;
