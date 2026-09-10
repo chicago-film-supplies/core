@@ -19,7 +19,7 @@ api-cloudrun#943's remaining half.*
 > | `core` (`beta`) | `fb4a572` | ✅ published — `@cfs/core@10.0.0-beta.403` on JSR |
 > | `api-cloudrun` (`main`) | `c499891d` + `1c552f07` (40 pins) | ✅ pushed |
 > | `manager` (`main`) | `3fed294` (1 pin) | ✅ pushed |
-> | `templates` | PR **#306** (3 commits, 15 pins) | ⏸ green, **awaiting a human merge** |
+> | `templates` | PR **#306** (3 commits, 15 pins) | ⏸ green, **needs a human merge** |
 >
 > **Not yet in prod** — that waits on api-cloudrun's next release cut, as batch 1 did.
 >
@@ -462,8 +462,11 @@ batch 1's exactly, which is the check worth repeating rather than the numbers wo
 **Continue in-session** only for the immediate follow-ups that lean on what is already loaded:
 
 1. **Merge `templates` PR #306** — three commits (fixture completion, templates#305, 15 pins), all
-   four checks green including `visual-diff`. Left unmerged because merge is the publish authority in
-   that repo and agents open PRs rather than merging them.
+   four checks PASSED on the head sha `6941036`, `visual-diff` included.
+   ⚠️ **Not auto-merged, and the reason is specific rather than general.** A `templates` pin PR whose
+   diff is `deno.json` + `deno.lock` alone is one an agent merges itself; **a fixture, golden or
+   workflow in the same PR takes it out of that row**, and this one repairs two fixtures. So the rule
+   is intact — this PR is simply not a pure pin bump. See `templates/CLAUDE.md` § pin bump.
 2. **Carrying `beta.403` to prod** waits on api-cloudrun's next release cut, exactly as batch 1's
    `beta.399` did. Nothing about the tightening bites until then.
 3. api-cloudrun#951 (the corpus re-parse guard — the ad-hoc probe has now been rewritten three times)
