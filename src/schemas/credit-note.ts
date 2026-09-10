@@ -284,11 +284,11 @@ export interface CreditNoteDocTotals {
 }
 
 const CreditNoteDocTotalsSchema: z.ZodType<CreditNoteDocTotals> = z.strictObject({
-  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
-  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
-  discount_amount_cents: z.int().default(0).meta({ column: true, label: "Discount" }),
-  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
-  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+  subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
+  discount_amount_cents: z.int().meta({ column: true, label: "Discount" }),
+  taxes: z.array(PriceModifier).meta({ label: "Tax" }),
+  total_cents: z.int().meta({ column: true, label: "Total" }),
 });
 
 // ── Document ─────────────────────────────────────────────────────

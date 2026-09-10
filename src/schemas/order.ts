@@ -1273,12 +1273,12 @@ export const TotalsCore: {
   transaction_fees: z.ZodType<PriceModifierType[]>;
   total_cents: z.ZodType<number>;
 } = {
-  discount_amount_cents: z.int().default(0).meta({ column: true, label: "Discount" }),
-  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
-  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
-  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
-  transaction_fees: z.array(PriceModifier).default([]).meta({ label: "Transaction Fee" }),
-  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+  discount_amount_cents: z.int().meta({ column: true, label: "Discount" }),
+  subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
+  taxes: z.array(PriceModifier).meta({ label: "Tax" }),
+  transaction_fees: z.array(PriceModifier).meta({ label: "Transaction Fee" }),
+  total_cents: z.int().meta({ column: true, label: "Total" }),
 };
 
 export interface OrderDocTotalsType {
@@ -1300,7 +1300,7 @@ const OrderDocTotals: z.ZodType<OrderDocTotalsType> = z.strictObject({
   transaction_fees: TotalsCore.transaction_fees,
   total_cents: TotalsCore.total_cents,
   // Order-only, and correctly so: an invoice price has no `replacement_cents`.
-  replacement_total_cents: z.int().default(0).meta({ column: true, label: "Replacement Total" }),
+  replacement_total_cents: z.int().meta({ column: true, label: "Replacement Total" }),
 });
 
 /**

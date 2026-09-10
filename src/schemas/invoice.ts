@@ -601,7 +601,7 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
   taxes: TotalsCore.taxes,
   transaction_fees: TotalsCore.transaction_fees,
   total_cents: TotalsCore.total_cents,
-  amount_paid_cents: z.int().default(0).meta({
+  amount_paid_cents: z.int().meta({
     column: true,
     label: "Amount Paid",
   }),
@@ -619,7 +619,7 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
     label: "Amount Voided",
   }),
   // Unbounded on purpose: an over-credited invoice must stay negative.
-  amount_due_cents: z.int().default(0).meta({
+  amount_due_cents: z.int().meta({
     column: true,
     label: "Amount Due",
   }),
