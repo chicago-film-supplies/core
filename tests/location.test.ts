@@ -24,9 +24,23 @@ Deno.test("LocationSchema validates a complete document", () => {
   assertEquals(LocationSchema.safeParse(validLocation).success, true);
 });
 
-Deno.test("LocationSchema defaults arrays when omitted", () => {
-  const { product_capacities: _, query_by_product_capacities: _q, products: _p, query_by_products: _qp, ...doc } = validLocation;
-  assertEquals(LocationSchema.safeParse(doc).success, true);
+// Was `LocationSchema defaults arrays when omitted`, asserting that all four of
+// these could be dropped and still parse. That assertion was the DEFAULT'S OWN
+// SPEC: `query_by_product_capacities` / `query_by_products` are derived denorms
+// that `services/locations.ts` writes on every create, so the default never put
+// a value anywhere — it only licensed a writer to omit one (core#95).
+// Rewritten as its mirror rather than deleted, one dropped key at a time so each
+// case names the constraint it tests instead of failing for some reason.
+// `product_capacities` / `products` are deliberately NOT asserted either way:
+// they are still catalogued backlog, and pinning their current defaults here
+// would just recreate this test for the next batch to undo.
+Deno.test("LocationSchema requires the query_by_* denorms", async (t) => {
+  for (const key of ["query_by_product_capacities", "query_by_products"] as const) {
+    await t.step(`rejects a document missing ${key}`, () => {
+      const { [key]: _dropped, ...doc } = validLocation;
+      assertEquals(LocationSchema.safeParse(doc).success, false);
+    });
+  }
 });
 
 Deno.test("LocationSchema rejects missing uid_store", () => {

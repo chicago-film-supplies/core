@@ -440,7 +440,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   }).meta({ label: "Organization" }),
   stores: z.array(BookingStoreSchema).default([]).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId).default([]),
-  query_by_uid_location: z.array(FirestoreId).default([]),
+  query_by_uid_location: z.array(FirestoreId),
   uid_destination_delivery: FirestoreId,
   uid_destination_collection: FirestoreId,
   version: z.int().min(0).default(0),

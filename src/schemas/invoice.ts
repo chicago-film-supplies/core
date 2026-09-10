@@ -914,7 +914,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   uid: FirestoreId,
   number: z.int().meta({ column: true, label: "#", linkTo: "invoiceDetail" }),
   status: InvoiceStatus.meta({ column: true, label: "Status" }),
-  query_by_orders: z.array(z.string()).default([]),
+  query_by_orders: z.array(z.string()),
   number_orders: z.array(z.int()).default([]).meta({
     column: true,
     label: "Order #",

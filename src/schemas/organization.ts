@@ -457,7 +457,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   // The whole contact is the column — the Typesense config indexes the nested
   // object, and `TableCell` joins the name parts.
   contacts: z.array(OrganizationContact).meta({ column: true, label: "Contacts" }),
-  query_by_contacts: z.array(z.string()).default([]),
+  query_by_contacts: z.array(z.string()),
   last_order: FirestoreTimestamp.nullable().optional().meta({ column: true, label: "Last Order" }),
   uid_thread: ThreadId,
   version: z.int().min(0).default(0),

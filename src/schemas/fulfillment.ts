@@ -458,9 +458,9 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
     label: "Reference",
     linkTo: "fulfillmentDetail",
   }),
-  query_by_items: z.array(z.string()).default([]),
-  query_by_contacts: z.array(z.string()).default([]),
-  query_by_dates: z.array(z.string()).default([]),
+  query_by_items: z.array(z.string()),
+  query_by_contacts: z.array(z.string()),
+  query_by_dates: z.array(z.string()),
   version: z.int().min(0).default(0),
   ...TimestampFields,
 }).meta({

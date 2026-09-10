@@ -33,6 +33,7 @@ const validLedger = {
     }],
   }],
   query_by_uid_store: ["teststore10000000000"],
+  query_by_uid_location: ["testloc1000000000000"],
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
 };

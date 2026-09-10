@@ -430,7 +430,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   totals: CreditNoteDocTotalsSchema,
   remaining_credit_cents: z.int().default(0).meta({ column: true, label: "Remaining Credit" }),
   sources: z.array(DocSource).default([]),
-  query_by_sources: z.array(z.string()).default([]),
+  query_by_sources: z.array(z.string()),
   xero_credit_note_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),

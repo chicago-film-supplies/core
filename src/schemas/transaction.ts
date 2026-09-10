@@ -793,9 +793,9 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   // reversal path reads it at `:535`. CLAUDE.md § "Is a field dead?".
   reverses: MovementId.nullable(),
   sources: z.array(DocSource).default([]).meta({ label: "Source" }),
-  query_by_sources: z.array(z.string()).default([]),
-  query_by_uid_store: z.array(FirestoreId).default([]),
-  query_by_uid_location: z.array(FirestoreId).default([]),
+  query_by_sources: z.array(z.string()),
+  query_by_uid_store: z.array(FirestoreId),
+  query_by_uid_location: z.array(FirestoreId),
   serialized_details: z.strictObject({
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
