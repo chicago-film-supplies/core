@@ -11,60 +11,84 @@ saying something different from what it predicted. That doc — `document-grain-
 this directory — is **deleted**, its structural work having landed and its every leftover now
 sitting on an issue (core#100, core#103, core#105, api-cloudrun#943, api-cloudrun#944).*
 
-> ## ⚠️ STATUS UPDATE 2026-09-10
+> ## ⚠️ STATUS UPDATE 2026-09-10 — steps 1-3 and 6 are DONE. Steps 4, 5 and 7 remain.
 >
-> **The backfill script exists and has written nothing yet** —
-> `api-cloudrun/scripts/backfill-zero-priced-projections.ts`, dry-run by default,
-> type-checks, unrun (ADC was expired). Step 1 is still the next thing anyone does, but
-> three facts found while writing it change what step 1 and step 3 have to be.
+> ⭐ **The corpus is repaired and the emit is live.** Both environments read **0 unstated
+> component rows on all three grains**, from 9,213. Prod write: 2 orders, 1,040 invoices,
+> 1,014 fulfillments, zero failures, consumer queues paused and drained (three passes —
+> `gcloud tasks queues purge` really does return before it finishes: 0 → 100 → 25 → 0).
+> `@cfs/core@10.0.0-beta.401` published and verified **against the tarball** from a consumer,
+> not against core's own gates. All three consumers pinned: api-cloudrun `0f729d47`, manager
+> `20fd0c0`, templates still on beta.400 (it moves with the fixture PR below).
 >
-> 🔴 **1. The emit's population is LINES, not components — or the emit rule changes.**
-> `invoiceItemDifferences` counts a `null`-valued key as PRESENT, and
-> `buildOrderLineFromProduct` / `buildCustomOrderLine` write `zero_priced: null` on EVERY
-> order line, not only components. So an unconditional emit makes every *paired* line
-> differ, not the 4,397 component rows — and the backfill has to cover ~1,040 invoices
-> and ~1,020 fulfillments rather than the documents that happen to hold components. Three
-> resolutions, **undecided**, to be settled on the dry-run numbers:
-> **(a)** unconditional `?? null` + backfill every line — the key set stops depending on
-> the value, which is why `base_percent` and `taxed_as` are both spelled that way;
-> **(c)** emit only a stated boolean — the plan's original population, but a line's key
-> set then moves when its value does, so clearing a catalog flag strands the stored key
-> and reports `out_of_sync` forever; **(e)** teach the TOP-LEVEL key comparison
-> absent ≡ null, which `invoicePriceDifferences` already does one level down — zero
-> corpus writes for the non-component population, but it moves sync verdicts corpus-wide
-> and needs its own before/after. The script's `--stated-only` lever prices (a) against
-> (c) in one dry run each.
+> **What is LEFT, in order:**
 >
-> 🔴 **2. Stamping the flag can make a document UNWRITABLE.** `computeItemPaths` sorts
-> `zero_priced === true` ahead of its priced siblings and `validatePathsAgainst` compares
-> `items[i].uid` against the recomputed array — so the write boundary checks the
-> LINEARIZATION, not just the paths. There is no "stamp but keep the order" option; the
-> only writable form is the canonical one. The script recomputes per grain and holds
-> documents whose row order actually moves behind `--allow-reorder`, because reordering
-> the lines of an issued invoice is customer-visible. Neither this doc nor core#100 knew.
+> 1. 🔴 **`templates` — and it is a PREREQUISITE for step 4, not the tail this plan called
+>    it.** `lintFixture` parses every fixture against the real `InvoiceSchema`, so an
+>    array-level refine refuses any fixture whose components are unstated. Measured
+>    2026-09-10: the INVOICE family is **20 of 20 line rows unstated across all 8 fixtures**
+>    (8 of those rows are components, across 5 files — that smaller number is what the refine
+>    refuses; the larger one is what a re-capture must fix). The QUOTE family is **0 of 134**,
+>    because its fixtures are captured from ORDERS, which always carried the flag.
+>    ⭐ **A captured fixture is only as complete as the document it captured** — capture buys
+>    PII safety and shape fidelity, never completeness. Re-capture all 8 with
+>    `templates_capture_fixture` (never `templates_set_fixture`); every source document is
+>    inside the backfilled corpus, so the capture fixes them by construction:
+>    `zero-priced-flat-tax` + `-hidden` ← #2390 `wDBAH05fWHmNi5m94an8` (one document
+>    deliberately — the pair is a controlled comparison), `billing-foreign-country` ← #1918,
+>    `rental-discount-taxed` ← #1902, `rental-discount-untaxed` ← #1996, plus `part-paid`,
+>    `credits-applied`, `service-untaxed-fee`. Then re-bless goldens in BOTH namespaces via
+>    `--env=dev`, and bump the pin to beta.401 in the same PR.
+> 2. **Step 4 — the refine (core#100).** Array-level, both directions, on all three grains.
+> 3. **Step 5 — `AuthoredProductComponent.zero_priced` required.** Still a zero-row backfill.
 >
-> 🔴 **3. Step 3 must widen the invoice INPUT schema too.** `buildInvoiceItems` rebuilds
-> every stored line from typed fields and `InvoiceItemInputLineInner` is a plain
-> `z.object` that strips unknown keys — so without `zero_priced` on
-> `InvoiceItemInputLineType`, the next `PUT /invoices` drops the backfilled key line by
-> line. It is the `path_substituted_for` shape exactly.
+> ⭐ **Owner ruling 2026-09-10 — the templates key on `zero_priced`**, which is what
+> `quote.eta:307` already does. **Measured before shipping: near-inert.** The proxy
+> (`price.base_cents === 0 && componentDepth > 0`) hides 3,557 rows, the real flag 3,556 —
+> **1 row becomes visible** (invoice #2411, draft, a genuinely-charged-at-$0 component the
+> proxy was wrongly hiding) and **0 become hidden**, which is invariant (1) holding. Also
+> repair the "an invoice line has NO `zero_priced` field" claim in `invoice.eta` and in two
+> `invoice.meta.json` fixture descriptions.
 >
-> ⭐ **Owner ruling 2026-09-10 — the templates key on `zero_priced`.** `invoice.eta`'s
-> `hide_zero_priced_components` filters on `price.base_cents === 0 && componentDepth > 0`
-> as a PROXY, with a docblock stating the invoice line has no such field; step 3 makes
-> that false and the predicate becomes `i.zero_priced === true`, which is what
-> `quote.eta:307` already does. One line plus its docblock in each of two families, and
-> the two stop disagreeing. ⚠️ Invariant (1) makes `zero_priced === true` a SUBSET of
-> `base_cents === 0`, so the switch can only ever make a hidden row VISIBLE, never the
-> reverse — measure that population before shipping it. Default renders are unaffected
-> (the param defaults false); the exposed goldens are the two
-> `hide-zero-priced-components` fixtures. ⚠️ It also means a component row the backfill
-> MISSES stops being hidden — completeness now has a rendering consequence, not only a
-> refine one.
+> ## 🔴 Three things this plan did not know, all found by RUNNING
 >
-> ⚠️ The two `invoice.meta.json` fixture descriptions repeat the "an invoice line has NO
-> `zero_priced` field" claim verbatim. They are prose about the corpus and go stale in
-> the same commit.
+> 1. **The emit's population is LINES, not components.** `invoiceItemDifferences` counts a
+>    null-valued key as PRESENT and `buildOrderLineFromProduct` writes `zero_priced: null` on
+>    every order line — so the emit had to be unconditional and the backfill had to cover
+>    every line. The narrow value-conditional rule saved only **102 documents of 1,037** and
+>    would have made a line's key set depend on its VALUE, so clearing a catalog flag strands
+>    the stored key and reports `out_of_sync` forever. Not worth it; **(a) unconditional
+>    `?? null`** is what shipped.
+> 2. **Stamping the flag can make a document UNWRITABLE.** `computeItemPaths` sorts
+>    `zero_priced === true` ahead of its priced siblings and `validatePathsAgainst` compares
+>    `items[i].uid` positionally — so the write boundary checks the LINEARIZATION, not just
+>    paths. There is no stamp-but-keep-the-order option. 3 prod invoices reordered (#1850
+>    paid, #2299 and #2303 void; accessories moving inside one kit, money identical) and were
+>    written in canonical order under `--allow-reorder`. ⚠️ **Any future items[] backfill must
+>    WRITE IN CANONICAL ORDER rather than patch a key in place**, and must expect arrays a
+>    previous backfill already reordered.
+> 3. **The input channel created a way to LOSE the field.** `buildInvoiceItems` rebuilds
+>    every line from typed fields and the input schema strips unknowns, so `zero_priced` had
+>    to be added to `InvoiceItemInputLineType` — and that turns an omitted key into `?? null`,
+>    wiping a backfilled answer off every line of that invoice. Closed by
+>    `preserveStoredZeroPriced` (`api-cloudrun/src/lib/invoiceLineDenorms.ts`), a third
+>    carry-forward on the shared `(uid, k-th occurrence)` pairing.
+>
+> ⚠️ **Two residue classes the census structurally could not see**, both found by the
+> backfill's own fallbacks and both now derived rather than left silent. The catalog must be
+> keyed on the **(parent product, component) PAIR** — 5 component uids are stated both ways by
+> different parents, which made 2 rows look unanswerable while their own parent was
+> unambiguous. And a **component that carries a charge is not zero-priced**, so its own money
+> answers: 3 rows are a *Chicago Bottled Water Tax ( $0.05/bottle )* under an *Open Water 16oz
+> Aluminum Bottle (24 Case)*, in no product's `components[]` and billing 6 cents on 96-240
+> bottles. The census reads 0 for the unsafe arm because its partition (7) asks only about
+> rows whose paired ORDER line says true — prod invoice #2316 (paid) charges $6.80 for a
+> component the catalog calls free, and only the catalog fallback can reach it.
+>
+> ⚠️ **Two tests INVERTED rather than being deleted**, and expect one per grain for anything
+> that tightens `items[]`: core's *"the PROJECTION does not emit zero_priced yet"* was
+> literally the stage-one spec, and api-cloudrun's *"buildFulfillment line items expose only
+> fulfillment-safe fields"* listed the key among the order-only leaks.
 
 > **State at hand-off, 2026-09-09:** nothing in *The order of work* below has started. What
 > exists is the measurement (`api-cloudrun/scripts/audit-zero-priced-components.ts`, api-cloudrun
