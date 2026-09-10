@@ -24,7 +24,7 @@ api-cloudrun#943's remaining half.*
 > ✅ **In PROD as `v0.248.0`** — build `b5c04b92` from tag `v0.248.0` at commit `b88296ce`, image
 > `sha256:0733f9fd…`, serving as revision **`api-cloudrun-00365-8t9`** at 100%. Verified by digest
 > rather than by the tag: the build's `results.images[0].digest` and the revision's serving digest are
-> the same string ([[a-tag-is-not-a-deployment]]).
+> the same string — a tag is a fact about the repo, not about what prod executes.
 >
 > ⚠️ **The release NOTES say `beta.402`, and the artifact runs `beta.403`.** Release Please left
 > `#949` untouched when the pin landed because `chore(deps)` and `test(fixtures)` are not releasable
@@ -396,10 +396,48 @@ decision is stable:
   that `totals`, `number`, `query_by_*` and `bookings_breakdown` are the client-untouchable derived
   set — so the batch boundary was a lookup, and the writer audit generalised across all 11
   collections instead of being re-argued per path.
-- **The `Address` block is the biggest single decision** — 35 blocked paths in five embeddings, and
-  one `.default("")` per key. It needs the core#101 treatment: find the value's AUTHOR (a
-  geocode? the CRMS import?), not a plausible default. ⚠️ Its absences differ per embedding
-  (49/53 on organizations, 2/11 on cards, 1/11 on bookings), so it is more than one population.
+### 🔴 `Address` is batch 3, and it is ONE declaration spanning EVERY partition class
+
+Measured 2026-09-10, after batch 2. `core/src/schemas/common.ts:1844` — `export const Address`,
+`.default("")` on each of seven keys — resolves to **63 backlog paths = 7 keys × 9 embeddings**.
+⚠️ **Not 35, and not 49.** Earlier versions of this doc said "35 blocked paths in five embeddings";
+that counted only the blocked half. The 63 partition like this:
+
+| embedding | class | absent (prod / dev) |
+|---|---|---|
+| `organizations.billing_address` | BLOCKED | **49 of 318 / 53 of 322** |
+| `cards.destination.address` | BLOCKED | 2 of 1,159 / 11 of 1,166 |
+| `bookings.destinations.delivery.address` | BLOCKED | 1 of 7,112 / 11 of 7,120 |
+| `destinations.address` | BLOCKED | 1 of 322 / 1 of 323 |
+| `orders.organization.billing_address` | BLOCKED | 1 of 1,020 / 1 of 1,020 |
+| `invoices.organization.billing_address` | FREE | 0 / 0 |
+| `credit-notes.organization.billing_address` | FREE | 0 / 0 |
+| `fulfillments.destinations[].delivery.address` | **ARRAY-MEMBER — never censused** | unknown |
+| `recurrences.prototype.destination.address` | **VACUOUS** — collection empty both projects | says nothing |
+
+🔴 **The halves cannot be split, because it is one declaration.** Removing `.default("")` from
+`Address` tightens all nine embeddings at once. So the 14 free paths are not free — the blocked 35
+gate them, and so do the two that no instrument has answered for.
+
+⭐ **This is the first backlog item that needs every instrument the campaign has**: the `orderBy`
+census for five embeddings, a PAGED probe for `fulfillments.destinations[]` (an array of maps —
+see the `array[]` bullet below), and a WRITER argument for `recurrences`, whose corpus is empty and
+therefore cannot answer (the VACUOUS warning above — an empty collection makes the gate
+pass by vacuity while saying nothing about the writer).
+
+**The work, in order:**
+1. **Census the two unmeasured embeddings** — page `fulfillments.destinations[]`; read the
+   `recurrences` prototype WRITER, since its corpus cannot speak.
+2. **Find the AUTHOR of an address**, per core#101 — a geocode? the retired CRMS import? an operator
+   typing it? — rather than picking a plausible default. ⚠️ `.default("")` is the trap in miniature:
+   `""` is not "unknown", and 49 organizations with no billing address is a business fact somebody
+   knows, not a hole to fill with empty strings.
+3. **Expect several populations.** 49-of-318 on `organizations` against 1-of-1,020 on `orders` is not
+   one defect at different scales — the org one is plausibly "we never collected it", the order one a
+   single stray document. Attribute before repairing.
+4. ⚠️ **`organizations` is the only one where dev genuinely adds rows** (322 vs 318, and 53 vs 49
+   absent). Everywhere else the two projects are a mirror — check the counts before claiming a
+   second sample, as *Batch 2* records.
 - **The 75 `array[]` paths need a different instrument** — a paged census in the shape of
   `audit-zero-priced-components.ts`, which already pages `items[]` on three grains. The stored
   invoice item `path` (`schemas/invoice.ts:487`, `z.array(ItemUid).default([])`) is in this family.
@@ -473,11 +511,10 @@ batch 1's exactly, which is the check worth repeating rather than the numbers wo
    merged, `v0.248.0` deployed and verified by image digest.
 2. **Batch 3 is a DECISION, not a sweep, and that is new.** Batch 2 took the last of the large
    coherent free blocks; the 74 free scalar paths that remain fragment into families of 4, 3 and 2
-   (`items` containers ×4, `sources` ×3, `reference` ×3). ⭐ **`Address` is now the pivot** — ONE
-   declaration (`core/src/schemas/common.ts:1844`, `.default("")` per key) resolving to 49 paths
-   across 8 embeddings, of which **14 are free and 35 blocked**. Because it is one declaration the
-   halves cannot be split, so the blocked 35 gate all 49. It needs the core#101 treatment — find who
-   AUTHORS an address — and its absences differ per embedding (49/53 organizations, 2/11 cards, 1/11
-   bookings), so it is several populations wearing one schema.
+   (`items` containers ×4, `sources` ×3, `reference` ×3). ⭐ **`Address` is the pivot** — ONE
+   declaration resolving to **63 paths across 9 embeddings**, spanning every partition class the
+   campaign has: 35 blocked, 14 free, 7 vacuous and 7 never censused at all. The full table, the
+   per-embedding absence counts and the order of work are in *The next batch* above; **start there,
+   not here.**
 3. api-cloudrun#951 (the corpus re-parse guard — that probe has now been written three times, and
    found a prod defect on its first run) and api-cloudrun#943's manager half.
