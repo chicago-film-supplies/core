@@ -220,6 +220,32 @@ decision is stable:
   participates in the array's own ordering** — and if the boundary re-derives that ordering, a
   correct value written in the stored order is still a refused write.
 
+  🔴 **A committed templates fixture is a PREREQUISITE for an `items[]` tightening, not a tail** —
+  `lintFixture` parses every fixture against the real `InvoiceSchema`/`OrderSchema`, so a fixture
+  missing a newly-required items key fails the templates gate before anything reaches prod.
+  ⚠️ **And the exposure is per-GRAIN, wildly so.** Measured here 2026-09-10 over the committed
+  fixtures: the **quote** family (orders-sourced) is **0 of 134 line rows** unstated for
+  `zero_priced`, while the **invoice** family is **20 of 20** across 8 files. Not a skew — total, in
+  both directions, because quote fixtures are captured from orders that always carried the flag.
+  ⭐ **So a fixture captured from a real document is only as complete as the document it captured.**
+  It inherits the CORPUS's holes, not the schema's requirements. ⚠️ That corrects the reason given in
+  the `beta.400` templates pin (`templates` #302), which said no fixture needed repair *"because they
+  were produced by `templates_capture_fixture` from real documents rather than hand-written"*. The
+  conclusion was right and the mechanism claim was too broad: those same captured invoice fixtures
+  are missing `zero_priced` on every line row. Capture-completeness is a fact about the source
+  documents, per field and per grain — measure it, do not infer it from provenance.
+  ✅ **Measured for THIS backlog: 0 exposure today.** Every one of the 57 `items[]` backlog keys is
+  stated on every row of both families (224 item rows). `zero_priced` is not in the backlog, so its
+  20 unstated rows belong to manager#421's campaign, not this one — but the measurement is the
+  prerequisite an `items[]` batch must re-run, since it is a fact about fixtures that change.
+
+  ⚠️ **Expect an INVERTED test per grain when an `items[]` batch lands.** A guard written while a
+  field was legitimately absent asserts that absence: `buildFulfillment line items expose only
+  fulfillment-safe fields` listed `zero_priced` among the order-only keys that must NOT leak, and
+  core carried *"the PROJECTION does not emit `zero_priced` yet"* — the stage-one spec. Both had to
+  be rewritten against the source line rather than deleted, so they read as mirrors. A green test
+  can be the workaround's spec (cfs-f0, 2026-09-10).
+
 ## Context recommendation
 
 **Clear before the wider campaign.** It does not need this session's working context — the policy is
