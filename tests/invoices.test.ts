@@ -330,11 +330,16 @@ Deno.test("buildOrderScopedItems projects order-only fields off line items", () 
   const keys = Object.keys(projected).sort();
   assertEquals(
     keys.includes("stock_method") || keys.includes("order_number") || keys.includes("uid_order") ||
-      keys.includes("inclusion_type") || keys.includes("zero_priced") || keys.includes("uid_delivery") ||
+      keys.includes("inclusion_type") || keys.includes("uid_delivery") ||
       keys.includes("uid_collection"),
     false,
     `leaked keys present: ${keys.join(", ")}`,
   );
+  // ⚠️ `zero_priced` was in the list above until 2026-09-10 and is deliberately
+  // NOT any more: it stopped being an order-only field when stage two of
+  // manager#421 made it a mirror. Asserted positively rather than merely dropped,
+  // so this test still says something about it.
+  assertEquals((projected as unknown as Record<string, unknown>).zero_priced, false);
   const priceKeys = Object.keys((projected as unknown as { price: Record<string, unknown> }).price);
   assertEquals(priceKeys.includes("replacement"), false, `leaked price.replacement_cents: ${priceKeys.join(", ")}`);
 });
@@ -3433,22 +3438,60 @@ Deno.test("invariant (1): a flagged invoice line may not carry a charge", () => 
   );
 });
 
-Deno.test("manager#421 stage one: the PROJECTION does not emit zero_priced yet", () => {
-  // The order line genuinely carries the key — otherwise this passes vacuously
-  // and would keep passing after stage two lands.
-  const orderLine = orderShapedLine() as unknown as Record<string, unknown>;
-  orderLine.zero_priced = null;
-  const projected = projectOrderItemToInvoiceItem(
-    orderLine as unknown as Parameters<typeof projectOrderItemToInvoiceItem>[0],
-    ORDER_DIV_1,
-  ) as unknown as Record<string, unknown>;
-  assertEquals("zero_priced" in projected, false);
+Deno.test("manager#421 stage two: the PROJECTION emits zero_priced, unconditionally", async (t) => {
+  // ⚠️ This test INVERTED on 2026-09-10. It was "the projection does not emit
+  // zero_priced yet" and it was the stage-one spec — a green test that was the
+  // workaround's specification. Stage two is exactly the change it forbade, so
+  // it is rewritten rather than deleted: the same three questions, answered the
+  // other way, plus the arm that proves the backfill was necessary.
+  const project = (flag: boolean | null) => {
+    const orderLine = orderShapedLine() as unknown as Record<string, unknown>;
+    orderLine.zero_priced = flag;
+    return projectOrderItemToInvoiceItem(
+      orderLine as unknown as Parameters<typeof projectOrderItemToInvoiceItem>[0],
+      ORDER_DIV_1,
+    ) as unknown as Record<string, unknown>;
+  };
 
-  // 🔴 And the consequence that makes it load-bearing: a stored line with no
-  // key still agrees with its projection, so no sync verdict moves.
-  const stored = buildOrderScopedItems(
-    [orderLine as unknown as Parameters<typeof buildOrderScopedItems>[0][number]],
-    ORDER_DIV_1,
-  )[0] as InvoiceItem;
-  assertEquals(invoiceItemDifferences(projected as unknown as InvoiceItem, stored), []);
+  await t.step("the order's answer is carried across, for every value", () => {
+    assertEquals(project(true).zero_priced, true);
+    assertEquals(project(false).zero_priced, false);
+    // 🔴 The `null` arm is the one that matters. A spread conditional on
+    // STATEDNESS would drop the key here, which makes a line's key set depend on
+    // its value — clear a component's flag in the catalog and the stored line
+    // keeps a key the projection has stopped emitting, reporting `out_of_sync`
+    // forever with nothing wrong.
+    assertEquals("zero_priced" in project(null), true);
+    assertEquals(project(null).zero_priced, null);
+  });
+
+  await t.step("a projected line and its stored twin agree", () => {
+    const orderLine = orderShapedLine() as unknown as Record<string, unknown>;
+    orderLine.zero_priced = null;
+    const stored = buildOrderScopedItems(
+      [orderLine as unknown as Parameters<typeof buildOrderScopedItems>[0][number]],
+      ORDER_DIV_1,
+    )[0] as InvoiceItem;
+    assertEquals(invoiceItemDifferences(project(null) as unknown as InvoiceItem, stored), []);
+  });
+
+  await t.step("…and a line the backfill MISSED differs, on this key", () => {
+    // ⭐ The anti-vacuity arm, and the whole reason the emit was gated on a
+    // corpus write rather than shipped on its own. `invoiceItemDifferences`
+    // compares top-level KEY SETS and counts a null-valued key as present, so an
+    // un-backfilled stored line is not merely missing a value — it reports a
+    // difference. Without this arm the step above would pass just as well
+    // against a projection that emitted nothing at all.
+    const orderLine = orderShapedLine() as unknown as Record<string, unknown>;
+    orderLine.zero_priced = null;
+    const unbackfilled = buildOrderScopedItems(
+      [orderLine as unknown as Parameters<typeof buildOrderScopedItems>[0][number]],
+      ORDER_DIV_1,
+    )[0] as unknown as Record<string, unknown>;
+    delete unbackfilled.zero_priced;
+    assertEquals(
+      invoiceItemDifferences(project(null) as unknown as InvoiceItem, unbackfilled as unknown as InvoiceItem),
+      ["zero_priced"],
+    );
+  });
 });

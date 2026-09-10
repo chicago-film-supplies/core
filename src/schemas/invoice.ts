@@ -344,22 +344,16 @@ export interface InvoiceDocLineItemType {
    * line it mirrors, which is the opposite of the alignment this exists for; a
    * divider row and a plain top-level rental have no meaningful boolean.
    *
-   * 🔴 **DECLARED, NOT YET EMITTED — so "carries the same fact" above is the
-   * intent and not yet the corpus.** `projectOrderItemToInvoiceItem` omits this
-   * key on purpose (stage one of `manager#421`): the schema accepts it so a
-   * deployed reader can hold a document carrying one, and nothing writes one
-   * yet. Measured 2026-09-09 in both projects: **0 of 4,397 invoice component
-   * lines carry it**, against 4,821 of 4,823 stated on the order grain.
-   *
-   * ⚠️ **So the DECLARED surface of this line and its STORED surface are
-   * different sets right now**, and anything reasoning about invoice lines —
-   * a census, a Typesense mirror, a template fixture, a key-set diff — has to
-   * read the stored shape rather than this interface. Emitting it is gated on a
-   * backfill rather than on taste: `invoiceItemDifferences` compares top-level
+   * ⭐ **EMITTED since 2026-09-10**, unconditionally as `?? null`, by
+   * `projectOrderItemToInvoiceItem` and by `api-cloudrun`'s hand-mirrored
+   * `buildInvoiceItems`. The corpus was backfilled first — 1,037 of 1,040 prod
+   * invoices, 9,590 rows — because `invoiceItemDifferences` compares top-level
    * KEY SETS and `buildOrderLine` writes the key on every order line, so an emit
-   * ahead of the backfill makes every paired line differ at once. See
-   * `projectOrderItemToInvoiceItem`'s docblock and
-   * `core/.claude/plans/zero-priced-stage-two.md`.
+   * ahead of the backfill would have made every paired line differ at once.
+   *
+   * ⚠️ **The key is present on every line, valued `null` where the order line
+   * states nothing.** Absence means a line written before the backfill, not "no
+   * answer" — a component with no answer is what the core#100 refine refuses.
    */
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
@@ -1118,6 +1112,18 @@ export interface InvoiceItemInputLineType {
    * than rejected.
    */
   path_substituted_for?: string[];
+  /**
+   * @see `InvoiceDocLineItemType.zero_priced`. NOT operator-authored — it is
+   * projected from the order line — and it still needs an input channel, for
+   * exactly the reason above: `buildInvoiceItems` rebuilds every stored line
+   * from typed fields, so without this key here the next `PUT /invoices` would
+   * strip the backfilled value off every line of that invoice, silently.
+   *
+   * ⚠️ The API does not trust it blindly either — `checkZeroPricedAmount` ties
+   * `true` to `base_cents === 0`, so a client cannot flag a line it also
+   * charges for.
+   */
+  zero_priced?: boolean | null;
 }
 
 // Un-annotated for `_zod.propValues`, `z.object` so unknown keys are stripped
@@ -1161,6 +1167,7 @@ const InvoiceItemInputLineInner = z.object({
   taxed_as: TaxedAsEnum.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
   path_substituted_for: z.array(ItemUid).optional(),
+  zero_priced: z.boolean().nullable().optional(),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable invoice line (input). */

@@ -545,26 +545,32 @@ export function buildInvoiceDestinationDivider(
  * `...orderItem` into an invoice item leaks them. Call this helper at every
  * order → invoice boundary instead.
  *
- * 🔴 **`zero_priced` is DECLARED on the invoice line now and is deliberately
- * still NOT projected — that pairing is the whole of stage one** (`manager#421`).
- * The schema accepts the key so a deployed reader can hold a document carrying
- * it; nothing emits one yet, so no stored line changes and no verdict moves.
+ * ⭐ **`zero_priced` is projected UNCONDITIONALLY (`?? null`), and the corpus was
+ * backfilled first** — stage two of `manager#421`, landed 2026-09-10 by
+ * `api-cloudrun/scripts/backfill-zero-priced-projections.ts`.
  *
- * ⚠️ **Emitting it is gated on a BACKFILL, not on taste**, and the reason is
- * `invoiceItemDifferences` comparing top-level KEY SETS. `buildOrderLine` writes
- * `zero_priced: null` explicitly on every order line — see its own comment,
- * *"the server writes both as an explicit `null` so the optimistic row matches
- * the echo"* — so the key is present on every order line without exception. Add
- * it to this projection before the stored invoice lines carry it and EVERY
- * paired line reports a key-set difference at once. That is not hypothetical:
- * this file already records it happening three times (`base_percent`,
- * `crms_id`, `price.discount_percent` — 8,015 of 8,978 paired lines), which is
- * why `coa_revenue`, `taxed_as` and `price.taxes_base` below are all spread
+ * ⚠️ **The order of those two was forced, and the reason is
+ * `invoiceItemDifferences` comparing top-level KEY SETS.** `buildOrderLine`
+ * writes `zero_priced: null` explicitly on every order line — see its own
+ * comment, *"the server writes both as an explicit `null` so the optimistic row
+ * matches the echo"* — so the key is present on every order line without
+ * exception, and emitting here ahead of the backfill would have made EVERY
+ * paired line report a key-set difference at once. This file already records
+ * that happening three times (`base_percent`, `crms_id`,
+ * `price.discount_percent` — 8,015 of 8,978 paired lines), which is why
+ * `coa_revenue`, `taxed_as` and `price.taxes_base` below are all spread
  * CONDITIONALLY.
  *
- * **Stage two is therefore: backfill the corpus, then emit here, in that
- * order** — and a conditional spread does NOT rescue it, because the condition
- * is true for every line.
+ * 🔴 **So this key is the one that must NOT be conditional, and the population
+ * is why.** A conditional spread on presence is vacuous — the condition is true
+ * for every order line. A conditional spread on *statedness* is worse: it makes
+ * a line's KEY SET depend on its VALUE, so clearing a component's flag in the
+ * catalog would take the key off the projection while the stored line kept it,
+ * and that line would report `out_of_sync` forever with nothing wrong. Measured
+ * 2026-09-10 in prod, the narrow rule saved 102 invoice documents out of 1,037 —
+ * a tenth of the write, for a defect class. `price.base_percent` and `taxed_as`
+ * are spelled `?? null` in `api-cloudrun`'s `buildInvoiceItems` for the same
+ * reason.
  *
  * `destination` and `group` items share their shape with the order doc, so they
  * pass through. Line items (and `transaction_fee`, which is stored as a
@@ -641,6 +647,10 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
       ...(p.taxes_base !== undefined ? { taxes_base: p.taxes_base } : {}),
       total_cents: p.total_cents ?? 0,
     },
+    // Mirrored from the order line so the invoice carries the same answer as the
+    // line it was projected from. UNCONDITIONAL — see the docblock: this is the
+    // one key here whose presence must not depend on its value.
+    zero_priced: item.zero_priced ?? null,
     // ⚠️ `coa_revenue` is an INVOICE_ONLY field, and projecting it is not a
     // contradiction — it is what makes the override an override. The invoice's
     // own value still wins (`carryForwardOverrides` re-applies it after the

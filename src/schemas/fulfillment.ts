@@ -96,18 +96,16 @@ export interface FulfillmentLineItemType {
    * ⚠️ Same shape as the order's, `.nullable().optional()` — see the invoice
    * twin's docblock for why matching rather than tightening is the point.
    *
-   * 🔴 **DECLARED, NOT YET EMITTED — so "carries the same fact" above is the
-   * intent and not yet the corpus.** `projectItem`
-   * (`api-cloudrun/src/services/fulfillment.ts`) does not copy this key.
-   * Measured 2026-09-09 in both projects: **0 of 4,823 fulfillment component
-   * lines carry it**, against 4,821 of 4,823 stated on the order grain — so the
-   * DECLARED and STORED surfaces of this line are different sets right now, and
-   * a census or mirror must read the stored shape rather than this interface.
+   * ⭐ **EMITTED since 2026-09-10**, unconditionally as `?? null`, by
+   * `projectItem` (`api-cloudrun/src/services/fulfillment.ts`). The corpus was
+   * backfilled first — 1,014 of 1,020 prod fulfillments, 9,981 rows.
    *
-   * ⭐ This is also why `rebuildFulfillmentItems` takes sequence from the STORED
-   * document: with no value here a fulfillment cannot evaluate the
-   * zero-priced-first invariant about itself and can only inherit its
-   * projection's order. See `core/.claude/plans/zero-priced-stage-two.md`.
+   * ⚠️ **`rebuildFulfillmentItems` still takes sequence from the STORED
+   * document, and the reason has CHANGED rather than gone away.** It used to be
+   * that a fulfillment carried no flag and so could not evaluate the
+   * zero-priced-first invariant about itself; now it can. Sequence is still not
+   * the picker's to author — the surface has no drag-reorder — so passing the
+   * stored items is what keeps every line in the order the document already had.
    */
   zero_priced?: boolean | null;
   path: string[];
