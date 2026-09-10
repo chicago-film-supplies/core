@@ -122,6 +122,33 @@ export interface ProductComponent {
  */
 export interface AuthoredProductComponent extends ProductComponent {
   inclusion_type: InclusionTypeType;
+  /**
+   * Whether this parent includes this component at no charge — REQUIRED on the
+   * authored side, `core#100` / `manager#421` step 5.
+   *
+   * 🔴 **This is what makes the array-level refinement HOLD instead of decay.**
+   * `buildOrderComponentLines` writes `zero_priced: comp.zero_priced ?? null`,
+   * so a single catalog component authored without the flag puts a `null` on
+   * every order line built from it — and `checkZeroPricedComponents` then
+   * refuses those documents. Requiring it here makes the document-level
+   * invariant true BY CONSTRUCTION rather than true until someone adds a
+   * component.
+   *
+   * ⭐ **A zero-row backfill: 175 of 175 prod `components[]` entries state it**
+   * (122 true, 53 false, across 68 products), re-measured in both projects
+   * 2026-09-10. Exactly the shape `inclusion_type` above was tightened on.
+   *
+   * ⚠️ And the WRITER can supply it, which is why the input schema correctly
+   * stays loose: `toAuthoredComponents` fills `?? false` the way it already
+   * fills `inclusion_type` and `price_overridden`. Both manager authoring paths
+   * send an explicit boolean already (`stores/products.ts`, `?? false` and a
+   * literal `false`), so this does not need the manager to ship first.
+   *
+   * NOT expressed as `.default(false)`, for the reason stated above
+   * `inclusion_type`: `validateBeforeWrite` writes the RAW doc, so a schema
+   * default never materializes and the field would still be written absent.
+   */
+  zero_priced: boolean;
   price_overridden: ComponentPriceKeyType[];
 }
 
@@ -472,6 +499,10 @@ export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = exte
   // complete — the same channel carries `pii`, where a silent drop is a leak.
   {
     inclusion_type: InclusionTypeEnum.meta({ label: "Inclusion" }),
+    // Required on the authored side — see the interface for why, and why the
+    // label has to be restated (`.extend` REPLACES the node and takes its
+    // `.meta()` with it, silently).
+    zero_priced: z.boolean().meta({ label: "Zero Priced" }),
     /**
      * The price keys this parent deliberately authored, overriding the
      * component product's own catalog price.

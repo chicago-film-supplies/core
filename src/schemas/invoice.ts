@@ -17,6 +17,7 @@ import {
   checkItemPriceFormula,
   checkPriceBaseUnit,
   checkZeroPricedAmount,
+  checkZeroPricedComponents,
   COARevenueEnum,
   type COARevenueType,
   DOC_LINE_ITEM_TYPES,
@@ -972,7 +973,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   // read 0, and its "destinations is an EMPTY array" row is EXPECTED to read 31
   // and must NOT be driven down.
   destinations: z.array(InvoiceDocDestination),
-  items: z.array(InvoiceDocItem).default([]).meta({ label: "Item" }),
+  items: z.array(InvoiceDocItem).default([]).meta({ label: "Item" })
+    .superRefine(checkZeroPricedComponents),
   totals: InvoiceDocTotals,
   xero_id: z.uuid().nullable(),
   uploadcare_uuid: uploadcareRef(z.string().nullable().default(null)),

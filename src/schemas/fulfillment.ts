@@ -24,6 +24,7 @@ import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import {
   checkZeroPricedAmount,
+  checkZeroPricedComponents,
   type FirestoreTimestampType,
   type FulfillableItemType,
   FULFILLMENT_LINE_ITEM_TYPES,
@@ -438,7 +439,8 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   status: FulfillmentOrderStatus.meta({ column: true, label: "Status" }),
   organization: FulfillmentOrganization.meta({ label: "Organization" }),
   destinations: z.array(DocDestination).min(1),
-  items: z.array(FulfillmentItem).default([]).meta({ label: "Item" }),
+  items: z.array(FulfillmentItem).default([]).meta({ label: "Item" })
+    .superRefine(checkZeroPricedComponents),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
   // Bare `z.string()`, identical to the other two grains as of core#97
   // increment 3 — the interface for `OrderDocument.subject` carries the census

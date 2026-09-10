@@ -255,7 +255,7 @@
         {
           "kind": "interface",
           "name": "AuthoredProductComponent",
-          "declaration": "interface AuthoredProductComponent {\n  inclusion_type: InclusionTypeType;\n  price_overridden: ComponentPriceKeyType[];\n}",
+          "declaration": "interface AuthoredProductComponent {\n  inclusion_type: InclusionTypeType;\n  zero_priced: boolean;\n  price_overridden: ComponentPriceKeyType[];\n}",
           "doc": "A component product within a parent product — the entry in `components`.\n\nIdentical to {@link ProductComponent} except that `inclusion_type` is\n**required**, and that difference is the point. Both expanders\n(`buildOrderComponentLines`, and the staged-add path) filter\n`=== \"mandatory\" || === \"default\"`, so an `undefined` here is a silent fourth\nbucket whose component is dropped from every order it should have joined.\n\n⚠️ This said *\"`buildOrderComponentLines` in manager\"* until 2026-09-05, and\nit is in **core** — `src/utils/order-lines.ts`. Instruction-grade text\npointing at the wrong repo: it sends a reader looking for the expander in a\nconsumer, which is exactly the place a second implementation would be added.\n\nThe optionality it replaces existed to accommodate `component_of`, where the\nfield genuinely is not authored — and it leaked onto the authored side, where\nit is a bug. Splitting the two is what lets this side be required. Prod\ncarries 0 undefined rows across 174 `components` entries on 68 products\n(re-measured 2026-09-05; 165 on 63 when this was written), so this is\nhardening with a zero-row backfill; writers with no answer pass\n`\"default\"`, the reading manager's new-component form already takes. (The\nother reader was `crmsProduct.ts`, DELETED 2026-09-05 when the outbound CRMS\nhalf closed — it took the same default, so its removal narrows the evidence\nfor this sentence rather than contradicting it.)\n\nNOT expressed as `.default(\"default\")`: `validateBeforeWrite` validates but\nwrites the RAW doc, so a schema default never materializes and the field would\nstill be written absent."
         },
         {
@@ -4861,6 +4861,18 @@
           "doc": "How a *throttle's* `resets_at` was determined. A superset of\n{@link XeroResetsAtSource}, because Xero throttles on two independent windows\nand only the daily one rolls over:\n\n- `assumed_minute` — a minute / app-minute / concurrent 429 that carried no\n  `Retry-After` (per Xero's docs the concurrent and app-minute limits don't send\n  one), so `now + 60s` was assumed — the width of the minute window.\n\nDeliberately NOT added to {@link XeroBudgetSchema}: the persisted\n`xero-budget/current` doc describes the **day** window only, and a minute-limit\nrefusal must never be able to write a 60-second `resets_at` into it. Widening the\ndoc schema would let a transient throttle masquerade as the daily budget and make\nthe gate fail open a minute later."
         },
         {
+          "kind": "interface",
+          "name": "ZeroPricedComponentFinding",
+          "declaration": "interface ZeroPricedComponentFinding {\n  readonly index: number;\n  readonly uid: string;\n  readonly name: string;\n  readonly parentType: string;\n}",
+          "doc": "One violation of either array-level invariant."
+        },
+        {
+          "kind": "interface",
+          "name": "ZeroPricedItemLike",
+          "declaration": "interface ZeroPricedItemLike {\n  readonly uid: string;\n  readonly type: string;\n  readonly name?: string;\n  readonly path?: readonly string[];\n  readonly zero_priced?: boolean | null;\n}",
+          "doc": "The minimum an item has to expose for the two ARRAY-level `zero_priced`\ninvariants. Structural rather than one of the three stored item unions,\nbecause the whole point is that an order item, an invoice item and a\nfulfillment item answer these questions identically — and `T[]` is invariant,\nso naming the unions would need a cast per grain to say so."
+        },
+        {
           "kind": "function",
           "name": "activityFeedPermissionsFor",
           "signature": "activityFeedPermissionsFor(held: Iterable<Permission>): Permission[]",
@@ -4914,6 +4926,14 @@
           "name": "checkItemPriceFormula",
           "signature": "checkItemPriceFormula(item: typeLiteral, ctx: z.RefinementCtx): void",
           "doc": "The `pricing` half of {@link ITEM_CONTRACTS}: a `percent_of_total` price is\nlegal only where the contract says the line is priced FROM the document total.\n\nApplies to every price shape in the package, so it is the check the invoice\narm attaches on its own — an invoice line has no `stock_method` and its price\nhas no `replacement` key, which leaves this as the only axis it can express.\n\n`percent_of_total` prices a line from the DOCUMENT total, which only\n`calculateTransactionFeeAmount` knows how to do — `calculateItemSubtotal`\nthrows on it. Before this axis the combination was merely thrown on at\nruntime, deep in `perUnitSubtotal`; here it is unwritable. The converse is\ndeliberately NOT asserted: a flat-amount fee is legitimate, and\n`calculateTransactionFeeAmount` prices one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkZeroPricedComponents",
+          "signature": "checkZeroPricedComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void",
+          "doc": "The ARRAY-level `zero_priced` refinement, holding **both directions in one\nplace** — a flagged line is a component, and a component states the flag.\n\n🔴 **It cannot be per-item and it cannot be split.** Deciding componenthood\nneeds the sibling array, so a per-item refinement would red the test sites that\nparse a line item in isolation for having no siblings — failures with nothing\nto do with `zero_priced`. And splitting the two directions across a schema\nrefinement and a write-boundary check gives one fact two homes: `core#100`\nasked for both here because `validateCollection` re-parses every stored\ndocument through its Zod schema, so a schema-level rule audits the whole corpus\nfor free where a boundary-only rule is invisible to it.\n\n⚠️ **This runs STRICTLY BEFORE `api-cloudrun/src/lib/validate.ts`'s arm**, which\n`validateBeforeWrite` reaches only after `safeParse` has succeeded — so that\narm's invariant-(2) check is unreachable once this lands, and is dead code\nrather than a second opinion.\n\nInvariant (1) — *a flagged line carries no charge* — stays per-item in\n{@link checkZeroPricedAmount}, because it needs only the item it is given.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5304,6 +5324,22 @@
           "name": "usState",
           "signature": "usState(): z.ZodType<string, string>",
           "doc": "Schema factory for `Address.region` — canonicalizes to the USPS code on\nparse, the same shape as `chicagoInstant()` for datetimes.\n\n⚠️ **A transform on a DOCUMENT schema does not rewrite what gets stored.**\n`validateBeforeWrite` discards `result.data` on purpose (it would strip\nFieldValue sentinels), so this only materializes where the parsed output is\nwhat flows on — i.e. route input validation. A writer that builds an address\nfrom a source that never passes through an input schema (the CRMS webhooks)\nstill stores whatever it was handed. So consumers that care about the value\nmust call {@link toUsStateCode} themselves rather than trusting storage.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "zeroPricedFlaggedNonComponents",
+          "signature": "zeroPricedFlaggedNonComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]",
+          "doc": "**Invariant (2): a line flagged `zero_priced` is a COMPONENT.** Owner ruling\n2026-09-07 — the resolved parent must be a LINE, not a divider and not the\ndocument root.\n\nExported so `utils/orders.ts` can expose it to templates as\n`validateZeroPricedComponents` without a second implementation. Returns `[]`\nwhen every flagged line is a component.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "zeroPricedUnstatedComponents",
+          "signature": "zeroPricedUnstatedComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]",
+          "doc": "**Invariant (3): a COMPONENT states the flag.** The converse of invariant (2),\nand the reason this pair is one refinement rather than two — `core#100`.\n\n🔴 **An absent value is not \"no answer\", it is *charged*.**\n{@link checkZeroPricedAmount} fires only on `=== true` and the zero-priced-first\nsort groups only on `=== true`, so a component that states nothing has its\nbilling decided by a default. On a kit component, *\"included at no charge with\nits parent\"* versus *\"billed separately\"* is a real distinction and it was\nbeing made by omission on 9,213 rows.\n\n⚠️ **`null` fails this, and that is the whole point** — it is what today's\nwriter emits when the catalog says nothing (`comp.zero_priced ?? null` in\n`utils/order-lines.ts`), so accepting it would leave the defect representable\nunder a different spelling. A non-component line correctly carries `null`; only\ncomponents are asked.\n\n⭐ **The corpus was emptied before this could land**, exactly as invariant (2)\nwas: `api-cloudrun/scripts/backfill-zero-priced-projections.ts` took all three\ngrains to 0 unstated component rows in both projects on 2026-09-10, from 9,213.\nOrdering a contract behind its corpus is the whole of that pattern.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -6058,6 +6094,18 @@
           "doc": "Generic uid + name reference used across many collections."
         },
         {
+          "kind": "interface",
+          "name": "ZeroPricedComponentFinding",
+          "declaration": "interface ZeroPricedComponentFinding {\n  readonly index: number;\n  readonly uid: string;\n  readonly name: string;\n  readonly parentType: string;\n}",
+          "doc": "One violation of either array-level invariant."
+        },
+        {
+          "kind": "interface",
+          "name": "ZeroPricedItemLike",
+          "declaration": "interface ZeroPricedItemLike {\n  readonly uid: string;\n  readonly type: string;\n  readonly name?: string;\n  readonly path?: readonly string[];\n  readonly zero_priced?: boolean | null;\n}",
+          "doc": "The minimum an item has to expose for the two ARRAY-level `zero_priced`\ninvariants. Structural rather than one of the three stored item unions,\nbecause the whole point is that an order item, an invoice item and a\nfulfillment item answer these questions identically — and `T[]` is invariant,\nso naming the unions would need a cast per grain to say so."
+        },
+        {
           "kind": "function",
           "name": "checkItemContract",
           "signature": "checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void",
@@ -6085,7 +6133,15 @@
           "kind": "function",
           "name": "checkZeroPricedAmount",
           "signature": "checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void",
-          "doc": "**Invariant (1) of the `zero_priced` campaign: a line flagged `zero_priced`\ncarries no charge.** Owner ruling, 2026-09-07: *\"zero priced should prevent a\ncharge\"*, restated 2026-09-08 to cover the catalog grain too — the rule holds\nat EVERY grain, with no exceptions.\n\n🔴 **Nothing used to tie the flag to the amount, and that is precisely how the\ncorpus drifted.** `zero_priced` is applied to a price in exactly one place —\n`core/src/utils/order-lines.ts`, `base_cents: comp.zero_priced ? 0 : (…)` —\nwhich runs client-side, ONCE, at line construction, and the resulting `0` is\nthen stored. Every pricer downstream reads the stored `base_cents` and never\nconsults the flag, so once a non-zero amount arrives by any route nothing\nre-zeroes it. Measured before this refinement existed: **53 order lines across\n35 documents** and **65 catalog component entries across 37 products**, both\nenvironments, including nine lines carrying $15,318 of charge on an ACTIVE\norder while its Xero quote correctly excluded them.\n\n⚠️ **PER-ITEM on purpose, unlike invariant (2).** This rule needs only the item\nit is given — a flag and an amount on one object — so it is safe on the 29 test\nsites that parse a line item in isolation. Invariant (2) (*a flagged line is a\nCOMPONENT*) cannot be expressed here at all, because deciding it requires the\nsibling array; it lives in {@link validateZeroPricedComponents} and is asserted\nat the write boundary instead.\n\n⚠️ **A flagged line with NO price is fine** and is not reported: absence cannot\ncharge anything, and dividers reach this check with `price: null`.",
+          "doc": "**Invariant (1) of the `zero_priced` campaign: a line flagged `zero_priced`\ncarries no charge.** Owner ruling, 2026-09-07: *\"zero priced should prevent a\ncharge\"*, restated 2026-09-08 to cover the catalog grain too — the rule holds\nat EVERY grain, with no exceptions.\n\n🔴 **Nothing used to tie the flag to the amount, and that is precisely how the\ncorpus drifted.** `zero_priced` is applied to a price in exactly one place —\n`core/src/utils/order-lines.ts`, `base_cents: comp.zero_priced ? 0 : (…)` —\nwhich runs client-side, ONCE, at line construction, and the resulting `0` is\nthen stored. Every pricer downstream reads the stored `base_cents` and never\nconsults the flag, so once a non-zero amount arrives by any route nothing\nre-zeroes it. Measured before this refinement existed: **53 order lines across\n35 documents** and **65 catalog component entries across 37 products**, both\nenvironments, including nine lines carrying $15,318 of charge on an ACTIVE\norder while its Xero quote correctly excluded them.\n\n⚠️ **PER-ITEM on purpose, unlike invariants (2) and (3).** This rule needs only\nthe item it is given — a flag and an amount on one object — so it is safe on\nthe 29 test sites that parse a line item in isolation. The other two (*a\nflagged line is a COMPONENT*, *a component STATES the flag*) cannot be\nexpressed here at all, because deciding componenthood requires the sibling\narray; both live in {@link checkZeroPricedComponents}, the array-level\nrefinement on each grain's `items`.\n\n⚠️ **A flagged line with NO price is fine** and is not reported: absence cannot\ncharge anything, and dividers reach this check with `price: null`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkZeroPricedComponents",
+          "signature": "checkZeroPricedComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void",
+          "doc": "The ARRAY-level `zero_priced` refinement, holding **both directions in one\nplace** — a flagged line is a component, and a component states the flag.\n\n🔴 **It cannot be per-item and it cannot be split.** Deciding componenthood\nneeds the sibling array, so a per-item refinement would red the test sites that\nparse a line item in isolation for having no siblings — failures with nothing\nto do with `zero_priced`. And splitting the two directions across a schema\nrefinement and a write-boundary check gives one fact two homes: `core#100`\nasked for both here because `validateCollection` re-parses every stored\ndocument through its Zod schema, so a schema-level rule audits the whole corpus\nfor free where a boundary-only rule is invisible to it.\n\n⚠️ **This runs STRICTLY BEFORE `api-cloudrun/src/lib/validate.ts`'s arm**, which\n`validateBeforeWrite` reaches only after `safeParse` has succeeded — so that\narm's invariant-(2) check is unreachable once this lands, and is dead code\nrather than a second opinion.\n\nInvariant (1) — *a flagged line carries no charge* — stays per-item in\n{@link checkZeroPricedAmount}, because it needs only the item it is given.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6174,6 +6230,22 @@
           "name": "usState",
           "signature": "usState(): z.ZodType<string, string>",
           "doc": "Schema factory for `Address.region` — canonicalizes to the USPS code on\nparse, the same shape as `chicagoInstant()` for datetimes.\n\n⚠️ **A transform on a DOCUMENT schema does not rewrite what gets stored.**\n`validateBeforeWrite` discards `result.data` on purpose (it would strip\nFieldValue sentinels), so this only materializes where the parsed output is\nwhat flows on — i.e. route input validation. A writer that builds an address\nfrom a source that never passes through an input schema (the CRMS webhooks)\nstill stores whatever it was handed. So consumers that care about the value\nmust call {@link toUsStateCode} themselves rather than trusting storage.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "zeroPricedFlaggedNonComponents",
+          "signature": "zeroPricedFlaggedNonComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]",
+          "doc": "**Invariant (2): a line flagged `zero_priced` is a COMPONENT.** Owner ruling\n2026-09-07 — the resolved parent must be a LINE, not a divider and not the\ndocument root.\n\nExported so `utils/orders.ts` can expose it to templates as\n`validateZeroPricedComponents` without a second implementation. Returns `[]`\nwhen every flagged line is a component.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "zeroPricedUnstatedComponents",
+          "signature": "zeroPricedUnstatedComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]",
+          "doc": "**Invariant (3): a COMPONENT states the flag.** The converse of invariant (2),\nand the reason this pair is one refinement rather than two — `core#100`.\n\n🔴 **An absent value is not \"no answer\", it is *charged*.**\n{@link checkZeroPricedAmount} fires only on `=== true` and the zero-priced-first\nsort groups only on `=== true`, so a component that states nothing has its\nbilling decided by a default. On a kit component, *\"included at no charge with\nits parent\"* versus *\"billed separately\"* is a real distinction and it was\nbeing made by omission on 9,213 rows.\n\n⚠️ **`null` fails this, and that is the whole point** — it is what today's\nwriter emits when the catalog says nothing (`comp.zero_priced ?? null` in\n`utils/order-lines.ts`), so accepting it would leave the defect representable\nunder a different spelling. A non-component line correctly carries `null`; only\ncomponents are asked.\n\n⭐ **The corpus was emptied before this could land**, exactly as invariant (2)\nwas: `api-cloudrun/scripts/backfill-zero-priced-projections.ts` took all three\ngrains to 0 unstated component rows in both projects on 2026-09-10, from 9,213.\nOrdering a contract behind its corpus is the whole of that pattern.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -7952,7 +8024,7 @@
         {
           "kind": "interface",
           "name": "AuthoredProductComponent",
-          "declaration": "interface AuthoredProductComponent {\n  inclusion_type: InclusionTypeType;\n  price_overridden: ComponentPriceKeyType[];\n}",
+          "declaration": "interface AuthoredProductComponent {\n  inclusion_type: InclusionTypeType;\n  zero_priced: boolean;\n  price_overridden: ComponentPriceKeyType[];\n}",
           "doc": "A component product within a parent product — the entry in `components`.\n\nIdentical to {@link ProductComponent} except that `inclusion_type` is\n**required**, and that difference is the point. Both expanders\n(`buildOrderComponentLines`, and the staged-add path) filter\n`=== \"mandatory\" || === \"default\"`, so an `undefined` here is a silent fourth\nbucket whose component is dropped from every order it should have joined.\n\n⚠️ This said *\"`buildOrderComponentLines` in manager\"* until 2026-09-05, and\nit is in **core** — `src/utils/order-lines.ts`. Instruction-grade text\npointing at the wrong repo: it sends a reader looking for the expander in a\nconsumer, which is exactly the place a second implementation would be added.\n\nThe optionality it replaces existed to accommodate `component_of`, where the\nfield genuinely is not authored — and it leaked onto the authored side, where\nit is a bug. Splitting the two is what lets this side be required. Prod\ncarries 0 undefined rows across 174 `components` entries on 68 products\n(re-measured 2026-09-05; 165 on 63 when this was written), so this is\nhardening with a zero-row backfill; writers with no answer pass\n`\"default\"`, the reading manager's new-component form already takes. (The\nother reader was `crmsProduct.ts`, DELETED 2026-09-05 when the outbound CRMS\nhalf closed — it took the same default, so its removal narrows the evidence\nfor this sentence rather than contradicting it.)\n\nNOT expressed as `.default(\"default\")`: `validateBeforeWrite` validates but\nwrites the RAW doc, so a schema default never materializes and the field would\nstill be written absent."
         },
         {
@@ -13645,7 +13717,7 @@
           "kind": "function",
           "name": "validateZeroPricedComponents",
           "signature": "validateZeroPricedComponents(items: T[]): ZeroPricedComponentIssue[]",
-          "doc": "**Invariant (2) of the `zero_priced` campaign: a flagged line is a COMPONENT.**\nOwner ruling 2026-09-07 — `path.at(-2)` must name a LINE, not a divider and not\nthe document root.\n\n⚠️ **ARRAY-LEVEL, and it cannot be anything else.** Deciding whether a line is\na component requires resolving its parent, which requires its siblings. A\nper-item refinement would turn the 29 test sites that parse a line item in\nisolation red for having no sibling array — including this campaign's own pin\nin `tests/invoices.test.ts` — and none of those failures would be about\n`zero_priced`. Invariant (1) has no such need and IS per-item\n({@link checkZeroPricedAmount}).\n\n🔴 **`isDividerItemType`, NOT `getStructuralUids`.** The obvious implementation\nreuses `getStructuralUids`, which is ORDER-shaped and does not count an\ninvoice's `order` divider — so every top-level invoice line would resolve to a\nnon-divider parent and read as a legitimate component, and the check would\npass on exactly the documents it exists to reject.\n\n⭐ **What made this reachable at all: the corpus was emptied first.** 44\nflagged top-level lines existed across both environments — all from the deleted\nCRMS ingest, which spread `zero_priced` into every line variant with no\ncomponent check — and this refinement would have made all 35 of their documents\nunwritable. They were repaired on 2026-09-07; ordering a contract behind its\ncorpus is the whole of `optional → stop the writer → empty storage → delete`\napplied to a refinement rather than a deletion.\n\nReturns `[]` when every flagged line is a component.",
+          "doc": "**Invariant (2) of the `zero_priced` campaign: a flagged line is a COMPONENT.**\nOwner ruling 2026-09-07 — `path.at(-2)` must name a LINE, not a divider and not\nthe document root.\n\n⚠️ **ARRAY-LEVEL, and it cannot be anything else.** Deciding whether a line is\na component requires resolving its parent, which requires its siblings. A\nper-item refinement would turn the 29 test sites that parse a line item in\nisolation red for having no sibling array — including this campaign's own pin\nin `tests/invoices.test.ts` — and none of those failures would be about\n`zero_priced`. Invariant (1) has no such need and IS per-item\n({@link checkZeroPricedAmount}).\n\n🔴 **`isDividerItemType`, NOT `getStructuralUids`.** The obvious implementation\nreuses `getStructuralUids`, which is ORDER-shaped and does not count an\ninvoice's `order` divider — so every top-level invoice line would resolve to a\nnon-divider parent and read as a legitimate component, and the check would\npass on exactly the documents it exists to reject.\n\n⭐ **What made this reachable at all: the corpus was emptied first.** 44\nflagged top-level lines existed across both environments — all from the deleted\nCRMS ingest, which spread `zero_priced` into every line variant with no\ncomponent check — and this refinement would have made all 35 of their documents\nunwritable. They were repaired on 2026-09-07; ordering a contract behind its\ncorpus is the whole of `optional → stop the writer → empty storage → delete`\napplied to a refinement rather than a deletion.\n\n⚠️ **A DELEGATE since 2026-09-10, and it kept its name because templates call\nit** (`it.orders.validateZeroPricedComponents`). The rule itself is\n`zeroPricedFlaggedNonComponents` in `schemas/common.ts`, where the ARRAY-level\nrefinement can reach it — a schema cannot import from `utils/`, and two copies\nof one predicate is what `core#100` asked to avoid when it said to put both\ndirections in one place.\n\n⭐ **The delegate also resolves the parent by PATH rather than by uid**, which\nthis body did not. The uid form was never wrong in practice — divider uids are\nper-order UUIDs and line uids are Firestore ids, so the two sets cannot\ncollide — but `item.uid` repeats within one document in 18% of prod orders, so\npath resolution is right by construction instead of right by coincidence.\n\nReturns `[]` when every flagged line is a component.",
           "paramTags": [],
           "returnsTag": null
         }

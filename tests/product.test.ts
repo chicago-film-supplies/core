@@ -85,6 +85,7 @@ Deno.test("ProductSchema validates with components", () => {
         name: "Battery",
         type: "rental",
         inclusion_type: "default",
+        zero_priced: false,
         price_overridden: [],
         stock_method: "bulk",
         crms_id: 200,
@@ -129,6 +130,7 @@ Deno.test("ProductSchema rejects rental component without price.replacement_cent
         name: "Battery",
         type: "rental",
         inclusion_type: "default",
+        zero_priced: false,
         price_overridden: [],
         stock_method: "bulk",
         crms_id: 200,
@@ -150,6 +152,7 @@ Deno.test("ProductSchema accepts rental component with stock_method none and no 
         name: "Service Fee",
         type: "rental",
         inclusion_type: "default",
+        zero_priced: false,
         price_overridden: [],
         stock_method: "none",
         crms_id: 200,
@@ -243,6 +246,7 @@ Deno.test("CreateProductInput requires price.replacement_cents for rental compon
     name: "Battery",
     type: "rental" as const,
     inclusion_type: "default" as const,
+    zero_priced: false,
     stock_method: "bulk" as const,
     crms_id: 200,
     quantity: 2,
@@ -451,9 +455,9 @@ Deno.test("price.coa_revenue is REQUIRED on the document and on BOTH inputs", ()
   assertEquals(ComponentSchema.safeParse(component).success, true);
 });
 
-Deno.test("components require inclusion_type and price_overridden; component_of requires neither", () => {
-  // The asymmetry is the point, and there are now TWO fields on the authored
-  // side rather than one.
+Deno.test("components require inclusion_type, price_overridden and zero_priced; component_of requires none", () => {
+  // The asymmetry is the point, and there are now THREE fields on the authored
+  // side rather than two.
   //
   // `inclusion_type`: an `undefined` there is a silent fourth bucket both
   // expanders drop, so the component never reaches an order.
@@ -463,6 +467,13 @@ Deno.test("components require inclusion_type and price_overridden; component_of 
   // would be meaningless — nobody prices a parent from a child — and its
   // absence there is what makes a `component_of` price divergence
   // unambiguously a missed cascade, and therefore auditable.
+  //
+  // `zero_priced` (core#100 / manager#421 step 5): `buildOrderComponentLines`
+  // writes `comp.zero_priced ?? null`, so one component authored without it puts
+  // a `null` on every order line built from it and the array-level refinement
+  // then refuses those documents. Requiring it here is what makes that
+  // invariant true by construction rather than true until someone adds a
+  // component. 175 of 175 prod entries already state it.
   //
   // `component_of` is the reciprocal back-reference: the parent authors the
   // relationship attributes, and 140 of 141 prod rows carry none of them, so
@@ -480,17 +491,27 @@ Deno.test("components require inclusion_type and price_overridden; component_of 
 
   assertEquals(ComponentSchema.safeParse(backRef).success, true);
   assertEquals(AuthoredComponentSchema.safeParse(backRef).success, false);
-  // Still false with only ONE of the two — the fixture must supply both.
+  // Still false with any ONE missing — the fixture must supply all three, and
+  // each is dropped in turn so a test that passes for the wrong reason cannot.
   assertEquals(
-    AuthoredComponentSchema.safeParse({ ...backRef, inclusion_type: "default" }).success,
+    AuthoredComponentSchema.safeParse({ ...backRef, price_overridden: [], zero_priced: false }).success,
     false,
   );
   assertEquals(
-    AuthoredComponentSchema.safeParse({ ...backRef, price_overridden: [] }).success,
+    AuthoredComponentSchema.safeParse({ ...backRef, inclusion_type: "default", zero_priced: false }).success,
     false,
   );
   assertEquals(
     AuthoredComponentSchema.safeParse({ ...backRef, inclusion_type: "default", price_overridden: [] }).success,
+    false,
+  );
+  assertEquals(
+    AuthoredComponentSchema.safeParse({
+      ...backRef,
+      inclusion_type: "default",
+      price_overridden: [],
+      zero_priced: false,
+    }).success,
     true,
   );
 
@@ -531,7 +552,7 @@ Deno.test("a component may be priced five_day_week or fixed", () => {
     const component = { ...componentBase, price: { ...componentBase.price, formula } };
     assertEquals(ComponentSchema.safeParse(component).success, true, formula);
     assertEquals(
-      AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [] }).success,
+      AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [], zero_priced: false }).success,
       true,
       formula,
     );
@@ -544,7 +565,7 @@ Deno.test("a component may NOT be priced percent_of_total — on either side", (
   const component = { ...componentBase, price: { ...componentBase.price, formula: "percent_of_total" } };
   assertEquals(ComponentSchema.safeParse(component).success, false);
   assertEquals(
-    AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [] }).success,
+    AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [], zero_priced: false }).success,
     false,
   );
 });
@@ -594,7 +615,7 @@ Deno.test("a component may NOT carry a base_percent beside a two-member formula"
   };
   assertEquals(ComponentSchema.safeParse(component).success, false);
   assertEquals(
-    AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [] }).success,
+    AuthoredComponentSchema.safeParse({ ...component, inclusion_type: "default", price_overridden: [], zero_priced: false }).success,
     false,
   );
 });

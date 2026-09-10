@@ -54,7 +54,7 @@ import type {
   Tax as SchemaTax,
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
-import { isDividerItemType, itemContract } from "../schemas/mod.ts";
+import { itemContract, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
 import { getDuration, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
@@ -2113,27 +2113,23 @@ export interface ZeroPricedComponentIssue {
  * corpus is the whole of `optional → stop the writer → empty storage → delete`
  * applied to a refinement rather than a deletion.
  *
+ * ⚠️ **A DELEGATE since 2026-09-10, and it kept its name because templates call
+ * it** (`it.orders.validateZeroPricedComponents`). The rule itself is
+ * `zeroPricedFlaggedNonComponents` in `schemas/common.ts`, where the ARRAY-level
+ * refinement can reach it — a schema cannot import from `utils/`, and two copies
+ * of one predicate is what `core#100` asked to avoid when it said to put both
+ * directions in one place.
+ *
+ * ⭐ **The delegate also resolves the parent by PATH rather than by uid**, which
+ * this body did not. The uid form was never wrong in practice — divider uids are
+ * per-order UUIDs and line uids are Firestore ids, so the two sets cannot
+ * collide — but `item.uid` repeats within one document in 18% of prod orders, so
+ * path resolution is right by construction instead of right by coincidence.
+ *
  * Returns `[]` when every flagged line is a component.
  */
 export function validateZeroPricedComponents<T extends LineItem>(items: T[]): ZeroPricedComponentIssue[] {
-  const typeByUid = new Map<string, string>();
-  for (const item of items) typeByUid.set(item.uid, item.type);
-
-  const issues: ZeroPricedComponentIssue[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    if (item.zero_priced !== true) continue;
-    const path = item.path ?? [];
-    const parentUid = path.length >= 2 ? path[path.length - 2] : undefined;
-    const parentType = parentUid === undefined ? "<root>" : (typeByUid.get(parentUid) ?? "<unresolved>");
-    // A parent that resolves to nothing is NOT reported here: that is
-    // `validateItemParentage`'s finding, and reporting one defect through two
-    // instruments makes a single broken document look like two.
-    if (parentType === "<unresolved>") continue;
-    if (parentType !== "<root>" && !isDividerItemType(parentType)) continue;
-    issues.push({ index: i, uid: item.uid, name: item.name ?? "", parentType });
-  }
-  return issues;
+  return zeroPricedFlaggedNonComponents(items);
 }
 
 /**

@@ -1135,12 +1135,13 @@ export function checkItemContract(
  * environments, including nine lines carrying $15,318 of charge on an ACTIVE
  * order while its Xero quote correctly excluded them.
  *
- * ⚠️ **PER-ITEM on purpose, unlike invariant (2).** This rule needs only the item
- * it is given — a flag and an amount on one object — so it is safe on the 29 test
- * sites that parse a line item in isolation. Invariant (2) (*a flagged line is a
- * COMPONENT*) cannot be expressed here at all, because deciding it requires the
- * sibling array; it lives in {@link validateZeroPricedComponents} and is asserted
- * at the write boundary instead.
+ * ⚠️ **PER-ITEM on purpose, unlike invariants (2) and (3).** This rule needs only
+ * the item it is given — a flag and an amount on one object — so it is safe on
+ * the 29 test sites that parse a line item in isolation. The other two (*a
+ * flagged line is a COMPONENT*, *a component STATES the flag*) cannot be
+ * expressed here at all, because deciding componenthood requires the sibling
+ * array; both live in {@link checkZeroPricedComponents}, the array-level
+ * refinement on each grain's `items`.
  *
  * ⚠️ **A flagged line with NO price is fine** and is not reported: absence cannot
  * charge anything, and dividers reach this check with `price: null`.
@@ -1162,6 +1163,171 @@ export function checkZeroPricedAmount(
       `zero_priced is true, so base_cents must be 0 — got ${base}. ` +
       `A flagged line carries no charge (api-cloudrun#917); if this line should be charged, clear zero_priced instead.`,
   });
+}
+
+/**
+ * The minimum an item has to expose for the two ARRAY-level `zero_priced`
+ * invariants. Structural rather than one of the three stored item unions,
+ * because the whole point is that an order item, an invoice item and a
+ * fulfillment item answer these questions identically — and `T[]` is invariant,
+ * so naming the unions would need a cast per grain to say so.
+ */
+export interface ZeroPricedItemLike {
+  readonly uid: string;
+  readonly type: string;
+  readonly name?: string;
+  readonly path?: readonly string[];
+  readonly zero_priced?: boolean | null;
+}
+
+/** One violation of either array-level invariant. */
+export interface ZeroPricedComponentFinding {
+  readonly index: number;
+  readonly uid: string;
+  readonly name: string;
+  readonly parentType: string;
+}
+
+/**
+ * Resolve an item's structural parent BY PATH — `path.slice(0, -1)` — and answer
+ * its type, or `"<root>"` / `"<unresolved>"`.
+ *
+ * 🔴 **By path, not by uid.** `path.at(-2)` IS the parent's uid, so a uid lookup
+ * gets the same answer *unless* one uid appears twice in a document — which it
+ * does, in 18% of prod orders (`cfs-items`). Divider uids are per-order UUIDs
+ * and line uids are Firestore ids, so the two sets cannot collide and the uid
+ * form was never wrong in practice; resolving by path is right by construction
+ * instead of right by coincidence.
+ */
+function parentTypeOf(
+  item: ZeroPricedItemLike,
+  byPath: ReadonlyMap<string, ZeroPricedItemLike>,
+): string {
+  const path = item.path ?? [];
+  if (path.length < 2) return "<root>";
+  return byPath.get(JSON.stringify(path.slice(0, -1)))?.type ?? "<unresolved>";
+}
+
+function indexItemsByPath(
+  items: readonly ZeroPricedItemLike[],
+): ReadonlyMap<string, ZeroPricedItemLike> {
+  const byPath = new Map<string, ZeroPricedItemLike>();
+  for (const item of items) {
+    if (Array.isArray(item.path)) byPath.set(JSON.stringify(item.path), item);
+  }
+  return byPath;
+}
+
+/**
+ * **Invariant (2): a line flagged `zero_priced` is a COMPONENT.** Owner ruling
+ * 2026-09-07 — the resolved parent must be a LINE, not a divider and not the
+ * document root.
+ *
+ * Exported so `utils/orders.ts` can expose it to templates as
+ * `validateZeroPricedComponents` without a second implementation. Returns `[]`
+ * when every flagged line is a component.
+ */
+export function zeroPricedFlaggedNonComponents(
+  items: readonly ZeroPricedItemLike[],
+): ZeroPricedComponentFinding[] {
+  const byPath = indexItemsByPath(items);
+  const findings: ZeroPricedComponentFinding[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.zero_priced !== true) continue;
+    const parentType = parentTypeOf(item, byPath);
+    // A parent resolving to nothing is `validateItemParentage`'s finding, not
+    // this one — reporting one defect through two instruments makes a single
+    // broken document look like two.
+    if (parentType === "<unresolved>") continue;
+    if (parentType !== "<root>" && !isDividerItemType(parentType)) continue;
+    findings.push({ index: i, uid: item.uid, name: item.name ?? "", parentType });
+  }
+  return findings;
+}
+
+/**
+ * **Invariant (3): a COMPONENT states the flag.** The converse of invariant (2),
+ * and the reason this pair is one refinement rather than two — `core#100`.
+ *
+ * 🔴 **An absent value is not "no answer", it is *charged*.**
+ * {@link checkZeroPricedAmount} fires only on `=== true` and the zero-priced-first
+ * sort groups only on `=== true`, so a component that states nothing has its
+ * billing decided by a default. On a kit component, *"included at no charge with
+ * its parent"* versus *"billed separately"* is a real distinction and it was
+ * being made by omission on 9,213 rows.
+ *
+ * ⚠️ **`null` fails this, and that is the whole point** — it is what today's
+ * writer emits when the catalog says nothing (`comp.zero_priced ?? null` in
+ * `utils/order-lines.ts`), so accepting it would leave the defect representable
+ * under a different spelling. A non-component line correctly carries `null`; only
+ * components are asked.
+ *
+ * ⭐ **The corpus was emptied before this could land**, exactly as invariant (2)
+ * was: `api-cloudrun/scripts/backfill-zero-priced-projections.ts` took all three
+ * grains to 0 unstated component rows in both projects on 2026-09-10, from 9,213.
+ * Ordering a contract behind its corpus is the whole of that pattern.
+ */
+export function zeroPricedUnstatedComponents(
+  items: readonly ZeroPricedItemLike[],
+): ZeroPricedComponentFinding[] {
+  const byPath = indexItemsByPath(items);
+  const findings: ZeroPricedComponentFinding[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (typeof item.zero_priced === "boolean") continue;
+    if (!isLineItemType(item.type)) continue;
+    const parentType = parentTypeOf(item, byPath);
+    if (!isLineItemType(parentType)) continue; // not a component
+    findings.push({ index: i, uid: item.uid, name: item.name ?? "", parentType });
+  }
+  return findings;
+}
+
+/**
+ * The ARRAY-level `zero_priced` refinement, holding **both directions in one
+ * place** — a flagged line is a component, and a component states the flag.
+ *
+ * 🔴 **It cannot be per-item and it cannot be split.** Deciding componenthood
+ * needs the sibling array, so a per-item refinement would red the test sites that
+ * parse a line item in isolation for having no siblings — failures with nothing
+ * to do with `zero_priced`. And splitting the two directions across a schema
+ * refinement and a write-boundary check gives one fact two homes: `core#100`
+ * asked for both here because `validateCollection` re-parses every stored
+ * document through its Zod schema, so a schema-level rule audits the whole corpus
+ * for free where a boundary-only rule is invisible to it.
+ *
+ * ⚠️ **This runs STRICTLY BEFORE `api-cloudrun/src/lib/validate.ts`'s arm**, which
+ * `validateBeforeWrite` reaches only after `safeParse` has succeeded — so that
+ * arm's invariant-(2) check is unreachable once this lands, and is dead code
+ * rather than a second opinion.
+ *
+ * Invariant (1) — *a flagged line carries no charge* — stays per-item in
+ * {@link checkZeroPricedAmount}, because it needs only the item it is given.
+ */
+export function checkZeroPricedComponents(
+  items: readonly ZeroPricedItemLike[],
+  ctx: z.RefinementCtx,
+): void {
+  for (const f of zeroPricedFlaggedNonComponents(items)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [f.index, "zero_priced"],
+      message:
+        `zero_priced line "${f.name}" sits under ${f.parentType} — a flagged line must be a COMPONENT ` +
+        `of another line, not top-level (api-cloudrun#917).`,
+    });
+  }
+  for (const f of zeroPricedUnstatedComponents(items)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [f.index, "zero_priced"],
+      message:
+        `component "${f.name}" states no zero_priced — it is a component of a ${f.parentType} line, ` +
+        `so it must say whether it is included at no charge. An absent or null value is not "undecided", ` +
+        `it resolves to CHARGED (core#100).`,
+    });
+  }
 }
 
 export function checkPriceBaseUnit(

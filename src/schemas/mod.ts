@@ -298,6 +298,17 @@ export {
   isLineItemType,
   isDividerItemType,
   isFulfillableItemType,
+  // The ARRAY-level `zero_priced` refinement and its two halves (core#100).
+  // ⚠️ Listed here BY HAND, like everything else on this barrel — a symbol in
+  // `schemas/common.ts` is unreachable as `@cfs/core/schemas` until it appears in
+  // this list, and `check`, `check:declarations` and the suite are all green on
+  // the omission. `utils/orders.ts` imports the first of these, so this repo
+  // would have caught it; a consumer-only symbol would not have been.
+  checkZeroPricedComponents,
+  zeroPricedFlaggedNonComponents,
+  zeroPricedUnstatedComponents,
+  type ZeroPricedComponentFinding,
+  type ZeroPricedItemLike,
   FULFILLMENT_LINE_ITEM_TYPES,
   CfsSourceCollectionEnum,
   CFS_SOURCE_COLLECTIONS,

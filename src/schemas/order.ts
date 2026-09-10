@@ -13,6 +13,7 @@ import {
   type AddressType,
   checkItemContract,
   checkZeroPricedAmount,
+  checkZeroPricedComponents,
   checkItemPriceFormula,
   checkPriceBaseUnit,
   COARevenueEnum,
@@ -1512,7 +1513,8 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // "Item" prefixes every column under here, which is what keeps
   // `items.price.taxes.rate` ("Item Tax Rate") distinct from the order-level
   // `totals.taxes.rate` ("Tax Rate") — the same field shape at two depths.
-  items: z.array(OrderDocItem).default([]).meta({ label: "Item" }),
+  items: z.array(OrderDocItem).default([]).meta({ label: "Item" })
+    .superRefine(checkZeroPricedComponents),
   // Present but NULLABLE, not optional — `null` is a value meaning "inherit the
   // organization's profile", so it has to be stored rather than absent. Still
   // no `.default()`: one never materializes on a write (see the note in
