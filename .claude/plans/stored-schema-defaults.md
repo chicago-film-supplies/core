@@ -4,40 +4,45 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-10 — **batch 2 is COMMITTED in three repos and NOT YET PUSHED. Backlog 239 → 211.**
-> Batch 1 is closed on every axis and is now history: 20 `totals` defaults, shipped to all four repos,
-> in prod as `v0.247.0` / revision `api-cloudrun-00364-v6z`. Its details live in *What shipped* below.
+> ## ⚠️ STATUS 2026-09-10 — **batch 2 PUBLISHED as `beta.403` and swept to all three consumers. Backlog 239 → 211.**
+> Batch 1 is closed and is now history: 20 `totals` defaults, in prod as `v0.247.0` / revision
+> `api-cloudrun-00364-v6z`. Its details live in *What shipped* below.
 >
 > **Batch 2 — the derived-denorm family.** The boundary is one the codebase already draws:
 > `core/src/schemas/propagation/orders.ts` names `totals`, `number`, `query_by_*` and
 > `bookings_breakdown` as the values the order INPUT schemas carry no channel for. Batch 1 took
-> `totals`; this takes the other two — **20 `query_by_*` across 11 collections + the 8 on
+> `totals`; this took the other two — **20 `query_by_*` across 11 collections + the 8 on
 > `orders.bookings_breakdown`** (wrapper + seven numeric leaves).
 >
 > | repo | commit | state |
 > |---|---|---|
-> | `core` (`beta`) | `fb4a572` | committed, **NOT pushed — pushing PUBLISHES `beta.403` to JSR** |
-> | `api-cloudrun` (`main`) | `c499891d` | committed, not pushed |
-> | `templates` (`fix/core95-batch2-quote-fixture`) | `3fc8992` | committed, **no PR opened yet** |
+> | `core` (`beta`) | `fb4a572` | ✅ published — `@cfs/core@10.0.0-beta.403` on JSR |
+> | `api-cloudrun` (`main`) | `c499891d` + `1c552f07` (40 pins) | ✅ pushed |
+> | `manager` (`main`) | `3fed294` (1 pin) | ✅ pushed |
+> | `templates` | PR **#306** (3 commits, 15 pins) | ⏸ green, **awaiting a human merge** |
 >
-> **Gate taken, both projects:** census 0-absent/0-null on all 28; writers audited; step 6 re-parse
-> **26,147 documents, 0 batch-field failures**. Two repairs found, both invisible to `deno check`:
-> an "a complete document" literal missing one sibling key, and an INVERTED test that was the
-> default's own spec. Details in *What shipped* and *Batch 2* below.
+> **Not yet in prod** — that waits on api-cloudrun's next release cut, as batch 1 did.
 >
-> 🔴 **The pin sweep CANNOT complete: `templates` is blocked, and not by this batch.**
-> `templates/fixtures/quote/long-multi-group.json` fails `OrderSchema` at `beta.402` — the
-> api-cloudrun#917 `zero_priced` refine refuses a zero-priced KIT PARENT. `templates` is still pinned
-> to `beta.401`, so its CI is green *today* and **the next pin bump of any kind turns it red**.
-> Filed as **templates#305** (`kind:decision`) — it needs a semantic ruling that belongs to
-> manager#421's campaign, not this one. ⭐ The measurement that should inform it: **no live order has
-> that shape** — 1,020 orders + 1,040 invoices + 1,020 fulfillments re-parse clean in both projects.
+> **Gate taken, both projects:** census 0-absent/0-null on all 28; every create path audited; step 6
+> re-parse **26,147 documents, 0 batch-field failures**. Two repairs, both invisible to `deno check`:
+> a literal calling itself *"a complete document"* while missing one sibling key, and an INVERTED
+> test that was the default's own spec.
+>
+> ⭐ **templates#305 is CLOSED, and the answer was already written down.** `long-multi-group.json`
+> carried `zero_priced: true` on two kit-header lines under a `group`, which api-cloudrun#917's refine
+> refuses. It looked like a semantic call; it was not — `core/src/schemas/common.ts` records
+> *"Invariant (2): a line flagged `zero_priced` is a COMPONENT. Owner ruling 2026-09-07."* ⚠️ **The
+> repo was TWO betas behind**, so its own corpus had been red against `beta.402` with nobody able to
+> see it: the stale pin was what held the refine back. Set to `false` not `null` because prod says so
+> — 5,146 `false` vs 96 `null` on top-level lines across 1,020 orders — and `visual-diff` confirmed
+> render-neutrality rather than it being merely predicted.
 >
 > ⚠️ **`getInitialValues` reads `.default()` as the FORM SEED** (`core/src/schemas/initial.ts`,
 > `case "default"`), so 28 removals could have moved manager's create forms. Measured, not assumed:
 > **byte-identical across all 103 registered schemas**, because the type-derived zero for `z.array()`
-> is `[]` and for `z.number()` is `0` — the same values the defaults named. Re-run this check on any
-> batch whose defaults are NOT the type-derived zero; `z.boolean().default(true)` is the known trap.
+> is `[]` and for `z.number()` is `0` — the same values the defaults named. **Re-run this per batch**;
+> a default that differs from its type's zero moves the seed, and `z.boolean().default(true)` is the
+> known case.
 >
 > **Also filed: api-cloudrun#951** (`kind:guard`, `risk:live-data`) — the step-6 re-parse found two
 > stored documents that violate their own schema, and nothing routinely looks. One is a **prod**
@@ -56,9 +61,11 @@ api-cloudrun#943's remaining half.*
 | 15 pins + 1 parsed fixture | `templates` `cb9b44b` (PR #301) | ✅ merged |
 | `beta.399` reaching **prod** | `v0.247.0` → revision `api-cloudrun-00364-v6z` | ✅ deployed |
 | the campaign's ratchet, 291 paths partitioned | `core/tests/stored-defaults.test.ts` (`5d14347`) | ✅ landed |
-| **batch 2** — 28 defaults on the derived-denorm family | `core` `fb4a572` | ⏸ committed on `beta`, unpushed |
-| 2 order literals completed to the four new keys | `api-cloudrun` `c499891d` | ⏸ committed on `main`, unpushed |
-| 1 quote fixture completed | `templates` `3fc8992` | ⏸ branch, no PR |
+| **batch 2** — 28 defaults on the derived-denorm family | `core` `fb4a572` → `beta.403` | ✅ published |
+| 2 order literals completed to the four new keys | `api-cloudrun` `c499891d` | ✅ landed on `main` |
+| 40 pins | `api-cloudrun` `1c552f07` | ✅ landed on `main` |
+| 1 pin | `manager` `3fed294` | ✅ landed on `main` |
+| 1 quote fixture + templates#305 + 15 pins | `templates` PR #306 | ⏸ green, awaiting merge |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -454,14 +461,10 @@ batch 1's exactly, which is the check worth repeating rather than the numbers wo
 
 **Continue in-session** only for the immediate follow-ups that lean on what is already loaded:
 
-1. 🔴 **Batch 2 is committed in three repos and UNPUSHED.** `core` `fb4a572` on `beta` — pushing
-   **publishes `beta.403` to JSR and is irreversible**. Then the pin sweep: ~40 in `api-cloudrun`,
-   ~1 in `manager`, ~15 in `templates`, by `sed` over `jsr:@cfs/core@10.0.0-beta.402/` rather than by
-   a count. `api-cloudrun` `c499891d` and `templates` `3fc8992` are both forward-compatible and can
-   land before the publish; the `templates` branch still needs its PR opened.
-2. 🔴 **`templates` cannot take the pin until templates#305 is decided** — the `zero_priced` refine
-   refuses a zero-priced kit parent in `long-multi-group.json`, and that fixture is red at `beta.402`
-   already. Its pin is on `beta.401`, so nothing is broken *today*; the bump is what breaks it.
-   Sequencing option if the decision is slow: publish, sweep `api-cloudrun` + `manager`, and leave
-   `templates` on `beta.401` deliberately — recorded, not forgotten.
-3. api-cloudrun#951 (the corpus re-parse guard) and api-cloudrun#943's manager half.
+1. **Merge `templates` PR #306** — three commits (fixture completion, templates#305, 15 pins), all
+   four checks green including `visual-diff`. Left unmerged because merge is the publish authority in
+   that repo and agents open PRs rather than merging them.
+2. **Carrying `beta.403` to prod** waits on api-cloudrun's next release cut, exactly as batch 1's
+   `beta.399` did. Nothing about the tightening bites until then.
+3. api-cloudrun#951 (the corpus re-parse guard — the ad-hoc probe has now been rewritten three times)
+   and api-cloudrun#943's manager half.
