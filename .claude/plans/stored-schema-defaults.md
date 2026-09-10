@@ -55,9 +55,21 @@ api-cloudrun#943's remaining half.*
 > | repo | commit | state |
 > |---|---|---|
 > | `core` (`beta`) | `4f73bca` + `ce8272d` | ✅ published — `@cfs/core@10.0.0-beta.404` |
-> | `api-cloudrun` (`main`) | `200af2cf` (42 pins) | ⏳ pushing — full suite, escalated to `test:serial` |
-> | `manager` (`main`) | pending — held until api-cloudrun releases dev Firestore | ⏸ |
-> | `templates` | PR #307 (15 pins + lockfile) | ⏳ open, auto-merges on green |
+> | `api-cloudrun` (`main`) | `200af2cf` (42 pins) + `f5c834b9` (3 fixtures) | ✅ pushed |
+> | `manager` (`main`) | `064a7e3` (1 pin) | ✅ pushed |
+> | `templates` | `6645344` (PR #307, 15 pins + lockfile) | ✅ merged |
+>
+> 🔴 **IN DEV, NOT IN PROD, and it will not get there on its own.** Both api-cloudrun commits are
+> `chore(deps)` and `test(fixtures)` — non-releasable types — and no release PR is open, so Release
+> Please cuts nothing. Dev runs `beta.404` (Cloud Build deploys every push to `main`); **prod is still
+> `v0.248.0` / `beta.403`.** ⚠️ Batch 2 reached prod only because a release PR already existed for its
+> pin to ride in; do not read its write-up as "the pin deploys itself".
+>
+> ⭐ **Safe to leave, and the reason generalises: this tightening has no unsafe direction.** It makes a
+> field REQUIRED, the corpus is already complete in both projects, and an old lenient READER accepts
+> everything a new strict WRITER produces — so there is no document dev can write that prod refuses,
+> and no client change waiting on a deploy. The only thing not yet live in prod is the REFUSAL. Verify
+> by image digest if a release is later forced; a tag is a fact about the repo.
 >
 > **Gate, both projects, run against the LOCAL schemas before the beta was cut:** 12,004 prod /
 > 12,006 dev documents parsed over the nine `Address`-bearing collections, **0 failures**; **24,120
@@ -69,6 +81,38 @@ api-cloudrun#943's remaining half.*
 > Form seeds byte-identical across all 103 registered schemas. Consumer side: 0 of 79 JSON fixture
 > address objects incomplete under two independent predicates, `templates` `lint:fixtures` clean on
 > the first run, `test:units` 2,024 green, manager 1,977 green.
+>
+> 🔴 **And the consumer sweep MISSED three `.ts` literals, which the pre-push gate caught** (repaired
+> in `f5c834b9`). Both halves of the miss are the session's own lesson pointed at itself:
+>
+> - **The wrong predicate.** I classified the partial-address literals by *"does this file call
+>   `safeParse`/`validateBeforeWrite`"*. That is right for a unit test and meaningless for an
+>   integration one, which parses SERVER-SIDE over HTTP through the route's input schema. All four I
+>   cleared were in the unit tier, where the predicate happens to hold — so the conclusion was true
+>   and the reasoning did not transfer.
+> - **The scanner shared the defect of its subject.** Keyed on `address:\s*\{`, it could not see
+>   `address: opts.region ? { … } : null`. A shape-keyed pass (any literal holding 2+ of the seven,
+>   position-independent) found it — and over-reported 101 hits by sweeping in the Mapbox/geocode
+>   shapes, which have their own schema with optional keys. **The suite was the oracle both times.**
+>
+> ⭐ **Every repair states the value the default SUPPLIED (`""`), not a plausible one.** A first pass
+> invented `street: "1 Test St"`; the test passed and the log showed `geocoding_failed …
+> no_place_agreement`, because the invented street changed the geocoder's query — so the assertion
+> would have been passing for a different reason. ⚠️ **That is the OPPOSITE of the rule for stored
+> data**, where the population that omitted a field is a biased sample and the default is the one
+> value not to write. For a fixture whose subject is something else, reproducing the default's own
+> value is what makes the repair inert.
+>
+> ⚠️ **One of the three was not a test defect at all.** `findOrCreateDestination` takes
+> `Partial<AddressType>` and writes it as `address as DestinationDoc["address"]`, so the mint path
+> could always have stored a partial address — the inert default only made validation pass. Prod is
+> clean (0 of 322 destinations), because both production callers pass the PARSED order input, which
+> batch 3 now requires to be complete. Filed as **api-cloudrun#952**: batch 3 is what makes the three
+> casts removable.
+>
+> ⚠️ **Seven other tests failed in the parallel rung and were CONTENTION** — the serial rung reproduced
+> only these three and had not reached the rest, and all five remaining files pass in isolation. Load
+> average was 7+ rising to 23 during the run, from desktop apps rather than from any suite.
 >
 > ⭐ **Four inverted tests repaired as MIRRORS** — two passing three keys and inheriting four, three
 > organization literals spelling `{ full }` alone. And `tests/organization.test.ts`'s existing
@@ -549,19 +593,13 @@ worth repeating — and a reconciliation is exactly what a hole in the ENUMERATO
 sides come from the same walk. It reconciled at 211 while 47 paths were invisible. **Re-derive, and
 ask what the instrument cannot see.**
 
-**Continue in-session** only for these:
-
-1. ⏳ **`api-cloudrun` `200af2cf` is mid-push** (42 pins), escalated to `test:serial`. ⚠️ If that push
-   dies, an escaped suite outlives it — `pgrep -fl "deno.*test"`, and reap by the **pgid**.
-2. ⏳ **`templates` #307** — verify it merged on the newest run against the HEAD sha, never merely
-   "concluded".
-3. ⏸ **`manager`'s one pin** — deliberately held until api-cloudrun's suite releases dev Firestore,
-   since manager's pre-push e2e smoke hits the live dev API. Its typecheck and 1,977 unit tests are
-   already green against `beta.404`.
-4. Then the release: `api-cloudrun` cuts a release PR; prod is confirmed by comparing the build's
-   `results.images[0].digest` to the serving revision's digest, **not** by the tag.
+**Everything mechanical is DONE** — `core` published, all three consumer pins landed, `templates`
+#307 merged, four inverted tests and three consumer fixtures repaired. The one open item is that
+**prod is still `beta.403`** and nothing will change that until a releasable commit lands in
+`api-cloudrun`; the status block above says why that is safe to leave.
 
 **Not this session:** api-cloudrun#951 (the corpus re-parse guard — that probe has now been written
 **four** times, and batch 3's version added the two things the others lacked, a per-position
 denominator and a reach check, so it is the one to lift), api-cloudrun#943's manager half, and batch 4
-(`DocDestinationContact.phones`, 8 paths across 6 collections — see *The next batch*).
+(`DocDestinationContact.phones`, 8 paths across 6 collections — see *The next batch*, which now
+names it with measurements rather than leaving it to be re-derived).
