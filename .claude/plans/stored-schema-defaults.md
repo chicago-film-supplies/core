@@ -223,6 +223,23 @@ batch wants to isolate its own change.
 tests the code about to be published rather than the one already out. That is the variant the
 `items[]` batch needs; batch 1 did not, because its schemas were already on JSR.
 
+⚠️ **And the two forms have different siting rules, which is the part that wastes an hour.**
+A direct `jsr:`/`npm:` specifier carries its own resolution, so a probe using one runs from
+**anywhere** — that is why batch 1's re-parse worked out of the scratchpad. A **relative** import
+into a workspace does not: `zod` has to resolve through that workspace's import map — `core/deno.json`
+— so the probe file must physically sit inside that workspace (drop it in `core/scripts/`, run it,
+delete it) or it dies on *"Import zod not a dependency"*. The specifier trick cannot cover the unpublished case, which is
+exactly the case the `items[]` batch is.
+Three more things that are load-bearing in such a probe, all learned the expensive way by
+manager#421's run:
+- Build Firestore from a bare `initializeApp({ projectId })` + `getFirestore`, **never from
+  `api-cloudrun/src/db.ts`** — importing that drags the consumer's PINNED core in beside the local
+  one, and you are then parsing against two versions without noticing.
+- **Bucket failures by the SHAPE of the issue path**, mapping every numeric segment to `#`
+  (`items.#.zero_priced`), so 9,000 rows of one defect read as one line rather than flooding.
+- ⚠️ `deno run -A` inside `core` will **rewrite `core/deno.lock`** when it pulls `firebase-admin`.
+  Check `git status` and revert it; the probe is a probe, not a keeper.
+
 ## The next batch
 
 Read the split off `tests/stored-defaults.test.ts` rather than this doc, but the shape of the
