@@ -3244,11 +3244,28 @@ const DocDestinationContact: z.ZodType<DocDestinationContactType>;
 
 Contact reference in a destination endpoint (document schema — uid & first_name required).
 
+⚠️ **`phones` is REQUIRED here and `.optional()` on {@link DestinationContact},
+and that asymmetry is deliberate** (core#95 batch 4). It carried
+`.default([])`, which is inert on a stored schema — `validateBeforeWrite`
+discards `result.data` and writes the raw document — so its only effect was
+to let a writer omit the key.
+
+The input stays lenient because a client that names a contact need not know
+its phone numbers; api-cloudrun's `buildDestinationPair` supplies the empty
+list, which is what makes this requirement reachable. Tightening the input
+instead would 400 a payload that is semantically fine.
+
+Measured 2026-09-10 before the tightening: **0 of 4,560 prod and 0 of 4,571
+dev documents** fail it across the six embedding collections. ⚠️ The
+denominator is thin on the destination positions — 18 prod / 22 dev non-null
+contact objects, and `invoices.destinations[].delivery.contact` has **none in
+either project** — so this rests on the WRITER audit, not on the corpus.
+
 ```ts
 interface DocDestinationContactType {
   uid: string;
   name: string;
-  phones?: string[];
+  phones: string[];
 }
 ```
 
@@ -16260,11 +16277,28 @@ const DocDestinationContact: z.ZodType<DocDestinationContactType>;
 
 Contact reference in a destination endpoint (document schema — uid & first_name required).
 
+⚠️ **`phones` is REQUIRED here and `.optional()` on {@link DestinationContact},
+and that asymmetry is deliberate** (core#95 batch 4). It carried
+`.default([])`, which is inert on a stored schema — `validateBeforeWrite`
+discards `result.data` and writes the raw document — so its only effect was
+to let a writer omit the key.
+
+The input stays lenient because a client that names a contact need not know
+its phone numbers; api-cloudrun's `buildDestinationPair` supplies the empty
+list, which is what makes this requirement reachable. Tightening the input
+instead would 400 a payload that is semantically fine.
+
+Measured 2026-09-10 before the tightening: **0 of 4,560 prod and 0 of 4,571
+dev documents** fail it across the six embedding collections. ⚠️ The
+denominator is thin on the destination positions — 18 prod / 22 dev non-null
+contact objects, and `invoices.destinations[].delivery.contact` has **none in
+either project** — so this rests on the WRITER audit, not on the corpus.
+
 ```ts
 interface DocDestinationContactType {
   uid: string;
   name: string;
-  phones?: string[];
+  phones: string[];
 }
 ```
 

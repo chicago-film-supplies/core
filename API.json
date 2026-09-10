@@ -1461,8 +1461,8 @@
         {
           "kind": "interface",
           "name": "DocDestinationContactType",
-          "declaration": "interface DocDestinationContactType {\n  uid: string;\n  name: string;\n  phones?: string[];\n}",
-          "doc": "Contact reference in a destination endpoint (document schema — uid & first_name required)."
+          "declaration": "interface DocDestinationContactType {\n  uid: string;\n  name: string;\n  phones: string[];\n}",
+          "doc": "Contact reference in a destination endpoint (document schema — uid & first_name required).\n\n⚠️ **`phones` is REQUIRED here and `.optional()` on {@link DestinationContact},\nand that asymmetry is deliberate** (core#95 batch 4). It carried\n`.default([])`, which is inert on a stored schema — `validateBeforeWrite`\ndiscards `result.data` and writes the raw document — so its only effect was\nto let a writer omit the key.\n\nThe input stays lenient because a client that names a contact need not know\nits phone numbers; api-cloudrun's `buildDestinationPair` supplies the empty\nlist, which is what makes this requirement reachable. Tightening the input\ninstead would 400 a payload that is semantically fine.\n\nMeasured 2026-09-10 before the tightening: **0 of 4,560 prod and 0 of 4,571\ndev documents** fail it across the six embedding collections. ⚠️ The\ndenominator is thin on the destination positions — 18 prod / 22 dev non-null\ncontact objects, and `invoices.destinations[].delivery.contact` has **none in\neither project** — so this rests on the WRITER audit, not on the corpus."
         },
         {
           "kind": "variable",
@@ -7414,8 +7414,8 @@
         {
           "kind": "interface",
           "name": "DocDestinationContactType",
-          "declaration": "interface DocDestinationContactType {\n  uid: string;\n  name: string;\n  phones?: string[];\n}",
-          "doc": "Contact reference in a destination endpoint (document schema — uid & first_name required)."
+          "declaration": "interface DocDestinationContactType {\n  uid: string;\n  name: string;\n  phones: string[];\n}",
+          "doc": "Contact reference in a destination endpoint (document schema — uid & first_name required).\n\n⚠️ **`phones` is REQUIRED here and `.optional()` on {@link DestinationContact},\nand that asymmetry is deliberate** (core#95 batch 4). It carried\n`.default([])`, which is inert on a stored schema — `validateBeforeWrite`\ndiscards `result.data` and writes the raw document — so its only effect was\nto let a writer omit the key.\n\nThe input stays lenient because a client that names a contact need not know\nits phone numbers; api-cloudrun's `buildDestinationPair` supplies the empty\nlist, which is what makes this requirement reachable. Tightening the input\ninstead would 400 a payload that is semantically fine.\n\nMeasured 2026-09-10 before the tightening: **0 of 4,560 prod and 0 of 4,571\ndev documents** fail it across the six embedding collections. ⚠️ The\ndenominator is thin on the destination positions — 18 prod / 22 dev non-null\ncontact objects, and `invoices.destinations[].delivery.contact` has **none in\neither project** — so this rests on the WRITER audit, not on the corpus."
         },
         {
           "kind": "variable",

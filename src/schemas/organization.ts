@@ -451,8 +451,8 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   }),
   tax_exempt: z.boolean().optional().meta({ column: true, label: "Tax Exempt" }),
   description: z.string().optional().meta({ column: true, label: "Description" }),
-  emails: z.array(Email).default([]).meta({ column: true, label: "Emails" }),
-  phones: z.array(Phone).default([]).meta({ column: true, label: "Phones" }),
+  emails: z.array(Email).meta({ column: true, label: "Emails" }),
+  phones: z.array(Phone).meta({ column: true, label: "Phones" }),
   billing_address: Address.meta({ label: "Billing" }),
   // The whole contact is the column — the Typesense config indexes the nested
   // object, and `TableCell` joins the name parts.
