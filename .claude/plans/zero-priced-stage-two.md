@@ -11,84 +11,60 @@ saying something different from what it predicted. That doc — `document-grain-
 this directory — is **deleted**, its structural work having landed and its every leftover now
 sitting on an issue (core#100, core#103, core#105, api-cloudrun#943, api-cloudrun#944).*
 
-> ## ⚠️ STATUS UPDATE 2026-09-10 — steps 1-3 and 6 are DONE. Steps 4, 5 and 7 remain.
+> ## ⚠️ STATUS UPDATE 2026-09-10 — DONE except the templates PR. Delete this doc when it merges.
 >
-> ⭐ **The corpus is repaired and the emit is live.** Both environments read **0 unstated
-> component rows on all three grains**, from 9,213. Prod write: 2 orders, 1,040 invoices,
-> 1,014 fulfillments, zero failures, consumer queues paused and drained (three passes —
-> `gcloud tasks queues purge` really does return before it finishes: 0 → 100 → 25 → 0).
-> `@cfs/core@10.0.0-beta.401` published and verified **against the tarball** from a consumer,
-> not against core's own gates. All three consumers pinned: api-cloudrun `0f729d47`, manager
-> `20fd0c0`, templates still on beta.400 (it moves with the fixture PR below).
+> ⭐ **Steps 1-6 have landed. The only thing left is
+> [templates#304](https://github.com/chicago-film-supplies/templates/pull/304)**, which is open,
+> green on all four checks at its HEAD sha (`visual-diff` included), and needs a human merge —
+> merge is the publish authority and agents open PRs only. **Delete this doc in the commit that
+> merges it**; nothing else here is outstanding.
 >
-> **What is LEFT, in order:**
+> | what | where |
+> |---|---|
+> | backfill, both projects | **0 unstated component rows on all three grains, from 9,213** |
+> | emit + input channel | `@cfs/core@10.0.0-beta.401` |
+> | refine + catalog required | `@cfs/core@10.0.0-beta.402` |
+> | consumers | api-cloudrun `c4ad7a1a`, manager `0c6748c` — both on beta.402 |
+> | templates | PR #304, on beta.401; a later bump to .402 is routine (Renovate #197 is open) |
 >
-> 1. 🔴 **`templates` — and it is a PREREQUISITE for step 4, not the tail this plan called
->    it.** `lintFixture` parses every fixture against the real `InvoiceSchema`, so an
->    array-level refine refuses any fixture whose components are unstated. Measured
->    2026-09-10: the INVOICE family is **20 of 20 line rows unstated across all 8 fixtures**
->    (8 of those rows are components, across 5 files — that smaller number is what the refine
->    refuses; the larger one is what a re-capture must fix). The QUOTE family is **0 of 134**,
->    because its fixtures are captured from ORDERS, which always carried the flag.
->    ⭐ **A captured fixture is only as complete as the document it captured** — capture buys
->    PII safety and shape fidelity, never completeness. Re-capture all 8 with
->    `templates_capture_fixture` (never `templates_set_fixture`); every source document is
->    inside the backfilled corpus, so the capture fixes them by construction:
->    `zero-priced-flat-tax` + `-hidden` ← #2390 `wDBAH05fWHmNi5m94an8` (one document
->    deliberately — the pair is a controlled comparison), `billing-foreign-country` ← #1918,
->    `rental-discount-taxed` ← #1902, `rental-discount-untaxed` ← #1996, plus `part-paid`,
->    `credits-applied`, `service-untaxed-fee`. Then re-bless goldens in BOTH namespaces via
->    `--env=dev`, and bump the pin to beta.401 in the same PR.
-> 2. **Step 4 — the refine (core#100).** Array-level, both directions, on all three grains.
-> 3. **Step 5 — `AuthoredProductComponent.zero_priced` required.** Still a zero-row backfill.
+> Prod write: 2 orders, 1,040 invoices, 1,014 fulfillments, zero failures, queues paused and
+> drained. Both betas verified **against the tarball** from a consumer, not against core's own
+> gates. Both live corpora re-parsed against the LOCAL core before the refine was cut — 1,020
+> orders, 1,040 invoices, 1,020 fulfillments, 570 products, all parse, in both projects.
 >
-> ⭐ **Owner ruling 2026-09-10 — the templates key on `zero_priced`**, which is what
-> `quote.eta:307` already does. **Measured before shipping: near-inert.** The proxy
-> (`price.base_cents === 0 && componentDepth > 0`) hides 3,557 rows, the real flag 3,556 —
-> **1 row becomes visible** (invoice #2411, draft, a genuinely-charged-at-$0 component the
-> proxy was wrongly hiding) and **0 become hidden**, which is invariant (1) holding. Also
-> repair the "an invoice line has NO `zero_priced` field" claim in `invoice.eta` and in two
-> `invoice.meta.json` fixture descriptions.
->
-> ## 🔴 Three things this plan did not know, all found by RUNNING
+> ## 🔴 Five things this plan did not know, every one found by RUNNING rather than reading
 >
 > 1. **The emit's population is LINES, not components.** `invoiceItemDifferences` counts a
 >    null-valued key as PRESENT and `buildOrderLineFromProduct` writes `zero_priced: null` on
->    every order line — so the emit had to be unconditional and the backfill had to cover
->    every line. The narrow value-conditional rule saved only **102 documents of 1,037** and
->    would have made a line's key set depend on its VALUE, so clearing a catalog flag strands
->    the stored key and reports `out_of_sync` forever. Not worth it; **(a) unconditional
->    `?? null`** is what shipped.
+>    every order line, so the emit had to be unconditional and the backfill had to cover every
+>    line. The narrow value-conditional rule saved only **102 documents of 1,037** and would have
+>    made a line's KEY SET depend on its VALUE.
 > 2. **Stamping the flag can make a document UNWRITABLE.** `computeItemPaths` sorts
 >    `zero_priced === true` ahead of its priced siblings and `validatePathsAgainst` compares
->    `items[i].uid` positionally — so the write boundary checks the LINEARIZATION, not just
->    paths. There is no stamp-but-keep-the-order option. 3 prod invoices reordered (#1850
->    paid, #2299 and #2303 void; accessories moving inside one kit, money identical) and were
->    written in canonical order under `--allow-reorder`. ⚠️ **Any future items[] backfill must
->    WRITE IN CANONICAL ORDER rather than patch a key in place**, and must expect arrays a
->    previous backfill already reordered.
-> 3. **The input channel created a way to LOSE the field.** `buildInvoiceItems` rebuilds
->    every line from typed fields and the input schema strips unknowns, so `zero_priced` had
->    to be added to `InvoiceItemInputLineType` — and that turns an omitted key into `?? null`,
->    wiping a backfilled answer off every line of that invoice. Closed by
->    `preserveStoredZeroPriced` (`api-cloudrun/src/lib/invoiceLineDenorms.ts`), a third
->    carry-forward on the shared `(uid, k-th occurrence)` pairing.
+>    `items[i].uid` positionally, so the write boundary checks the LINEARIZATION. 3 prod invoices
+>    reordered. ⚠️ **Any future items[] backfill must WRITE IN CANONICAL ORDER rather than patch a
+>    key in place.**
+> 3. **The input channel the emit needed created a way to LOSE the field** — `?? null` on an
+>    omitted key wipes a backfilled answer. Closed by `preserveStoredZeroPriced`.
+> 4. 🔴 **A SUBSTITUTED component had no way to get the flag, and that was a live 400.** The
+>    carry-forward keys on `(uid, k-th occurrence)` and a substitution puts product Y in product
+>    X's slot, so there is no uid to pair on. It now inherits from the slot — `zero_priced` is a
+>    property of the POSITION, not the product. ⚠️ The first fix was silently wrong:
+>    `path_substituted_for` holds the ORDER path while stored rows are divider-scoped, which
+>    `lib/invoiceSubstitutions.ts` names as "the silent failure mode".
+> 5. **`templates` was a PREREQUISITE for the refine, not its tail.** `lintFixture` parses every
+>    fixture against the real `InvoiceSchema`; the invoice family was 20 of 20 line rows unstated
+>    across all 8 files while the quote family was 0 of 134, because quote fixtures are captured
+>    from ORDERS. ⭐ **A captured fixture is only as complete as the document it captured.**
 >
-> ⚠️ **Two residue classes the census structurally could not see**, both found by the
-> backfill's own fallbacks and both now derived rather than left silent. The catalog must be
-> keyed on the **(parent product, component) PAIR** — 5 component uids are stated both ways by
-> different parents, which made 2 rows look unanswerable while their own parent was
-> unambiguous. And a **component that carries a charge is not zero-priced**, so its own money
-> answers: 3 rows are a *Chicago Bottled Water Tax ( $0.05/bottle )* under an *Open Water 16oz
-> Aluminum Bottle (24 Case)*, in no product's `components[]` and billing 6 cents on 96-240
-> bottles. The census reads 0 for the unsafe arm because its partition (7) asks only about
-> rows whose paired ORDER line says true — prod invoice #2316 (paid) charges $6.80 for a
-> component the catalog calls free, and only the catalog fallback can reach it.
+> ⚠️ **Two tests INVERTED rather than being deleted, and expect one per grain for anything that
+> tightens `items[]`:** core's *"the PROJECTION does not emit zero_priced yet"* was literally the
+> stage-one spec, and api-cloudrun's *"buildFulfillment line items expose only fulfillment-safe
+> fields"* listed the key among the order-only leaks.
 >
-> ⚠️ **Two tests INVERTED rather than being deleted**, and expect one per grain for anything
-> that tightens `items[]`: core's *"the PROJECTION does not emit zero_priced yet"* was
-> literally the stage-one spec, and api-cloudrun's *"buildFulfillment line items expose only
-> fulfillment-safe fields"* listed the key among the order-only leaks.
+> ⚠️ **And the retry ladder's "transient" label is per FILE.** `invoiceSubstitution.test.ts` reads
+> *"seen 5 times before, 4 called transient"*, and finding (4) was sitting underneath it,
+> deterministic. Read the assertion, not the label.
 
 > **State at hand-off, 2026-09-09:** nothing in *The order of work* below has started. What
 > exists is the measurement (`api-cloudrun/scripts/audit-zero-priced-components.ts`, api-cloudrun
