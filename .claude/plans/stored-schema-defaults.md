@@ -4,6 +4,39 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
+> ## ⚠️ STATUS 2026-09-09 (later) — **first removal batch DONE in `core`; NOT yet published.**
+> Two commits on `beta`, gates green, **push/publish deliberately held**:
+> `1827843` (20 totals defaults, core#95) and `e0c71dd` (`path` required on all four
+> invoice INPUT arms, core#105 — folded in to share this beta's pin sweep). Working tree
+> clean, `origin/beta` unmoved, newest published is still `beta.399`.
+>
+> **The campaign now has a measured denominator, not an estimate.** A full absence census
+> ran over all 30 collections in BOTH projects using the existing
+> `api-cloudrun/scripts/audit-field-presence.ts` — no new instrument was needed, and it was
+> found by grepping `scripts/` before building one. Of the 259 inert paths:
+>
+> | | count | meaning |
+> |---|---:|---|
+> | reachable by the cheap oracle | **184** | scalar/nested-map — one `orderBy` count each, no document reads |
+> | need paging | **75** | `array[]` members; Firestore cannot `orderBy` inside an array of maps |
+> | **FREE** (0 absent, both projects) | **122** | removable with no backfill |
+> | **BLOCKED** (absence measured) | **47** | needs a backfill or a decision first |
+> | **VACUOUS** | **15** | `location-types` + `recurrences` are EMPTY in both projects |
+>
+> ⭐ **The blocked 47 are almost all ONE shared block.** The 7-key `Address` group is
+> blocked in five embeddings at once (`organizations.billing_address`,
+> `orders.organization.billing_address`, `destinations.address`,
+> `cards.destination.address`, `bookings.destinations.delivery.address`) — 35 of the 47.
+> The rest: `bookings.stores`/`query_by_uid_store` (4,205 each), the two
+> `transactions.serialized_details` arrays, `cards.destination.contact.phones` (1,156),
+> `transactions.cost.unit_costs_cents` (908), `orders.xero_id` (3), `orders.invoices`.
+>
+> ⚠️ **The 15 vacuous paths are the MOST dangerous, not the least.** An empty collection
+> makes the corpus gate pass by vacuity while saying nothing about the writer — the first
+> `recurrence` ever created would be the test. The census tool refuses to report on a
+> 0-document collection rather than printing 0/0 as clean, which is the only reason this
+> was visible at all.
+
 > ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` DONE, **pin sweep DONE, shipped to PROD, ratchet LANDED.**
 > All four repos are on `beta.399` — `api-cloudrun` `adc121bf`, `manager` `8edfa7b`, `templates`
 > `cb9b44b` (PR #301 merged). **Prod runs it**: `v0.247.0`, Cloud Run revision
@@ -132,7 +165,7 @@ and cannot be generalised. `version` is deliberately not bumped either.
   check. ⚠️ And prod/dev are **not** independent samples — `devReplica` mirrors prod writes, and the
   two read identically — so that is one confirmation, not two.
 
-- **The wider campaign — now MEASURED rather than estimated: 259 inert paths across 37 collections**,
+- **The wider campaign — 239 inert paths remain** (259 minus this session's 20 totals removals),
   concentrated in `orders` (48), `invoices` (41), `credit-notes` (33), `fulfillments` (22),
   `cards` (20) — read the live split off `tests/stored-defaults.test.ts` rather than this list, which
   is the one thing here that can rot. ⚠️ The older "~250 sites / ~335 distinct" figures counted
@@ -152,7 +185,7 @@ and cannot be generalised. `version` is deliberately not bumped either.
     are `version` under `FieldValue.increment(1)`; the other three are `arrayUnion`/`arrayRemove`
     targets — `cards.recurrence_overrides`, `recurrences.exception_dates`, `products.tags` — each
     entry naming its write site. **This is the partition core#95 asked for, and it is now made.**
-  - **`INERT_DEFAULTS` (259)** — the campaign backlog. Only shrinks.
+  - **`INERT_DEFAULTS` (239 as of `1827843`; 259 when first catalogued)** — the campaign backlog. Only shrinks.
   ⚠️ **The catalogue was GENERATED from the walk, so it agrees by construction and the first green
   run proved nothing.** Both directions were verified by mutation instead: `.default("untitled")` on
   `TagSchema.name` failed the *catalogued* arm naming `tags.name`, and an unfindable catalogue entry
