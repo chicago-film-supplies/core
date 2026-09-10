@@ -203,6 +203,23 @@ decision is stable:
   `audit-zero-priced-components.ts`, which already pages `items[]` on three grains. The stored
   invoice item `path` (`schemas/invoice.ts:487`, `z.array(ItemUid).default([])`) is in this family.
 
+  🔴 **And an `items[]` batch has a second hazard the scalar batches do not: a backfill can make
+  the array UNWRITABLE.** `validatePathsAgainst` (`utils/orders.ts`) compares
+  `items[i].uid !== recomputed[i].uid` **position by position**, so the write boundary validates the
+  LINEARIZATION and not merely the paths — while `resolveBlock` sorts `zero_priced === true` ahead
+  of its priced siblings within each parent's direct children. So stamping a sort-participating flag
+  onto a stored items array changes the recomputed order, and the stored array then fails its own
+  boundary check. **Measured by the zero_priced stage-two backfill (cfs-f0, 2026-09-10): three prod
+  invoices reordered and had to be written in canonical order.**
+  ⚠️ **Reach: 57 of the 239 remaining paths are `items[]` paths** — 19 invoices, 16 orders,
+  14 credit-notes, 8 fulfillments. `zero_priced` is the only sort key today and is NOT itself in the
+  backlog, so the hazard is not that this campaign stamps it; it is that any items-array backfill
+  must WRITE IN CANONICAL ORDER rather than patching a key in place, and must expect arrays a
+  previous backfill has already reordered.
+  ⭐ The transferable question: **before backfilling a key into an array, ask whether the key
+  participates in the array's own ordering** — and if the boundary re-derives that ordering, a
+  correct value written in the stored order is still a refused write.
+
 ## Context recommendation
 
 **Clear before the wider campaign.** It does not need this session's working context — the policy is
