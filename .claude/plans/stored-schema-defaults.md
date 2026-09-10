@@ -204,15 +204,18 @@ and `[]`, and they will not coincide for a family with a narrower leaf type.
 1,020/1,020, invoices 1,040/1,040, fulfillments 1,020/1,020, credit-notes 13/13 — **3,093
 documents, 0 parse failures and 0 issues anywhere under `totals`**.
 
-⚠️ **Dev was ATTEMPTED AND ABANDONED, not run — say so rather than implying a pair.** It cleared
-`orders` (1,020/1,020, 0 issues) and then made no progress for 40 minutes at load average 10.4,
-because a peer session's api-cloudrun suite was exercising dev Firestore concurrently. It was
-killed rather than waited out: it had stopped being a measurement and become a confounder in
-someone else's push. The prod number stands on its own; the dev half is **unmeasured for
-`invoices`, `fulfillments` and `credit-notes`**.
-⚠️ Cheap to finish when dev is quiet, and worth finishing rather than assuming: `devReplica`
-mirrors prod so most rows are the same corpus, but dev also carries native documents the legacy
-ingest never wrote — which is exactly the population a prod-only reading cannot see.
+✅ **Dev completed 2026-09-10 when the corpus was quiet** (an earlier attempt was killed mid-run
+at load 10.4 while a peer's suite held dev Firestore): orders 1,020/1,020, invoices 1,040/1,040,
+fulfillments 1,020/1,020, credit-notes 13/13 — **0 parse failures, 0 `totals` issues**, identical
+to prod.
+
+⚠️ **And the dev half added no independent rows, which is worth knowing before paying for it
+again.** On these four collections the two projects are the SAME SIZE to the document (1,020 /
+1,040 / 1,020 / 13), so `devReplica` is a pure mirror here and this is one corpus measured twice.
+The general warning still holds and is simply not about these collections: dev's extra
+native documents are real on `contacts` (182 vs 173), `cards` and `bookings` — the collections the
+legacy CRMS ingest did not write. **Check the two counts before claiming a dev run is a second
+sample.**
 
 ⚠️ **That result is JOINT, not isolating.** Parsing against `beta.402` exercises manager#421's
 `zero_priced` required + array refinement at the same time as this campaign's totals removals, so a
@@ -290,11 +293,11 @@ decision is stable:
   stated on every row of both families (224 item rows). `zero_priced` is not in the backlog, so its
   20 unstated rows belong to manager#421's campaign, not this one — but the measurement is the
   prerequisite an `items[]` batch must re-run, since it is a fact about fixtures that change.
-  🔴 **And it has a KNOWN expiry, not merely a general one: manager#421 is re-capturing all 8
-  invoice fixtures** (all 8, rather than the 5 its refine forces, so there is no second pass). That
-  rewrites the corpus this 224-row measurement was taken over. **Re-run it after that PR merges** —
-  it should move the invoice family to 20/20 stated, and until it does the number above describes a
-  corpus that no longer exists.
+  ✅ **RE-RUN AND STILL 0, against the post-recapture corpus.** manager#421's re-capture landed as
+  `templates` #304 (`6675703`) and moved the invoice family from 20-of-20 `zero_priced`-unstated to
+  **0 of 20**, exactly as predicted. Re-measured here after it merged: **0 of the 57 `items[]`
+  backlog keys unstated**, across 224 item rows in both families. The expiry recorded above is
+  discharged; the next one arrives with the next fixture change.
   ⚠️ Three populations, three different questions, and they are easy to conflate: the template
   predicate switch exposes **2** fixtures, the refine refuses **5**, full corpus fidelity is all
   **8** — and *line rows* (20) is a different count again from *component rows* (8). Name which one
