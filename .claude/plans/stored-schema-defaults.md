@@ -4,47 +4,44 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-09 — **batch 1 SHIPPED to all four repos. Backlog 259 → 239, and now PARTITIONED.**
-> `@cfs/core@10.0.0-beta.400` is published and swept: api-cloudrun `2e633487`, manager `88c8543`,
-> templates #302 (merged). All four repos clean on their canonical branches. **Not yet in prod** —
-> that waits on api-cloudrun's next release cut.
+> ## ⚠️ STATUS 2026-09-10 — **batch 2 is COMMITTED in three repos and NOT YET PUSHED. Backlog 239 → 211.**
+> Batch 1 is closed on every axis and is now history: 20 `totals` defaults, shipped to all four repos,
+> in prod as `v0.247.0` / revision `api-cloudrun-00364-v6z`. Its details live in *What shipped* below.
 >
-> **What landed:** the 20 inert `.default()` on the three `totals` blocks (core `1827843`, core#95's
-> first removal batch) and `path` required on all four invoice items INPUT arms (core `e0c71dd`,
-> **core#105 — closed**, folded in to share this beta's 56-pin sweep). Two fixture repairs in
-> api-cloudrun; none needed in templates or manager.
+> **Batch 2 — the derived-denorm family.** The boundary is one the codebase already draws:
+> `core/src/schemas/propagation/orders.ts` names `totals`, `number`, `query_by_*` and
+> `bookings_breakdown` as the values the order INPUT schemas carry no channel for. Batch 1 took
+> `totals`; this takes the other two — **20 `query_by_*` across 11 collections + the 8 on
+> `orders.bookings_breakdown`** (wrapper + seven numeric leaves).
 >
-> **The campaign now has a measured denominator rather than an estimate.** No new instrument was
-> built — `api-cloudrun/scripts/audit-field-presence.ts` already was the oracle step 1 needs, found by
-> grepping `scripts/` first. Run over all 30 collections in BOTH projects:
+> | repo | commit | state |
+> |---|---|---|
+> | `core` (`beta`) | `fb4a572` | committed, **NOT pushed — pushing PUBLISHES `beta.403` to JSR** |
+> | `api-cloudrun` (`main`) | `c499891d` | committed, not pushed |
+> | `templates` (`fix/core95-batch2-quote-fixture`) | `3fc8992` | committed, **no PR opened yet** |
 >
-> | | count | meaning |
-> |---|---:|---|
-> | reachable by the cheap oracle | **184** | scalar/nested-map — one `orderBy` count each, no document reads |
-> | **not** reachable | **75** | `array[]` members; Firestore cannot `orderBy` inside an array of maps |
-> | **FREE** (0 absent, both projects) | **122** | removable with no backfill |
-> | **BLOCKED** (absence measured) | **47** | needs a backfill or a decision first |
-> | **VACUOUS** | **15** | `location-types` + `recurrences` are EMPTY in both projects |
+> **Gate taken, both projects:** census 0-absent/0-null on all 28; writers audited; step 6 re-parse
+> **26,147 documents, 0 batch-field failures**. Two repairs found, both invisible to `deno check`:
+> an "a complete document" literal missing one sibling key, and an INVERTED test that was the
+> default's own spec. Details in *What shipped* and *Batch 2* below.
 >
-> ⭐ **The blocked 47 are mostly ONE shared block.** The 7-key `Address` group is blocked in five
-> embeddings at once (`organizations.billing_address`, `orders.organization.billing_address`,
-> `destinations.address`, `cards.destination.address`, `bookings.destinations.delivery.address`) —
-> 35 of the 47. The rest: `bookings.stores`/`query_by_uid_store` (4,205 each), the two
-> `transactions.serialized_details` arrays, `cards.destination.contact.phones` (1,156),
-> `transactions.cost.unit_costs_cents` (908), `orders.xero_id` (3), `orders.invoices` (2).
+> 🔴 **The pin sweep CANNOT complete: `templates` is blocked, and not by this batch.**
+> `templates/fixtures/quote/long-multi-group.json` fails `OrderSchema` at `beta.402` — the
+> api-cloudrun#917 `zero_priced` refine refuses a zero-priced KIT PARENT. `templates` is still pinned
+> to `beta.401`, so its CI is green *today* and **the next pin bump of any kind turns it red**.
+> Filed as **templates#305** (`kind:decision`) — it needs a semantic ruling that belongs to
+> manager#421's campaign, not this one. ⭐ The measurement that should inform it: **no live order has
+> that shape** — 1,020 orders + 1,040 invoices + 1,020 fulfillments re-parse clean in both projects.
 >
-> ⚠️ **The 15 vacuous paths are the MOST dangerous, not the least.** An empty collection makes the
-> corpus gate pass by vacuity while saying nothing about the writer — the first `recurrence` ever
-> created would be the test. The tool refuses to report on a 0-document collection rather than
-> printing 0/0 as clean, which is the only reason this was visible.
+> ⚠️ **`getInitialValues` reads `.default()` as the FORM SEED** (`core/src/schemas/initial.ts`,
+> `case "default"`), so 28 removals could have moved manager's create forms. Measured, not assumed:
+> **byte-identical across all 103 registered schemas**, because the type-derived zero for `z.array()`
+> is `[]` and for `z.number()` is `0` — the same values the defaults named. Re-run this check on any
+> batch whose defaults are NOT the type-derived zero; `z.boolean().default(true)` is the known trap.
 >
-> ⚠️ **prod and dev are ONE sample** (`devReplica` mirrors prod), so it was used as a consistency
-> check instead: dev-absent >= prod-absent holds on all 169 paths. Three paths are 0-absent in prod
-> and non-zero in dev — a prod-only reading would have proposed all three for tightening.
->
-> **The earlier `OrderDocDates` work that opened this campaign is recorded in *What shipped* below**;
-> its ratchet (`tests/stored-defaults.test.ts`, `5d14347`) is what made this batch mechanical.
-> `beta.399` reached prod as `v0.247.0` / revision `api-cloudrun-00364-v6z`.
+> **Also filed: api-cloudrun#951** (`kind:guard`, `risk:live-data`) — the step-6 re-parse found two
+> stored documents that violate their own schema, and nothing routinely looks. One is a **prod**
+> `purchase` transaction with `supplier: null` whose offset is Accounts Payable.
 
 ## What shipped
 
@@ -59,6 +56,9 @@ api-cloudrun#943's remaining half.*
 | 15 pins + 1 parsed fixture | `templates` `cb9b44b` (PR #301) | ✅ merged |
 | `beta.399` reaching **prod** | `v0.247.0` → revision `api-cloudrun-00364-v6z` | ✅ deployed |
 | the campaign's ratchet, 291 paths partitioned | `core/tests/stored-defaults.test.ts` (`5d14347`) | ✅ landed |
+| **batch 2** — 28 defaults on the derived-denorm family | `core` `fb4a572` | ⏸ committed on `beta`, unpushed |
+| 2 order literals completed to the four new keys | `api-cloudrun` `c499891d` | ⏸ committed on `main`, unpushed |
+| 1 quote fixture completed | `templates` `3fc8992` | ⏸ branch, no PR |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -93,6 +93,80 @@ AND both durations absent. Criterion 1 alone matches **66** pairs, of which **46
 same-day jobs that agree with their order and carry real business timestamps. Criterion 2 alone
 matches pairs an order edit legitimately moved. Only the conjunction names the migration's output,
 and on the measured corpus all three agree on the same 20.
+
+## Batch 2 — the derived-denorm family, and what it cost
+
+**The partition, RE-DERIVED 2026-09-10 by the recipe below** (do not quote these either):
+
+| | count | note |
+|---|---:|---|
+| backlog before | 239 | |
+| reachable by the cheap oracle | 164 | scalar / nested-map |
+| **not** reachable | 75 | `array[]` members |
+| FREE (0 absent, both projects) | 102 | |
+| BLOCKED | 47 | mostly the one shared `Address` block |
+| VACUOUS | 15 | `location-types` + `recurrences` are EMPTY in both projects |
+| **taken by batch 2** | **28** | 20 `query_by_*` + 8 `bookings_breakdown` |
+| backlog after | **211** | |
+
+⭐ It reconciles exactly with the 2026-09-09 table minus batch 1's 20 removals (184 − 20 = 164
+reachable, 122 − 20 = 102 free), which is itself a check that the re-derivation was not a fresh
+guess. The dev-absent >= prod-absent consistency check held on all 164.
+
+**Three `query_by_*` were deliberately LEFT** — each has measured absences and stays in the backlog:
+`bookings.query_by_uid_store` (4,205), `contacts.query_by_organizations` (dev 2),
+`orders.query_by_invoices` (2). ⭐ Each is absent on exactly the same documents as its SOURCE field
+(`bookings.stores` is absent on the same 4,205; `orders.invoices` on the same 2), which is what a
+denorm's absence should look like and is the reason to treat them as one repair rather than four.
+
+### What made this batch cheap, and what will not generalise
+
+⭐ **`validatedUpdate` validates the full MERGED document, never the patch**
+(`api-cloudrun/src/lib/firestoreWrite.ts`), and `updateOrder` builds it with `cloneDeep(order)`. So
+**update paths are safe by construction**: a stored key carries forward. Only a from-scratch
+construction can regress, which collapses the writer audit from "every write site" to "every create
+site" — a much smaller set. ⚠️ This holds only while a caller builds `merged` from the stored doc; a
+caller that hand-builds a partial `merged` would have been leaning on the default invisibly.
+
+⭐ **All 28 interface members were ALREADY non-optional.** The schema defaulted what the interface
+required — the exact blind spot `z.ZodType<T>`'s one-directional check cannot see — so procedure
+step 4 was a no-op and typed document literals were already compiler-gated. **That is why the only
+two defects were untyped fixtures**, and it predicts the same for any batch where the interface
+already states the field.
+
+### The two repairs, and the one that was a MIRROR
+
+- `api-cloudrun/tests/unit/fixtureFormat.test.ts` and
+  `api-cloudrun/tests/integration/templates/fixtures.test.ts` — both hand-spelled `orders` literals,
+  both missing all four. ⭐ **The cheap tier and the expensive one each found exactly one**:
+  `test:units` caught the first in 9 seconds; only the integration tier reached the second, where all
+  five failures traced to one `orderDoc()` helper.
+- `core/tests/inventory-ledger.test.ts` — a literal that calls itself *"a complete document"* while
+  carrying `query_by_uid_store` **without its sibling** `query_by_uid_location`.
+- 🔴 `core/tests/location.test.ts` had an **INVERTED test**: `LocationSchema defaults arrays when
+  omitted` asserted that all four could be dropped and still parse. **That assertion was the
+  default's own spec.** Rewritten as its mirror — one dropped key per step, so each case names the
+  constraint it tests rather than failing for some reason. ⭐ `product_capacities` / `products` are
+  deliberately left unasserted *in either direction*: they are still backlog, and pinning their
+  current defaults would recreate this same inverted test for the next batch to undo.
+
+### ⚠️ Whether dev is a second sample is PER COLLECTION, not a property of the campaign
+
+Batch 1's four grains are the same size to the document, so `devReplica` made it one corpus measured
+twice. **Six of batch 2's ten collections differ** — transactions 2,148 vs 1,958, bookings 7,120 vs
+7,112, organizations 322 vs 318, locations 210 vs 209, out-of-service 4 vs 2 — so the dev run added
+~200 rows the legacy ingest never wrote, and was a real second sample. **Compare the two counts
+before claiming either.**
+
+### The classifier that was wrong by 42
+
+A first pass over the `templates` fixtures reported **43** exposed documents. The real number is
+**1**. The classifier matched invoice-SHAPED maps anywhere in the tree and swept in `aging-report`'s
+`.rows[]` — but `lintFixture` parses only the top-level `fixture.doc`, against the FAMILY's declared
+`collection_source`, and `aging-report` resolves to `aging-reports`, which never meets
+`InvoiceSchema` at all. ⭐ **Read the gate's own dispatch before writing a census of what the gate
+will refuse** — the sidecar (`templates/templates/<family>.meta.json`) names the collection, so the
+mapping is a lookup rather than an inference.
 
 ## Verification, and how it was gated
 
@@ -153,7 +227,7 @@ and cannot be generalised. `version` is deliberately not bumped either.
   check. ⚠️ And prod/dev are **not** independent samples — `devReplica` mirrors prod writes, and the
   two read identically — so that is one confirmation, not two.
 
-- **The wider campaign — 239 inert paths remain** (259 minus this session's 20 totals removals),
+- **The wider campaign — 211 inert paths remain** (259 − batch 1's 20 − batch 2's 28),
   concentrated in `orders` (48), `invoices` (41), `credit-notes` (33), `fulfillments` (22),
   `cards` (20) — read the live split off `tests/stored-defaults.test.ts` rather than this list, which
   is the one thing here that can rot. ⚠️ The older "~250 sites / ~335 distinct" figures counted
@@ -173,7 +247,7 @@ and cannot be generalised. `version` is deliberately not bumped either.
     are `version` under `FieldValue.increment(1)`; the other three are `arrayUnion`/`arrayRemove`
     targets — `cards.recurrence_overrides`, `recurrences.exception_dates`, `products.tags` — each
     entry naming its write site. **This is the partition core#95 asked for, and it is now made.**
-  - **`INERT_DEFAULTS` (239 as of `1827843`; 259 when first catalogued)** — the campaign backlog. Only shrinks.
+  - **`INERT_DEFAULTS` (211 as of `fb4a572`; 259 when first catalogued)** — the campaign backlog. Only shrinks.
   ⚠️ **The catalogue was GENERATED from the walk, so it agrees by construction and the first green
   run proved nothing.** Both directions were verified by mutation instead: `.default("untitled")` on
   `TagSchema.name` failed the *catalogued* arm naming `tags.name`, and an unfindable catalogue entry
@@ -189,6 +263,13 @@ and cannot be generalised. `version` is deliberately not bumped either.
   count is small.**
 
 ## ⚠️ Step 6 was SKIPPED on batch 1, and closed retroactively
+
+> ✅ **Batch 2 ran it BEFORE committing, which is where it belongs** — every document of all ten
+> affected collections, both projects: **26,147 parsed, 0 failures on any batch field.** It also
+> found two documents that fail their own schema for unrelated reasons (api-cloudrun#951), which a
+> census could never have seen. ⭐ Because the change was UNPUBLISHED, this used the **relative
+> import** form sited in `core/scripts/` — the variant the siting rule below describes — and it
+> worked exactly as predicted.
 
 core#95's procedure ends *"re-parse both live corpora against the tightened schema before
 committing."* Batch 1 did **not** do that. It ran the key-presence census (step 1), the writer
@@ -293,8 +374,13 @@ path, because `devReplica` mirrors prod. It did, on all 169 measured.
 Read the split off `tests/stored-defaults.test.ts` rather than this doc, but the shape of the
 decision is stable:
 
-- **The 122 FREE paths are the cheap ones** and several are shared blocks like `TotalsCore` was, so
-  a batch is chosen by DECLARATION rather than by path count.
+- **The FREE paths are the cheap ones** (102 before batch 2 took 28 of them; re-derive rather than
+  subtract) and several are shared blocks like `TotalsCore` was, so a batch is chosen by DECLARATION
+  rather than by path count. ⭐ **Batch 2 found a better selector than "which paths are free": ask
+  what the codebase already treats as one FAMILY.** `propagation/orders.ts` had already written down
+  that `totals`, `number`, `query_by_*` and `bookings_breakdown` are the client-untouchable derived
+  set — so the batch boundary was a lookup, and the writer audit generalised across all 11
+  collections instead of being re-argued per path.
 - **The `Address` block is the biggest single decision** — 35 blocked paths in five embeddings, and
   one `.default("")` per key. It needs the core#101 treatment: find the value's AUTHOR (a
   geocode? the CRMS import?), not a plausible default. ⚠️ Its absences differ per embedding
@@ -357,24 +443,25 @@ decision is stable:
 
 ## Context recommendation
 
-**Clear before batch 2.** Batch 1 is closed on every axis — shipped to all four repos, gated on both
-projects, both open measurements discharged, core#105 closed, the ratchet shrunk 259 → 239. Nothing
-about batch 2 depends on batch 1's working context: the backlog is read off
-`tests/stored-defaults.test.ts`, the partition is re-derived by the recipe above, and the policy is
-in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+**Clear before batch 3.** Batch 2 is gated and committed; what remains on it is a *decision*
+(publish + sweep, below), not analysis, and nothing about batch 3 depends on this session's working
+context. The backlog is read off `core/tests/stored-defaults.test.ts`, the partition is re-derived
+by the recipe above, and the policy is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
 
-⚠️ **Do not carry the numbers in this doc into batch 2 — re-run the recipe.** They are a measurement
-over a corpus two other campaigns are actively writing to, and one of them already invalidated a
-number in this doc inside a single session.
+⚠️ **Do not carry the numbers in this doc into batch 3 — re-run the recipe.** They are a measurement
+over a corpus two other campaigns are actively writing to. Batch 2's re-derivation reconciled with
+batch 1's exactly, which is the check worth repeating rather than the numbers worth reusing.
 
-**Continue in-session** only for an immediate follow-up that leans on what is already loaded.
+**Continue in-session** only for the immediate follow-ups that lean on what is already loaded:
 
-**Clear before the wider campaign.** It does not need this session's working context — the policy is
-in `core/CLAUDE.md`, the worked example is this doc, and the campaign starts from a fresh grep of
-`src/schemas/`. The pin sweep is done, so the fresh-session warning that stood here is discharged;
-what it was protecting against turned out to be real, and the census discriminator above is the
-cheap form of it.
-
-**Continue in-session** only for an immediate follow-up that leans on what is already loaded —
-merging api-cloudrun#948 to carry `beta.399` to prod, picking up api-cloudrun#943's manager half, or
-measuring the second class named above.
+1. 🔴 **Batch 2 is committed in three repos and UNPUSHED.** `core` `fb4a572` on `beta` — pushing
+   **publishes `beta.403` to JSR and is irreversible**. Then the pin sweep: ~40 in `api-cloudrun`,
+   ~1 in `manager`, ~15 in `templates`, by `sed` over `jsr:@cfs/core@10.0.0-beta.402/` rather than by
+   a count. `api-cloudrun` `c499891d` and `templates` `3fc8992` are both forward-compatible and can
+   land before the publish; the `templates` branch still needs its PR opened.
+2. 🔴 **`templates` cannot take the pin until templates#305 is decided** — the `zero_priced` refine
+   refuses a zero-priced kit parent in `long-multi-group.json`, and that fixture is red at `beta.402`
+   already. Its pin is on `beta.401`, so nothing is broken *today*; the bump is what breaks it.
+   Sequencing option if the decision is slow: publish, sweep `api-cloudrun` + `manager`, and leave
+   `templates` on `beta.401` deliberately — recorded, not forgotten.
+3. api-cloudrun#951 (the corpus re-parse guard) and api-cloudrun#943's manager half.
