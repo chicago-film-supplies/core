@@ -4,59 +4,47 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-09 (later) — **first removal batch DONE in `core`; NOT yet published.**
-> Two commits on `beta`, gates green, **push/publish deliberately held**:
-> `1827843` (20 totals defaults, core#95) and `e0c71dd` (`path` required on all four
-> invoice INPUT arms, core#105 — folded in to share this beta's pin sweep). Working tree
-> clean, `origin/beta` unmoved, newest published is still `beta.399`.
+> ## ⚠️ STATUS 2026-09-09 — **batch 1 SHIPPED to all four repos. Backlog 259 → 239, and now PARTITIONED.**
+> `@cfs/core@10.0.0-beta.400` is published and swept: api-cloudrun `2e633487`, manager `88c8543`,
+> templates #302 (merged). All four repos clean on their canonical branches. **Not yet in prod** —
+> that waits on api-cloudrun's next release cut.
 >
-> **The campaign now has a measured denominator, not an estimate.** A full absence census
-> ran over all 30 collections in BOTH projects using the existing
-> `api-cloudrun/scripts/audit-field-presence.ts` — no new instrument was needed, and it was
-> found by grepping `scripts/` before building one. Of the 259 inert paths:
+> **What landed:** the 20 inert `.default()` on the three `totals` blocks (core `1827843`, core#95's
+> first removal batch) and `path` required on all four invoice items INPUT arms (core `e0c71dd`,
+> **core#105 — closed**, folded in to share this beta's 56-pin sweep). Two fixture repairs in
+> api-cloudrun; none needed in templates or manager.
+>
+> **The campaign now has a measured denominator rather than an estimate.** No new instrument was
+> built — `api-cloudrun/scripts/audit-field-presence.ts` already was the oracle step 1 needs, found by
+> grepping `scripts/` first. Run over all 30 collections in BOTH projects:
 >
 > | | count | meaning |
 > |---|---:|---|
 > | reachable by the cheap oracle | **184** | scalar/nested-map — one `orderBy` count each, no document reads |
-> | need paging | **75** | `array[]` members; Firestore cannot `orderBy` inside an array of maps |
+> | **not** reachable | **75** | `array[]` members; Firestore cannot `orderBy` inside an array of maps |
 > | **FREE** (0 absent, both projects) | **122** | removable with no backfill |
 > | **BLOCKED** (absence measured) | **47** | needs a backfill or a decision first |
 > | **VACUOUS** | **15** | `location-types` + `recurrences` are EMPTY in both projects |
 >
-> ⭐ **The blocked 47 are almost all ONE shared block.** The 7-key `Address` group is
-> blocked in five embeddings at once (`organizations.billing_address`,
-> `orders.organization.billing_address`, `destinations.address`,
-> `cards.destination.address`, `bookings.destinations.delivery.address`) — 35 of the 47.
-> The rest: `bookings.stores`/`query_by_uid_store` (4,205 each), the two
+> ⭐ **The blocked 47 are mostly ONE shared block.** The 7-key `Address` group is blocked in five
+> embeddings at once (`organizations.billing_address`, `orders.organization.billing_address`,
+> `destinations.address`, `cards.destination.address`, `bookings.destinations.delivery.address`) —
+> 35 of the 47. The rest: `bookings.stores`/`query_by_uid_store` (4,205 each), the two
 > `transactions.serialized_details` arrays, `cards.destination.contact.phones` (1,156),
-> `transactions.cost.unit_costs_cents` (908), `orders.xero_id` (3), `orders.invoices`.
+> `transactions.cost.unit_costs_cents` (908), `orders.xero_id` (3), `orders.invoices` (2).
 >
-> ⚠️ **The 15 vacuous paths are the MOST dangerous, not the least.** An empty collection
-> makes the corpus gate pass by vacuity while saying nothing about the writer — the first
-> `recurrence` ever created would be the test. The census tool refuses to report on a
-> 0-document collection rather than printing 0/0 as clean, which is the only reason this
-> was visible at all.
-
-> ## ⚠️ STATUS 2026-09-09 — `OrderDocDates` DONE, **pin sweep DONE, shipped to PROD, ratchet LANDED.**
-> All four repos are on `beta.399` — `api-cloudrun` `adc121bf`, `manager` `8edfa7b`, `templates`
-> `cb9b44b` (PR #301 merged). **Prod runs it**: `v0.247.0`, Cloud Run revision
-> `api-cloudrun-00364-v6z`, verified against the release tag's own `deno.json` rather than the tag
-> alone.
-> **The campaign's INSTRUMENT now exists** — `tests/stored-defaults.test.ts` (`5d14347`) pins all 291
-> stored `.default()` paths and makes the partition core#95 asked for: 32 sentinel-legitimate, 259
-> debt. The 259 removals themselves are unstarted.
+> ⚠️ **The 15 vacuous paths are the MOST dangerous, not the least.** An empty collection makes the
+> corpus gate pass by vacuity while saying nothing about the writer — the first `recurrence` ever
+> created would be the test. The tool refuses to report on a 0-document collection rather than
+> printing 0/0 as clean, which is the only reason this was visible.
 >
-> **A `.default()` on a stored schema is inert and its only live effect is a hole.**
-> `validateBeforeWrite` discards `result.data` and persists the raw document, so the default never
-> materializes in Firestore. What it does do is let a writer OMIT a non-optional key and still pass
-> validation — which is how documents end up missing fields their schema says they have.
+> ⚠️ **prod and dev are ONE sample** (`devReplica` mirrors prod), so it was used as a consistency
+> check instead: dev-absent >= prod-absent holds on all 169 paths. Three paths are 0-absent in prod
+> and non-zero in dev — a prod-only reading would have proposed all three for tightening.
 >
-> Owner ruling, 2026-09-09: *"we dont use default, you can remove it, confirm the writers are
-> compliant."*
->
-> This is not a new policy. `customer_collecting` / `customer_returning` in this same
-> `DestinationPairCore` lost theirs on **2026-09-08** (`9435a15`), and the comment at
-> `schemas/order.ts` states the reasoning verbatim. `OrderDocDates` is the sibling field group.
+> **The earlier `OrderDocDates` work that opened this campaign is recorded in *What shipped* below**;
+> its ratchet (`tests/stored-defaults.test.ts`, `5d14347`) is what made this batch mechanical.
+> `beta.399` reached prod as `v0.247.0` / revision `api-cloudrun-00364-v6z`.
 
 ## What shipped
 
@@ -199,6 +187,21 @@ and cannot be generalised. `version` is deliberately not bumped either.
   their order but is *not* all-identical (#2335, #2342, #2355…). An order edited after invoicing
   looks exactly like that, so they may be entirely legitimate. **Unmeasured — do not assume the
   count is small.**
+
+## The next batch
+
+Read the split off `tests/stored-defaults.test.ts` rather than this doc, but the shape of the
+decision is stable:
+
+- **The 122 FREE paths are the cheap ones** and several are shared blocks like `TotalsCore` was, so
+  a batch is chosen by DECLARATION rather than by path count.
+- **The `Address` block is the biggest single decision** — 35 blocked paths in five embeddings, and
+  one `.default("")` per key. It needs the core#101 treatment: find the value's AUTHOR (a
+  geocode? the CRMS import?), not a plausible default. ⚠️ Its absences differ per embedding
+  (49/53 on organizations, 2/11 on cards, 1/11 on bookings), so it is more than one population.
+- **The 75 `array[]` paths need a different instrument** — a paged census in the shape of
+  `audit-zero-priced-components.ts`, which already pages `items[]` on three grains. The stored
+  invoice item `path` (`schemas/invoice.ts:487`, `z.array(ItemUid).default([])`) is in this family.
 
 ## Context recommendation
 
