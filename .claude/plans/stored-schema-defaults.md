@@ -188,6 +188,41 @@ and cannot be generalised. `version` is deliberately not bumped either.
   looks exactly like that, so they may be entirely legitimate. **Unmeasured — do not assume the
   count is small.**
 
+## ⚠️ Step 6 was SKIPPED on batch 1, and closed retroactively
+
+core#95's procedure ends *"re-parse both live corpora against the tightened schema before
+committing."* Batch 1 did **not** do that. It ran the key-presence census (step 1), the writer
+audit (step 2) and the fixture sweep (step 5), and treated the census as sufficient.
+
+🔴 **A census and a re-parse are not the same check.** The census asks whether the KEY is present;
+only a parse asks whether the VALUE is legal. A wrong-typed value — a float under `z.int()`, a
+string under `z.array()` — is **present**, so it passes an absence census and fails a parse. Batch 1
+was lucky rather than gated: the two questions coincide for a family whose defaults were all `0`
+and `[]`, and they will not coincide for a family with a narrower leaf type.
+
+✅ **Run retroactively, 2026-09-10, against the published `beta.402` — PROD only:** orders
+1,020/1,020, invoices 1,040/1,040, fulfillments 1,020/1,020, credit-notes 13/13 — **3,093
+documents, 0 parse failures and 0 issues anywhere under `totals`**.
+
+⚠️ **Dev was ATTEMPTED AND ABANDONED, not run — say so rather than implying a pair.** It cleared
+`orders` (1,020/1,020, 0 issues) and then made no progress for 40 minutes at load average 10.4,
+because a peer session's api-cloudrun suite was exercising dev Firestore concurrently. It was
+killed rather than waited out: it had stopped being a measurement and become a confounder in
+someone else's push. The prod number stands on its own; the dev half is **unmeasured for
+`invoices`, `fulfillments` and `credit-notes`**.
+⚠️ Cheap to finish when dev is quiet, and worth finishing rather than assuming: `devReplica`
+mirrors prod so most rows are the same corpus, but dev also carries native documents the legacy
+ingest never wrote — which is exactly the population a prod-only reading cannot see.
+
+⚠️ **That result is JOINT, not isolating.** Parsing against `beta.402` exercises manager#421's
+`zero_priced` required + array refinement at the same time as this campaign's totals removals, so a
+failure would have needed attributing before it could be reported. Pin the beta deliberately when a
+batch wants to isolate its own change.
+
+⭐ **For a batch whose core change is UNPUBLISHED, import core by relative path instead** — that
+tests the code about to be published rather than the one already out. That is the variant the
+`items[]` batch needs; batch 1 did not, because its schemas were already on JSR.
+
 ## The next batch
 
 Read the split off `tests/stored-defaults.test.ts` rather than this doc, but the shape of the
