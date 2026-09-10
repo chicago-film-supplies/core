@@ -4,7 +4,7 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-10 — **batch 2 PUBLISHED as `beta.403` and swept to all three consumers. Backlog 239 → 211.**
+> ## ⚠️ STATUS 2026-09-10 — **batch 2 is IN PROD. `beta.403` swept to all three consumers. Backlog 239 → 211.**
 > Batch 1 is closed and is now history: 20 `totals` defaults, in prod as `v0.247.0` / revision
 > `api-cloudrun-00364-v6z`. Its details live in *What shipped* below.
 >
@@ -19,9 +19,17 @@ api-cloudrun#943's remaining half.*
 > | `core` (`beta`) | `fb4a572` | ✅ published — `@cfs/core@10.0.0-beta.403` on JSR |
 > | `api-cloudrun` (`main`) | `c499891d` + `1c552f07` (40 pins) | ✅ pushed |
 > | `manager` (`main`) | `3fed294` (1 pin) | ✅ pushed |
-> | `templates` | PR **#306** (3 commits, 15 pins) | ⏸ green, **needs a human merge** |
+> | `templates` (`main`) | `a2adc13` (PR #306, 15 pins) | ✅ merged; templates#305 closed |
 >
-> **Not yet in prod** — that waits on api-cloudrun's next release cut, as batch 1 did.
+> ✅ **In PROD as `v0.248.0`** — build `b5c04b92` from tag `v0.248.0` at commit `b88296ce`, image
+> `sha256:0733f9fd…`, serving as revision **`api-cloudrun-00365-8t9`** at 100%. Verified by digest
+> rather than by the tag: the build's `results.images[0].digest` and the revision's serving digest are
+> the same string ([[a-tag-is-not-a-deployment]]).
+>
+> ⚠️ **The release NOTES say `beta.402`, and the artifact runs `beta.403`.** Release Please left
+> `#949` untouched when the pin landed because `chore(deps)` and `test(fixtures)` are not releasable
+> types, so the bump earns no changelog line. The deployed code is correct and the notes
+> under-describe it — same family as api-cloudrun#947 and core#71.
 >
 > **Gate taken, both projects:** census 0-absent/0-null on all 28; every create path audited; step 6
 > re-parse **26,147 documents, 0 batch-field failures**. Two repairs, both invisible to `deno check`:
@@ -461,13 +469,15 @@ batch 1's exactly, which is the check worth repeating rather than the numbers wo
 
 **Continue in-session** only for the immediate follow-ups that lean on what is already loaded:
 
-1. **Merge `templates` PR #306** — three commits (fixture completion, templates#305, 15 pins), all
-   four checks PASSED on the head sha `6941036`, `visual-diff` included.
-   ⚠️ **Not auto-merged, and the reason is specific rather than general.** A `templates` pin PR whose
-   diff is `deno.json` + `deno.lock` alone is one an agent merges itself; **a fixture, golden or
-   workflow in the same PR takes it out of that row**, and this one repairs two fixtures. So the rule
-   is intact — this PR is simply not a pure pin bump. See `templates/CLAUDE.md` § pin bump.
-2. **Carrying `beta.403` to prod** waits on api-cloudrun's next release cut, exactly as batch 1's
-   `beta.399` did. Nothing about the tightening bites until then.
-3. api-cloudrun#951 (the corpus re-parse guard — the ad-hoc probe has now been rewritten three times)
-   and api-cloudrun#943's manager half.
+1. ✅ Done this session: `templates` #306 merged (templates#305 closed with it), `api-cloudrun` #949
+   merged, `v0.248.0` deployed and verified by image digest.
+2. **Batch 3 is a DECISION, not a sweep, and that is new.** Batch 2 took the last of the large
+   coherent free blocks; the 74 free scalar paths that remain fragment into families of 4, 3 and 2
+   (`items` containers ×4, `sources` ×3, `reference` ×3). ⭐ **`Address` is now the pivot** — ONE
+   declaration (`core/src/schemas/common.ts:1844`, `.default("")` per key) resolving to 49 paths
+   across 8 embeddings, of which **14 are free and 35 blocked**. Because it is one declaration the
+   halves cannot be split, so the blocked 35 gate all 49. It needs the core#101 treatment — find who
+   AUTHORS an address — and its absences differ per embedding (49/53 organizations, 2/11 cards, 1/11
+   bookings), so it is several populations wearing one schema.
+3. api-cloudrun#951 (the corpus re-parse guard — that probe has now been written three times, and
+   found a prod defect on its first run) and api-cloudrun#943's manager half.
