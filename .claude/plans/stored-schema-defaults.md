@@ -238,6 +238,15 @@ decision is stable:
   stated on every row of both families (224 item rows). `zero_priced` is not in the backlog, so its
   20 unstated rows belong to manager#421's campaign, not this one — but the measurement is the
   prerequisite an `items[]` batch must re-run, since it is a fact about fixtures that change.
+  🔴 **And it has a KNOWN expiry, not merely a general one: manager#421 is re-capturing all 8
+  invoice fixtures** (all 8, rather than the 5 its refine forces, so there is no second pass). That
+  rewrites the corpus this 224-row measurement was taken over. **Re-run it after that PR merges** —
+  it should move the invoice family to 20/20 stated, and until it does the number above describes a
+  corpus that no longer exists.
+  ⚠️ Three populations, three different questions, and they are easy to conflate: the template
+  predicate switch exposes **2** fixtures, the refine refuses **5**, full corpus fidelity is all
+  **8** — and *line rows* (20) is a different count again from *component rows* (8). Name which one
+  a number answers.
 
   ⚠️ **Expect an INVERTED test per grain when an `items[]` batch lands.** A guard written while a
   field was legitimately absent asserts that absence: `buildFulfillment line items expose only
