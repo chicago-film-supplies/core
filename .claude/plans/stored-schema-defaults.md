@@ -243,6 +243,51 @@ manager#421's run:
 - ⚠️ `deno run -A` inside `core` will **rewrite `core/deno.lock`** when it pulls `firebase-admin`.
   Check `git status` and revert it; the probe is a probe, not a keeper.
 
+## Reproducing the census — the recipe, because the numbers above will rot
+
+The partition is a MEASUREMENT, not a fact about the schemas, and it moves whenever the corpus or
+the backlog does. Re-derive it rather than quoting the table. Nothing here is a committed script on
+purpose: it is campaign-scoped and goes when this doc does.
+
+```sh
+# 1. the backlog, straight from the ratchet — never a hand-kept list
+cd core && awk '/^const INERT_DEFAULTS/,/^\]\);/' tests/stored-defaults.test.ts \
+  | grep -o '"[^"]*"' | tr -d '"' > /tmp/inert.txt
+
+# 2. split by what the cheap oracle can reach
+grep -v '\[\]' /tmp/inert.txt > /tmp/scalar.txt   # orderBy-censusable
+grep    '\[\]' /tmp/inert.txt > /tmp/arrays.txt   # needs a paged probe
+
+# 3. group the scalar half per collection
+while IFS= read -r p; do echo "${p%%.*} ${p#*.}"; done < /tmp/scalar.txt \
+  | awk '{a[$1]=a[$1]" "$2} END {for (c in a) print c a[c]}' | sort > /tmp/bycoll.txt
+
+# 4. census both projects (api-cloudrun owns the tool)
+cd ../api-cloudrun
+for PROJ in cfs-3100 cfs-dev-3100; do
+  while IFS= read -r line; do
+    GCLOUD_PROJECT=$PROJ deno run --allow-env --allow-net --allow-read \
+      scripts/audit-field-presence.ts ${=line}          # zsh: ${=line} SPLITS
+  done < /tmp/bycoll.txt
+done
+```
+
+⚠️ **`${=line}`, not `$line`.** zsh does not word-split an unquoted expansion, so the plain form
+hands the whole line to the script as ONE argument and every run prints usage — it fails loudly,
+but it looks like a broken tool rather than a broken invocation.
+
+⚠️ **A collection with 0 documents prints no rows at all**, which is how the 15 vacuous paths were
+found. Reconcile the paths you asked about against the paths you got answers for; the difference is
+not "clean".
+
+⭐ **Control the probe before believing a clean sweep.** 0-absent everywhere reads identically to a
+broken oracle. `contacts.crms_id` is the built-in calibration case — it read 12 absent of 182 on
+2026-09-10 (the tool's own docblock says 166 of 178, measured 2026-08-23; the corpus grew, the
+absences did not).
+
+⭐ **Consistency check in place of a second sample:** dev-absent >= prod-absent must hold on every
+path, because `devReplica` mirrors prod. It did, on all 169 measured.
+
 ## The next batch
 
 Read the split off `tests/stored-defaults.test.ts` rather than this doc, but the shape of the
@@ -311,6 +356,18 @@ decision is stable:
   can be the workaround's spec (cfs-f0, 2026-09-10).
 
 ## Context recommendation
+
+**Clear before batch 2.** Batch 1 is closed on every axis — shipped to all four repos, gated on both
+projects, both open measurements discharged, core#105 closed, the ratchet shrunk 259 → 239. Nothing
+about batch 2 depends on batch 1's working context: the backlog is read off
+`tests/stored-defaults.test.ts`, the partition is re-derived by the recipe above, and the policy is
+in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+
+⚠️ **Do not carry the numbers in this doc into batch 2 — re-run the recipe.** They are a measurement
+over a corpus two other campaigns are actively writing to, and one of them already invalidated a
+number in this doc inside a single session.
+
+**Continue in-session** only for an immediate follow-up that leans on what is already loaded.
 
 **Clear before the wider campaign.** It does not need this session's working context — the policy is
 in `core/CLAUDE.md`, the worked example is this doc, and the campaign starts from a fresh grep of
