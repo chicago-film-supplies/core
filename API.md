@@ -4567,7 +4567,7 @@ interface InvoiceItemInputDestinationType {
   type: "destination";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 ```
 
@@ -4589,7 +4589,7 @@ interface InvoiceItemInputGroupType {
   type: "group";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 ```
 
@@ -4621,7 +4621,7 @@ interface InvoiceItemInputLineType {
   description?: string;
   quantity?: number;
   price?: InvoiceItemInputPriceType;
-  path?: string[];
+  path: string[];
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
@@ -4647,7 +4647,7 @@ interface InvoiceItemInputOrderType {
   type: "order";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 ```
 
@@ -15328,7 +15328,7 @@ interface InvoiceItemInputDestinationType {
   type: "destination";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 ```
 
@@ -15350,7 +15350,7 @@ interface InvoiceItemInputGroupType {
   type: "group";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 ```
 
@@ -15382,7 +15382,7 @@ interface InvoiceItemInputLineType {
   description?: string;
   quantity?: number;
   price?: InvoiceItemInputPriceType;
-  path?: string[];
+  path: string[];
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
   tracking_category?: string | null;
@@ -15408,7 +15408,7 @@ interface InvoiceItemInputOrderType {
   type: "order";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 ```
 

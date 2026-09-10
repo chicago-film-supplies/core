@@ -1105,7 +1105,7 @@ export interface InvoiceItemInputLineType {
   description?: string;
   quantity?: number;
   price?: InvoiceItemInputPriceType;
-  path?: string[];
+  path: string[];
   coa_revenue?: COARevenueType | null;
   /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
   taxed_as?: TaxedAsType | null;
@@ -1156,7 +1156,7 @@ const InvoiceItemInputLineInner = z.object({
   // the destination pair's two flags.
   quantity: z.int().min(0).optional(),
   price: InvoiceItemInputPrice.optional(),
-  path: z.array(ItemUid).optional(),
+  path: z.array(ItemUid),
   coa_revenue: COARevenueEnum.nullable().optional(),
   taxed_as: TaxedAsEnum.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
@@ -1173,7 +1173,7 @@ export interface InvoiceItemInputDestinationType {
   type: "destination";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 
 // `z.strictObject`, unlike the line arm above — see the note on
@@ -1186,7 +1186,7 @@ const InvoiceItemInputDestinationInner = z.strictObject({
   // Venue label, not a person. See `DestinationDividerArm.name`.
   name: z.string().meta({ pii: "none" }).optional(),
   description: z.string().meta({ pii: "none" }).optional(),
-  path: z.array(ItemUid).optional(),
+  path: z.array(ItemUid),
   // `.nullable()`, not merely `.optional()` (api-cloudrun#492). The divider
   // BUILDER writes `?? null`, so the stored shape carries an explicit `null`
   // whenever the client omitted the id — and the manager drafts an invoice from
@@ -1212,7 +1212,7 @@ export interface InvoiceItemInputGroupType {
   type: "group";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 
 // Strict for the same reason as the destination arm above.
@@ -1222,7 +1222,7 @@ const InvoiceItemInputGroupInner = z.strictObject({
   // Section header drawn from the catalog. See `GroupDividerArm.name`.
   name: z.string().meta({ pii: "none" }).optional(),
   description: z.string().meta({ pii: "none" }).optional(),
-  path: z.array(ItemUid).optional(),
+  path: z.array(ItemUid),
 });
 
 /** Zod schema for a group divider (invoice input). */
@@ -1235,7 +1235,7 @@ export interface InvoiceItemInputOrderType {
   type: "order";
   name?: string;
   description?: string;
-  path?: string[];
+  path: string[];
 }
 
 // Strict for the same reason as the destination arm above.
@@ -1246,7 +1246,7 @@ const InvoiceItemInputOrderInner = z.strictObject({
   type: z.literal("order"),
   name: z.string().meta({ pii: "none" }).optional(),
   description: z.string().meta({ pii: "none" }).optional(),
-  path: z.array(ItemUid).optional(),
+  path: z.array(ItemUid),
 });
 
 /** Zod schema for an order divider (invoice input). */

@@ -2043,7 +2043,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -2055,7 +2055,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputGroupType",
-          "declaration": "interface InvoiceItemInputGroupType {\n  uid: string;\n  type: \"group\";\n  name?: string;\n  description?: string;\n  path?: string[];\n}",
+          "declaration": "interface InvoiceItemInputGroupType {\n  uid: string;\n  type: \"group\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
           "doc": "A group divider as a client sends it."
         },
         {
@@ -2067,7 +2067,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -2079,7 +2079,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputOrderType",
-          "declaration": "interface InvoiceItemInputOrderType {\n  uid: string;\n  type: \"order\";\n  name?: string;\n  description?: string;\n  path?: string[];\n}",
+          "declaration": "interface InvoiceItemInputOrderType {\n  uid: string;\n  type: \"order\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
           "doc": "An order divider as a client sends it — invoice-only, scopes items to a source order."
         },
         {
@@ -6960,7 +6960,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path?: string[];\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -6972,7 +6972,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputGroupType",
-          "declaration": "interface InvoiceItemInputGroupType {\n  uid: string;\n  type: \"group\";\n  name?: string;\n  description?: string;\n  path?: string[];\n}",
+          "declaration": "interface InvoiceItemInputGroupType {\n  uid: string;\n  type: \"group\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
           "doc": "A group divider as a client sends it."
         },
         {
@@ -6984,7 +6984,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path?: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -6996,7 +6996,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputOrderType",
-          "declaration": "interface InvoiceItemInputOrderType {\n  uid: string;\n  type: \"order\";\n  name?: string;\n  description?: string;\n  path?: string[];\n}",
+          "declaration": "interface InvoiceItemInputOrderType {\n  uid: string;\n  type: \"order\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
           "doc": "An order divider as a client sends it — invoice-only, scopes items to a source order."
         },
         {

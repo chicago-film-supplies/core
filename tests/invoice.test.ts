@@ -392,8 +392,8 @@ Deno.test("CreateInvoiceInput accepts items with path and destination fields", (
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
     items: [
-      { uid: "dest1000000000000000", type: "destination", name: "Venue" },
-      { uid: "group100000000000000", type: "group", name: "Lighting" },
+      { uid: "dest1000000000000000", type: "destination", name: "Venue", path: ["dest1000000000000000"] },
+      { uid: "group100000000000000", type: "group", name: "Lighting", path: ["dest1000000000000000", "group100000000000000"] },
       { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["dest1000000000000000", "group100000000000000"] },
     ],
   };
@@ -515,7 +515,7 @@ Deno.test("CreateInvoiceInput accepts order divider items", () => {
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
     items: [
-      { uid: "orderdiv100000000000", type: "order", name: "Order #1001" },
+      { uid: "orderdiv100000000000", type: "order", name: "Order #1001", path: ["orderdiv100000000000"] },
       { uid: "dest1000000000000000", type: "destination", name: "Venue", path: ["orderdiv100000000000"] },
       { uid: "item1000000000000000", type: "rental", name: "Spot Light", path: ["orderdiv100000000000", "dest1000000000000000"] },
     ],
@@ -559,7 +559,7 @@ Deno.test("CreateInvoiceInput: a divider cannot carry a price or a quantity", ()
     uid: "newinv10000000000000",
     query_by_orders: ["order100000000000000"],
     organization: { uid: "org10000000000000000" },
-    items: [{ uid: "order100000000000000", type: "order", name: "Order #1", quantity: 2, price: { base_cents: 1000 } }],
+    items: [{ uid: "order100000000000000", type: "order", name: "Order #1", path: ["order100000000000000"], quantity: 2, price: { base_cents: 1000 } }],
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].code, "unrecognized_keys");
@@ -592,7 +592,7 @@ Deno.test("UpdateInvoiceInput: a line ships back with its stored extras", () => 
 Deno.test("UpdateInvoiceInput: percent_of_total is inexpressible on an input line", () => {
   const bad = UpdateInvoiceInput.safeParse({
     version: 1,
-    items: [{ uid: "item1000000000000000", type: "rental", price: { base_percent: 3, formula: "percent_of_total" } }],
+    items: [{ uid: "item1000000000000000", type: "rental", path: ["item1000000000000000"], price: { base_percent: 3, formula: "percent_of_total" } }],
   });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["items", 0, "price", "formula"]);
@@ -607,7 +607,7 @@ Deno.test("CreateInvoiceInput: an invoice may still start with a line item", () 
       uid: "newinv10000000000000",
       query_by_orders: ["order100000000000000"],
       organization: { uid: "org10000000000000000" },
-      items: [{ uid: "item1000000000000000", type: "service", name: "Delivery" }],
+      items: [{ uid: "item1000000000000000", type: "service", name: "Delivery", path: ["item1000000000000000"] }],
     }).success,
     true,
   );
@@ -1205,4 +1205,52 @@ Deno.test("the input schema refuses everything the document schema refuses (core
     // deno-lint-ignore no-explicit-any
     assertEquals((inLine.name as any).safeParse("").success, false);
   });
+});
+
+Deno.test("path: required on every invoice input arm, matching the order grain (core#105)", async (t) => {
+  // 🔴 `path` is the row identity and `computeInvoiceItemPaths` is its ONE
+  // author, so an item that arrives without one addresses nothing. Until
+  // `@cfs/core@10.0.0-beta.400` all FOUR invoice input arms had it `.optional()`
+  // while the order grain had all three of its arms REQUIRED — the invoice was
+  // the outlier, 1 of 3 on the line arm and 4 of 4 across the file.
+  //
+  // ⚠️ The failure this closes is not a 400. `buildInvoiceItems` passed
+  // `item.path ?? []` straight through, so an omitted path used to PERSIST as
+  // `path: []` — the same hole the divider-less branch of
+  // `computeInvoiceItemPaths` had, at a second call site. The write path
+  // recovers it today, which is why this was latent rather than live; the
+  // schema is what stops it becoming live again.
+  //
+  // ⭐ Gate taken before tightening (`cfs-release-order`'s REFINE row: the
+  // client must ship the field BEFORE the API demands it). The manager sends a
+  // `path` on every item of every invoice-items PUT, measured across all five
+  // of its `items:` writes rather than read off a comment: `buildDiff` is
+  // top-level-key granularity so any items change sends the WHOLE array from
+  // the store; three of the five run `computeInvoiceItemPaths` directly and the
+  // other two spread an already-pathed line; a newly created divider is built
+  // `path: []` and re-pathed in the same updater; and `repriceInvoiceItems`
+  // `cloneDeep`s and touches prices only.
+  const arms: Array<[string, Record<string, unknown>]> = [
+    ["line", { uid: "Item0000000000000002", type: "rental" }],
+    ["destination", { uid: "Destination000000001", type: "destination" }],
+    ["group", { uid: "Group000000000000001", type: "group" }],
+    ["order", { uid: "Order000000000000001", type: "order" }],
+  ];
+  for (const [label, base] of arms) {
+    await t.step(`${label}: REFUSED without a path`, () => {
+      const parsed = UpdateInvoiceInput.safeParse({ version: 1, items: [base] });
+      assertEquals(parsed.success, false, `${label} arm still accepts a path-less item`);
+    });
+    await t.step(`${label}: accepted with one — the discriminating half`, () => {
+      const parsed = UpdateInvoiceInput.safeParse({
+        version: 1,
+        items: [{ ...base, path: [base.uid] }],
+      });
+      assertEquals(
+        parsed.success,
+        true,
+        JSON.stringify(parsed.success ? {} : parsed.error.issues),
+      );
+    });
+  }
 });
