@@ -43,6 +43,33 @@ api-cloudrun#943's remaining half.*
 > | `cards.organization` | 1,159 / 1,159 | 1,166 / **1,160** | 🔴 deferred — 6 absent |
 > | `recurrences.prototype.*` (5) | 0 / 0 | 0 / 0 | ⚠️ vacuous — taken on the WRITER |
 >
+> ### ✅ THE 7 DEV CARDS ARE REPAIRED — `action` and `organization` are now FREE
+>
+> Done 2026-09-11 on the owner's call, dev only. The repair wrote ONLY the absent keys, with the
+> value `createCard` writes for this population today (`action: null`, `organization: null`), and
+> **parsed the MERGED document against the real `CardSchema` before each write** so a row with some
+> other defect would fail closed rather than be half-repaired. All 7 parsed.
+>
+> | | total | `action` absent | `organization` absent |
+> |---|---:|---:|---:|
+> | dev BEFORE | 1,168 | 7 | 6 |
+> | dev AFTER | 1,168 | **0** | **0** |
+> | prod (untouched control) | 1,161 | 0 | 0 |
+>
+> Confirmed by the INDEPENDENT instrument rather than the repair's own predicate: `audit:reparse`
+> reads **dev 1,168/1,168 and prod 1,161/1,161 present** on both positions. ⚠️ Note `non-null` is 29
+> (dev) / 30 (prod) for `action` and 1,161 for `organization` — stored `null` is legal and this is a
+> PRESENCE claim, so read the `present` column.
+>
+> 🔴 **So both paths are now takeable, and there is a REASON TO TAKE THEM SOON**: hand-authored cards
+> are not created in prod yet but will be. `createCard` already states both keys explicitly, so the
+> write path is compliant today — the tightening makes that enforced rather than incidental, before
+> the population that would expose it exists. **Backlog is 90; these two would make it 88.**
+>
+> ⚠️ **The witness is gone, by design.** Those 7 rows were the only documents in either corpus
+> produced by the hand-authored card path, and that is what made batch 8's denominator readable. The
+> finding is recorded above precisely because the evidence for it no longer exists.
+>
 > ### ⭐ A VACUOUS declaration can still be gated — by the TYPE and by the SUITE
 >
 > `recurrences` holds **0 documents in both projects**, so `audit:reparse` prints `NO-POPULATION`
@@ -636,7 +663,7 @@ separate is what makes the remainder legible to whoever takes it:
 
 | path(s) | why it was left | what it would take |
 |---|---|---|
-| `cards.action`, `cards.organization` | **CORPUS** — 7 / 6 dev-native hand-authored cards omit them | decide whether to stamp those 7 dev rows; then it is a normal batch |
+| ~~`cards.action`, `cards.organization`~~ | ✅ **UNBLOCKED 2026-09-11** — the 7 dev rows are repaired, both positions now 100% present in both projects | nothing. Take them; `createCard` already states both |
 | `cards.attachments[].locked`, `recurrences.prototype.attachments[].locked` | **STRUCTURE** — ONE node (`CardAttachment.locked`), shared with `CreateCardInput`, `UpdateCardInput` and both recurrence inputs | an API-input tightening with a client-first ordering |
 | `cards.dates.start`, `cards.dates.end` | **STRUCTURE** — `CardDates`, shared the same way via `dates: CardDates.optional()` | same |
 
@@ -655,6 +682,25 @@ the node's type-zero** — `resolveField` (`core/src/schemas/initial.ts`) return
 - **Not equal → the form silently reseeds**, and the field needs `.meta({ initial: V })` in the same
   commit. The canonical case is `z.boolean().default(true)`, whose type-zero is `false`; the note in
   `initial.ts` records five product fields that would have shipped new products inactive.
+
+🔴 **CENSUSED 2026-09-11 over the whole remaining backlog — it is 3 of 90, and they are named.**
+Every other path's default equals its node's type-zero, so 87 of 90 removals are invisible to
+`getInitialValues` and need nothing:
+
+| path | default | type-zero |
+|---|---|---|
+| `holiday-definitions.active` | `true` | `false` |
+| `location-types.active` | `true` | `false` |
+| **`products.price.discountable`** | `true` | `false` |
+
+⚠️ **The third is in `products`, which is batch 9's candidate** — so this is not a hypothetical. Add
+`.meta({ initial: true })` in the same commit that removes the default, or new product drafts seed
+as non-discountable.
+
+⚠️ The census reached 78 of 90 directly; the other 12 (`items[]|N.path` ×10 and
+`component_of[].price.taxes` ×2) are notation the walker spells differently, and were confirmed by
+reading the declarations — all are `z.array(X).default([])`, type-zero `[]`. **Reconciling the 12
+was the point**: 78 of 90 with no account of the rest is not a clean count.
 
 ⭐ **Measure it, do not reason it**: dump `getInitialValues` for the affected schemas to JSON before
 the edit and diff after, and mutation-control the probe by re-adding a non-type-zero default. Which
@@ -815,7 +861,7 @@ who is blocked:
 |---|---|---|---|
 | 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
 | 2 | **Batch 9** — 90 paths, only 14 of them `items[]` | next session | nothing |
-| 3 | **The 7 dev cards** — stamp `action`/`organization`, or leave them | the owner | a small call; see below |
+| 3 | ~~The 7 dev cards~~ ✅ **DONE** — so `cards.action` + `cards.organization` are ready to take | next session | nothing |
 | 4 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
 | 5 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
 
@@ -850,14 +896,16 @@ The alternatives are `templates` family (7), `stores` (6), `sources` (4), `refer
 free), or a deliberate `path` ×10 batch — `path` is the row identity with one author, and the
 array-ordering hazard above is about it, so take it deliberately or last.
 
-**(3) the 7 dev cards** — `BAk6xc1tcArJsyyt6Dmp`, `MGewyIaRh4wvChU6UYla`, `QTVA4qNFdhQDIlZ0UTw5`,
-`eUtoJVsGMZZkV2qyIP4J`, `ncncawKFQUoC9x3MryaC`, `u7gJBYqj4DTf79ILtYSJ`, `vhFJK7J3Gxq1CRtGVuI8` —
-all `status=canceled`, hand-authored April–May 2026, dev-only. All 7 omit `action`; 6 also omit
-`organization`. Stamping `action: null` / `organization: null` is what `createCard` writes for this
-exact population today, so it is not the biased backfill this campaign forbids. ⚠️ But it **erases
-the only witness in either corpus to the hand-authored card path**, which is what made batch 8's
-denominator readable at all — so record the finding before repairing the rows, and note that writing
-them fires the dev `cards` Eventarc triggers (Typesense sync + activity feed).
+**(3) ✅ the 7 dev cards are REPAIRED** (2026-09-11) — `BAk6xc1tcArJsyyt6Dmp`,
+`MGewyIaRh4wvChU6UYla`, `QTVA4qNFdhQDIlZ0UTw5`, `eUtoJVsGMZZkV2qyIP4J`, `ncncawKFQUoC9x3MryaC`,
+`u7gJBYqj4DTf79ILtYSJ`, `vhFJK7J3Gxq1CRtGVuI8`, all `status=canceled`, hand-authored April–May 2026,
+dev-only. Six took `{action: null, organization: null}`, one (`MGewyIaRh4wvChU6UYla`) took `action`
+alone. Dev is now **1,168 / 1,168 present** on both positions and prod **1,161 / 1,161**.
+
+⭐ **So `cards.action` and `cards.organization` are a two-path batch with nothing blocking it, and a
+deadline**: hand-authored cards reach prod soon, and `createCard` already states both keys — the
+tightening turns a compliant writer into an enforced one *before* the population that would test it
+exists. Fold them into batch 9 rather than spending a beta on two paths.
 
 ## Context recommendation
 
