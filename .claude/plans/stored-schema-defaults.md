@@ -697,6 +697,11 @@ Every other path's default equals its node's type-zero, so 87 of 90 removals are
 `.meta({ initial: true })` in the same commit that removes the default, or new product drafts seed
 as non-discountable.
 
+⭐ **Cross-checked by a second, independent method**: `grep -rn 'default(true)' src/schemas/` finds
+exactly three live ones — `holiday-definition.active`, `location-type.active`,
+`product.price.discountable` — which is the same set the registry walk produced. A source grep and a
+schema walk fail in different directions, so agreeing is worth more than either alone.
+
 ⚠️ The census reached 78 of 90 directly; the other 12 (`items[]|N.path` ×10 and
 `component_of[].price.taxes` ×2) are notation the walker spells differently, and were confirmed by
 reading the declarations — all are `z.array(X).default([])`, type-zero `[]`. **Reconciling the 12
@@ -860,7 +865,7 @@ who is blocked:
 | # | what | owner | blocked on |
 |---|---|---|---|
 | 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
-| 2 | **Batch 9** — 90 paths, only 14 of them `items[]` | next session | nothing |
+| 2 | **Batch 9** — 90 paths, 14 of them `items[]`. `products` + the two card stragglers = 17 ⚠️ one needs `.meta({ initial })` | next session | nothing |
 | 3 | ~~The 7 dev cards~~ ✅ **DONE** — so `cards.action` + `cards.organization` are ready to take | next session | nothing |
 | 4 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
 | 5 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
@@ -887,11 +892,26 @@ there is no `CFS-MOV-1161` anywhere in the ACCPAY window. Full evidence on the i
 
 **(2) batch 9 — read the split off `core/tests/stored-defaults.test.ts`, not this doc.**
 🔴 **`products`/`webshop-products` (15 paths) is now the largest family left** and is the obvious
-candidate: two collections, one shared `component_of` block, and no new instrument needed. ⚠️ Two
-things to check there that batch 8 raises — `products` has **`.default(true)` fields**
-(`schemas/initial.ts` names five that would ship new products inactive), so the `getInitialValues`
-step above is load-bearing rather than a formality; and `component_of[]`/`components[]` are
-`array[]` members, so the corpus half needs `--positions` rather than a leaf census.
+candidate: two collections, one shared `component_of` block, and no new instrument needed.
+**Fold in `cards.action` + `cards.organization`** (unblocked, item 3 below) — 17 paths, and they
+carry the only deadline in the backlog.
+
+⚠️ **Three things to do there, all already measured — do not re-derive them:**
+
+1. 🔴 **`products.price.discountable` is `.default(true)` over a `false` type-zero** — the ONE
+   affected path in this family, per the 3-of-90 census above. It needs `.meta({ initial: true })`
+   **in the same commit that removes the default**, or the manager's new-product draft seeds as
+   non-discountable with nothing failing. ⚠️ Do not read `schemas/initial.ts`'s note as the answer:
+   the five fields it records are ALREADY on `.meta({ initial: true })` and carry no default, so
+   none is in the backlog — and they are not all products (`product.active`,
+   `product.eligible_delivery`, `product.eligible_in_store_pickup`, `webshop-product.active`,
+   **`store.active`**). The census is the population; that note is the precedent.
+2. `component_of[]` / `components[]` are `array[]` members, so the corpus half needs `--positions`
+   rather than a leaf census — and quote the filter in zsh.
+3. Check whether `component_of` is a SHARED node between `products` and `webshop-products`, and
+   whether either is embedded by an INPUT schema. Batch 8's two exclusions were both this class, and
+   a path-level view cannot see it — grep the node.
+
 The alternatives are `templates` family (7), `stores` (6), `sources` (4), `reference` (3, likely
 free), or a deliberate `path` ×10 batch — `path` is the row identity with one author, and the
 array-ordering hazard above is about it, so take it deliberately or last.
