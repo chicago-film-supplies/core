@@ -4,9 +4,9 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-11 — **batch 4 is LANDED, published and IN PROD. Backlog 153 → 143.**
-> Four batches done. Batches 1–3 are history and their details live below; this is the one current
-> statement the convention asks for, compacted rather than stacked.
+> ## ⚠️ STATUS 2026-09-10 — **batch 4 is in PROD, and batch 5's PREREQUISITE is built. Backlog 143.**
+> One statement, compacted rather than stacked: four batches landed, and the instrument batch 5
+> cannot proceed without is now committed rather than written a sixth time.
 >
 > | batch | what | backlog | state |
 > |---|---|---:|---|
@@ -14,74 +14,117 @@ api-cloudrun#943's remaining half.*
 > | 2 | 20 `query_by_*` + 8 `bookings_breakdown` | 239 → 211 | ✅ prod, `v0.248.0` |
 > | — | **the ratchet hole**: +47 paths nothing had ever enumerated | 211 → 258 | ✅ `core` `4f73bca` |
 > | 3 | the seven `Address` keys — 105 paths, 15 positions | 258 → 153 | ✅ `core` `ce8272d` → `beta.404` |
-> | 4 | **`phones` ×9 + `organizations.emails` — 10 paths, 3 declarations** | 153 → **143** | ✅ **prod, `v0.248.1`, revision `api-cloudrun-00366-whd`** |
+> | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → **143** | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
+> | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
 >
-> ✅ **The batch-3 open item is CLOSED as a side effect.** Prod was stuck on `beta.403` because batch
-> 3's consumer commits were `chore(deps)`/`test(fixtures)` — non-releasable — so Release Please cut
-> nothing. Batch 4's api-cloudrun commit is a genuine `fix(orders)`, which cut **`v0.248.1`** and
-> carried `beta.405` (and with it batch 3's `Address` tightening) to prod. Verified by image digest,
-> not by the tag: revision `api-cloudrun-00366-whd` serves
-> `sha256:5a1eaf3f…a763f10`, byte-identical to what build `fac78f9f` produced. Dev runs `1080ca2`.
+> ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
 >
-> ⭐ **That is the standing "decide the commit TYPE deliberately" warning paying off, and it
-> generalises: the pin rides whatever the commit says it is.** A campaign whose consumer work is
-> genuinely only a pin bump has no vehicle and will sit in dev indefinitely; one that carries real
-> behaviour types as `fix`/`feat` and ships itself.
+> The issue said *"nothing re-parses the live corpus"*. **`api-cloudrun/scripts/audit-schema-validation.ts`
+> already existed and already re-parsed it.** Five sessions wrote their own probe anyway, and the
+> reason is one line: it did `import { db } from "../src/db.ts"`, which drags the repo's PINNED
+> `@cfs/core` in beside any local one — so a probe of an UNPUBLISHED tightening parsed against the OLD
+> schema and read 0 failures. **The instrument was there; it could not answer the question, and
+> nothing said so.**
 >
-> 🔴 **Batch 4's finding: the corpus said almost NOTHING, and the parse still read 0 failures.**
-> 4,560 prod / 4,571 dev documents parsed, 0 failures — but the per-position denominator is what the
-> batch actually rests on. `organizations.emails`/`phones` carry **319 prod / 323 dev non-null objects
-> with 0 absences**; the eight destination-contact positions hold **18 prod / 22 dev non-null contact
-> objects between them**, and `invoices.destinations[].delivery.contact` holds **none in either
-> project**. A clean parse over a population that thin is a fact about the WRITER, which is
-> `core/CLAUDE.md` § *Making a field REQUIRED* step 2 in its literal form. ⭐ **So report the
-> denominator beside every clean verdict** — batch 3 added the per-position count because a position
-> of all-nulls passes while saying nothing; batch 4 is the case where it changed which evidence was
-> load-bearing.
+> ⭐ **The transferable half: before building the instrument an issue asks for, look for the one that
+> is already committed and ask why nobody used it.** `api-cloudrun#636` had been open for weeks saying
+> the same script under-covered; the two issues were the same artifact seen from two sides, and
+> building a sixth script would have left both open plus a seventh thing to maintain.
 >
-> 🔴 **And the writer gap was a 500, measured rather than argued.** The input
-> `DestinationContact.phones` is `.optional()` and `buildDestinationPair` spread it verbatim, so once
-> the document schema required it the same accepted payload failed `validateBeforeWrite` from inside
-> the create transaction — `500 INTERNAL_ERROR`, not a `400`. Proved by stashing the fix: exactly one
-> step of `orders.test.ts` fails and the other 50 pass. `withStatedContactPhones` supplies `?? []` at
-> the one root author, which is step 3's split — tighten the INPUT only where the writer CANNOT supply
-> the value. ⚠️ **`?? []` in a forward writer is not the backfill the campaign forbids**; that rule is
-> about existing documents, whose omission is a biased sample.
+> **What it now does** (`deno task audit:reparse`, `api-cloudrun` `5ed776fe`): paged
+> `orderBy("__name__")` walk, collection set derived from `listCollections()` ∩ the registry rather
+> than a hand-written block of 40 imports, failures bucketed by issue-path SHAPE, **exit non-zero**,
+> `--groups` for subcollections, `--core=../core/src/schemas/mod.ts` for an unpublished tightening,
+> `--positions` for the per-position denominator, and `--reach`.
 >
-> ⭐ **A node can be unshared and still look shared.** Batch 3's rule is *grep the NODE, not the path*.
-> Here `phones` appears on six declarations under three names — `DocDestinationContact` (stored),
-> `DestinationContact`, `NewContactInput`, `Create`/`UpdateOrganizationInput` (inputs) and
-> `ContactSchema` (already required) — all separate objects. So unlike `Address` this was a **pure
-> storage tightening with no API-input change**, and only reading the declarations says so.
+> ⭐ **`--positions` takes a DISCRIMINATOR FILTER, which is what makes it usable on `items[]`** —
+> `orders.items[type!=destination|group].description`. The backlog addresses union members
+> positionally (`|0` is the line-item arm, `|1` a destination divider, `|2` a group divider), so an
+> unfiltered path over-counts a denominator in the one direction that makes a vacuous position look
+> populated. ⚠️ **Quote it in zsh** — a bare `[]` is a glob.
 >
-> ⭐ **Step 4 was NOT a no-op this time, and that is the durable half.**
-> `DocDestinationContactType.phones` was `?: string[]` while the schema defaulted it — the exact
-> `z.ZodType<T>` blind spot — so unlike batch 2 typed literals were *not* already compiler-gated.
-> Dropping the `?` makes every future hand-built one a compile error. It broke nothing: `deno check`
-> green across core, api-cloudrun (2,024 unit tests) and manager (`tsc` + 1,977 tests).
+> ### 🔴 The instrument was controlled before any of its numbers were believed
 >
-> ⭐ **Zero fixture repairs — a first for this campaign, and each exoneration had a different
-> reason.** A shape-keyed sweep of all four repos found 21 literals bound to a `contact` key carrying
-> `uid` + `first_name`; the 7 without `phones` were all correctly so: two typed `DestinationType`
-> (the INPUT pair, which keeps `.optional()`), two per-rule field projections in
-> `audit-denorm-freshness.ts` whose sibling `phones-to-orders` row carries `phones` and no name parts
-> at all, two untyped manager display fixtures, and one parameter type for `OrganizationContact`,
-> which has no `phones` field. **Omission identifies the schema**, again.
+> Four controls, because "0 failures" and "traversed nothing" print the same line:
+> - **Three distinct verdicts on one run** — `organizations.phones` REACHED (required since batch 4),
+>   `orders.reference` OPTIONAL-HERE (still backlog), `invoices.destinations[].delivery.contact`
+>   REACHED-but-VACUOUS (1,009 containers, **0 non-null** — batch 4's finding, reproduced
+>   mechanically).
+> - ⭐ **The sharpest one: same document, same leaf name, two union arms, opposite verdicts.**
+>   `orders.items[type=group].name` → REACHED, `orders.items[type=destination].name` →
+>   OPTIONAL-HERE. Nothing but a probe that genuinely resolves through the discriminated union can
+>   produce that pair.
+> - **`--core` proved load-bearing, not decorative** — pointed at a shim registry that refuses
+>   everything, `taxes` went 0/12 failing → 12/12.
+> - **The filter PARTITIONS exactly** — 10,065 + 1,021 + 2,898 = 13,984 dev order item rows. An
+>   arithmetic identity the run can check on itself.
 >
-> ⚠️ **A gate can pass without asking.** `templates` `lint:fixtures` went clean — and its denominator
-> for `organizations` is **zero**, because no fixture holds an organization document. It said nothing
-> about half the batch. Read a green gate's population before crediting it.
+> ### The measurement it was built to make, run before landing it
 >
-> ⚠️ **The type-escape ratchet refused BOTH halves of the first attempt, and it was right twice** —
-> `dest as unknown as {…}` in the writer and the same form in the test. Neither was budgeted: the
-> writer now declares `delivery`/`collection` on its generic constraint and the test builds a fresh
-> payload literal. ⭐ **Both anti-vacuity runs were redone against the rewritten test** — a fix
-> verified before a tidy-up is not a fix verified.
+> | | collections | documents | failures |
+> |---|---:|---:|---|
+> | **prod** top-level | 49 | **29,013** | **1** — the `transactions` purchase with `supplier: null` |
+> | **dev** top-level | 49 | **116,570** | 3 — that row mirrored, the `-default` location id, `users/test-user` |
+> | prod subcollection groups | 3 | 5,442 | 0 |
+> | dev subcollection groups | 3 | 220,583 | 3 legacy-shaped `events` rows |
 >
-> ⭐ **`organizations.emails` was folded in on ADJACENCY** — the line above `phones` in the same
-> `z.strictObject`, same `z.array(X).default([])` shape, already required on the interface, and the
-> parse had to cover `organizations` either way. Batch 2's selector was *"what does the codebase treat
-> as one family"*; adjacency in a declaration is a cheaper form of the same question.
+> ⭐ **So `api-cloudrun#636`'s widening found exactly ONE new class, dev-only.** The collections the
+> old hand-written list never validated — `credit-notes`, `settlements`, `fulfillments`, `cards`,
+> `templates-versions`, `template-components`, `uploadcare-worklist`, `quotes`, `stock`, `activities`
+> and the rest — are clean in both projects, as are the three subcollection groups it could not reach
+> at all (`orders/{id}/documents`, `orders/{id}/xero-sync`, `webhooks/{s}/events`).
+>
+> ⚠️ **It is HAND-RUN, and scheduling it is blocked on repairing the rows it already finds.** An alert
+> firing on two known-dirty documents every night is an alert nobody reads. The exit code is there so
+> a tightening's rollout can gate on it.
+>
+> ⭐ **The pure half is `api-cloudrun/scripts/_corpusReparse.ts`, pinned by
+> `api-cloudrun/tests/unit/corpusReparse.test.ts`** — because those are the functions that read
+> identically when broken. Anti-vacuity: four mutations (a permissive `namesPosition`, a
+> null-admitting filter, a null-descending walk, an `undefined`-based presence test) each fail
+> **exactly one** arm, its own.
+>
+> ### 🔴 A side finding the parse surfaced: two catalogs disagreeing about one fact
+>
+> `scripts/scan-firestore-subcollections.ts` had been exiting 1 on **PROD** for as long as the
+> Typesense sync pulse existed — `typesense-pulse` is blessed in the write-guard allowlist and was
+> absent from `UNVALIDATED_COLLECTIONS`. Fixed in `api-cloudrun` `310dd3bc`, verified by a before/after
+> pair on the census itself (exit 1 → exit 0), with a population assertion beside the declaration.
+> ⚠️ **A standing red hides the next genuinely unaccounted collection behind it.** Dev stays red on
+> `api-cloudrun#637`'s two paths, which are a different cause and already tracked there.
+>
+> ⚠️ **Dates in this doc were off by one until now** — the previous session stamped UTC where CFS
+> canonicalizes to Chicago, so "2026-09-11" was the evening of 2026-09-10. Corrected throughout; the
+> `cfs-datetime` rule applies to prose that records a measurement date, not only to stored fields.
+>
+> ### Batch 4's findings, which still stand
+>
+> 🔴 **The corpus said almost NOTHING and the parse still read 0 failures.** 4,560 prod / 4,571 dev
+> documents, 0 failures — but `organizations.emails`/`phones` carry **319 prod / 323 dev non-null
+> objects with 0 absences** while the eight destination-contact positions hold **18 prod / 22 dev
+> between them**, and `invoices.destinations[].delivery.contact` holds **none**. ⭐ **Report the
+> denominator beside every clean verdict**, and say which half the tightening rests on.
+>
+> 🔴 **The writer gap was a 500, measured rather than argued.** `DestinationContact.phones` is
+> `.optional()` and `buildDestinationPair` spread it verbatim, so once the document schema required it
+> the same accepted payload failed `validateBeforeWrite` from inside the create transaction.
+> `withStatedContactPhones` supplies `?? []` at the one root author. ⚠️ **`?? []` in a forward writer
+> is not the backfill the campaign forbids** — that rule is about existing documents, whose omission
+> is a biased sample.
+>
+> ⭐ **A node can be unshared and still look shared.** `phones` appears on six declarations under three
+> names, all separate objects — so unlike `Address` this was a pure storage tightening with no
+> API-input change, and only reading the declarations says so. **A field name is not a node.**
+>
+> ⭐ **Step 4 was NOT a no-op.** `DocDestinationContactType.phones` was `?: string[]` while the schema
+> defaulted it — the `z.ZodType<T>` blind spot — so typed literals were *not* already compiler-gated.
+>
+> ⚠️ **A gate can pass without asking.** `templates` `lint:fixtures` went clean and its denominator for
+> `organizations` is **zero**. Read a green gate's population before crediting it.
+>
+> ⭐ **The pin rides whatever the commit says it is.** Batch 3 sat in dev because its consumer commits
+> were `chore(deps)`/`test(fixtures)`; batch 4's genuine `fix(orders)` cut `v0.248.1` and carried both
+> to prod. Verified by image digest, not by the tag.
 
 ## What shipped
 
@@ -113,6 +156,9 @@ api-cloudrun#943's remaining half.*
 | 1 pin | `manager` `ea454f2` | ✅ landed on `main` |
 | 15 pins + lockfile | `templates` `41f6f9b` (PR #308) | ✅ merged |
 | **`beta.405` reaching prod, and batch 3 with it** | `v0.248.1` → revision `api-cloudrun-00366-whd` | ✅ deployed |
+| **the corpus-parse instrument** — batch 5's prerequisite, `api-cloudrun#951` + `#636` | `api-cloudrun/scripts/audit-schema-validation.ts` + `_corpusReparse.ts` (`5ed776fe`) | ✅ landed on `main` |
+| its calibration, four mutations each failing one arm | `api-cloudrun/tests/unit/corpusReparse.test.ts` | ✅ landed on `main` |
+| `typesense-pulse` catalogued — the prod collection census goes exit 1 → 0 | `api-cloudrun` `310dd3bc` | ✅ landed on `main` |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -284,7 +330,7 @@ and cannot be generalised. `version` is deliberately not bumped either.
 - **The wider campaign — 143 inert paths remain**, and the arithmetic is NOT a subtraction:
   259 − 20 − 28 + **47** (the paths the ratchet had never enumerated) − 105 (batch 3) − 10 (batch 4)
   = 143. Concentrated in `invoices` (23), `orders` (21), `credit-notes` (19), `fulfillments` (10),
-  `cards` (10) — 76 scalar and 67 `array[]` (re-derived 2026-09-11). Read the live split off
+  `cards` (10) — 76 scalar and 67 `array[]` (re-derived 2026-09-10). Read the live split off
   `tests/stored-defaults.test.ts` rather than this list, which is the one thing here that can rot. ⚠️ The older "~250 sites / ~335 distinct" figures counted
   DECLARATIONS; 291 is *resolved paths*, which is what actually reaches storage — a shared block like
   `Address` appears once per embedding collection. Each needs the same
@@ -467,7 +513,7 @@ would recur. **Both halves were wrong in an instructive direction:**
 
 ### 🔴 Batch 5 — `items[]` is what is left, and it is 57 of the 143
 
-Re-derived 2026-09-11 off the post-batch-4 catalogue: **143 paths — 76 scalar, 67 `array[]`.**
+Re-derived 2026-09-10 off the post-batch-4 catalogue: **143 paths — 76 scalar, 67 `array[]`.**
 
 | family | paths | note |
 |---|---:|---|
@@ -487,11 +533,25 @@ and it keeps the writer audit to a single author per batch.
 `OrganizationContactType.roles` is REQUIRED on the interface while `OrganizationContact` defaults it
 — the batch-2 blind shape — and `organizations` is otherwise now clear.
 
-⚠️ **Batch 4's parse probe is the instrument to lift, and it is DELETED again.** It has now been
-written five times. It handles `array[]` positions natively, reports a per-position denominator, and
-REACH-verifies each one by deleting a key from a real document. **api-cloudrun#951 is the issue that
-asks for it to become a committed guard** — do that before batch 5 rather than writing it a sixth
-time.
+✅ **The parse probe is COMMITTED — `deno task audit:reparse` in `api-cloudrun`.** It was written
+five times as a throwaway and is now `api-cloudrun/scripts/audit-schema-validation.ts`
+(`5ed776fe`), with `api-cloudrun#951` and `api-cloudrun#636` closed on it. For batch 5 the two
+flags that matter are `--core=../core/src/schemas/mod.ts` (parse against the UNPUBLISHED tightening)
+and `--positions=… --reach`, whose discriminator filter addresses union arms:
+
+```sh
+cd api-cloudrun && deno task audit:reparse --core=../core/src/schemas/mod.ts \
+  '--positions=orders.items[type!=destination|group].description,invoices.items[type!=destination|group].description' --reach
+```
+
+⚠️ **Read the denominator and the reach verdict, not the failure count.** `OPTIONAL-HERE` before the
+tightening is the expected state and is the reading that says there is something to do; after it,
+the same position must read `REACHED` or the tightening is not gated by anything.
+
+**Measured 2026-09-10, dev `orders`:** `description` is present and non-null on **13,984 of 13,984**
+item rows — 10,065 line items, 1,021 destination dividers, 2,898 group dividers, an exact partition.
+⚠️ That is one leaf on one grain in one project; re-run it per position, both projects, and expect
+the `credit-notes` arm to be thin (13 documents).
 
 
 - **The 67 `array[]` paths need a different instrument** — a paged census in the shape of
@@ -567,15 +627,22 @@ table can be wrong in both directions with the errors in the INSTRUMENTS; batch 
 can be right and still mean something different from what they look like. **Re-derive, and ask what
 the instrument can see.**
 
-🔴 **Do api-cloudrun#951 FIRST.** Batch 4's corpus probe was the fifth writing of the same script, and
-it is deleted again. Batch 5 is `items[]` — 57 of the 143 paths, all `array[]` members the `orderBy`
-oracle cannot address at all — so it *needs* that instrument and cannot fall back to a census. Lifting
-it into a committed guard is the batch's cheapest prerequisite, not a tidy-up after it.
+✅ **api-cloudrun#951 is DONE, so batch 5 is unblocked.** The corpus parse is committed as
+`deno task audit:reparse`; batch 5 is `items[]` — 57 of the 143 paths, all `array[]` members the
+`orderBy` oracle cannot address at all — and the parse is now its only oracle *and* a standing one.
+⚠️ **Run it once before touching a schema**, so the pre-tightening `OPTIONAL-HERE` reading is on the
+record; a reach verdict is only evidence as a BEFORE/AFTER pair.
 
-**One thing batch 4 did NOT do, deliberately:** `updateOrganization` still carries
-`organization.emails = organization.emails || []` and the same for `phones`
-(`api-cloudrun/src/services/organizations.ts`). Those are workarounds for exactly the absence this
-batch removed, and they are now inert — both fields are required and both corpora are complete. They
-were left because removing them is a separate, behaviour-bearing change with its own argument, and
-folding it into a pin-carrying release would have hidden it. **A fix expires its workarounds; expiring
-them is its own commit.**
+**Two things this session left deliberately, each its own commit:**
+- The two documents `api-cloudrun#951` names are **still unrepaired** — a prod `transactions`
+  purchase with `supplier: null` (an accounting fact, not a default: find its Xero bill or ask the
+  owner) and a dev `locations` id. A third turned up, dev-only: `users/test-user`. Until they are
+  gone the parse cannot be scheduled, because a nightly alert on known-dirty rows is one nobody
+  reads.
+- `updateOrganization` still carries `organization.emails = organization.emails || []` and the same
+  for `phones` (`api-cloudrun/src/services/organizations.ts`) — inert since batch 4, because both
+  fields are required and both corpora are complete.
+
+**A fix expires its workarounds; expiring them is its own commit** — which is why the two items
+above are listed rather than folded in. Removing the `|| []` pair is behaviour-bearing, and hiding it
+inside a pin-carrying release is how a behaviour change ships unreviewed.

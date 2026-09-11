@@ -715,6 +715,15 @@ position where every document stores `null` passes while saying nothing about it
 non-null objects per position, and prove the parse REACHES each one by deleting a key from a real
 document and requiring the issue path to name it.
 
+⭐ **That instrument is COMMITTED — do not write it a sixth time.** `deno task audit:reparse` in
+api-cloudrun (`api-cloudrun/scripts/audit-schema-validation.ts`) does the paged walk, the
+per-position denominator and the reach check, and **`--core=../core/src/schemas/mod.ts` parses
+against this working tree rather than the pinned release**, which is the whole point for an
+unpublished tightening. Its `--positions` paths take a discriminator filter
+(`orders.items[type!=destination|group].description`) because a `z.discriminatedUnion` member is not
+addressable by path alone. ⚠️ Run it BEFORE the schema edit too: a reach verdict is evidence only as
+a before/after pair, and `OPTIONAL-HERE` beforehand is what says the tightening has work to do.
+
 🔴 **And the denominator can be so small that the parse says NOTHING — at which point the writer
 audit is the evidence, not a supporting check.** Measured 2026-09-10, core#95 batch 4: the same run
 that parsed 4,560 prod / 4,571 dev documents with 0 failures covered `organizations.emails`/`phones`
