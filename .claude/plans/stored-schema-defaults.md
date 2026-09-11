@@ -4,7 +4,12 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-11 — **batch 9 is landed, deployed and enforcing in prod. Backlog 75.**
+> ## ⚠️ STATUS 2026-09-11 — **batch 9 landed, plus TWO follow-ups and a prod repair. Backlog 75.**
+> **Three deploys in this session, and only the first is a batch.** `beta.410` is batch 9 itself
+> (`v0.249.5`, revision `api-cloudrun-00372-f6z`). `beta.411` and `beta.412` are its consequences —
+> a finding the batch made, then a CORRECTION to the call that finding prompted — and
+> `api-cloudrun` `0b6ab037` repaired the prod data the correction exposed. All four are closed and
+> verified; the backlog moved only for the batch.
 > One statement, compacted rather than stacked. Nine batches. Batch 9 is **the products family plus
 > the two unblocked card paths — 15 paths across THREE declarations**: `ProductSchema` ×6
 > (`alternates`, `components`, `component_of`, `price.taxes`, `price.discountable`,
@@ -23,7 +28,7 @@ api-cloudrun#943's remaining half.*
 > against the core the image itself resolves: **all 15 positions `REACHED`, 0 failures, exit 0.**
 > ⭐ published → pinned → deployed → enforcing, each link a different claim and each one checked.
 >
-> ### ✅ FOLLOW-UP LANDED — `beta.411` moved the authorship to the writer
+> ### ✅ FOLLOW-UP 1 — `beta.411` moved the authorship to the writer
 > On the owner's call, batch 9's first finding was **resolved rather than documented**.
 > `CreateProductInput`'s four array defaults are now `.optional()` and `createProduct` states
 > `alternates` / `components` / `component_of` / `tags` at its construction site — `core` `933248c`
@@ -43,8 +48,15 @@ api-cloudrun#943's remaining half.*
 > runtime. **A `.default()` whose own interface marks it optional is a schema disagreeing with
 > itself, and the `|| []` count is the tell.**
 >
-> 🔴 **`price.taxes` was left defaulted on a reason that turned out to be BACKWARDS — corrected in
-> `beta.412`.** The call was *"`UpdateProductInput` replaces the price wholesale and a cascade keys on
+> ### 🔴 FOLLOW-UP 2 — `beta.412` corrected follow-up 1's own exclusion
+>
+> ✅ **Shipped and deployed**: `core` `4c41d10` → **`beta.412`**, `api-cloudrun` `2c38a3bb` →
+> **`v0.250.1`**, revision **`api-cloudrun-00374-r6f`**, digest
+> `sha256:9c75357262ca74d25c2649b4f6f329863c297180c40c06da17e58976e8c6ef90`, deployed tree verified
+> at `.412`. `manager-v26.0.6` and `templates` PR #317 are on it. `price.taxes` is now REQUIRED on
+> both product inputs and the dead presence test is deleted.
+>
+> 🔴 **It was left defaulted in `beta.411` on a reason that turned out to be BACKWARDS.** The call was *"`UpdateProductInput` replaces the price wholesale and a cascade keys on
 > `"taxes" in update.price`, so its default is load-bearing"*. The wholesale replacement is precisely
 > why it is a defect: `assembleProduct` spreads `update.price` over the stored price, so an omitted
 > `taxes` is filled with `[]` and **erases the product's tax profile** rather than 400ing. The
@@ -64,6 +76,52 @@ api-cloudrun#943's remaining half.*
 >
 > ⚠️ **And the ordering is asymmetric**: the writer must state a key BEFORE its default comes off,
 > never after.
+>
+> ### ✅ THE PROD DATA IS REPAIRED — 3 rentals and 3 component copies (`api-cloudrun#966`)
+>
+> The correction exposed live data: **30 of 570 prod products held an empty `price.taxes`.** 26 are
+> legitimate (`service` 15/15 and `surcharge` 11/11 are untaxed by nature); **3 RENTALS of 219 were
+> each the only untaxed member of their own family.** Owner ruling: repair them. Applied
+> 2026-09-11, `api-cloudrun` `0b6ab037`; `devReplica` mirrored the writes so both projects healed.
+>
+> | | before | after |
+> |---|---:|---:|
+> | `rental` | **3 / 219** | **0 / 219** |
+> | `service` · `surcharge` | 15/15 · 11/11 | unchanged — untouched |
+> | total | 30 / 570 | 27 / 570 |
+>
+> Verified by the INDEPENDENT census rather than the repair's own report, and `audit:reparse` reads
+> 815 scanned / 0 failed per project.
+>
+> ⭐ **The value was DERIVED from the tax CATALOG, not copied from a sibling — and that was
+> load-bearing.** `Chicago Rental Tax` has **three versions** (rate 9, 11, 15) and only
+> `VEW4Ivy7VNqgxFA5eJw6` is current, so a sibling-copy repair was one stale window away from
+> stamping a wrong RATE onto a live catalogue. The script builds the ref from the live `taxes`
+> document whose `[applied_from, applied_to)` window contains today, then asserts it is the ref the
+> corpus already uses (216 of 216, byte-identical) and refuses otherwise.
+>
+> ⭐ **Each target needed its OWN witness, and this is the rule this doc already had, exercised.**
+> A population argument says what is TYPICAL, never what THIS document said. `createReplacementDoc`
+> and `createWebshopDoc` both copy `taxes: product.price.taxes` VERBATIM, so each copy is a frozen
+> snapshot of its parent's own profile: the two paper rolls resolved to same-day replacement twins,
+> the Folding Chair to its own webshop mirror.
+>
+> ⚠️ **The Folding Chair's twin is NOT its witness and the script DECLINED it** — Chicago *Sales*
+> Tax, created 2022-12-01, last touched by Migration Bot: a migrated legacy pair, not a mint.
+> Replacements are sales, so a sales-taxed twin is the NORMAL shape. **A witness has to be a COPY of
+> the subject, not merely a document near it** — and the arm discriminating on live data is the only
+> reason that distinction is known to hold rather than merely intended.
+>
+> 🔴 **The component copies were part of the repair, not a tail.** `buildOrderComponentLines` reads
+> `taxes: unpricedTaxRefs(comp.price?.taxes)` — an expanded line takes its taxes from the COMPONENT
+> ENTRY, not the child product. Fixing only the products would have left every component expansion
+> billing untaxed while the repair reported success. ⚠️ One entry declaring
+> `price_overridden: ["taxes"]` was LEFT ALONE: an operator patching the missing tax one level up,
+> which is the same defect seen from the other side.
+>
+> ⚠️ **NOT done, deliberately**: orders and invoices already written carry a tax SNAPSHOT from write
+> time. Re-pricing them is a money decision for the owner, not a side effect of a catalog fix, and
+> the scope is unmeasured. Recorded on #966 before it was closed.
 >
 > ### 🔴 The finding that prompted it: an INPUT default was what put the keys in storage
 >
@@ -279,6 +337,17 @@ api-cloudrun#943's remaining half.*
 | 1 pin, RELEASED FIRST so `requires-manager` measured green | `manager` `156d470` → `manager-v26.0.3` | ✅ released |
 | 15 pins + lockfile | `templates` `a069082` (PR #315) | ✅ merged, verified on the remote |
 | `beta.410` reaching prod, verified by digest and by a deployed-core reparse | `v0.249.5` (`6bcefeed`) → revision `api-cloudrun-00372-f6z` | ✅ deployed |
+| **follow-up 1** — `CreateProductInput` stops defaulting 4 arrays; `createProduct` authors them | `core` `933248c` → `beta.411` | ✅ published |
+| the writer + the create that OMITS all four, mutation-verified as a pair | `api-cloudrun` `1e6fc531` | ✅ landed on `main` |
+| 1 pin, released first so `requires-manager` measured green | `manager` `156d470` → `manager-v26.0.5` | ✅ released |
+| 15 pins | `templates` `a069082` (PR #316) | ✅ merged |
+| `beta.411` reaching prod, digest-verified, deployed tree carrying BOTH halves | `v0.250.0` (`9e8d6070`) → revision `api-cloudrun-00373-nwx` | ✅ deployed |
+| **follow-up 2** — `price.taxes` REQUIRED on both product inputs, correcting follow-up 1 | `core` `4c41d10` → `beta.412` | ✅ published |
+| the dead `"taxes" in update.price` presence test deleted + 40 pins | `api-cloudrun` `2c38a3bb` | ✅ landed on `main` |
+| 1 pin, released first | `manager` → `manager-v26.0.6` | ✅ released |
+| 15 pins | `templates` `55d59a3` (PR #317) | ✅ merged |
+| `beta.412` reaching prod, digest-verified | `v0.250.1` (`1b1dcf47`) → revision `api-cloudrun-00374-r6f` | ✅ deployed |
+| **the prod repair** — 3 rentals + 3 component copies restored to Chicago Rental Tax | `api-cloudrun/scripts/repair-product-missing-rental-tax.ts` (`0b6ab037`) | ✅ applied, both projects |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -895,9 +964,10 @@ with most care: it is the row identity, and the `items[]` backfill/ordering haza
 
 ## What is LEFT — read this first
 
-**Batch 9 has NO residue** — published, swept, merged, deployed, digest-verified and re-confirmed
-against the deployed core. What follows is everything else this campaign knows about, in order of
-who is blocked:
+**Batch 9 and both of its follow-ups have NO residue** — published, swept, merged, deployed,
+digest-verified, and the prod data the second follow-up exposed is repaired and independently
+re-censused (`api-cloudrun#966`, closed). What follows is everything else this campaign knows
+about, in order of who is blocked:
 
 | # | what | owner | blocked on |
 |---|---|---|---|
@@ -905,6 +975,7 @@ who is blocked:
 | 2 | **Batch 10** — 75 paths, 14 of them `items[]`. No family is obviously cheapest any more; see below | next session | nothing |
 | 3 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
 | 4 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
+| 5 | **Historic orders/invoices priced from the 3 untaxed rentals** — lines carry a tax SNAPSHOT, so the catalog repair does NOT reach them. Unmeasured on purpose | the owner | a money call; wants its own issue with `risk:money-path` |
 
 ⚠️ **The deploy verification is a four-link chain and the batch-6 near-miss still applies.** A
 revision NUMBER moving is good evidence the build arrived and **no evidence at all that the image
@@ -913,7 +984,8 @@ built (⚠️ **regional — a bare `gcloud builds list --project=` returns "Lis
 exactly like "no build was triggered"**), `gcloud run revisions describe` for what the live revision
 serves, diff the deployed tree's `deno.json` against the checkout you probe from, and only then run
 `deno task audit:reparse` with **no `--core` flag**. Published → pinned → deployed → enforcing are
-four different claims. Batches 7, 8 and 9 each ran all four and they all held.
+four different claims. Batches 7, 8 and 9 and both `beta.411`/`beta.412` follow-ups each ran all
+four and they all held.
 
 **(1) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
 there is no `DELETE` route, `updateTransaction` edits `reference` alone, and this row cannot take
@@ -964,15 +1036,24 @@ green core suite over such a fixture is not evidence; assert each path directly.
 
 **Clear before batch 10.**
 
-Batch 9 is closed — nothing mechanical is left to watch. **Batch 10 depends on none of this session's
+Batch 9 and both follow-ups are closed — nothing mechanical is left to watch, and the prod repair
+is applied and verified. **Batch 10 depends on none of this session's
 analysis.** Everything it requires is written down: the backlog is read off
 `core/tests/stored-defaults.test.ts` (**75** paths — 53 scalar, 22 `array[]`, 14 of them `items[]`),
 the partition is re-derived by the recipe above, the `items[]` hazards are in the section above, and
 the policy — the parse-not-census rule, the shared stored/input-node rule, the denominator rule
 batches 4 and 6 sharpened between them, batch 7's *require the KEY, claim nothing about the VALUE*,
-batch 8's *a VACUOUS declaration is gated by the TYPE and the SUITE*, and batch 9's *two parse seams*
-and *a `getInitialValues` fixture is blind* — is in `core/CLAUDE.md` § *`.default()` and
-`.optional()`*.
+batch 8's *a VACUOUS declaration is gated by the TYPE and the SUITE*, and batch 9's *two parse seams*,
+*a `getInitialValues` fixture is blind*, *"a branch READS this default" and "a branch is HARMED by
+it" produce the same grep*, and *a whole-object replacement INVERTS what a default means* — is in
+`core/CLAUDE.md` § *`.default()` and `.optional()`*.
+
+⭐ **The session's own shape is worth carrying: batch 9 shipped, then its FINDING shipped
+(`beta.411`), then a CORRECTION to that shipment shipped (`beta.412`), then the prod data the
+correction exposed was repaired.** Three deploys and a data fix off one batch. Each step was
+cheap only because the one before it was closed and verified first — and the correction was found
+by a peer's question, not by a gate, which is the argument for writing findings down where someone
+can disagree with them.
 
 ⚠️ **Do not carry this doc's numbers into batch 10 — re-run the recipe.** Batch 3 proved the doc's
 own table can be wrong in both directions with the errors in the INSTRUMENTS; batch 4 proved the
@@ -995,7 +1076,22 @@ what the instrument can see.
   three affected fixtures were the first kind, and the batch would have looked fully gated.
 - 🔴 **Ask which parse seam a key's completeness comes from.** `validateBeforeWrite` discards
   `result.data`; the route validator returns it. A stored key can be 100% present because of an
-  INPUT default, in which case that default is load-bearing and must not be swept later.
+  INPUT default rather than because any writer named it.
+  ⚠️ **This line first said such a default "must not be swept later". That is NOT the rule** — the
+  `beta.411`/`beta.412` follow-ups swept four of them deliberately. The rule is that the key needs
+  ONE VISIBLE AUTHOR: move it to the writer, in a commit that states the key BEFORE the default
+  comes off. Pinning the default with a test is policing a coupling, which is the weaker option and
+  was this session's first instinct.
+- 🔴 **"A live branch READS this default" and "a live branch is HARMED by it" produce the same
+  grep.** The question that separates them is whether the branch could ever observe the key ABSENT.
+  If not, the default is what made the test unfalsifiable — it is the defect, not the dependant.
+  ⭐ And **a whole-object replacement INVERTS what a default means**: on a patch it fills a gap, on
+  a replacement it deletes whatever the client did not restate. `price.taxes` was both at once, and
+  reading it as a dependant cost a beta.
+- ⭐ **Derive a repair's value from the CATALOG, never from a sibling row.** `Chicago Rental Tax`
+  has three versions and only one is current, so a sibling copy is one stale window from writing a
+  wrong rate. And give every target its OWN witness — a COPY of that document (a same-day
+  replacement twin, its webshop mirror), never a neighbour.
 - **Release `manager` BEFORE merging api-cloudrun's release PR**, so `requires-manager`'s measured
   arm is green on its first run rather than red-then-fixed.
 
