@@ -167,15 +167,15 @@ export interface CreditNoteDocItemPrice {
 }
 
 const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strictObject({
-  base_cents: z.int().default(0).meta({ column: true, label: "Base Price" }),
+  base_cents: z.int().meta({ column: true, label: "Base Price" }),
   base_percent: z.number().nullable().optional(),
-  chargeable_days: z.number().nullable().default(null),
-  formula: PriceFormulaEnum.default("fixed").meta({ column: true, label: "Formula" }),
-  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
-  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
-  discount: Discount.nullable().default(null).meta({ label: "Discount" }),
-  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
-  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+  chargeable_days: z.number().nullable(),
+  formula: PriceFormulaEnum.meta({ column: true, label: "Formula" }),
+  subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
+  discount: Discount.nullable().meta({ label: "Discount" }),
+  taxes: z.array(PriceModifier).meta({ label: "Tax" }),
+  total_cents: z.int().meta({ column: true, label: "Total" }),
 }).superRefine(checkPriceBaseUnit);
 
 // ── Line items ───────────────────────────────────────────────────

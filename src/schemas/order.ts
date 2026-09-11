@@ -1025,24 +1025,24 @@ export interface OrderDocItemPriceType {
 }
 
 export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObject({
-  base_cents: z.int().default(0).meta({ column: true, label: "Base Price" }),
+  base_cents: z.int().meta({ column: true, label: "Base Price" }),
   base_percent: z.number().nullable().optional(),
   // `.nullable().optional()` and NOT defaulted: a null replacement means "this
   // line has no replacement value", which is not the fact `0` states, and
   // `checkItemContract`'s `forbidden` arm reads the difference.
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
-  chargeable_days: z.number().int().nullable().default(null).meta({ column: true, label: "Chargeable Days" }),
-  formula: PriceFormulaEnum.default("five_day_week").meta({ column: true, label: "Formula" }),
-  subtotal_cents: z.int().default(0).meta({ column: true, label: "Subtotal" }),
-  subtotal_discounted_cents: z.int().default(0).meta({ column: true, label: "Discounted Subtotal" }),
-  discount: Discount.nullable().default(null).meta({ label: "Discount" }),
-  taxes: z.array(PriceModifier).default([]).meta({ label: "Tax" }),
+  chargeable_days: z.number().int().nullable().meta({ column: true, label: "Chargeable Days" }),
+  formula: PriceFormulaEnum.meta({ column: true, label: "Formula" }),
+  subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
+  subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
+  discount: Discount.nullable().meta({ label: "Discount" }),
+  taxes: z.array(PriceModifier).meta({ label: "Tax" }),
   // Labelled although nothing here is a column in its own right: `TaxRef`'s
   // `name` and `rate` ARE columns (the product catalog offers them), so every
   // key holding a `TaxRef` inherits two columns and needs to name them. Without
   // this the pre-override snapshot would collide with the live `taxes`.
   taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax" }),
-  total_cents: z.int().default(0).meta({ column: true, label: "Total" }),
+  total_cents: z.int().meta({ column: true, label: "Total" }),
 }).superRefine(checkPriceBaseUnit);
 
 /**
