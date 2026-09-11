@@ -88,7 +88,7 @@ api-cloudrun#943's remaining half.*
 >
 > ### 🔴 A side finding the parse surfaced: two catalogs disagreeing about one fact
 >
-> `scripts/scan-firestore-subcollections.ts` had been exiting 1 on **PROD** for as long as the
+> `api-cloudrun/scripts/scan-firestore-subcollections.ts` had been exiting 1 on **PROD** for as long as the
 > Typesense sync pulse existed — `typesense-pulse` is blessed in the write-guard allowlist and was
 > absent from `UNVALIDATED_COLLECTIONS`. Fixed in `api-cloudrun` `310dd3bc`, verified by a before/after
 > pair on the census itself (exit 1 → exit 0), with a population assertion beside the declaration.
