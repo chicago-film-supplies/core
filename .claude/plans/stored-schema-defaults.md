@@ -4,15 +4,20 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-10 — **batch 5 is PUBLISHED, all three pins swept, prod release cut. Backlog 132.**
+> ## ⚠️ STATUS 2026-09-10 — **batch 5 is IN PROD and fully closed. Backlog 132.**
 > One statement, compacted rather than stacked: five batches landed, the fifth being the first cut
-> into the `items[]` family. `core` published `beta.406`; `api-cloudrun` (40), `manager` (1) and
-> `templates` (15) are all pinned to it on their own `main`, each verified by reading the REMOTE's
-> content rather than by a push exit code. `api-cloudrun` `v0.249.0` is cut and building for prod.
+> into the `items[]` family, and it reached prod in the same session it was written. `core` published
+> `beta.406`; `api-cloudrun` (40), `manager` (1) and `templates` (15) are all pinned to it on their
+> own `main`, each verified by reading the REMOTE's content rather than by a push exit code.
 >
-> **The one thing still open on batch 5: confirm prod is actually RUNNING `v0.249.0` — by image
-> digest, not by the tag.** Batch 3 sat in dev believing otherwise; batch 4 established the digest
-> check. Everything else below is batch 6's problem.
+> ✅ **Prod confirmed by IMAGE DIGEST, not by the tag** — `v0.249.0` built
+> `sha256:e7366df3fac83c764545a43fb40d391b35cab8acd148de9b509d1bb299b0312d` and revision
+> `api-cloudrun-00367-xm4` serves exactly that digest.
+> ✅ **And confirmed against the PUBLISHED artifact rather than the working tree**: the reparse run
+> with **no `--core` flag**, i.e. against the pinned `@cfs/core/schemas` the deployed image carries,
+> reads all 11 positions `REACHED` over 3,095 prod documents, 0 failures, exit 0. ⭐ That is the
+> whole chain closed — published → pinned → deployed → enforcing — and it is a different claim from
+> the `--core` run that gated the commit.
 >
 > 🔴 **The publish was blocked for ~40 minutes by ONE citation, and the local gate said clean.**
 > `core/.claude/plans/stored-schema-defaults.md` cited an **api-cloudrun** script with a bare
@@ -33,7 +38,7 @@ api-cloudrun#943's remaining half.*
 > | 3 | the seven `Address` keys — 105 paths, 15 positions | 258 → 153 | ✅ `core` `ce8272d` → `beta.404` |
 > | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → **143** | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
 > | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
-> | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → **132** | ✅ `beta.406`, 3 pins swept, `v0.249.0` cut — ⏳ digest unconfirmed |
+> | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → **132** | ✅ prod, `v0.249.0`, revision `api-cloudrun-00367-xm4` |
 >
 > ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
 >
@@ -183,7 +188,7 @@ api-cloudrun#943's remaining half.*
 | 40 pins, as a release-cutting `fix` rather than a `chore(deps)` | `api-cloudrun` `ab9013a4` | ✅ landed on `main` |
 | 1 pin | `manager` `313bfd0` | ✅ landed on `main` |
 | 15 pins | `templates` PR #310 (`c10574d`) | ✅ merged |
-| `v0.249.0` — the prod release carrying batch 5 | `api-cloudrun` PR #958 | ⏳ building |
+| `v0.249.0` reaching prod, verified by digest and by a pinned-core reparse | revision `api-cloudrun-00367-xm4` | ✅ deployed |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -702,19 +707,17 @@ with most care: it is the row identity, and the `items[]` backfill/ordering haza
 
 Batch 5 is done bar one confirmation. In order of who is blocked:
 
+**Batch 5 has NO residue** — it is in prod, digest-verified, and re-confirmed against the published
+core. What follows is everything else this campaign knows about, in order of who is blocked:
+
 | # | what | owner | blocked on |
 |---|---|---|---|
-| 1 | **Confirm prod runs `v0.249.0` by IMAGE DIGEST**, not by the tag | next session | the Cloud Build finishing |
-| 2 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between three options, all measured |
-| 3 | **Batch 6** — 132 paths, 46 of them `items[]` | next session | nothing |
-| 4 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
-| 5 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing; filed this session |
+| 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
+| 2 | **Batch 6** — 132 paths, 46 of them `items[]` | next session | nothing |
+| 3 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
+| 4 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing; filed this session |
 
-**(1) is the only batch-5 residue** and it is one command:
-`gcloud run revisions list --project=cfs-3100` and compare the serving revision's image digest with
-the `v0.249.0` build's. ⚠️ **The tag is not the check** — batch 3 believed a tag and sat in dev.
-
-**(2) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
+**(1) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
 there is no `DELETE` route, `updateTransaction` edits `reference` alone, and this row cannot take
 even that — it writes through `ValidatedTx.set`, which validates first. So a **reversal** mints a new
 movement and leaves the bad row in place (the reparse still exits non-zero), **stamping a supplier**
@@ -725,7 +728,7 @@ documented schema carve-out naming the one uid — costs a comment and a test. �
 adjudicated: it is a **duplicate of #1162**, which carries Home Depot and posted as `CFS-MOV-1162`;
 there is no `CFS-MOV-1161` anywhere in the ACCPAY window. Full evidence on the issue.
 
-**(3) batch 6** — read the split off `tests/stored-defaults.test.ts`, not this doc. The clustered
+**(2) batch 6** — read the split off `tests/stored-defaults.test.ts`, not this doc. The clustered
 leaves left in `items[]` are `path` ×10, `taxes` ×9, `quantity` ×4. ⚠️ **`path` is the row identity
 with exactly one author, and the array-ordering hazard below is about it** — take it last, or
 deliberately.
@@ -734,8 +737,8 @@ deliberately.
 
 **Clear before batch 6.**
 
-Batch 5 needs only confirmation (1), which needs no context from this session. Batch 6 depends on
-none of this session's analysis. Everything it needs is written down: the backlog
+Batch 5 is closed — nothing mechanical is left to watch. Batch 6 depends on none of this session's
+analysis. Everything it needs is written down: the backlog
 is read off `core/tests/stored-defaults.test.ts` (**132** paths, 46 of them `items[]`), the partition
 is re-derived by the recipe above, the `items[]` hazards are in the section above this one, and the
 policy — the parse-not-census rule, the shared stored/input-node rule, and the denominator rule
