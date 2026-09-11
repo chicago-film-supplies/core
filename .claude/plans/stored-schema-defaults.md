@@ -4,10 +4,26 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-10 — **batch 5 is COMMITTED and unpublished. Backlog 132.**
-> One statement, compacted rather than stacked: five batches are in the tree, four of them in prod,
-> and the fifth is the first cut into the `items[]` family — verified end to end against both
-> corpora and against a real consumer, but **not yet published**, so no pin has moved.
+> ## ⚠️ STATUS 2026-09-10 — **batch 5 is PUBLISHED, all three pins swept, prod release cut. Backlog 132.**
+> One statement, compacted rather than stacked: five batches landed, the fifth being the first cut
+> into the `items[]` family. `core` published `beta.406`; `api-cloudrun` (40), `manager` (1) and
+> `templates` (15) are all pinned to it on their own `main`, each verified by reading the REMOTE's
+> content rather than by a push exit code. `api-cloudrun` `v0.249.0` is cut and building for prod.
+>
+> **The one thing still open on batch 5: confirm prod is actually RUNNING `v0.249.0` — by image
+> digest, not by the tag.** Batch 3 sat in dev believing otherwise; batch 4 established the digest
+> check. Everything else below is batch 6's problem.
+>
+> 🔴 **The publish was blocked for ~40 minutes by ONE citation, and the local gate said clean.**
+> `core/.claude/plans/stored-schema-defaults.md` cited an **api-cloudrun** script with a bare
+> `scripts/` prefix. Core's own `deno task audit:citations` resolves that against the whole
+> workspace and passes; CI checks core out ALONE, where `scripts/` is core's own top-level
+> directory, so it is BROKEN rather than ambiguous — and `publish.yaml` gates `release` on
+> `needs: ci`. **Two earlier betas silently did not publish** (`34549009010`, `34549265656`, both
+> `release: skipped`). ⭐ Repo-qualify every sibling path in this doc; the local gate cannot see it.
+> ⚠️ Reproducing it needs the extracted dir NAMED `core` (the resolver derives the workspace from
+> the PARENT, so any other name reports every core path broken), and **not** `HOME=/tmp/nonexistent`,
+> which just breaks Deno's module cache.
 >
 > | batch | what | backlog | state |
 > |---|---|---:|---|
@@ -17,7 +33,7 @@ api-cloudrun#943's remaining half.*
 > | 3 | the seven `Address` keys — 105 paths, 15 positions | 258 → 153 | ✅ `core` `ce8272d` → `beta.404` |
 > | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → **143** | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
 > | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
-> | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → **132** | ⏳ `core` `27be0ad`, committed on `beta`, **unpublished** |
+> | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → **132** | ✅ `beta.406`, 3 pins swept, `v0.249.0` cut — ⏳ digest unconfirmed |
 >
 > ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
 >
@@ -162,7 +178,12 @@ api-cloudrun#943's remaining half.*
 | its calibration, four mutations each failing one arm | `api-cloudrun/tests/unit/corpusReparse.test.ts` | ✅ landed on `main` |
 | `typesense-pulse` catalogued — the prod collection census goes exit 1 → 0 | `api-cloudrun` `310dd3bc` | ✅ landed on `main` |
 | **batch 5** — `items[].description` ×11, 5 declarations | `core` `27be0ad` | ⏳ committed on `beta`, **unpublished** |
-| 8 repaired tests — the `docLine` factory + two raw literals routed through it | `core/tests/order.test.ts` | ⏳ in `27be0ad` |
+| 8 repaired tests — the `docLine` factory + two raw literals routed through it | `core/tests/order.test.ts` | ✅ in `27be0ad` |
+| the citation that had silently skipped two publishes | `core` `2dc6b6b` | ✅ landed on `beta` |
+| 40 pins, as a release-cutting `fix` rather than a `chore(deps)` | `api-cloudrun` `ab9013a4` | ✅ landed on `main` |
+| 1 pin | `manager` `313bfd0` | ✅ landed on `main` |
+| 15 pins | `templates` PR #310 (`c10574d`) | ✅ merged |
+| `v0.249.0` — the prod release carrying batch 5 | `api-cloudrun` PR #958 | ⏳ building |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -677,17 +698,44 @@ with most care: it is the row identity, and the `items[]` backfill/ordering haza
   be rewritten against the source line rather than deleted, so they read as mirrors. A green test
   can be the workaround's spec (cfs-f0, 2026-09-10).
 
+## What is LEFT — read this first
+
+Batch 5 is done bar one confirmation. In order of who is blocked:
+
+| # | what | owner | blocked on |
+|---|---|---|---|
+| 1 | **Confirm prod runs `v0.249.0` by IMAGE DIGEST**, not by the tag | next session | the Cloud Build finishing |
+| 2 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between three options, all measured |
+| 3 | **Batch 6** — 132 paths, 46 of them `items[]` | next session | nothing |
+| 4 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
+| 5 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing; filed this session |
+
+**(1) is the only batch-5 residue** and it is one command:
+`gcloud run revisions list --project=cfs-3100` and compare the serving revision's image digest with
+the `v0.249.0` build's. ⚠️ **The tag is not the check** — batch 3 believed a tag and sat in dev.
+
+**(2) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
+there is no `DELETE` route, `updateTransaction` edits `reference` alone, and this row cannot take
+even that — it writes through `ValidatedTx.set`, which validates first. So a **reversal** mints a new
+movement and leaves the bad row in place (the reparse still exits non-zero), **stamping a supplier**
+makes the parse pass while leaving $2.00 of cost basis Xero does not have, and a **hard delete**
+needs a one-shot prod script plus manual `quantity_held` surgery, because `LEDGER_REBUILD_FIELDS`
+deliberately makes a replayed quantity unreachable from the write path. The fourth option — a
+documented schema carve-out naming the one uid — costs a comment and a test. ⭐ The row itself is
+adjudicated: it is a **duplicate of #1162**, which carries Home Depot and posted as `CFS-MOV-1162`;
+there is no `CFS-MOV-1161` anywhere in the ACCPAY window. Full evidence on the issue.
+
+**(3) batch 6** — read the split off `tests/stored-defaults.test.ts`, not this doc. The clustered
+leaves left in `items[]` are `path` ×10, `taxes` ×9, `quantity` ×4. ⚠️ **`path` is the row identity
+with exactly one author, and the array-ordering hazard below is about it** — take it last, or
+deliberately.
+
 ## Context recommendation
 
-**Continue if you are publishing batch 5; clear before batch 6.**
+**Clear before batch 6.**
 
-🔴 **Batch 5 is committed and UNPUBLISHED (`core` `27be0ad`), so it is the one piece of live state
-this doc cannot replace.** Publishing it is a push to `beta`, which cuts `beta.406` and then obliges
-the pin sweep in `api-cloudrun` (40), `manager` (1) and `templates` (15) and a prod deploy — the
-`cfs-release-order` skill owns that dance. Nothing else is in flight: both worktrees are gone, both
-corpora are clean, and no pin has moved yet.
-
-Batch 6 depends on none of this session's analysis. Everything it needs is written down: the backlog
+Batch 5 needs only confirmation (1), which needs no context from this session. Batch 6 depends on
+none of this session's analysis. Everything it needs is written down: the backlog
 is read off `core/tests/stored-defaults.test.ts` (**132** paths, 46 of them `items[]`), the partition
 is re-derived by the recipe above, the `items[]` hazards are in the section above this one, and the
 policy — the parse-not-census rule, the shared stored/input-node rule, and the denominator rule
