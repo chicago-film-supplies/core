@@ -12,10 +12,21 @@ api-cloudrun#943's remaining half.*
 > (40 pins, `05e1e65c`), `manager` (1 pin, `7697e16`) and `templates` (15 pins, PR #311) are all
 > bumped, each verified by reading the REMOTE's content rather than by a push exit code.
 >
-> 🟡 **The ONE thing left for the owner: `templates` PR #311 is open with all four checks green.**
-> Merging it was refused by this session's permission classifier. Nothing else waits on it —
-> the pin is a no-op for template content — but the repo is one beta behind until it merges.
-> The api-cloudrun release PR is the other half; see *What is LEFT*.
+> ✅ **Both merges landed the same session.** `templates` #311 squashed to `main` as `3d6d491`
+> (15 pins verified on the remote), and `api-cloudrun` #959 squashed as `d640a907`, cutting
+> **`v0.249.1`** and firing the prod trigger. Prod now serves revision **`api-cloudrun-00368-bx8`**
+> (batch 5's was `00367-xm4`), read from the public `/openapi.json`, whose `info.version` carries
+> `K_REVISION`.
+>
+> 🟡 **The chain is NOT closed, and the missing link is named.** Both gcloud credentials — the
+> account token AND ADC — died `invalid_grant` between the pin sweep and the merge, so the two
+> checks batch 5 used could not run: the **image-digest** confirmation (`gcloud builds describe` →
+> `gcloud run services describe`) and the **`audit:reparse` against prod with no `--core` flag**,
+> which is the deployed→enforcing half. ⚠️ **A new revision NUMBER is circumstantial, not the
+> digest** — one release was cut in the window and the counter moved by one, which is strong and is
+> still not the check this campaign prescribes. Re-run both after
+> `gcloud auth login` + `gcloud auth application-default login`; expect all 24 positions `REACHED`
+> over 2,074 prod documents, exit 0.
 >
 > ### ⭐ The finding: the CORPUS can BE the writer audit, and batch 4 is the other half of the pair
 >
@@ -105,7 +116,7 @@ api-cloudrun#943's remaining half.*
 > | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → 143 | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
 > | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
 > | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → 132 | ✅ prod, `v0.249.0`, revision `api-cloudrun-00367-xm4` |
-> | 6 | the `price` block ×3 — 24 paths, 3 declarations, one block | 132 → **108** | ✅ `beta.407`, all pins swept; **release + templates#311 pending** |
+> | 6 | the `price` block ×3 — 24 paths, 3 declarations, one block | 132 → **108** | ✅ prod, `v0.249.1`, revision `api-cloudrun-00368-bx8` — **digest + pinned-core reparse still unrun** |
 >
 > ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
 >
@@ -260,8 +271,8 @@ api-cloudrun#943's remaining half.*
 | 40 pins + two EXPIRED comments re-stated as history | `api-cloudrun` `05e1e65c` | ✅ landed on `main` |
 | the shared-counter assertion repaired on the RESULT, mutation-verified | `api-cloudrun` `b0961b80` | ✅ landed on `main` |
 | 1 pin | `manager` `7697e16` | ✅ landed on `main` |
-| 15 pins + lockfile | `templates` PR #311 | 🟡 **open, four checks green — needs a merge** |
-| `beta.407` reaching prod | — | 🟡 **needs the api-cloudrun release PR merged** |
+| 15 pins + lockfile | `templates` `3d6d491` (PR #311) | ✅ merged |
+| `beta.407` reaching prod | `v0.249.1` (`d640a907`) → revision `api-cloudrun-00368-bx8` | ✅ deployed, 🟡 **not yet digest-verified** |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -790,22 +801,22 @@ with most care: it is the row identity, and the `items[]` backfill/ordering haza
 
 ## What is LEFT — read this first
 
-**Batch 6's schema change is published and every pin is swept. Two merges are all that remain of
-it, and both are the owner's** — this session's permission classifier refused the merge verb.
+**Batch 6 is published, swept, merged and deployed. One VERIFICATION is outstanding, not one
+action** — the credentials it needs expired mid-session.
 
 | # | what | owner | blocked on |
 |---|---|---|---|
-| 1 | **`templates` PR #311** — the 15-pin bump to `beta.407` | the owner | a merge; all four checks green |
-| 2 | **the `api-cloudrun` release PR** — cuts `v0.250.0` and carries `beta.407` to prod | the owner | a merge; `05e1e65c` is a release-cutting `fix(items)` |
-| 3 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
-| 4 | **Batch 7** — 108 paths, 22 of them `items[]` | next session | nothing |
-| 5 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
-| 6 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
+| 1 | **Close batch 6's chain** — image digest for `v0.249.1`, then `audit:reparse` against prod with **no `--core`** | next session | `gcloud auth login` + `gcloud auth application-default login` |
+| 2 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
+| 3 | **Batch 7** — 108 paths, 22 of them `items[]` | next session | nothing |
+| 4 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
+| 5 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
 
-⚠️ **(2) is what makes the tightening BITE.** Until the release PR merges, `beta.407` is on dev only
-and prod's `validateBeforeWrite` still carries the eight defaults. Verify the arrival the way batch 5
-did — **by image digest, not by the tag** — and then re-run `deno task audit:reparse` with **no
-`--core` flag** against prod, which is the published→pinned→deployed→enforcing chain closed.
+⚠️ **(1) is the deployed→ENFORCING half, and nothing else substitutes for it.** The revision number
+moved 00367 → 00368 with exactly one release cut in the window, which is good evidence that the
+build arrived and is **not** evidence that the image carries `beta.407` — that is what the digest
+says. ⭐ **Batch 5 wrote down why**: the tag and the digest are different claims, and the pinned-core
+reparse is a third one again.
 
 **(3) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
 there is no `DELETE` route, `updateTransaction` edits `reference` alone, and this row cannot take
@@ -828,9 +839,9 @@ obvious next leaf batch and needs no new instrument.
 
 **Clear before batch 7.**
 
-Batch 6's analysis is spent: the schema change is published, the pins are swept and verified against
-the remotes, and the only two open threads are merges that need no context at all. Batch 7 depends on
-none of it. Everything it needs is written down: the backlog is read off
+Batch 6's analysis is spent: published, swept, merged and deployed. The one open thread — closing the
+digest + pinned-core-reparse chain once gcloud is re-authed — needs two commands and none of this
+session's reasoning; the expected reading is written down above it. Batch 7 depends on none of it. Everything it needs is written down: the backlog is read off
 `core/tests/stored-defaults.test.ts` (**108** paths — 76 scalar, 32 `array[]`, 22 of them `items[]`),
 the partition is re-derived by the recipe above, the `items[]` hazards are in the section above this
 one, and the policy — the parse-not-census rule, the shared stored/input-node rule, and the
