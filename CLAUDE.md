@@ -735,6 +735,24 @@ beside the clean verdict, and say which half the tightening actually rests on.**
 makes step 2 above — *100% key-presence is evidence about the GENERATOR* — the whole argument rather
 than a caveat on it.
 
+⭐ **And the same denominator, read at the other end, lets the CORPUS DISCHARGE step 2 outright.**
+`validateBeforeWrite` writes the RAW document, so a `.default()` can never put a key into storage —
+therefore a position whose `present` column EQUALS its `containers` column at a large denominator is
+a statement about every writer that has ever run, not about the parse. Measured 2026-09-10, core#95
+batch 6: **19,801 of 19,801 stored line-item price objects** state all eight keys, in both projects,
+so the writer audit was the measurement rather than six writers read and argued about. ⚠️ It is
+evidence about **EXERCISED** writers only — a path that has never written leaves no trace — so the
+compiler half still has to be checked separately. **Batch 4 and batch 6 are the two ends of one
+rule**: a thin denominator makes the writer audit the whole argument, a complete one makes the corpus
+the writer audit, and nothing but the denominator tells you which case you are in.
+
+⚠️ **`present` and `non-null` are different columns, and a PRESENCE tightening rests on the first.**
+`audit:reparse` prints `⚠️ VACUOUS — a clean parse here says nothing` when `non-null` is 0, and that
+label is about a claim on the VALUE. `credit-notes.items[].price.chargeable_days` reads 146
+containers / 146 present / **0 non-null**: every row states the key, so requiring it is fully gated,
+while nothing has ever exercised a non-null value there. **Say which claim a denominator answers
+before reading its verdict.**
+
 ⭐ **A field NAME is not a node, and the check for sharing is the declaration.** The same batch found
 `phones` on six declarations under three spellings — `DocDestinationContact` (stored, required now),
 `DestinationContact` / `NewContactInput` / `Create`+`UpdateOrganizationInput` (inputs, still

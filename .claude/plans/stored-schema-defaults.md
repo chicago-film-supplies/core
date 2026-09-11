@@ -4,41 +4,108 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-10 — **batch 5 is IN PROD and fully closed. Backlog 132.**
-> One statement, compacted rather than stacked: five batches landed, the fifth being the first cut
-> into the `items[]` family, and it reached prod in the same session it was written. `core` published
-> `beta.406`; `api-cloudrun` (40), `manager` (1) and `templates` (15) are all pinned to it on their
-> own `main`, each verified by reading the REMOTE's content rather than by a push exit code.
+> ## ⚠️ STATUS 2026-09-10 — **batch 6 is landed and swept. Backlog 108.**
+> One statement, compacted rather than stacked. Six batches have landed. Batch 6 is the `price`
+> block on the three price-bearing item grains — **24 paths across THREE declarations**
+> (`OrderDocItemPrice`, `InvoiceDocItemPrice`, `CreditNoteDocItemPriceSchema`), taking the backlog
+> **132 → 108** and the `items[]` family **46 → 22**. `core` published `beta.407`; `api-cloudrun`
+> (40 pins, `05e1e65c`), `manager` (1 pin, `7697e16`) and `templates` (15 pins, PR #311) are all
+> bumped, each verified by reading the REMOTE's content rather than by a push exit code.
 >
-> ✅ **Prod confirmed by IMAGE DIGEST, not by the tag** — `v0.249.0` built
-> `sha256:e7366df3fac83c764545a43fb40d391b35cab8acd148de9b509d1bb299b0312d` and revision
-> `api-cloudrun-00367-xm4` serves exactly that digest.
-> ✅ **And confirmed against the PUBLISHED artifact rather than the working tree**: the reparse run
-> with **no `--core` flag**, i.e. against the pinned `@cfs/core/schemas` the deployed image carries,
-> reads all 11 positions `REACHED` over 3,095 prod documents, 0 failures, exit 0. ⭐ That is the
-> whole chain closed — published → pinned → deployed → enforcing — and it is a different claim from
-> the `--core` run that gated the commit.
+> 🟡 **The ONE thing left for the owner: `templates` PR #311 is open with all four checks green.**
+> Merging it was refused by this session's permission classifier. Nothing else waits on it —
+> the pin is a no-op for template content — but the repo is one beta behind until it merges.
+> The api-cloudrun release PR is the other half; see *What is LEFT*.
 >
-> 🔴 **The publish was blocked for ~40 minutes by ONE citation, and the local gate said clean.**
-> `core/.claude/plans/stored-schema-defaults.md` cited an **api-cloudrun** script with a bare
-> `scripts/` prefix. Core's own `deno task audit:citations` resolves that against the whole
-> workspace and passes; CI checks core out ALONE, where `scripts/` is core's own top-level
-> directory, so it is BROKEN rather than ambiguous — and `publish.yaml` gates `release` on
-> `needs: ci`. **Two earlier betas silently did not publish** (`34549009010`, `34549265656`, both
-> `release: skipped`). ⭐ Repo-qualify every sibling path in this doc; the local gate cannot see it.
+> ### ⭐ The finding: the CORPUS can BE the writer audit, and batch 4 is the other half of the pair
+>
+> `validateBeforeWrite` discards `result.data` and writes the RAW document
+> (`api-cloudrun/src/lib/firestoreWrite.ts`), so a `.default()` can never put a key into storage.
+> **Therefore 19,801 of 19,801 stored price objects carrying all eight keys is a statement about
+> every writer that has ever built a line — not about the parse.** Step 2 of the procedure was
+> discharged by the measurement rather than by reading six writers and arguing.
+>
+> ⭐ **And that is exactly the inverse of batch 4, which is why the denominator is the thing to
+> print.** Batch 4's eight destination-contact positions held **18 objects between them**, so the
+> parse said almost nothing and the WRITER audit was the whole argument. Same instrument, same
+> "0 failures", opposite strengths — and the only thing that distinguishes them is the
+> denominator column. ⚠️ It is evidence about EXERCISED writers only: a code path that has never
+> written a line leaves no trace in a corpus, which is why the compiler half still has to be
+> checked (here: all eight members already REQUIRED on all three interfaces, so every typed site
+> was already gated, and `CreateCreditNoteLineInput` requires all eight on the API input).
+>
+> ### ⚠️ `present` and `non-null` are DIFFERENT columns, and a presence tightening rests on the first
+>
+> `credit-notes.items[].price.chargeable_days` and `.discount` read **146 containers, 146 present,
+> 0 non-null**, and `audit:reparse` labels both `⚠️ VACUOUS — a clean parse here says nothing`.
+> That label is right about a claim on the VALUE and wrong about a claim on the KEY: every row
+> states the key, so the tightening is fully gated there; what is unexercised is any non-null
+> value. ⭐ **Say which claim a denominator answers before reading its verdict.**
+>
+> ### The BEFORE/AFTER pair, both projects, 24 positions
+>
+> | arm | declaration | containers | present |
+> |---|---|---:|---:|
+> | `orders.items[type!=destination\|group].price` | `OrderDocItemPrice` | 10,065 | 10,065 |
+> | `invoices.items[type!=destination\|group\|order].price` | `InvoiceDocItemPrice` | 9,590 | 9,590 |
+> | `credit-notes.items[].price` | `CreditNoteDocItemPriceSchema` | 146 | 146 |
+>
+> BEFORE, against the PINNED `beta.406`: all 24 `OPTIONAL-HERE`. AFTER, against the working tree
+> (`--core=../core/src/schemas/mod.ts`): all 24 `REACHED`. Then AGAIN with **no `--core` flag**,
+> i.e. against the published `beta.407` the new pin installs: all 24 `REACHED`, 2,074 documents,
+> 0 failures, exit 0 — published → pinned, confirmed from a consumer rather than from the source
+> tree. ⚠️ **Dev is NOT a second sample on these grains**: 1,021 / 1,040 / 13 documents and
+> byte-identical denominators in both projects, as batch 5 also found.
+>
+> ### ⭐ The batch boundary was ONE BLOCK across three grains — batch 5's rule one level up
+>
+> Batch 5 took one LEAF (`description`) across four grains; batch 6 took one BLOCK (`price`, eight
+> leaves) across the three grains that have one. Both are batch 2's *"ask what the codebase already
+> treats as one family"*, and the `price` object is a family the schemas name out loud.
+> ⚠️ **It is still three separate declarations under one name** — *a field name is not a node*,
+> batch 4's rule, holding for the third time. Here it cost nothing because the three are identical
+> leaf-for-leaf, but only reading all three said so.
+>
+> 🔴 **Two comments EXPIRED, and neither guard did.** `api-cloudrun/src/services/orders.ts` and
+> `api-cloudrun/tests/integration/orders/orders.test.ts` both recorded, in the present tense, that
+> `OrderDocItemPrice` carries `.default()`s and therefore `validateBeforeWrite` cannot catch a
+> partial price. Both are now re-stated as history. ⭐ **The guards stay**: both 500s they describe
+> fire BEFORE `validateBeforeWrite` is reached, so the boundary assertion in `buildLineItem` is
+> still the only thing turning either payload into a 400 that names the field. *A tightening can
+> expire a comment's REASON without expiring the code it defends* — check which one moved.
+>
+> ### 🔴 A shared-counter assertion, found by this campaign's own push
+>
+> `publishResolvedTemplates: idempotent re-publish (same sha) is a noop` compared
+> `counters/templates-publish-seq` before and after with `assertEquals`. That counter is ONE
+> document for the whole dev project and the suite runs `--parallel` across FILES, so the
+> assertion froze a global across a window it does not own — `131217 !== 131216`, green in
+> isolation. ⭐ **Its sibling assertion in the same file has always used `>` and was never
+> affected: the DIRECTION of the comparison is what made one contention-safe and the other not.**
+> Repaired in `api-cloudrun` `b0961b80` by asserting on the RESULT (a redelivery returns the
+> existing version's seq), with a non-vacuity guard because both sides are `number | null`, and
+> verified by mutation — comparing against `seq + 1` fails exactly that step and nothing else.
+>
+> 🔴 **The batch-5 citation trap did NOT fire this time, and the reason was deliberate**: this doc
+> was held unpushed until after the publish, so no plan-doc citation could gate `release`. The rule
+> that bought that stands — **repo-qualify every sibling path in this doc.** Core's own
+> `deno task audit:citations` resolves a bare `scripts/` against the whole workspace and passes; CI
+> checks core out ALONE, where `scripts/` is core's own top-level directory, so it is BROKEN rather
+> than ambiguous, and `publish.yaml` gates `release` on `needs: ci`. **Two betas silently did not
+> publish** that way (`34549009010`, `34549265656`, both `release: skipped`). Tracked as `core#106`.
 > ⚠️ Reproducing it needs the extracted dir NAMED `core` (the resolver derives the workspace from
-> the PARENT, so any other name reports every core path broken), and **not** `HOME=/tmp/nonexistent`,
-> which just breaks Deno's module cache.
+> the PARENT), and **not** `HOME=/tmp/nonexistent`, which just breaks Deno's module cache.
 >
 > | batch | what | backlog | state |
 > |---|---|---:|---|
 > | 1 | 20 `totals` defaults | 259 → 239 | ✅ prod, `v0.247.0` |
 > | 2 | 20 `query_by_*` + 8 `bookings_breakdown` | 239 → 211 | ✅ prod, `v0.248.0` |
 > | — | **the ratchet hole**: +47 paths nothing had ever enumerated | 211 → 258 | ✅ `core` `4f73bca` |
-> | 3 | the seven `Address` keys — 105 paths, 15 positions | 258 → 153 | ✅ `core` `ce8272d` → `beta.404` |
-> | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → **143** | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
+> | 3 | the seven `Address` keys — 105 paths, 15 positions | 258 → 153 | ✅ prod, `v0.248.1` |
+> | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → 143 | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
 > | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
-> | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → **132** | ✅ prod, `v0.249.0`, revision `api-cloudrun-00367-xm4` |
+> | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → 132 | ✅ prod, `v0.249.0`, revision `api-cloudrun-00367-xm4` |
+> | 6 | the `price` block ×3 — 24 paths, 3 declarations, one block | 132 → **108** | ✅ `beta.407`, all pins swept; **release + templates#311 pending** |
 >
 > ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
 >
@@ -182,13 +249,19 @@ api-cloudrun#943's remaining half.*
 | **the corpus-parse instrument** — batch 5's prerequisite, `api-cloudrun#951` + `#636` | `api-cloudrun/scripts/audit-schema-validation.ts` + `_corpusReparse.ts` (`5ed776fe`) | ✅ landed on `main` |
 | its calibration, four mutations each failing one arm | `api-cloudrun/tests/unit/corpusReparse.test.ts` | ✅ landed on `main` |
 | `typesense-pulse` catalogued — the prod collection census goes exit 1 → 0 | `api-cloudrun` `310dd3bc` | ✅ landed on `main` |
-| **batch 5** — `items[].description` ×11, 5 declarations | `core` `27be0ad` | ⏳ committed on `beta`, **unpublished** |
+| **batch 5** — `items[].description` ×11, 5 declarations | `core` `27be0ad` → `beta.406` | ✅ published |
 | 8 repaired tests — the `docLine` factory + two raw literals routed through it | `core/tests/order.test.ts` | ✅ in `27be0ad` |
 | the citation that had silently skipped two publishes | `core` `2dc6b6b` | ✅ landed on `beta` |
 | 40 pins, as a release-cutting `fix` rather than a `chore(deps)` | `api-cloudrun` `ab9013a4` | ✅ landed on `main` |
 | 1 pin | `manager` `313bfd0` | ✅ landed on `main` |
 | 15 pins | `templates` PR #310 (`c10574d`) | ✅ merged |
 | `v0.249.0` reaching prod, verified by digest and by a pinned-core reparse | revision `api-cloudrun-00367-xm4` | ✅ deployed |
+| **batch 6** — the `price` block ×3, 24 paths, 3 declarations | `core` `9a48a5a` → `beta.407` | ✅ published |
+| 40 pins + two EXPIRED comments re-stated as history | `api-cloudrun` `05e1e65c` | ✅ landed on `main` |
+| the shared-counter assertion repaired on the RESULT, mutation-verified | `api-cloudrun` `b0961b80` | ✅ landed on `main` |
+| 1 pin | `manager` `7697e16` | ✅ landed on `main` |
+| 15 pins + lockfile | `templates` PR #311 | 🟡 **open, four checks green — needs a merge** |
+| `beta.407` reaching prod | — | 🟡 **needs the api-cloudrun release PR merged** |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -543,23 +616,35 @@ would recur. **Both halves were wrong in an instructive direction:**
 
 ### ✅ `items[].description` WAS batch 5 — and dev turned out not to be a second sample
 
-**Done in the tree** (`core` `27be0ad`, **unpublished**). Re-derived 2026-09-10 off the
-post-batch-4 catalogue: **143 paths — 76 scalar, 67 `array[]`**; batch 5 took 11 of them, leaving
-**132**. The remaining `items[]` family is **46**.
+**Done and in prod** (`core` `27be0ad` → `beta.406`, `v0.249.0`, revision `api-cloudrun-00367-xm4`).
+Re-derived 2026-09-10 off the post-batch-4 catalogue: **143 paths — 76 scalar, 67 `array[]`**;
+batch 5 took 11 of them, leaving **132**, of which 46 were `items[]`.
+
+### ✅ the `price` BLOCK WAS batch 6 — and the corpus discharged step 2 on its own
+
+**Done** (`core` `9a48a5a` → `beta.407`), 24 paths across three declarations, leaving **108**.
+Full write-up in the status block; this section carries only the re-derived split.
+
+**RE-DERIVED 2026-09-10 by the recipe below — do not quote it, re-run it:**
+**108 paths — 76 scalar, 32 `array[]`.** The `items[]` family is now **22**.
 
 | family | paths | note |
 |---|---:|---|
-| **`items[]` across orders / invoices / credit-notes / fulfillments** | **57** | the dominant family, and every remaining hazard note below is about it |
-| `products` / `webshop-products` (`webshop.*`, `component_of[]`) | 15 | two collections, one shared `component_of` block |
+| **`items[]` across orders / invoices / credit-notes / fulfillments** | **22** | still the dominant family, and every hazard note below is about it |
 | `cards` (+ `recurrences.prototype.*`, which mirrors it) | 16 | `attachments`, `locked`, `body_text`, `dates.*`, `uid_assignees`, `sources` |
+| `products` / `webshop-products` (`webshop.*`, `component_of[]`, `components[]`) | 15 | two collections, one shared `component_of` block |
+| `templates` / `templates-versions` / `template-components` | 7 | `draft_uids`, `fixtures`, `params`, `consumed_components`, `active_semver`, `depends_on.components` |
 | `stores` / `stores[].locations` / `store_breakdown` | 6 | `bookings`, `out-of-service`, `inventory-ledgers` — one shape, three collections |
 | `sources` | 4 | `credit-notes`, `out-of-service`, `recurrences.prototype`, `transactions` |
 | `reference` | 3 | `orders`, `credit-notes`, `fulfillments` — small, scalar, likely free |
 
-⭐ **Inside `items[]` the leaf names cluster harder than the collections do** — `description` ×12,
-`path` ×10, `taxes` ×9, `quantity` ×4 — so the batch boundary is probably ONE leaf across four
-grains rather than one grain's whole item. That is batch 2's family selector applied one level down,
-and it keeps the writer audit to a single author per batch.
+⭐ **Inside `items[]` the leaf names still cluster harder than the collections do** — after batch 6
+took the whole `price` block, what is left is `path` ×10, `quantity` ×4, `name` ×4, plus four
+credit-note-only keys (`tracking_category`, `uid_invoice_item`, `xero_id`,
+`xero_tracking_option_id`) — so the boundary stays ONE leaf across the grains that have it.
+🔴 **`path` is the row identity with exactly one author, and the array-ordering hazard below is
+about it — take it last, or deliberately.** `quantity` ×4 and `name` ×4 are the cheap ones and are
+the obvious batch 7.
 
 ⚠️ **`organizations.contacts[].roles` is a 1-path straggler worth taking with something else.**
 `OrganizationContactType.roles` is REQUIRED on the interface while `OrganizationContact` defaults it
@@ -705,19 +790,24 @@ with most care: it is the row identity, and the `items[]` backfill/ordering haza
 
 ## What is LEFT — read this first
 
-Batch 5 is done bar one confirmation. In order of who is blocked:
-
-**Batch 5 has NO residue** — it is in prod, digest-verified, and re-confirmed against the published
-core. What follows is everything else this campaign knows about, in order of who is blocked:
+**Batch 6's schema change is published and every pin is swept. Two merges are all that remain of
+it, and both are the owner's** — this session's permission classifier refused the merge verb.
 
 | # | what | owner | blocked on |
 |---|---|---|---|
-| 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
-| 2 | **Batch 6** — 132 paths, 46 of them `items[]` | next session | nothing |
-| 3 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
-| 4 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing; filed this session |
+| 1 | **`templates` PR #311** — the 15-pin bump to `beta.407` | the owner | a merge; all four checks green |
+| 2 | **the `api-cloudrun` release PR** — cuts `v0.250.0` and carries `beta.407` to prod | the owner | a merge; `05e1e65c` is a release-cutting `fix(items)` |
+| 3 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
+| 4 | **Batch 7** — 108 paths, 22 of them `items[]` | next session | nothing |
+| 5 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
+| 6 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
 
-**(1) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
+⚠️ **(2) is what makes the tightening BITE.** Until the release PR merges, `beta.407` is on dev only
+and prod's `validateBeforeWrite` still carries the eight defaults. Verify the arrival the way batch 5
+did — **by image digest, not by the tag** — and then re-run `deno task audit:reparse` with **no
+`--core` flag** against prod, which is the published→pinned→deployed→enforcing chain closed.
+
+**(3) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
 there is no `DELETE` route, `updateTransaction` edits `reference` alone, and this row cannot take
 even that — it writes through `ValidatedTx.set`, which validates first. So a **reversal** mints a new
 movement and leaves the bad row in place (the reparse still exits non-zero), **stamping a supplier**
@@ -728,34 +818,38 @@ documented schema carve-out naming the one uid — costs a comment and a test. �
 adjudicated: it is a **duplicate of #1162**, which carries Home Depot and posted as `CFS-MOV-1162`;
 there is no `CFS-MOV-1161` anywhere in the ACCPAY window. Full evidence on the issue.
 
-**(2) batch 6** — read the split off `tests/stored-defaults.test.ts`, not this doc. The clustered
-leaves left in `items[]` are `path` ×10, `taxes` ×9, `quantity` ×4. ⚠️ **`path` is the row identity
-with exactly one author, and the array-ordering hazard below is about it** — take it last, or
-deliberately.
+**(4) batch 7** — read the split off `core/tests/stored-defaults.test.ts`, not this doc. What is left
+inside `items[]` is `path` ×10, `quantity` ×4, `name` ×4 and four credit-note-only keys.
+⚠️ **`path` is the row identity with exactly one author, and the array-ordering hazard above is about
+it** — take it last, or deliberately. `quantity` + `name` (8 paths across the four grains) is the
+obvious next leaf batch and needs no new instrument.
 
 ## Context recommendation
 
-**Clear before batch 6.**
+**Clear before batch 7.**
 
-Batch 5 is closed — nothing mechanical is left to watch. Batch 6 depends on none of this session's
-analysis. Everything it needs is written down: the backlog
-is read off `core/tests/stored-defaults.test.ts` (**132** paths, 46 of them `items[]`), the partition
-is re-derived by the recipe above, the `items[]` hazards are in the section above this one, and the
-policy — the parse-not-census rule, the shared stored/input-node rule, and the denominator rule
-batch 4 sharpened — is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+Batch 6's analysis is spent: the schema change is published, the pins are swept and verified against
+the remotes, and the only two open threads are merges that need no context at all. Batch 7 depends on
+none of it. Everything it needs is written down: the backlog is read off
+`core/tests/stored-defaults.test.ts` (**108** paths — 76 scalar, 32 `array[]`, 22 of them `items[]`),
+the partition is re-derived by the recipe above, the `items[]` hazards are in the section above this
+one, and the policy — the parse-not-census rule, the shared stored/input-node rule, and the
+denominator rule batches 4 and 6 sharpened between them — is in `core/CLAUDE.md` §
+*`.default()` and `.optional()`*.
 
-⚠️ **Do not carry this doc's numbers into batch 5 — re-run the recipe.** Batch 3 proved the doc's own
+⚠️ **Do not carry this doc's numbers into batch 7 — re-run the recipe.** Batch 3 proved the doc's own
 table can be wrong in both directions with the errors in the INSTRUMENTS; batch 4 proved the numbers
-can be right and still mean something different from what they look like. **Re-derive, and ask what
-the instrument can see.**
+can be right and still mean something different from what they look like; batch 6 proved a column
+labelled VACUOUS can be decisive for the claim actually being made. **Re-derive, and ask what the
+instrument can see.**
 
-✅ **api-cloudrun#951 is DONE, and batch 5 used it.** The corpus parse is committed as
+✅ **`api-cloudrun#951` is DONE, and batches 5 and 6 both used it.** The corpus parse is committed as
 `deno task audit:reparse`; the `items[]` family is all `array[]` members the `orderBy` oracle cannot
-address at all, so the parse is its only oracle *and* a standing one. **46 of the 132 remain.**
+address at all, so the parse is its only oracle *and* a standing one. **22 of the 108 remain.**
 ⚠️ **Run it once before touching a schema**, so the pre-tightening `OPTIONAL-HERE` reading is on the
 record; a reach verdict is only evidence as a BEFORE/AFTER pair.
 
-**Two things this session left deliberately, each its own commit:**
+**Three things this session left deliberately:**
 - The two documents `api-cloudrun#951` names are **still unrepaired** — a prod `transactions`
   purchase with `supplier: null` (an accounting fact, not a default: find its Xero bill or ask the
   owner) and a dev `locations` id. A third turned up, dev-only: `users/test-user`. Until they are
@@ -764,7 +858,15 @@ record; a reach verdict is only evidence as a BEFORE/AFTER pair.
 - `updateOrganization` still carries `organization.emails = organization.emails || []` and the same
   for `phones` (`api-cloudrun/src/services/organizations.ts`) — inert since batch 4, because both
   fields are required and both corpora are complete.
+- The `templates` worktree `.claude/worktrees/core-beta-407` on branch `chore/core-beta-407`, which
+  is what PR #311 was built in. ⚠️ **The main `templates` checkout was sitting on a PEER's pushed
+  branch** (`docs/rebless-recipe-needs-the-bearer`), so switching it would have moved HEAD under
+  another session — the worktree was taken for that reason and nothing else. **Remove it when #311
+  merges**: `git worktree remove .claude/worktrees/core-beta-407`.
 
-**A fix expires its workarounds; expiring them is its own commit** — which is why the two items
-above are listed rather than folded in. Removing the `|| []` pair is behaviour-bearing, and hiding it
-inside a pin-carrying release is how a behaviour change ships unreviewed.
+**A fix expires its workarounds; expiring them is its own commit** — which is why the `|| []` pair is
+listed rather than folded in. Removing it is behaviour-bearing, and hiding it inside a pin-carrying
+release is how a behaviour change ships unreviewed. ⭐ **Batch 6 met the same rule in its milder
+form**: two comments in `api-cloudrun` asserted, in the present tense, a fact the tightening made
+false, while the code they defended stayed correct. **A tightening can expire a comment's REASON
+without expiring the code** — say which one moved, and re-state rather than delete.
