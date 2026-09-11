@@ -715,6 +715,34 @@ position where every document stores `null` passes while saying nothing about it
 non-null objects per position, and prove the parse REACHES each one by deleting a key from a real
 document and requiring the issue path to name it.
 
+🔴 **And the denominator can be so small that the parse says NOTHING — at which point the writer
+audit is the evidence, not a supporting check.** Measured 2026-09-10, core#95 batch 4: the same run
+that parsed 4,560 prod / 4,571 dev documents with 0 failures covered `organizations.emails`/`phones`
+at **319 / 323 non-null objects with 0 absences** — decisive — and the eight
+`DocDestinationContact.phones` positions at **18 prod / 22 dev objects between them**, with
+`invoices.destinations[].delivery.contact` holding **none in either project**. Same parse, same
+verdict, two completely different strengths of claim. ⭐ **So report the per-position denominator
+beside the clean verdict, and say which half the tightening actually rests on.** A thin population
+makes step 2 above — *100% key-presence is evidence about the GENERATOR* — the whole argument rather
+than a caveat on it.
+
+⭐ **A field NAME is not a node, and the check for sharing is the declaration.** The same batch found
+`phones` on six declarations under three spellings — `DocDestinationContact` (stored, required now),
+`DestinationContact` / `NewContactInput` / `Create`+`UpdateOrganizationInput` (inputs, still
+`.optional()`), and `ContactSchema` (already required) — all separate objects. At the PATH level that
+reads exactly like `Address`'s genuine stored/input sharing; only reading the declarations
+distinguishes a pure storage tightening from one that also narrows the API.
+
+⚠️ **Where the writer CAN supply the value, tighten the writer and leave the input alone — but check
+what the gap costs first.** `DestinationContact.phones` stays `.optional()` because a client naming a
+contact need not know its phone numbers; api-cloudrun's `buildDestinationPair` now states `?? []`.
+Without that, the accepted payload failed the DOCUMENT schema inside the create transaction: a
+**500**, not a 400 (measured by stashing the fix — exactly one integration step went red). **A
+storage tightening whose input stays lenient has a writer obligation, and skipping it converts a
+validation error into a server error.** ⚠️ That `?? []` is a forward writer default and is NOT the
+backfill this section forbids — that rule is about documents that already exist, whose omission is a
+biased sample.
+
 🔴 **A node shared between a STORED schema and an INPUT schema holds its default in two states at
 once, and the ratchet's *"input schemas are excluded by construction"* argument does not reach it.**
 `tests/stored-defaults.test.ts` walks the Firestore registry, so every path it catalogues is reached

@@ -4,121 +4,84 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-10 — **batch 3 is LANDED and published. Backlog 211 → 258 → 153.**
-> Three batches are done. Batches 1 and 2 are history and their details live below; this block is the
-> one current statement the convention asks for, compacted rather than stacked.
+> ## ⚠️ STATUS 2026-09-11 — **batch 4 is LANDED, published and IN PROD. Backlog 153 → 143.**
+> Four batches done. Batches 1–3 are history and their details live below; this is the one current
+> statement the convention asks for, compacted rather than stacked.
 >
 > | batch | what | backlog | state |
 > |---|---|---:|---|
-> | 1 | 20 `totals` defaults | 259 → 239 | ✅ prod, `v0.247.0`, revision `api-cloudrun-00364-v6z` |
-> | 2 | 20 `query_by_*` + 8 `bookings_breakdown` | 239 → 211 | ✅ prod, `v0.248.0`, revision `api-cloudrun-00365-8t9` |
-> | — | **the ratchet hole**: +47 paths nothing had ever enumerated | 211 → **258** | ✅ `core` `4f73bca` |
-> | 3 | **the seven `Address` keys — 105 paths, 15 positions** | 258 → **153** | ✅ `core` `ce8272d` → `beta.404` |
+> | 1 | 20 `totals` defaults | 259 → 239 | ✅ prod, `v0.247.0` |
+> | 2 | 20 `query_by_*` + 8 `bookings_breakdown` | 239 → 211 | ✅ prod, `v0.248.0` |
+> | — | **the ratchet hole**: +47 paths nothing had ever enumerated | 211 → 258 | ✅ `core` `4f73bca` |
+> | 3 | the seven `Address` keys — 105 paths, 15 positions | 258 → 153 | ✅ `core` `ce8272d` → `beta.404` |
+> | 4 | **`phones` ×9 + `organizations.emails` — 10 paths, 3 declarations** | 153 → **143** | ✅ **prod, `v0.248.1`, revision `api-cloudrun-00366-whd`** |
 >
-> **Batch 3's two findings are the ones that outlive it, and both say the instruments were wrong
-> rather than the corpus.**
+> ✅ **The batch-3 open item is CLOSED as a side effect.** Prod was stuck on `beta.403` because batch
+> 3's consumer commits were `chore(deps)`/`test(fixtures)` — non-releasable — so Release Please cut
+> nothing. Batch 4's api-cloudrun commit is a genuine `fix(orders)`, which cut **`v0.248.1`** and
+> carried `beta.405` (and with it batch 3's `Address` tightening) to prod. Verified by image digest,
+> not by the tag: revision `api-cloudrun-00366-whd` serves
+> `sha256:5a1eaf3f…a763f10`, byte-identical to what build `fac78f9f` produced. Dev runs `1080ca2`.
 >
-> 🔴 **The ratchet could not see six of `Address`'s fifteen embeddings.** All three schema ratchets
-> carried ONE `seen` set per collection walk, keyed on node identity, so a shared block was
-> catalogued once per COLLECTION instead of once per POSITION. `Address` is one module-level object;
-> nine positions were enumerated and six were not, including every `collection` leg and both
-> `destinations[]` legs on orders and invoices. ⚠️ **The premise behind it was TRUE and carried one
-> level too far** — `.meta()` does clone, so the walk really does enter both legs of a destination
-> pair, but the clone is SHALLOW and both legs share the very same inner `Address` node. Fixed by
-> scoping the guard to the current PATH; `stored-optionality` gained 19 paths by the same fix and
-> `inert-defaults` (a zero-tolerance gate) stayed green while finally covering re-embedded positions.
-> ⭐ **A guard cannot find what its own enumerator cannot reach**: re-running the OLD walk against the
-> NEW catalogue leaves the `catalogued` arm GREEN — it is a subset check — and fails only
-> `only shrinks`. The arm that detects the hole is the one that needs the catalogue to already know
-> the paths, which is why the catalogue being GENERATED from the walk had hidden it for the whole
-> campaign.
+> ⭐ **That is the standing "decide the commit TYPE deliberately" warning paying off, and it
+> generalises: the pin rides whatever the commit says it is.** A campaign whose consumer work is
+> genuinely only a pin bump has no vehicle and will sit in dev indefinitely; one that carries real
+> behaviour types as `fix`/`feat` and ships itself.
 >
-> 🔴 **And the 35 paths this doc called BLOCKED were stored NULLS.** A leaf census is
-> `orderBy("billing_address.city")`, which EXCLUDES a document whose `billing_address` is `null` —
-> legal, and on a derived organization placeholder mandatory under invariant 10, where `null` means
-> *"states nothing, ask my parent"*. So the leaf read absent and that read as *"leans on the
-> default"*. The five embeddings with absences (49 of 318 organizations, then 2, 1, 1, 1) reproduce
-> EXACTLY as null counts. ⭐ **So for a tightening the oracle is a PARSE of the corpus, not a census
-> of the key** — it asks the question the change poses, is immune to this confound, and is native on
-> the `array[]` positions `orderBy` cannot address at all. Both findings are now in
-> `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+> 🔴 **Batch 4's finding: the corpus said almost NOTHING, and the parse still read 0 failures.**
+> 4,560 prod / 4,571 dev documents parsed, 0 failures — but the per-position denominator is what the
+> batch actually rests on. `organizations.emails`/`phones` carry **319 prod / 323 dev non-null objects
+> with 0 absences**; the eight destination-contact positions hold **18 prod / 22 dev non-null contact
+> objects between them**, and `invoices.destinations[].delivery.contact` holds **none in either
+> project**. A clean parse over a population that thin is a fact about the WRITER, which is
+> `core/CLAUDE.md` § *Making a field REQUIRED* step 2 in its literal form. ⭐ **So report the
+> denominator beside every clean verdict** — batch 3 added the per-position count because a position
+> of all-nulls passes while saying nothing; batch 4 is the case where it changed which evidence was
+> load-bearing.
 >
-> ⚠️ **Batch 3 also tightened the API INPUT, deliberately** — `Address` is shared with
-> `DestinationEndpoint.address`, `CreateOrganizationInput.billing_address` and
-> `UpdateOrganizationInput.billing_address`, and on an input schema a default is LIVE because handlers
-> read the parsed body. A `billing_address` of `{}` parsed to seven empty strings, a third state the
-> organization model does not have, which would stop billing-address resolution at that node and
-> blank the block on every descendant's invoices. Prod holds 0 such objects. ⚠️ Whether the leniency
-> was ever USED is **not answerable from stored data** — the manager's own `|| ""` fallbacks leave the
-> same blank-key signature — so it is a judgement, recorded as one.
+> 🔴 **And the writer gap was a 500, measured rather than argued.** The input
+> `DestinationContact.phones` is `.optional()` and `buildDestinationPair` spread it verbatim, so once
+> the document schema required it the same accepted payload failed `validateBeforeWrite` from inside
+> the create transaction — `500 INTERNAL_ERROR`, not a `400`. Proved by stashing the fix: exactly one
+> step of `orders.test.ts` fails and the other 50 pass. `withStatedContactPhones` supplies `?? []` at
+> the one root author, which is step 3's split — tighten the INPUT only where the writer CANNOT supply
+> the value. ⚠️ **`?? []` in a forward writer is not the backfill the campaign forbids**; that rule is
+> about existing documents, whose omission is a biased sample.
 >
-> | repo | commit | state |
-> |---|---|---|
-> | `core` (`beta`) | `4f73bca` + `ce8272d` | ✅ published — `@cfs/core@10.0.0-beta.404` |
-> | `api-cloudrun` (`main`) | `200af2cf` (42 pins) + `f5c834b9` (3 fixtures) | ✅ pushed |
-> | `manager` (`main`) | `064a7e3` (1 pin) | ✅ pushed |
-> | `templates` | `6645344` (PR #307, 15 pins + lockfile) | ✅ merged |
+> ⭐ **A node can be unshared and still look shared.** Batch 3's rule is *grep the NODE, not the path*.
+> Here `phones` appears on six declarations under three names — `DocDestinationContact` (stored),
+> `DestinationContact`, `NewContactInput`, `Create`/`UpdateOrganizationInput` (inputs) and
+> `ContactSchema` (already required) — all separate objects. So unlike `Address` this was a **pure
+> storage tightening with no API-input change**, and only reading the declarations says so.
 >
-> 🔴 **IN DEV, NOT IN PROD, and it will not get there on its own.** Both api-cloudrun commits are
-> `chore(deps)` and `test(fixtures)` — non-releasable types — and no release PR is open, so Release
-> Please cuts nothing. Dev runs `beta.404` (Cloud Build deploys every push to `main`); **prod is still
-> `v0.248.0` / `beta.403`.** ⚠️ Batch 2 reached prod only because a release PR already existed for its
-> pin to ride in; do not read its write-up as "the pin deploys itself".
+> ⭐ **Step 4 was NOT a no-op this time, and that is the durable half.**
+> `DocDestinationContactType.phones` was `?: string[]` while the schema defaulted it — the exact
+> `z.ZodType<T>` blind spot — so unlike batch 2 typed literals were *not* already compiler-gated.
+> Dropping the `?` makes every future hand-built one a compile error. It broke nothing: `deno check`
+> green across core, api-cloudrun (2,024 unit tests) and manager (`tsc` + 1,977 tests).
 >
-> ⭐ **Safe to leave, and the reason generalises: this tightening has no unsafe direction.** It makes a
-> field REQUIRED, the corpus is already complete in both projects, and an old lenient READER accepts
-> everything a new strict WRITER produces — so there is no document dev can write that prod refuses,
-> and no client change waiting on a deploy. The only thing not yet live in prod is the REFUSAL. Verify
-> by image digest if a release is later forced; a tag is a fact about the repo.
+> ⭐ **Zero fixture repairs — a first for this campaign, and each exoneration had a different
+> reason.** A shape-keyed sweep of all four repos found 21 literals bound to a `contact` key carrying
+> `uid` + `first_name`; the 7 without `phones` were all correctly so: two typed `DestinationType`
+> (the INPUT pair, which keeps `.optional()`), two per-rule field projections in
+> `audit-denorm-freshness.ts` whose sibling `phones-to-orders` row carries `phones` and no name parts
+> at all, two untyped manager display fixtures, and one parameter type for `OrganizationContact`,
+> which has no `phones` field. **Omission identifies the schema**, again.
 >
-> **Gate, both projects, run against the LOCAL schemas before the beta was cut:** 12,004 prod /
-> 12,006 dev documents parsed over the nine `Address`-bearing collections, **0 failures**; **24,120
-> prod / 24,110 dev non-null address objects, 0 missing any of the seven keys**, 0 missing a parent
-> key. A DENOMINATOR per position (14 of 15 carry 269–7,111 objects) because a position where every
-> document stores `null` passes while saying nothing, and every one of those 14 REACH-verified by
-> deleting `city` from a real document and requiring the issue path to name that position. The 15th,
-> `recurrences.prototype.destination.address`, has no corpus and rests on its writer instead.
-> Form seeds byte-identical across all 103 registered schemas. Consumer side: 0 of 79 JSON fixture
-> address objects incomplete under two independent predicates, `templates` `lint:fixtures` clean on
-> the first run, `test:units` 2,024 green, manager 1,977 green.
+> ⚠️ **A gate can pass without asking.** `templates` `lint:fixtures` went clean — and its denominator
+> for `organizations` is **zero**, because no fixture holds an organization document. It said nothing
+> about half the batch. Read a green gate's population before crediting it.
 >
-> 🔴 **And the consumer sweep MISSED three `.ts` literals, which the pre-push gate caught** (repaired
-> in `f5c834b9`). Both halves of the miss are the session's own lesson pointed at itself:
+> ⚠️ **The type-escape ratchet refused BOTH halves of the first attempt, and it was right twice** —
+> `dest as unknown as {…}` in the writer and the same form in the test. Neither was budgeted: the
+> writer now declares `delivery`/`collection` on its generic constraint and the test builds a fresh
+> payload literal. ⭐ **Both anti-vacuity runs were redone against the rewritten test** — a fix
+> verified before a tidy-up is not a fix verified.
 >
-> - **The wrong predicate.** I classified the partial-address literals by *"does this file call
->   `safeParse`/`validateBeforeWrite`"*. That is right for a unit test and meaningless for an
->   integration one, which parses SERVER-SIDE over HTTP through the route's input schema. All four I
->   cleared were in the unit tier, where the predicate happens to hold — so the conclusion was true
->   and the reasoning did not transfer.
-> - **The scanner shared the defect of its subject.** Keyed on `address:\s*\{`, it could not see
->   `address: opts.region ? { … } : null`. A shape-keyed pass (any literal holding 2+ of the seven,
->   position-independent) found it — and over-reported 101 hits by sweeping in the Mapbox/geocode
->   shapes, which have their own schema with optional keys. **The suite was the oracle both times.**
->
-> ⭐ **Every repair states the value the default SUPPLIED (`""`), not a plausible one.** A first pass
-> invented `street: "1 Test St"`; the test passed and the log showed `geocoding_failed …
-> no_place_agreement`, because the invented street changed the geocoder's query — so the assertion
-> would have been passing for a different reason. ⚠️ **That is the OPPOSITE of the rule for stored
-> data**, where the population that omitted a field is a biased sample and the default is the one
-> value not to write. For a fixture whose subject is something else, reproducing the default's own
-> value is what makes the repair inert.
->
-> ⚠️ **One of the three was not a test defect at all.** `findOrCreateDestination` takes
-> `Partial<AddressType>` and writes it as `address as DestinationDoc["address"]`, so the mint path
-> could always have stored a partial address — the inert default only made validation pass. Prod is
-> clean (0 of 322 destinations), because both production callers pass the PARSED order input, which
-> batch 3 now requires to be complete. Filed as **api-cloudrun#952**: batch 3 is what makes the three
-> casts removable.
->
-> ⚠️ **Seven other tests failed in the parallel rung and were CONTENTION** — the serial rung reproduced
-> only these three and had not reached the rest, and all five remaining files pass in isolation. Load
-> average was 7+ rising to 23 during the run, from desktop apps rather than from any suite.
->
-> ⭐ **Four inverted tests repaired as MIRRORS** — two passing three keys and inheriting four, three
-> organization literals spelling `{ full }` alone. And `tests/organization.test.ts`'s existing
-> discipline paid off exactly as its docblock predicted: it asserts the issue PATH rather than
-> `success`, so a one-key address now refused for INCOMPLETENESS fails loudly instead of going green
-> for a reason the test is not about.
+> ⭐ **`organizations.emails` was folded in on ADJACENCY** — the line above `phones` in the same
+> `z.strictObject`, same `z.array(X).default([])` shape, already required on the interface, and the
+> parse had to cover `organizations` either way. Batch 2's selector was *"what does the codebase treat
+> as one family"*; adjacency in a declaration is a cheaper form of the same question.
 
 ## What shipped
 
@@ -142,8 +105,14 @@ api-cloudrun#943's remaining half.*
 | **batch 3** — the seven `.default("")` on `Address`, 105 paths | `core` `ce8272d` → `beta.404` | ✅ published |
 | the parse-not-census rule + the shared stored/input node rule | `core/CLAUDE.md` § *`.default()` and `.optional()`* | ✅ landed |
 | 4 inverted tests repaired as mirrors | `core/tests/{usState,organization}.test.ts` | ✅ landed |
-| 42 pins | `api-cloudrun` `200af2cf` | ⏳ pushing |
-| 15 pins + lockfile | `templates` PR #307 | ⏳ open |
+| 42 pins | `api-cloudrun` `200af2cf` | ✅ pushed |
+| 15 pins + lockfile | `templates` PR #307 | ✅ merged |
+| **batch 4** — `phones` ×9 + `organizations.emails`, 10 paths | `core` `a109c22` → `beta.405` | ✅ published |
+| the writer fix that makes it reachable + 42 pins | `api-cloudrun` `be9965b8` | ✅ landed on `main` |
+| a stored-VALUE assertion for it, verified against its own absence | `api-cloudrun/tests/integration/orders/orders.test.ts` | ✅ landed |
+| 1 pin | `manager` `ea454f2` | ✅ landed on `main` |
+| 15 pins + lockfile | `templates` `41f6f9b` (PR #308) | ✅ merged |
+| **`beta.405` reaching prod, and batch 3 with it** | `v0.248.1` → revision `api-cloudrun-00366-whd` | ✅ deployed |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -312,10 +281,10 @@ and cannot be generalised. `version` is deliberately not bumped either.
   check. ⚠️ And prod/dev are **not** independent samples — `devReplica` mirrors prod writes, and the
   two read identically — so that is one confirmation, not two.
 
-- **The wider campaign — 153 inert paths remain**, and the arithmetic is NOT a subtraction:
-  259 − 20 − 28 + **47** (the paths the ratchet had never enumerated) − 105 (batch 3) = 153.
-  Concentrated in `invoices` (25), `orders` (23), `credit-notes` (19), `fulfillments` (12),
-  `cards` (11) — 80 scalar and 73 `array[]`. Read the live split off
+- **The wider campaign — 143 inert paths remain**, and the arithmetic is NOT a subtraction:
+  259 − 20 − 28 + **47** (the paths the ratchet had never enumerated) − 105 (batch 3) − 10 (batch 4)
+  = 143. Concentrated in `invoices` (23), `orders` (21), `credit-notes` (19), `fulfillments` (10),
+  `cards` (10) — 76 scalar and 67 `array[]` (re-derived 2026-09-11). Read the live split off
   `tests/stored-defaults.test.ts` rather than this list, which is the one thing here that can rot. ⚠️ The older "~250 sites / ~335 distinct" figures counted
   DECLARATIONS; 291 is *resolved paths*, which is what actually reaches storage — a shared block like
   `Address` appears once per embedding collection. Each needs the same
@@ -481,46 +450,51 @@ because it was wrong in both directions and both errors were in the INSTRUMENTS:
   advice aimed at a defect that did not exist. ⭐ **Ask what the instrument can SEE before designing
   a repair around what it reported.**
 
-### 🔴 Batch 4 is `DocDestinationContact.phones` — the same shape, one tenth the size
+### ✅ `phones` WAS batch 4 — and what it proved is that a clean parse can be nearly vacuous
 
-Measured 2026-09-10 off the post-batch-3 catalogue. Backlog **153** — 80 scalar, 73 `array[]`.
+**Done** (`core` `a109c22` → `beta.405`, in prod as `v0.248.1`). The section that stood here called it
+*"the same shape, one tenth the size"* as `Address`, and predicted the batch-3 null-parent confound
+would recur. **Both halves were wrong in an instructive direction:**
 
-`phones` is 9 of those 153, from **two** declarations, and the larger one is the same
-one-declaration-many-positions shape `Address` just proved out:
+- The confound never fired, because the population is too small for it to matter. `Address` had
+  24,120 prod objects; the eight destination-contact positions have **18**, and one has **none**. The
+  parse read 0 failures and was almost saying nothing.
+- ⭐ **So the thing that carried batch 4 was the WRITER audit, not the corpus** — and the section
+  predicting otherwise is why the denominator has to be reported beside every clean verdict rather
+  than filed as a batch-3 refinement. See the status block.
+- It also predicted a possible shared INPUT node and there was none — six declarations of `phones`
+  across three names, all separate objects. **A field name is not a node.**
 
-| declaration | paths | positions |
-|---|---:|---|
-| `DocDestinationContact.phones` (`schemas/order.ts:243`, `z.array(Phone).default([])`) | **8** | `cards.destination.contact`, `orders`/`invoices`/`fulfillments` `destinations[].{delivery,collection}.contact`, `recurrences.prototype.destination.contact` |
-| `OrganizationSchema.phones` (`schemas/organization.ts:455`) | 1 | `organizations.phones` |
+### 🔴 Batch 5 — `items[]` is what is left, and it is 57 of the 143
 
-⭐ **Half of the 8 only exist because of the walker fix** — every `collection` leg was invisible
-before `4f73bca`, so a batch scoped from the old catalogue would have tightened four positions it had
-never measured. That is the concrete cost of the hole, and the reason to re-derive rather than quote.
-
-**Why it is the right next batch:**
-
-- **6 of the 8 positions are `array[]` members**, which the `orderBy` oracle cannot address at all —
-  so it needs the parse instrument, which batch 3 has now built and validated. It is the cheapest
-  possible first use of it.
-- `Phone` is a leaf type, so `[]` vs absent is the whole question; there is no nested map to confuse
-  a census the way `Address`'s nullable parent did.
-- ⚠️ **`DocDestinationContact` is reached through `DocDestinationEndpoint.contact`, which is
-  `.nullable()`** — so expect exactly the batch-3 confound again: a null CONTACT makes `phones`
-  legitimately absent. **Parse; do not census the leaf.**
-- ⚠️ And check whether this node is shared with an INPUT schema before deciding scope —
-  `schemas/order.ts:226` is a second `phones: z.array(Phone).optional()` on what looks like the input
-  contact. Batch 3's rule applies: grep the NODE, not the path.
-
-**The other coherent families in the remaining 153**, for when `phones` is done — all re-derivable by
-the recipe above, none of them quoted as gospel:
+Re-derived 2026-09-11 off the post-batch-4 catalogue: **143 paths — 76 scalar, 67 `array[]`.**
 
 | family | paths | note |
 |---|---:|---|
-| `items[]` across orders / invoices / credit-notes / fulfillments | **57** | 19 invoices, 16 orders, 14 credit-notes, 8 fulfillments — unchanged by batch 3, and the hazard bullet below still stands |
-| `sources[]` / `reference` | 6 | small, scalar, likely free |
+| **`items[]` across orders / invoices / credit-notes / fulfillments** | **57** | the dominant family, and every remaining hazard note below is about it |
 | `products` / `webshop-products` (`webshop.*`, `component_of[]`) | 15 | two collections, one shared `component_of` block |
+| `cards` (+ `recurrences.prototype.*`, which mirrors it) | 16 | `attachments`, `locked`, `body_text`, `dates.*`, `uid_assignees`, `sources` |
+| `stores` / `stores[].locations` / `store_breakdown` | 6 | `bookings`, `out-of-service`, `inventory-ledgers` — one shape, three collections |
+| `sources` | 4 | `credit-notes`, `out-of-service`, `recurrences.prototype`, `transactions` |
+| `reference` | 3 | `orders`, `credit-notes`, `fulfillments` — small, scalar, likely free |
 
-- **The 73 `array[]` paths need a different instrument** — a paged census in the shape of
+⭐ **Inside `items[]` the leaf names cluster harder than the collections do** — `description` ×12,
+`path` ×10, `taxes` ×9, `quantity` ×4 — so the batch boundary is probably ONE leaf across four
+grains rather than one grain's whole item. That is batch 2's family selector applied one level down,
+and it keeps the writer audit to a single author per batch.
+
+⚠️ **`organizations.contacts[].roles` is a 1-path straggler worth taking with something else.**
+`OrganizationContactType.roles` is REQUIRED on the interface while `OrganizationContact` defaults it
+— the batch-2 blind shape — and `organizations` is otherwise now clear.
+
+⚠️ **Batch 4's parse probe is the instrument to lift, and it is DELETED again.** It has now been
+written five times. It handles `array[]` positions natively, reports a per-position denominator, and
+REACH-verifies each one by deleting a key from a real document. **api-cloudrun#951 is the issue that
+asks for it to become a committed guard** — do that before batch 5 rather than writing it a sixth
+time.
+
+
+- **The 67 `array[]` paths need a different instrument** — a paged census in the shape of
   `audit-zero-priced-components.ts`, which already pages `items[]` on three grains. The stored
   invoice item `path` (`schemas/invoice.ts:487`, `z.array(ItemUid).default([])`) is in this family.
 
@@ -532,8 +506,8 @@ the recipe above, none of them quoted as gospel:
   onto a stored items array changes the recomputed order, and the stored array then fails its own
   boundary check. **Measured by the zero_priced stage-two backfill (cfs-f0, 2026-09-10): three prod
   invoices reordered and had to be written in canonical order.**
-  ⚠️ **Reach: 57 of the 153 remaining paths are `items[]` paths** — 19 invoices, 16 orders,
-  14 credit-notes, 8 fulfillments, unchanged by batch 3. `zero_priced` is the only sort key today and is NOT itself in the
+  ⚠️ **Reach: 57 of the 143 remaining paths are `items[]` paths** — unchanged by batches 3 and 4,
+  which took nothing out of this family. `zero_priced` is the only sort key today and is NOT itself in the
   backlog, so the hazard is not that this campaign stamps it; it is that any items-array backfill
   must WRITE IN CANONICAL ORDER rather than patching a key in place, and must expect arrays a
   previous backfill has already reordered.
@@ -578,56 +552,30 @@ the recipe above, none of them quoted as gospel:
 
 ## Context recommendation
 
-**Clear before batch 4.** Batch 3 is gated, committed and published; what remains is mechanical —
-watch `api-cloudrun` `200af2cf` land, merge `templates` #307, bump and push `manager`'s one pin, and
-confirm the release reaches prod by image digest. None of that needs this session's analysis, and
-nothing about batch 4 depends on it: the backlog is read off `core/tests/stored-defaults.test.ts`, the
-partition is re-derived by the recipe above, and the policy — now including the parse-not-census rule
-and the shared stored/input-node rule — is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+**Clear before batch 5.** Batch 4 is fully landed: `core` published `beta.405`, all three consumer
+pins are in, `templates` #308 is merged, and — unlike batch 3 — it **reached prod**, verified by
+image digest rather than by a tag. There is nothing mechanical left to watch.
 
-⚠️ **Do not carry the numbers in this doc into batch 4 — re-run the recipe.** Batch 3 is the proof:
-this doc's own `Address` table was wrong in both directions, and the errors were in the instruments
-rather than in the arithmetic. ⭐ **Batch 3 also retires the reconciliation check this section used to
-recommend.** "Batch 2's re-derivation reconciled with batch 1's exactly" was offered as the check
-worth repeating — and a reconciliation is exactly what a hole in the ENUMERATOR survives, because both
-sides come from the same walk. It reconciled at 211 while 47 paths were invisible. **Re-derive, and
-ask what the instrument cannot see.**
+Batch 5 depends on none of this session's analysis. Everything it needs is written down: the backlog
+is read off `core/tests/stored-defaults.test.ts` (143 paths), the partition is re-derived by the
+recipe above, the `items[]` hazards are in the section above this one, and the policy — the
+parse-not-census rule, the shared stored/input-node rule, and the denominator rule batch 4 sharpened
+— is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
 
-**Everything mechanical is DONE** — `core` published, all three consumer pins landed, `templates`
-#307 merged, four inverted tests and three consumer fixtures repaired. The one open item is that
-**prod is still `beta.403`** and nothing will change that until a releasable commit lands in
-`api-cloudrun`; the status block above says why that is safe to leave.
+⚠️ **Do not carry this doc's numbers into batch 5 — re-run the recipe.** Batch 3 proved the doc's own
+table can be wrong in both directions with the errors in the INSTRUMENTS; batch 4 proved the numbers
+can be right and still mean something different from what they look like. **Re-derive, and ask what
+the instrument can see.**
 
-**The owner has granted merging Release Please PRs** (2026-09-10), so whoever picks this up may land
-one without asking. ⚠️ **There is none to land** — and there will not be until a releasable commit
-exists, so do not go looking for one and conclude something is broken.
+🔴 **Do api-cloudrun#951 FIRST.** Batch 4's corpus probe was the fifth writing of the same script, and
+it is deleted again. Batch 5 is `items[]` — 57 of the 143 paths, all `array[]` members the `orderBy`
+oracle cannot address at all — so it *needs* that instrument and cannot fall back to a census. Lifting
+it into a committed guard is the batch's cheapest prerequisite, not a tidy-up after it.
 
-⭐ **If prod is wanted on `beta.404`, the vehicle is api-cloudrun#952, not a no-op commit.** Deleting
-`findOrCreateDestination`'s `Partial<AddressType>` and its three `as` casts is a genuine
-`fix(destinations):`, it is one session's work, batch 3 is what unblocked it, and it cuts `v0.249.0`
-carrying the pin with it. A commit manufactured only to trigger a release would put a false
-changelog line in front of the one release note that matters.
-
-### ⚠️ Every batch's pin bump is a `chore(deps)` carrying a BREAKING change — and that is mis-typed
-
-This has now bitten twice and will bite batch 4 identically, so it belongs here rather than in a
-session's head. A pin bump is spelled `chore(deps)`, which says *"tooling, no behaviour change"* —
-and in this campaign it always carries one: batch 3's made `POST /orders` and `PATCH /orders/{uid}`
-**400 a partial address** where they used to silently complete it.
-
-| batch | symptom |
-|---|---|
-| 2 | a release PR already existed, so the pin rode in and the NOTES under-described the artifact |
-| 3 | no release PR existed, so **nothing was cut at all** and prod stayed a beta behind |
-
-⭐ Batch 3 is the sharper failure and the easier one to miss, because nothing looks wrong: `main` is
-green, dev is correct, and the absence of a release is indistinguishable from not needing one. Same
-family as api-cloudrun#947 (a `!` with no `BREAKING CHANGE` footer) and core#71 — noted on #947.
-**For batch 4, decide the commit TYPE deliberately before pushing the pin**, and say in the message
-what a consumer of the API would notice.
-
-**Not this session:** api-cloudrun#951 (the corpus re-parse guard — that probe has now been written
-**four** times, and batch 3's version added the two things the others lacked, a per-position
-denominator and a reach check, so it is the one to lift), api-cloudrun#943's manager half, and batch 4
-(`DocDestinationContact.phones`, 8 paths across 6 collections — see *The next batch*, which now
-names it with measurements rather than leaving it to be re-derived).
+**One thing batch 4 did NOT do, deliberately:** `updateOrganization` still carries
+`organization.emails = organization.emails || []` and the same for `phones`
+(`api-cloudrun/src/services/organizations.ts`). Those are workarounds for exactly the absence this
+batch removed, and they are now inert — both fields are required and both corpora are complete. They
+were left because removing them is a separate, behaviour-bearing change with its own argument, and
+folding it into a pin-carrying release would have hidden it. **A fix expires its workarounds; expiring
+them is its own commit.**
