@@ -480,7 +480,7 @@ const InvoiceDocOrderItemInner = z.strictObject({
   // replica are literally `Order #NNN`. See `OrderDocLineItem.name`.
   name: z.string().max(200).meta({ pii: "none" }).default(""),
   path: z.array(ItemUid).default([]),
-  description: z.string().meta({ pii: "none" }).default(""),
+  description: z.string().meta({ pii: "none" }),
 });
 
 /** Zod schema for an order divider item. */

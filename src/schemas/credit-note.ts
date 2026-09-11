@@ -246,7 +246,7 @@ const CreditNoteDocLineItemInner = z.strictObject({
   type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
   name: z.string().meta({ pii: "none", column: true }),
-  description: z.string().meta({ pii: "none", column: true, label: "Description" }).default(""),
+  description: z.string().meta({ pii: "none", column: true, label: "Description" }),
   quantity: z.int().default(0).meta({ column: true, label: "Quantity" }),
   price: CreditNoteDocItemPriceSchema,
   coa_revenue: COARevenueEnum.nullable(),

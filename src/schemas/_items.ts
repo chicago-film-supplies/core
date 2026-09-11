@@ -111,7 +111,7 @@ import { ItemUid } from "./_uid.ts";
 export const LineItemCore: {
   uid: z.ZodType<string>;
   name: z.ZodString;
-  description: z.ZodDefault<z.ZodString>;
+  description: z.ZodString;
   quantity: z.ZodDefault<z.ZodNumber>;
   path: z.ZodDefault<z.ZodArray<z.ZodType<string>>>;
   zero_priced: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
@@ -156,7 +156,7 @@ export const LineItemCore: {
     pii: "none",
     column: true,
     label: "Description",
-  }).default(""),
+  }),
 
   // ⚠️ **`.min(0)` is the tightening.** The invoice declared `z.int()` with no
   // lower bound until 2026-09-09, so an invoice line could store a negative

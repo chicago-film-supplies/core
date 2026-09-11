@@ -28,6 +28,7 @@ const docLine = (over: Record<string, unknown> = {}) => ({
   uid: "testprod100000000000",
   type: "rental",
   name: "Camera",
+  description: "",
   stock_method: "none",
   price: priceBase,
   ...over,
@@ -549,18 +550,21 @@ Deno.test("OrderSchema validates a complete document", () => {
         uid: "550e8400-e29b-41d4-a716-446655440000",
         type: "destination",
         name: "Test Chicago Office",
+        description: "",
         path: [],
       },
       {
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "group",
         name: "Test Lighting",
+        description: "",
         path: ["550e8400-e29b-41d4-a716-446655440000"],
       },
       {
         uid: "testprod100000000000",
         type: "rental",
         name: "Camera",
+        description: "",
         path: ["550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440001"],
         quantity: 2,
         price: {
@@ -1179,25 +1183,18 @@ Deno.test("a transaction_fee cannot carry price.replacement_cents", () => {
 Deno.test("the contract check still reports at its declared path inside the union", () => {
   // `.superRefine` replaced a hand-written `.refine`; a DU arm's check must
   // still emit at ["price","replacement_cents"] rather than at the union root.
-  const bad = OrderDocItem.safeParse({
-    uid: "testprod100000000000",
-    type: "rental",
-    name: "Camera",
+  const bad = OrderDocItem.safeParse(docLine({
     stock_method: "bulk",
     price: { ...priceBase, replacement_cents: null },
-  });
+  }));
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["price", "replacement_cents"]);
 
   // Unchanged escape hatch: a rental holding no stock needs no replacement value.
   assertEquals(
-    OrderDocItem.safeParse({
-      uid: "testprod100000000000",
-      type: "rental",
-      name: "Camera",
-      stock_method: "none",
+    OrderDocItem.safeParse(docLine({
       price: { ...priceBase, replacement_cents: null },
-    }).success,
+    })).success,
     true,
   );
 });

@@ -60,7 +60,7 @@ export const DestinationDividerArm = z.strictObject({
   // (`destinations[i].uid === this divider's uid`), which is the only copy.
   // Removed in three steps 2026-08-25: writers stopped, both corpora purged
   // (2,981 prod documents / 2,980 dev, 0 failed), then this arm tightened.
-  description: z.string().meta({ pii: "none" }).default(""),
+  description: z.string().meta({ pii: "none" }),
 });
 
 /** Group divider in an order/invoice items array. */
@@ -73,5 +73,5 @@ export const GroupDividerArm = z.strictObject({
   // label, so `none` — see `OrderDocLineItem.name`.
   name: z.string().min(1).max(100).meta({ pii: "none" }),
   path: z.array(ItemUid).default([]),
-  description: z.string().meta({ pii: "none" }).default(""),
+  description: z.string().meta({ pii: "none" }),
 });
