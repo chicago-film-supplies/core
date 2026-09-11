@@ -7,6 +7,10 @@ const validCard = {
   uid_list: "list1000000000000000",
   uid_thread: "thread10000000000000",
   status: "planned",
+  // Both REQUIRED since core#95 batch 9. They sat absent here while the
+  // fixture called itself complete — the same shape that made 7 dev cards the
+  // only evidence batch 8 had.
+  action: null,
   position: 1000,
   subject: "Deliver to Warehouse A",
   body: null,
@@ -18,6 +22,7 @@ const validCard = {
   all_day: false,
   date_fs: null,
   destination: null,
+  organization: null,
   sources: [{ collection: "orders", uid: "order100000000000000" }],
   attachments: [],
   uid_assignees: [],
@@ -205,3 +210,17 @@ Deno.test("CardSchema accepts a recurring-instance card with overrides", () => {
   };
   assertEquals(CardSchema.safeParse(doc).success, true);
 });
+
+// 🔴 One dropped key per case, so each names the constraint it tests rather
+// than failing for some reason — core#95 batch 9's two paths. `null` stays a
+// legal stored VALUE for both; these assert the KEY.
+for (const key of ["action", "organization"] as const) {
+  Deno.test(`CardSchema requires ${key} (core#95 batch 9)`, () => {
+    const { [key]: _omit, ...doc } = validCard;
+    const parsed = CardSchema.safeParse(doc);
+    assertEquals(parsed.success, false);
+    if (!parsed.success) {
+      assertEquals(parsed.error.issues.map((i) => i.path.join(".")), [key]);
+    }
+  });
+}

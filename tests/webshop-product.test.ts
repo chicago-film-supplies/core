@@ -98,3 +98,60 @@ Deno.test("WebshopProductSchema still accepts a component priced five_day_week",
   const doc = { ...validWebshopProduct, components: [component] };
   assertEquals(WebshopProductSchema.safeParse(doc).success, true);
 });
+
+// ── core#95 batch 9 — the seven WebshopProductSchema paths, asserted directly ──
+//
+// 🔴 Same reason as `product.test.ts`: `validWebshopProduct` spreads
+// `getInitialValues(WebshopProductSchema)`, whose walk is TYPE-derived, so the
+// fixture states every key whether the schema asks for it or not and is
+// structurally incapable of failing a required-key tightening. The corpus
+// reparse and these cases are the gate; the fixture is not.
+for (const path of ["alternates", "components", "component_of"] as const) {
+  Deno.test(`WebshopProductSchema requires ${path} (core#95 batch 9)`, () => {
+    const { [path]: _omit, ...doc } = validWebshopProduct;
+    const parsed = WebshopProductSchema.safeParse(doc);
+    assertEquals(parsed.success, false);
+    if (!parsed.success) {
+      assertEquals(parsed.error.issues.map((i) => i.path.join(".")), [path]);
+    }
+  });
+}
+
+Deno.test("WebshopProductSchema requires price.taxes (core#95 batch 9)", () => {
+  const { taxes: _omit, ...price } = validWebshopProduct.price as Record<string, unknown>;
+  const parsed = WebshopProductSchema.safeParse({ ...validWebshopProduct, price });
+  assertEquals(parsed.success, false);
+  if (!parsed.success) {
+    assertEquals(parsed.error.issues.map((i) => i.path.join(".")), ["price.taxes"]);
+  }
+});
+
+Deno.test("WebshopProductSchema requires webshop.available (core#95 batch 9)", () => {
+  const { available: _omit, ...webshop } = validWebshopProduct.webshop as Record<string, unknown>;
+  const parsed = WebshopProductSchema.safeParse({ ...validWebshopProduct, webshop });
+  assertEquals(parsed.success, false);
+  if (!parsed.success) {
+    assertEquals(parsed.error.issues.map((i) => i.path.join(".")), ["webshop.available"]);
+  }
+});
+
+// ⭐ `components[]` and `component_of[]` are ONE node (`WebshopComponentSchema`)
+// reached at two positions, so the requirement is asserted at both — a single
+// declaration can still be unreached through one of its embeddings.
+for (const arm of ["components", "component_of"] as const) {
+  Deno.test(`WebshopProductSchema requires ${arm}[].price.taxes (core#95 batch 9)`, () => {
+    const component = {
+      uid: "testwpc000000000000a",
+      path: [],
+      name: "Battery",
+      type: "rental",
+      quantity: 1,
+      price: { base_cents: 0, formula: "fixed", discountable: false },
+    };
+    const parsed = WebshopProductSchema.safeParse({ ...validWebshopProduct, [arm]: [component] });
+    assertEquals(parsed.success, false);
+    if (!parsed.success) {
+      assertEquals(parsed.error.issues.map((i) => i.path.join(".")), [`${arm}.0.price.taxes`]);
+    }
+  });
+}

@@ -772,6 +772,32 @@ a clean diff and a broken probe print the same thing. ⚠️ Find the affected s
 **unbounded** `grep -rn getInitialValues manager/src`; batch 8's first attempt was `| head -20`,
 which cut off both card stores and read exactly like a complete answer.
 
+🔴 **There are TWO parse seams and they dispose of `result.data` in OPPOSITE directions — so an
+INPUT `.default()` really does reach storage, and must not be swept with the stored ones.**
+`validateBeforeWrite` DISCARDS `result.data` and writes the raw document, which is the whole premise
+of this campaign. The route validator does the opposite: `@hono/zod-validator` ends
+`return result.data`, so `c.req.valid("json")` hands the handler the PARSED input, defaults
+materialized. Measured 2026-09-11, core#95 batch 9 — `products.alternates` / `components` /
+`component_of` / `price.taxes` read **570 of 570 present in BOTH projects** while `createProduct`
+names none of them: it spreads the route's validated input, and `CreateProductInput.default([])` is
+what put those keys in every stored document. ⭐ **So the corpus completeness that licenses a stored
+tightening can be PRODUCED BY the input default**, and removing the stored one is safe only because
+the input one stays. `tests/product.test.ts` asserts that materialization directly, so the dependency
+is pinned rather than remembered.
+
+🔴 **A test fixture built from `getInitialValues(<Schema>)` is STRUCTURALLY INCAPABLE of failing a
+required-key tightening, and its green is not evidence.** `resolveField` is TYPE-derived, so the seed
+states every key whether the schema asks for it or not — the fixture is complete by construction.
+Measured 2026-09-11: `core/tests/product.test.ts` and `webshop-product.test.ts` both spread such a
+seed, and batch 9's thirteen product-family removals turned the suite **entirely green with nothing
+repaired**, while `card.test.ts` — a hand-spelled literal — went red on 11 cases. ⚠️ **The two greens
+are not the same fact**, and only the denominator says which you have. ⭐ **The remedy is a direct
+assertion per path — drop one key, require the issue to name exactly it** — never a fixture edit,
+because there is nothing in the fixture to edit. This is the mirror of the inverted test batch 2
+undid: not a green that asserts the default's spec, but a green that cannot see the default at all.
+⚠️ And note `getInitialValues` wears both hats — it is a LIVE consumer of these defaults in ~10
+manager stores (below) *and* the reason these fixtures are blind. Same helper, two opposite roles.
+
 🔴 **A VACUOUS declaration — zero documents in both projects — is still gateable, by the TYPE and by
 the SUITE.** `audit:reparse` prints `NO-POPULATION` rather than a clean `REACHED` there, and a clean
 parse means nothing at all. Measured 2026-09-11 on `RecurrencePrototype` (`recurrences` holds 0

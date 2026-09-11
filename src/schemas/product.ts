@@ -599,9 +599,14 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement Price" }),
     coa_revenue: COARevenueEnum,
-    taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
+    taxes: z.array(TaxRef).meta({ label: "Tax" }),
     formula: PriceFormulaEnum.meta({ column: true, label: "Price Formula" }),
-    discountable: z.boolean().default(true).meta({ column: true, label: "Discountable" }),
+    // `.meta({ initial })` rather than `.default(true)`, for the reason stated on
+    // `active` above — and here the annotation is load-bearing rather than
+    // tidy: the type-derived zero for a boolean is `false`, so dropping the
+    // default without it would seed every new-product form NON-discountable
+    // with nothing failing (core#95 batch 9).
+    discountable: z.boolean().meta({ initial: true, column: true, label: "Discountable" }),
   }).superRefine(checkPriceBaseUnit),
   // The four dimensions are NULLABLE because `0` means two different things —
   // "weighs nothing" and "nobody has weighed it" — and the corpus is entirely
@@ -627,9 +632,9 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     air_hazardous: z.boolean().meta({ column: true, label: "Air Hazardous" }),
     air_un: z.number().nullable().meta({ column: true, label: "UN Number" }),
   }).optional(),
-  alternates: z.array(UidNameRef).default([]).meta({ label: "Alternates" }),
-  components: z.array(AuthoredComponentSchema).default([]).meta({ label: "Components" }),
-  component_of: z.array(ComponentSchema).default([]).meta({ label: "Component Of" }),
+  alternates: z.array(UidNameRef).meta({ label: "Alternates" }),
+  components: z.array(AuthoredComponentSchema).meta({ label: "Components" }),
+  component_of: z.array(ComponentSchema).meta({ label: "Component Of" }),
   tags: z.array(UidNameRef).default([]).meta({ label: "Tags" }),
   query_by_tags: z.array(z.string()).optional(),
   query_by_components: z.array(z.string()).optional(),
@@ -640,7 +645,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   uid_linked_replacement: FirestoreId.nullable().optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
   webshop: z.strictObject({
-    available: z.boolean().default(false).meta({ column: true, label: "Available" }),
+    available: z.boolean().meta({ column: true, label: "Available" }),
     // Key present on 544 of 568 prod products, always `null`; the other 24 lack
     // it entirely (2026-08-23). So it is neither dead nor a clean tighten —
     // requiring it needs a 24-doc backfill first. CLAUDE.md § "Is a field dead?".

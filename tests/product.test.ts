@@ -633,3 +633,64 @@ Deno.test("a component with a NULL base_percent still parses — the copy path",
   };
   assertEquals(ComponentSchema.safeParse(component).success, true);
 });
+
+// ── core#95 batch 9 — the six ProductSchema paths, asserted directly ─────────
+//
+// 🔴 **These exist because `validProduct` CANNOT fail them.** It is built from
+// `getInitialValues(ProductSchema)`, whose walk is TYPE-derived and therefore
+// seeds every key whether the schema requires it or not — so the fixture is
+// complete by construction and a required-key tightening is invisible to it.
+// That is the mirror of the inverted test batch 2 undid: not a green that
+// asserts the default's spec, but a green that cannot see the default at all.
+// One dropped key per case, so each names the constraint it tests.
+for (const path of ["alternates", "components", "component_of"] as const) {
+  Deno.test(`ProductSchema requires ${path} (core#95 batch 9)`, () => {
+    const { [path]: _omit, ...doc } = validProduct;
+    const parsed = ProductSchema.safeParse(doc);
+    assertEquals(parsed.success, false);
+    if (!parsed.success) {
+      assertEquals(parsed.error.issues.map((i) => i.path.join(".")), [path]);
+    }
+  });
+}
+
+for (const leaf of ["taxes", "discountable"] as const) {
+  Deno.test(`ProductSchema requires price.${leaf} (core#95 batch 9)`, () => {
+    const { [leaf]: _omit, ...price } = validProduct.price as Record<string, unknown>;
+    const parsed = ProductSchema.safeParse({ ...validProduct, price });
+    assertEquals(parsed.success, false);
+    if (!parsed.success) {
+      assertEquals(parsed.error.issues.map((i) => i.path.join(".")), [`price.${leaf}`]);
+    }
+  });
+}
+
+Deno.test("ProductSchema requires webshop.available (core#95 batch 9)", () => {
+  const { available: _omit, ...webshop } = validProduct.webshop as Record<string, unknown>;
+  const parsed = ProductSchema.safeParse({ ...validProduct, webshop });
+  assertEquals(parsed.success, false);
+  if (!parsed.success) {
+    assertEquals(parsed.error.issues.map((i) => i.path.join(".")), ["webshop.available"]);
+  }
+});
+
+// ⚠️ The MIRROR, and it is the half that keeps this batch honest: the same keys
+// on `CreateProductInput` are DELIBERATELY still defaulted, because
+// `ComponentObject` is one node shared with both input schemas and because the
+// route validator returns `result.data` — so the input default is what actually
+// puts these keys into storage. Sweeping them is a client-visible change, not a
+// storage tightening. See `core/CLAUDE.md` § `.default()` and `.optional()`.
+Deno.test("CreateProductInput still DEFAULTS the three array keys, and they MATERIALIZE (core#95 batch 9)", () => {
+  // `validCreateInput` states none of the three — which is the point: the
+  // stored document is 570/570 complete on all three in BOTH projects, and this
+  // is where that comes from. `createProduct` spreads the route's
+  // `c.req.valid("json")`, and `@hono/zod-validator` returns `result.data`.
+  assertEquals("alternates" in validCreateInput, false);
+  const parsed = CreateProductInput.safeParse(validCreateInput);
+  assertEquals(parsed.success, true);
+  if (parsed.success) {
+    assertEquals(parsed.data.alternates, []);
+    assertEquals(parsed.data.components, []);
+    assertEquals(parsed.data.component_of, []);
+  }
+});
