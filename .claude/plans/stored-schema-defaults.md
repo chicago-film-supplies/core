@@ -4,7 +4,7 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-11 — **batch 7 is published and swept; the prod deploy is one merge away. Backlog 100.**
+> ## ⚠️ STATUS 2026-09-11 — **batch 7 is landed, deployed and enforcing in prod. Backlog 100.**
 > One statement, compacted rather than stacked. Seven batches. Batch 7 is `quantity` ×4 + `name` ×4
 > — **8 paths across FOUR declarations** (`LineItemCore`, `CreditNoteDocLineItemInner`,
 > `DestinationDividerArm`, `InvoiceDocOrderItemInner`), taking the backlog **108 → 100** and the
@@ -19,12 +19,26 @@ api-cloudrun#943's remaining half.*
 > main `templates` checkout is sitting on a peer session's pushed branch
 > (`docs/rebless-recipe-needs-the-bearer`) — the same reason PR #311 needed one.
 >
-> 🔴 **The chain stops at `pinned`, and the ONE open step is a merge this session could not make.**
-> **`api-cloudrun` release PR #960** (`chore(main): release 0.249.2`) — Release Please generated it
-> from `24cb4c9e` and its checks pass. **Merging it is what cuts `v0.249.2` and fires the prod
-> trigger**; until then prod still serves revision `api-cloudrun-00368-bx8` on `beta.407`, and
-> **batch 7 is NOT enforcing in prod.** The auto-mode classifier refused `gh pr merge` on it
-> (*Merge Without Review*), twice, and it was left for the owner rather than routed around.
+> ✅ **The chain is CLOSED, by digest and against the deployed artifact.** Release PR #960 merged as
+> `7bd11246`, cutting **`v0.249.2`**. That build produced
+> `sha256:a74c8afe19826a72d0edd2eef9f4811aaf18a68569923386a316c8d9b750c14c`, and revision
+> **`api-cloudrun-00369-7rk`** serves exactly that digest at 100% traffic — confirmed live from the
+> public `/openapi.json`, whose `info.version` carries `K_REVISION`. The deployed tree's
+> `api-cloudrun/deno.json`
+> was diffed against the checkout the probe ran from: **the same 40 `beta.408` pins, byte for
+> byte**, so the reparse with **no `--core` flag** parses against the core the image itself
+> resolves: **all 8 positions `REACHED`, 3,095 documents per project, 0 failures, exit 0.**
+> ⭐ published → pinned → deployed → enforcing, each link a different claim and each one checked.
+>
+> ⚠️ **The digest check nearly did not happen, for a boring reason worth writing down.**
+> `gcloud builds list --project=cfs-3100` returns *"Listed 0 items"* — the builds are REGIONAL and
+> need `--region=us-central1`. An empty list from the right project reads exactly like *"no build
+> was triggered"*, which is the wrong conclusion and points at re-running a deploy that already
+> succeeded. ⚠️ And the first `gh api .../contents/deno.json?ref=<sha>` died on zsh globbing the
+> `?`, writing an EMPTY file — whose diff against the real one printed 41 lines of *"only in
+> yours"* and looked like a pin mismatch in the deployed tree. **Quote any URL carrying `?`, and
+> check a fetched file's SIZE before diffing it**: a failed fetch and a genuinely different file
+> produce the same-shaped diff.
 >
 > ### The BEFORE/AFTER pair, both projects, 8 positions
 >
@@ -140,7 +154,7 @@ api-cloudrun#943's remaining half.*
 > | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
 > | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → 132 | ✅ prod, `v0.249.0`, revision `api-cloudrun-00367-xm4` |
 > | 6 | the `price` block ×3 — 24 paths, 3 declarations, one block | 132 → **108** | ✅ prod, `v0.249.1`, revision `api-cloudrun-00368-bx8`, digest-verified |
-> | 7 | `quantity` ×4 + `name` ×4 — 8 paths, 4 declarations, two leaves | 108 → **100** | ⏳ `beta.408` published, all three consumers pinned (`templates` merged); **prod deploy blocked on merging `api-cloudrun` #960** |
+> | 7 | `quantity` ×4 + `name` ×4 — 8 paths, 4 declarations, two leaves | 108 → **100** | ✅ prod, `v0.249.2`, revision `api-cloudrun-00369-7rk`, digest-verified |
 >
 > ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
 >
@@ -302,7 +316,7 @@ api-cloudrun#943's remaining half.*
 | 40 pins, as a release-cutting `fix` | `api-cloudrun` `24cb4c9e` | ✅ landed on `main` |
 | 1 pin | `manager` `4f0a481` | ✅ landed on `main` |
 | 15 pins + lockfile | `templates` `1b5e754f` (PR #312) | ✅ merged, verified on the remote |
-| `beta.408` reaching prod | `api-cloudrun` release PR #960 → `v0.249.2` | ⏳ **blocked on a merge** |
+| `beta.408` reaching prod, verified by digest and by a pinned-core reparse | `v0.249.2` (`7bd11246`) → revision `api-cloudrun-00369-7rk` | ✅ deployed |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -861,29 +875,26 @@ with most care: it is the row identity, and the `items[]` backfill/ordering haza
 
 ## What is LEFT — read this first
 
-🔴 **Batch 7 has ONE piece of residue and it is a merge.** Everything mechanical is done —
-published, pinned in all three consumers (`templates` #312 merged as `1b5e754f`), both api-cloudrun
-tiers green — but the chain stops at `pinned`, because this session's auto-mode classifier refused
-`gh pr merge` on the release PR (*Merge Without Review*). **Until #960 merges, batch 7 is not
-enforcing in prod.**
+**Batch 7 has NO residue** — published, swept, merged, deployed, digest-verified and re-confirmed
+against the published core. What follows is everything else this campaign knows about, in order of
+who is blocked:
 
 | # | what | owner | blocked on |
 |---|---|---|---|
-| 1 | **`api-cloudrun` release PR #960** (`chore(main): release 0.249.2`) — merging it cuts the version and fires the prod trigger | the owner, or a session allowed to merge | a merge |
-| 2 | **verify the chain end-to-end after (1)** — digest, not tag; then `audit:reparse` with NO `--core` | next session | (1) |
-| 3 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
-| 4 | **Batch 8** — 100 paths, only 14 of them `items[]` | next session | nothing |
-| 5 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
-| 6 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
+| 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
+| 2 | **Batch 8** — 100 paths, only 14 of them `items[]` | next session | nothing |
+| 3 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
+| 4 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
 
-**(2) is the step batch 6 nearly skipped and is worth restating.** A revision NUMBER moving is good
-evidence the build arrived and **no evidence at all that the image carries `beta.408`**. Read the
-digest: `gcloud run revisions describe` for the image, `gcloud builds` for what the tag built, and
-then `deno task audit:reparse` with **no `--core` flag** from a checkout whose `deno.json` matches
-the deployed tree — that parses against the core the image itself resolves. All 8 positions must
-read `REACHED`. Published → pinned → deployed → enforcing are four different claims.
+⚠️ **The deploy verification is a four-link chain and the batch-6 near-miss still applies.** A
+revision NUMBER moving is good evidence the build arrived and **no evidence at all that the image
+carries the beta**. Read the digest: `gcloud builds describe --region=us-central1` for what the tag
+built, `gcloud run revisions describe` for what the live revision serves, diff the deployed tree's
+`deno.json` against the checkout you probe from, and only then run `deno task audit:reparse` with
+**no `--core` flag**. Published → pinned → deployed → enforcing are four different claims. Batch 7
+ran all four and they all held.
 
-**(3) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
+**(1) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
 there is no `DELETE` route, `updateTransaction` edits `reference` alone, and this row cannot take
 even that — it writes through `ValidatedTx.set`, which validates first. So a **reversal** mints a new
 movement and leaves the bad row in place (the reparse still exits non-zero), **stamping a supplier**
@@ -894,24 +905,20 @@ documented schema carve-out naming the one uid — costs a comment and a test. �
 adjudicated: it is a **duplicate of #1162**, which carries Home Depot and posted as `CFS-MOV-1162`;
 there is no `CFS-MOV-1161` anywhere in the ACCPAY window. Full evidence on the issue.
 
-**(4) batch 8 — read the split off `core/tests/stored-defaults.test.ts`, not this doc.**
+**(2) batch 8 — read the split off `core/tests/stored-defaults.test.ts`, not this doc.**
 🔴 **The cheap `items[]` batches are exhausted**: `items[]` is down to `path` ×10 (the row identity,
 one author, and the array-ordering hazard above is about it) and four credit-note-only Xero keys on
 146 rows. **So batch 8 is a genuine choice for the first time since batch 2** — a small deliberate
 `path` batch, the four thin credit-note keys, or a non-items family (`cards` 10 ·
-`products`/`webshop-products` 15 · `templates`* 7). The `cards` family is the largest single one
+`products`/`webshop-products` 15 · `templates` family 7). The `cards` family is the largest single one
 left and needs no new instrument; `path` needs the ordering hazard read first.
 
 ## Context recommendation
 
-**Continue if you can merge #960; otherwise clear after handing it over.**
+**Clear before batch 8.**
 
-The remaining work splits cleanly. **Merging #960 and then verifying the chain (items 1-2)
-needs this session's context** — the shas, the BEFORE/AFTER readings and what each verification
-claim actually means are all here, and item (2) is the step a fresh session most often downgrades
-into reading a revision counter.
-
-**Batch 8 needs none of it.** Everything it requires is written down: the backlog is read off
+Batch 7 is closed — nothing mechanical is left to watch. **Batch 8 depends on none of this
+session's analysis.** Everything it requires is written down: the backlog is read off
 `core/tests/stored-defaults.test.ts` (**100** paths — 76 scalar, 24 `array[]`, 14 of them `items[]`),
 the partition is re-derived by the recipe above, the `items[]` hazards are in the section above this
 one, and the policy — the parse-not-census rule, the shared stored/input-node rule, the denominator
@@ -931,7 +938,7 @@ caught a fixture defect for free; batches 5 and 6 each found theirs only after s
 `build-the-consumer-against-a-local-core` recipe is the mechanism, and its guard-class list needs
 the correction above.
 
-**Two things this session left deliberately:**
+**Three things this session left deliberately:**
 - The two documents `api-cloudrun#951` names are **still unrepaired** — a prod `transactions`
   purchase with `supplier: null` (an accounting fact, not a default: find its Xero bill or ask the
   owner) and a dev `locations` id. A third turned up, dev-only: `users/test-user`. Until they are
