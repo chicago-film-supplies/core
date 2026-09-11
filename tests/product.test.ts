@@ -674,23 +674,36 @@ Deno.test("ProductSchema requires webshop.available (core#95 batch 9)", () => {
   }
 });
 
-// ⚠️ The MIRROR, and it is the half that keeps this batch honest: the same keys
-// on `CreateProductInput` are DELIBERATELY still defaulted, because
-// `ComponentObject` is one node shared with both input schemas and because the
-// route validator returns `result.data` — so the input default is what actually
-// puts these keys into storage. Sweeping them is a client-visible change, not a
-// storage tightening. See `core/CLAUDE.md` § `.default()` and `.optional()`.
-Deno.test("CreateProductInput still DEFAULTS the three array keys, and they MATERIALIZE (core#95 batch 9)", () => {
-  // `validCreateInput` states none of the three — which is the point: the
-  // stored document is 570/570 complete on all three in BOTH projects, and this
-  // is where that comes from. `createProduct` spreads the route's
-  // `c.req.valid("json")`, and `@hono/zod-validator` returns `result.data`.
+// ⚠️ **The MIRROR of a test that used to assert the opposite, and the flip is the
+// point.** While `CreateProductInput` carried `.default([])` on these four, that
+// default was the de-facto author of four STORED keys: the route validator
+// returns `result.data`, so it materialized into every created product while no
+// writer named them. The test here asserted that materialization — pinning a
+// cross-repo coupling rather than removing it.
+//
+// `createProduct` now states all four at its construction site, so the defaults
+// came off and the input says what it means: the client MAY omit, and omitting
+// leaves the key absent for the writer to author. Asserting the absence is what
+// stops a future session "helpfully" restoring the default and quietly taking
+// authorship back.
+Deno.test("CreateProductInput does NOT default the four array keys — the writer authors them", () => {
   assertEquals("alternates" in validCreateInput, false);
   const parsed = CreateProductInput.safeParse(validCreateInput);
   assertEquals(parsed.success, true);
   if (parsed.success) {
-    assertEquals(parsed.data.alternates, []);
-    assertEquals(parsed.data.components, []);
-    assertEquals(parsed.data.component_of, []);
+    for (const key of ["alternates", "components", "component_of", "tags"] as const) {
+      assertEquals(key in parsed.data, false);
+    }
   }
+});
+
+// ⚠️ `price.taxes` is the one that KEPT its default, and it is not an
+// inconsistency. `UpdateProductInput` replaces the price wholesale and its tax
+// cascade keys on `"taxes" in update.price`, so the default is load-bearing
+// there; loosening only the create half would split a pair for no gain.
+Deno.test("CreateProductInput still defaults price.taxes, deliberately", () => {
+  const { taxes: _drop, ...price } = validCreateInput.price as Record<string, unknown>;
+  const parsed = CreateProductInput.safeParse({ ...validCreateInput, price });
+  assertEquals(parsed.success, true);
+  if (parsed.success) assertEquals(parsed.data.price.taxes, []);
 });

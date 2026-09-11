@@ -829,10 +829,27 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     air_hazardous: z.boolean(),
     air_un: z.number().nullable(),
   }).optional(),
-  alternates: z.array(UidNameRef).default([]),
-  components: z.array(ComponentSchema).default([]),
-  component_of: z.array(ComponentSchema).default([]),
-  tags: z.array(UidNameRef).default([]),
+  // 🔴 **`.optional()`, NOT `.default([])` — the WRITER authors these.**
+  //
+  // A `.default()` here is not inert the way a stored one is: the route
+  // validator returns `result.data`, so it really did materialize into every
+  // created product. That made it the de-facto author of four stored keys with
+  // no writer naming them — and `CreateProductInputType` has always declared all
+  // four `?`, so `z.ZodType<T>`'s one-directional check let the schema and the
+  // interface disagree, and every reader in `createProduct` guarded with
+  // `|| []` to satisfy the compiler.
+  //
+  // `createProduct` now states all four at its construction site, which is the
+  // same split `UpdateProductInput` below already had. The wire contract is
+  // unchanged — a client may still omit them — but the value has ONE author and
+  // it is visible at the write.
+  //
+  // ⚠️ **Ordering, if this is ever revisited:** `ProductSchema` requires all four,
+  // so the writer must state them BEFORE these defaults come off, never after.
+  alternates: z.array(UidNameRef).optional(),
+  components: z.array(ComponentSchema).optional(),
+  component_of: z.array(ComponentSchema).optional(),
+  tags: z.array(UidNameRef).optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.nullable().optional(),
   uid_linked_replacement: FirestoreId.nullable().optional(),
