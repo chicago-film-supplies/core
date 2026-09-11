@@ -814,7 +814,10 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum,
-    taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
+    // Required — see the note on `UpdateProductInput.price.taxes` below. The
+    // create half carries no default either, so the two inputs cannot disagree
+    // about who authors this key.
+    taxes: z.array(TaxRef).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }).superRefine(checkPriceBaseUnit),
@@ -964,7 +967,16 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional(),
     coa_revenue: COARevenueEnum,
-    taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
+    // 🔴 **Required — no `.default([])`. `price` is a WHOLE-OBJECT replacement.**
+    // Exactly the reason `coa_revenue` above is required, and this line was the
+    // half that repair missed: the default turned a client OMISSION into a
+    // silent erasure of the product's tax profile, because `assembleProduct`
+    // spreads `update.price` over the stored one. It also made the cascade's
+    // `"taxes" in update.price` presence test unfalsifiable. Measured
+    // 2026-09-11: 30 of 570 prod products hold an empty `price.taxes`, and while
+    // `service` (15/15) and `surcharge` (11/11) are legitimately untaxed, three
+    // RENTALS of 219 are each the only untaxed member of their own family.
+    taxes: z.array(TaxRef).meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }).superRefine(checkPriceBaseUnit).optional(),

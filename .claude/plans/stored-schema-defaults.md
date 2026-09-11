@@ -43,10 +43,27 @@ api-cloudrun#943's remaining half.*
 > runtime. **A `.default()` whose own interface marks it optional is a schema disagreeing with
 > itself, and the `|| []` count is the tell.**
 >
-> ⚠️ **`price.taxes` was deliberately left defaulted** — `UpdateProductInput` replaces the price
-> wholesale and a cascade keys on `"taxes" in update.price`, so its default is load-bearing. Measured,
-> not assumed. ⚠️ **And the ordering is asymmetric**: the writer must state a key BEFORE its default
-> comes off, never after.
+> 🔴 **`price.taxes` was left defaulted on a reason that turned out to be BACKWARDS — corrected in
+> `beta.412`.** The call was *"`UpdateProductInput` replaces the price wholesale and a cascade keys on
+> `"taxes" in update.price`, so its default is load-bearing"*. The wholesale replacement is precisely
+> why it is a defect: `assembleProduct` spreads `update.price` over the stored price, so an omitted
+> `taxes` is filled with `[]` and **erases the product's tax profile** rather than 400ing. The
+> presence test could never be false — a fossil, not a dependant. Both inputs now require the key and
+> the dead test is gone.
+>
+> ⭐ **What produced the wrong call, because it will recur:** *"a live branch reads this default"* and
+> *"a live branch is HARMED by this default"* produce the same grep. The question that separates them
+> is whether the branch could ever observe the key ABSENT — if not, the default is what made the test
+> unfalsifiable. ⭐ And: **a whole-object replacement inverts what a default MEANS.** On a patch it
+> fills a gap; on a replacement it deletes whatever the client did not restate.
+>
+> ⚠️ The evidence was in the file the whole time: `UpdateProductInputType.price.taxes` is
+> non-optional, and its sibling `coa_revenue` one line above carries *"Required — `price` here is a
+> WHOLE-OBJECT replacement, so an update that omitted this erased the stored account."* **The repair
+> stopped one line short, and the second reading found it.**
+>
+> ⚠️ **And the ordering is asymmetric**: the writer must state a key BEFORE its default comes off,
+> never after.
 >
 > ### 🔴 The finding that prompted it: an INPUT default was what put the keys in storage
 >

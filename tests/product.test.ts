@@ -697,13 +697,35 @@ Deno.test("CreateProductInput does NOT default the four array keys — the write
   }
 });
 
-// ⚠️ `price.taxes` is the one that KEPT its default, and it is not an
-// inconsistency. `UpdateProductInput` replaces the price wholesale and its tax
-// cascade keys on `"taxes" in update.price`, so the default is load-bearing
-// there; loosening only the create half would split a pair for no gain.
-Deno.test("CreateProductInput still defaults price.taxes, deliberately", () => {
-  const { taxes: _drop, ...price } = validCreateInput.price as Record<string, unknown>;
-  const parsed = CreateProductInput.safeParse({ ...validCreateInput, price });
-  assertEquals(parsed.success, true);
-  if (parsed.success) assertEquals(parsed.data.price.taxes, []);
-});
+// 🔴 **`price.taxes` is REQUIRED on both inputs, and this is the anti-erasure
+// gate.** `price` is a whole-object replacement, so a `.default([])` here does
+// not protect an omission — it converts one into a silent deletion of the
+// product's tax profile. That is the same defect the `coa_revenue` docblock one
+// line above records ("an update that omitted this erased the stored account"),
+// and this key was the half that repair missed.
+//
+// Asserted on BOTH inputs so they cannot drift back into disagreeing about who
+// authors the key, and by ISSUE PATH rather than by `success: false` — a parse
+// that failed for some other reason would otherwise pass this test.
+for (const [label, schema] of [
+  ["CreateProductInput", CreateProductInput],
+  ["UpdateProductInput", UpdateProductInput],
+] as const) {
+  Deno.test(`${label} REFUSES a price that omits taxes — it is a whole-object replacement`, () => {
+    const { taxes: _drop, ...price } = validCreateInput.price as Record<string, unknown>;
+    const parsed = schema.safeParse({ ...validCreateInput, price, version: 1 });
+    assertEquals(parsed.success, false);
+    if (!parsed.success) {
+      assertEquals(parsed.error.issues.map((i) => i.path.join(".")), ["price.taxes"]);
+    }
+  });
+
+  Deno.test(`${label} still accepts an explicitly EMPTY taxes array`, () => {
+    // ⚠️ The mirror, and it is what keeps the arm above from over-reaching.
+    // `[]` is a legal, meaningful value — 15 of 15 prod `service` products and
+    // 11 of 11 `surcharge` products carry it. Requiring the KEY must not be
+    // read as banning the empty VALUE.
+    const price = { ...(validCreateInput.price as Record<string, unknown>), taxes: [] };
+    assertEquals(schema.safeParse({ ...validCreateInput, price, version: 1 }).success, true);
+  });
+}

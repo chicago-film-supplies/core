@@ -797,10 +797,26 @@ parse, so restoring the default fails rather than silently taking authorship bac
 INTERFACE disagreed: `CreateProductInputType` had always declared all four `?`, and `z.ZodType<T>`
 is checked in one direction only — so nine readers in `createProduct` carried `|| []` to satisfy the
 compiler, dead at runtime. **A `.default()` that its own interface marks optional is a schema
-disagreeing with itself, and the `|| []` count is the tell.** (2) `price.taxes` was deliberately
-NOT moved: `UpdateProductInput` replaces the price wholesale and a cascade keys on
-`"taxes" in update.price`, so its default is load-bearing. **Measure the update path before
-sweeping a create-side default for symmetry.**
+disagreeing with itself, and the `|| []` count is the tell.** (2) `price.taxes` was at first left alone on the
+reasoning that `UpdateProductInput` replaces the price wholesale and a cascade keys on
+`"taxes" in update.price`, so *"its default is load-bearing"*. 🔴 **That was WRONG, and the
+correction is the more useful half.** The wholesale replacement is exactly why the default is
+a defect rather than a guard: `assembleProduct` spreads `update.price` over the stored price,
+so an omitted `taxes` is filled with `[]` and **ERASES the product's tax profile** instead of
+400ing. The cascade's presence test could never be false, so it was a fossil, not a dependant.
+And the interface had said so all along — `UpdateProductInputType.price.taxes` is
+non-optional, and its sibling `coa_revenue` one line above carries *"Required — `price` here
+is a WHOLE-OBJECT replacement, so an update that omitted this erased the stored account."*
+**The repair stopped one line short.** Both inputs now require it (`beta.412`) and the dead
+test is gone.
+
+⭐ **Two transferable rules came out of getting it wrong.** First: **"the update path depends
+on it" and "the update path is HARMED by it" produce the same grep.** Seeing a default read by
+a live branch is not evidence the branch needs it — ask whether the branch could ever observe
+the key absent, and if not, the default is what made the test unfalsifiable. Second: **a
+whole-object replacement inverts the meaning of a default.** On a PATCH, a default fills a gap;
+on a replacement it deletes whatever the client did not restate. Ask which one an input is
+before reading its defaults as safety.
 
 🔴 **A test fixture built from `getInitialValues(<Schema>)` is STRUCTURALLY INCAPABLE of failing a
 required-key tightening, and its green is not evidence.** `resolveField` is TYPE-derived, so the seed
