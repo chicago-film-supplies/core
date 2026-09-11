@@ -23,7 +23,32 @@ api-cloudrun#943's remaining half.*
 > against the core the image itself resolves: **all 15 positions `REACHED`, 0 failures, exit 0.**
 > ⭐ published → pinned → deployed → enforcing, each link a different claim and each one checked.
 >
-> ### 🔴 The finding: an INPUT default is what put the keys in storage
+> ### ✅ FOLLOW-UP LANDED — `beta.411` moved the authorship to the writer
+> On the owner's call, batch 9's first finding was **resolved rather than documented**.
+> `CreateProductInput`'s four array defaults are now `.optional()` and `createProduct` states
+> `alternates` / `components` / `component_of` / `tags` at its construction site — `core` `933248c`
+> → **`beta.411`**, `api-cloudrun` `1e6fc531` → **`v0.250.0`**, revision `api-cloudrun-00373-nwx`,
+> digest `sha256:e129ab26…`, deployed tree verified to carry BOTH halves. `manager-v26.0.5` and
+> `templates` PR #316 are on `.411`.
+>
+> 🔴 **The suite could not see the change, and the mutation control is what found that.** Reverting
+> `createProduct` to the spread-only form against a loosened input left the products integration
+> suite **GREEN** — `productBase` is `getInitialValues(CreateProductInput)`, so no create in that
+> file omits a key. **Third instance of one blindness in two days**, after core's product and
+> webshop fixtures. A test that OMITS all four and asserts the stored document carries them now
+> exists, and was verified as a pair: old writer red on exactly that assertion, new writer green.
+>
+> ⭐ **Nine `|| []` guards came out with it.** `CreateProductInputType` had always declared the four
+> `?`, so every reader carried one to satisfy the compiler while the default made them dead at
+> runtime. **A `.default()` whose own interface marks it optional is a schema disagreeing with
+> itself, and the `|| []` count is the tell.**
+>
+> ⚠️ **`price.taxes` was deliberately left defaulted** — `UpdateProductInput` replaces the price
+> wholesale and a cascade keys on `"taxes" in update.price`, so its default is load-bearing. Measured,
+> not assumed. ⚠️ **And the ordering is asymmetric**: the writer must state a key BEFORE its default
+> comes off, never after.
+>
+> ### 🔴 The finding that prompted it: an INPUT default was what put the keys in storage
 >
 > **There are TWO parse seams and they dispose of `result.data` in OPPOSITE directions.**
 > `validateBeforeWrite` DISCARDS it and writes the raw document — the campaign's founding premise,

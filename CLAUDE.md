@@ -779,18 +779,40 @@ of this campaign. The route validator does the opposite: `@hono/zod-validator` e
 `return result.data`, so `c.req.valid("json")` hands the handler the PARSED input, defaults
 materialized. Measured 2026-09-11, core#95 batch 9 — `products.alternates` / `components` /
 `component_of` / `price.taxes` read **570 of 570 present in BOTH projects** while `createProduct`
-names none of them: it spreads the route's validated input, and `CreateProductInput.default([])` is
+named none of them: it spread the route's validated input, and `CreateProductInput.default([])` was
 what put those keys in every stored document. ⭐ **So the corpus completeness that licenses a stored
-tightening can be PRODUCED BY the input default**, and removing the stored one is safe only because
-the input one stays. `tests/product.test.ts` asserts that materialization directly, so the dependency
-is pinned rather than remembered.
+tightening can be PRODUCED BY the input default.**
+
+✅ **RESOLVED for `products` rather than documented — and the resolution is the better lesson.**
+The first response was a test in `tests/product.test.ts` pinning the materialization, so the
+cross-repo dependency could not be swept away unnoticed. That is *policing a coupling*, and this
+package's own rule prefers making a defect class unrepresentable. So the four array keys moved to
+`.optional()` and **api-cloudrun's `createProduct` now authors them at its construction site**
+(`beta.411`). ⚠️ **The ordering is not symmetric: the writer must state the key BEFORE the default
+comes off**, never after — `ProductSchema` already required all four, so defaults-first would have
+400'd every create. The test is rewritten as its MIRROR, asserting the keys stay ABSENT after a
+parse, so restoring the default fails rather than silently taking authorship back.
+
+⭐ **Two things that made the old shape invisible, and both generalise.** (1) The schema and the
+INTERFACE disagreed: `CreateProductInputType` had always declared all four `?`, and `z.ZodType<T>`
+is checked in one direction only — so nine readers in `createProduct` carried `|| []` to satisfy the
+compiler, dead at runtime. **A `.default()` that its own interface marks optional is a schema
+disagreeing with itself, and the `|| []` count is the tell.** (2) `price.taxes` was deliberately
+NOT moved: `UpdateProductInput` replaces the price wholesale and a cascade keys on
+`"taxes" in update.price`, so its default is load-bearing. **Measure the update path before
+sweeping a create-side default for symmetry.**
 
 🔴 **A test fixture built from `getInitialValues(<Schema>)` is STRUCTURALLY INCAPABLE of failing a
 required-key tightening, and its green is not evidence.** `resolveField` is TYPE-derived, so the seed
 states every key whether the schema asks for it or not — the fixture is complete by construction.
 Measured 2026-09-11: `core/tests/product.test.ts` and `webshop-product.test.ts` both spread such a
 seed, and batch 9's thirteen product-family removals turned the suite **entirely green with nothing
-repaired**, while `card.test.ts` — a hand-spelled literal — went red on 11 cases. ⚠️ **The two greens
+repaired**, while `card.test.ts` — a hand-spelled literal — went red on 11 cases. 🔴 **And it is not
+confined to core: api-cloudrun's products INTEGRATION suite has the same hole**, because
+`productBase` is `getInitialValues(CreateProductInput)` — so no create in that file omits a key, and
+reverting `createProduct` to its pre-`beta.411` form left the whole suite GREEN against a loosened
+input. Three instances of one blindness, in two repos, found in two days. **Wherever a payload or
+fixture is seeded from the schema it is testing, the seed cannot falsify the schema.** ⚠️ **The two greens
 are not the same fact**, and only the denominator says which you have. ⭐ **The remedy is a direct
 assertion per path — drop one key, require the issue to name exactly it** — never a fixture edit,
 because there is nothing in the fixture to edit. This is the mirror of the inverted test batch 2
