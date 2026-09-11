@@ -18,15 +18,21 @@ api-cloudrun#943's remaining half.*
 > (batch 5's was `00367-xm4`), read from the public `/openapi.json`, whose `info.version` carries
 > `K_REVISION`.
 >
-> 🟡 **The chain is NOT closed, and the missing link is named.** Both gcloud credentials — the
-> account token AND ADC — died `invalid_grant` between the pin sweep and the merge, so the two
-> checks batch 5 used could not run: the **image-digest** confirmation (`gcloud builds describe` →
-> `gcloud run services describe`) and the **`audit:reparse` against prod with no `--core` flag**,
-> which is the deployed→enforcing half. ⚠️ **A new revision NUMBER is circumstantial, not the
-> digest** — one release was cut in the window and the counter moved by one, which is strong and is
-> still not the check this campaign prescribes. Re-run both after
-> `gcloud auth login` + `gcloud auth application-default login`; expect all 24 positions `REACHED`
-> over 2,074 prod documents, exit 0.
+> ✅ **The chain is CLOSED, by digest and against the deployed artifact.** `v0.249.1` built
+> `sha256:92b1193fa1d665838edc7dfc531af1ced0213c18be3f5d19f4b6076325d63475` from commit `d640a907`,
+> and revision `api-cloudrun-00368-bx8` serves exactly that digest at 100% traffic. The deployed
+> tree's `deno.json` carries the same 40 `beta.407` pins as the checkout the probe ran from, so the
+> reparse with **no `--core` flag** parses against the core the image itself resolves: **all 24
+> positions `REACHED`, 2,074 prod documents, 0 failures, exit 0.** ⭐ published → pinned → deployed
+> → enforcing, each link a different claim.
+>
+> ⚠️ **It nearly was not, and the near-miss is the note worth keeping.** Both gcloud credentials —
+> the account token AND ADC — died `invalid_grant` between the pin sweep and the merge, and prod's
+> revision counter had already moved 00367 → 00368 with exactly one release cut in the window.
+> **That is good evidence the build arrived and no evidence at all that the image carries
+> `beta.407`** — a revision NUMBER is not a digest. The temptation to call it done on a counter is
+> exactly what batch 5's *digest, not tag* rule exists to refuse, and it is much stronger when the
+> real check is blocked rather than merely tedious.
 >
 > ### ⭐ The finding: the CORPUS can BE the writer audit, and batch 4 is the other half of the pair
 >
@@ -116,7 +122,7 @@ api-cloudrun#943's remaining half.*
 > | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → 143 | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
 > | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
 > | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → 132 | ✅ prod, `v0.249.0`, revision `api-cloudrun-00367-xm4` |
-> | 6 | the `price` block ×3 — 24 paths, 3 declarations, one block | 132 → **108** | ✅ prod, `v0.249.1`, revision `api-cloudrun-00368-bx8` — **digest + pinned-core reparse still unrun** |
+> | 6 | the `price` block ×3 — 24 paths, 3 declarations, one block | 132 → **108** | ✅ prod, `v0.249.1`, revision `api-cloudrun-00368-bx8`, digest-verified |
 >
 > ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
 >
@@ -272,7 +278,7 @@ api-cloudrun#943's remaining half.*
 | the shared-counter assertion repaired on the RESULT, mutation-verified | `api-cloudrun` `b0961b80` | ✅ landed on `main` |
 | 1 pin | `manager` `7697e16` | ✅ landed on `main` |
 | 15 pins + lockfile | `templates` `3d6d491` (PR #311) | ✅ merged |
-| `beta.407` reaching prod | `v0.249.1` (`d640a907`) → revision `api-cloudrun-00368-bx8` | ✅ deployed, 🟡 **not yet digest-verified** |
+| `beta.407` reaching prod, verified by digest and by a pinned-core reparse | `v0.249.1` (`d640a907`) → revision `api-cloudrun-00368-bx8` | ✅ deployed |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -801,24 +807,18 @@ with most care: it is the row identity, and the `items[]` backfill/ordering haza
 
 ## What is LEFT — read this first
 
-**Batch 6 is published, swept, merged and deployed. One VERIFICATION is outstanding, not one
-action** — the credentials it needs expired mid-session.
+**Batch 6 has NO residue** — published, swept, merged, deployed, digest-verified and re-confirmed
+against the published core. What follows is everything else this campaign knows about, in order of
+who is blocked:
 
 | # | what | owner | blocked on |
 |---|---|---|---|
-| 1 | **Close batch 6's chain** — image digest for `v0.249.1`, then `audit:reparse` against prod with **no `--core`** | next session | `gcloud auth login` + `gcloud auth application-default login` |
-| 2 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
-| 3 | **Batch 7** — 108 paths, 22 of them `items[]` | next session | nothing |
-| 4 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
-| 5 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
+| 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
+| 2 | **Batch 7** — 108 paths, 22 of them `items[]` | next session | nothing |
+| 3 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
+| 4 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
 
-⚠️ **(1) is the deployed→ENFORCING half, and nothing else substitutes for it.** The revision number
-moved 00367 → 00368 with exactly one release cut in the window, which is good evidence that the
-build arrived and is **not** evidence that the image carries `beta.407` — that is what the digest
-says. ⭐ **Batch 5 wrote down why**: the tag and the digest are different claims, and the pinned-core
-reparse is a third one again.
-
-**(3) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
+**(1) is NOT "delete a row", and that is the finding.** `transactions` is an append-only journal:
 there is no `DELETE` route, `updateTransaction` edits `reference` alone, and this row cannot take
 even that — it writes through `ValidatedTx.set`, which validates first. So a **reversal** mints a new
 movement and leaves the bad row in place (the reparse still exits non-zero), **stamping a supplier**
@@ -829,7 +829,7 @@ documented schema carve-out naming the one uid — costs a comment and a test. �
 adjudicated: it is a **duplicate of #1162**, which carries Home Depot and posted as `CFS-MOV-1162`;
 there is no `CFS-MOV-1161` anywhere in the ACCPAY window. Full evidence on the issue.
 
-**(4) batch 7** — read the split off `core/tests/stored-defaults.test.ts`, not this doc. What is left
+**(2) batch 7** — read the split off `core/tests/stored-defaults.test.ts`, not this doc. What is left
 inside `items[]` is `path` ×10, `quantity` ×4, `name` ×4 and four credit-note-only keys.
 ⚠️ **`path` is the row identity with exactly one author, and the array-ordering hazard above is about
 it** — take it last, or deliberately. `quantity` + `name` (8 paths across the four grains) is the
@@ -839,9 +839,8 @@ obvious next leaf batch and needs no new instrument.
 
 **Clear before batch 7.**
 
-Batch 6's analysis is spent: published, swept, merged and deployed. The one open thread — closing the
-digest + pinned-core-reparse chain once gcloud is re-authed — needs two commands and none of this
-session's reasoning; the expected reading is written down above it. Batch 7 depends on none of it. Everything it needs is written down: the backlog is read off
+Batch 6 is closed — nothing mechanical is left to watch. Batch 7 depends on none of this session's
+analysis. Everything it needs is written down: the backlog is read off
 `core/tests/stored-defaults.test.ts` (**108** paths — 76 scalar, 32 `array[]`, 22 of them `items[]`),
 the partition is re-derived by the recipe above, the `items[]` hazards are in the section above this
 one, and the policy — the parse-not-census rule, the shared stored/input-node rule, and the
@@ -860,7 +859,7 @@ address at all, so the parse is its only oracle *and* a standing one. **22 of th
 ⚠️ **Run it once before touching a schema**, so the pre-tightening `OPTIONAL-HERE` reading is on the
 record; a reach verdict is only evidence as a BEFORE/AFTER pair.
 
-**Three things this session left deliberately:**
+**Two things this session left deliberately:**
 - The two documents `api-cloudrun#951` names are **still unrepaired** — a prod `transactions`
   purchase with `supplier: null` (an accounting fact, not a default: find its Xero bill or ask the
   owner) and a dev `locations` id. A third turned up, dev-only: `users/test-user`. Until they are
@@ -869,11 +868,13 @@ record; a reach verdict is only evidence as a BEFORE/AFTER pair.
 - `updateOrganization` still carries `organization.emails = organization.emails || []` and the same
   for `phones` (`api-cloudrun/src/services/organizations.ts`) — inert since batch 4, because both
   fields are required and both corpora are complete.
-- The `templates` worktree `.claude/worktrees/core-beta-407` on branch `chore/core-beta-407`, which
-  is what PR #311 was built in. ⚠️ **The main `templates` checkout was sitting on a PEER's pushed
-  branch** (`docs/rebless-recipe-needs-the-bearer`), so switching it would have moved HEAD under
-  another session — the worktree was taken for that reason and nothing else. **Remove it when #311
-  merges**: `git worktree remove .claude/worktrees/core-beta-407`.
+
+⚠️ **PR #311 was built in a WORKTREE, and the reason generalises**: the main `templates` checkout
+was sitting on a PEER's pushed branch (`docs/rebless-recipe-needs-the-bearer`), so switching it would
+have moved HEAD under another session. `.claude/worktrees/` is ignored by committed `.gitignore` in
+all five repos — verify with `git check-ignore -v`, which names WHICH FILE answered, because three
+repos also keep a stale `.git/info/exclude` entry that reproduces the old verdict. Worktree and
+branch removed when #311 merged.
 
 **A fix expires its workarounds; expiring them is its own commit** — which is why the `|| []` pair is
 listed rather than folded in. Removing it is behaviour-bearing, and hiding it inside a pin-carrying
