@@ -753,6 +753,36 @@ containers / 146 present / **0 non-null**: every row states the key, so requirin
 while nothing has ever exercised a non-null value there. **Say which claim a denominator answers
 before reading its verdict.**
 
+🔴 **`getInitialValues` is a LIVE consumer of these defaults, and whether a removal is visible to it
+is DECIDABLE.** `manager/src/stores/cards.ts`, `.../recurrences.ts` and ~8 more stores seed new
+drafts from `getInitialValues(<StoredSchema>)`. `resolveField` (`schemas/initial.ts`) is
+**type-derived** — `[]` for an array, `""` for a string, `false` for a boolean, `null` for a
+nullable, the FIRST MEMBER for an enum — so:
+
+- **`V` equals the node's type-zero** → removing `.default(V)` leaves every form seed byte-identical.
+  All ten of core#95 batch 8's did.
+- **`V` does not** → the form silently reseeds, and the field needs `.meta({ initial: V })` in the
+  same commit. `z.boolean().default(true)` is the canonical case; the note in `initial.ts` records
+  five product fields that would have shipped new products inactive, undeliverable and not
+  pickup-eligible with nothing failing.
+
+⭐ **Measure it rather than reason it**: dump `getInitialValues` for the affected schemas to JSON
+before the edit and diff after, and mutation-control the probe by re-adding a non-type-zero default —
+a clean diff and a broken probe print the same thing. ⚠️ Find the affected stores with an
+**unbounded** `grep -rn getInitialValues manager/src`; batch 8's first attempt was `| head -20`,
+which cut off both card stores and read exactly like a complete answer.
+
+🔴 **A VACUOUS declaration — zero documents in both projects — is still gateable, by the TYPE and by
+the SUITE.** `audit:reparse` prints `NO-POPULATION` rather than a clean `REACHED` there, and a clean
+parse means nothing at all. Measured 2026-09-11 on `RecurrencePrototype` (`recurrences` holds 0
+documents in both projects), both arms controlled by mutation against a `file://`-pinned core:
+deleting a field from the single create author fails `TS2741` because the interface already requires
+it, and forcing `undefined` past that type with a cast makes `validateBeforeWrite` refuse at the
+exact path and reddens the integration test that POSTs the thinnest legal input. ⭐ **The general
+shape: the writer is usually ALREADY compiler-gated and the schema is the only door left open** — so
+for an empty collection the instrument is the type plus the suite that drives its create author, not
+the corpus.
+
 ⭐ **A field NAME is not a node, and the check for sharing is the declaration.** The same batch found
 `phones` on six declarations under three spellings — `DocDestinationContact` (stored, required now),
 `DestinationContact` / `NewContactInput` / `Create`+`UpdateOrganizationInput` (inputs, still
