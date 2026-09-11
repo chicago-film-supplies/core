@@ -166,13 +166,28 @@ export const RecurrencePrototype: z.ZodType<RecurrencePrototypeType> = z
   .strictObject({
     subject: z.string().min(1).max(200).meta({ pii: "mask", column: true, label: "Subject" }),
     body: CommentBody.nullable(),
-    body_text: z.string().max(20000).meta({ pii: "mask" }).default(""),
+    // **REQUIRED ×5 below — the inert `.default()`s came off 2026-09-11
+    // (core#95 batch 8), alongside the four they mirror on `CardSchema`.**
+    //
+    // 🔴 **This declaration is VACUOUS in the corpus and the tightening rests
+    // entirely on the writer.** `recurrences` holds **0 documents in BOTH
+    // projects** (measured 2026-09-11), so `audit:reparse` reports
+    // `NO-POPULATION` here rather than `REACHED` — there is nothing to traverse,
+    // before or after, and a clean parse would be saying nothing. What gates it
+    // instead is `buildPrototype` (`api-cloudrun/src/services/recurrences.ts`),
+    // the single create author, which states all five with `?? ""` / `?? []`
+    // and returns a typed `RecurrencePrototypeType` where all five are already
+    // required — so the compiler holds it, and the integration suite drives it
+    // from the thinnest legal input there is (`prototype: { subject }`) through
+    // `validateBeforeWrite` on every run. ⭐ That suite is the instrument an
+    // empty collection cannot be.
+    body_text: z.string().max(20000).meta({ pii: "mask" }),
     status: CardStatusEnum,
     destination: DocDestinationEndpoint.nullable(),
-    sources: z.array(DocSource).default([]),
-    attachments: z.array(CardAttachment).default([]),
-    uid_assignees: z.array(FirestoreId).default([]),
-    locked: z.array(CardLockKeyEnum).default([]),
+    sources: z.array(DocSource),
+    attachments: z.array(CardAttachment),
+    uid_assignees: z.array(FirestoreId),
+    locked: z.array(CardLockKeyEnum),
   });
 
 // ── Firestore document ──────────────────────────────────────────────
