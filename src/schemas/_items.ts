@@ -114,7 +114,7 @@ export const LineItemCore: {
   uid: z.ZodType<string>;
   name: z.ZodString;
   description: z.ZodString;
-  quantity: z.ZodDefault<z.ZodNumber>;
+  quantity: z.ZodNumber;
   path: z.ZodDefault<z.ZodArray<z.ZodType<string>>>;
   zero_priced: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
 } = {
@@ -170,7 +170,16 @@ export const LineItemCore: {
   // that is what the order and fulfillment grains already carried, and the two
   // produce a different `_zod.def.type` — keeping the existing spelling is what
   // makes this a no-op for those two rather than a change nobody asked for.
-  quantity: z.number().int().min(0).default(0).meta({
+  //
+  // **REQUIRED — the inert `.default(0)` came off 2026-09-11 (core#95 batch 7).**
+  // It never reached storage: `validateBeforeWrite` discards `result.data` and
+  // writes the raw document, so the default only ever made a partial line PARSE.
+  // Gated by the corpus rather than by argument — `orders` 10,065 / `invoices`
+  // 9,590 / `fulfillments` 9,986 line rows, **every one stating a non-null
+  // quantity, in both projects**, which is a statement about every writer that
+  // has ever built a line. ⚠️ `0` remains a legal stored value —
+  // `.min(0)` admits it — so requiring the KEY makes no claim about the VALUE.
+  quantity: z.number().int().min(0).meta({
     column: true,
     label: "Quantity",
   }),

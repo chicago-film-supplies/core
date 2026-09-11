@@ -247,7 +247,15 @@ const CreditNoteDocLineItemInner = z.strictObject({
   // Catalog product name — not customer data. See `OrderDocLineItem.name`.
   name: z.string().meta({ pii: "none", column: true }),
   description: z.string().meta({ pii: "none", column: true, label: "Description" }),
-  quantity: z.int().default(0).meta({ column: true, label: "Quantity" }),
+  // **REQUIRED — the inert `.default(0)` came off 2026-09-11 (core#95 batch 7),
+  // alongside `LineItemCore.quantity` on the other three grains.** ⚠️ This grain
+  // is a SEPARATE declaration that merely shares the leaf name: it spells
+  // `z.int()` where the others spell `z.number().int().min(0)`, so it admits a
+  // negative quantity they do not. That divergence is left exactly as it was —
+  // a bound is a different change from a presence tightening, and folding one
+  // into the other is how a batch stops being reviewable. 146 of 146 stored
+  // credit-note line rows state the key in both projects.
+  quantity: z.int().meta({ column: true, label: "Quantity" }),
   price: CreditNoteDocItemPriceSchema,
   coa_revenue: COARevenueEnum.nullable(),
   coa_posting: COACode,

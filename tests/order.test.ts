@@ -29,6 +29,7 @@ const docLine = (over: Record<string, unknown> = {}) => ({
   type: "rental",
   name: "Camera",
   description: "",
+  quantity: 1,
   stock_method: "none",
   price: priceBase,
   ...over,

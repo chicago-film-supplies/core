@@ -478,7 +478,13 @@ const InvoiceDocOrderItemInner = z.strictObject({
   type: z.literal("order"),
   // Machine-generated, not operator-typed: 218/218 order dividers in the dev
   // replica are literally `Order #NNN`. See `OrderDocLineItem.name`.
-  name: z.string().max(200).meta({ pii: "none" }).default(""),
+  //
+  // **REQUIRED — the inert `.default("")` came off 2026-09-11 (core#95 batch 7).**
+  // 1,009 of 1,009 stored order dividers state it in both projects, and the sole
+  // writer builds the literal `Order #NNN` above. ⚠️ A SEPARATE declaration from
+  // `DestinationDividerArm.name`, which moved in the same batch — a field name is
+  // not a node, and only reading both said the two agree.
+  name: z.string().max(200).meta({ pii: "none" }),
   path: z.array(ItemUid).default([]),
   description: z.string().meta({ pii: "none" }),
 });

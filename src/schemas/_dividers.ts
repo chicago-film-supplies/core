@@ -50,7 +50,15 @@ export const DestinationDividerArm = z.strictObject({
   // api-cloudrun#837. ⭐ It is NOT the "street address becomes a person" case that
   // was claimed while this was being decided: `fakeForMask` tests for a leading
   // digit FIRST, so an address masks to an address. Measured, not reasoned.
-  name: z.string().max(200).meta({ pii: "mask" }).default(""),
+  //
+  // **REQUIRED — the inert `.default("")` came off 2026-09-11 (core#95 batch 7).**
+  // It never reached storage (`validateBeforeWrite` writes the raw document), so
+  // it only ever let a partial divider PARSE. Gated by the corpus: `orders`
+  // 1,021 / `invoices` 1,009 / `fulfillments` 1,021 destination dividers, **every
+  // one stating a non-null name, in both projects**. ⚠️ `""` is still a legal
+  // stored value — there is no `.min(1)` here, unlike `GroupDividerArm.name`
+  // below — so this requires the KEY and says nothing about the VALUE.
+  name: z.string().max(200).meta({ pii: "mask" }),
   path: z.array(ItemUid).default([]),
   // 🔴 **There is no `uid_delivery`/`uid_collection` here, and re-adding either
   // re-opens api-cloudrun#662/#663/#664.** They were a SECOND copy of the pair's
