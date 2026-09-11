@@ -548,10 +548,29 @@ cd api-cloudrun && deno task audit:reparse --core=../core/src/schemas/mod.ts \
 tightening is the expected state and is the reading that says there is something to do; after it,
 the same position must read `REACHED` or the tightening is not gated by anything.
 
-**Measured 2026-09-10, dev `orders`:** `description` is present and non-null on **13,984 of 13,984**
-item rows — 10,065 line items, 1,021 destination dividers, 2,898 group dividers, an exact partition.
-⚠️ That is one leaf on one grain in one project; re-run it per position, both projects, and expect
-the `credit-notes` arm to be thin (13 documents).
+✅ **BASELINE TAKEN 2026-09-10, by running the command above verbatim — `description` on the
+line-item arm is FREE on both grains in both projects.**
+
+| position | prod | dev | reach |
+|---|---:|---:|---|
+| `orders.items[type!=destination\|group].description` | 10,065 / 10,065 | 10,071 / 10,071 | OPTIONAL-HERE |
+| `invoices.items[type!=destination\|group].description` | 10,599 / 10,599 | 10,599 / 10,599 | OPTIONAL-HERE |
+
+**41,334 item rows, every one stating a non-null `description`, 0 parse failures.** That is a
+decisive denominator rather than a thin one — the opposite of batch 4, where the writer audit had to
+carry the batch alone.
+
+🔴 **`OPTIONAL-HERE` is the BEFORE half of the evidence and it only exists because it was taken
+first.** After the tightening these two must read `REACHED`; without this row there is nothing to
+compare against, and a post-hoc `REACHED` proves only that the probe found *an* issue.
+
+⚠️ **Dev is a genuine second sample on `orders` here** (1,023 vs prod's 1,021) and on `invoices`
+(1,064 vs 1,040) — check the two counts per collection before crediting either, exactly as batch 2
+records.
+
+⚠️ **Still to measure for this batch:** `fulfillments` and `credit-notes` (the latter is 13 documents
+— expect it thin, and expect the writer audit to carry it), and the other clustered leaves
+(`path` ×10, `taxes` ×9, `quantity` ×4). One leaf measured is not the family.
 
 
 - **The 67 `array[]` paths need a different instrument** — a paged census in the shape of
