@@ -4,9 +4,10 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-10 — **batch 4 is in PROD, and batch 5's PREREQUISITE is built. Backlog 143.**
-> One statement, compacted rather than stacked: four batches landed, and the instrument batch 5
-> cannot proceed without is now committed rather than written a sixth time.
+> ## ⚠️ STATUS 2026-09-10 — **batch 5 is COMMITTED and unpublished. Backlog 132.**
+> One statement, compacted rather than stacked: five batches are in the tree, four of them in prod,
+> and the fifth is the first cut into the `items[]` family — verified end to end against both
+> corpora and against a real consumer, but **not yet published**, so no pin has moved.
 >
 > | batch | what | backlog | state |
 > |---|---|---:|---|
@@ -16,6 +17,7 @@ api-cloudrun#943's remaining half.*
 > | 3 | the seven `Address` keys — 105 paths, 15 positions | 258 → 153 | ✅ `core` `ce8272d` → `beta.404` |
 > | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → **143** | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
 > | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
+> | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → **132** | ⏳ `core` `27be0ad`, committed on `beta`, **unpublished** |
 >
 > ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
 >
@@ -159,6 +161,8 @@ api-cloudrun#943's remaining half.*
 | **the corpus-parse instrument** — batch 5's prerequisite, `api-cloudrun#951` + `#636` | `api-cloudrun/scripts/audit-schema-validation.ts` + `_corpusReparse.ts` (`5ed776fe`) | ✅ landed on `main` |
 | its calibration, four mutations each failing one arm | `api-cloudrun/tests/unit/corpusReparse.test.ts` | ✅ landed on `main` |
 | `typesense-pulse` catalogued — the prod collection census goes exit 1 → 0 | `api-cloudrun` `310dd3bc` | ✅ landed on `main` |
+| **batch 5** — `items[].description` ×11, 5 declarations | `core` `27be0ad` | ⏳ committed on `beta`, **unpublished** |
+| 8 repaired tests — the `docLine` factory + two raw literals routed through it | `core/tests/order.test.ts` | ⏳ in `27be0ad` |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -511,9 +515,11 @@ would recur. **Both halves were wrong in an instructive direction:**
 - It also predicted a possible shared INPUT node and there was none — six declarations of `phones`
   across three names, all separate objects. **A field name is not a node.**
 
-### 🔴 Batch 5 — `items[]` is what is left, and it is 57 of the 143
+### ✅ `items[].description` WAS batch 5 — and dev turned out not to be a second sample
 
-Re-derived 2026-09-10 off the post-batch-4 catalogue: **143 paths — 76 scalar, 67 `array[]`.**
+**Done in the tree** (`core` `27be0ad`, **unpublished**). Re-derived 2026-09-10 off the
+post-batch-4 catalogue: **143 paths — 76 scalar, 67 `array[]`**; batch 5 took 11 of them, leaving
+**132**. The remaining `items[]` family is **46**.
 
 | family | paths | note |
 |---|---:|---|
@@ -548,29 +554,62 @@ cd api-cloudrun && deno task audit:reparse --core=../core/src/schemas/mod.ts \
 tightening is the expected state and is the reading that says there is something to do; after it,
 the same position must read `REACHED` or the tightening is not gated by anything.
 
-✅ **BASELINE TAKEN 2026-09-10, by running the command above verbatim — `description` on the
-line-item arm is FREE on both grains in both projects.**
+✅ **The BEFORE/AFTER pair, all eleven positions, both projects.** Before: every position
+`OPTIONAL-HERE`. After, parsed against the working tree with
+`--core=../core/src/schemas/mod.ts`: every position `REACHED`, 0 failures, exit 0.
 
-| position | prod | dev | reach |
-|---|---:|---:|---|
-| `orders.items[type!=destination\|group].description` | 10,065 / 10,065 | 10,071 / 10,071 | OPTIONAL-HERE |
-| `invoices.items[type!=destination\|group].description` | 10,599 / 10,599 | 10,599 / 10,599 | OPTIONAL-HERE |
+| arm | declaration | prod rows |
+|---|---|---:|
+| `orders.items[type!=destination\|group]` | `LineItemCore` | 10,065 |
+| `orders.items[type=destination]` | `DestinationDividerArm` | 1,021 |
+| `orders.items[type=group]` | `GroupDividerArm` | 2,898 |
+| `invoices.items[type!=destination\|group\|order]` | `LineItemCore` | 9,590 |
+| `invoices.items[type=group]` | `GroupDividerArm` | 3,135 |
+| `invoices.items[type=destination]` | `DestinationDividerArm` | 1,009 |
+| `invoices.items[type=order]` | `InvoiceDocOrderItem` | 1,009 |
+| `fulfillments.items[type!=destination\|group]` | `LineItemCore` | 9,986 |
+| `fulfillments.items[type=destination]` | `DestinationDividerArm` | 1,021 |
+| `fulfillments.items[type=group]` | `GroupDividerArm` | 2,898 |
+| `credit-notes.items[]` | `CreditNoteDocLineItem` | 146 |
 
-**41,334 item rows, every one stating a non-null `description`, 0 parse failures.** That is a
-decisive denominator rather than a thin one — the opposite of batch 4, where the writer audit had to
-carry the batch alone.
+**42,778 item rows, every one stating a non-null `description`, 0 parse failures.**
 
-🔴 **`OPTIONAL-HERE` is the BEFORE half of the evidence and it only exists because it was taken
-first.** After the tightening these two must read `REACHED`; without this row there is nothing to
-compare against, and a post-hoc `REACHED` proves only that the probe found *an* issue.
+🔴 **`OPTIONAL-HERE` is the BEFORE half and it only exists because it was taken first.** A post-hoc
+`REACHED` proves only that the probe found *an* issue.
 
-⚠️ **Dev is a genuine second sample on `orders` here** (1,023 vs prod's 1,021) and on `invoices`
-(1,064 vs 1,040) — check the two counts per collection before crediting either, exactly as batch 2
-records.
+🔴 **CORRECTION — dev is NOT a second sample on these four grains, and this doc said it was.** The
+line here read *"a genuine second sample on `orders` (1,023 vs prod's 1,021) and on `invoices`
+(1,064 vs 1,040)"*. Measured 2026-09-10: both projects are **1,021 / 1,040 / 1,021 / 13 to the
+document**, and the reparse returned byte-identical denominators and the *same witness document ids*
+in both. Confirmed independently by the dev and prod MCP `db_*_count` endpoints, so the instrument
+was not lying — the doc was. ⭐ **The check this doc already prescribes is the one that caught it**:
+compare the two counts before crediting either. It is worth knowing that this campaign's own record
+failed its own rule.
 
-⚠️ **Still to measure for this batch:** `fulfillments` and `credit-notes` (the latter is 13 documents
-— expect it thin, and expect the writer audit to carry it), and the other clustered leaves
-(`path` ×10, `taxes` ×9, `quantity` ×4). One leaf measured is not the family.
+🔴 **CORRECTION — the earlier invoice baseline conflated two declarations.** It filtered
+`items[type!=destination|group]`, which leaves the **order divider** inside the line-item
+denominator: 10,599 = 9,590 line rows + 1,009 order dividers. Those are separate declarations
+(`LineItemCore` vs `InvoiceDocOrderItem`), so one of the five had never been measured on its own.
+⭐ **A discriminator filter that names what to EXCLUDE silently absorbs any arm you forgot exists.**
+
+⭐ **The batch boundary was ONE LEAF across four grains** — batch 2's family selector one level down.
+`description` clusters ×12 in the backlog where no grain's whole item does, so the writer audit
+stayed a single author. The prediction in the previous revision of this section held exactly.
+
+⭐ **It was a PURE STORAGE tightening — no API-input change**, like batch 4's `phones` and unlike
+`Address`. Every consumer of `LineItemCore` and the two divider arms is a stored schema; the input
+schemas each declare their own `description ... .optional()` instance. Only grepping the NODE says
+so.
+
+⚠️ **The suite was the oracle and it bit: 8 failures in `tests/order.test.ts`**, two of them negative
+tests asserting an exact issue-path set — the *"requiring a field rewrites every negative test that
+spelled its fields inline"* hazard, firing exactly as core/CLAUDE.md predicts. Repaired by completing
+the `docLine` factory and routing the two raw literals through it, so each case again drops exactly
+one field.
+
+⚠️ **Still to measure for the REST of the family:** the other clustered leaves — `path` ×10,
+`taxes` ×9, `quantity` ×4. **One leaf measured is not the family**, and `path` is the one to treat
+with most care: it is the row identity, and the `items[]` backfill/ordering hazard below is about it.
 
 
 - **The 67 `array[]` paths need a different instrument** — a paged census in the shape of
@@ -585,8 +624,8 @@ records.
   onto a stored items array changes the recomputed order, and the stored array then fails its own
   boundary check. **Measured by the zero_priced stage-two backfill (cfs-f0, 2026-09-10): three prod
   invoices reordered and had to be written in canonical order.**
-  ⚠️ **Reach: 57 of the 143 remaining paths are `items[]` paths** — unchanged by batches 3 and 4,
-  which took nothing out of this family. `zero_priced` is the only sort key today and is NOT itself in the
+  ⚠️ **Reach: 46 of the 132 remaining paths are `items[]` paths** — batch 5 took 11 of the 57, and
+  batches 3 and 4 took none. `zero_priced` is the only sort key today and is NOT itself in the
   backlog, so the hazard is not that this campaign stamps it; it is that any items-array backfill
   must WRITE IN CANONICAL ORDER rather than patching a key in place, and must expect arrays a
   previous backfill has already reordered.
@@ -617,6 +656,15 @@ records.
   **0 of 20**, exactly as predicted. Re-measured here after it merged: **0 of the 57 `items[]`
   backlog keys unstated**, across 224 item rows in both families. The expiry recorded above is
   discharged; the next one arrives with the next fixture change.
+  ✅ **Re-run again for BATCH 5 specifically, 2026-09-10: 224 item rows across the committed
+  `invoice` + `quote` families, 0 missing `description`.** ⚠️ **And the probe needed controlling
+  twice.** The first form queried `.doc.items` and returned zero rows — a fixture file *is* the
+  document, `items` is top-level — which reads identically to a clean sweep. The second form found
+  28 rows apparently missing the key, all in the **`receipt`** family, whose `collection_source` is
+  `movement-sessions` — a schema carrying no `description` at all. ⭐ **Both halves are the
+  `aging-report` classifier error recurring**: read the sidecar's declared collection before counting
+  what a gate will refuse, and control a zero against a key that IS sometimes absent (`zero_priced`,
+  98 rows) before believing it.
   ⚠️ Three populations, three different questions, and they are easy to conflate: the template
   predicate switch exposes **2** fixtures, the refine refuses **5**, full corpus fidelity is all
   **8** — and *line rows* (20) is a different count again from *component rows* (8). Name which one
@@ -631,24 +679,28 @@ records.
 
 ## Context recommendation
 
-**Clear before batch 5.** Batch 4 is fully landed: `core` published `beta.405`, all three consumer
-pins are in, `templates` #308 is merged, and — unlike batch 3 — it **reached prod**, verified by
-image digest rather than by a tag. There is nothing mechanical left to watch.
+**Continue if you are publishing batch 5; clear before batch 6.**
 
-Batch 5 depends on none of this session's analysis. Everything it needs is written down: the backlog
-is read off `core/tests/stored-defaults.test.ts` (143 paths), the partition is re-derived by the
-recipe above, the `items[]` hazards are in the section above this one, and the policy — the
-parse-not-census rule, the shared stored/input-node rule, and the denominator rule batch 4 sharpened
-— is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+🔴 **Batch 5 is committed and UNPUBLISHED (`core` `27be0ad`), so it is the one piece of live state
+this doc cannot replace.** Publishing it is a push to `beta`, which cuts `beta.406` and then obliges
+the pin sweep in `api-cloudrun` (40), `manager` (1) and `templates` (15) and a prod deploy — the
+`cfs-release-order` skill owns that dance. Nothing else is in flight: both worktrees are gone, both
+corpora are clean, and no pin has moved yet.
+
+Batch 6 depends on none of this session's analysis. Everything it needs is written down: the backlog
+is read off `core/tests/stored-defaults.test.ts` (**132** paths, 46 of them `items[]`), the partition
+is re-derived by the recipe above, the `items[]` hazards are in the section above this one, and the
+policy — the parse-not-census rule, the shared stored/input-node rule, and the denominator rule
+batch 4 sharpened — is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
 
 ⚠️ **Do not carry this doc's numbers into batch 5 — re-run the recipe.** Batch 3 proved the doc's own
 table can be wrong in both directions with the errors in the INSTRUMENTS; batch 4 proved the numbers
 can be right and still mean something different from what they look like. **Re-derive, and ask what
 the instrument can see.**
 
-✅ **api-cloudrun#951 is DONE, so batch 5 is unblocked.** The corpus parse is committed as
-`deno task audit:reparse`; batch 5 is `items[]` — 57 of the 143 paths, all `array[]` members the
-`orderBy` oracle cannot address at all — and the parse is now its only oracle *and* a standing one.
+✅ **api-cloudrun#951 is DONE, and batch 5 used it.** The corpus parse is committed as
+`deno task audit:reparse`; the `items[]` family is all `array[]` members the `orderBy` oracle cannot
+address at all, so the parse is its only oracle *and* a standing one. **46 of the 132 remain.**
 ⚠️ **Run it once before touching a schema**, so the pre-tightening `OPTIONAL-HERE` reading is on the
 record; a reach verdict is only evidence as a BEFORE/AFTER pair.
 

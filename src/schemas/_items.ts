@@ -25,7 +25,9 @@
  * grain inlines its own `type` enum — so nothing is erased, and the assumption
  * that the exemption transferred was wrong. Verified 2026-09-09 by annotating
  * and re-measuring: `deno check` clean, `getInitialValues` and all six column
- * surfaces byte-identical, `description`'s `.default("")` still materializing.
+ * surfaces byte-identical, and `description`'s `.default("")` — which it still
+ * carried then, and which core#95 batch 5 has since retired — still
+ * materializing.
  * **So this file needs no exemption, and must not be given one** — an exemption
  * that silences a class nothing exhibits is the stale-entry failure
  * `check-declarations.ts` documents.
