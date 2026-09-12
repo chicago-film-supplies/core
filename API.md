@@ -3976,6 +3976,7 @@ interface GoldenDiff {
   sha: string;
   checked_at: FirestoreTimestampType;
   largest_blob?: typeLiteral;
+  git_path?: string;
 }
 ```
 

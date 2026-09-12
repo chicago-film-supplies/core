@@ -1779,7 +1779,7 @@
         {
           "kind": "interface",
           "name": "GoldenDiff",
-          "declaration": "interface GoldenDiff {\n  fixture: string;\n  verdict: GoldenDiffVerdict;\n  delta: number;\n  image_uuids: typeLiteral;\n  sha: string;\n  checked_at: FirestoreTimestampType;\n  largest_blob?: typeLiteral;\n}",
+          "declaration": "interface GoldenDiff {\n  fixture: string;\n  verdict: GoldenDiffVerdict;\n  delta: number;\n  image_uuids: typeLiteral;\n  sha: string;\n  checked_at: FirestoreTimestampType;\n  largest_blob?: typeLiteral;\n  git_path?: string;\n}",
           "doc": "Per-fixture golden visual-diff result for a draft branch. The CI golden-diff\npath fans out over the family's git-canonical fixtures (`fixtures/<gp>/*.json`)\nand persists one entry per fixture so the manager can render the\napprove-to-merge review row-by-row. `image_uuids` are Uploadcare UUIDs\n(served via ucarecdn.com); `fixture` is the slug join key\n(`fixtures/<gp>/<slug>.json`)."
         },
         {

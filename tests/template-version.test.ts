@@ -47,6 +47,32 @@ Deno.test("GoldenDiffSchema accepts a per-fixture match result", () => {
   assertEquals(res.success, true);
 });
 
+Deno.test("GoldenDiffSchema accepts an optional git_path — the family a row verifies, which may differ from the doc's own (api-cloudrun#969)", () => {
+  const res = GoldenDiffSchema.safeParse({
+    fixture: "order-841",
+    verdict: "match",
+    delta: 0.0001,
+    image_uuids: { candidate: "uc-1", diff: "uc-2" },
+    sha: "deadbeef",
+    checked_at: mockTimestamp,
+    git_path: "quote",
+  });
+  assertEquals(res.success, true);
+});
+
+Deno.test("GoldenDiffSchema — a row with no git_path (pre-existing shape) still parses", () => {
+  const res = GoldenDiffSchema.safeParse({
+    fixture: "order-841",
+    verdict: "match",
+    delta: 0.0001,
+    image_uuids: { candidate: "uc-1", diff: "uc-2" },
+    sha: "deadbeef",
+    checked_at: mockTimestamp,
+  });
+  assertEquals(res.success, true);
+  if (res.success) assertEquals("git_path" in res.data, false);
+});
+
 Deno.test("GoldenDiffSchema — largest_blob accepts a measurement or absence — never an explicit null", () => {
   const base = {
     fixture: "order-841",

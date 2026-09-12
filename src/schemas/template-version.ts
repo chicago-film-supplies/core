@@ -252,6 +252,21 @@ export interface GoldenDiff {
     width: number;
     height: number;
   };
+  /**
+   * Which TEMPLATE family this row verifies — the family's `git_path`, not
+   * necessarily the owning `templates-versions` doc's own family
+   * (api-cloudrun#969). A component draft has no fixtures of its own, so
+   * blessing against it writes rows for the CONSUMING families it affects
+   * onto the component's own draft doc — `persistGoldenOutcome` merges by
+   * this field so one family's run does not clobber another's rows on a
+   * branch shared across several families' CI runs.
+   *
+   * Absent on every row written before this field existed, all of which
+   * belonged to the doc's OWN family (the only case that existed then) — a
+   * reader needing the owner falls back to the doc's own `git_branch`-derived
+   * git_path.
+   */
+  git_path?: string;
 }
 
 /** Zod schema for a GoldenDiff. */
@@ -276,6 +291,7 @@ export const GoldenDiffSchema: z.ZodType<GoldenDiff> = z.strictObject({
     width: z.int().nonnegative(),
     height: z.int().nonnegative(),
   }).optional(),
+  git_path: z.string().min(1).optional(),
 });
 
 /**
