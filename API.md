@@ -11397,7 +11397,7 @@ default must differ (see the note in `resolveField`).
 ## The return is `Partial`, and that is not conservatism — it is the truth
 
 The result is missing required fields, so `z.output<S>` would be a lie.
-Three separate holes put it there, and each is visible above:
+Four separate holes put it there, and each is visible above:
 
 - **`custom` nodes are omitted entirely** (`SKIP`). `FirestoreTimestamp` is
   `z.custom`, and `TimestampFields` puts `created_at`/`updated_at` on
@@ -11409,9 +11409,19 @@ Three separate holes put it there, and each is visible above:
   reports rather than hides.
 - **The partial is shallow.** Nested objects are partial in fact but typed
   complete, because the walk recurses while the type does not.
+- **Every date and datetime field is omitted** (`SKIP`), as of core#107. A
+  seeded epoch is not nullish, so it defeats the writer's
+  `input.x ?? <default>`; an absent key is what lets that default fire. This
+  is the widest of the four — 22 of the 222 object schemas exported from
+  `src/schemas/mod.ts` seeded an epoch before it (measured 2026-09-13), and every
+  `chicagoInstant()` / `chicagoStartOfDay()` field reaches it through `pipe`.
+  `tests/initial.test.ts` sweeps all of them, so this is pinned by value
+  rather than by location.
 
-`pipe` resolving the *input* side is a fourth, currently latent: both live
-transforms are `z.ZodType<string, string>`, so In ≡ Out today.
+`pipe` resolving the *input* side no longer produces a value for a date at
+all — the input side of both date factories is an ISO-datetime string, which
+SKIPs. For a non-date transform it remains latent: those are
+`z.ZodType<string, string>`, so In ≡ Out today.
 
 ### `getNodeMeta(node: z.ZodType): Record<string, unknown> | null`
 

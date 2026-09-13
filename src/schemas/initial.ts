@@ -34,12 +34,28 @@ function resolveField(schema: any): unknown {
     case "nullable":
       return null;
     case "pipe":
-      // Produced by `.transform()` — resolve against the input side so
-      // factories like chicagoInstant() inherit the ISO-datetime initial.
+      // Produced by `.transform()` — resolve against the input side, which is
+      // where a factory's own `.meta({ initial })` and `.default()` live. ⚠️ For
+      // the date factories (`chicagoInstant`, `chicagoStartOfDay`) that input
+      // side is an ISO-datetime string, which now resolves to SKIP rather than
+      // to a seeded epoch — see `case "string"`.
       return resolveField(def.in);
     case "string":
-      if (def.format === "datetime") return "1970-01-01T00:00:00Z";
-      if (def.format === "date") return "1970-01-01";
+      // 🔴 **A date gets NO seed, because there is no right one to give.** This
+      // returned the epoch until core#107, and the epoch is not nullish — so it
+      // survives every `input.x ?? <server default>` on the writer side rather
+      // than letting the default fire. That is how 8 prod invoices reached
+      // `due_date: 1969-12-31` (the Chicago-offset canonicalization of
+      // `1970-01-01T00:00:00Z`), 7 of them AUTHORISED in the live Xero AR ledger
+      // at ~57 years overdue. An ABSENT key is what the writer's `??` is
+      // looking for.
+      //
+      // A field that genuinely wants a seed carries `.meta({ initial })` — but
+      // that takes a static literal, so "today" is not expressible there and the
+      // FORM must author it. Both live surfaces already do: `TaxManager.tsx`
+      // (`applied_from`) and `MakeRecurringModal.tsx` (`active_from`).
+      if (def.format === "datetime") return SKIP;
+      if (def.format === "date") return SKIP;
       return "";
     case "number":
       return 0;
@@ -97,7 +113,7 @@ function resolveField(schema: any): unknown {
  * ## The return is `Partial`, and that is not conservatism — it is the truth
  *
  * The result is missing required fields, so `z.output<S>` would be a lie.
- * Three separate holes put it there, and each is visible above:
+ * Four separate holes put it there, and each is visible above:
  *
  * - **`custom` nodes are omitted entirely** (`SKIP`). `FirestoreTimestamp` is
  *   `z.custom`, and `TimestampFields` puts `created_at`/`updated_at` on
@@ -109,9 +125,19 @@ function resolveField(schema: any): unknown {
  *   reports rather than hides.
  * - **The partial is shallow.** Nested objects are partial in fact but typed
  *   complete, because the walk recurses while the type does not.
+ * - **Every date and datetime field is omitted** (`SKIP`), as of core#107. A
+ *   seeded epoch is not nullish, so it defeats the writer's
+ *   `input.x ?? <default>`; an absent key is what lets that default fire. This
+ *   is the widest of the four — 22 of the 222 object schemas exported from
+ *   `src/schemas/mod.ts` seeded an epoch before it (measured 2026-09-13), and every
+ *   `chicagoInstant()` / `chicagoStartOfDay()` field reaches it through `pipe`.
+ *   `tests/initial.test.ts` sweeps all of them, so this is pinned by value
+ *   rather than by location.
  *
- * `pipe` resolving the *input* side is a fourth, currently latent: both live
- * transforms are `z.ZodType<string, string>`, so In ≡ Out today.
+ * `pipe` resolving the *input* side no longer produces a value for a date at
+ * all — the input side of both date factories is an ISO-datetime string, which
+ * SKIPs. For a non-date transform it remains latent: those are
+ * `z.ZodType<string, string>`, so In ≡ Out today.
  */
 export function getInitialValues<S extends z.ZodType>(schema: S): Partial<z.output<S>> {
   const result = resolveField(schema);
