@@ -31,6 +31,7 @@ import * as bookingUtils from "../src/utils/bookings.ts";
 import * as cardUtils from "../src/utils/cards.ts";
 import * as contactNameUtils from "../src/utils/contact-name.ts";
 import * as dateUtils from "../src/utils/dates.ts";
+import * as documentDiffUtils from "../src/utils/documentDiff.ts";
 import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as fulfillmentUtils from "../src/utils/fulfillments.ts";
@@ -80,6 +81,11 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   cards: cardUtils,
   "contact-name": contactNameUtils,
   dates: dateUtils,
+  // Same exception as `substitutions`: `utils/documentDiff.ts` compares a document
+  // against its SIBLINGS (order, fulfillment, invoices) for the manager's detail
+  // views. A template renders one document and holds no second side to compare.
+  // Listed so the drift guard sees its exports.
+  documentDiff: documentDiffUtils,
   icons: iconUtils,
   fulfillments: fulfillmentUtils,
   // Same exception as `citations` and `template-lint`: `utils/fulfillment-items.ts`

@@ -264,6 +264,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "removeOrderScopedDestinations", // destinations mutation (write-path)
     "resyncInvoiceLines", // operator-triggered resync (write-path)
     "computeInvoiceSyncStatus", // manager line-badging, not rendering
+    "canonicalizePayload", // pair-comparison normalization, shared with utils/documentDiff.ts — not rendering
     "invoiceItemsMatch", // the one order↔invoice comparator — sync machinery
     "invoiceItemDifferences", // that comparator's substrate — audits + histograms
     "unexplainedInvoiceItemDifferences", // the sync explainers — badge + audit machinery
@@ -415,6 +416,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // which is exactly the double-injection the ordering comment on that
     // function exists to prevent.
     "injectPartDefaults",
+  ],
+  // `utils/documentDiff.ts` compares a document against its SIBLINGS — the order,
+  // fulfillment and invoices — for the manager's detail views (manager#467). A
+  // template renders one document and is handed no second side, so there is
+  // nothing to call this with. Listed in UTIL_MODULES only so the drift guard
+  // sees its exports.
+  documentDiff: [
+    "computeDocumentDiffs",
   ],
   // `utils/fulfillment-items.ts` is a WRITE-PATH function shared by the API and
   // the manager — it rebuilds a fulfillment's items array from a picker

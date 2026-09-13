@@ -11036,6 +11036,81 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/documentDiff",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "DocumentDiffContext",
+          "declaration": "interface DocumentDiffContext {\n  taxNameByUid: ReadonlyMap<string, string>;\n  isOrderFrozen: fnOrConstructor;\n}",
+          "doc": "What the order ↔ invoice explanation arms need, per order."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentDiffEntry",
+          "declaration": "interface DocumentDiffEntry {\n  source: DocumentRef;\n  kind: DocumentDiffKind;\n  fields: DocumentDiffField[];\n}",
+          "doc": "One source's difference at one key of the viewed document."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentDiffField",
+          "declaration": "interface DocumentDiffField {\n  field: string;\n  here: unknown;\n  there: unknown;\n}",
+          "doc": "One compared field. `here` is the viewed document's value, `there` the source's."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "DocumentDiffKind",
+          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\";",
+          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees"
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentDiffMap",
+          "declaration": "interface DocumentDiffMap {\n  lines: Map<string, DocumentDiffEntry[]>;\n  pairs: Map<string, DocumentDiffEntry[]>;\n  unaligned: Array<typeLiteral>;\n}",
+          "doc": "The answer for one viewed document.\n\nKeys are `path.join(\"/\")` in the VIEWED document's own path space, so a row\nlooks itself up by its own stored path: an invoice line's key carries its\norder-divider prefix, an order or fulfillment line's does not. A destination\npair is keyed by its destination divider's path key, in the same space."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentDiffSources",
+          "declaration": "interface DocumentDiffSources {\n  orders?: readonly Order[];\n  fulfillments?: readonly Fulfillment[];\n  invoices?: readonly Invoice[];\n}",
+          "doc": "Documents the caller holds. Any may be absent or partial."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "DocumentKind",
+          "declaration": "type DocumentKind = \"order\" | \"fulfillment\" | \"invoice\";",
+          "doc": "The three document kinds a diff can be viewed from or sourced from."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentRef",
+          "declaration": "interface DocumentRef {\n  kind: DocumentKind;\n  uid: string;\n  number: number;\n  version: number;\n}",
+          "doc": "Which document a diff entry is against — enough to link to it and to CAS a later sync."
+        },
+        {
+          "kind": "function",
+          "name": "computeDocumentDiffs",
+          "signature": "computeDocumentDiffs(sources: DocumentDiffSources, viewing: typeLiteral, context: DocumentDiffContext): DocumentDiffMap",
+          "doc": "Every difference between the viewed document and the other documents passed in.",
+          "paramTags": [
+            {
+              "name": "sources",
+              "doc": "The documents the caller holds, the viewed one included"
+            },
+            {
+              "name": "viewing",
+              "doc": "Which of them is being viewed"
+            },
+            {
+              "name": "context",
+              "doc": "Tax names and the order freeze predicate, for the explanation arms"
+            }
+          ],
+          "returnsTag": "Entries keyed by the viewed document's own path keys; empty when the\nviewed document is not among `sources`"
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/icons",
       "moduleDoc": "",
       "symbols": [
@@ -11374,6 +11449,14 @@
           "name": "calculateItemTotalCents",
           "signature": "calculateItemTotalCents(item: LineItem, taxes: Tax[]): number",
           "doc": "Calculate the total (subtotal_discounted + taxes) for a single line item.\n\nA `transaction_fee` reports its stored `price.total_cents`: it is priced from\nthe document, so the only correct value is the one the totals pass already\nwrote. Recomputing it here would need a basis this function does not have.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "canonicalizePayload",
+          "signature": "canonicalizePayload(value: unknown): unknown",
+          "doc": "Key-sorted deep copy with `null`/`undefined`/absent collapsed to absent —\nso two payloads compare equal iff they say the same thing.\n\n⚠️ **Both normalizations are load-bearing, and neither is cosmetic.**\n*Key order*: one side of a comparison is a stored document (Firestore returns\nmap keys sorted) and the other may be freshly built (insertion order), so a\nraw `JSON.stringify` can report two identical pairs as different. *Nullish*:\nevery field on this pair means the same thing absent as it does `null` — no\ndestination record, no address, no instructions, no jurisdiction claim — and\na corpus mid-migration holds both spellings of that. Reading one as an edit\nwould freeze the pair as \"overridden\" and stop it syncing **entirely**,\nbecause the check is all-or-nothing for the whole pair.",
           "paramTags": [],
           "returnsTag": null
         },

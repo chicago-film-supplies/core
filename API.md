@@ -24520,6 +24520,117 @@ toChicagoYmd("2025-02-14T03:00:00.000Z");      // "2025-02-13" (Chicago day)
 toChicagoYmd("2025-07-04T00:00:00.000-05:00"); // "2025-07-04" (CDT)
 ```
 
+## `@cfs/core/utils/documentDiff`
+
+### `DocumentDiffContext`
+
+What the order ↔ invoice explanation arms need, per order.
+
+```ts
+interface DocumentDiffContext {
+  taxNameByUid: ReadonlyMap<string, string>;
+  isOrderFrozen: fnOrConstructor;
+}
+```
+
+### `DocumentDiffEntry`
+
+One source's difference at one key of the viewed document.
+
+```ts
+interface DocumentDiffEntry {
+  source: DocumentRef;
+  kind: DocumentDiffKind;
+  fields: DocumentDiffField[];
+}
+```
+
+### `DocumentDiffField`
+
+One compared field. `here` is the viewed document's value, `there` the source's.
+
+```ts
+interface DocumentDiffField {
+  field: string;
+  here: unknown;
+  there: unknown;
+}
+```
+
+### `DocumentDiffKind`
+
+- `differs` — the same path on both sides, a compared field disagrees
+- `only_here` — on the viewed document, absent from the source
+- `missing_here` — on the source, absent from the viewed document
+- `pair_field` — a destination pair's compared field disagrees
+
+```ts
+type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field";
+```
+
+### `DocumentDiffMap`
+
+The answer for one viewed document.
+
+Keys are `path.join("/")` in the VIEWED document's own path space, so a row
+looks itself up by its own stored path: an invoice line's key carries its
+order-divider prefix, an order or fulfillment line's does not. A destination
+pair is keyed by its destination divider's path key, in the same space.
+
+```ts
+interface DocumentDiffMap {
+  lines: Map<string, DocumentDiffEntry[]>;
+  pairs: Map<string, DocumentDiffEntry[]>;
+  unaligned: Array<typeLiteral>;
+}
+```
+
+### `DocumentDiffSources`
+
+Documents the caller holds. Any may be absent or partial.
+
+```ts
+interface DocumentDiffSources {
+  orders?: readonly Order[];
+  fulfillments?: readonly Fulfillment[];
+  invoices?: readonly Invoice[];
+}
+```
+
+### `DocumentKind`
+
+The three document kinds a diff can be viewed from or sourced from.
+
+```ts
+type DocumentKind = "order" | "fulfillment" | "invoice";
+```
+
+### `DocumentRef`
+
+Which document a diff entry is against — enough to link to it and to CAS a later sync.
+
+```ts
+interface DocumentRef {
+  kind: DocumentKind;
+  uid: string;
+  number: number;
+  version: number;
+}
+```
+
+### `computeDocumentDiffs(sources: DocumentDiffSources, viewing: typeLiteral, context: DocumentDiffContext): DocumentDiffMap`
+
+Every difference between the viewed document and the other documents passed in.
+
+**Parameters**
+
+- `sources` — The documents the caller holds, the viewed one included
+- `viewing` — Which of them is being viewed
+- `context` — Tax names and the order freeze predicate, for the explanation arms
+
+**Returns** — Entries keyed by the viewed document's own path keys; empty when the
+viewed document is not among `sources`
+
 ## `@cfs/core/utils/icons`
 
 ### `CFS_LOGO_SVG`
@@ -25207,6 +25318,21 @@ Calculate the total (subtotal_discounted + taxes) for a single line item.
 A `transaction_fee` reports its stored `price.total_cents`: it is priced from
 the document, so the only correct value is the one the totals pass already
 wrote. Recomputing it here would need a basis this function does not have.
+
+### `canonicalizePayload(value: unknown): unknown`
+
+Key-sorted deep copy with `null`/`undefined`/absent collapsed to absent —
+so two payloads compare equal iff they say the same thing.
+
+⚠️ **Both normalizations are load-bearing, and neither is cosmetic.**
+*Key order*: one side of a comparison is a stored document (Firestore returns
+map keys sorted) and the other may be freshly built (insertion order), so a
+raw `JSON.stringify` can report two identical pairs as different. *Nullish*:
+every field on this pair means the same thing absent as it does `null` — no
+destination record, no address, no instructions, no jurisdiction claim — and
+a corpus mid-migration holds both spellings of that. Reading one as an edit
+would freeze the pair as "overridden" and stop it syncing **entirely**,
+because the check is all-or-nothing for the whole pair.
 
 ### `carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[]`
 

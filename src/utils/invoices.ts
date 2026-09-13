@@ -2329,7 +2329,7 @@ function carryOverridablePairFields(
  * would freeze the pair as "overridden" and stop it syncing **entirely**,
  * because the check is all-or-nothing for the whole pair.
  */
-function canonicalizePayload(value: unknown): unknown {
+export function canonicalizePayload(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalizePayload);
   if (value === null || value === undefined) return null;
   if (typeof value !== "object") return value;

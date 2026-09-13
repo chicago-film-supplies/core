@@ -64,6 +64,7 @@
     "./utils/cards": "./src/utils/cards.ts",
     "./utils/contact-name": "./src/utils/contact-name.ts",
     "./utils/dates": "./src/utils/dates.ts",
+    "./utils/documentDiff": "./src/utils/documentDiff.ts",
     "./utils/icons": "./src/utils/icons.ts",
     "./utils/invoices": "./src/utils/invoices.ts",
     "./utils/fulfillments": "./src/utils/fulfillments.ts",
