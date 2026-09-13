@@ -69,7 +69,7 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
     uid: FirestoreId,
     max: z.int().nullable(),
     max_default: z.int().nullable(),
-  })).default([]),
+  })),
   query_by_product_capacities: z.array(z.string()),
   active: z.boolean().meta({ column: true, label: "Active" }),
   products: z.array(z.strictObject({
@@ -77,7 +77,7 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
     name: z.string().meta({ column: true }),
     quantity: z.int().meta({ column: true, label: "Quantity" }),
     default: z.boolean(),
-  })).default([]).meta({ label: "Products" }),
+  })).meta({ label: "Products" }),
   query_by_products: z.array(z.string()),
   version: z.int().min(0).default(0),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),

@@ -112,22 +112,12 @@ const SENTINEL_DEFAULTS: ReadonlyMap<string, string> = new Map([
  * let a writer omit the key. **This set only ever shrinks.**
  */
 const INERT_DEFAULTS: ReadonlySet<string> = new Set([
-  "cards.attachments[].locked",
-  "cards.dates.end",
-  "cards.dates.start",
   "comments.reactions",
   "holiday-definitions.active",
   "holiday-snapshot.materialized_dates",
-  "location-types.active",
-  "location-types.product_capacities",
-  "locations.product_capacities",
-  "locations.products",
   "orders.xero_id",
   "organizations.contacts[].roles",
   "out-of-service.stores[].locations",
-  "products.component_of[].price.taxes",
-  "products.components[].price.taxes",
-  "recurrences.prototype.attachments[].locked",
   "roles.permissions",
   "stock.unavailable",
   "stores.default_location",

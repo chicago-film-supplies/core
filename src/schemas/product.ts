@@ -442,7 +442,7 @@ const ComponentObject = z.strictObject({
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional().meta({ label: "Replacement" }),
     coa_revenue: COARevenueEnum.optional(),
-    taxes: z.array(TaxRef).default([]).meta({ label: "Tax" }),
+    taxes: z.array(TaxRef).meta({ label: "Tax" }),
     formula: ComponentPriceFormulaEnum,
     discountable: z.boolean(),
   }).superRefine(checkPriceBaseUnit),

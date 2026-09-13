@@ -39,7 +39,7 @@ export const LocationTypeSchema: z.ZodType<LocationType> = z.strictObject({
   product_capacities: z.array(z.strictObject({
     uid: FirestoreId,
     max: z.int().nullable().meta({ column: true, label: "Max" }),
-  })).default([]).meta({ label: "Capacity" }),
+  })).meta({ label: "Capacity" }),
   query_by_product_capacities: z.array(z.string()).optional(),
   dimensions: z.strictObject({
     width: z.number().optional().meta({ column: true, label: "Width" }),
@@ -48,7 +48,7 @@ export const LocationTypeSchema: z.ZodType<LocationType> = z.strictObject({
     weight_capacity: z.number().optional().meta({ column: true, label: "Weight Capacity" }),
   }).nullable().optional(),
   version: z.int().min(0).default(0),
-  active: z.boolean().default(true),
+  active: z.boolean().meta({ initial: true }),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).meta({

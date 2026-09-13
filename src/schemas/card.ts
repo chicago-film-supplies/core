@@ -181,7 +181,7 @@ export const CardAttachment: z.ZodType<CardAttachmentType> = z.strictObject({
   filename: z.string().min(1).max(260).meta({ pii: "mask", column: true, label: "Filename" }),
   mime_type: z.string().min(1).max(120),
   size_bytes: z.int().min(0),
-  locked: z.boolean().default(false),
+  locked: z.boolean(),
 });
 
 // ── Organization (denormalized) ─────────────────────────────────────
@@ -258,8 +258,8 @@ export const CardDates: z.ZodType<CardDatesType> = z.strictObject({
   // and `schemas/out-of-service.ts`: `getServerSortableColumns` unwraps to the pipe and
   // reads meta THERE, so a tag on the outer `.default()` is invisible to it —
   // and with it invisible, the Typesense `date_fs` column loses its pairing.
-  start: chicagoInstant().meta({ column: true, label: "Date", serverSortVia: "date_fs" }).nullable().default(null),
-  end: chicagoInstant().meta({ column: true, label: "End Date" }).nullable().default(null),
+  start: chicagoInstant().meta({ column: true, label: "Date", serverSortVia: "date_fs" }).nullable(),
+  end: chicagoInstant().meta({ column: true, label: "End Date" }).nullable(),
 });
 
 /** Zod schema for a card Firestore document. */
