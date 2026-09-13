@@ -4,6 +4,57 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
+> ## ⚠️ STATUS 2026-09-13 — **batch 14 (1 of 2): the invoices/organizations denorm pair. Committed locally, backfilled and verified — NOT YET PUSHED/PUBLISHED.**
+>
+> `orders.invoices`/`query_by_invoices` and `contacts.organizations`/`query_by_organizations` — the
+> two `query_by_*` denorm pairs the doc's own tail list named as this shape (batch 2's family: a
+> source array + its derived query-string mirror, absent together on the same documents). `core`
+> `18fc584` (local, **unpushed** — `beta` is one commit ahead of `origin/beta`), 4 paths, 2
+> declarations. Both interfaces were already non-optional, so `deno task check` is unaffected;
+> `deno task test` (2311 tests), `lint`, `check:declarations`, `check:generated` and
+> `audit:citations` are all independently re-run clean.
+>
+> Census, both projects: `orders.invoices`/`query_by_invoices` absent on the exact same 2 canceled,
+> CRMS-imported orders (`crms_status: "Provisional"`) in prod AND dev — 0 real invoices reference
+> either uid (`db_invoices_count` on `uid_order`), so `[]` is the verified value, not a guess.
+> `contacts.organizations` is 100% present in both envs (175/175 prod, 184/184 dev);
+> `query_by_organizations` was absent on 2 **dev-only** contacts whose `organizations` was already
+> `[]`, so the derived value was unambiguous. Writer audit: `createOrder`/`createContact` state both
+> fields at every create site (already-required interface, compiler-gated); `updateOrder`/
+> `updateContact` carry forward via `cloneDeep`. `getInitialValues` byte-identical (array type-zero
+> is `[]`, matching the removed default — 2 of 46 remain the live `getInitialValues` cases named
+> below, unaffected by this batch). One templates fixture repaired:
+> `templates/fixtures/quote/discounts-and-fee.json` was missing both order fields.
+>
+> ✅ **Backfilled and independently re-verified 0 absent, both projects** —
+> `api-cloudrun/scripts/backfill-order-invoices-contact-organizations.ts` (committed `9d53586d`),
+> spot-checked by direct `db_*_get` on all 4 documents after the write and by a full
+> `order_by=query_by_organizations` page of all 184 dev contacts (0 absent).
+>
+> 🔴 **The backfill's first run used a raw `ref.update()`, not `validatedUpdateDoc` — a deviation
+> from `api-cloudrun/CLAUDE.md`'s own "Conventions for new scripts" rule**, caught in review rather
+> than by any gate (no gate here checks a script's write path the way `audit:reparse` checks a
+> schema). The 4 writes had already landed in both projects before the gap was found; content was
+> independently re-read and matches this batch's derivation exactly (verified above), but the write
+> skipped schema validation at write time. **Corrected in the committed script** — rewritten to
+> `validatedUpdateDoc`, and a re-run against both projects now correctly SKIPs all 4 docs as
+> already-backfilled (verified by dry-run, both projects, after the fix). ⭐ **The mechanism this
+> caught it, not a mechanism**: an unusually thorough post-hoc audit of a subagent's own report
+> against its commit message, prompted by the two disagreeing on tense ("needs a backfill" vs.
+> "backfilled"). No test in this repo would have caught a correctly-shaped raw write; `deno task
+> check` doesn't see write-path convention.
+>
+> This is why the batch is recorded as **STATUS**, not the usual ✅ **CLOSED, by digest**: `core@beta`
+> is one commit ahead of `origin/beta` and has **not been pushed** (no JSR publish, no pin bumps, no
+> deploy) pending explicit confirmation, given the process gap just found on the same batch's own
+> backfill. `api-cloudrun`'s script commit (`9d53586d`) is on local `main`, also unpushed, and `main`
+> there already carries one unrelated peer commit ahead of `origin/main` — pushing needs a nod on
+> including that commit too, per workspace rule.
+>
+> | batch | what | backlog | state |
+> |---|---|---:|---|
+> | 14 (1 of 2) | `orders.invoices`/`query_by_invoices` + `contacts.organizations`/`query_by_organizations` — 4 paths, 2 declarations | 46 → **42** | ⚠️ committed + backfilled, not pushed/published |
+
 > ## ✅ STATUS 2026-09-13 — **batch 13 landed. Backlog 56 → 46. Chain verified by digest.**
 >
 > `items[].path` ×10 — the row identity, one author (`computeItemPaths`/`computeInvoiceItemPaths`),
