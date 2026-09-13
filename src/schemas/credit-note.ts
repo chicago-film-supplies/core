@@ -437,7 +437,7 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // were forced, not ceremonial: every write validates the FULL document and
   // this is a `z.strictObject`, so a schema that has dropped the key REJECTS
   // every stored document still carrying it. Optional → empty storage → delete.
-  items: z.array(CreditNoteDocLineItem).default([]).meta({ label: "Item" }),
+  items: z.array(CreditNoteDocLineItem).meta({ label: "Item" }),
   totals: CreditNoteDocTotalsSchema,
   remaining_credit_cents: z.int().default(0).meta({ column: true, label: "Remaining Credit" }),
   // Bare `z.array(DocSource)` — the dropped `.default([])` is core#95 batch
