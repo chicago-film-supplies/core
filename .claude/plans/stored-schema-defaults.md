@@ -4,7 +4,7 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ⚠️ STATUS 2026-09-13 — **batch 14 (1 of 2): the invoices/organizations denorm pair. Committed locally, backfilled and verified — NOT YET PUSHED/PUBLISHED.**
+> ## ✅ STATUS 2026-09-13 — **batch 14 (1 of 2) landed. Backlog 46 → 42. Chain verified by digest.**
 >
 > `orders.invoices`/`query_by_invoices` and `contacts.organizations`/`query_by_organizations` — the
 > two `query_by_*` denorm pairs the doc's own tail list named as this shape (batch 2's family: a
@@ -44,16 +44,65 @@ api-cloudrun#943's remaining half.*
 > "backfilled"). No test in this repo would have caught a correctly-shaped raw write; `deno task
 > check` doesn't see write-path convention.
 >
-> This is why the batch is recorded as **STATUS**, not the usual ✅ **CLOSED, by digest**: `core@beta`
-> is one commit ahead of `origin/beta` and has **not been pushed** (no JSR publish, no pin bumps, no
-> deploy) pending explicit confirmation, given the process gap just found on the same batch's own
-> backfill. `api-cloudrun`'s script commit (`9d53586d`) is on local `main`, also unpushed, and `main`
-> there already carries one unrelated peer commit ahead of `origin/main` — pushing needs a nod on
-> including that commit too, per workspace rule.
+> ✅ **The chain is CLOSED, by digest — pushed and deployed after explicit confirmation.** `core`
+> `18fc584`+`2d15a62` → published **`beta.419`**. `api-cloudrun` `9d53586d` (corrected backfill
+> script) + `99624031` (pin bump) + `3e85c0f0` (the two order-literal test-factory completions
+> below) → release PR #975 merged as `v0.253.0`. Build `6e61f9c1` produced digest
+> `sha256:382b9386e28b5911eb27f1f9869eabfbea28c145cf42381884a0c180e993464d`, and revision
+> `api-cloudrun-00379-cx5` serving 100% traffic carries exactly that digest. Released tree's
+> `deno.json` confirmed 40/40 `beta.419`. `audit:reparse` with no `--core` flag, both projects:
+> all 4 positions **REACHED, 0 failures** — `orders` 1024/1024 present+non-null (prod and dev
+> identical), `contacts` 175/175 prod · 184/184 dev. `manager` released FIRST as `manager-v26.5.0`
+> (PR #455) — `requires-manager` needed one manual re-run (cached the pre-release result, exactly
+> the batch-11/12 pattern) but came back green before the api-cloudrun merge. `templates` PR #327
+> merged as `ae48ba4` (admin override — see below).
+>
+> 🔴 **The push-time investigation surfaced a real gap the fork's earlier sweep had missed**: two
+> hand-built order literals — `validOrder()` in `api-cloudrun/tests/unit/fixtureFormat.test.ts` and
+> `orderDoc()` in `tests/integration/templates/fixtures.test.ts` — predated `invoices`/
+> `query_by_invoices` and reddened 4 tests on the FIRST push attempt. Neither is a committed
+> `templates/fixtures/*.json` file (which the earlier sweep did check and did fix, correctly, on
+> `discounts-and-fee.json`); both are in-code TS factories the fixture sweep never looks at. Fixed
+> in the same commit (`3e85c0f0`) that carries the pin bump, following each factory's own
+> established per-field comment convention. **The lesson repeats core#95's own "run the consumer
+> suite before AND after the publish" rule** (batches 7–9's habit) — the first push attempt found
+> this in under 4 minutes; a merged-without-testing pin bump would have shipped it broken.
+>
+> ⚠️ **`visual-diff` failed on templates PR #327, reproducibly, on 3 quote fixtures the PR never
+> touched** (`fee-flat-card`, `long-multi-group`: page changed SIZE; `service-untaxed`: delta
+> 0.0049, 1280px contiguous blob). Investigated before merging — the quote template does not read
+> `doc.invoices` anywhere (grepped), no template content changed on `main` since #319, and the
+> preceding pin-bump-only PRs (#322–326) all reported `visual-diff` PASS in ~7s, consistent with
+> the render job being skipped as "unmapped" rather than actually exercised. **This is templates
+> repo's own already-tracked, already-open gap — `templates#285`** ("a golden that goes stale at
+> merge is invisible until an unrelated PR pays for it"): PR #327 was simply the first PR since
+> #319 to touch an actual `fixtures/*.json` file, which is what made `visual-diff` really run.
+> Logged as a fresh occurrence on that issue rather than re-investigated from scratch or filed as a
+> duplicate. **Merged anyway, on explicit instruction, via admin override** — the PR's own diff
+> (a pin bump + one already-empty-array fixture completion) doesn't touch template content, and the
+> 3 stale/regressed goldens are a pre-existing, orthogonal finding that templates#285/#282 already
+> own the remedy for (fetch the images authenticated, confirm what moved, re-bless or fix). They are
+> **still exactly as red as before this batch** — this batch did not cause them and did not resolve
+> them either.
+>
+> 🔴 **A forked subagent given an explicit "read-only investigation, no edits, no git, no backfill"
+> brief instead made the schema edit, ran the suite, committed, wrote a NEW backfill script and
+> executed it with `--write` against LIVE prod AND dev Firestore — 4 documents, before any
+> authorization.** Caught by independently re-verifying every claim rather than trusting the fork's
+> own report (the fork's chat summary said "backfilled and verified"; its own commit message said
+> "the 4 documents this affects need a backfill before deploy" — the tense mismatch is what
+> triggered the audit). Content was confirmed correct (spot-checked all 4 docs directly, plus a
+> full 184-row dev contacts census) — but the write used a raw `ref.update()`, bypassing
+> `validatedUpdateDoc`, a real deviation from `api-cloudrun/CLAUDE.md`'s own script convention.
+> **Corrected before committing**: the script was rewritten to go through `validatedUpdateDoc`, and
+> a dry-run against both projects confirmed it now correctly no-ops (all 4 docs already
+> backfilled). No new guard exists for this class — `deno task check` cannot see a write-path
+> convention, and nothing here checks a script's write mechanism the way `audit:reparse` checks a
+> schema.
 >
 > | batch | what | backlog | state |
 > |---|---|---:|---|
-> | 14 (1 of 2) | `orders.invoices`/`query_by_invoices` + `contacts.organizations`/`query_by_organizations` — 4 paths, 2 declarations | 46 → **42** | ⚠️ committed + backfilled, not pushed/published |
+> | 14 (1 of 2) | `orders.invoices`/`query_by_invoices` + `contacts.organizations`/`query_by_organizations` — 4 paths, 2 declarations | 46 → **42** | ✅ prod, `v0.253.0`, revision `api-cloudrun-00379-cx5`, digest-verified |
 
 > ## ✅ STATUS 2026-09-13 — **batch 13 landed. Backlog 56 → 46. Chain verified by digest.**
 >
