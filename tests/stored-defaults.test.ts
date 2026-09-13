@@ -55,7 +55,12 @@
  *
  * @see `tests/inert-defaults.test.ts` — the `.default(x).optional()` shape, and the traversal this reuses
  * @see `tests/stored-optionality.test.ts` — the same ratchet one axis over
- * @see `core/.claude/plans/stored-schema-defaults.md` — the worked example
+ *
+ * `INERT_DEFAULTS` cleared to empty in core#95 batch 16 (2026-09-13) — the
+ * campaign's own plan doc is deleted per this workspace's plan-docs
+ * convention; its history is core#95's (closed) comment thread. This set
+ * stays as a ratchet: it fails if a new stored `.default()` with no
+ * sentinel behind it appears.
  */
 import { assert, assertEquals } from "@std/assert";
 import { z } from "zod";
