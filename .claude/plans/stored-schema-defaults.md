@@ -4,6 +4,62 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
+> ## ✅ STATUS 2026-09-13 — **batch 12 landed. Backlog 62 → 56. Chain verified by digest.**
+>
+> The `stores` family — 6 of 7 candidate paths: `bookings.stores` / `.query_by_uid_store` /
+> `.stores[].locations`, `out-of-service.stores`, `inventory-ledgers.store_breakdown` /
+> `.store_breakdown[].locations`. `core` `4a965a0` → **`beta.416`**. Census (both projects): 6 of 7
+> were already FREE — `bookings.stores`/`.query_by_uid_store` alone carried **4,205 absences**, all
+> `status === "complete"`. Non-allocating by `ORDER_STATUS_ALLOCATES_STOCK.complete === false` and
+> `toRecalcBookingEntry` returning `null` for a complete booking outright, so the backfilled value
+> (`[]`, `[]`) is not a computation — it is the fixed value the live writer already produces for a
+> non-allocating booking. Backfilled and verified 0 absent, both projects
+> (`api-cloudrun/scripts/backfill-booking-store-allocation.ts`).
+>
+> 🔴 **The backfill's own patch carried a bug, caught by the re-parse rather than by review.**
+> `validatedUpdateDoc(ref, merged, patch, …)` validates `merged`, never `patch`, against the schema —
+> the two are supposed to agree by the caller's own construction, and this call didn't: `merged`
+> omitted `updated_by` (bookings have no such field at all) while `patch` stated it, so the honest
+> `merged` validated clean and `ref.update(patch)` wrote the extra key straight past the check, on all
+> 4,205 documents in both projects. `deno task audit:reparse` caught it as `unrecognized_keys @ <root>`
+> before the schema commit was even considered gated. Corrected
+> (`api-cloudrun/scripts/repair-booking-stray-updated-by.ts`), verified 0 remaining both projects.
+> Filed as **api-cloudrun#972** (`kind:guard`, `risk:live-data`) — the gap is in the shared helper,
+> not just this call site.
+>
+> ⚠️ **`out-of-service.stores[].locations` is DELIBERATELY LEFT**, reason recorded beside the schema
+> (`schemas/out-of-service.ts`): `OOSStoreSchema` is shared verbatim with `Create`/`UpdateOutOfServiceInput`
+> (a staged-input case — "the warehouse can fill these in via PUT once the actual location is
+> known"), and the corpus is VACUOUS either way (0 `OOSStore` objects in either project's `stores[]`
+> today). Needs a deliberate input/storage split (batch 9's `products.price.taxes` shape), not a
+> census. Backlog is **56**, not 55.
+>
+> `getInitialValues` byte-identical before/after (every default was `[]`, the array's own
+> type-zero — no `.meta({ initial })` needed). Fixture sweep clean: `templates`' `pick-sheet`/
+> `packing-list` families embed `BookingStoreSchema` via the computed `pick-sheets` view, and all 4
+> committed fixtures already state `locations` on every store entry.
+>
+> ✅ **The chain is CLOSED, by digest.** `api-cloudrun` `b02ff741` → release PR #971 merged as
+> `bdebc0ec`, cutting **`v0.251.2`**. Build `bf5a71d6` produced
+> `sha256:b00b8f1de2420583523771055f0039577aaad6ff03ad23d74bb8fd2a34789cad`, and the revision serving
+> 100% traffic carries exactly that digest. Deployed tree's `deno.json`/`deno.lock` (pulled off the
+> Artifact Registry blob store) byte-identical to the checkout. Reparse with no `--core` flag: all 6
+> positions REACHED, 0 failures, both projects. `manager` released FIRST as `manager-v26.3.0`
+> (`60ec754b`) — `requires-manager` measured green on the first run, no manual re-run needed.
+> `templates` PR #325 (`0fb7d370`), all four required checks (`money-lint`, `money-lint-ratchet`,
+> `templates-lint`, `visual-diff`) passed on the head sha before merge.
+>
+> ⚠️ **`manager`'s push carried a peer session's unrelated commit** (`b977f4e`, fulfillment action
+> labels) that was sitting unpushed on `main` — confirmed with the user before pushing, per the
+> workspace rule that a push carries every commit on the branch and a foreign one needs a nod first.
+>
+> | batch | what | backlog | state |
+> |---|---|---:|---|
+> | 1–9 | see `core/CLAUDE.md` § *`.default()` and `.optional()`* and the table two sections below | 259 → 75 | ✅ prod |
+> | 10 | `sources`/`reference` tidy-up — 6 paths, 5 declarations | 75 → 69 | ✅ prod, `v0.251.0` |
+> | 11 | the templates family — 7 paths, 3 declarations | 69 → 62 | ✅ prod, `v0.251.1` |
+> | 12 | the `stores` family — 6 of 7 paths, 3 declarations | 62 → **56** | ✅ prod, `v0.251.2`, revision serving digest `b00b8f1d`, verified |
+
 > ## ✅ STATUS 2026-09-13 — **batch 11 landed. Backlog 69 → 62. Chain verified by digest.**
 >
 > The templates family — 7 paths across three collections: `templates.active_semver` /
@@ -780,10 +836,12 @@ campaign knows about, in order of who is blocked:
 | # | what | owner | blocked on |
 |---|---|---|---|
 | 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
-| 2 | **Batch 12** — 62 paths, 22 of them `array[]` (14 `items[]`). The cheap tidy-up is gone; see below | next session | nothing |
-| 3 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
-| 4 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip. ⚠️ **Batch 11 is a live counter-example this issue should cite**: a stale bare-basename citation from batch 10's own status-update commit blocked `beta.415`'s first publish attempt, and only CI's core-alone run caught it — two prior full-workspace `audit:citations` runs had read it clean | — | nothing |
-| 5 | **Historic orders/invoices priced from the 3 untaxed rentals** — lines carry a tax SNAPSHOT, so the catalog repair does NOT reach them. Unmeasured on purpose | the owner | a money call; wants its own issue with `risk:money-path` |
+| 2 | ✅ **Batch 12** — the `stores` family, 6 of 7 paths. Done, see status block. `out-of-service.stores[].locations` deliberately left, reason beside the schema | — | closed |
+| 3 | **Batch 13** — 56 paths left. `items[].path` ×10 is now the largest remaining cluster; see below | next session | nothing |
+| 4 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
+| 5 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip. ⚠️ **Batch 11 is a live counter-example this issue should cite**: a stale bare-basename citation from batch 10's own status-update commit blocked `beta.415`'s first publish attempt, and only CI's core-alone run caught it — two prior full-workspace `audit:citations` runs had read it clean | — | nothing |
+| 6 | **Historic orders/invoices priced from the 3 untaxed rentals** — lines carry a tax SNAPSHOT, so the catalog repair does NOT reach them. Unmeasured on purpose | the owner | a money call; wants its own issue with `risk:money-path` |
+| 7 | **api-cloudrun#972** — `validatedUpdateDoc`/`validatedUpdate` validate `merged`, never `patch`, against the schema. Found by batch 12's own backfill bug | the owner | nothing; filed |
 
 ⚠️ **The deploy verification is a four-link chain and the batch-6 near-miss still applies.** A
 revision NUMBER moving is good evidence the build arrived and **no evidence at all that the image
@@ -891,12 +949,14 @@ green core suite over such a fixture is not evidence; assert each path directly.
 
 ## Context recommendation
 
-**Clear before batch 12.**
+**Clear before batch 13.**
 
-Batches 9, 10 and 11 and batch 9's two follow-ups are closed — nothing mechanical is left to watch,
-and the prod repair is applied and verified. **Batch 12 depends on none of this session's
-analysis.** Everything it requires is written down: the backlog is read off
-`core/tests/stored-defaults.test.ts` (**62** paths — 40 scalar, 22 `array[]`, 14 of them `items[]`),
+Batches 9, 10, 11 and 12 (and batch 9's two follow-ups) are closed — nothing mechanical is left to
+watch, and every prod repair (including batch 12's own backfill-bug correction) is applied and
+verified. **Batch 13 depends on none of this session's analysis.** Everything it requires is written
+down: the backlog is read off `core/tests/stored-defaults.test.ts` (**56** paths as of batch 12 —
+`items[].path` ×10 is now the largest single cluster left; re-derive the scalar/array split rather
+than trusting this number),
 the partition is re-derived by the recipe above, the `items[]` hazards are in the section above, and
 the policy — the parse-not-census rule, the shared stored/input-node rule, the denominator rule
 batches 4 and 6 sharpened between them, batch 7's *require the KEY, claim nothing about the VALUE*,
