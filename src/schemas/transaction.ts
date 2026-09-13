@@ -478,7 +478,7 @@ export const MovementCost: z.ZodType<MovementCostType> = z.strictObject({
   // that rendered $0.0639/unit as `$0.00`. A bare `rate: true` marker would
   // repeat `money: boolean`'s mistake of carrying no unit at all.
   unit_cost: z.number().meta({ column: true, label: "Unit Cost", unit: "usd" }),
-  unit_costs_cents: z.array(z.int()).default([]),
+  unit_costs_cents: z.array(z.int()),
 });
 
 // ── The document ────────────────────────────────────────────────────
@@ -783,7 +783,7 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   quantity: z.number().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   custody: MovementCustody.nullable(),
   cost: MovementCost.nullable(),
-  lines: z.array(MovementLine).default([]).meta({ label: "Line" }),
+  lines: z.array(MovementLine).meta({ label: "Line" }),
   date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
   reference: z.string().meta({ column: true, label: "Reference" }),
@@ -801,8 +801,8 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),
   serialized_details: z.strictObject({
-    asset_tags: z.array(z.string()).default([]),
-    serial_numbers: z.array(z.string()).default([]),
+    asset_tags: z.array(z.string()),
+    serial_numbers: z.array(z.string()),
   }).nullable(),
   // Optional, never required-nullable: 0 of 1,153 prod / 0 of 1,405 dev
   // movements carry the key (2026-08-30). See the interface docblock.

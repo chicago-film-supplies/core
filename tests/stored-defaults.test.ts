@@ -140,10 +140,6 @@ const INERT_DEFAULTS: ReadonlySet<string> = new Set([
   "stores.default_location",
   "taxes.crms_id",
   "threads.last_message_preview",
-  "transactions.cost.unit_costs_cents",
-  "transactions.lines",
-  "transactions.serialized_details.asset_tags",
-  "transactions.serialized_details.serial_numbers",
 ]);
 
 // deno-lint-ignore no-explicit-any
